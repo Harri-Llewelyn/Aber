@@ -1339,6 +1339,13 @@ services:
       # both targets -- so it is the only one that can read the CA actually in use. `ca.key` is in
       # this volume too and is never opened: mosquitto-tls-init leaves it root-owned at 0600.
       - mosquitto_certs:/mosquitto/certs:ro
+      # WRITE END OF THE PLAYBACK DELIVERY PATH (0078). A credential issued for a gateway the
+      # database calls a playback target is dropped here as well as into the broker, and the
+      # playback worker mounts the same volume read-only. Before this, a newly-issued password
+      # reached the worker only by being pasted into .env and the container RECREATED -- and an
+      # operator who had just clicked "Generate broker credential" had no reason to think either
+      # step was outstanding. The credential was correct; the worker held the previous one.
+      - playback_credentials:/var/lib/acs-cymru/playback
       - ./scripts/gateway-credential-service.mjs:/scripts/gateway-credential-service.mjs:ro
       - ./scripts/lib/mosquitto-credentials.mjs:/scripts/lib/mosquitto-credentials.mjs:ro
     command: ["node", "/scripts/gateway-credential-service.mjs"]
@@ -1621,6 +1628,11 @@ services:
       PYTHONUNBUFFERED: "1"
     volumes:
       - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
+      # READ END, AND READ-ONLY. This worker consumes credentials and never issues them: that is
+      # `_credentials()`'s "tier two of three" -- it cannot authenticate as a gateway whose password
+      # it was not given -- and a writable mount would let a compromised worker hand itself one.
+      # The same reasoning is why it does not hold MQTT_CREDENTIAL_SERVICE_TOKEN.
+      - playback_credentials:/var/lib/acs-cymru/playback:ro
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -1998,6 +2010,14 @@ volumes:
   grafana_provisioning_alerting:
   grafana_provisioning_datasources:
   mosquitto_data:
+  # Broker passwords for playback targets, written by gateway-credential and read by playback.
+  #
+  # A VOLUME AND NOT A BIND MOUNT, for the reason grafana_provisioning_alerting is one: it holds
+  # credential material and a bind mount would write it into the working tree, one `git add -A`
+  # away from the repository. It is also the only copy that survives the browser closing -- the
+  # broker keeps a hash and the audit row names no secret -- so it is deliberately durable rather
+  # than a tmpfs.
+  playback_credentials:
   # The broker's CA and its MQTTS leaf, issued by mosquitto-tls-init.
   #
   # A NAMED VOLUME BECAUSE THE ROOT MUST SURVIVE `docker compose down`. The CA is distributed by

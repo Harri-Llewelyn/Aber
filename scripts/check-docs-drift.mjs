@@ -630,6 +630,13 @@ function edgeFunctionNames() {
     // leaving both declared would make a seven-argument call ambiguous at the call site. The
     // baseline's copy is the one being replaced.
     'public.digital_thread_page': '0077 adds the keyset cursor; the baseline holds the unpaged form',
+    // 0078 gives it a third returned column, `is_playback_target`, which is what authorises the
+    // credential service to DELIVER the password to the playback worker. A returned TABLE type
+    // cannot be changed by CREATE OR REPLACE, so the two-column form is DROPped first -- and a
+    // caller selecting three columns from a leftover two-column declaration fails at the call site,
+    // in the browser, as a credential button that quietly stopped working.
+    'public.authorize_virtual_gateway_credential':
+      '0078 adds is_playback_target; the baseline holds the two-column form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -1332,6 +1339,62 @@ function edgeFunctionNames() {
 // started. The realistic failure is a misspelling in a compose file or a chart, which is a static
 // fact -- so it is caught here, at check time, in the two places the name is written.
 // -------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
+// 11c-ter. The playback credential delivery path is the same string in all four places (0078).
+//
+// A CREDENTIAL IS WRITTEN AT ONE PATH AND READ AT ANOTHER, AND NEITHER END COMPLAINS. That is the
+// whole reason this is checked statically: gateway-credential writes its file and reports success,
+// the playback worker looks for a file that is not there and correctly treats absence as "nothing
+// has been issued yet", and the operator sees a credential issued cleanly beside a worker that
+// never picks it up. There is no error anywhere in that sequence.
+//
+// The two ends cannot import a shared constant from each other -- one is JavaScript beside the
+// broker, one is Python in the ingestion image -- and the two mounts that carry the file between
+// them are written in a third and fourth language again. Four copies, no compiler.
+// -------------------------------------------------------------------------------------------------
+{
+  const lib = read('scripts/lib/mosquitto-credentials.mjs');
+  const worker = read('ingestion/playback_worker.py');
+  const composeSrc = read('docker-compose.yml');
+  const chartSrc = read('deploy/helm/acs-cymru/templates/apps/playback.yaml');
+
+  const libPath = lib.match(/PLAYBACK_CREDENTIAL_FILE\s*=\s*'([^']+)'/)?.[1];
+  const workerPath = worker.match(/"PLAYBACK_CREDENTIAL_FILE",\s*"([^"]+)"/)?.[1];
+
+  if (!libPath || !workerPath) {
+    fail(
+      'the playback delivery path could not be read from both ends ' +
+        `(lib: ${libPath || 'absent'}, worker: ${workerPath || 'absent'}).`
+    );
+  } else if (libPath !== workerPath) {
+    fail(
+      `the playback delivery path differs: gateway-credential writes ${libPath}, playback_worker ` +
+        `reads ${workerPath}. Neither end reports an error when these disagree -- the write ` +
+        'succeeds and the read finds nothing, which the worker reports as "no credentials issued".'
+    );
+  } else {
+    // The DIRECTORY is what the two deployment targets mount; the file is created inside it.
+    const dir = libPath.replace(/\/[^/]+$/, '');
+    const onCompose = composeSrc.includes(`playback_credentials:${dir}`);
+    const onChart = chartSrc.includes(`mountPath: ${dir}`);
+    // The Secret key's `path:` is relative to the mount, so it must be the file's basename or the
+    // worker reads a directory entry that is not there.
+    const basename = libPath.slice(dir.length + 1);
+    const chartItem = chartSrc.includes(`path: ${basename}`);
+
+    if (!onCompose || !onChart || !chartItem) {
+      fail(
+        `the playback delivery path ${libPath} is not carried by both targets (compose mount: ` +
+          `${onCompose ? 'ok' : 'MISSING'}, chart mount: ${onChart ? 'ok' : 'MISSING'}, chart ` +
+          `secret item path: ${chartItem ? 'ok' : 'MISSING'}). An issued playback credential ` +
+          'would be written into a container layer and lost, with no error on either side.'
+      );
+    } else {
+      pass(`the playback delivery path ${libPath} agrees across both ends and both targets`);
+    }
+  }
+}
+
 {
   const compose = read('docker-compose.yml');
   const chart = read('deploy/helm/acs-cymru/templates/supabase/rest.yaml');

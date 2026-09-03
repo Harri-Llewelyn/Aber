@@ -24,6 +24,12 @@ python ingestion/test_telemetry_batching.py
 python ingestion/test_capture_playback.py
 # The daemon-side recording engine -- subject matching, the caps, and the manifest
 python ingestion/test_capture_worker.py
+# How the playback worker resolves the broker passwords it holds (0078), and the precedence rule
+# that matters: a DELIVERED credential beats one in the environment. The broker keeps one password
+# per username, so a value in `.env` is not an alternative to the delivered one -- it is an older
+# one. If the environment won, "issue a new credential" would be the one repair that could not fix
+# a refused playback.
+python ingestion/test_playback_credentials.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
 # Deliberately narrow: the export path needs a historian, object storage and a chunk to mean
@@ -122,6 +128,12 @@ python supabase/migrations/test_digital_thread_guard.py
 # whose timestamps happen to be distinct -- and they are not, because one transaction's rows
 # all carry one now() and a batch relocation is deliberately one transaction (0033).
 python supabase/migrations/test_digital_thread_paging.py
+# The delivery gate on broker-credential issuance (0078). NOT the happy path: the test that earns
+# its place is that a REAL gateway is not a delivery target, because a true there writes a real
+# machine's broker password into a file the replay worker reads -- and mosquitto.acl would then let
+# it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
+# dead code rather than the thing deciding deliveries.
+python supabase/migrations/test_playback_credential_delivery.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py

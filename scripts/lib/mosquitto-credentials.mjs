@@ -45,6 +45,62 @@ export const GATEWAY_ID_PATTERN = /^gwy[0-9a-f]{21}$/;
 /** Where both deployment targets keep the file. mosquitto.conf names this path for both. */
 export const PASSWORD_FILE = '/mosquitto/config/password_file';
 
+/**
+ * Where a playback target's password is delivered (0078).
+ *
+ * DECLARED ONCE AND IMPORTED BY BOTH ENDS, because a mismatch between the writer and the reader is
+ * silent on both sides: gateway-credential writes successfully and playback_worker finds no file,
+ * so the operator sees a credential issued cleanly and a worker that never picks it up. The Python
+ * end cannot import this, so scripts/check-docs-drift.mjs asserts the two agree along with the two
+ * mount paths that carry them.
+ */
+export const PLAYBACK_CREDENTIAL_FILE = '/var/lib/acs-cymru/playback/credentials.json';
+
+/**
+ * Fold one delivered credential into the map already held, keyed by `sparkplug_id`.
+ *
+ * MERGED, NOT OVERWRITTEN. A stack can have several playback targets and they are issued one at a
+ * time, so writing a single-entry store would silently revoke delivery for every other target on
+ * each issue -- and the symptom would arrive much later, as a playback refused for a gateway nobody
+ * had touched.
+ *
+ * A MALFORMED STORE IS REPLACED RATHER THAN FATAL. By the time this runs the account already exists
+ * at the broker and the password is about to be shown once; throwing here would strand a credential
+ * nobody can use in order to preserve a file nobody can parse. `onWarn` is how the caller reports
+ * that without this module knowing what a log is.
+ */
+export function mergeDelivery(existing, sparkplugId, password, onWarn = () => {}) {
+  assertGatewayId(sparkplugId);
+  assertSafePassword(password);
+
+  let held = {};
+  if (existing) {
+    try {
+      const parsed = JSON.parse(existing);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        // COERCED TO STRINGS, because this is read back by a Python worker that will hand the value
+        // to paho as a password. A number or a null surviving a round trip through JSON would fail
+        // at CONNECT with a broker refusal rather than here, where the cause is visible.
+        for (const [k, v] of Object.entries(parsed)) {
+          if (v !== null && v !== undefined) held[String(k)] = String(v);
+        }
+      } else {
+        onWarn('playback delivery store is not a JSON object; replacing it');
+      }
+    } catch (err) {
+      onWarn(`playback delivery store is unreadable (${err.message}); replacing it`);
+    }
+  }
+
+  held[sparkplugId] = password;
+  return held;
+}
+
+/** The delivery store's serialised form. Trailing newline so the file is a well-formed text file. */
+export function serialiseDelivery(held) {
+  return `${JSON.stringify(held, null, 2)}\n`;
+}
+
 /** Distinguishable from a programming error, so callers can map it to a 4xx rather than a 500. */
 export class CredentialError extends Error {
   constructor(message, code = 'invalid_request') {

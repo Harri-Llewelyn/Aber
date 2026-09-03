@@ -534,6 +534,35 @@ the worker is up and holds nothing, while no recent report means the worker is d
 list alone cannot tell those apart. Nothing secret is stored; a `sparkplug_id` is the MQTT username
 and is on the Gateways page already.
 
+**`0078` makes issuing a playback credential also *deliver* it**, because the two halves being
+separate acts is what left this stack unable to play anything back. The Playback gateway is
+`gwy16…`; the broker's only gateway account was `gwy11…`, orphaned from a gateway deleted long ago;
+`gateway_has_broker_credential()` answered false; and the worker held a `gwy16…` password out of
+`.env` that nothing had ever issued. Connecting with it returned `CONNACK rc = 5, not authorised` —
+and nothing said so, because `allow_anonymous false` refuses at CONNECT and Sparkplug's QoS 0 gives
+a publisher nothing to observe after it.
+
+`authorize_virtual_gateway_credential()` therefore returns a third column, `is_playback_target`, and
+the credential service writes the password where the playback worker reads it when that column is
+true. **The predicate is `is_simulated` — the same one `start_playback_job()` gates on** — so the
+set of passwords the worker can be handed is exactly the set of gateways it may publish as, and
+`0078` carries a self-check that fails if the job gate stops using it.
+
+**Deciding it here rather than in the caller is the whole point.** The credential service holds a
+`sparkplug_id` and no database access by design, and the edge function could compute something
+similar from the gateway row — which would be a *second* definition of "is this a playback target".
+Two definitions eventually disagree, and the disagreement is a real machine's broker password
+written into a file the replay worker reads, from where `mosquitto.acl` would let it publish as that
+machine.
+
+**Letting the worker mint its own was rejected**, though it needs no delivery mechanism at all. The
+credential service's own header states the cost: a holder of its token can *"publish Sparkplug
+telemetry as any gateway on the site"*. `playback_worker._credentials()` calls itself **tier two of
+three** because the worker cannot authenticate as a gateway whose password it was not given, and a
+minting worker deletes that tier. Minting stays a human act with an audit row; only delivery is
+automated. The operational half — the file, the mounts, and why `_credentials()` had to stop running
+once at startup — is in [`ingestion/README.md`](../ingestion/README.md#issuing-a-playback-credential-delivers-it-0078).
+
 **`0058` is `rebirth_requests`, and it is named for the one thing it carries.** A capture opens by
 asking its subject's edge node to rebirth, because birth certificates cannot be queried, and a
 person can now ask for one too. Sparkplug's NCMD channel could equally write metric *values* — a
