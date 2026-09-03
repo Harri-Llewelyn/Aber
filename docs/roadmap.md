@@ -17,19 +17,22 @@ instead — and `scripts/check-docs-drift.mjs` dropped the four invariants that 
 numbers are labels for reading order, they run 1-12 with no gaps, and **a renumber costs one grep**
 (`§[0-9]`, `roadmap item [0-9]`) across the repository for the prose that still cites them.
 
-**Ordered by subject rather than by age**, in three groups. **1-7 are the platform's own**, led by
+**Ordered by subject rather than by age**, in three groups. **1-8 are the platform's own**, led by
 the one item somebody else sets the deadline for and then by the credential and operations chain:
 2 is Administrator-only from the start and deliberately does not wait for 4, and 3 adds a sixth
 Administrator-only policy in the same direction rather than depending on the role split. **The role
 split those three would otherwise have queued behind has already shipped**, as `0069` and `0070`,
-which is why 4 is now Entra sign-in alone and 5 no longer waits on it. **7 is the newest and the
-only one here that arrived from a change being REFUSED** rather than from an audit or a request —
-it is what has to exist before an `Operator` can be granted anything else. **8-11 arrive from
-feature requests** — 8, 9 and 11 from GitHub issues
+which is why 4 is now Entra sign-in alone and 5 no longer waits on it. **7 arrived from a change
+being REFUSED** rather than from an audit or a request — it is what has to exist before an
+`Operator` can be granted anything else. **8 is the newest**, and is the only item here whose
+subject is the BROKER credential plane rather than the database one; it sits at the end of the
+chain because 3 explicitly scopes that plane out, and because its strongest argument is a gap
+(a revoked gateway that is already connected keeps publishing) rather than a feature. **9-12 arrive
+from feature requests** — 9, 10 and 12 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
-[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 10 was not filed, and is sequenced
-*after* 9 because it removes what 9 replaces. **12 is documentation**, and is the one item whose
+[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 11 was not filed, and is sequenced
+*after* 10 because it removes what 10 replaces. **13 is documentation**, and is the one item whose
 remaining work is mostly writing; it arrives from
 [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built.
@@ -70,7 +73,7 @@ Shopfloor Operations dashboard, the three machine alert rules, `provision-gatewa
 seeded schemas are all gone; `0073` retires the last of them from databases that already have them.
 A fresh install now has no cells, no gateways, no devices and no schemas, and Node-RED opens empty.
 **`deploy-nodered` went with it**, because the only flow it could deploy was the demonstrator's — see
-8, which absorbed that.
+9, which absorbed that.
 
 **Two further entries were retired the same day as answered rather than built**, which is a third
 outcome this file did not previously have a place for. **Horizontal ingestion scaling** was retired because
@@ -847,7 +850,102 @@ inventory and live telemetry. Cannot read the audit trail."* That sentence is th
 
 ---
 
-## 8 · The Directory's MQTT half, and the one lookup it still lacks
+## 8 · The broker's Dynamic Security plugin, and the two things a file cannot do
+
+**Builds on:** [`mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) ·
+[`mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf) ·
+[`scripts/gateway-credential-service.mjs`](../scripts/gateway-credential-service.mjs) ·
+`revoke_gateway_credentials()`
+([0038](../supabase/migrations/archive/0038_revoke_gateway_credentials.sql),
+[0063](../supabase/migrations/archive/0063_virtual_gateways_get_revoked.sql)) ·
+`BROKER_PRINCIPALS` in
+[`serviceIdentities.js`](../frontend/src/utils/serviceIdentities.js) ·
+[`scripts/check-broker-config.mjs`](../scripts/check-broker-config.mjs) ·
+`mosquitto_dynamic_security.so`, which **already ships in the pinned image**
+
+Move broker authentication and authorisation from `password_file` + `acl_file` onto Mosquitto's
+Dynamic Security plugin, managed at runtime over `$CONTROL/dynamic-security/v1`. The plugin is at
+`/usr/lib/mosquitto_dynamic_security.so` in `eclipse-mosquitto:2.0.22` — the tag both targets
+already run — so this adds no dependency and no image change.
+
+**This is not the answer to the playback credential question, and the entry says so first because
+that is the request it will most often arrive attached to.** Getting a broker password to the
+playback worker without recreating its container is blocked in
+[`ingestion/playback_worker.py`](../ingestion/playback_worker.py) — `_credentials()` is read once in
+`main()`, from the environment — and no broker-side change reaches that. The broker half is already
+solved besides: the credential service SIGHUPs Mosquitto, which *"re-reads the password and ACL
+files in place and keeps every connection."* Dynsec would add nothing to the no-restart property,
+because there is nothing left to add.
+
+### Two things the files cannot do, and one of them is a security gap
+
+**REVOCATION DOES NOT DISCONNECT, AND THAT IS THE ITEM.** `0038` and `0063` revoke a gateway by
+removing its line from the password file — but Mosquitto checks credentials at CONNECT and never
+again. An archived or deleted gateway that is **already connected keeps publishing** until something
+makes it reconnect, and nothing in the stack does. The dashboard reports the credential revoked, the
+audit row says revoked, and telemetry keeps arriving. Dynsec's `disableClient`/`deleteClient` kick
+the live session, which is the only form of revocation the word actually promises.
+
+**THERE IS NO LIST, WHICH IS WHY THE PAGE HOLDS A LITERAL.**
+[`serviceIdentities.js`](../frontend/src/utils/serviceIdentities.js) argues the current arrangement
+at length and its premise is a fact about the file: *"There is nowhere to fetch it from. The ACL is
+mounted read-only into the broker container and is never parsed by anything that has an HTTP
+surface."* Dynsec has `listClients`, so that premise stops being true and the broker half of the
+Access Control page could become a live read instead of three hand-maintained objects kept honest by
+`check-docs-drift`.
+
+### What it costs, in descending order of seriousness
+
+**1. It inverts the credential service's minimal authority, which is that service's whole design.**
+Its header states what it deliberately cannot do: *"it cannot issue a Mosquitto account... cannot
+read a password back... cannot delete accounts"*, because *"issuing a Mosquitto account is a far
+larger authority than 'add one line to a password file'."* Dynsec management is admin-or-not, so an
+HTTP service that today can only append a hashed line would hold create, delete, list and
+ACL-rewrite over every principal on the broker. **That is the trade this item is, and it should be
+argued rather than absorbed.**
+
+**2. `mosquitto.acl` is the most heavily verified artifact in the repository**, and its guarantees
+are measured rather than assumed — `check-broker-config.mjs` re-runs them against whatever tag
+`docker-compose.yml` pins. Porting means re-deriving all of it in dynsec's JSON, in particular
+`pattern readwrite spBv1.0/+/+/%u/#`, which the file calls *"the rule doing the actual work"*, and
+the delivery-time semantics recorded beside it: a wildcard subscription is **granted** at QoS 0 and
+enforced per message at delivery, and the refusal is invisible to the publisher because Sparkplug
+mandates QoS 0 and there is no PUBACK to carry a reason code. **A dynsec policy that is subtly wider
+than the file would therefore fail silently, in the one direction this repository has already paid
+to close.**
+
+**3. Mutable state fights the `.env` model on both targets.** `dynamic-security.json` is runtime
+state; `mosquitto-init` regenerates the platform principals from `.env` on every run
+(*"THE PLATFORM PRINCIPALS ARE REWRITTEN ON EVERY RUN — they come from .env and must follow it"*).
+Boot would have to **reconcile idempotently rather than rewrite**, and the failure mode inverts:
+instead of §3's *"a revocation performed in the UI would be undone by the next `docker compose up`"*,
+the risk becomes broker state that drifts from `.env` and is never corrected. On Kubernetes it is
+worse — the ACL and config arrive as read-only ConfigMaps, and mutable state needs a PVC the broker
+does not currently have.
+
+### Worth deciding early
+
+- **Whether dynsec can coexist with `password_file` for one listener.** If it cannot — which is what
+  should be assumed until measured — every principal moves in one flag day, and there is no
+  incremental path to test on a live stack.
+- **Whether dynsec ACLs substitute `%u`.** The entire per-gateway confinement rests on it, and
+  adding a gateway costs an ACL edit rather than nothing if they do not. Measure it on 2.0.22
+  before anything else in this item is planned; `check-broker-config.mjs` is where the measurement
+  belongs, for the reason `mosquitto.acl` already gives: *"A config that starts is not a config that
+  is safe."*
+- **Whether `listClients` is exposed to the dashboard at all.** A LIST verb on the credential
+  service was already refused once, partly because *"it would hand whoever holds one bearer token an
+  inventory of every account on the broker."* Dynsec's list has exactly that property, so the
+  objection transfers intact and needs a fresh answer rather than being assumed away by the new
+  mechanism.
+- **Whether revocation alone justifies the move.** It is the strongest argument here and it may have
+  a cheaper answer: disconnecting a revoked client could also be reached by having the credential
+  service rewrite the account to an unguessable password and then bounce that one session, without
+  moving the authorisation model at all. That should be priced before the plugin is.
+
+---
+
+## 9 · The Directory's MQTT half, and the one lookup it still lacks
 
 **Builds on:** [`supabase/functions/fplus-directory/index.ts`](../supabase/functions/fplus-directory/index.ts) ·
 `directory_services` (`0001`) · `gateways.sparkplug_group` (`0008`) · `relocate_devices()` (`0033`) ·
@@ -887,7 +985,7 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
-## 9 · GitOps edge sync
+## 10 · GitOps edge sync
 
 **Builds on:** the `gateway-backups` bucket in
 [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) · `digital_thread` (`0005`, `0026`) ·
@@ -932,7 +1030,7 @@ rather than borrow `service`.
 
 ---
 
-## 10 · Retiring the flow-backup bucket, and pointing at repositories instead
+## 11 · Retiring the flow-backup bucket, and pointing at repositories instead
 
 **Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
 the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
@@ -940,7 +1038,7 @@ the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) and its tag vocabulary ·
 `digital_thread` (`0005`) · **not yet filed as an issue**
 
-**The other end of §9, and it should be sequenced against it rather than planned beside it.** §9
+**The other end of §10, and it should be sequenced against it rather than planned beside it.** §10
 adds the pull; this removes what the push made necessary. Doing the removal first would leave a
 physical gateway with no copy of its flow anywhere, which is the exact loss `FlowBackupUploader`
 exists to prevent — its header states the case plainly: the appliance is the only copy, and a failed
@@ -977,7 +1075,7 @@ against the same column.
 
 ---
 
-## 11 · An ISA-95 Unified Namespace bridge
+## 12 · An ISA-95 Unified Namespace bridge
 
 **Builds on:** the DDATA path in [`ingestion/ingestion.py`](../ingestion/ingestion.py) ·
 `public.device_locations` (`0001`) · `cells` (`0001`, `0021`) · `devices.location_scope` ·
@@ -1015,7 +1113,7 @@ currently prevent.
 
 ---
 
-## 12 · Contextual help, and where the documentation actually lives
+## 13 · Contextual help, and where the documentation actually lives
 
 **Builds on:** [`frontend/src/App.jsx`](../frontend/src/App.jsx)'s top bar and
 [`frontend/src/navigation.jsx`](../frontend/src/navigation.jsx) ·
