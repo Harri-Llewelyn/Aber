@@ -1,5 +1,5 @@
 /**
- * Verify the generated ASHRAE 223P block in 0013_ashrae223_vocabulary.sql is intact.
+ * Verify the generated ASHRAE 223P block in 0002_seed_data.sql is intact.
  *
  * Same discipline as the MTConnect and OPC UA checks: the digest is recomputed from the file that
  * actually executes, and this needs no network, so it still says something useful when GitHub is
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MIGRATION = join(ROOT, 'supabase', 'migrations', '0013_ashrae223_vocabulary.sql');
+const MIGRATION = join(ROOT, 'supabase', 'migrations', '0002_seed_data.sql');
 const BEGIN_MARKER = '-- >>> BEGIN GENERATED ashrae223_vocabulary';
 const END_MARKER = '-- <<< END GENERATED ashrae223_vocabulary';
 

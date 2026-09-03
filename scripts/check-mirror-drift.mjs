@@ -9,7 +9,7 @@
  * So each mirror below is parsed on both sides and the two answers are compared.
  *
  * WHAT IS NOT HERE. The `modelledMetrics` mirror is behaviour rather than a literal and could not
- * be checked this way; it has a fixture contract instead (`tests/fixtures/modelled-metrics.json`),
+ * be checked this way; it has a fixture contract instead (`test-harness/fixtures/modelled-metrics.json`),
  * asserted by a vitest suite, two unittest suites and a static parse of the edge function. It is
  * the one that found a live divergence, which is the argument for behavioural contracts wherever
  * they are affordable.

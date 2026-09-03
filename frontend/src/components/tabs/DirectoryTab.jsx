@@ -184,7 +184,7 @@ export function groupServices(services) {
  * stale date reads as stale and makes a reader suspicious, whereas a green ACTIVE badge is
  * believed -- and it would have said ACTIVE for a service down a week.
  *
- * `refresh_directory_liveness()` (migration 0054) now writes both, every minute, from Prometheus's
+ * `refresh_directory_liveness()` (archived migration 0054) now writes both, every minute, from Prometheus's
  * `up` series. Six of the fifteen are genuinely scraped.
  *
  * ---------------------------------------------------------------------------------------------
@@ -241,7 +241,7 @@ function LivenessCell({ status, lastHeartbeat }) {
     <span
       className="badge badge-neutral"
       style={{ opacity: 0.75 }}
-      title="Nothing in this stack observes this service. Its endpoint_url is a browser address, so a probe from inside a container would be asking about the wrong host — see migration 0054."
+      title="Nothing in this stack observes this service. Its endpoint_url is a browser address, so a probe from inside a container would be asking about the wrong host — see archived migration 0054."
     >
       not observed
     </span>

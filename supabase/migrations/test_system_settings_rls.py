@@ -1,5 +1,5 @@
 """
-RLS and grant tests for public.system_settings (migration 0031).
+RLS and grant tests for public.system_settings (archived migration 0031).
 
 WHAT THIS SUITE IS ACTUALLY DEFENDING, because "admins can edit settings" is the easy half and
 none of these tests are about it:
@@ -123,7 +123,7 @@ class SystemSettingsRLS(unittest.TestCase):
                 cur.execute("SELECT to_regclass('public.system_settings');")
                 if cur.fetchone()[0] is None:
                     raise RuntimeError(
-                        "public.system_settings does not exist -- run migration 0031 first."
+                        "public.system_settings does not exist -- run archived migration 0031 first."
                     )
                 cur.execute(
                     "SELECT count(*) FROM public.system_settings WHERE key = %s;", (SEEDED_KEY,)

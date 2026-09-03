@@ -96,12 +96,12 @@ mkdirSync(cfg, { recursive: true });
  * that tested a hand-written config would not be testing the shipped one.
  */
 function assemble({ withTls }) {
-  let conf = readFileSync(join(REPO, 'mosquitto.conf'), 'utf8');
+  let conf = readFileSync(join(REPO, 'mosquitto', 'mosquitto.conf'), 'utf8');
   if (withTls) {
-    conf += '\n' + readFileSync(join(REPO, 'mosquitto-tls.conf'), 'utf8');
+    conf += '\n' + readFileSync(join(REPO, 'mosquitto', 'mosquitto-tls.conf'), 'utf8');
   }
   writeFileSync(join(cfg, 'mosquitto.conf'), conf);
-  writeFileSync(join(cfg, 'mosquitto.acl'), readFileSync(join(REPO, 'mosquitto.acl'), 'utf8'));
+  writeFileSync(join(cfg, 'mosquitto.acl'), readFileSync(join(REPO, 'mosquitto', 'mosquitto.acl'), 'utf8'));
 }
 
 /**
@@ -444,11 +444,11 @@ try {
   // -----------------------------------------------------------------------------------------------
   {
     const TLS_INIT_IMAGE = 'acs-cymru-mosquitto-tls-init:check';
-    const build = docker(['build', '-q', '-t', TLS_INIT_IMAGE, join(REPO, 'mosquitto-tls-init')]);
+    const build = docker(['build', '-q', '-t', TLS_INIT_IMAGE, join(REPO, 'mosquitto', 'tls-init')]);
 
     if (build.status !== 0) {
       problems.push(
-        `could not build mosquitto-tls-init/Dockerfile: ${(build.stderr || '').trim().slice(0, 300)}`
+        `could not build mosquitto/tls-init/Dockerfile: ${(build.stderr || '').trim().slice(0, 300)}`
       );
     } else {
       const certs = join(work, 'issued');

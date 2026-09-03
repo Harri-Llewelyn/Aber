@@ -173,9 +173,13 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
 
         # The write itself moved into an atomic RPC, so half of what this class guards now lives
         # in SQL. Both halves are still checked -- the invariant did not change, only its home.
-        migration = os.path.join(
-            here, "..", "..", "migrations", "0003_audit_immutability_and_quarantine_rpc.sql"
-        )
+        #
+        # Its home moved once more in the squash: `approve_quarantined_device()` was declared by
+        # 0003 and is now in the baseline, in the single final form the whole chain produced.
+        # Reading it there is strictly better than reading 0003 was -- 0003 held the FIRST of
+        # several declarations, and a later migration replacing the body would have left this
+        # suite asserting against SQL the database had long stopped running.
+        migration = os.path.join(here, "..", "..", "migrations", "0001_baseline_schema.sql")
         with open(migration, "r", encoding="utf-8") as handle:
             self.rpc_sql = handle.read()
 

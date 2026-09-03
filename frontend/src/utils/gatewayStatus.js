@@ -19,7 +19,7 @@ export const HEARTBEAT_STALE_MS = 90_000;
  *   PENDING_ENROLLMENT  a bundle has been issued; the appliance has not redeemed it yet
  *   AWAITING_BIRTH      the appliance enrolled and holds a credential; no NBIRTH yet
  *
- * Both are written by the enrolment path (migration 0025), and both are cleared by the first
+ * Both are written by the enrolment path (archived migration 0025), and both are cleared by the first
  * heartbeat -- process_node_message() writes `status` unconditionally, so the transition to ONLINE
  * needs no code anywhere.
  */
@@ -111,7 +111,7 @@ export function formatHeartbeat(lastHeartbeat, now = Date.now()) {
 }
 
 /**
- * APPLIANCE HEALTH, reported by the gateway itself on the heartbeat (migration 0035).
+ * APPLIANCE HEALTH, reported by the gateway itself on the heartbeat (archived migration 0035).
  *
  * These read columns that are NULL on every gateway that does not report them -- a virtual one, and
  * any appliance on a bundle predating that migration -- so each helper returns null rather than a

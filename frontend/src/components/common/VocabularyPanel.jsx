@@ -58,7 +58,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
 
   return (
     <>
-    <div className="card" style={{ marginBottom: '24px' }}>
+    <div className="card" style={{ marginBottom: 'var(--stack)' }}>
       {/* The header is the title and its explanation, full width, with nothing floating in it. */}
       <div className="card-header vocab-header">
         <div>
@@ -142,7 +142,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
         </div>
       )}
 
-      <div style={{ padding: '4px 20px 16px' }}>
+      <div style={{ padding: '4px var(--inset) 12px' }}>
         {filtered.map(section => {
           const open = isOpen(section.key)
           const used = active.isUsed ? section.items.filter(i => active.isUsed(i)).length : 0

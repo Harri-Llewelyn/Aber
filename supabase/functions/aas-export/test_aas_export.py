@@ -27,9 +27,9 @@ import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-# The official IDTA metamodel schema, vendored verbatim. See tests/schemas/README.md for its
+# The official IDTA metamodel schema, vendored verbatim. See test-harness/schemas/README.md for its
 # provenance and how to refresh it -- it is never hand-edited.
-AAS_SCHEMA_PATH = REPO_ROOT / "tests" / "schemas" / "AAS_V3_0_JSON_Schema.json"
+AAS_SCHEMA_PATH = REPO_ROOT / "test-harness" / "schemas" / "AAS_V3_0_JSON_Schema.json"
 TS_MAPPER = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "sparkplugToXsd.ts"
 JS_MAPPER = REPO_ROOT / "frontend" / "src" / "utils" / "sparkplugDatatype.js"
 TS_MODEL_TYPES = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "model3dContentType.ts"
@@ -37,7 +37,7 @@ JS_MODEL_TYPES = REPO_ROOT / "frontend" / "src" / "utils" / "model3d.js"
 # The mapping layer moved to _shared/aas/shell.ts when aas-api began sharing it; this is where
 # modelledMetrics() now lives, and it is still extracted and EXECUTED rather than grepped.
 TS_SHELL = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "shell.ts"
-MODELLED_METRICS_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "modelled-metrics.json"
+MODELLED_METRICS_FIXTURE = REPO_ROOT / "test-harness" / "fixtures" / "modelled-metrics.json"
 
 MODEL_BUCKET = os.getenv("STORAGE_MODEL_BUCKET", "asset-3d-models")
 # The AAS metamodel's idShort pattern, transcribed from the vendored schema. Stricter than it
@@ -170,7 +170,7 @@ def find_device_id(token: str) -> str | None:
         return None
 
 
-sys.path.insert(0, str(REPO_ROOT / "tests"))
+sys.path.insert(0, str(REPO_ROOT / "test-harness"))
 import aas_fixture  # noqa: E402  -- after sys.path, by necessity
 
 
@@ -311,7 +311,7 @@ class TestModelledMetricsContract(unittest.TestCase):
     The FOURTH implementation of `modelledMetrics`, held to the same fixture as the other three.
 
     `frontend/src/utils/deviceTags.js`, `ingestion/validate.py` and `i3x/i3x_service.py` all assert
-    `tests/fixtures/modelled-metrics.json` in their own runners. This one did not, and it was the
+    `test-harness/fixtures/modelled-metrics.json` in their own runners. This one did not, and it was the
     only one still carrying the array-`properties` divergence the fixture was written to catch --
     for two years of `_comment` explaining the bug, in a file the bug was not checked against.
 
@@ -505,7 +505,7 @@ class TestAasExportLive(unittest.TestCase):
         """
         The IDTA elements say what they mean, using IDTA's own identifiers.
 
-        These IRDIs come from IDTA 02006-3-0-1 and are seeded by migration 0011; the exporter looks
+        These IRDIs come from IDTA 02006-3-0-1 and are seeded by archived migration 0011; the exporter looks
         them up rather than hard-coding them, so this asserts the lookup actually reached the
         table. A missing semanticId here means the join silently produced nothing, which is exactly
         the failure that would otherwise ship as a valid-looking shell full of anonymous strings.

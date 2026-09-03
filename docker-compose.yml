@@ -13,7 +13,7 @@ x-nodered-auth-env: &nodered-auth-env
 
   # --- Human auth: OAuth2 + PKCE against GoTrue's OAuth server -------------------------------
   NODERED_OAUTH_CLIENT_ID: ${NODERED_OAUTH_CLIENT_ID:-c0ffee00-0000-4000-8000-000000000002}
-  # Hashed into auth.oauth_clients by migration 0003. Rotating it means changing .env and
+  # Hashed into auth.oauth_clients by archived migration 0003. Rotating it means changing .env and
   # restarting supabase-db-init as well as these two services.
   NODERED_OAUTH_CLIENT_SECRET: ${NODERED_OAUTH_CLIENT_SECRET}
   # auth_url is followed by the BROWSER, so it must be the host-facing Kong address; token_url
@@ -215,7 +215,7 @@ services:
       #
       #   ERROR: pgsodium_crypto_aead_det_decrypt_by_id: invalid ciphertext
       #
-      # which surfaces as migration 0006 failing and supabase-db-init exiting 3. `restart` and
+      # which surfaces as archived migration 0006 failing and supabase-db-init exiting 3. `restart` and
       # `stop`/`start` keep the container, so this only bites on down/up -- which is why it can sit
       # unnoticed for a long time.
       #
@@ -341,7 +341,7 @@ services:
       # NODERED_PUBLIC_URL as the callbackURL settings.js uses, so the two cannot drift apart --
       # they must match exactly or /oauth/authorize answers "invalid redirect_uri".
       NODERED_OAUTH_CALLBACK_URL: ${NODERED_PUBLIC_URL:-http://localhost:1880}/auth/strategy/callback
-      # Creates the Supabase-side `grafana_reader` in migration 0027 -- the role Grafana connects
+      # Creates the Supabase-side `grafana_reader` in archived migration 0027 -- the role Grafana connects
       # as to read public.storage_footprint. THE SAME CREDENTIAL as the historian's reader of the
       # same name, on purpose: it is the same tool, and a second secret to rotate for it is a
       # second secret to forget. The privileges are granted per database and share nothing but the
@@ -548,7 +548,7 @@ services:
       # the Elixir app ever starts. It is not optional.
       RLIMIT_NOFILE: "10000"
       # RLS is evaluated per change, per subscriber. Required: digital_thread is
-      # restricted to privileged/auditor roles (migration 0005), and that has to
+      # restricted to privileged/auditor roles (archived migration 0005), and that has to
       # hold over the socket exactly as it does over PostgREST.
       RLS_ENABLED: "true"
       SEED_SELF_HOST: "true"
@@ -957,7 +957,7 @@ services:
       - ./supabase/functions:/home/deno/functions:ro
       # The physical gateway bundle template gateway-bundle zips and serves. Read in the entrypoint
       # below because an edge worker has no filesystem access to this mount.
-      - ./templates/physical-gateway:/home/deno/templates/physical-gateway:ro
+      - ./gateway-bundle-template:/home/deno/gateway-bundle-template:ro
       # Persist fetched remote modules so functions don't re-download on restart.
       - deno_cache:/root/.cache/deno
     # An edge-runtime user worker has no filesystem access to these mounts, so the
@@ -975,7 +975,7 @@ services:
         # main/index.ts is an allow-list of variable NAMES and a dynamic set could not be declared
         # there. Kept in step with supabase/functions/Dockerfile's ENTRYPOINT, which does the same
         # for the Kubernetes target.
-        T=/home/deno/templates/physical-gateway
+        T=/home/deno/gateway-bundle-template
         export GW_BUNDLE_COMPOSE="$$(cat $$T/docker-compose.yml)"
         export GW_BUNDLE_DOCKERFILE="$$(cat $$T/Dockerfile)"
         export GW_BUNDLE_BOOTSTRAP="$$(cat $$T/bootstrap.mjs)"
@@ -1154,7 +1154,7 @@ services:
   mosquitto-tls-init:
     container_name: acs-cymru_mosquitto_tls_init
     build:
-      context: ./mosquitto-tls-init
+      context: ./mosquitto/tls-init
     # Root, because it chowns the key to the uid mosquitto drops to (1883). The broker reads its
     # own key AFTER dropping privileges, so a key it cannot read exits the broker with an OpenSSL
     # "system library" error that names neither the file nor the permission.
@@ -1197,8 +1197,8 @@ services:
       # the two targets now differ in transport and not in method. mosquitto.acl is deliberately
       # NOT assembled -- it stays a read-only bind mount on the broker itself, because it is the
       # security-critical file and nothing should be able to rewrite it at runtime.
-      - ./mosquitto.conf:/policy/mosquitto.conf:ro
-      - ./mosquitto-tls.conf:/policy/mosquitto-tls.conf:ro
+      - ./mosquitto/mosquitto.conf:/policy/mosquitto.conf:ro
+      - ./mosquitto/mosquitto-tls.conf:/policy/mosquitto-tls.conf:ro
       - mosquitto_certs:/certs:ro
     entrypoint: >
       /bin/sh -e -c "
@@ -1263,7 +1263,7 @@ services:
       # Topic authorisation. STILL a read-only bind mount, and deliberately not assembled: it is
       # repository-managed policy, it is the file that confines every principal, and nothing at
       # runtime should be able to rewrite it.
-      - ./mosquitto.acl:/mosquitto/config/mosquitto.acl:ro
+      - ./mosquitto/mosquitto.acl:/mosquitto/config/mosquitto.acl:ro
       # The paths mosquitto-tls.conf names. Read-only: the broker presents this leaf, it does not
       # manage it. The CA's private key is NOT in this volume's readable set for the broker uid --
       # mosquitto-tls-init leaves ca.key root-owned and 0600.
@@ -1391,7 +1391,7 @@ services:
     container_name: acs-cymru_ingestion
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ingestion/Dockerfile
     restart: always
     # PUBLISHED SO IT CAN BE SCRAPED, and there is nothing here to scrape it with -- this stack
     # ships no Prometheus, and Grafana holds two Postgres datasources and no others. The port is
@@ -1446,7 +1446,7 @@ services:
       # Both of these are needed and they do different jobs. The anon key is the apikey the gateway
       # checks; it admits exactly two literal keys, so the ingestion token cannot be sent in its
       # place. The ingestion token is the Authorization bearer, and it names Service_Ingestor
-      # (migration 0046) -- an Operator principal that cannot write a single row directly. Every
+      # (archived migration 0046) -- an Operator principal that cannot write a single row directly. Every
       # write goes through a gate in 0047 that checks the caller is that principal.
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_INGESTION_KEY: ${SUPABASE_INGESTION_KEY}
@@ -1528,7 +1528,7 @@ services:
     container_name: acs-cymru_cold_archiver
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ingestion/Dockerfile
     restart: always
     command: ["python", "-m", "cold_archive", "--drop", "--loop", "${COLD_ARCHIVE_INTERVAL_SECONDS:-86400}"]
     environment:
@@ -1569,14 +1569,14 @@ services:
   #
   # WHAT IS NOT SHARED IS EVERYTHING THAT MATTERS. This service holds no historian credential, no
   # ingestion MQTT account and no SUPABASE_INGESTION_KEY. Its Supabase identity is Service_Playback
-  # (migration 0056), which reaches four gates and one storage object; its MQTT identity is the
+  # (archived migration 0056), which reaches four gates and one storage object; its MQTT identity is the
   # TARGET GATEWAY'S OWN, which is what makes `pattern readwrite spBv1.0/+/+/%u/#` confine it with
   # no ACL change at all.
   playback:
     container_name: acs-cymru_playback
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ingestion/Dockerfile
     command: ["python", "playback_worker.py"]
     restart: always
     environment:
@@ -1604,7 +1604,7 @@ services:
       # Both, for the reason the ingestion service gives above: the anon key is the apikey the
       # gateway checks, and the playback key is the Authorization bearer naming Service_Playback.
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-      SUPABASE_PLAYBACK_KEY: ${SUPABASE_PLAYBACK_KEY:?SUPABASE_PLAYBACK_KEY is required -- the playback worker authenticates as Service_Playback (migration 0056) and can claim nothing without it. Run `npm run setup`, or copy it from .env.example.}
+      SUPABASE_PLAYBACK_KEY: ${SUPABASE_PLAYBACK_KEY:?SUPABASE_PLAYBACK_KEY is required -- the playback worker authenticates as Service_Playback (archived migration 0056) and can claim nothing without it. Run `npm run setup`, or copy it from .env.example.}
       CAPTURE_BUCKET: ${CAPTURE_BUCKET:-broker-captures}
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -1837,7 +1837,7 @@ services:
   #
   # DISK IS THE METRIC THAT EARNS IT. This host carries two Postgres data directories and now a
   # TSDB; filling it takes the whole stack down at once, and it is the failure `storage_footprint`
-  # (migration 0027) was added to make visible from the inside. This is the same question asked from
+  # (archived migration 0027) was added to make visible from the inside. This is the same question asked from
   # outside the databases, which is the half that notices the log files and the images.
   #
   # READ-ONLY MOUNTS AND NO CAPABILITIES. It reads /proc and /sys and reports numbers; nothing here

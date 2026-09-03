@@ -19,7 +19,12 @@ dist/
 build/
 .cache/
 
-# Mosquitto generated credentials
+# Mosquitto generated credentials.
+#
+# Neither target writes here -- Compose assembles /mosquitto/config inside a named volume and
+# the chart uses a Secret -- but mosquitto/ is now a real directory holding the policy files,
+# so a hand-run `mosquitto_passwd -c mosquitto/password_file` while debugging lands beside them.
+# That file is $7$ hashes of the five platform principals.
 mosquitto/password_file
 
 # Supabase CLI local scratch

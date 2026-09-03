@@ -63,7 +63,7 @@ describe('iso22400Prefill', () => {
   })
 
   it('suggests the KPI family as the group, so the composed name matches the live catalog', () => {
-    // The catalog already holds OEE/AVAILABILITY (migration 0019). A prefill that suggested any
+    // The catalog already holds OEE/AVAILABILITY (archived migration 0019). A prefill that suggested any
     // other group would fork the taxonomy against immutable names.
     const prefill = iso22400Prefill(availability)
     expect(composeMetricName(prefill.group, '', prefill.type, '')).toBe('OEE/AVAILABILITY')

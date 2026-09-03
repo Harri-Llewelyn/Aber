@@ -75,7 +75,7 @@ export const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-mo
  * The IDTA Digital Nameplate template whose element semanticIds this mapping attaches.
  *
  * NOT an environment variable, and not on the exported submodel either -- it selects rows from
- * `idta_submodel_templates` (seeded by migration 0011) and nothing more. The version is part of
+ * `idta_submodel_templates` (seeded by archived migration 0011) and nothing more. The version is part of
  * the identifier: 2.0 lives under admin-shell.io/zvei, 3.0 under admin-shell.io/idta, and a shell
  * that mixed them would name two different templates.
  */
@@ -231,7 +231,7 @@ export function file(idShort: string, value: string, contentType: string, descri
 /**
  * The metric names one schema models: `properties` keys plus `required` entries.
  *
- * THE FOURTH OF FOUR IMPLEMENTATIONS, and the fixture in tests/fixtures/modelled-metrics.json is
+ * THE FOURTH OF FOUR IMPLEMENTATIONS, and the fixture in test-harness/fixtures/modelled-metrics.json is
  * what keeps them in step -- `frontend/src/utils/deviceTags.js`, `ingestion/validate.py` and
  * `i3x/i3x_service.py` are the others. It moved here from aas-export/index.ts when aas-api began
  * sharing this mapping; test_aas_export.py extracts it BY REGEX from this file and executes it, so

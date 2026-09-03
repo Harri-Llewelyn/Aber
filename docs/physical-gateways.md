@@ -94,7 +94,7 @@ acs-gateway-<name>-<sparkplug_id>/
 ```
 
 Everything except `.env` and `GATEWAY.txt` is mirrored verbatim from
-[`templates/physical-gateway/`](../templates/physical-gateway/).
+[`gateway-bundle-template/`](../gateway-bundle-template/).
 
 `.env` carries exactly six values, all read by `bootstrap.mjs`:
 
@@ -320,7 +320,7 @@ They are in the quarantine queue awaiting approval (§9). That is the design, no
 
 ## Related
 
-* [`templates/physical-gateway/README.md`](../templates/physical-gateway/README.md) — the copy that
+* [`gateway-bundle-template/README.md`](../gateway-bundle-template/README.md) — the copy that
   ships in the bundle
 * [`docs/openapi.yaml`](openapi.yaml) — `enroll-gateway` and `gateway-bundle` contracts
 * [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) — the Kubernetes CA

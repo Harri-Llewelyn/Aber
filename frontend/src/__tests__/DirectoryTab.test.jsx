@@ -275,7 +275,7 @@ describe('DirectoryTab service groups', () => {
    * nothing wrote `directory_services.status` and the pill said ACTIVE on all fifteen rows
    * unconditionally -- it would have said ACTIVE for a service down for a week.
    *
-   * `refresh_directory_liveness()` (migration 0054) writes it now, from Prometheus's `up` series.
+   * `refresh_directory_liveness()` (archived migration 0054) writes it now, from Prometheus's `up` series.
    * So the column is back, and what these tests protect is no longer "claims nothing" but "claims
    * only what was observed".
    *

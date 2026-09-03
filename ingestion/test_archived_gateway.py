@@ -1,7 +1,7 @@
 """
 Unit tests for refusing traffic from an ARCHIVED edge node (`resolve_gateway` in ingestion.py).
 
-WHY THIS IS THE APPLICATION TIER OF SOMETHING ELSE'S JOB. Migration 0038 revokes a gateway's broker
+WHY THIS IS THE APPLICATION TIER OF SOMETHING ELSE'S JOB. archived migration 0038 revokes a gateway's broker
 credential when it is archived, so an archived appliance should not be able to connect at all. Two
 things stop that being sufficient on its own:
 

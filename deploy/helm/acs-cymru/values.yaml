@@ -90,7 +90,7 @@ secrets:
   # The ingestion daemon's own credential (see Machine Identities in supabase/README.md). Signed by the same jwtSecret, but
   # unlike the two above it names a PRINCIPAL rather than a role: claims are
   # {"iss":"supabase","role":"authenticated","sub":"b0000000-0000-4000-8000-000000000002"}.
-  # That subject is Service_Ingestor, seeded by migration 0046; it holds Operator and cannot write
+  # That subject is Service_Ingestor, seeded by archived migration 0046; it holds Operator and cannot write
   # a row directly, so every write goes through a gate in 0047 that checks the caller is it.
   #
   # PART OF THE SAME MATCHING SET as anonKey and serviceRoleKey -- re-sign all FOUR together when
@@ -98,7 +98,7 @@ secrets:
   ingestionKey: ""
 
   # The playback worker's own JWT, same shape, subject b0000000-0000-4000-8000-000000000003 --
-  # Service_Playback, seeded by migration 0056.
+  # Service_Playback, seeded by archived migration 0056.
   #
   # A SECOND IDENTITY BECAUSE THE BROKER RIGHTS DIFFER. The ingestion daemon may publish
   # `spBv1.0/+/NCMD/+` and nothing else; this worker publishes asset data as one gateway. Sharing
@@ -984,8 +984,9 @@ ingestion:
   dbUser: "ingest_writer"
   enabled: true
   image:
-    # BUILT FROM the repository-root Dockerfile, not pulled:
-    #   docker build -f Dockerfile -t <repo>:<tag> .
+    # BUILT FROM ingestion/Dockerfile, not pulled. Context is the REPOSITORY ROOT, because the
+    # image compiles sparkplug_b.proto and the .proto lives there:
+    #   docker build -f ingestion/Dockerfile -t <repo>:<tag> .
     #
     # PUBLISHED -- see supabaseFunctions.image for what the empty tag means.
     repository: ghcr.io/harri-llewelyn/acs-cymru/ingestion
@@ -1255,12 +1256,12 @@ ingress:
 e2e:
   enabled: false
   image:
-    # BUILT FROM tests/Dockerfile with the REPOSITORY ROOT as context. It extends the ingestion
+    # BUILT FROM test-harness/Dockerfile with the REPOSITORY ROOT as context. It extends the ingestion
     # image (which already has psycopg2, paho and a protoc-generated sparkplug_b_pb2) with
     # jsonschema and the AAS suite -- jsonschema is deliberately NOT in the production ingestion
     # image, and without it the schema-conformance tests skip themselves while still reporting
     # success.
-    #   docker build -f tests/Dockerfile -t <repo>:<tag> .
+    #   docker build -f test-harness/Dockerfile -t <repo>:<tag> .
     #
     # PUBLISHED -- see supabaseFunctions.image for what the empty tag means. It is published for
     # the same reason it exists: a conformance suite that only runs where the repository is

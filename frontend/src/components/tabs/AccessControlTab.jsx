@@ -126,7 +126,7 @@ export function AccessControlTab({ showToast }) {
   if (loading) {
     return (
       <div className="page-layout"><div className="page-main">
-        <div className="card" style={{ padding: '16px' }}>
+        <div className="card" style={{ padding: '12px var(--inset)' }}>
           <div className="loading-wrap"><div className="spinner" /> Loading credentials…</div>
         </div>
       </div></div>
@@ -368,7 +368,7 @@ export function AccessControlTab({ showToast }) {
             It also carried `.settings-preamble-title`, which is small-caps -- a THIRD title
             treatment on a page that already had `.section-title` above and bold 13px text below.
             One page, one way of naming a section. */}
-        <div style={{ margin: '24px 4px 12px' }}>
+        <div style={{ margin: 'calc(var(--stack) * 1.5) 0 10px' }}>
           <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <IconLock size={15} /> Service identities
           </h3>
@@ -387,7 +387,7 @@ export function AccessControlTab({ showToast }) {
             which is what every other multi-table page in the app uses. This was a bold 13px div
             with hand-picked padding, so the same page named one section with `.section-title` and
             another with an improvised style. */}
-        <div className="card" style={{ marginTop: '12px' }}>
+        <div className="card" style={{ marginTop: 'var(--stack)' }}>
           <div className="card-header">
             <h3 className="section-title">
               Database principals{' '}
@@ -567,7 +567,7 @@ export function AccessControlTab({ showToast }) {
               caveat the row carries, on a page this dense. */}
         </div>
 
-        <div className="card" style={{ marginTop: '12px' }}>
+        <div className="card" style={{ marginTop: 'var(--stack)' }}>
           <div className="card-header">
             <h3 className="section-title">
               Broker principals{' '}

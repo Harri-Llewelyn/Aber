@@ -159,7 +159,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Context is the REPOSITORY ROOT: templates/physical-gateway is not reachable
+          # Context is the REPOSITORY ROOT: gateway-bundle-template is not reachable
           # from a narrower context.
           - name: edge-runtime
             dockerfile: supabase/functions/Dockerfile
@@ -300,12 +300,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Context is the REPOSITORY ROOT: the Dockerfile compiles sparkplug_b.proto with protoc and
-      # the .proto lives there.
+      # Context is the REPOSITORY ROOT: ingestion/Dockerfile compiles sparkplug_b.proto with protoc
+      # and the .proto lives there.
       - name: Build ingestion
         run: |
           set -eu
-          docker build -f Dockerfile -t "$IMAGE_NAMESPACE/ingestion:$V" \
+          docker build -f ingestion/Dockerfile -t "$IMAGE_NAMESPACE/ingestion:$V" \
             --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
             --label "org.opencontainers.image.revision=${{ github.sha }}" \
             --label "org.opencontainers.image.version=$V" \
@@ -329,7 +329,7 @@ jobs:
           echo "  ok  $REF is local -- test-runner will build against it without a pull"
 
       # REPOSITORY ROOT again: test_aas_export.py resolves five files relative to parents[3], so the
-      # suite needs the repo-shaped layout tests/Dockerfile builds. See its header.
+      # suite needs the repo-shaped layout test-harness/Dockerfile builds. See its header.
       #
       # INGESTION_IMAGE is passed explicitly rather than relying on the Dockerfile's ARG default:
       # the base is the image built seconds ago at the version being released, which no committed
@@ -337,7 +337,7 @@ jobs:
       - name: Build test-runner From The Local ingestion
         run: |
           set -eu
-          docker build -f tests/Dockerfile -t "$IMAGE_NAMESPACE/test-runner:$V" \
+          docker build -f test-harness/Dockerfile -t "$IMAGE_NAMESPACE/test-runner:$V" \
             --build-arg "INGESTION_IMAGE=$IMAGE_NAMESPACE/ingestion:$V" \
             --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
             --label "org.opencontainers.image.revision=${{ github.sha }}" \

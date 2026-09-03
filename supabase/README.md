@@ -6,8 +6,8 @@ foreign-data-wrapper view.
 
 | Path | Purpose |
 | :--- | :--- |
-| [`migrations/`](migrations) | `0001` schema, `0002` seed data, then additive migrations `0003`–`0007` |
-| [`migrations/archive/`](migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. **Never executed** |
+| [`migrations/`](migrations) | `0001` schema, `0002` seed data, then nine corrective migrations |
+| [`migrations/archive/`](migrations/archive) | The 99 superseded migrations, preserved for their reasoning. **Never executed** |
 | [`functions/`](functions) | Deno edge functions and the worker router |
 | [`envoy.yaml`](envoy.yaml) | API gateway routes, CORS, and the `apikey` check. **A template** |
 | [`seed.sql`](seed.sql) | Demo user accounts |
@@ -16,21 +16,77 @@ foreign-data-wrapper view.
 
 ## Migration Baseline
 
-Squashed to a **two-file baseline** for the public beta, plus additive remediation migrations:
+Squashed **twice**. The pre-beta chain became `0001`/`0002` for the public beta; the 72-file chain
+that grew on top of it was squashed back into the same two files, leaving a short corrective tail.
 
 | File | Contents |
 | :--- | :--- |
-| `0001_baseline_schema.sql` | Pure DDL. Tables, views, functions, triggers, policies, grants |
-| `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric catalog, demo assets, cron, Vault |
-| `0003_audit_immutability_and_quarantine_rpc.sql` | Append-only enforcement and the atomic approval RPC |
+| `0001_baseline_schema.sql` | Pure DDL. Tables, views, functions, triggers, policies, grants, the FDW, the Realtime publication |
+| `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric catalogue, settings, secrets, cron, the Playback gateway |
 | `0004_drop_gateway_ip_address.sql` | Removes a column nothing read |
-| `0005_digital_thread_signal_and_attribution.sql` | Stops the audit trigger recording machine non-events |
-| `0006_nodered_oidc_auth.sql` | Node-RED's OAuth client and the webhook signing key |
-| `0007_metric_catalog_name_check.sql` | Constrains `metric_catalog.name` to the Factory+ format |
-| `0008_gateway_sparkplug_group.sql` | Adds `gateways.sparkplug_group`, making the edge node address `(group, node)` |
+| `0005_digital_thread_signal_and_attribution.sql` | Purges audit rows that record no change |
+| `0016_directory_service_cleanup.sql` | Removes and renames seeded directory entries |
+| `0020_cleanup_legacy_simulator_seed.sql` | Deletes the single-device simulator's assets |
+| `0028_platform_alerts_migration.sql` | Drops `device_alerts` after moving its rows |
+| `0040_retire_demonstration_seed.sql` | The one-shot purge of the four-cell demonstration floor |
+| `0049_documents_become_links.sql` | Drops `documents` after the rename to `links` |
+| `0053_one_shot_ledger_is_not_writable.sql` | Withdraws write access to the one-shot ledger |
+| `0069_the_two_roles_stop_being_the_same.sql` | Removes the permissions that made two roles one |
+| `0073_the_shopfloor_ships_empty.sql` | Retires the last demonstration schemas |
 
-Add schema changes as a **new numbered file** (`0008_…`). The baseline files describe the state a
-fresh database is built into; a live database has already run them.
+### Why those nine survived the squash, and nothing else did
+
+**A squash can only fold what a fresh install would do anyway.** The baseline states the shape a
+new database is built into, so anything ADDITIVE — a table, a column, a function, a seeded row —
+folds into it and the old file is redundant. What cannot fold is a SUBTRACTION: `CREATE TABLE IF
+NOT EXISTS` does not remove a column that already exists, and a baseline that simply never mentions
+`gateways.ip_address` leaves the column sitting on every database that already has one.
+
+So every file above either drops something, deletes rows, or withdraws a privilege. Each is a
+no-op on a fresh install and the repair on an existing one. `0053` is the subtle member: `0040`
+creates the one-shot ledger and grants `service_role` full rights on it, and `0053` is what takes
+them away — fold `0053` and the grant comes back on every boot.
+
+The rule for the future: **an additive change goes in a new numbered migration and folds into the
+baseline at the next squash; a subtractive one stays until every database that could receive it
+has.**
+
+### The baseline is generated, and the equivalence is checked
+
+`0001` is produced from a `pg_dump` of a database the whole chain built, mechanically rewritten
+into idempotent form. That is what makes every function appear **exactly once, in its final form**
+— `log_digital_thread_event()` was declared five times across the chain, so four of the five bodies
+a reader could find were dead, with nothing in the file to say which.
+
+`scripts/verify-schema-equivalence.mjs` is the acceptance test: it builds a database from each of
+two chains and asserts they arrive at the same schema and the same seed rows. The squash was landed
+on its verdict — 72 files and 11 build the identical schema `623d6f6059e2`.
+
+**Five things a dump cannot express**, all of them hand-carried into `0001` and each found by a
+failing run rather than by inspection:
+
+1. **Roles.** `grafana_reader` is not a schema object and appears in no `--schema-only` dump.
+2. **Conditional grants.** `0027`/`0029`/`0036` grant to that role only when `BI_READER_PASSWORD`
+   is set; pg_dump sees the resulting ACL and writes a bare `GRANT` that fails with
+   `role "grafana_reader" does not exist` on exactly the deployments the condition exists for.
+3. **Privilege *absences*.** A dump says what IS granted. The image's default privileges hand
+   `anon`, `authenticated` and `service_role` everything, so append-only on `digital_thread` and
+   `one_shot_migrations` exists only as four missing words in one ACL line.
+4. **Ordering.** `ALTER DEFAULT PRIVILEGES` applies only to objects created after it runs. The old
+   baseline had those three lines *after* the tables they govern, where they narrowed nothing.
+5. **Publications.** A publication is a database object, not a schema one, so `--schema=public`
+   contains no reference to it. Dropping the Realtime setup was invisible to the schema comparison
+   and surfaced two migrations later as `0028` reporting the dashboard would never see an alert.
+
+### Seeding is audited now
+
+The baseline creates every trigger before `0002` runs, so a fresh install records 12 rows in
+`digital_thread` with `actor_source = 'migration'` describing what the seed inserted. The old chain
+recorded 2, because its ordering meant most seeding happened before the triggers existed.
+
+They are written **once, on first boot** — every statement is `ON CONFLICT`, so a replay matches no
+rows and adds nothing, and the count holds across restarts. Treat them as a receipt that the seed
+ran and what it inserted, not as a per-boot health signal.
 
 ### Prefixes must be unique, and the order is the filename
 
@@ -818,7 +874,7 @@ record was readable by everyone privileged. Adding role grants to a table a Shop
 read in full is not an improvement.
 
 **The rule is who may PERFORM the act, not what the act is about.** `CREDENTIAL_ISSUED` stays in
-the asset lane because [`0041`](migrations/0041_virtual_gateway_credential.sql) admits a
+the asset lane because [`0041`](migrations/archive/0041_virtual_gateway_credential.sql) admits a
 Shopfloor_Manager to `issue_virtual_gateway_credential()`. Filing it as security would mean a
 Manager mints a broker credential and the record of their own act disappears — an empty lane is
 only honest when the rows in it belong to somebody else.
@@ -1707,7 +1763,8 @@ so a whole-file scan would flag the documentation of the rule as a violation of 
 
 **The edge functions are delivered differently too.** Compose bind-mounts `functions/` for hot-reload;
 Kubernetes bakes them into an image (`functions/Dockerfile`, built with the **repository root** as
-context because `simulation/node_red_flow.json` sits outside `supabase/functions/`). Baking is what makes "which revision of
+context because `gateway-bundle` COPYs `gateway-bundle-template/`, which sits outside
+`supabase/functions/`). Baking is what makes "which revision of
 `aas-export` is running" a property of the deployed artefact, so a rollback rolls the functions back.
 
 `key-auth` is enabled on `/rest/v1/`, `/realtime/v1/`, `/storage/v1/` and `/functions/v1/`.

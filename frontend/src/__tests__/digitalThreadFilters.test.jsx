@@ -4,7 +4,7 @@
  * The attribution half exists because `changed_by IS NULL` was the normal case, not an anomaly:
  * on a stack with one simulated gateway and one device the audit table was taking 175 anonymous
  * rows/hour, of which every one was either a heartbeat stamp or a write where `old_data =
- * new_data`. Migration 0005 stops recording those and stamps `actor_source` on what remains, so
+ * new_data`. archived migration 0005 stops recording those and stamps `actor_source` on what remains, so
  * a blank author now means a genuine gap rather than "a machine did something routine".
  */
 import React from 'react'
@@ -354,7 +354,7 @@ describe('Digital Thread time range', () => {
   // than an error.
   //
   // THE MECHANISM MOVED AND THE GUARD FOLLOWED IT. The bounds used to be `query.gte(...)` on a
-  // PostgREST builder; migration 0039 made this page an RPC, because the deleted-asset filter is
+  // PostgREST builder; archived migration 0039 made this page an RPC, because the deleted-asset filter is
   // an anti-join PostgREST cannot express. They are arguments now. What must stay true is
   // unchanged: the window reaches the database, and is not applied to rows the limit already cut.
   it('applies the bounds as arguments to the page RPC, not as a client-side filter', () => {
@@ -714,7 +714,7 @@ describe('Digital Thread event drawer', () => {
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
-    // Migration 0005 already suppresses heartbeat-ONLY updates at the source. This is the
+    // archived migration 0005 already suppresses heartbeat-ONLY updates at the source. This is the
     // residue: a real edit that also bumped the heartbeat, which would otherwise open every
     // diff with a line nobody came to read.
     expect(within(document.querySelector('.dt-diff-table')).queryByText('last_heartbeat')).toBeNull()
@@ -914,7 +914,7 @@ describe('Digital Thread drawer navigation', () => {
  *
  * It moved from a badge on every row into the drawer and the marker tooltip: an actor belongs to
  * one EVENT, and a lane is one ASSET. The substance is unchanged -- `changed_by IS NULL` was the
- * normal case rather than an anomaly until migration 0005 stopped recording machine non-events
+ * normal case rather than an anomaly until archived migration 0005 stopped recording machine non-events
  * and stamped `actor_source` on what remained, so a blank author now means a genuine gap.
  */
 describe('Digital Thread attribution', () => {

@@ -333,11 +333,11 @@ Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short versio
 ```bash
 # Five images are built from this repository and are on no registry.
 docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:0.1.0 .   # context: repo root
-docker build -f Dockerfile                    -t acs-cymru/ingestion:0.1.0 .      # context: repo root
+docker build -f ingestion/Dockerfile          -t acs-cymru/ingestion:0.1.0 .      # context: repo root
 docker build -f node-red/Dockerfile           -t acs-cymru/node-red:0.1.0 node-red
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
                                               -t acs-cymru/frontend:0.1.0 frontend
-docker build -f tests/Dockerfile              -t acs-cymru/test-runner:0.1.0 .    # conformance suites
+docker build -f test-harness/Dockerfile       -t acs-cymru/test-runner:0.1.0 .    # conformance suites
 
 node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
 
@@ -381,10 +381,11 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | [`docs/incidents.md`](docs/incidents.md) | Faults whose FIX LOOKS ARBITRARY without the story. Read before "tidying" a guard that seems redundant |
 | [`docs/upgrades.md`](docs/upgrades.md) | What survives an upgrade and why nothing needs reconfiguring — plus the three places that is not the whole truth |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
-| [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
+| [`supabase/migrations/archive/`](supabase/migrations/archive) | The 99 superseded migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
 | [`scripts/`](scripts) | Setup, seeding, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, stack reset, AAS push |
-| [`tests/`](tests) | Vendored IDTA AAS schema, conformance test-runner image |
+| [`test-harness/`](test-harness) | Vendored IDTA AAS schema, conformance test-runner image |
+| [`gateway-bundle-template/`](gateway-bundle-template) | The appliance files `gateway-bundle` serves to a physical gateway: Compose file, Dockerfile, bootstrap and flow template |
 
 ---
 
@@ -413,13 +414,13 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `127.0.0.1:54323:3000` (loopback only — see below) |
 | `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `5433:5432` |
 | `timescaledb-maintenance` | `acs-cymru_timescaledb_maintenance` | `timescale/timescaledb:2.29.2-pg17` | — |
-| `mosquitto-tls-init` | `acs-cymru_mosquitto_tls_init` | `./mosquitto-tls-init/Dockerfile` | — |
+| `mosquitto-tls-init` | `acs-cymru_mosquitto_tls_init` | `./mosquitto/tls-init/Dockerfile` | — |
 | `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.22` | — |
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
-| `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | `9108:9108` |
-| `playback` | `acs-cymru_playback` | `./Dockerfile` (same image as `ingestion`, different command) | — |
-| `cold-archiver` | `acs-cymru_cold_archiver` | `./Dockerfile` (same image as `ingestion`, different command) | — |
+| `ingestion` | `acs-cymru_ingestion` | `./ingestion/Dockerfile` | `9108:9108` |
+| `playback` | `acs-cymru_playback` | `./ingestion/Dockerfile` (same image as `ingestion`, different command) | — |
+| `cold-archiver` | `acs-cymru_cold_archiver` | `./ingestion/Dockerfile` (same image as `ingestion`, different command) | — |
 | `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |
 | `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
@@ -438,7 +439,7 @@ unrecognised role produces `403`.
 
 | Layer | Control |
 | :--- | :--- |
-| **Broker** | `allow_anonymous false`; [`mosquitto.acl`](mosquitto.acl) confines each gateway to `spBv1.0/+/+/<own-id>/#` |
+| **Broker** | `allow_anonymous false`; [`mosquitto.acl`](mosquitto/mosquitto.acl) confines each gateway to `spBv1.0/+/+/<own-id>/#` |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise, once `INGEST_WRITER_PASSWORD` and `INGEST_DB_USER` are set: `ingest_writer` may INSERT and cannot UPDATE, DELETE or TRUNCATE. Unset, the daemon keeps the admin credential and the guarantee is the Python's again — see [Historian roles](#historian-roles) |
 | **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |

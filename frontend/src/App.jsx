@@ -7,8 +7,10 @@ import { useToast } from './hooks/useToast'
 import { useApiActivity } from './hooks/useApiActivity'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
-import { PERMISSION_UUIDS } from './constants'
+import { TABS, tabIsVisible } from './navigation'
 import AmbientPipeline from './components/common/AmbientPipeline'
+import { Sidebar } from './components/common/Sidebar'
+import { GlobalSearch } from './components/common/GlobalSearch'
 
 /*
  * THERE IS NO SIGN-UP PATH, and its absence is a decision rather than an omission.
@@ -35,18 +37,7 @@ const OAUTH_CONSENT_PATH = '/oauth/consent'
 
 import {
   IconFactory,
-  IconRadio,
-  IconCpu,
-  IconLayoutDashboard,
-  IconClipboardList,
-  IconFileCode,
-  IconArchive,
-  IconDatabase,
-  IconRecord,
-  IconSettings,
-  IconLock,
-  IconBookOpen,
-  IconHistory,
+  IconKeyboard,
   IconSun,
   IconMoon,
   IconUser,
@@ -61,6 +52,7 @@ import { Toast } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
 import { BugReportModal } from './components/modals/BugReportModal'
+import { ShortcutsModal } from './components/modals/ShortcutsModal'
 
 // Lazy-load Tab components
 const OverviewTab      = lazy(() => import('./components/tabs/OverviewTab').then(m => ({ default: m.OverviewTab })))
@@ -79,97 +71,24 @@ const ColdStorageTab   = lazy(() => import('./components/tabs/ColdStorageTab').t
 const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then(m => ({ default: m.SettingsTab })))
 const AccessControlTab = lazy(() => import('./components/tabs/AccessControlTab').then(m => ({ default: m.AccessControlTab })))
 
-export const TABS = [
-  { id: 'overview',       label: 'Overview',          icon: <IconLayoutDashboard size={15} /> },
-  { id: 'cells',          label: 'Cells',             icon: <IconFactory size={15} /> },
-  { id: 'gateways',       label: 'Gateways',          icon: <IconRadio size={15} /> },
-  { id: 'devices',        label: 'Devices',           icon: <IconCpu size={15} /> },
-  { id: 'digital-thread', label: 'Digital Thread',    icon: <IconHistory size={15} /> },
-  { id: 'schemas',        label: 'Schemas',           icon: <IconClipboardList size={15} /> },
-  // Split out of Schemas: the registry and catalog are state you edit, the vocabularies are
-  // reference you read, and the reference half grows with every standard adopted.
-  { id: 'vocabulary',     label: 'Vocabulary',        icon: <IconFileCode size={15} /> },
-  { id: 'directory',      label: 'Directory',         icon: <IconBookOpen size={15} /> },
-  // THE THREE ROLES THE DATABASE ADMITS, named here rather than reduced to one. 0055 grants SELECT
-  // on `captures` and `capture_jobs` to Administrator, Shopfloor_Manager and Auditor; the first two
-  // can also record and delete. Operator is absent from both, which is why the tab is gated at all
-  // -- an Operator opening this page would see an empty table and no explanation, because RLS
-  // returns no rows rather than an error.
-  { id: 'capture',        label: 'Capture',           icon: <IconRecord size={15} />, role: ['Administrator', 'Shopfloor_Manager', 'Auditor'] },
-  { id: 'archives',       label: 'Archives',          icon: <IconArchive size={15} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
-  // NOT "Archives", WHICH IS THE TAB DIRECTLY ABOVE. That one means ENTITY archives -- archived
-  // cells, gateways and devices, with a Restore button and an auto-purge timer. This is telemetry
-  // tiered to Parquet on object storage, with no restore and no timer. The two share only the
-  // English word, and the labels keep them apart deliberately.
-  //
-  // THE SAME THREE ROLES `cold_storage_rows()` RETURNS ROWS TO, and the function checks them in its
-  // own body rather than relying on this: the catalogue names object keys, and the bucket policy
-  // admits exactly these three to read what those keys point at.
-  { id: 'cold-storage',   label: 'Cold Storage',      icon: <IconDatabase size={15} />, role: ['Administrator', 'Shopfloor_Manager', 'Auditor'] },
-  // GATED ON THE ROLE, NOT ON A PERMISSION, because the DATABASE gates on the role: 0031's UPDATE
-  // policy is `has_role(ARRAY['Administrator'])`. Inventing a SETTINGS_MANAGE permission for the
-  // UI would mean two different predicates deciding the same question, and the day they disagree
-  // the page is visible and every save fails.
-  // BESIDE Settings AND GATED THE SAME WAY, on the ROLE rather than on a permission. The two RPCs
-  // behind this page check `has_role(ARRAY['Administrator','Shopfloor_Manager'])`, so the page is
-  // deliberately NARROWER than the API it calls: seeing who holds what is an access-control
-  // question, and a Shopfloor_Manager who needs to issue a credential still can, from Gateways.
-  //
-  // A TAB, NOT A ROUTE. `frontend/src/pages/` holds one file and the shell is `components/tabs/`;
-  // adding `/access-control` as a route would introduce a second navigation model for one page.
-  { id: 'access-control', label: 'Access Control',    icon: <IconLock size={15} />, role: 'Administrator' },
-  { id: 'settings',       label: 'Settings',          icon: <IconSettings size={15} />, role: 'Administrator' },
-]
-
-/**
- * Whether a tab appears in the nav.
+/*
+ * THE PAGE LIST MOVED TO `navigation.jsx`, AND IS RE-EXPORTED FROM HERE UNCHANGED.
  *
- * THIS FUNCTION EXISTED AND WAS NEVER CALLED. `TABS.map` rendered every tab unconditionally, so
- * `Archives` has been visible to everyone regardless of `ARCHIVE_MANAGE` since it was added -- the
- * declaration read like a gate and gated nothing. Connecting it is what makes the Settings tab's
- * role check mean anything, so it is fixed here rather than left for later.
+ * It lived here for as long as this file was the only thing that read it. Three things read it now
+ * -- the sidebar draws it, the search palette indexes it, and the effect below still consults it --
+ * and a component this file renders cannot import from this file without a cycle.
  *
- * IT IS STILL ONLY A COURTESY. Hiding a tab removes a signpost, not an ability: the same PATCH can
- * be sent with curl, and what refuses it is the RLS policy. Nothing here is a security control,
- * and treating it as one is how a UI gate ends up being the ONLY gate.
+ * Re-exported rather than moved outright because the tests that grew up around `TABS` and
+ * `tabIsVisible` import them from here, and where a list is declared is not what any of them is
+ * about.
+ *
+ * `navDensity()` IS GONE, AND ITS ABSENCE IS THE POINT OF THE CHANGE. It banded the top bar by how
+ * many tabs a session could see, because thirteen of them in one horizontal strip had a measured
+ * ceiling: at fourteen the wordmark had ~24px left and the ladder had nowhere further to go. A
+ * vertical rail spends the axis there is more of, so the ceiling, the bands and the two media
+ * queries that implemented them all go with it.
  */
-/**
- * Which density band the top bar is in, from the number of tabs this session can see.
- *
- * NAMED AND EXPORTED SO IT COULD BE TESTED BEFORE IT WAS REACHABLE. When this was written the
- * `tight` band was for twelve tabs and there were eleven, so reading it out of the rendered DOM
- * would have meant checking it only once a twelfth page shipped -- the moment it starts being
- * relied upon and the worst moment to find the threshold wrong.
- *
- * THE CAPTURE PAGE IS THAT TWELFTH TAB, and the band is live for an Administrator from here on.
- * Writing the test first turned out to be worth it: the rule fires on the session that has every
- * tab, and the two smaller roles never reach it, so a threshold that was one out would have been
- * visible only to the person least likely to file it.
- *
- * The bands are measured; the arithmetic is in App.css beside the rules that use them. 11 tabs fit
- * at 1920 and must not start abbreviating; 12 do not and must.
- */
-export function navDensity(visibleTabCount) {
-  if (visibleTabCount >= 12) return 'tight'
-  if (visibleTabCount >= 10) return 'compact'
-  // undefined rather than a third name: no attribute at all means no rule matches, which is what
-  // an Operator seeing eight tabs should get at every width the existing ladder already handles.
-  return undefined
-}
-
-export function tabIsVisible(tabDef, hasPermission, userRole) {
-  // `role` TAKES A LIST AS WELL AS A STRING. Every tab that had one named a single role, and the
-  // Capture page cannot: 0055 grants read on `captures` to Administrator, Shopfloor_Manager AND
-  // Auditor, so a single-role gate would either hide the page from two roles the database admits
-  // or invent a permission that no policy consults -- which is two predicates deciding one
-  // question, and the day they disagree the page is visible and every call fails.
-  if (tabDef.role) {
-    const allowed = Array.isArray(tabDef.role) ? tabDef.role : [tabDef.role]
-    if (!allowed.includes(userRole)) return false
-  }
-  if (!tabDef.permission) return true
-  return hasPermission(tabDef.permission)
-}
+export { TABS, tabIsVisible, NAV_GROUPS, groupedNav } from './navigation'
 
 function AuthScreen({ onLoginSuccess, notice }) {
   // AuthScreen owns a theme handle of its own because it renders INSTEAD of Dashboard, never
@@ -485,6 +404,7 @@ function Dashboard({ session, onSignOut }) {
   // vocabularies it already holds and opens its Add Metric form.
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
   const [showBugReport, setShowBugReport] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
 
   const { tab, setTab, handleNavClick } = useAppRouting(
     setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter,
@@ -548,6 +468,32 @@ function Dashboard({ session, onSignOut }) {
     if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('overview')
   }, [tab, loadingPerms, userRole, hasPermission, setTab])
 
+  /*
+   * `?` OPENS THE SHORTCUTS LIST, which is the convention and is also the only way this particular
+   * dialog is not absurd: a list of keyboard shortcuts reachable solely by mouse asks the reader to
+   * do the thing it exists to help them stop doing. The button in the bar is what makes it
+   * discoverable; this is what makes it worth having found.
+   *
+   * IT MUST NOT FIRE WHILE SOMEBODY IS TYPING, and that is the whole difficulty with binding a
+   * PRINTABLE character. Every other shortcut in this app carries a modifier or is a key with no
+   * text meaning, so none of them has to ask this question -- but `?` is a character a user can
+   * legitimately want in a search box, a schema description or a bug report. So the handler stands
+   * down for any editable target, including `contenteditable`, and for any keystroke carrying a
+   * modifier, which is somebody reaching for a browser shortcut rather than for this one.
+   */
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey) return
+      const el = e.target
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+      e.preventDefault()
+      setShowShortcuts(true)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
   useQuarantineAlerts(showToast)
 
   // Grafana's firing alerts, delivered through platform_alerts. Lifted to App rather than owned by a
@@ -574,40 +520,40 @@ function Dashboard({ session, onSignOut }) {
 
   const persona = session?.user?.email || 'Administrator'
 
-  // Computed once and used twice: the nav renders it and the header measures it. Filtering in
-  // both places would let the bar's declared density disagree with the tabs actually in it.
+  // Computed once and used twice: the rail draws it and the search palette indexes it. Filtering
+  // in both places would let the search offer a page the rail does not.
   const navTabs = TABS.filter(t => tabIsVisible(t, hasPermission, userRole))
 
   return (
     <div className="app-shell">
       {/*
-        ONE bar: brand, navigation and session controls. The tab strip that used to sit under this
-        header is now the centre region, which gives every page back 62px of viewport.
-
-        The nav labels collapse to icons below 1400px rather than scrolling -- see the responsive
-        block in App.css. Every tab therefore carries a `title` with its full name at all times,
-        because below that width the title is the only thing naming the page.
+        THE BAR NO LONGER NAVIGATES. It carried thirteen tabs between the brand and the session
+        controls, which is where the density ladder and its two media queries came from -- and at
+        fourteen pages there was no band left to add. Navigation moved to the rail on the left,
+        and the centre of the bar is now the search box, which is a better use of a horizontal
+        strip than a list: one control whose width is fixed, however many pages exist.
       */}
-      {/* HOW MANY TABS THIS SESSION SEES IS NOT A CSS FACT, and that is the whole reason for this
-          attribute. The nav is 8 tabs for an Operator and 11 for an Administrator, so a media
-          query tuned for the crowded case would strip the brand from somebody who had room for it
-          all along. React knows the count; CSS does not, and cannot be told any other way.
+      <header className="topbar">
+        {/* A BUTTON, BECAUSE IT NAVIGATES. Clicking the mark to get home is a convention old enough
+            that its absence reads as a broken link rather than as a decision -- people click it,
+            nothing happens, and they conclude the header is decorative.
 
-          TWO BANDS AND NOT A BOOLEAN, because the widths differ by about 200px and one threshold
-          would be wrong for one of them. 11 tabs at 1920 fits today -- see the screenshot in the
-          commit -- and must not start abbreviating; 12 does not fit and must. The bands are
-          measured rather than guessed: the nav is rigid and the two side groups split what is
-          left, so brand space is (viewport - 72px of padding and gaps - nav width) / 2, against a
-          brand that wants ~290px. */}
-      <header
-        className="topbar"
-        data-nav-dense={navDensity(navTabs.length)}
-      >
-        <div className="topbar-brand">
-          <div className="brand-icon" title="ACS Cymru Platform Logo"><IconFactory size={18} /></div>
+            `handleNavClick`, not `setTab`, and the difference is the same one the rail relies on:
+            it clears the cross-page filters a drill-down handed over. Clicking the logo means
+            "start again", which is exactly when a stale device filter would be most confusing.
+
+            A real <button> rather than a div with an onClick, so it is reachable by Tab, announces
+            itself, and takes Enter and Space without any of that being reimplemented here. */}
+        <button
+          className="topbar-brand"
+          onClick={() => handleNavClick('overview')}
+          title="ACS Cymru — go to the Overview page"
+          aria-label="ACS Cymru, go to the Overview page"
+        >
+          <div className="brand-icon"><IconFactory size={18} /></div>
           <div className="brand-text">
             {/* Titled because .brand-name truncates: it is the region that yields space when the
-                nav and the session controls have taken theirs.
+                search box and the session controls have taken theirs.
 
                 TWO SPELLINGS, ONE SHOWN, and the measurement behind that is unobvious. The two
                 lines are nearly the same width -- the wordmark ~242px against the strapline
@@ -624,27 +570,23 @@ function Dashboard({ session, onSignOut }) {
             </div>
             <div className="brand-sub">Shopfloor to Digital Twin Pipeline</div>
           </div>
-        </div>
+        </button>
 
-        {/* aria-label on each tab, and not only `title`, because the label is display:none at the
-            narrowest step of the ladder. A `title` is a weak accessible name -- some screen
-            readers ignore it when another source is present -- and an icon-only control whose
-            name lives in a tooltip has no name at all on a touch panel. */}
-        <nav className="topbar-nav" aria-label="Primary">
-          {navTabs.map(t => (
-            <button
-              key={t.id}
-              className={`nav-tab ${tab === t.id ? 'active' : ''}`}
-              onClick={() => handleNavClick(t.id)}
-              title={`Navigate to ${t.label} page`}
-              aria-label={t.label}
-              aria-current={tab === t.id ? 'page' : undefined}
-            >
-              <span className="tab-icon">{t.icon}</span>
-              <span className="nav-tab-label">{t.label}</span>
-            </button>
-          ))}
-        </nav>
+        {/* THE CENTRE OF THE BAR, where the thirteen tabs were.
+
+            It takes the SAME `navTabs` the rail does, so the two can never disagree about what
+            this session may reach, and the SAME hand-over helpers every other surface navigates
+            with -- so pasting a device id here lands exactly where clicking that device from the
+            Overview map lands, query parameter and all. */}
+        <GlobalSearch
+          tabs={navTabs}
+          currentTab={tab}
+          onNavigate={handleNavClick}
+          onSelectDevice={showDevice}
+          onSelectGateway={showGateway}
+          onSelectCell={showCell}
+          onSelectSchema={showSchema}
+        />
 
         {/*
           TWO CONTROLS, and that is the whole of the right-hand side now.
@@ -675,6 +617,25 @@ function Dashboard({ session, onSignOut }) {
             onSelectGateway={showGateway}
           />
 
+          {/* THE THIRD CONTROL IN THE BAR, AND IT BREAKS THE RULE ABOVE ON PURPOSE. That rule is
+              that only things whose VALUE CHANGES stay out here; a shortcuts key is as standing as
+              the theme toggle, which was moved into the account menu on exactly that argument.
+
+              What earns it the place is that it is a SIGNPOST rather than a preference. The two
+              items behind the account menu are set once and forgotten, so hiding them costs one
+              click on a rare day. This is the opposite: its whole value is being seen by somebody
+              who does not yet know the keyboard does anything, and a discovery aid nobody discovers
+              is just a file. Beside the alert glyph rather than after the avatar, because the
+              avatar must stay the last thing in the bar -- it is the fixed corner people aim at. */}
+          <button
+            className="topbar-icon-button"
+            onClick={() => setShowShortcuts(true)}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <IconKeyboard size={15} />
+          </button>
+
           <UserMenu
             persona={persona}
             userRole={userRole}
@@ -700,44 +661,53 @@ function Dashboard({ session, onSignOut }) {
         )}
       </header>
 
-      {/* Main Content */}
-      <main className="content">
-        <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
-          {tab === 'overview'       && <OverviewTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-          {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
-          {tab === 'gateways'       && <GatewaysTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-          {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
-          {tab === 'digital-thread' && (
-            <DigitalThreadTab
-              initialEntity={selectedThreadEntity}
-              onClearEntity={() => setSelectedThreadEntity(null)}
-              showToast={showToast}
-            />
-          )}
-          {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
-          {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('schemas') }} />}
-          {tab === 'directory'      && <DirectoryTab showToast={showToast} />}
-          {/* The role is re-checked here for the same reason Access Control's is: routing can put
-              `tab` on a value the nav never offered. `userRole` is passed on rather than a boolean,
-              because the page distinguishes read-only Auditor from the two roles that can record. */}
-          {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
-            <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
-          {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
-          {/* Re-checked here as the others are: routing can put `tab` on a value the nav never
-              offered. `userRole` is passed on rather than a boolean because the page uses it to
-              tell "nothing archived" apart from "not yours to see" -- cold_storage_rows() gates in
-              its body, so both look like an empty list from the browser. */}
-          {tab === 'cold-storage' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
-            <ColdStorageTab showToast={showToast} userRole={userRole} />}
-          {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
-              the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
-          {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} />}
-          {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} />}
-        </Suspense>
-      </main>
+      {/* THE RAIL AND THE PAGE, SIDE BY SIDE.
+
+          A row rather than the page alone, because the rail is a permanent 52px gutter. What it is
+          NOT is a two-column layout that resizes: the expanded panel is painted over the page from
+          inside that gutter, so nothing here reflows when the pointer enters it. See Sidebar.jsx. */}
+      <div className="app-body">
+        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={handleNavClick} />
+
+        <main className="content">
+          <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
+            {tab === 'overview'       && <OverviewTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
+            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+            {tab === 'gateways'       && <GatewaysTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
+            {tab === 'digital-thread' && (
+              <DigitalThreadTab
+                initialEntity={selectedThreadEntity}
+                onClearEntity={() => setSelectedThreadEntity(null)}
+                showToast={showToast}
+              />
+            )}
+            {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
+            {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('schemas') }} />}
+            {tab === 'directory'      && <DirectoryTab showToast={showToast} />}
+            {/* The role is re-checked here for the same reason Access Control's is: routing can put
+                `tab` on a value the nav never offered. `userRole` is passed on rather than a boolean,
+                because the page distinguishes read-only Auditor from the two roles that can record. */}
+            {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
+              <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
+            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
+            {/* Re-checked here as the others are: routing can put `tab` on a value the nav never
+                offered. `userRole` is passed on rather than a boolean because the page uses it to
+                tell "nothing archived" apart from "not yours to see" -- cold_storage_rows() gates in
+                its body, so both look like an empty list from the browser. */}
+            {tab === 'cold-storage' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
+              <ColdStorageTab showToast={showToast} userRole={userRole} />}
+            {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
+                the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
+            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} />}
+            {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} />}
+          </Suspense>
+        </main>
+      </div>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={clearToast} />}
       {showBugReport && <BugReportModal onClose={() => setShowBugReport(false)} showToast={showToast} persona={persona} activeTab={tab} />}
+      {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
     </div>
   )
 }

@@ -5,7 +5,7 @@ import { api } from '../api'
  * Read one runtime setting, with the code default as the fallback.
  *
  * THE FALLBACK IS THE CONTRACT, not a defensive shrug. An absent row, an unreadable table, a
- * database that has not run migration 0031 yet -- all of them mean "use the value that was
+ * database that has not run archived migration 0031 yet -- all of them mean "use the value that was
  * compiled in", which is what keeps a local boot zero-configuration and keeps this hook safe to
  * call from a component that must render before the fetch resolves. A setting that has never been
  * changed does not behave differently from one that does not exist, and neither behaves

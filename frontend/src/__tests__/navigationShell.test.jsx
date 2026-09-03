@@ -6,22 +6,22 @@ import path from 'node:path'
 import App from '../App'
 
 /**
- * The merged navigation shell.
+ * The navigation shell.
  *
- * The 60px header and the 54px tab strip beneath it became ONE 52px bar, and every tab lost the
- * page heading and description paragraph that used to sit above its content. Both changes trade
- * standing text for viewport, so what has to be guarded is that nothing became UNREACHABLE in the
- * trade:
+ * TWO REFACTORS DEEP NOW. The 60px header and the 54px tab strip beneath it became ONE 52px bar;
+ * then the thirteen tabs left that bar for a rail down the left-hand side, and the space they
+ * vacated became the search box. Every step traded standing chrome for viewport, so what has to be
+ * guarded is the same thing each time -- that nothing became UNREACHABLE in the trade:
  *
- *   * all nine pages are still one click away, inside the bar rather than under it
- *   * every tab still names itself when its label is hidden -- below 1400px the CSS drops
- *     `.nav-tab-label` and the `title` is the only thing left saying which page an icon is
- *   * the current page is still identifiable without reading the label, since the collapsed bar
- *     is exactly where that matters most
+ *   * every page is still one click away, in the rail rather than in the bar
+ *   * every item still names itself while the rail is collapsed, which is its resting state and
+ *     therefore the state that matters -- the label is transparent and clipped, so `title` and
+ *     `aria-label` are what is left saying which page an icon leads to
+ *   * the current page is still identifiable without reading a label, for the same reason
  *
- * jsdom does not do layout, so the width-dependent half is asserted against App.css directly:
- * these are the rules the icon-only mode is built from, and a refactor that quietly drops one
- * would leave a bar of anonymous icons that still passes every rendering test.
+ * jsdom does not do layout, so the width- and hover-dependent half is asserted against App.css
+ * directly: these are the rules the collapsed state is built from, and a refactor that quietly
+ * drops one would leave a rail of anonymous icons that still passes every rendering test.
  */
 
 const mockSession = {
@@ -64,7 +64,8 @@ const ALWAYS_VISIBLE = [
 ]
 
 const topbar = () => document.querySelector('.topbar')
-const navTabs = () => [...document.querySelectorAll('.nav-tab')]
+const sidebar = () => document.querySelector('.sidebar')
+const navTabs = () => [...document.querySelectorAll('.sidebar-item')]
 
 const renderShell = async () => {
   render(<App />)
@@ -81,33 +82,68 @@ describe('Merged navigation shell', () => {
     supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } })
   })
 
-  it('puts the navigation inside the top bar, not in a strip beneath it', async () => {
+  it('puts the navigation in the rail, and leaves none of it in the bar', async () => {
     await renderShell()
 
-    const nav = within(topbar()).getByRole('navigation', { name: /primary/i })
+    const nav = within(sidebar()).getByRole('navigation', { name: /primary/i })
     expect(nav).toBeTruthy()
 
-    // The old second bar. Its absence is the whole point of the merge, so a reintroduced
-    // `.nav-tabs` element is a regression even if everything still renders.
+    // BOTH PREVIOUS HOMES, asserted absent. `.nav-tabs` was the second bar the merge removed;
+    // `.nav-tab` was the strip inside the merged bar that the rail removed. Either reappearing is
+    // a regression even if everything still renders, because it would mean two navigation
+    // surfaces disagreeing about which page is current.
     expect(document.querySelector('.nav-tabs')).toBeNull()
+    expect(document.querySelector('.nav-tab')).toBeNull()
+    expect(topbar().querySelector('nav')).toBeNull()
 
     for (const label of ALWAYS_VISIBLE) {
       expect(within(nav).getByRole('button', { name: new RegExp(label, 'i') })).toBeTruthy()
     }
   })
 
-  it('names every tab in a title attribute, so the icon-only mode is not a row of anonymous icons', async () => {
+  /**
+   * The grouping, which is the reason the rail exists rather than being a rotated tab strip.
+   *
+   * A separator between every group and a heading for each named one. The separator is what the
+   * collapsed rail has instead of the heading, so it must be present regardless of state -- and
+   * `groupedNav` drops empty groups, so the count is the number of groups this session can
+   * actually see rather than the number declared.
+   */
+  it('separates the rail into groups, with one fewer divider than groups', async () => {
+    await renderShell()
+
+    const groups = [...document.querySelectorAll('.sidebar-group')]
+    const dividers = [...document.querySelectorAll('.sidebar-divider')]
+
+    expect(groups.length).toBeGreaterThanOrEqual(4)
+    // Dividers go BETWEEN groups, so there is never one above the first item -- a leading rule
+    // reads as the rail being clipped at the top.
+    expect(dividers).toHaveLength(groups.length - 1)
+
+    // Overview leads and is in a group of its own: it is the landing page, and a group of one
+    // would be a heading that names nothing.
+    expect(groups[0].querySelector('.sidebar-group-label')).toBeNull()
+    expect(groups[0].querySelectorAll('.sidebar-item')).toHaveLength(1)
+  })
+
+  it('names every item twice over, because the collapsed rail is the resting state', async () => {
     await renderShell()
 
     const tabs = navTabs()
     expect(tabs.length).toBeGreaterThanOrEqual(ALWAYS_VISIBLE.length)
 
     for (const tab of tabs) {
-      const label = tab.querySelector('.nav-tab-label')?.textContent?.trim()
+      const label = tab.querySelector('.sidebar-item-label')?.textContent?.trim()
       expect(label).toBeTruthy()
-      // The title must contain the label rather than merely exist: a generic "Navigate" on all
-      // nine would satisfy a presence check and tell a user nothing once the labels are hidden.
+      // The title must CONTAIN the label rather than merely exist: a generic "Navigate" on all
+      // thirteen would satisfy a presence check and tell a user nothing while the labels are
+      // transparent.
       expect(tab.getAttribute('title')).toContain(label)
+      // AND an aria-label, which is the half a `title` cannot cover. A title is a weak accessible
+      // name -- some screen readers drop it when another source exists, and this button's other
+      // source is text that is present but invisible -- so the announcement would otherwise depend
+      // on whether a pointer happened to be resting on the rail.
+      expect(tab.getAttribute('aria-label')).toBe(label)
     }
   })
 
@@ -117,37 +153,109 @@ describe('Merged navigation shell', () => {
     const current = navTabs().filter(t => t.getAttribute('aria-current') === 'page')
     expect(current).toHaveLength(1)
     expect(current[0]).toHaveClass('active')
-    expect(current[0].querySelector('.nav-tab-label').textContent).toBe('Overview')
+    expect(current[0].querySelector('.sidebar-item-label').textContent).toBe('Overview')
   })
 
   /**
    * The decluttered bar.
    *
-   * TWO CONTROLS ON THE RIGHT, and the count is the assertion. The bar held five: the alert pill, a
-   * Live/Polling chip, a theme toggle, Report Bug and the account pill. Four of them never changed
+   * THREE CONTROLS ON THE RIGHT, and the count is the assertion. The bar held five: the alert pill,
+   * a Live/Polling chip, a theme toggle, Report Bug and the account pill. Four of them never changed
    * value -- the Live chip was read off a build flag, so it was a lit green dot that could not go out
    * -- and a row of controls that never change teaches the eye to stop reading it. Which is a problem
    * when one of them is the alarm.
    *
-   * Asserted as an upper bound rather than by naming what is present, because the failure this guards
-   * against is ACCRETION: the next standing indicator added here is added by somebody who has not
-   * read the reasoning, and naming the survivors would not catch it.
+   * THE THIRD IS THE SHORTCUTS KEY, AND IT IS A DELIBERATE EXCEPTION TO THAT RULE rather than a
+   * relaxation of it. The rule keeps out standing PREFERENCES: a theme is set once and forgotten, so
+   * hiding it behind the account menu costs one click on a rare day. A discovery aid is the inverse
+   * -- its entire value is being seen by somebody who does not yet know the keyboard does anything,
+   * and one that nobody discovers is a file rather than a feature.
+   *
+   * Asserted as an exact count rather than an upper bound, because the failure this guards against is
+   * ACCRETION: the next standing indicator is added by somebody who has not read the reasoning, and
+   * naming only the survivors would not catch it. A fourth control here should have to argue for
+   * itself in this comment first.
    */
-  it('keeps only the changing control and the account door in the bar', async () => {
+  it('keeps the bar to the changing control, the shortcuts key and the account door', async () => {
     await renderShell()
 
     const right = topbar().querySelector('.topbar-right')
     expect(right).toBeTruthy()
     const controls = [...right.querySelectorAll('button')]
-    expect(controls).toHaveLength(2)
+    expect(controls).toHaveLength(3)
 
-    // The one whose VALUE moves, and the door to everything else.
+    // The one whose VALUE moves, the signpost, and the door to everything else.
     expect(right.querySelector('.alert-pill')).toBeTruthy()
+    expect(within(right).getByRole('button', { name: /keyboard shortcuts/i })).toBeTruthy()
     expect(right.querySelector('.user-avatar')).toBeTruthy()
 
     // The Live/Polling chip is gone. It reported a build flag, not the socket's health.
     expect(document.querySelector('.topbar-status')).toBeNull()
     expect(document.querySelector('.pulse-dot')).toBeNull()
+  })
+
+  /**
+   * The mark is the way home.
+   *
+   * Clicking a product logo to return to the landing page is a convention old enough that its
+   * ABSENCE reads as a broken link rather than as a decision -- people click it, nothing happens,
+   * and they conclude the header is decorative. It is a real <button> so that it is reachable by
+   * Tab and takes Enter without any of that being reimplemented.
+   */
+  it('takes the brand mark home, as a real button rather than a clickable div', async () => {
+    await renderShell()
+
+    const brand = topbar().querySelector('.topbar-brand')
+    expect(brand.tagName).toBe('BUTTON')
+    expect(brand.getAttribute('aria-label')).toMatch(/overview/i)
+
+    // Leave Overview, then click the mark to come back.
+    fireEvent.click(screen.getByRole('button', { name: /^Devices$/ }))
+    await waitFor(() => expect(window.location.pathname).toBe('/devices'))
+
+    fireEvent.click(brand)
+    await waitFor(() => expect(window.location.pathname).toBe('/overview'))
+  })
+
+  /**
+   * The shortcuts dialog, and the key that opens it.
+   *
+   * A list of keyboard shortcuts reachable only by mouse asks the reader to do the thing it exists
+   * to help them stop doing, so `?` opens it too. That binding is the awkward one in this app -- it
+   * is the only PRINTABLE character bound anywhere, and every other shortcut carries a modifier or
+   * is a key with no text meaning. So it has to stand down inside a text field, which is asserted
+   * here rather than trusted: getting it wrong means a user cannot type a question mark into the
+   * search box, a schema description or a bug report.
+   */
+  describe('the shortcuts dialog', () => {
+
+    it('opens from the bar', async () => {
+      await renderShell()
+      fireEvent.click(screen.getByRole('button', { name: /keyboard shortcuts/i }))
+      expect(screen.getByRole('dialog', { name: /keyboard shortcuts/i })).toBeTruthy()
+    })
+
+    it('opens on ?, and closes on Escape', async () => {
+      await renderShell()
+      fireEvent.keyDown(document.body, { key: '?' })
+      expect(screen.getByRole('dialog', { name: /keyboard shortcuts/i })).toBeTruthy()
+
+      fireEvent.keyDown(document, { key: 'Escape' })
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: /keyboard shortcuts/i })).toBeNull())
+    })
+
+    it('does not open while a question mark is being typed into a field', async () => {
+      await renderShell()
+      const search = screen.getByRole('combobox')
+      fireEvent.keyDown(search, { key: '?' })
+      expect(screen.queryByRole('dialog', { name: /keyboard shortcuts/i })).toBeNull()
+    })
+
+    it('stands down for a modified keystroke, which is somebody reaching past this app', async () => {
+      await renderShell()
+      fireEvent.keyDown(document.body, { key: '?', ctrlKey: true })
+      expect(screen.queryByRole('dialog', { name: /keyboard shortcuts/i })).toBeNull()
+    })
   })
 
   it('moves the theme toggle and Report Bug behind the account button, not out of the app', async () => {
@@ -257,21 +365,49 @@ describe('Merged navigation shell', () => {
     })
   })
 
-  it('collapses tab labels below 1400px instead of scrolling the bar', () => {
-    // A horizontal scroller in the nav hides pages behind a gesture nobody performs on a bar that
-    // looks complete. The label-drop is what replaces it, so both halves are asserted.
-    const collapse = APP_CSS.match(/@media \(max-width: 1399px\) \{([\s\S]*?)\n\}/)
-    expect(collapse, 'the <1400px collapse block is missing from App.css').toBeTruthy()
-    expect(collapse[1]).toMatch(/\.nav-tab-label\s*\{\s*display:\s*none/)
+  /**
+   * The rail expands OVER the page rather than pushing it.
+   *
+   * This is the whole reason the gutter and the panel are two elements. `.sidebar` is a fixed 52px
+   * flex item that never changes; `.sidebar-panel` is absolutely positioned inside it and is what
+   * grows. A single element that widened on hover would reflow every table and chart beside it for
+   * as long as a pointer rested in the corner -- and on Overview it would re-lay out the whole
+   * shopfloor grid.
+   *
+   * Asserted against the stylesheet because jsdom computes no layout and fires no :hover.
+   */
+  it('overlays the page when it expands, rather than reflowing it', () => {
+    const railRule = APP_CSS.match(/\n\.sidebar \{([\s\S]*?)\n\}/)[1]
+    const panelRule = APP_CSS.match(/\n\.sidebar-panel \{([\s\S]*?)\n\}/)[1]
+    const expandedRule = APP_CSS.match(/\n\.sidebar-expanded \.sidebar-panel \{([\s\S]*?)\n\}/)[1]
 
-    const topbarRule = APP_CSS.match(/\.topbar \{([\s\S]*?)\n\}/)[1]
-    const navRule = APP_CSS.match(/\.topbar-nav \{([\s\S]*?)\n\}/)[1]
-    expect(topbarRule).not.toMatch(/overflow-x:\s*(auto|scroll)/)
-    expect(navRule).not.toMatch(/overflow-x:\s*(auto|scroll)/)
+    // The gutter is rigid: same basis, no grow, no shrink.
+    expect(railRule).toMatch(/flex:\s*0 0 52px/)
+    // The panel is lifted out of flow, so its width is not the gutter's width.
+    expect(panelRule).toMatch(/position:\s*absolute/)
+    expect(panelRule).toMatch(/width:\s*52px/)
+    expect(expandedRule).toMatch(/width:\s*232px/)
+    // And it paints above the page. Below the bar, so the account popover still wins.
+    expect(railRule).toMatch(/z-index:\s*90/)
+  })
 
-    // The nav must not be the flex item that gives up space -- if it shrinks, the icons clip.
-    // Carried by the `flex` shorthand's shrink term now that the nav also declares its basis.
-    expect(navRule).toMatch(/flex:\s*0 0 auto/)
+  /**
+   * The labels are CLIPPED, not removed.
+   *
+   * `display: none` would have been the obvious way to hide them and is the wrong one: it takes the
+   * text out of the accessibility tree, so the rail's accessible names would blink in and out with
+   * the pointer. They are transparent and clipped by the panel instead, which leaves every name in
+   * the DOM at every width.
+   */
+  it('clips the labels rather than removing them, so the names never leave the DOM', () => {
+    const labelRule = APP_CSS.match(/\n\.sidebar-item-label \{([\s\S]*?)\n\}/)[1]
+    const panelRule = APP_CSS.match(/\n\.sidebar-panel \{([\s\S]*?)\n\}/)[1]
+
+    expect(labelRule).toMatch(/opacity:\s*0/)
+    expect(labelRule).not.toMatch(/display:\s*none/)
+    expect(APP_CSS).toMatch(/\.sidebar-expanded \.sidebar-item-label \{ opacity: 1; \}/)
+    // The clip itself. Vertical scrolling is fine and expected; horizontal is what hides the text.
+    expect(panelRule).toMatch(/overflow-x:\s*hidden/)
   })
 
   it('keeps the bar at 52px, which is what the merge was for', () => {
@@ -280,29 +416,35 @@ describe('Merged navigation shell', () => {
   })
 
   /*
-    Centring the nav IN THE BAR, which is not what it used to do.
+    Centring the CENTRE REGION, whatever occupies it. It was the tab strip and is now the search
+    box, and the mechanism is what survived both.
 
-    `margin: 0 auto` absorbs a flex row's LEFTOVER space, so it centred the nav between the brand's
-    right edge and the session controls' left edge. Those two are nowhere near the same width -- a
-    two-line brand against an alert pill and a 28px avatar -- so the nav sat left of the bar's true
-    centre by half their difference, which is the miss this replaced.
+    `margin: 0 auto` absorbs a flex row's LEFTOVER space, so it would centre the box between the
+    brand's right edge and the session controls' left edge. Those two are nowhere near the same
+    width -- a two-line brand against an alert pill and a 28px avatar -- so it would sit left of
+    the bar's true centre by half their difference, which is the miss this replaced.
 
-    Equal-weight sides is the mechanism now: both flanks claim the same share of free space
-    whatever their content measures, which puts the nav's midpoint on the bar's. Asserted as a
-    SET, because no one rule here does anything on its own -- an auto margin left behind on the
-    nav would compete with the sides for the same space and un-centre it again.
+    Equal-weight flanks is the mechanism: both claim the same share of free space whatever their
+    content measures, which puts the centre region's midpoint on the bar's. Asserted as a SET,
+    because no one rule here does anything on its own.
+
+    THE ONE CHANGE THE SEARCH BOX MADE is the shrink term. The tab strip was `0 0 auto` -- rigid,
+    because a clipped tab is an unreachable page. A search box has no such failure: it degrades to
+    a narrower box, so it takes `0 1 480px` and yields before the brand does.
   */
-  it('centres the nav on the bar by giving its two flanks equal weight', () => {
+  it('centres the search on the bar by giving its two flanks equal weight', () => {
     const brandRule = APP_CSS.match(/\.topbar-brand \{([\s\S]*?)\n\}/)[1]
-    const navRule = APP_CSS.match(/\.topbar-nav \{([\s\S]*?)\n\}/)[1]
+    const searchRule = APP_CSS.match(/\n\.global-search \{([\s\S]*?)\n\}/)[1]
     const rightRule = APP_CSS.match(/\.topbar-right \{([\s\S]*?)\n\}/)[1]
 
     expect(brandRule).toMatch(/flex:\s*1 1 0/)
     expect(rightRule).toMatch(/flex:\s*1 1 0/)
-    expect(navRule).toMatch(/flex:\s*0 0 auto/)
-    expect(navRule).not.toMatch(/margin:\s*0 auto/)
-    // The right-hand group is as wide as its half of the bar now, so its contents need pinning to
-    // the far edge or they float in the middle of it.
+    expect(searchRule).toMatch(/flex:\s*0 1 480px/)
+    expect(searchRule).not.toMatch(/margin:\s*0 auto/)
+    // A floor, so it shrinks to a usable box rather than to the icon alone.
+    expect(searchRule).toMatch(/min-width:\s*150px/)
+    // The right-hand group is as wide as its half of the bar, so its contents need pinning to the
+    // far edge or they float in the middle of it.
     expect(rightRule).toMatch(/justify-content:\s*flex-end/)
   })
 
@@ -318,41 +460,48 @@ describe('Merged navigation shell', () => {
   })
 
   /**
-   * The three bands, as a set rather than one at a time.
+   * The bands that are left, as a set rather than one at a time.
    *
-   * Each band drops the next-least-load-bearing thing, and the ORDER is the design: the brand
-   * subtitle goes first because it is recoverable from a title; the nav labels go last because they
-   * are the only thing saying which page an icon leads to. A band that dropped them in the other
-   * order would still fit on screen and would be much worse to use.
+   * THE LADDER GOT SHORTER BECAUSE THE THING THAT CONSUMED THE BAR LEFT IT. There were five steps
+   * -- two density bands keyed to how many tabs a session could see, plus three width bands -- and
+   * every one of them existed to keep thirteen tabs and a wordmark in the same 52px row. Two
+   * remain, and NAVIGATION IS IN NEITHER, which is the assertion that matters: the rail's own
+   * collapse is a hover state rather than a width band, so no viewport can take a page away.
    *
-   * THE ACCOUNT CONTROL NO LONGER APPEARS IN ANY BAND. It used to shed the user's name at 1600px and
-   * keep its role badge below that; the declutter made it a 28px circle at every width, so there is
-   * nothing left in it to drop. Asserted as an absence, because a reinstated `.user-pill-name` rule
-   * would be a rule for a class nothing renders -- dead CSS that reads as intentional.
+   * The order within what is left is still the design: the brand subtitle goes before the wordmark
+   * shortens, and the wordmark shortens rather than disappearing.
    */
-  it('drops the recoverable text first and the nav labels last', () => {
+  it('sheds only recoverable text now that navigation is not in the bar', () => {
     const band = (px) => APP_CSS.match(new RegExp(`@media \\(max-width: ${px}px\\) \\{([\\s\\S]*?)\\n\\}`))?.[1]
 
-    const wide = band(1599)
     const narrow = band(1399)
-    expect(wide, 'the 1400-1599px band is missing').toBeTruthy()
+    const narrowest = band(1099)
     expect(narrow, 'the <1400px band is missing').toBeTruthy()
+    expect(narrowest, 'the <1100px band is missing').toBeTruthy()
 
-    // 1400-1599: the recoverable label, and NOT the nav.
-    expect(wide).toMatch(/\.brand-sub\s*\{\s*display:\s*none/)
-    expect(wide).not.toMatch(/\.nav-tab-label/)
-
-    // <1400: the nav labels, and the button labels that would overflow next.
-    expect(narrow).toMatch(/\.nav-tab-label\s*\{\s*display:\s*none/)
+    // <1400: the strapline goes, the wordmark shortens, button labels go.
+    expect(narrow).toMatch(/\.brand-sub\s*\{\s*display:\s*none/)
+    expect(narrow).toMatch(/\.brand-name-short\s*\{\s*display:\s*inline/)
     expect(narrow).toMatch(/\.btn-label\s*\{\s*display:\s*none/)
 
-    // The account control has no responsive treatment at all now, in either band.
-    for (const b of [wide, narrow]) {
+    // <1100: the brand text entirely, leaving the mark.
+    expect(narrowest).toMatch(/\.brand-text\s*\{\s*display:\s*none/)
+
+    // NAVIGATION IS IN NO BAND. The rail is the same width at every viewport, so a page cannot be
+    // hidden by one -- which is exactly what the old `.nav-tab-label` rule did below 1400px.
+    for (const b of [narrow, narrowest]) {
+      expect(b).not.toMatch(/\.sidebar/)
+      expect(b).not.toMatch(/\.nav-tab/)
+      // The account control has no responsive treatment either: the declutter made it a 28px
+      // circle at every width, so there is nothing left in it to drop.
       expect(b).not.toMatch(/\.user-pill/)
       expect(b).not.toMatch(/\.user-avatar/)
     }
-    // And the classes it shed are gone from the whole stylesheet, not merely from the bands.
+    // And the classes the account control shed are gone from the whole stylesheet, not merely from
+    // the bands. The density bands go the same way: a rule for an attribute nothing stamps is dead
+    // CSS that reads as intentional.
     expect(APP_CSS).not.toMatch(/\.user-pill/)
+    expect(APP_CSS).not.toMatch(/data-nav-dense/)
   })
 
   /**
@@ -362,11 +511,16 @@ describe('Merged navigation shell', () => {
    * figure. Hiding the pill instead would remove the only changing element in the header at exactly
    * the widths a shopfloor kiosk runs at.
    */
-  it('narrows the alert counter without hiding it', () => {
-    const narrow = APP_CSS.match(/@media \(max-width: 1399px\) \{([\s\S]*?)\n\}/)[1]
-    expect(narrow).toMatch(/\.alert-pill-label\s*\{\s*display:\s*none/)
-    expect(narrow).not.toMatch(/\.alert-pill\s*\{\s*display:\s*none/)
-    expect(narrow).not.toMatch(/\.alert-pill-count\s*\{\s*display:\s*none/)
+  it('never hides the alert control at any width', () => {
+    // IT HAS NOTHING LEFT TO SHED, which is what changed. The control used to drop its WORD below
+    // 1400px and keep its number; it is now a glyph plus at most two digits at every width, so the
+    // band that narrowed it has no work to do. What it must never do -- at any width, in any band --
+    // is disappear, because an absent alert control and a healthy one would look identical.
+    for (const band of [1399, 1099]) {
+      const rules = APP_CSS.match(new RegExp(`@media \\(max-width: ${band}px\\) \\{([\\s\\S]*?)\\n\\}`))[1]
+      expect(rules).not.toMatch(/\.alert-pill[\s\S]*?display:\s*none/)
+    }
+    expect(APP_CSS).not.toMatch(/\.alert-pill-label/)
   })
 
   /**
@@ -398,7 +552,7 @@ describe('Merged navigation shell', () => {
   // because an overflow set on the page would produce the same scrollbar the collapse exists to
   // avoid, just one level up.
   it('never resorts to a horizontal scrollbar', () => {
-    for (const selector of ['.topbar', '.topbar-nav', '.app-shell', '.content']) {
+    for (const selector of ['.topbar', '.app-shell', '.app-body', '.content', '.sidebar']) {
       const rule = APP_CSS.match(new RegExp(`\\n\\${selector} \\{([\\s\\S]*?)\\n\\}`))?.[1]
       if (!rule) continue
       expect(rule, `${selector} must not scroll horizontally`).not.toMatch(/overflow-x:\s*(auto|scroll)/)
@@ -421,14 +575,36 @@ describe('Merged navigation shell', () => {
  */
 describe('shopfloor grid across viewports', () => {
   const gridRule = APP_CSS.match(/\n\.shopfloor-grid \{([\s\S]*?)\n\}/)[1]
-  const minWidth = Number(gridRule.match(/minmax\((\d+)px/)[1])
+  const minWidth = Number(gridRule.match(/minmax\(min\((\d+)px/)[1])
   const gap = Number(gridRule.match(/gap:\s*(\d+)px/)[1])
-  // .content is the grid's container: full viewport width less its own horizontal padding.
-  const contentPad = Number(APP_CSS.match(/\n\.content \{([\s\S]*?)\n\}/)[1].match(/padding:\s*\d+px (\d+)px/)[1])
+
+  /*
+   * WHAT THE GRID'S CONTAINER ACTUALLY MEASURES, and this model has been wrong twice.
+   *
+   * It was the viewport less `.content`'s own horizontal padding. Then navigation became a rail,
+   * and 52px of every row stopped belonging to the page -- the counts happened to survive that, so
+   * nothing failed and the model was quietly describing a layout that no longer existed. Then the
+   * padding became a token, so reading it off the `.content` rule stopped working at all.
+   *
+   * Every term is read from the stylesheet rather than written down here, because a number copied
+   * into a test is a number that stops tracking the thing it was copied from -- which is precisely
+   * how this drifted the first time.
+   */
+  const block = (re) => APP_CSS.match(re)[1]
+
+  const rail = Number(block(/\n\.sidebar \{([\s\S]*?)\n\}/).match(/flex:\s*0 0 (\d+)px/)[1])
+  const inset = Number(block(/:root, \[data-theme="dark"\] \{([\s\S]*?)\n\}/).match(/--inset:\s*(\d+)px/)[1])
+  // The reserved scrollbar track. `scrollbar-gutter: stable` holds it open on every page, so it is
+  // part of the width arithmetic rather than something that appears when a page grows -- which is
+  // the whole reason it was made stable.
+  const gutter = Number(block(/::-webkit-scrollbar \{([^}]*)\}/).match(/width:\s*(\d+)px/)[1])
 
   const columnsAt = (viewport) => {
-    const available = viewport - contentPad * 2
-    return Math.floor((available + gap) / (minWidth + gap))
+    const available = viewport - rail - inset * 2 - gutter
+    // `minmax(min(280px, 100%), 1fr)`: the track never exceeds the container, so a container
+    // narrower than the tile yields one full-width column rather than an overflow.
+    const track = Math.min(minWidth, available)
+    return Math.floor((available + gap) / (track + gap))
   }
 
   it('fills six columns at 1920x1080, the primary target', () => {
@@ -440,7 +616,7 @@ describe('shopfloor grid across viewports', () => {
     expect(cols).toBe(4)
     // The check that matters: whatever the count, the row still fits.
     const used = cols * minWidth + (cols - 1) * gap
-    expect(used).toBeLessThanOrEqual(1366 - contentPad * 2)
+    expect(used).toBeLessThanOrEqual(1366 - rail - inset * 2 - gutter)
   })
 
   it('keeps at least one column at every width down to a phone', () => {
@@ -454,6 +630,18 @@ describe('shopfloor grid across viewports', () => {
   it('uses auto-fill so one cell does not stretch across the row', () => {
     expect(gridRule).toMatch(/auto-fill/)
     expect(gridRule).not.toMatch(/auto-fit/)
+  })
+
+  /**
+   * THE TRACK MUST BE CAPPED AT THE CONTAINER, which a bare `minmax(280px, 1fr)` is not.
+   *
+   * A grid track whose minimum exceeds its container does not shrink, it overflows -- and once the
+   * rail took 52px out of the row, the narrowest viewport this suite checks fell under 280px. The
+   * failure is a horizontal scrollbar on the one page that must never have one, at the one width
+   * where nobody is looking.
+   */
+  it('caps the tile at the container width so it cannot overflow', () => {
+    expect(gridRule).toMatch(/minmax\(min\(\d+px,\s*100%\)/)
   })
 })
 

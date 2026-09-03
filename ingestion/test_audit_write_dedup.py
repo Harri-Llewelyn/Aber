@@ -3,7 +3,7 @@ Unit tests for ingestion's write deduplication on the DBIRTH and node-heartbeat 
 
 WHAT THIS PROTECTS, AND WHY IT IS NOT THE SAME THING AS THE AUDIT GUARD.
 
-Migration 0005 already stops an unchanged UPDATE from writing a `digital_thread` row, and stops a
+archived migration 0005 already stops an unchanged UPDATE from writing a `digital_thread` row, and stops a
 heartbeat-only UPDATE from writing one either. That is the DATABASE half, and
 `supabase/migrations/test_digital_thread_guard.py` covers it.
 
@@ -149,7 +149,7 @@ class DBirthDedupTestCase(unittest.TestCase):
         """
         The fields each ingest_set_device_state() call actually changes.
 
-        The write goes through a gate now (Machine Identities in supabase/README.md, migration 0047). Its signature is
+        The write goes through a gate now (Machine Identities in supabase/README.md, archived migration 0047). Its signature is
         fixed and NULL means "leave alone", so the changed-field set that used to be the UPDATE
         payload is now the non-NULL parameters -- normalised back to column names here so the
         assertions keep saying what they said. The property is unchanged: a steady-state rebirth
@@ -333,7 +333,7 @@ class TestCounters(DBirthDedupTestCase):
 class TestHeartbeatStillWritesEveryTime(unittest.TestCase):
     """
     The deliberate NON-deduplication. `last_heartbeat` has to move on every heartbeat because
-    public.gateway_status derives staleness from it at read time. Migration 0005 keeps these out
+    public.gateway_status derives staleness from it at read time. archived migration 0005 keeps these out
     of the audit trail by subtracting `last_heartbeat` before comparing; the daemon's job is only
     to tell a transition from a routine beat IN THE LOG.
     """

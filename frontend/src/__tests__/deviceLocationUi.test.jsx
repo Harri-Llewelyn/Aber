@@ -475,7 +475,7 @@ describe('approving a quarantined device', () => {
 
 
 /**
- * Shadow devices on the Devices page (migration 0060).
+ * Shadow devices on the Devices page (archived migration 0060).
  *
  * `ensure_shadow_devices()` mints one per device a capture recorded, at the moment a playback
  * starts -- so a stack that has never replayed has none, and the first playback would otherwise
@@ -538,7 +538,7 @@ describe('replay lanes', () => {
 
 
 /**
- * Actions withdrawn from a shadow device (migration 0060).
+ * Actions withdrawn from a shadow device (archived migration 0060).
  *
  * 0060 states both rules and gives the reason for each, so these are not taste:
  *

@@ -1,5 +1,5 @@
 /**
- * The ASHRAE 223P vocabulary, as served from `ashrae223_vocabulary` (migration 0013).
+ * The ASHRAE 223P vocabulary, as served from `ashrae223_vocabulary` (archived migration 0013).
  *
  * Unlike MTConnect and OPC UA, a 223P concept is NOT positional. `Fan` is a class of thing, not a
  * reading taken somewhere -- there is no browse path to derive a group from, and no instance for
@@ -7,12 +7,12 @@
  * supplies is which fan.
  *
  * ⚠ The standard is still in public review. These concepts come from a pre-publication ontology
- * release and may change before ASHRAE 223 is published; see the header of migration 0013.
+ * release and may change before ASHRAE 223 is published; see the header of archived migration 0013.
  */
 
 import { STANDARDS } from './standards'
 
-/** The single metric group 223P concepts file under. Registered by migration 0013. */
+/** The single metric group 223P concepts file under. Registered by archived migration 0013. */
 export const ASHRAE223_GROUP = 'Building'
 
 /** Concepts, ordered by label -- what a reader scans -- rather than by local name. */

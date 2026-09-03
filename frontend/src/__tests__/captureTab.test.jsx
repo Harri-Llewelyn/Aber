@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CaptureTab } from '../components/tabs/CaptureTab'
 import { captureManifest, capturePath } from '../api'
-import { tabIsVisible, navDensity, TABS } from '../App'
+import { tabIsVisible, TABS, groupedNav } from '../App'
 
 /**
  * The Capture page.
@@ -572,13 +572,23 @@ describe('the nav entry', () => {
   })
 
   /**
-   * THE TWELFTH TAB. `navDensity`'s `tight` band was written for a page that did not exist; this is
-   * the page, and an Administrator now sees twelve.
+   * WHERE IT SITS IN THE RAIL, which is the assertion that replaced a `navDensity` one.
+   *
+   * This used to check that Capture pushed an Administrator into the top bar's `tight` density
+   * band -- the twelfth tab was what that band was written for. The bar and its bands are gone;
+   * the sidebar has no ceiling to be pushed against, so the fact left worth pinning is which
+   * GROUP the page is filed under.
+   *
+   * `history` and not `assets`, and the distinction is the one the group names are chosen on: a
+   * capture is a recording of what a device already said, in the same tense as Digital Thread and
+   * Cold Storage beside it. Filing it with Devices would put a page about the past among three
+   * pages about the present.
    */
-  it('takes an Administrator into the tight nav band', () => {
+  it('is filed under History in the rail, beside the other two pages about the past', () => {
     const visible = TABS.filter(t => tabIsVisible(t, () => true, 'Administrator'))
-    expect(visible.length).toBeGreaterThanOrEqual(12)
-    expect(navDensity(visible.length)).toBe('tight')
+    const history = groupedNav(visible).find(g => g.id === 'history')
+
+    expect(history.tabs.map(t => t.id)).toEqual(['digital-thread', 'capture', 'cold-storage'])
   })
 })
 

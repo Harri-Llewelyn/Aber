@@ -235,7 +235,7 @@ SELECT
 COMMENT ON VIEW public.storage_footprint IS
   'One row per stored relation: bytes by kind, chunk count, compression before/after, and the '
   'time span the chunks cover. Read directly by Grafana and mapped into Supabase over '
-  'postgres_fdw as timescale.storage_footprint (migration 0027).';
+  'postgres_fdw as timescale.storage_footprint (archived migration 0027).';
 
 
 -- ---------------------------------------------------------------------------------------------

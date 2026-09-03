@@ -191,7 +191,7 @@ export function composeMetricName(...parts) {
  * The Factory+ metric-name format: '/'-delimited folders whose segments use only alphanumerics
  * and the underscore.
  *
- * MIRROR OF THE SQL. `metric_catalog_name_format` (migration 0007) is the same expression, and it
+ * MIRROR OF THE SQL. `metric_catalog_name_format` (archived migration 0007) is the same expression, and it
  * is the authority -- this exists so the operator is told at the form rather than by a 400. Keep
  * the two in step, the same obligation deriveMetricGroup() and utils/sparkplugId.js carry.
  *

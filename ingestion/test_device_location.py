@@ -95,7 +95,7 @@ class DeviceLocationInvariantTest(unittest.TestCase):
         """
         The parameters of each ingest_register_quarantined_device() call.
 
-        The write goes through a gate now (Machine Identities in supabase/README.md, migration 0047), which strengthens
+        The write goes through a gate now (Machine Identities in supabase/README.md, archived migration 0047), which strengthens
         what this file asserts rather than merely relocating it: the gate HAS NO location
         parameter, so a location is not something the daemon declines to send -- it is something
         the call cannot express.

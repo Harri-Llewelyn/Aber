@@ -5,7 +5,7 @@ import { ActionButton } from '../common/ActionButton'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
- * Edit a device's IDTA 02006 Digital Nameplate (migration 0011).
+ * Edit a device's IDTA 02006 Digital Nameplate (archived migration 0011).
  *
  * WHY THIS IS NOT ON THE SCHEMAS PAGE. A nameplate is a fact about one physical asset. The Schemas
  * page is entirely type-level -- what a metric may be named, what a standard defines, what shape a

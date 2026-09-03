@@ -30,7 +30,7 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-AAS_SCHEMA_PATH = REPO_ROOT / "tests" / "schemas" / "AAS_V3_0_JSON_Schema.json"
+AAS_SCHEMA_PATH = REPO_ROOT / "test-harness" / "schemas" / "AAS_V3_0_JSON_Schema.json"
 MAIN_INDEX = REPO_ROOT / "supabase" / "functions" / "main" / "index.ts"
 API_INDEX = REPO_ROOT / "supabase" / "functions" / "aas-api" / "index.ts"
 SHARED_SHELL = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "shell.ts"
@@ -40,7 +40,7 @@ ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
 DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
 # Provisioned by this suite, not seeded. See the note in test_aas_export.py -- the two share
-# tests/aas_fixture.py so they cannot disagree about what a conformance subject is.
+# test-harness/aas_fixture.py so they cannot disagree about what a conformance subject is.
 TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "")
 PROVISION_FIXTURE = not TARGET_DEVICE
 
@@ -110,7 +110,7 @@ def find_device(token: str):
         return None
 
 
-sys.path.insert(0, str(REPO_ROOT / "tests"))
+sys.path.insert(0, str(REPO_ROOT / "test-harness"))
 import aas_fixture  # noqa: E402  -- after sys.path, by necessity
 
 

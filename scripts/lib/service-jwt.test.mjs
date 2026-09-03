@@ -6,7 +6,7 @@
 // #101 describes:
 //
 //   * the ceiling is REFUSED rather than clamped, so nobody is surprised by an expiry;
-//   * it mirrors service_token_max_days() in 0043, checked against the migration's own text;
+//   * it mirrors service_token_max_days() in the migration chain, checked against its own text;
 //   * a service key carries a `jti` and an infrastructure key does not;
 //   * the two kinds have different lifetimes, deliberately.
 // =================================================================================================
@@ -28,17 +28,37 @@ test('the ceiling mirrors service_token_max_days() in the migration that owns it
   // KEPT IN STEP BY TEST RATHER THAN BY HOPE. Two numbers that must agree and live in different
   // languages are exactly the pair that drifts -- and drifting UPWARD here re-creates #101, while
   // drifting downward makes every key this repo mints unrecordable.
+  //
+  // FOUND BY WHAT IT DECLARES, NOT BY WHAT IT IS CALLED. This used to look for a file whose NAME
+  // contained `record_service_token_issued`, which was 0043 -- and the squash folded 0043 into
+  // `0001_baseline_schema.sql`, so the search matched nothing and the test failed on a premise
+  // rather than on its subject. Naming the baseline instead would only move the problem to the
+  // next squash. Reading every migration and taking the one that declares the function is stable
+  // across any renumbering, and asserts something worth asserting on its own: that the chain
+  // declares this function exactly once.
   const dir = join(REPO, 'supabase', 'migrations');
-  const file = readdirSync(dir).find((f) => f.includes('record_service_token_issued'));
-  assert.ok(file, 'could not find the migration declaring service_token_max_days()');
-  const sql = readFileSync(join(dir, file), 'utf8');
+  const DECLARATION =
+    /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+public\.service_token_max_days\(\)[\s\S]*?AS\s*\$\$\s*SELECT\s+(\d+)\s*\$\$/i;
 
-  // Matches the declaration as 0043 actually writes it -- a one-line SQL function,
+  const declaring = readdirSync(dir)
+    .filter((f) => f.endsWith('.sql'))
+    .map((f) => ({ file: f, sql: readFileSync(join(dir, f), 'utf8') }))
+    .filter(({ sql }) => DECLARATION.test(sql));
+
+  assert.ok(declaring.length > 0, 'no migration declares service_token_max_days()');
+  assert.equal(
+    declaring.length, 1,
+    `service_token_max_days() is declared in ${declaring.length} migrations ` +
+    `(${declaring.map((d) => d.file).join(', ')}); the last one applied wins, which is not a thing ` +
+    'to leave to file order'
+  );
+
+  const { file, sql } = declaring[0];
+
+  // Matches the declaration as the chain actually writes it -- a one-line SQL function,
   // `AS $$ SELECT 90 $$`. Asserted to have matched at all, so that a rewrite of the function into
   // another form fails here loudly instead of quietly comparing against undefined.
-  const declared = sql.match(
-    /FUNCTION\s+public\.service_token_max_days\(\)[\s\S]*?AS\s*\$\$\s*SELECT\s+(\d+)\s*\$\$/i
-  )?.[1];
+  const declared = sql.match(DECLARATION)?.[1];
   assert.ok(declared, `could not read the ceiling out of ${file}; has the function been rewritten?`);
   assert.equal(
     Number(declared), SERVICE_KEY_MAX_DAYS,

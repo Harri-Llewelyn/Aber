@@ -8,7 +8,7 @@
  *
  * The three are complementary, not alternatives, which is why the form offers a choice rather than
  * a migration path between them:
- *   MTConnect  -- machine tools: the component/data-item vocabulary (migration 0018)
+ *   MTConnect  -- machine tools: the component/data-item vocabulary (archived migration 0018)
  *   ISO 22400  -- computed KPIs, which MTConnect deliberately excludes (archived migration 0030)
  *   OPC UA     -- robotics and general machinery companion specs (archived migration 0031)
  */

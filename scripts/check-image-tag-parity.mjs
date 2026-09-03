@@ -352,7 +352,7 @@ if (onlyChart.length) {
  *   values.yaml            what the chart tells a cluster to pull
  *   release.yml            what actually gets pushed to GHCR
  *   ci.yml                 what k8s-validation builds locally and imports into k3d
- *   tests/Dockerfile       which ingestion image the conformance runner extends
+ *   test-harness/Dockerfile       which ingestion image the conformance runner extends
  *
  * These fail QUIETLY and in different places, which is why they are worth a check rather than a
  * convention:
@@ -363,7 +363,7 @@ if (onlyChart.length) {
  *   - ci.yml building a different reference than the chart asks for does not fail either: the pod
  *     falls through to PULLING the published image, so the job silently stops testing the working
  *     tree and starts testing whatever was last released.
- *   - tests/Dockerfile's ARG default drifting means a bare `docker build` extends a different
+ *   - test-harness/Dockerfile's ARG default drifting means a bare `docker build` extends a different
  *     ingestion image than the chart deploys, and the conformance suite reports on a stack it is
  *     not running beside.
  *
@@ -374,7 +374,7 @@ if (onlyChart.length) {
 const RELEASE_WF = join(REPO_ROOT, '.github', 'workflows', 'release.yml');
 const CI_WF = join(REPO_ROOT, '.github', 'workflows', 'ci.yml');
 const CHART_YAML = join(REPO_ROOT, 'deploy', 'helm', 'acs-cymru', 'Chart.yaml');
-const TESTS_DOCKERFILE = join(REPO_ROOT, 'tests', 'Dockerfile');
+const TESTS_DOCKERFILE = join(REPO_ROOT, 'test-harness', 'Dockerfile');
 
 const releaseIssues = [];
 const expected = [...BUILT_IMAGES].sort();
@@ -497,16 +497,16 @@ for (const stray of ciSrc.matchAll(/(INGESTION_IMAGE=|[-]t\s+")\$NS\//g)) {
   );
 }
 
-// 4. tests/Dockerfile: the ARG default names a published image at the chart's appVersion.
+// 4. test-harness/Dockerfile: the ARG default names a published image at the chart's appVersion.
 const testsSrc = readFileSync(TESTS_DOCKERFILE, 'utf8');
 const argMatch = testsSrc.match(/^ARG\s+INGESTION_IMAGE=(\S+)/m);
 if (!argMatch) {
-  releaseIssues.push('tests/Dockerfile no longer declares ARG INGESTION_IMAGE.');
+  releaseIssues.push('test-harness/Dockerfile no longer declares ARG INGESTION_IMAGE.');
 } else {
   const wanted = `${IMAGE_NAMESPACE}/ingestion:${appVersion}`;
   if (argMatch[1] !== wanted) {
     releaseIssues.push(
-      `tests/Dockerfile defaults INGESTION_IMAGE to ${argMatch[1]}, expected ${wanted}.\n` +
+      `test-harness/Dockerfile defaults INGESTION_IMAGE to ${argMatch[1]}, expected ${wanted}.\n` +
         "    CI and release.yml both pass this explicitly, so the default only bites a bare\n" +
         '    `docker build` -- which is exactly when nobody is watching for it.'
     );
@@ -518,7 +518,7 @@ if (releaseIssues.length) {
   console.error('\nRelease surface FAILED:\n');
   for (const issue of releaseIssues) console.error(`  ${issue}\n`);
   console.error(
-    'values.yaml, release.yml, ci.yml and tests/Dockerfile must agree on which images this\n' +
+    'values.yaml, release.yml, ci.yml and test-harness/Dockerfile must agree on which images this\n' +
       'repository publishes, under which namespace, at which version. None of these disagreements\n' +
       'produces a failed install -- they produce a stack that comes up two thirds healthy.\n'
   );

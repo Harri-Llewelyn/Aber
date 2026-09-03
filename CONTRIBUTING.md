@@ -8,7 +8,7 @@ Some logic is **mirrored across languages** and must be kept in step: `frontend/
 generated columns and views in [`supabase/migrations/0001_baseline_schema.sql`](supabase/migrations/0001_baseline_schema.sql),
 and the edge functions duplicate two mappers the browser bundle cannot share. CI enforces the pairs
 it can compare — [`scripts/check-mirror-drift.mjs`](scripts/check-mirror-drift.mjs),
-[`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs), `tests/test_aas_export.py`.
+[`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs), `supabase/functions/aas-export/test_aas_export.py`.
 
 ## Two rules worth stating up front
 

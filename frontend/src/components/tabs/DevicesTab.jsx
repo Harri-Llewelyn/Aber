@@ -815,7 +815,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           <button
             className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setShowShadows(v => !v)}
-            title="Shadow devices created by broker playback (migration 0060). One per device a capture recorded, they receive replayed readings so a recording is never mistaken for live plant data. Hidden by default because they are not machines."
+            title="Shadow devices created by broker playback (archived migration 0060). One per device a capture recorded, they receive replayed readings so a recording is never mistaken for live plant data. Hidden by default because they are not machines."
           >
             <IconPlay size={13} /> Show shadow devices ({shadowCount})
           </button>
@@ -836,7 +836,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
       )}
 
       {quarantine.length > 0 && (
-        <div style={{ marginBottom: '24px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '20px' }}>
+        <div style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px var(--inset)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--warning-text)', fontWeight: 600 }}>
               <IconShieldAlert size={20} />

@@ -69,7 +69,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 # before PostgREST ever saw it.
 #
 # The ingestion token is the Authorization bearer and is what actually authorises the writes. It
-# names Service_Ingestor (migration 0046), an `authenticated` principal holding Operator, which
+# names Service_Ingestor (archived migration 0046), an `authenticated` principal holding Operator, which
 # cannot write a single row directly: every write goes through a SECURITY DEFINER gate in 0047 that
 # checks the caller is that principal. This is the same shape i3X uses -- pass a bearer through to
 # PostgREST and let RLS answer -- rather than a key that bypasses RLS entirely.
@@ -447,7 +447,7 @@ def get_timescaledb_connection():
 # -----------------------------------------------------------------------------
 # Assets are identified on the wire by an immutable, platform-issued id: a 3-character type
 # prefix plus 21 lowercase hex characters, derived from the row's UUID primary key by the
-# `sparkplug_id` generated column (migration 0014). Asset *names* are display labels only
+# `sparkplug_id` generated column (archived migration 0014). Asset *names* are display labels only
 # and can be edited freely without breaking ingestion, telemetry continuity, or the audit
 # trail -- which was the entire point of moving off name-based identity.
 GATEWAY_ID_PATTERN = re.compile(r"^gwy[0-9a-f]{21}$")
@@ -527,7 +527,7 @@ SOURCE_LEGACY_NAME = "legacy_name"
 
 # Statuses a gateway may NOT assert about itself, and the length cap on the ones it may.
 #
-# `gateways.status` is deliberately unconstrained text (migration 0025) because a `Gateway_Status`
+# `gateways.status` is deliberately unconstrained text (archived migration 0025) because a `Gateway_Status`
 # metric in an NBIRTH overrides whatever the message type implies -- the domain is the fleet's, not
 # ours. That is a statement about VOCABULARY, not about authority, and the two were conflated: the
 # payload string was written through verbatim, so a gateway could claim any value at any length.
@@ -692,7 +692,7 @@ _device_seen_lock = threading.Lock()
 # changes nothing -- which costs a PostgREST round trip and, because `devices` is REPLICA IDENTITY
 # FULL and in the supabase_realtime publication, broadcasts a full-row change event to every
 # connected dashboard. The audit trigger already suppresses the *audit row* for such a write
-# (migration 0005); it cannot suppress the write itself.
+# (archived migration 0005); it cannot suppress the write itself.
 _DEVICE_COLUMNS = (
     "id,name,sparkplug_id,reported_identity,gateway_id,is_quarantined,first_dbirth_at,"
     "last_birth_metrics,status,identity_source,conformance_policy"
@@ -1326,7 +1326,7 @@ def resolve_gateway(wire_id: str, group_id: str = None, include_archived: bool =
     `resolve_gateway` stays the one seam every caller and every test patches.
 
     ARCHIVED IS A REFUSAL, NOT A MATCH, and it is the application tier of the same two-tier
-    arrangement mosquitto.acl describes. Migration 0038 revokes a gateway's broker credential when
+    arrangement mosquitto.acl describes. archived migration 0038 revokes a gateway's broker credential when
     it is archived, so an archived appliance should not be able to connect at all -- but that
     revocation is ASYNCHRONOUS (net.http_post queues it) and is INERT on a deployment that never
     configured GATEWAY_REVOKE_SECRET. Both leave a window in which a decommissioned appliance still
@@ -1348,7 +1348,7 @@ def resolve_gateway(wire_id: str, group_id: str = None, include_archived: bool =
     if _throttled(_archived_gateway_warned, wire_id, ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS):
         logger.warning(
             "Dropping traffic from edge node '%s' (%s): the gateway is ARCHIVED. Its broker "
-            "credential should have been revoked when it was archived (migration 0038) -- that it "
+            "credential should have been revoked when it was archived (archived migration 0038) -- that it "
             "can still publish means revocation has not landed, or GATEWAY_REVOKE_SECRET is unset "
             "on this deployment. Un-archive the gateway to accept it again.",
             wire_id, row.get("name")
@@ -1843,7 +1843,7 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                 # cannot decode -- so an unconditional UPDATE here fires once per rebirth per
                 # device, forever, and changes nothing on all but the first.
                 #
-                # The audit trigger already refuses to record such a write (migration 0005
+                # The audit trigger already refuses to record such a write (archived migration 0005
                 # subtracts nothing and compares the rows, so an identical UPDATE writes no
                 # digital_thread row). What it CANNOT suppress is the write itself: the round
                 # trip to PostgREST, the WAL record, and -- because `devices` is REPLICA IDENTITY
@@ -1998,7 +1998,7 @@ def accept_reported_status(reported: str, edge_node_id: str = None):
 # -----------------------------------------------------------------------------
 # Appliance health, carried on the heartbeat that already exists
 # -----------------------------------------------------------------------------
-# WHAT AN APPLIANCE REPORTS ABOUT ITSELF, and where each value lands. Migration 0035 carries the
+# WHAT AN APPLIANCE REPORTS ABOUT ITSELF, and where each value lands. archived migration 0035 carries the
 # argument for the columns; this is the wire contract.
 #
 # NO NEW TRANSPORT, CREDENTIAL OR TABLE. These arrive as ordinary metrics on the node-level message
@@ -2054,7 +2054,7 @@ def extract_gateway_health(group_id, edge_node_id, payload):
     """
     The recognised health metrics in a node-level payload, as a column -> value dict.
 
-    VALIDATED HERE RATHER THAN BY A CHECK CONSTRAINT, and migration 0035 records why: these
+    VALIDATED HERE RATHER THAN BY A CHECK CONSTRAINT, and archived migration 0035 records why: these
     columns are written in the SAME UPDATE as `status` and `last_heartbeat`. A constraint
     violation would fail that whole statement, so one nonsensical disk figure would stop a live
     gateway reporting ONLINE -- a cosmetic fault presenting as an outage. A metric that fails
@@ -2123,7 +2123,7 @@ def extract_gateway_health(group_id, edge_node_id, payload):
 # The same readings, as Prometheus gauges -- because the columns have no history
 # -----------------------------------------------------------------------------
 # WHY BOTH. `gateways.disk_free_bytes` and its neighbours hold a LATEST VALUE AND NO HISTORY, which
-# migration 0035 states plainly. So a dashboard reading the database can answer "how full is that
+# archived migration 0035 states plainly. So a dashboard reading the database can answer "how full is that
 # disk" and can never answer "is it filling" -- the question an operator actually acts on. These
 # gauges are that second answer, at the scrape interval, over the Prometheus the stack already runs.
 #
@@ -2252,7 +2252,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # THIS WRITE IS NOT SKIPPABLE, and the comparison below is not a guard on it. `last_heartbeat`
     # has to move on every heartbeat because `public.gateway_status` derives staleness from it at
     # read time -- suppressing the write would make a live gateway report STALE, which is a far
-    # worse failure than the noise it would save. Migration 0005 is what keeps this out of the
+    # worse failure than the noise it would save. archived migration 0005 is what keeps this out of the
     # audit trail: it subtracts `last_heartbeat` before comparing, so a heartbeat that moves only
     # the timestamp writes no digital_thread row while a genuine ONLINE/OFFLINE transition still
     # does.
@@ -2722,7 +2722,7 @@ def record_payload_violations(device: dict, violations, observed_at):
     outage. DDATA arrives continuously; under report-by-exception a busy cell publishes several
     messages a second. Writing a row per non-conforming message would append tens of thousands of
     rows a day to a table that is append-only and that NO application role can prune, and the first
-    symptom would be the disk filling. Migration 0005 made exactly this argument about heartbeat
+    symptom would be the disk filling. archived migration 0005 made exactly this argument about heartbeat
     UPDATEs; this is the same argument about a path 0005 cannot see, because these rows are written
     through an RPC rather than by the audit trigger.
 

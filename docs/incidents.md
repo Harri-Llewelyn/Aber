@@ -50,7 +50,7 @@ only runs once" is guarded by an assumption, not by a mechanism.*
 ## Array `properties` read as metric names
 
 **Where the fix lives:** `frontend/src/utils/deviceTags.js`, `i3x/i3x_service.py`,
-`supabase/functions/aas-export/index.ts`. The contract is `tests/fixtures/modelled-metrics.json`.
+`supabase/functions/aas-export/index.ts`. The contract is `test-harness/fixtures/modelled-metrics.json`.
 **Symptom (first time):** a device's telemetry read as almost entirely "Unmodelled" in the
 dashboard, while `validate.py` reported the same device as having no schema at all.
 

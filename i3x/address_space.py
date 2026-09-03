@@ -64,7 +64,7 @@ STANDARD_NAMESPACES = {
     "MTConnect": "https://mtconnect.org/v2.0",
     "ISO 22400": "https://acs-cymru.local/semantics/iso22400",
     "OPC UA": "https://opcfoundation.org/UA",
-    # Issued by ASHRAE, not minted here -- migration 0013 CHECKs that every seeded id sits under
+    # Issued by ASHRAE, not minted here -- archived migration 0013 CHECKs that every seeded id sits under
     # this namespace.
     "ASHRAE 223P": "http://data.ashrae.org/standard223#",
 }

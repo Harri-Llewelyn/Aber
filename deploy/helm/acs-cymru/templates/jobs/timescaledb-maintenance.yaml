@@ -49,7 +49,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     # WEIGHT 5 -- after db-roles-init (0) and BEFORE db-init (10), and the order is load-bearing.
-    # Migration 0010 maps the rollups and telemetry_latest as foreign tables and then READS each
+    # archived migration 0010 maps the rollups and telemetry_latest as foreign tables and then READS each
     # one to prove the mapping resolves; postgres_fdw is lazy, so mapping objects that do not exist
     # yet succeeds and fails later in the dashboard instead. This Job is what creates them.
     "helm.sh/hook-weight": "5"

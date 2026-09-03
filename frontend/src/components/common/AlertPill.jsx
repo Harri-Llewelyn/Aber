@@ -13,14 +13,24 @@ import { REALTIME_ENABLED, grafanaAlertUrl } from '../../constants'
  * one reason: an element that is absent when healthy is indistinguishable from an element that is
  * BROKEN. A dashboard on a wall showing no alert chip could mean nothing is wrong, or that the
  * webhook secret is stale, or that Grafana has been down since Tuesday -- and the operator has no
- * way to tell which without opening another tab. `0 Alerts` is a positive statement that the
+ * way to tell which without opening another tab. A standing icon is a positive statement that the
  * pipeline is answering, which is a different claim from silence and the one worth making.
  *
- * The cost is real and is paid deliberately: a count of one is now a CHANGE in a familiar element
- * rather than the arrival of a new one, which is a weaker peripheral signal. Three things carry the
- * difference instead -- the icon changes shape (shield -> triangle -> circle), the colour changes,
- * and only the firing states pulse. The healthy pill is deliberately the quietest thing in the bar:
- * muted, unanimated, no border colour of its own.
+ * THE WORD AND THE ZERO ARE GONE; THE ICON AND THE COUNT-WHEN-FIRING ARE NOT. It read `0 Alerts`
+ * on a floor with nothing wrong, which is ~62px of bar spent on the least interesting sentence the
+ * application can say, and it said it in exactly the same shape whether the answer was zero or
+ * nine. What replaced it is a single glyph that carries the state three ways -- shape (shield ->
+ * triangle -> circle), colour, and animation on the firing states only.
+ *
+ * THE COUNT SURVIVES, AS A BADGE, AND ONLY WHEN IT IS NOT ZERO. Dropping it entirely would have
+ * been simpler and is the one thing here worth arguing about: on a wall display "something is
+ * wrong" and "twelve things are wrong" are different operational situations, and a colour cannot
+ * tell them apart -- the operator would have to open the panel to learn whether to walk over. Zero
+ * is the one count that needs no digit, because the healthy shield already says it. So the resting
+ * bar is one quiet glyph, and the digit appears exactly when it carries information.
+ *
+ * The healthy state is deliberately the quietest thing in the bar: muted, unanimated, no border
+ * colour of its own.
  *
  * THE COUNT IS THE HEADLINE, THE DETAIL IS ON DEMAND. A toast already fired when each alert arrived;
  * this is the answer to "what is still wrong", which is a different question and wants a list rather
@@ -80,7 +90,6 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
   // Three shapes, so severity is not carried by colour alone at 13px in a header.
   const Glyph = healthy ? IconShieldCheck : critical > 0 ? IconAlertCircle : IconAlertTriangle
 
-  const label = count === 1 ? 'Alert' : 'Alerts'
   const spoken = healthy
     ? 'No firing alerts'
     : `${count} firing alert${count === 1 ? '' : 's'}`
@@ -100,11 +109,10 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
               + ' — raised by Grafana. Click for detail.'
         }
       >
-        <Glyph size={13} />
-        {/* The number AND the word, in both states. Colour alone is not a signal an operator can
-            rely on, and this sits in a header beside other chips that are merely informational. */}
-        <span className="alert-pill-count">{count}</span>
-        <span className="alert-pill-label">{label}</span>
+        <Glyph size={15} />
+        {/* NOT RENDERED AT ZERO, which is the whole of what makes the resting bar quiet. See the
+            header for why the digit is kept at all rather than left to the colour. */}
+        {!healthy && <span className="alert-pill-count">{count}</span>}
       </button>
 
       {open && (

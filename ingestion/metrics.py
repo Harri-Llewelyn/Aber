@@ -28,7 +28,7 @@ whatever can reach that port. Every addition is a decision, not a detail.
 IT USED TO SERVE COUNTERS AND NOTHING ELSE. It now also serves FIVE GAUGES DESCRIBING THE
 APPLIANCES THEMSELVES -- uptime, load, available memory, free disk, and when each last reported --
 labelled by `edge_node`. The reason is that `gateways.disk_free_bytes` and its neighbours hold a
-LATEST VALUE AND NO HISTORY (migration 0035 says so in its own header), so "is that appliance's
+LATEST VALUE AND NO HISTORY (archived migration 0035 says so in its own header), so "is that appliance's
 disk filling" is answerable here and nowhere else in the stack. A dashboard reading the database
 can only ever draw a flat line at `now`.
 
@@ -89,12 +89,12 @@ COUNTER_MAP = {
         "acs_ingestion_gateway_status_reserved_rejected_total", {}),
     "device_state_writes": ("acs_ingestion_device_state_writes_total", {}),
     "device_state_writes_skipped": ("acs_ingestion_device_state_writes_skipped_total", {}),
-    # Schema conformance (migration 0026).
+    # Schema conformance (archived migration 0026).
     "payload_violations_recorded": ("acs_ingestion_payload_violations_recorded_total", {}),
     "payload_violations_suppressed": ("acs_ingestion_payload_violations_suppressed_total", {}),
     "payload_violation_write_failures": (
         "acs_ingestion_payload_violation_write_failures_total", {}),
-    # Appliance health (migration 0035).
+    # Appliance health (archived migration 0035).
     "gateway_health_metrics_rejected": (
         "acs_ingestion_gateway_health_rejected_total", {}),
 }

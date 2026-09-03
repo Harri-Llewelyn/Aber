@@ -20,7 +20,7 @@ somebody else's plant in it. What that floor knew is in this file instead.
 | The dashboard | `http://localhost:3000` |
 | The Node-RED editor | `http://localhost:1880` |
 | Grafana | `http://localhost:3002` |
-| Broker config and topic ACL | [`../mosquitto.conf`](../mosquitto.conf), [`../mosquitto.acl`](../mosquitto.acl) |
+| Broker config and topic ACL | [`../mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf), [`../mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) |
 | Node-RED provisioning | [`../scripts/node-red-init.mjs`](../scripts/node-red-init.mjs) |
 | Credential tool, physical gateways | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
 
@@ -354,7 +354,7 @@ a real gateway carries no `Asset_ID` either, which is why the topic has to be au
 
 ## Broker Topic Authorisation
 
-[`../mosquitto.acl`](../mosquitto.acl) confines each client to its own edge-node subtree:
+[`../mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) confines each client to its own edge-node subtree:
 
 ```
 pattern readwrite spBv1.0/+/+/%u/#

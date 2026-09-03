@@ -195,9 +195,12 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
     [...prom.matchAll(/^\s*-\s*job_name:\s*["']?([A-Za-z0-9._-]+)/gm)].map((m) => m[1])
   );
 
-  const migration = read('supabase/migrations/0054_directory_liveness.sql');
+  // IN 0001 SINCE THE SQUASH, not 0054, and the closing delimiter moved with it: the baseline is
+  // generated from a dump of the finished chain, and pg_dump renders every function body with the
+  // plain `$$` tag rather than the `$fn$` the source happened to use.
+  const migration = read('supabase/migrations/0001_baseline_schema.sql');
   const mapStart = migration.indexOf('CREATE OR REPLACE FUNCTION public.directory_liveness_job_map()');
-  const mapEnd = migration.indexOf('$fn$;', mapStart);
+  const mapEnd = migration.indexOf('$$;', mapStart);
   const mapped = [...migration.slice(mapStart, mapEnd).matchAll(/\(\s*'([a-z0-9._-]+)'\s*,/g)]
     .map((m) => m[1]);
 
@@ -592,126 +595,23 @@ function edgeFunctionNames() {
 {
   const dir = 'supabase/migrations';
 
-  /** name -> why a later migration is allowed to replace an earlier definition. */
-  const INTENDED_REDECLARATIONS = {
-    'public.consume_gateway_enrollment_token': `0025 declares it testing only the token hash,
-      consumed_at and expires_at; 0037 replaces it with one that ALSO refuses an archived gateway.
-      THE BODY IS REPRODUCED IN FULL rather than patched, because this function is the security
-      boundary for enrolment and a reader should see all of it at once -- a redeclaration that
-      patched only the WHERE clause would leave the hash shape-check and the identity SELECT in a
-      different migration from the rule they protect. 0037's self-check runs the reproduction it
-      exists to close: archive a gateway holding a live bundle, then attempt redemption. This list
-      can check that a redeclaration was INTENDED and not that it was COMPLETE.`,
-    'public.prune_platform_alerts': `0030 declares it with the window as a literal default; 0032
-      replaces it with one whose default is NULL and which reads alerts.retention_days from
-      system_settings, so an Administrator can see and change the window without a shell. THE
-      PREDICATE IS REPRODUCED IN FULL rather than patched -- the superseded-occurrence clause is
-      what keeps a long-firing alert alive past its own age, and a redeclaration that dropped it
-      would delete the CURRENT state of a live alert while every test about ordinary pruning still
-      passed. 0032's self-check fabricates a 400-day-old firing alert and asserts it survives,
-      because this list can check that a redeclaration was INTENDED and not that it was COMPLETE.`,
-    'public.log_digital_thread_event': `0003 adds append-only enforcement, 0005 adds actor_source
-      attribution, 0026 adds the causation_id stamp, and 0048 stops a machine principal being
-      recorded as a user. 0048's body is the live one and reproduces 0026 IN FULL -- a later
-      declaration that patched rather than reproduced would silently drop the heartbeat suppression
-      guard or the attribution, which is exactly why 0017 was never written. 0048 was written by
-      taking the DEPLOYED definition and changing one branch, for that reason. Its own self-check
-      asserts an ingestion write is still recorded as 'ingestion', because this list checks that a
-      redeclaration was INTENDED and cannot check that it was COMPLETE.`,
-    'public.record_ingestion_rejection': `0026 declares it with the GRANT as its only access
-      control, which was right while service_role was the only caller; 0051 replaces it with one
-      that ALSO requires the Service_Ingestor principal, because 0046 moved the daemon off that key
-      and the grant therefore had to widen to authenticated. Widening without the guard would let
-      any signed-in user forge a SCHEMA_REJECTION row into an append-only table no application role
-      can prune. THE BODY IS REPRODUCED IN FULL, and was produced by copying 0026's text rather than
-      retyping it -- the same discipline 0048 records, for the same reason. 0051's self-check
-      asserts BOTH directions in one block, since either alone passes in a state that is broken:
-      the daemon reaching it proves nothing if a stranger can too. This list can check that a
-      redeclaration was INTENDED and not that it was COMPLETE.`,
-    'public.is_ingestion_caller': `0047 admits the Service_Ingestor principal OR a caller still
-      presenting the service-role key; 0048 removes the second arm, which completes the credential
-      swap. The transitional arm existed so that a daemon deployed before that swap
-      kept working, and 0047 says removing it should be one line "so that it is a decision rather
-      than a refactor". 0048 is that decision -- nothing hands the daemon a service-role key any
-      more, on either Compose or Kubernetes, so the arm only widened the gates. 0048's self-check
-      asserts service_role is now refused.`,
-    'public.digital_thread_page': `0039 derives is_purged as an anti-join against cells, gateways
-      and devices, DELIBERATELY not narrowed by entity_type -- its own comment argues that an asset
-      is live if it is still in any of them, which is three index probes rather than a CASE that
-      would have to track the trigger's TG_TABLE_NAME vocabulary. 0043 and 0044 grew that
-      vocabulary: they write entity_type = 'service_principals', which is NOT a table, so every one
-      of their rows answered "absent from all three" and was hidden as a deleted asset. 0045 scopes
-      the question to the three types that can answer it. The anti-join itself is unchanged.`,
-    // -------------------------------------------------------------------------------------------
-    // SIX OF THESE ARE ONE CHANGE. 0065 moves every SQL predicate off `gateways.is_virtual` and on
-    // to `deployment` (0064), because that word carries three incompatible definitions and every
-    // behaviour branching on it is about a fourth -- as three defects showed, each costing a
-    // migration to fix locally: 0056, 0062 and 0063.
-    //
-    // REPRODUCTION IS FORCED RATHER THAN CHOSEN HERE: CREATE OR REPLACE FUNCTION takes a whole
-    // body, so there is no patching form. Each entry says only what is specific to that function;
-    // the translation itself is one line, `NOT is_virtual` -> `deployment = 'remote'`, and 0064's
-    // trigger keeps the columns in agreement so every one of them answers exactly as it did.
-    // -------------------------------------------------------------------------------------------
-    'public.gateway_holds_a_credential': `0038 declares it as \`NOT is_virtual AND enrolled_at IS
-      NOT NULL\`; 0065 declares the same question against \`deployment = 'remote'\`. Still
-      IMMUTABLE and still called from triggers. 0056's self-check, which asserts it refuses a
-      host-run gateway, passes unchanged -- that is the point: the answer is identical and only the
-      column it reads has a name that means one thing.`,
-    'public.gateway_has_broker_credential': `0056 declares it; 0065 moves both arms onto
-      \`deployment\`. The arms are what make it usable by revocation (0063) without creating
-      accounts, and they are unchanged in substance: a remote appliance that enrolled, or a
-      host-run gateway with a CREDENTIAL_ISSUED row, minus revocation.`,
-    'public.authorize_virtual_gateway_credential': `0041 declares it; 0065 swaps its one predicate.
-      The function keeps its name deliberately -- it is cited from the frontend and from 0041's own
-      header, and renaming an RPC is a client-visible change that belongs in its own commit rather
-      than smuggled into a body swap.`,
-    'public.issue_gateway_enrollment_token': `0025 declares it; 0065 swaps the check that refuses a
-      gateway with no appliance to carry a bundle to. The clearest case for the whole item: the
-      question was always "is there a machine out there", and \`is_virtual\` was three other claims
-      wearing that name.`,
-    'public.record_gateway_credential_issued': `0041 declares it; 0065 swaps the \`is_virtual\` key
-      in the audit row's new_data for \`deployment\`. ROWS ALREADY WRITTEN KEEP THE OLD KEY, which
-      is correct: an audit row records what was true in the vocabulary of its time, and rewriting
-      history to use a word coined later would be a lie about a table whose value is that it cannot
-      be edited. Nothing reads either key -- the Digital Thread page renders new_data generically.`,
-    'public.record_gateway_credential_issued_by_service': `0062 declares it; 0065 makes the same
-      new_data change as its operator-path twin above, for the same reason and with the same
-      consequence for rows already written.`,
-    'public.revoke_credential_on_decommission': `0038 gates both arms on
-      gateway_holds_a_credential(), which is \`NOT is_virtual AND enrolled_at IS NOT NULL\` and is
-      therefore false for every gateway a provisioned stack has; 0063 gates them on
-      gateway_has_broker_credential() (0056) instead. Demonstrated before the fix: a virtual
-      gateway's broker credential kept publishing after its row was DELETED, and nothing was ever
-      queued in net.http_request_queue -- the path was dead code rather than failing. THE BODY IS
-      REPRODUCED IN FULL, so the archive arm, the transition guard and the optimistic stamp stay in
-      the file that defines the live function. The guard 0040 documents is preserved rather than
-      removed: the new predicate still cannot admit a gateway that never held an account, so
-      revocation cannot CREATE one through the add-only credential service.
-      test_credential_revocation.py asserts both directions.`,
-    'public.sweep_gateway_credential_revocations': `Same swap as the trigger above, in the same
-      migration and for the same reason. The sweep is the retry path for a trigger call that did
-      not land, so leaving it on the old predicate would have left the safety net with a hole in
-      exactly the shape of the bug -- a virtual gateway whose revocation failed silently would
-      never have been retried. Everything else, including the clear-the-optimistic-stamp statement
-      and the LIMIT 200, is 0038's text.`,
-    'public.platform_health_rows': `0029 excludes archived gateways from the gateway_stale arm and
-      nothing else, which was right when it was written; 0061 ALSO excludes shadow gateways. The
-      Playback gateway (0060) is never expected to heartbeat -- nothing publishes as it until a
-      playback runs -- so it sat permanently in the view and fired acs-gateway-stale five minutes
-      after every boot, which is precisely the "trains an operator to ignore the rule" cost 0029's
-      own comment names for archived appliances. THE BODY IS REPRODUCED IN FULL rather than patched:
-      the enrolment and quarantine arms are unchanged, and leaving them in a different migration
-      from the live definition would make a reader assemble the function from two files. 0061's
-      self-check asserts the view emits exactly the gateways the predicate names, in both
-      directions, because this list can check that a redeclaration was INTENDED and not that it was
-      COMPLETE.`,
-    'public.ensure_gateway_status_view': `0025 widens public.gateway_status for the enrolment columns
-      and adds the branch that short-circuits PENDING_ENROLLMENT / AWAITING_BIRTH ahead of the
-      staleness test. g.* is expanded at CREATE time, so the view cannot be widened in place.`,
-    'public.dispatch_device_quarantine_webhook': `0006 re-points the webhook at Node-RED's
-      /hooks/quarantine with the scoped signing key, replacing 0001's unsigned dispatch.`,
-  };
+  /**
+   * name -> why a later migration is allowed to replace an earlier definition.
+   *
+   * EMPTY SINCE THE SQUASH, AND THAT IS THE POINT OF THE SQUASH. This map used to carry eleven
+   * names -- `log_digital_thread_event()` alone was declared five times across the chain, so four
+   * of the five bodies a reader could find were dead, with nothing in the file to say which. The
+   * baseline is generated from a dump of the finished database, so every function appears exactly
+   * once and in its final form, and there is no longer such a thing as an earlier definition to
+   * intend to replace.
+   *
+   * KEPT RATHER THAN DELETED WITH THE CHECK. The hazard has not gone away: the chain is still
+   * replayed in filename order with no ledger, so a new migration that redeclares a function still
+   * wins silently on every boot. This is where "yes, I meant to replace that" gets written down
+   * when that day comes -- and an empty map means the check now fails on the FIRST redeclaration
+   * rather than on the twelfth.
+   */
+  const INTENDED_REDECLARATIONS = {};
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
     .filter((e) => e.isFile() && /^\d+_.*\.sql$/.test(e.name))
@@ -1036,8 +936,24 @@ function edgeFunctionNames() {
   }
 
   if (!checked) {
-    fail('no migration appears to add a `gateways` column, which cannot be true -- 0008, 0024, '
-      + '0025 and 0035 all do.\n      This check examined nothing.');
+    // ZERO IS THE CORRECT ANSWER SINCE THE SQUASH, and it did not use to be. This branch used to
+    // fail outright, on the argument that 0008, 0024, 0025 and 0035 all add a column so finding
+    // none meant the regex had broken. Those four are archived now and the baseline declares every
+    // gateways column inline in its CREATE TABLE, so there is no ALTER left to find.
+    //
+    // The self-guard is still needed -- a check that silently examines nothing is worse than no
+    // check -- so it asserts the other half instead: that the rebuild helper this rule is ABOUT
+    // still exists. If `ensure_gateway_status_view()` is ever renamed, REBUILDS stops matching and
+    // this rule would go quiet on the first migration that needs it, which is the failure the
+    // original guard was written to prevent.
+    const baseline = statements(read('supabase/migrations/0001_baseline_schema.sql'));
+    if (!/FUNCTION public\.ensure_gateway_status_view\(\)/i.test(baseline)) {
+      fail('public.ensure_gateway_status_view() is not declared in the baseline, so this rule '
+        + 'cannot recognise a rebuild.\n      Rename in REBUILDS above to match, or this check '
+        + 'will pass every migration that forgets one.');
+    } else {
+      pass('no migration adds a gateways column; the baseline declares them inline');
+    }
   } else if (offenders.length) {
     fail(
       `${offenders.length} migration(s) add a public.gateways column that NOTHING after them `
@@ -1190,7 +1106,7 @@ function edgeFunctionNames() {
   };
   for (const d of [
     'frontend/src', 'supabase/functions', 'ingestion', 'i3x', 'timescaledb',
-    'scripts', 'grafana', 'node-red', 'tests', 'docs',
+    'scripts', 'grafana', 'node-red', 'test-harness', 'docs',
   ]) {
     walkInto(d);
   }
@@ -1294,7 +1210,7 @@ function edgeFunctionNames() {
 // and wrongly, what a client is allowed to do.
 // -------------------------------------------------------------------------------------------------
 {
-  const acl = read('mosquitto.acl');
+  const acl = read('mosquitto/mosquitto.acl');
   const ui = read('frontend/src/utils/serviceIdentities.js');
 
   // A `user <name>` line owns every `topic` line until the next `user` or the end of the file.
@@ -1465,17 +1381,25 @@ function edgeFunctionNames() {
 // it is `is_shadow`, and 0067 refuses to let it be archived away.
 // -------------------------------------------------------------------------------------------------
 {
-  // 0060 and 0067 create the Playback gateway; every other migration must seed no asset.
-  const PLAYBACK = ['0060', '0067'];
+  // THE EXEMPTION IS THE GATEWAY'S ID, NOT THE FILE IT LIVES IN, and the squash is what forced
+  // that. It used to be `['0060', '0067']` -- the two migrations that create the Playback gateway
+  // -- but those folded into 0002, and exempting 0002 by name would exempt the whole seed file:
+  // every asset insert anyone ever added to it would pass unread, which is the opposite of what
+  // this guard is for. The pinned UUID identifies the one row that is allowed, wherever it moves
+  // to next, and every other asset insert in the same file is still an offender.
+  const PLAYBACK_ID = '16000000-0000-4000-8000-000000000001';
   const offenders = [];
 
   for (const file of readdirSync(join(REPO, 'supabase/migrations')).filter((f) => f.endsWith('.sql'))) {
-    if (PLAYBACK.includes(file.slice(0, 4))) continue;
     const text = read(join('supabase/migrations', file));
     // TOP-LEVEL INSERTs ONLY, anchored to the start of a line. A function body that inserts on
     // demand is not a seed -- `relocate_devices()` and the enrolment path both insert, and what
     // they insert is what a user asked for. Those sit indented inside their definitions.
     for (const m of text.matchAll(/^INSERT INTO (?:public[.])?(cells|gateways|devices)(?![A-Za-z_])/gm)) {
+      // The statement, not the file: an INSERT runs to its terminating semicolon, and the
+      // exemption applies only if THIS one names the Playback gateway.
+      const stmt = text.slice(m.index, text.indexOf(';', m.index) + 1);
+      if (m[1] === 'gateways' && stmt.includes(PLAYBACK_ID)) continue;
       offenders.push(`${file} seeds public.${m[1]}`);
     }
   }
@@ -1592,7 +1516,7 @@ function edgeFunctionNames() {
 //
 // FOUND BY USERS, TWICE OVER: the Grafana login button read "Sign in with Factory+ SSO" and the
 // OAuth consent screen read "Authorize Factory+ Grafana ... access to your Factory+ identity",
-// long after the application was renamed. Migration 0014 renamed the SEMANTIC IDENTIFIERS
+// long after the application was renamed. archived migration 0014 renamed the SEMANTIC IDENTIFIERS
 // (factoryplus.local -> acs-cymru.local) and nothing renamed the prose, so the rename was half
 // done and no check could tell.
 //
@@ -1674,7 +1598,7 @@ function edgeFunctionNames() {
     fail(
       'Factory+ is a framework this stack IMPLEMENTS, and every reference to it as one is correct --\n' +
         '      the Directory adapter, the metric-name format, the Sparkplug payload marker. What must not\n' +
-        '      survive is the product naming ITSELF Factory+ in text a user reads. Migration 0014 renamed\n' +
+        '      survive is the product naming ITSELF Factory+ in text a user reads. archived migration 0014 renamed\n' +
         '      the semantic identifiers and left the prose behind; users reported the result twice.'
     );
   } else {
@@ -1703,8 +1627,19 @@ function edgeFunctionNames() {
 // the file would argue against a query nobody would have written.
 // -------------------------------------------------------------------------------------------------
 {
-  const MIGRATION = 'supabase/migrations/0030_platform_alerts_retention.sql';
-  const SETTING = 'supabase/migrations/0032_alert_retention_setting.sql';
+  // BOTH PATHS MOVED IN THE SQUASH, and they moved in different directions, which is the whole
+  // shape of what a squash does to a citation.
+  //
+  // The seeded value is DML, so it folded into 0002 and is still executed on every boot -- it
+  // remains the single source this rule checks everything else against.
+  //
+  // The counter-example is a COMMENT in 0030's header, and a header is the one thing a generated
+  // baseline cannot carry: pg_dump keeps the comments inside a function body and knows nothing
+  // about the prose above it. It is cited here because it is still the clearest statement of the
+  // predicate that must not be used, and it still says so under `archive/` -- which is what the
+  // archive is for. Nothing there is executed; this reads it as documentation.
+  const MIGRATION = 'supabase/migrations/archive/0030_platform_alerts_retention.sql';
+  const SETTING = 'supabase/migrations/0002_seed_data.sql';
 
   // THE SOURCE OF TRUTH MOVED, AND THIS RULE HAD TO MOVE WITH IT. It used to read the default
   // argument of prune_platform_alerts() in 0030. 0032 makes that default NULL and reads the window
@@ -1794,8 +1729,10 @@ function edgeFunctionNames() {
 {
   const py = read('ingestion/ingestion.py');
   const block = py.match(/GATEWAY_HEALTH_METRICS\s*=\s*\{([\s\S]*?)\n\}/);
-  const sql = read('supabase/migrations/0047_ingestion_write_rpcs.sql');
-  const fn = sql.match(/CREATE OR REPLACE FUNCTION public\.ingest_record_gateway_health[\s\S]*?\$fn\$;/);
+  // In 0001 since the squash, with `$$` for the body tag rather than the `$fn$` 0047 wrote: the
+  // baseline is generated from a dump, and pg_dump chooses its own delimiter.
+  const sql = read('supabase/migrations/0001_baseline_schema.sql');
+  const fn = sql.match(/CREATE OR REPLACE FUNCTION public\.ingest_record_gateway_health[\s\S]*?\$\$;/);
 
   if (!block) {
     fail('check-docs-drift: could not find GATEWAY_HEALTH_METRICS in ingestion/ingestion.py.');

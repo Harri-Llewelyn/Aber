@@ -12,7 +12,7 @@
 # WHY THE REPO-SHAPED LAYOUT. Both AAS suites resolve their fixtures relative to
 # `Path(__file__).resolve().parents[3]`:
 #
-#   tests/schemas/AAS_V3_0_JSON_Schema.json                  the vendored IDTA metamodel schema
+#   test-harness/schemas/AAS_V3_0_JSON_Schema.json                  the vendored IDTA metamodel schema
 #   supabase/functions/_shared/aas/sparkplugToXsd.ts         \  the two duplicated mappers, and
 #   frontend/src/utils/sparkplugDatatype.js                  /  the drift check between them
 #   supabase/functions/_shared/aas/model3dContentType.ts     \  likewise for the 3D model
@@ -30,7 +30,7 @@
 # aas-export. They are copied from there now; their parity contract with the frontend is unchanged.
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT:
-#   docker build -f tests/Dockerfile -t ghcr.io/harri-llewelyn/acs-cymru/test-runner:<tag> .
+#   docker build -f test-harness/Dockerfile -t ghcr.io/harri-llewelyn/acs-cymru/test-runner:<tag> .
 #
 # The default below is a convenience for a bare `docker build` and nothing more -- both CI and
 # release.yml pass INGESTION_IMAGE explicitly, because at release time the base is the ingestion
@@ -52,10 +52,10 @@ RUN pip install --no-cache-dir jsonschema==4.23.0
 
 # parents[3] of /app/supabase/functions/aas-export/test_aas_export.py is /app -- so these paths, and
 # only these paths, make the suites' lookups resolve.
-COPY tests/schemas /app/tests/schemas
+COPY test-harness/schemas /app/test-harness/schemas
 # The suites' SUBJECT, provisioned at runtime rather than seeded. Both import it, so
 # it travels with them or every live check skips itself for want of a device.
-COPY tests/aas_fixture.py /app/tests/aas_fixture.py
+COPY test-harness/aas_fixture.py /app/test-harness/aas_fixture.py
 # test_aas_api.py asserts that every route the service advertises is documented, so the spec is a
 # fixture of the suite rather than only a deliverable.
 COPY docs/openapi.yaml /app/docs/openapi.yaml

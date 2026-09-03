@@ -79,10 +79,10 @@ first, so it takes `0011` and the vocabulary work starts at `0012`.
   already running, independently of any major bump.
 - **`pgjwt` was expected to be a hard blocker. It is not** — see Phase 0. The changelog says the
   PG17 bundle drops it; the image still ships it and it works.
-  [0006_nodered_oidc_auth.sql:207](../supabase/migrations/0006_nodered_oidc_auth.sql#L207) signs the
+  [0006_nodered_oidc_auth.sql:207](../supabase/migrations/archive/0006_nodered_oidc_auth.sql#L207) signs the
   quarantine-webhook token with `extensions.sign()` and
-  [0006:263](../supabase/migrations/0006_nodered_oidc_auth.sql#L263) raises if it is absent, so this
-  *would* have stopped `supabase-db-init` at migration 0006. It does not. Phase 1 survives as
+  [0006:263](../supabase/migrations/archive/0006_nodered_oidc_auth.sql#L263) raises if it is absent, so this
+  *would* have stopped `supabase-db-init` at archived migration 0006. It does not. Phase 1 survives as
   hardening against a deprecation Supabase has announced and will eventually act on.
 - **The PG17 bundle also drops `timescaledb`, which costs nothing here.** The historian is a
   separate container. The split pays off.
@@ -124,7 +124,7 @@ probe containers, using the command documented at [ci.yml:715](../.github/workfl
 | `storage` stub tables | [0001 §6](../supabase/migrations/0001_baseline_schema.sql) relied on `storage.objects` existing at migration time | PG15 shipped `buckets`/`objects`/`migrations`; **17.6 ships the schema EMPTY** | ❌ **changed** |
 | Grants on `storage.*` | assumed present | PG15 stub granted ALL to anon/authenticated/service_role; **17.6 grants nothing** | ❌ **changed** |
 | `pg_cron`, `pg_net`, `pgcrypto`, `postgres_fdw`, `supabase_vault` | required by [0001:66-69](../supabase/migrations/0001_baseline_schema.sql#L66) | all present; `pg_cron`/`pg_net` in `shared_preload_libraries` | ✅ |
-| `vault.create_secret` / `update_secret` / `decrypted_secrets` | used by [0002:2205](../supabase/migrations/0002_seed_data.sql#L2205), [0006:134](../supabase/migrations/0006_nodered_oidc_auth.sql#L134) | signatures unchanged, view present | ✅ |
+| `vault.create_secret` / `update_secret` / `decrypted_secrets` | used by [0002:2205](../supabase/migrations/0002_seed_data.sql#L2205), [0006:134](../supabase/migrations/archive/0006_nodered_oidc_auth.sql#L134) | signatures unchanged, view present | ✅ |
 | `/etc/postgresql/postgresql.conf` ships | [supabase-db-statefulset.yaml:100](../deploy/helm/acs-cymru/templates/data/supabase-db-statefulset.yaml#L100) | present, plus a `postgresql.conf.d/` | ✅ |
 | No `aws` CLI in the image | [k8s README:665](../deploy/k8s/README.md#L665) | still absent; `pg_dump` is 17.6 | ✅ |
 | Locale provider | unstated | PG15 **libc** → PG17 **ICU**, both `en_US.UTF-8` | ⚠ note |
@@ -200,12 +200,12 @@ the reprieve ends.
 
 Replace `extensions.sign()` with a local HS256 signer. The idiom already exists in the tree:
 [0002:2292](../supabase/migrations/0002_seed_data.sql#L2292) and
-[0006:76](../supabase/migrations/0006_nodered_oidc_auth.sql#L76) already build base64url digests via
+[0006:76](../supabase/migrations/archive/0006_nodered_oidc_auth.sql#L76) already build base64url digests via
 `extensions.digest`, so `pgcrypto` is present and the encoding dance is already written. The signer
 is `extensions.hmac(...)` plus the same `rtrim(translate(encode(...), '+/', '-_'), '=')`.
 
 - `0011` defines the signer and redefines `dispatch_device_quarantine_webhook()` to call it.
-- Rewrite the self-check at [0006:263](../supabase/migrations/0006_nodered_oidc_auth.sql#L263) to
+- Rewrite the self-check at [0006:263](../supabase/migrations/archive/0006_nodered_oidc_auth.sql#L263) to
   assert the *new* function. The guard's purpose is unchanged: an unsigned webhook fails silently
   hours later, at a quarantined device, which is the worst possible place to discover it.
 - Run `node scripts/sync-helm-chart-files.mjs`.

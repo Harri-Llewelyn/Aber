@@ -11,7 +11,7 @@
 // WHAT THIS SIGNS, AND WHY IT IS NOT A BACK DOOR. The same HS256 secret the whole stack shares, so
 // PostgREST validates it exactly as it validates a GoTrue token -- there is no second trust path.
 // The subject is `b0000000-0000-4000-8000-000000000001`, the read-only principal seeded by
-// migration 0034, which holds `Operator` and nothing else: it reads every relation the i3X address
+// archived migration 0034, which holds `Operator` and nothing else: it reads every relation the i3X address
 // space is assembled from and writes nothing, and it cannot read `digital_thread`.
 //
 // GOTRUE_JWT_EXP DOES NOT APPLY. It governs what GoTrue ISSUES; a JWT signed here is validated on
@@ -49,7 +49,7 @@ import { dirname, join, resolve } from 'node:path';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** The principal seeded by migration 0034, and the default when --principal is not given. */
+/** The principal seeded by archived migration 0034, and the default when --principal is not given. */
 const DEFAULT_SUBJECT = 'b0000000-0000-4000-8000-000000000001';
 
 /**

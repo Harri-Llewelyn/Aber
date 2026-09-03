@@ -148,7 +148,7 @@ class TestRecordDeclaredMetrics(unittest.TestCase):
         The parameters of each ingest_record_declared_metrics() call.
 
         Reads the RPC rather than a table UPDATE because the write goes through a gate now
-        (Machine Identities in supabase/README.md, migration 0047). The property under test is unchanged -- one write per
+        (Machine Identities in supabase/README.md, archived migration 0047). The property under test is unchanged -- one write per
         real change to the declared set -- but it is asserted on the call the daemon now makes.
         """
         return [
@@ -514,7 +514,7 @@ class TestDeviceLivenessWatchdog(unittest.TestCase):
         """
         The ingest_mark_device_offline() calls the sweep made.
 
-        The write goes through a gate now (Machine Identities in supabase/README.md, migration 0047). The properties this
+        The write goes through a gate now (Machine Identities in supabase/README.md, archived migration 0047). The properties this
         class exists to protect are unchanged and still asserted below -- one write per quiet
         period, tracking retained on failure -- but the already-OFFLINE predicate that used to be
         a client-side `.eq("status", "ONLINE")` now lives in the gate, where a caller cannot

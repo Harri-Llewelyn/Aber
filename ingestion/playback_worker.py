@@ -364,7 +364,7 @@ def main():
     if not SUPABASE_PLAYBACK_KEY:
         logger.critical(
             "CRITICAL CONFIGURATION ERROR: SUPABASE_PLAYBACK_KEY is not set. This worker "
-            "authenticates as Service_Playback (migration 0056) and every gate it calls checks "
+            "authenticates as Service_Playback (archived migration 0056) and every gate it calls checks "
             "that the caller IS that principal, so without this key it can claim nothing and would "
             "sit polling an empty queue forever while looking healthy. Run `npm run setup`, or "
             "copy the key from .env.example for a demonstration stack."

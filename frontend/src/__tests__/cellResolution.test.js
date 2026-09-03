@@ -210,7 +210,7 @@ describe('labels and bulk resolution', () => {
 });
 
 /**
- * Staged, uncommitted relocations (Rearrange mode's deferred commit, migration 0033).
+ * Staged, uncommitted relocations (Rearrange mode's deferred commit, archived migration 0033).
  *
  * The case that actually needed a test is the FIRST one: every device on the Overview page
  * carries `location_source` merged from `device_locations`, and deviceLocationOf() prefers that

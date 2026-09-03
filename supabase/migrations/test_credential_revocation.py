@@ -3,7 +3,7 @@ Revocation reaches a virtual gateway (0063), and still cannot invent an account 
 
     python supabase/migrations/test_credential_revocation.py
 
-Requires the Supabase database (54322 by default) and migration 0063 applied.
+Requires the Supabase database (54322 by default) and archived migration 0063 applied.
 
 ---------------------------------------------------------------------------------------------
 THE REGRESSION THIS EXISTS FOR, demonstrated end to end before it was fixed: create a virtual

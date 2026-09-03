@@ -77,7 +77,7 @@ describe('ArchivesTab Component', () => {
  * `auto_delete_at` already purges on a timer, and this page has always SHOWN that date without
  * offering any way to act on it -- so an asset archived by mistake sat in the list for thirty
  * days with no control that could clear it. The row is really deleted; only the digital thread
- * survives, which migration 0006 guarantees by making audit rows immutable and independent of
+ * survives, which archived migration 0006 guarantees by making audit rows immutable and independent of
  * the entity they describe.
  */
 /**

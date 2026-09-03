@@ -204,7 +204,7 @@ export default async function handler(req: Request): Promise<Response> {
         error: "The bundle template is not available on this deployment",
         details:
           `Missing: ${missing.join(", ")}. The supabase-functions entrypoint populates these from ` +
-          "templates/physical-gateway/. No enrolment token was minted.",
+          "gateway-bundle-template/. No enrolment token was minted.",
       });
     }
 

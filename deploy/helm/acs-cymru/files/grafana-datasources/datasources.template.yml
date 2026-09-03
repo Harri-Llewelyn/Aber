@@ -65,7 +65,7 @@ datasources:
   # what the telemetry costs and nothing about `digital_thread` -- the table this platform promises
   # never to prune, and therefore the one whose growth actually needs watching. The postgres_fdw
   # link runs Supabase -> TimescaleDB and nothing runs back, so `public.storage_footprint` (created
-  # by migration 0027, over `timescaledb/storage.sql`) can only live on this side. That is what
+  # by archived migration 0027, over `timescaledb/storage.sql`) can only live on this side. That is what
   # makes a second datasource necessary rather than merely convenient.
   #
   # IT CONNECTS AS `grafana_reader`, WHICH MAY SELECT THAT ONE VIEW.
@@ -73,7 +73,7 @@ datasources:
   # Grafana used to hold the `postgres` superuser credential for the HISTORIAN and that was removed
   # deliberately: a service fronted by browser SSO must not carry the key that owns the database.
   # Repeating it here would be strictly worse, because the Supabase superuser bypasses RLS and can
-  # rewrite the audit trail. Migration 0027 creates the role, grants SELECT on the view, and then
+  # rewrite the audit trail. archived migration 0027 creates the role, grants SELECT on the view, and then
   # re-revokes everything else in the schema on every boot -- so the grant is reconciled rather
   # than merely initial.
   #

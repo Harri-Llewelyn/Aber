@@ -5,7 +5,7 @@ import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 
 /**
- * The Devices tab's Schema Conformance control (migration 0050).
+ * The Devices tab's Schema Conformance control (archived migration 0050).
  *
  * THIS IS THE ONE FIELD ON THE FORM THAT CAN DESTROY DATA. Setting it to `enforce` makes the
  * ingestion daemon drop a metric whose value contradicts the device's bound schema, and telemetry

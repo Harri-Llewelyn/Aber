@@ -5,7 +5,7 @@ import {
 } from '../utils/deviceTags'
 
 /**
- * The finding migration 0012 exists to make visible.
+ * The finding archived migration 0012 exists to make visible.
  *
  * The motivating bug is real and is quoted in the migration header: the Node-RED demo flow set
  * `Controller/EXECUTION` to `RUNNING`, which MTConnect does not define. It was a valid string in a

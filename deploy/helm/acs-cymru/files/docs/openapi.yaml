@@ -871,7 +871,7 @@ paths:
         string. Changing a metric is deprecate-and-supersede, never a rename.
 
         `name` must match `^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$` — the Factory+ format, enforced
-        by `metric_catalog_name_format` (migration 0007). `/` separates folders; only
+        by `metric_catalog_name_format` (archived migration 0007). `/` separates folders; only
         alphanumerics and `_` are legal inside a segment. **`.` is not a legal character.**
 
         The group is derived from the first segment and its spelling is checked against
@@ -3044,7 +3044,7 @@ components:
           description: >-
             The literal Sparkplug B metric name. IMMUTABLE once created — a device is already
             configured to publish this exact string. Must match
-            ^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$ (migration 0007).
+            ^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$ (archived migration 0007).
         metric_group:
           type: string
           nullable: true

@@ -89,7 +89,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
    * This page is mostly read: it is the one people leave open on a wall display and glance at. A
    * drag is a one-gesture, no-confirmation write to a device's location, so a slipped mouse
    * silently relocated an asset — and every correction is a second row in `digital_thread`, which
-   * migration 0006 makes immutable. Those rows are not the problem and must not be suppressed: the
+   * archived migration 0006 makes immutable. Those rows are not the problem and must not be suppressed: the
    * move genuinely happened, and an audit trail that hides operator mistakes is worth less than one
    * that does not. The fix is to stop the accidental gesture, not to hide its record.
    *

@@ -81,7 +81,7 @@ under any device's id. Three consequences, in ascending severity:
    which silently stops its real telemetry being stored. **A denial of service against a production
    asset, triggered by one message.**
 
-[`mosquitto.acl`](../mosquitto.acl) closes the same hole at the broker tier. **Both are needed**:
+[`mosquitto.acl`](../mosquitto/mosquitto.acl) closes the same hole at the broker tier. **Both are needed**:
 the broker cannot know which device belongs to which gateway (that lives in Supabase), and the
 daemon cannot stop a forged message being delivered to other subscribers.
 
@@ -376,7 +376,7 @@ already enumerate the fleet through the directory — but it is why nobody below
 with no WebSocket listener, and the recording principal's password is a server-side secret a bundle
 would publish. So the **Capture** page is a page in front of new behaviour in the ingestion daemon,
 and [`capture_worker.py`](capture_worker.py) is that behaviour:
-[`0055`](../supabase/migrations/0055_capture_orchestration.sql) holds the tables and every gate.
+[`0055`](../supabase/migrations/archive/0055_capture_orchestration.sql) holds the tables and every gate.
 
 **The daemon is the host, and there is no second principal.** It already holds `spBv1.0/#` and the
 credential, so a capture costs no new broker connection — `observe()` appends to a buffer when a job
@@ -470,7 +470,7 @@ that modal is the only thing standing there.
 ### Playback from the dashboard
 
 [`playback_worker.py`](playback_worker.py) is a **separate process**, with
-[`0056`](../supabase/migrations/0056_playback_orchestration.sql) behind it. It runs from the
+[`0056`](../supabase/migrations/archive/0056_playback_orchestration.sql) behind it. It runs from the
 ingestion image under a different command: what playback needs that is new is a separate process
 holding a separate Supabase principal and its own broker credentials, none of which an image
 boundary provides, and it publishes through `capture.py`'s `plan_playback()`, which is already in
@@ -520,7 +520,7 @@ mint leaves — and subtracts revocation. Liveness is not the predicate either: 
 legitimately `OFFLINE`, because nothing publishes as it until a playback runs.
 
 **The worker reports what it holds, on a heartbeat**
-([`0057`](../supabase/migrations/0057_playback_worker_reports_its_reach.sql)), because the database
+([`0057`](../supabase/migrations/archive/0057_playback_worker_reports_its_reach.sql)), because the database
 knows whether the *platform* issued a credential and cannot know whether the *worker* was given the
 password — minting shows it once and an operator pastes it into the worker's environment. The
 timestamp is the part that earns its place: an empty list with a recent report means the worker is
@@ -531,7 +531,7 @@ username and is on the Gateways page already.
 
 ### The Playback gateway, and its shadow devices
 
-[`0060`](../supabase/migrations/0060_playback_gateway_and_shadow_devices.sql) seeds a dedicated
+[`0060`](../supabase/migrations/archive/0060_playback_gateway_and_shadow_devices.sql) seeds a dedicated
 `Playback` gateway (`gwy160000000000400080000`, `is_shadow`), and a BEFORE INSERT trigger on
 `playback_jobs` refuses any other target.
 
@@ -587,7 +587,7 @@ question a reader has about a number here is whether it **happened** — and for
 answer is yes, on the real device, on the day the capture was taken.
 
 **The gateway offers no Archive, no Rebirth and no Edit.** Archiving the last one is refused by
-[`0067`](../supabase/migrations/0067_the_playback_gateway_cannot_be_archived_away.sql) in the
+[`0067`](../supabase/migrations/archive/0067_the_playback_gateway_cannot_be_archived_away.sql) in the
 database, because `ensure_shadow_devices()` finds the gateway *by flag* and the failure would
 otherwise surface weeks later at job time. A rebirth is addressed to a node nobody is listening as —
 the playback worker only publishes and holds no subscription. And **editing is withdrawn because the
@@ -793,7 +793,7 @@ A device that stops publishing writes nothing and emits no DDEATH, so before thi
 
 **Why this is a writer when gateway staleness deliberately is not.** `gateways.last_heartbeat` is
 stamped on every heartbeat, so staleness is derivable at read time and `public.gateway_status` is
-strictly better than a cron writer — migration 0024's header sets out why. A device has **no
+strictly better than a cron writer — archived migration 0024's header sets out why. A device has **no
 last-seen column** to derive from, and adding one would mean an UPDATE per DDATA message, which is
 an audit row per message. So the transition itself is what gets written, and only the transition.
 
@@ -891,7 +891,7 @@ Prometheus, the log line is for whoever is reading `docker logs` at 3am with no 
 | `acs_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
 | `acs_ingestion_write_failures_total` | — | A historian write raised. That telemetry is gone. |
 | `acs_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
-| `acs_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (migration 0026). The telemetry was still written. |
+| `acs_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (archived migration 0026). The telemetry was still written. |
 | `acs_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
 | `acs_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
 | `acs_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by `MAX_ENTITIES_PER_CACHE`. |
@@ -1119,7 +1119,7 @@ would pass regardless of whether anything was exercised.
 
 Its cleanup uses a **direct owner connection** to Supabase Postgres for audit rows, because
 `public.digital_thread` is genuinely append-only — the trigger added in
-[`0003`](../supabase/migrations/0003_audit_immutability_and_quarantine_rpc.sql) refuses `DELETE`
+[`0003`](../supabase/migrations/archive/0003_audit_immutability_and_quarantine_rpc.sql) refuses `DELETE`
 for `service_role` too. Clearing audit rows is meant to require owner authority.
 
 **That connection is proved at startup, not discovered at cleanup.** It is a second connection with
@@ -1139,4 +1139,4 @@ still runs, because its assertions are worth reporting either way.
 
 - [`../supabase/README.md`](../supabase/README.md) — schema, RLS, triggers, edge functions
 - [`../tutorial/README.md`](../tutorial/README.md) — building a gateway, a device and the flow that publishes as it
-- [`../mosquitto.acl`](../mosquitto.acl) — per-gateway topic confinement
+- [`../mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) — per-gateway topic confinement

@@ -1,5 +1,5 @@
 """
-Tests for public.relocate_devices() (migration 0033).
+Tests for public.relocate_devices() (archived migration 0033).
 
 WHAT THIS SUITE IS ACTUALLY DEFENDING. "An admin can move devices" is the easy half and almost
 none of these tests are about it:
@@ -86,7 +86,7 @@ class RelocateDevices(unittest.TestCase):
                 cur.execute("SELECT to_regprocedure('public.relocate_devices(jsonb)');")
                 if cur.fetchone()[0] is None:
                     raise RuntimeError(
-                        "public.relocate_devices(jsonb) does not exist -- run migration 0033 first."
+                        "public.relocate_devices(jsonb) does not exist -- run archived migration 0033 first."
                     )
         finally:
             conn.close()

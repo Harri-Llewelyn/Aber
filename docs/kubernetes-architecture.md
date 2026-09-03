@@ -147,7 +147,7 @@ by design, and it is already readable in the shipped bundle.
 
 ### 2.2 Edge runtime: build an image instead of mounting the repo
 
-`supabase-functions` bind-mounts `./supabase/functions` and `./templates/physical-gateway`, then uses a
+`supabase-functions` bind-mounts `./supabase/functions` and `./gateway-bundle-template`, then uses a
 shell entrypoint to read the bundle templates into `GW_BUNDLE_*` because an edge-runtime user worker
 has no filesystem access to the mount. There is no repository on a cluster node to mount, and "which
 revision of `aas-export` is running" must be a property of the deployed artefact if a rollback is
@@ -156,7 +156,7 @@ to roll the functions back.
 `supabase/functions/Dockerfile` now bakes both, with the same entrypoint export moved into the
 image so the Deployment needs no command override.
 
-- **The build context is the repository root**, not `supabase/functions/` — `templates/physical-gateway`
+- **The build context is the repository root**, not `supabase/functions/` — `gateway-bundle-template`
   lives outside this directory and has to be reachable. `docker build -f supabase/functions/Dockerfile .`
 - **`.dockerignore` added at the root and in `frontend/`.** The root context now includes the whole
   repository, so this is no longer optional; `frontend/.dockerignore` excludes `node_modules`,

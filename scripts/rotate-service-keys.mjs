@@ -88,7 +88,7 @@ const days = daysArg >= 0 ? Number(args[daysArg + 1]) : SERVICE_KEY_DEFAULT_DAYS
 
 if (!Number.isFinite(days) || days <= 0 || days > SERVICE_KEY_MAX_DAYS) {
   console.error(`❌ --days must be between 1 and ${SERVICE_KEY_MAX_DAYS} (got ${args[daysArg + 1] ?? days}).`);
-  console.error(`   ${SERVICE_KEY_MAX_DAYS} is service_token_max_days() in migration 0043. A longer key`);
+  console.error(`   ${SERVICE_KEY_MAX_DAYS} is service_token_max_days() in archived migration 0043. A longer key`);
   console.error('   could not be recorded in the credential inventory and could not be withdrawn.');
   process.exit(1);
 }

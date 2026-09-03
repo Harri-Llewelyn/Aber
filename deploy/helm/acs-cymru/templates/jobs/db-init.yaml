@@ -122,7 +122,7 @@ spec:
             - name: NODERED_OAUTH_CALLBACK_URL
               value: {{ printf "%s/auth/strategy/callback" (include "acs-cymru.noderedUrl" .) | quote }}
             {{- /*
-              Creates the Supabase-side `grafana_reader` in migration 0027 -- the role Grafana
+              Creates the Supabase-side `grafana_reader` in archived migration 0027 -- the role Grafana
               connects as to read public.storage_footprint. THE SAME CREDENTIAL as the
               historian's reader of the same name, deliberately: it is the same tool, and a
               second secret to rotate for it is a second secret to forget. Privileges are

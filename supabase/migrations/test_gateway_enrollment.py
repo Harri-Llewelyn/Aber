@@ -22,7 +22,6 @@ Run against a stack with the migrations applied:
 """
 import os
 import unittest
-from pathlib import Path
 
 import psycopg2
 from psycopg2 import errors as pg_errors
@@ -33,7 +32,6 @@ DB_NAME = os.getenv("SUPABASE_DB_NAME", os.getenv("DB_NAME", "postgres"))
 DB_USER = os.getenv("SUPABASE_DB_USER", os.getenv("DB_USER", "postgres"))
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgres"))
 
-MIGRATION = Path(__file__).with_name("0025_physical_gateway_enrollment.sql")
 
 # Pinned so a failed run leaves rows that the next setUpClass reclaims rather than accumulating.
 # The 2f/2e prefixes continue the convention in scripts/provision-gateways.mjs and cannot collide
@@ -651,28 +649,32 @@ class TestGatewayBackupPolicies(GatewayEnrollmentBase):
         self.assertFalse(row[0], "the gateway-backups bucket is PUBLIC; it must be private")
 
 
-class TestMigrationIdempotency(GatewayEnrollmentBase):
-    def test_migration_reapplies_cleanly(self):
-        """
-        supabase-db-init replays EVERY migration on EVERY boot, against a persistent volume. A
-        migration that is not re-runnable therefore fails on the second `docker compose up` and not
-        on the first -- and takes the whole stack's initialisation with it, because db-init runs
-        with ON_ERROR_STOP.
-
-        Applied twice here rather than once: the first run may be a no-op against an already
-        migrated database, so only the second proves re-entrancy from a known-applied state.
-        """
-        sql = MIGRATION.read_text(encoding="utf-8")
-        for attempt in (1, 2):
-            with self.subTest(attempt=attempt):
-                self.cur.execute(sql)
-        self.conn.rollback()
-
-    def test_self_check_guards_are_present(self):
-        """The migration's own DO-block assertions must not be quietly removed."""
-        sql = MIGRATION.read_text(encoding="utf-8")
-        for needle in ("0025 self-check", "ensure_gateway_status_view", "ENABLE ROW LEVEL SECURITY"):
-            self.assertIn(needle, sql)
+# ---------------------------------------------------------------------------------------------
+# TestMigrationIdempotency was HERE, and its subject no longer exists.
+# ---------------------------------------------------------------------------------------------
+# It read 0025_physical_gateway_enrollment.sql, executed it twice to prove re-entrancy, and
+# asserted its self-check guards had not been quietly deleted. The squash folded 0025 into
+# 0001_baseline_schema.sql, so there is no per-migration file left to read.
+#
+# THE PROPERTY IS NOT DROPPED, IT IS ENFORCED MORE BROADLY NOW, and by things that could not have
+# been written as a unit test here:
+#
+#   scripts/check-migration-idempotency.mjs   replays the WHOLE chain against a live database and
+#                                             asserts the schema digest is unchanged, that no
+#                                             'migration' audit rows were added, and that no
+#                                             operator rows were deleted. That covers every file,
+#                                             not the one this suite happened to name.
+#
+#   scripts/verify-schema-equivalence.mjs     builds a database from each of two chains and
+#                                             asserts they arrive at the same schema and the same
+#                                             seed rows.
+#
+# Re-pointing the old test at 0001 was the obvious move and does not work: psycopg executes SQL,
+# and the baseline opens with psql meta-commands (`\if :{?bi_reader_password}`) that only psql
+# understands. A test that stripped them would be running something other than what db-init runs.
+#
+# The other 30 tests in this file are untouched: they exercise enrolment against a live database,
+# which is where the behaviour that matters actually lives.
 
 
 if __name__ == "__main__":

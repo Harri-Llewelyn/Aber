@@ -3,7 +3,7 @@ import { api } from '../../api'
 import { IconSettings, IconX } from '../common/Icons'
 
 /**
- * The runtime configuration plane (migration 0031), as a page.
+ * The runtime configuration plane (archived migration 0031), as a page.
  *
  * WHAT THIS PAGE DELIBERATELY CANNOT DO: add a setting, or delete one. The key set is closed in
  * the database -- RLS grants UPDATE and nothing else -- so there is no "New setting" button here
@@ -213,7 +213,7 @@ export function SettingsTab({ showToast }) {
   if (loading) {
     return (
       <div className="page-layout"><div className="page-main">
-        <div className="card" style={{ padding: '16px' }}>
+        <div className="card" style={{ padding: '12px var(--inset)' }}>
           <div className="loading-wrap"><div className="spinner" /> Loading settings…</div>
         </div>
       </div></div>

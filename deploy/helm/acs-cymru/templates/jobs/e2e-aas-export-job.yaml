@@ -8,7 +8,7 @@
 
 ITS SUBJECT IS PROVISIONED BY THE SUITE, not seeded and not produced by another Job. It creates a
 gateway, a device, a schema, a nameplate and its birth parameters at pinned ids through
-tests/aas_fixture.py, asserts against the document the exporter composes from them, and tears them
+test-harness/aas_fixture.py, asserts against the document the exporter composes from them, and tears them
 down -- so the live checks need no broker, no simulator publishing a DBIRTH, and no operator
 approval, and no demo data either.
 
@@ -33,7 +33,7 @@ REPORTS SUCCESS is still the failure mode to avoid here, and it is still silent 
 asserts on the absence of the skip line rather than on this Job's exit status.
 
 WHAT IT COVERS THAT NOTHING ELSE DOES:
-  * conformance against the REAL vendored IDTA schema (tests/schemas), which caught three metamodel
+  * conformance against the REAL vendored IDTA schema (test-harness/schemas), which caught three metamodel
     violations the hand-written structural tests had passed -- all of the same shape: the metamodel
     expresses "absent" by OMITTING a field, never by a placeholder;
   * the AASX container's discovery chain, every link of which is load-bearing;
@@ -121,7 +121,7 @@ spec:
           image: {{ include "acs-cymru.image" (dict "image" .Values.e2e.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.e2e.image.pullPolicy }}
           # The repo-shaped path is required: the suite resolves the IDTA schema and the four
-          # mapper files relative to parents[3] of its own location. See tests/Dockerfile.
+          # mapper files relative to parents[3] of its own location. See test-harness/Dockerfile.
           command: ["python", "supabase/functions/aas-export/test_aas_export.py"]
           env:
             - name: SUPABASE_URL

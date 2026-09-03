@@ -180,7 +180,7 @@ export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
  * Rollup resolutions a caller may ask for, and the relation each maps to.
  *
  * These are continuous aggregates in TimescaleDB (see timescaledb/aggregates.sql), exposed over
- * the FDW by migration 0010. They exist because `postgres_fdw` pushes WHERE down but not LIMIT:
+ * the FDW by archived migration 0010. They exist because `postgres_fdw` pushes WHERE down but not LIMIT:
  * a trend over a month cannot be made cheap by asking for fewer rows, only by there BEING fewer
  * rows. One hour of 1s samples is 3600 raw rows or 60 one-minute buckets.
  *
@@ -765,7 +765,7 @@ const apiMethods = {
    *
    * THROUGH THE RPC, AS THE CALLER. `create_service_principal()` (0044) is SECURITY DEFINER and
    * checks has_role() itself -- it writes to `auth.users`, which no browser-facing role can reach
-   * and which nothing else in this application writes to except migration 0034.
+   * and which nothing else in this application writes to except archived migration 0034.
    */
   createServicePrincipal: async (roleName, note) => {
     const { data, error } = await supabase.rpc('create_service_principal', {
@@ -1179,7 +1179,7 @@ const apiMethods = {
       // publishing as -- see StartPlaybackModal. Not to refuse one: a playback target is
       // legitimately OFFLINE, because nothing publishes as it until a playback runs.
       .select('id, name, sparkplug_id, sparkplug_group, is_archived, status, last_heartbeat, gateway_has_broker_credential, devices(id, name, sparkplug_id, is_archived, shadow_of)')
-      // `is_shadow`, NOT `is_simulated` (migration 0060). A simulator is marked simulated and holds
+      // `is_shadow`, NOT `is_simulated` (archived migration 0060). A simulator is marked simulated and holds
       // a credential and would pass every tier -- and Node-RED is publishing as it at the same
       // time. Two publishers share one Sparkplug `seq` counter, the daemon reads the interleaving
       // as message loss, and it asks the live node for a rebirth in the middle of the playback.
@@ -1466,7 +1466,7 @@ const apiMethods = {
      * stored row, and what the device publishes for itself.
      *
      * THE THIRD PART IS THE POINT. The AAS exporter prefers a device-published value over a stored
-     * one (migration 0011), so a form that did not show which fields the device already answers
+     * one (archived migration 0011), so a form that did not show which fields the device already answers
      * would let an operator type a serial number, save it, and never see it in the export -- with
      * nothing on screen explaining why. The join is on `semantic_id`, exactly as the exporter does
      * it, because a device may call its serial number anything.
@@ -1601,7 +1601,7 @@ const apiMethods = {
       // because the window had been spent on rows that were then discarded.
       //
       // It cannot be expressed as a PostgREST filter: "still exists" is an anti-join against three
-      // tables. `digital_thread_page()` (migration 0039) does it in one statement and returns the
+      // tables. `digital_thread_page()` (archived migration 0039) does it in one statement and returns the
       // purged COUNT alongside the page -- the count drives the control that reveals them, so
       // deriving it from the page would have made the button vanish exactly when it was needed.
       const includePurged = url.searchParams.get('include_purged') === 'true';
@@ -1758,7 +1758,7 @@ const apiMethods = {
     }
 
     if (path.startsWith('/api/v1/ashrae223-vocabulary')) {
-      // Reference data (migration 0013), generated from the open223 ontology. Ordered by the
+      // Reference data (archived migration 0013), generated from the open223 ontology. Ordered by the
       // hierarchy the panel sections on, then by label -- the panel re-sorts, but arriving grouped
       // keeps a 640-row payload cheap to render on first paint.
       const { data, error } = await supabase
@@ -1856,7 +1856,7 @@ const apiMethods = {
     }
 
     /*
-     * The runtime configuration plane (migration 0031).
+     * The runtime configuration plane (archived migration 0031).
      *
      * ORDERED BY CATEGORY THEN LABEL, so the settings page groups without sorting client-side and
      * two administrators looking at the same install see the same order. `key` is deliberately not
@@ -2069,7 +2069,7 @@ const apiMethods = {
       // THE LAST CHECK BEFORE SOMETHING PERMANENT. `metric_catalog.name` is immutable, so a
       // non-conforming name cannot be corrected -- only deprecated and superseded. The Add Metric
       // form already refuses one (SchemasTab gates its submit on isValidMetricName), and
-      // `metric_catalog_name_format` in migration 0007 refuses it at the database. This closes the
+      // `metric_catalog_name_format` in archived migration 0007 refuses it at the database. This closes the
       // gap between them: any OTHER caller of this route would otherwise reach the constraint and
       // get a raw PostgREST 400 quoting a regex, where metricNameError() states the problem in a
       // sentence naming the offending character.
@@ -2336,7 +2336,7 @@ const apiMethods = {
      * would make the form unable to undo its own mistakes.
      *
      * The row is DELETED when every field comes back empty, because "no nameplate data" is
-     * modelled as no row -- migration 0011's exporter rule is that a submodel with nothing in it
+     * modelled as no row -- archived migration 0011's exporter rule is that a submodel with nothing in it
      * is omitted, and a row of nulls would leave the device looking edited rather than untouched.
      */
     if (path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)) {
@@ -2469,6 +2469,48 @@ const apiMethods = {
       );
     }
     return data[0];
+  },
+
+  /**
+   * Which kind of thing a UUID names, and what it is called.
+   *
+   * THE SEARCH BAR'S THIRD ANSWER. Pages and cards are matched against a static index; an asset id
+   * cannot be, because the ids are the operator's data and there are thousands of them. Pasting a
+   * UUID is how somebody arrives from a Grafana alert, a Sparkplug topic, a log line or a colleague's
+   * message -- with an identifier and no idea which of four pages it belongs on.
+   *
+   * FOUR TABLES BECAUSE FOUR PAGES CAN FOCUS ONE ROW. Every table in this schema has a uuid primary
+   * key, but only `cells`, `gateways`, `devices` and `schemas` have a page that can be opened TO one
+   * -- so resolving, say, a `digital_thread` event id would produce a result with nowhere to send it.
+   *
+   * ALL FOUR ARE ASKED AT ONCE, AND A LIST COMES BACK. A sequential probe returning on the first
+   * hit would read as a deliberate precedence and is not one -- so on the vanishingly unlikely day
+   * two tables answer, the caller is handed both rows and shows both, rather than being told a
+   * confident wrong answer by whichever table happened to be asked first.
+   *
+   * A MISS AND A REFUSAL BOTH COME BACK EMPTY, DELIBERATELY. RLS returns no rows rather than an
+   * error, so "no such device" and "not a device you may see" are indistinguishable from here and
+   * the palette must not claim to know which. Guessing would tell an Operator that an id they are
+   * not cleared for does not exist -- which is a disclosure in the other direction, and wrong.
+   */
+  resolveId: async (uuid) => {
+    if (!isUuid(uuid)) return [];
+
+    // `maybeSingle` rather than `single`: a primary-key lookup that matches nothing is the EXPECTED
+    // case here (three of the four always miss), and `single` reports that as an error.
+    // The name column is named per table -- `schemas` calls it `schema_name` -- so it is a parameter
+    // rather than assumed. A select of `*` would avoid the question and hand the palette a device's
+    // whole nameplate to render a single line with.
+    const probe = (table, kind, nameColumn) =>
+      supabase.from(table).select(`id, ${nameColumn}`).eq('id', uuid).maybeSingle()
+        .then(({ data, error }) => (error || !data ? null : { kind, id: data.id, name: data[nameColumn] }));
+
+    return (await Promise.all([
+      probe('devices', 'device', 'name'),
+      probe('gateways', 'gateway', 'name'),
+      probe('cells', 'cell', 'name'),
+      probe('schemas', 'schema', 'schema_name')
+    ])).filter(Boolean);
   },
 
   delete: async (path, options = {}) => {

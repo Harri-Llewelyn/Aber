@@ -157,7 +157,7 @@ this entry was written against the wrong one once already:
 **Builds on:** the `supabase-studio` block in [`docker-compose.yml`](../docker-compose.yml) ·
 `routes.studio` in [`values.yaml`](../deploy/helm/acs-cymru/values.yaml) ·
 `GOTRUE_OAUTH_SERVER_ENABLED` · [`0002`](../supabase/migrations/0002_seed_data.sql)'s Grafana client and
-[`0006`](../supabase/migrations/0006_nodered_oidc_auth.sql)'s Node-RED client ·
+[`0006`](../supabase/migrations/archive/0006_nodered_oidc_auth.sql)'s Node-RED client ·
 [`grafana-userinfo`](../supabase/functions/grafana-userinfo/index.ts) ·
 [`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts) ·
 [`OAuthConsent.jsx`](../frontend/src/pages/OAuthConsent.jsx) ·
@@ -291,9 +291,9 @@ change.
 ## 3 · Revocable service tokens, and the mint that becomes safe once they exist
 
 **Builds on:** `create_service_principal()`
-([0044](../supabase/migrations/0044_create_service_principal.sql)) ·
+([0044](../supabase/migrations/archive/0044_create_service_principal.sql)) ·
 `record_service_token_issued()` and `service_token_max_days()`
-([0043](../supabase/migrations/0043_record_service_token_issued.sql)) ·
+([0043](../supabase/migrations/archive/0043_record_service_token_issued.sql)) ·
 [`scripts/mint-mcp-token.mjs`](../scripts/mint-mcp-token.mjs) ·
 [`scripts/rotate-service-keys.mjs`](../scripts/rotate-service-keys.mjs) ·
 [`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx) ·
@@ -306,7 +306,7 @@ down.
 
 ### The CLI step is standing in for a control, not for a missing screen
 
-Half of this is built. [`0044`](../supabase/migrations/0044_create_service_principal.sql) already lets
+Half of this is built. [`0044`](../supabase/migrations/archive/0044_create_service_principal.sql) already lets
 an Administrator create a machine identity from the page, and
 [`supabase/README.md`](../supabase/README.md#the-access-control-page-states-what-is-outstanding)
 describes it doing so. What is left on the host is minting a **token** for one.
@@ -326,7 +326,7 @@ database decides, the row is written before the secret is returned, and the secr
 
 ### A fourth revocation design, and the key it needs has been recorded all along
 
-[`0043`](../supabase/migrations/0043_record_service_token_issued.sql) surveys three ways of adding
+[`0043`](../supabase/migrations/archive/0043_record_service_token_issued.sql) surveys three ways of adding
 revocation and none works: deleting the `auth.users` row does nothing because the signature is
 validated and the subject never looked up; removing the role does nothing because the relations the
 i3X address space is assembled from are `FOR SELECT TO authenticated USING (true)`; and a
@@ -374,9 +374,9 @@ check.
 
 The broker plane is not this item, and the reason is specific rather than a boundary drawn for
 tidiness. Gateway accounts are already mintable from the dashboard
-([0041](../supabase/migrations/0041_virtual_gateway_credential.sql)) and already revoked on archive or
-delete ([0038](../supabase/migrations/0038_revoke_gateway_credentials.sql),
-[0063](../supabase/migrations/0063_virtual_gateways_get_revoked.sql)).
+([0041](../supabase/migrations/archive/0041_virtual_gateway_credential.sql)) and already revoked on archive or
+delete ([0038](../supabase/migrations/archive/0038_revoke_gateway_credentials.sql),
+[0063](../supabase/migrations/archive/0063_virtual_gateways_get_revoked.sql)).
 
 **The five platform principals cannot be given the same controls, and a first attempt would look
 like it worked.** `factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor`, the validator
@@ -577,7 +577,7 @@ claims to enable, and the group-object-ID to role table. It lives in `docs/`, wh
 
 **Builds on:** GoTrue v2.189.0's factor API · `has_role()` and the `aal` claim ·
 [`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx) · the immutable audit in
-[`0003_audit_immutability_and_quarantine_rpc.sql`](../supabase/migrations/0003_audit_immutability_and_quarantine_rpc.sql)
+[`0003_audit_immutability_and_quarantine_rpc.sql`](../supabase/migrations/archive/0003_audit_immutability_and_quarantine_rpc.sql)
 
 TOTP second factors, required of the roles that can change the platform and optional for everyone
 else. Any authenticator that implements TOTP works — Microsoft Authenticator, Google Authenticator,
@@ -642,7 +642,7 @@ makes a lost handset an inconvenience, where a single-device authenticator makes
 ### What this must not touch
 
 Machine identities have no phone.
-[`0048_machine_principals_are_not_users.sql`](../supabase/migrations/0048_machine_principals_are_not_users.sql)
+[`0048_machine_principals_are_not_users.sql`](../supabase/migrations/archive/0048_machine_principals_are_not_users.sql)
 already draws that line, and every `aal2` predicate has to respect it: the ingestion writer, the MCP
 read-only principal, gateway credentials and the Grafana and Node-RED userinfo paths authenticate
 without a browser and cannot answer a challenge. A policy that demands `aal2` on a table a service
@@ -715,7 +715,7 @@ both databases — and that is the cost to weigh, not the button.
 
 `capture.py record` opens an MQTT subscription and a browser cannot, so the Capture page is *"a page
 in front of new behaviour in the ingestion daemon"* with the tables and every gate in
-[`0055`](../supabase/migrations/0055_capture_orchestration.sql). This is the same problem with a
+[`0055`](../supabase/migrations/archive/0055_capture_orchestration.sql). This is the same problem with a
 different capability, and it should be the same answer: `backup_jobs` for the act and `backups` for
 the artefact — 0055's own split, because *"a job and an artefact are different things"* — an
 Administrator-only RPC, a worker in a service that can do the work, and a page that states what
@@ -769,12 +769,12 @@ than offer it.
 
 ## 7 · Machine principals with their own authority, instead of borrowing a person's role
 
-**Builds on:** `is_machine_principal()` ([`0048`](../supabase/migrations/0048_machine_principals_are_not_users.sql),
-the predicate is [`0042`](../supabase/migrations/0042_list_service_principals.sql)'s) ·
-the MCP reader ([`0034`](../supabase/migrations/0034_mcp_read_only_principal.sql)) ·
-`Service_Ingestor` ([`0046`](../supabase/migrations/0046_service_ingestor_principal.sql)) ·
-`Service_Playback` ([`0060`](../supabase/migrations/0060_playback_gateway_and_shadow_devices.sql)) ·
-`has_role()` and its 58 call sites · the audit lanes ([`0070`](../supabase/migrations/0070_audit_domain_and_the_acts_nothing_recorded.sql)) ·
+**Builds on:** `is_machine_principal()` ([`0048`](../supabase/migrations/archive/0048_machine_principals_are_not_users.sql),
+the predicate is [`0042`](../supabase/migrations/archive/0042_list_service_principals.sql)'s) ·
+the MCP reader ([`0034`](../supabase/migrations/archive/0034_mcp_read_only_principal.sql)) ·
+`Service_Ingestor` ([`0046`](../supabase/migrations/archive/0046_service_ingestor_principal.sql)) ·
+`Service_Playback` ([`0060`](../supabase/migrations/archive/0060_playback_gateway_and_shadow_devices.sql)) ·
+`has_role()` and its 58 call sites · the audit lanes ([`0070`](../supabase/migrations/archive/0070_audit_domain_and_the_acts_nothing_recorded.sql)) ·
 **not filed as an issue, and arriving from a change that was refused rather than from an audit**
 
 Give a machine principal an authority of its own — a set of permissions it was granted — instead of
@@ -981,7 +981,7 @@ against the same column.
 
 **Builds on:** the DDATA path in [`ingestion/ingestion.py`](../ingestion/ingestion.py) ·
 `public.device_locations` (`0001`) · `cells` (`0001`, `0021`) · `devices.location_scope` ·
-[`mosquitto.acl`](../mosquitto.acl) ·
+[`mosquitto.acl`](../mosquitto/mosquitto.acl) ·
 [issue #66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66)
 
 **None of this exists yet — no `uns/` topic appears anywhere in the repository** — and the argument
@@ -1017,7 +1017,8 @@ currently prevent.
 
 ## 12 · Contextual help, and where the documentation actually lives
 
-**Builds on:** [`frontend/src/App.jsx`](../frontend/src/App.jsx)'s top bar and `navDensity()` ·
+**Builds on:** [`frontend/src/App.jsx`](../frontend/src/App.jsx)'s top bar and
+[`frontend/src/navigation.jsx`](../frontend/src/navigation.jsx) ·
 [`README.md`](../README.md) and the six subsystem READMEs ·
 [issue #39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39)
 
@@ -1054,16 +1055,34 @@ same bidirectional shape the service-directory check already uses.
 The cost is that help ships with the image rather than being editable in a browser. For a stack
 whose dashboard is versioned and deployed as one artefact, that is the right side of the trade.
 
-### What the top bar can absorb
+### Where the control goes, now that the bar has room
 
-`navDensity()` already bands the header at 10 and 12 tabs, and the bar currently carries eleven. A
-help control is a **button beside the session controls, not a twelfth tab** — it belongs with the
-things that act rather than the things that navigate, and putting it there costs the brand no width
-at any band.
+This section used to argue about width. `navDensity()` banded the header at 10 and 12 tabs, the bar
+carried eleven, and the case being made was that a help control had to be **a button beside the
+session controls rather than a twelfth tab**, because a twelfth tab cost the brand width it did not
+have.
 
-**Not a page.** A page called Help that lists everything is the README again with more clicks; the
-request is specifically for *contextual* help, which means the panel opens knowing which tab is
-active.
+**That constraint is gone.** Navigation moved out of the bar and into a rail
+([`Sidebar.jsx`](../frontend/src/components/common/Sidebar.jsx)); the density bands and the media
+queries that implemented them went with it. The conclusion survives its own reasoning, though, and
+for a better reason than width: **help is a thing that acts, not a place you navigate to**, so it
+belongs with Report Bug and the theme toggle rather than among the pages.
+
+Two homes are now plausible and the choice is worth making deliberately. A **button in the bar**
+puts it one click from anywhere and beside the account menu that already holds the other
+session-level escape hatches. An **item at the foot of the rail**, below a divider, reads as
+belonging to the chrome rather than to the page — but the rail is collapsed by default, so the
+control would be an unlabelled icon until hovered, which is the wrong resting state for the thing
+somebody reaches for when they are already lost.
+
+**Not a page**, either way. A page called Help that lists everything is the README again with more
+clicks; the request is specifically for *contextual* help, which means the panel opens knowing which
+page is active.
+
+**The search box is now the other half of this.** It answers "where is X" for pages, cards and asset
+ids, which is a real part of what issue #39 describes as unpacking the application — so the help
+corpus is narrower than it was when this item was written. What is left for it is what a
+destination cannot say: what a page is FOR, what its controls do, and what its states mean.
 
 ### Worth deciding early
 

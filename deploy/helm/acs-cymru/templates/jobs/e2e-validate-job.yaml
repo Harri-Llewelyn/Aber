@@ -189,7 +189,7 @@ spec:
       containers:
         - name: validate
           # The test-runner image: the ingestion image plus jsonschema and the AAS suite. Built from
-          # tests/Dockerfile with the REPOSITORY ROOT as context.
+          # test-harness/Dockerfile with the REPOSITORY ROOT as context.
           image: {{ include "acs-cymru.image" (dict "image" .Values.e2e.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.e2e.image.pullPolicy }}
           command: ["python", "validate.py"]

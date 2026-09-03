@@ -3,7 +3,7 @@ The machine-path credential recorder (0062), and the boundary it must not cross.
 
     python supabase/migrations/test_credential_recorder.py
 
-Requires the Supabase database (54322 by default) and migration 0062 applied.
+Requires the Supabase database (54322 by default) and archived migration 0062 applied.
 
 ---------------------------------------------------------------------------------------------
 WHAT THIS SUITE IS FOR.

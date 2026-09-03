@@ -313,7 +313,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       {/* Above the card: a page-level finding, and the first thing worth knowing on arrival. See
           CellsTab's note on why it is not in the card body. */}
       {unassignedDevices.length > 0 && (
-        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)' }}>
+        <div style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px var(--inset)', fontSize: '13px', color: 'var(--warning-text)' }}>
           <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
           {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
           Assign them from the Devices page.
@@ -407,7 +407,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <button
             className={`btn btn-sm ${showShadowGateways ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setShowShadowGateways(v => !v)}
-            title="The Playback gateway (migration 0060). It publishes recorded captures as shadow devices and is not a connector to any machine, so it is hidden by default — but it stays reachable, because minting its broker credential is the one act an operator must perform on it."
+            title="The Playback gateway (archived migration 0060). It publishes recorded captures as shadow devices and is not a connector to any machine, so it is hidden by default — but it stays reachable, because minting its broker credential is the one act an operator must perform on it."
           >
             <IconRadio size={13} /> Show playback gateway ({shadowGatewayCount})
           </button>
@@ -762,7 +762,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           // keyed on -- and the one identifier here that is not the UUID above it.
           { label: 'Sparkplug Edge Node ID', value: selected.sparkplug_id || gatewaySparkplugId(selected.gateway_id), mono: true, copyable: true },
           {
-            // The REAL group id where the gateway carries one. Migration 0008 made the edge node
+            // The REAL group id where the gateway carries one. archived migration 0008 made the edge node
             // address (group, node) rather than node alone, so a wildcard here was throwing away
             // half of an address the row already knows -- and a topic you cannot paste into an MQTT
             // client without editing it first is not much of an answer. Falls back to `+` only
@@ -806,7 +806,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
           /**
-           * WHAT THE APPLIANCE SAYS ABOUT ITSELF (migration 0035).
+           * WHAT THE APPLIANCE SAYS ABOUT ITSELF (archived migration 0035).
            *
            * SHOWN ONLY WHEN IT HAS REPORTED, and `health_reported_at` is what decides -- not the
            * individual values. A gateway that has never reported health is a virtual one or an
