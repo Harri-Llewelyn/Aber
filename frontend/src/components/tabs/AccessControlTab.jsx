@@ -4,6 +4,7 @@ import CopyableId from '../common/CopyableId'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { ServiceTokenModal } from '../modals/ServiceTokenModal'
+import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal'
 import { IconArchive, IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import {
   CREDENTIAL_STATES,
@@ -72,6 +73,15 @@ export function AccessControlTab({ showToast }) {
   // in the modal: describePrincipal() lives here, and a modal that looked it up again would be a
   // second place for an undocumented principal to be labelled differently.
   const [mintFor, setMintFor] = useState(null)
+  // { principal, name, status } while the inventory dialog is open. The STATUS is passed rather
+  // than recomputed, so the dialog lists exactly what the badge counted -- two derivations from
+  // the same rows is two places for the count and the list to disagree.
+  const [tokensFor, setTokensFor] = useState(null)
+  // The jtis auth_pre_request() is currently refusing. Its own state because it is its own read
+  // with its own authority: an Auditor can see the denylist, a Shopfloor_Manager cannot, and
+  // tokenStatus() degrades to the pre-0074 reading on an empty set rather than claiming
+  // everything is live.
+  const [revokedJtis, setRevokedJtis] = useState(() => new Set())
   // ITS OWN ERROR, not folded into loadError. The two reads have DIFFERENT authority -- gateway
   // credentials accept Shopfloor_Manager, service principals are Administrator-only (0042) -- so a
   // single error state would blame the whole page for a refusal that applies to one section.
@@ -97,6 +107,15 @@ export function AccessControlTab({ showToast }) {
     api.listServiceTokens()
       .then(setTokens)
       .catch(() => setTokens(new Map()))
+
+    // THE THIRD READ, and it is what keeps the count honest rather than what enables the button.
+    // Without it a badge reads "5 active tokens" after four have been withdrawn -- overstating
+    // exposure on the one page whose job is to state it, which is the same error tokenStatus()
+    // exists to avoid in the other direction. api.listRevokedServiceTokens() already resolves to
+    // an empty Set on a refusal, so the .catch here is for a transport failure only.
+    api.listRevokedServiceTokens()
+      .then(setRevokedJtis)
+      .catch(() => setRevokedJtis(new Set()))
   }, [])
 
   useEffect(() => { load(true) }, [load])
@@ -451,7 +470,10 @@ export function AccessControlTab({ showToast }) {
                 )}
                 {principals.map(p => {
                   const meta = describePrincipal(p.principal_id)
-                  const status = tokenStatus(tokens.get(p.principal_id))
+                  // THE DENYLIST IS PASSED, so a withdrawn token stops being counted as active.
+                  // `Date.now()` is spelled out because the third argument cannot be reached past
+                  // a defaulted second one.
+                  const status = tokenStatus(tokens.get(p.principal_id), Date.now(), revokedJtis)
                   return (
                     <tr key={p.principal_id}>
                       {/* THE PURPOSE IS A TOOLTIP NOW. It is three lines of background on a row whose
@@ -505,19 +527,47 @@ export function AccessControlTab({ showToast }) {
                           The tooltip is the copy that survives, matching the Identity column beside
                           it, and it takes that column's dotted underline with it: a title on a
                           plain element is an affordance nobody can see. */}
+                      {/* THE BADGE BECAME THE WAY IN, because it already carries the count and the
+                          count is the question a revocation follows from. A separate Revoke button
+                          in this row could not work: a principal has N tokens and
+                          `revoke_service_token()` takes a jti, so a row-level control would have to
+                          PICK one -- and whichever rule it used would be a guess the operator
+                          cannot see being made. See ServiceTokenInventoryModal's header.
+
+                          IT STAYS A PLAIN BADGE WHEN THERE IS NOTHING TO LIST, rather than
+                          rendering a button that opens an empty dialog. `cursor: help` is then
+                          honest -- the tooltip is all there is. */}
                       <td>
-                        <span
-                          className={`badge badge-${tokenStatusTone(status)}`}
-                          style={{
-                            fontSize: '11px',
-                            textDecoration: 'underline dotted var(--text-muted)',
-                            textUnderlineOffset: '3px',
-                            cursor: 'help',
-                          }}
-                          title={tokenStatusDetail(status)}
-                        >
-                          {tokenStatusLabel(status)}
-                        </span>
+                        {status.rows.length > 0 ? (
+                          <button
+                            type="button"
+                            className={`badge badge-${tokenStatusTone(status)}`}
+                            style={{
+                              fontSize: '11px',
+                              border: 'none',
+                              cursor: 'pointer',
+                              textDecoration: 'underline dotted currentColor',
+                              textUnderlineOffset: '3px',
+                            }}
+                            onClick={() => setTokensFor({ principal: p, name: meta.name, status })}
+                            title={`${tokenStatusDetail(status)} Click to list them and withdraw one.`}
+                          >
+                            {tokenStatusLabel(status)}
+                          </button>
+                        ) : (
+                          <span
+                            className={`badge badge-${tokenStatusTone(status)}`}
+                            style={{
+                              fontSize: '11px',
+                              textDecoration: 'underline dotted var(--text-muted)',
+                              textUnderlineOffset: '3px',
+                              cursor: 'help',
+                            }}
+                            title={tokenStatusDetail(status)}
+                          >
+                            {tokenStatusLabel(status)}
+                          </span>
+                        )}
                       </td>
                       {/* A BUTTON WHERE A TOKEN IS ACTUALLY READ, AND THE COMMAND EVERYWHERE ELSE.
                           Minting stayed on the host because these tokens could not be revoked, so
@@ -707,6 +757,19 @@ export function AccessControlTab({ showToast }) {
           principal={mintFor.principal}
           principalName={mintFor.name}
           onClose={() => { setMintFor(null); load() }}
+          showToast={showToast}
+        />
+      )}
+
+      {/* `onChanged` RATHER THAN RELOADING ON EVERY CLOSE. This dialog is opened to look at least
+          as often as to act, and refetching three reads because somebody glanced at a list would
+          make the table flicker for nothing. It reloads only when a withdrawal actually happened. */}
+      {tokensFor && (
+        <ServiceTokenInventoryModal
+          principalName={tokensFor.name}
+          status={tokensFor.status}
+          onClose={() => setTokensFor(null)}
+          onChanged={load}
           showToast={showToast}
         />
       )}

@@ -250,31 +250,60 @@ export function roleReach(roles) {
  * now refuses any request whose JWT carries a revoked `jti`, and `revoke_service_token()` is how a
  * jti gets there.
  *
- * WHAT HAS NOT CHANGED IS WHY THIS FUNCTION COUNTS THE WAY IT DOES. Revocation is a deliberate act
- * on one token; until somebody performs it, every unexpired mint is live. And revocation reaches
- * PostgREST ONLY -- storage, realtime, the edge runtime and Studio each verify the JWT secret for
- * themselves and consult no denylist -- so an outstanding count is still the honest measure of
- * exposure rather than a formality.
+ * A REVOKED TOKEN IS NOT OUTSTANDING, AND COUNTING IT WOULD BREAK THE ONE PROMISE THIS FUNCTION
+ * MAKES. The whole reason it counts every unexpired mint rather than the latest is that reporting
+ * fewer credentials than exist understates exposure on the one page whose job is to state it. Once
+ * `revoke_service_token()` exists, the same error is available in the other direction: a badge
+ * reading "5 active tokens" when four have been withdrawn OVERSTATES it, and an operator acting on
+ * that number revokes things that are already dead while believing the page.
+ *
+ * So `revokedJtis` is a THIRD ARGUMENT rather than a filter the caller applies first: the rows are
+ * still returned, marked, because "there were five and four are withdrawn" is the useful sentence
+ * and a caller that had filtered them out could not say it.
+ *
+ * WHAT HAS NOT CHANGED IS THE SCOPE. Revocation reaches PostgREST ONLY -- storage, realtime, the
+ * edge runtime and Studio each verify the JWT secret for themselves and consult no denylist -- so a
+ * revoked token is not gone, it is refused by the API. The label says "active"; the detail line is
+ * where that distinction is drawn, because a badge cannot carry it.
  * =================================================================================================
  */
 export const TOKEN_STATES = { ACTIVE: 'active', EXPIRED: 'expired', NONE: 'none' }
 
-export function tokenStatus(mints, now = Date.now()) {
+/**
+ * @param {Array}  mints        TOKEN_MINTED rows for one principal
+ * @param {number} [now]
+ * @param {Set}    [revokedJtis] jtis in `revoked_service_tokens`. Defaults to empty, so a caller
+ *                 that cannot read the denylist -- an Auditor can, a Manager cannot -- degrades to
+ *                 the pre-0074 reading rather than silently reporting everything as live.
+ */
+export function tokenStatus(mints, now = Date.now(), revokedJtis = new Set()) {
   const rows = (mints || [])
-    .map(m => ({ ...m, expiresAtMs: Date.parse(m.expires_at) }))
+    .map(m => ({
+      ...m,
+      expiresAtMs: Date.parse(m.expires_at),
+      // MARKED, NOT DROPPED. The inventory dialog lists these so an operator can see that a
+      // withdrawal happened; only the COUNTS below exclude them.
+      revoked: !!(m.jti && revokedJtis.has(m.jti)),
+    }))
     // A row whose expiry will not parse is DROPPED rather than treated as live: counting it as
     // outstanding would inflate the number an operator acts on, and counting it as expired would
     // hide a credential that may well still work.
     .filter(m => Number.isFinite(m.expiresAtMs))
     .sort((a, b) => a.expiresAtMs - b.expiresAtMs)
 
-  if (rows.length === 0) return { state: TOKEN_STATES.NONE, outstanding: 0, rows: [] }
+  if (rows.length === 0) return { state: TOKEN_STATES.NONE, outstanding: 0, revoked: 0, rows: [] }
 
-  const live = rows.filter(m => m.expiresAtMs > now)
+  const revoked = rows.filter(m => m.revoked && m.expiresAtMs > now).length
+  const live = rows.filter(m => m.expiresAtMs > now && !m.revoked)
+
   if (live.length === 0) {
     return {
+      // EXPIRED COVERS "ALL WITHDRAWN" TOO, and the detail line distinguishes them. Both mean the
+      // same thing to the person reading the badge -- nothing here is reaching the API -- and a
+      // fourth state would multiply the tones without changing what anybody does next.
       state: TOKEN_STATES.EXPIRED,
       outstanding: 0,
+      revoked,
       lastExpiry: rows[rows.length - 1].expiresAtMs,
       rows,
     }
@@ -283,6 +312,7 @@ export function tokenStatus(mints, now = Date.now()) {
   return {
     state: TOKEN_STATES.ACTIVE,
     outstanding: live.length,
+    revoked,
     // THE EARLIEST, not the latest. It is the next date on which something an operator depends on
     // stops working, which is the one they need in a calendar.
     earliestExpiry: live[0].expiresAtMs,
@@ -325,11 +355,30 @@ export function tokenStatusDetail(status, now = Date.now()) {
       + 'first of each is live but unrecorded until `npm run keys:rotate` re-signs it.'
   }
   if (status.state === TOKEN_STATES.EXPIRED) {
+    // WITHDRAWN AND LAPSED READ THE SAME ON THE BADGE AND MUST NOT READ THE SAME HERE. Both mean
+    // nothing is reaching the API, but only one of them was somebody's decision -- and a token
+    // that was revoked rather than expired is still accepted by storage, realtime, the edge
+    // runtime and Studio until its own expiry, which is the fact an operator would act on.
+    if (status.revoked > 0) {
+      const when = new Date(status.lastExpiry).toLocaleDateString()
+      return status.revoked === 1
+        ? `Withdrawn. It is refused by the API, and still accepted by storage, realtime and the `
+          + `edge functions until it expires on ${when}.`
+        : `All ${status.revoked} are withdrawn. They are refused by the API, and still accepted by `
+          + `storage, realtime and the edge functions until the last expires on ${when}.`
+    }
     return `The last token expired on ${new Date(status.lastExpiry).toLocaleDateString()}.`
   }
   const days = Math.max(0, Math.ceil((status.earliestExpiry - now) / DAY_MS))
   const when = new Date(status.earliestExpiry).toLocaleDateString()
-  return status.outstanding === 1
+  // SAID WHEN IT IS TRUE, AND NOT OTHERWISE. The badge counts only what is still live, so a
+  // principal with one live and four withdrawn reads "1 active token" -- correct, and it hides
+  // that four withdrawals happened. This is the sentence that makes the smaller number legible
+  // rather than looking like the page lost track of them.
+  const alsoRevoked = status.revoked > 0
+    ? ` ${status.revoked} further token${status.revoked === 1 ? ' has' : 's have'} been withdrawn.`
+    : ''
+  return (status.outstanding === 1
     // "REVOCABLE", NOT "CANNOT BE REVOKED", which is what these two lines said until 0074 gave
     // PostgREST a denylist to consult. The qualifier is not padding: revocation goes through
     // `auth_pre_request()`, which only PostgREST runs, so a withdrawn token still reaches storage,
@@ -338,5 +387,6 @@ export function tokenStatusDetail(status, now = Date.now()) {
     ? `Expires ${when} — in ${days} day${days === 1 ? '' : 's'}. Revocable against the API before `
       + 'then; storage, realtime and the edge functions check the signature only.'
     : `Earliest expires ${when} — in ${days} day${days === 1 ? '' : 's'}. Minting again adds a `
-      + 'credential rather than replacing one; each is revoked separately, and only against the API.';
+      + 'credential rather than replacing one; each is revoked separately, and only against the API.'
+  ) + alsoRevoked;
 }

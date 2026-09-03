@@ -761,6 +761,33 @@ const apiMethods = {
   },
 
   /**
+   * The jtis `auth_pre_request()` is currently refusing (0074), as a Set.
+   *
+   * SEPARATE FROM listServiceTokens(), because the two answer different questions and have
+   * different authority. That one reads `digital_thread`, needs the audit lane, and is the
+   * permanent history -- every mint ever. This reads `revoked_service_tokens`, needs Administrator
+   * or Auditor, and is OPERATIONAL: rows are pruned once the token they name has expired, because
+   * the signature check refuses it from then on.
+   *
+   * SO AN EMPTY SET IS NOT "NOTHING WAS EVER REVOKED". It is "nothing is currently being refused",
+   * which is also what a caller who cannot read the table gets -- RLS returns no rows rather than
+   * an error. `tokenStatus()` defaults to an empty set for exactly that reason: a Shopfloor_Manager
+   * sees the pre-0074 reading rather than a page that claims every token is live.
+   *
+   * FAILURE IS SWALLOWED TO AN EMPTY SET, matching listServiceTokens(). The section is
+   * supplementary; a principal list that renders is worth more than one blanked by a refusal on
+   * the newest of the three reads behind it.
+   */
+  listRevokedServiceTokens: async () => {
+    const { data, error } = await supabase
+      .from('revoked_service_tokens')
+      .select('jti,revoked_at,revoked_by,expires_at');
+
+    if (error) return new Set();
+    return new Set((data || []).map(r => r.jti).filter(Boolean));
+  },
+
+  /**
    * Create a machine identity that cannot sign in.
    *
    * THROUGH THE RPC, AS THE CALLER. `create_service_principal()` (0044) is SECURITY DEFINER and

@@ -6,7 +6,13 @@ import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
-  api: { listGatewayCredentials: vi.fn(), listServicePrincipals: vi.fn(), listServiceTokens: vi.fn() }
+  api: {
+    listGatewayCredentials: vi.fn(),
+    listServicePrincipals: vi.fn(),
+    listServiceTokens: vi.fn(),
+    listRevokedServiceTokens: vi.fn(),
+    revokeServiceToken: vi.fn(),
+  }
 }))
 
 // The two modals reach for browser APIs this suite has no need to stub; the tab's job is to decide
@@ -19,6 +25,11 @@ vi.mock('../components/modals/GatewayBundleModal', () => ({
 }))
 vi.mock('../components/modals/ServiceTokenModal', () => ({
   ServiceTokenModal: ({ principalName }) => <div data-testid="token-modal">{principalName}</div>
+}))
+vi.mock('../components/modals/ServiceTokenInventoryModal', () => ({
+  ServiceTokenInventoryModal: ({ principalName, status }) => (
+    <div data-testid="inventory-modal">{principalName}:{status.rows.length}</div>
+  )
 }))
 
 const provisioned = {
@@ -49,6 +60,9 @@ beforeEach(() => {
   // Defaulted so every credential-inventory test renders the whole page. Individual tests override.
   api.listServicePrincipals.mockResolvedValue([MCP_PRINCIPAL])
   api.listServiceTokens.mockResolvedValue(new Map())
+  // Empty by default, which is both the common case and the reading a caller who cannot see the
+  // denylist gets. Tests that care about a withdrawal override it.
+  api.listRevokedServiceTokens.mockResolvedValue(new Set())
 })
 
 describe('AccessControlTab', () => {
@@ -242,6 +256,60 @@ describe('AccessControlTab', () => {
     // The NAME is carried into the modal rather than looked up again there, so asserting it here
     // is asserting that the right row opened the dialog.
     await waitFor(() => expect(screen.getByTestId('token-modal').textContent).toBe('MCP read-only client'))
+  })
+
+  /**
+   * THE BADGE IS THE WAY IN, because it already carries the count and a revocation follows from it.
+   * A row-level Revoke button could not work: a principal has N tokens, `revoke_service_token()`
+   * takes one jti, so the row would have to PICK -- a guess the operator cannot see being made.
+   */
+  it('opens the token inventory from the count badge, carrying the rows it counted', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServiceTokens.mockResolvedValue(new Map([[
+      MCP_PRINCIPAL.principal_id,
+      [
+        { jti: 'a', issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' },
+        { jti: 'b', issued_at: '2026-09-02T00:00:00Z', expires_at: '2099-02-01T00:00:00Z' }
+      ]
+    ]]))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
+    screen.getByRole('button', { name: /2 active tokens/i }).click()
+
+    // The STATUS is passed rather than recomputed in the dialog, so asserting the row count here
+    // asserts that the list and the badge cannot disagree.
+    await waitFor(() => expect(screen.getByTestId('inventory-modal').textContent)
+      .toBe('MCP read-only client:2'))
+  })
+
+  /**
+   * The count must not include what has been withdrawn. Overstating exposure is the same class of
+   * error as understating it, and this page is the one that must do neither.
+   */
+  it('excludes a withdrawn token from the active count', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServiceTokens.mockResolvedValue(new Map([[
+      MCP_PRINCIPAL.principal_id,
+      [
+        { jti: 'a', issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' },
+        { jti: 'b', issued_at: '2026-09-02T00:00:00Z', expires_at: '2099-02-01T00:00:00Z' }
+      ]
+    ]]))
+    api.listRevokedServiceTokens.mockResolvedValue(new Set(['a']))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('1 active token')).toBeTruthy())
+    expect(screen.queryByText('2 active tokens')).toBeNull()
+  })
+
+  /** Nothing to list means nothing to open -- a button onto an empty dialog is worse than a badge. */
+  it('leaves the badge inert when no mint is recorded', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /No token on record/i })).toBeNull()
   })
 
   it('shows the broker principals and marks which one can publish', async () => {
