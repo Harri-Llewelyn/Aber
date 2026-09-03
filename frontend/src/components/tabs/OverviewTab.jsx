@@ -859,13 +859,26 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
 
                  It says where the assets went, because the previous wording ("No active cells
                  configured") answered a question nobody had asked while leaving the obvious one
-                 -- then where is everything? -- to the tiles above it. */
+                 -- then where is everything? -- to the tiles above it.
+
+                 THREE CASES, NOT TWO, and the third is the one 0073 made ordinary. On a stack that
+                 ships empty the only gateway is the seeded Playback row, which is `is_shadow` and
+                 therefore matches NO lane -- deliberately, see the LANES note above. So the lanes
+                 were empty, the grid was empty, and the fallback said "no active cells" while the
+                 first sentence of the other branch ("every asset resolves to one of the lanes
+                 above") would have been an outright lie: nothing resolved to a lane at all, and an
+                 operator reading either one had no way to learn that the stack does hold a gateway
+                 and that it is the replay lane. It names the Capture page because that is where the
+                 code has already decided a replay belongs. */
               <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
                 <div className="empty-icon"><IconFactory size={36} /></div>
                 <div className="empty-text">
                   {laneViews.some(v => v.gateways.length > 0 || v.devices.length > 0)
                     ? 'No cell zones configured — every asset resolves to one of the lanes above.'
-                    : 'No active cells configured to display on the shopfloor blueprint.'}
+                    : gw.shadow > 0
+                      ? 'Nothing on the floor yet. The only gateway on this stack is the replay '
+                        + 'lane, which is not part of the fleet and is driven from the Capture page.'
+                      : 'No active cells configured to display on the shopfloor blueprint.'}
                 </div>
               </div>
             )}

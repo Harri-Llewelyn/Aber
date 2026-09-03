@@ -161,8 +161,22 @@ export function describePrincipal(principalId) {
     name: 'Undocumented principal',
     // HONEST RATHER THAN BLANK. An unrecognised machine identity is more interesting than a
     // recognised one, not less, so the row says what it is missing and where to look.
-    purpose: 'No description is recorded in the dashboard for this identity. It was created by a '
-      + 'migration; check which one seeded this id before assuming it is safe.',
+    //
+    // "A MIGRATION" WAS TOO NARROW, AND THE NARROWNESS SENT PEOPLE THE WRONG WAY. It used to say
+    // the identity "was created by a migration; check which one seeded this id" -- confident, and
+    // wrong for the case that actually turns up. Four principals were found on a running stack
+    // that no migration will ever account for: RLS suites self-seed `auth.users` rows so they do
+    // not depend on seed.sql, commit them so the fixture is visible to their own connections, and
+    // (until this was fixed) never removed them. An operator following the old sentence would
+    // grep the migrations, find nothing, and be left with less confidence than before.
+    //
+    // check-docs-drift.mjs cannot close this the way it closes BROKER_PRINCIPALS: it reads the
+    // migrations statically, and a row created at test runtime is not in them. So the wording is
+    // the control here, and it names both origins rather than guessing between them.
+    purpose: 'No description is recorded in the dashboard for this identity. It was created '
+      + 'outside this map — by a migration, or by a test suite that seeded it and did not clean '
+      + 'up. Check which one before assuming it is safe: if no migration seeded this id, it is '
+      + 'almost certainly a fixture and can be removed.',
     mintedBy: null,
     // THE GENERIC MINT COMMAND IS RIGHT FOR AN UNKNOWN PRINCIPAL and wrong for the two service
     // keys, which is the whole reason this moved out of the component. A principal nobody has

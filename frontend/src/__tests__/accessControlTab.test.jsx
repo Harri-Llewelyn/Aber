@@ -146,7 +146,13 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
-    expect(screen.getByTitle(/check which one seeded this id/i)).toBeTruthy()
+    // BOTH ORIGINS, which is the assertion rather than the exact sentence. The tooltip used to say
+    // the identity "was created by a migration" and send the reader to grep for it -- confident,
+    // and wrong for the case that actually turns up on a long-lived stack, where the answer is an
+    // RLS suite that seeded a fixture and did not clean up. A reader who greps the migrations and
+    // finds nothing is left with less than they started with, so the wording has to admit the
+    // second origin and this test is what holds it to that.
+    expect(screen.getByTitle(/by a migration, or by a test suite/i)).toBeTruthy()
     // No role means every RLS policy refuses it -- said in a COLUMN, not a tooltip, because it is
     // the answer to "what can this reach" rather than background on what it is.
     expect(screen.getByText(/every RLS policy refuses it/i)).toBeTruthy()
