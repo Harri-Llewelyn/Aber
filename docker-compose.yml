@@ -1154,7 +1154,7 @@ services:
   mosquitto-tls-init:
     container_name: acs-cymru_mosquitto_tls_init
     build:
-      context: ./mosquitto-tls-init
+      context: ./mosquitto/tls-init
     # Root, because it chowns the key to the uid mosquitto drops to (1883). The broker reads its
     # own key AFTER dropping privileges, so a key it cannot read exits the broker with an OpenSSL
     # "system library" error that names neither the file nor the permission.
@@ -1197,8 +1197,8 @@ services:
       # the two targets now differ in transport and not in method. mosquitto.acl is deliberately
       # NOT assembled -- it stays a read-only bind mount on the broker itself, because it is the
       # security-critical file and nothing should be able to rewrite it at runtime.
-      - ./mosquitto.conf:/policy/mosquitto.conf:ro
-      - ./mosquitto-tls.conf:/policy/mosquitto-tls.conf:ro
+      - ./mosquitto/mosquitto.conf:/policy/mosquitto.conf:ro
+      - ./mosquitto/mosquitto-tls.conf:/policy/mosquitto-tls.conf:ro
       - mosquitto_certs:/certs:ro
     entrypoint: >
       /bin/sh -e -c "
@@ -1263,7 +1263,7 @@ services:
       # Topic authorisation. STILL a read-only bind mount, and deliberately not assembled: it is
       # repository-managed policy, it is the file that confines every principal, and nothing at
       # runtime should be able to rewrite it.
-      - ./mosquitto.acl:/mosquitto/config/mosquitto.acl:ro
+      - ./mosquitto/mosquitto.acl:/mosquitto/config/mosquitto.acl:ro
       # The paths mosquitto-tls.conf names. Read-only: the broker presents this leaf, it does not
       # manage it. The CA's private key is NOT in this volume's readable set for the broker uid --
       # mosquitto-tls-init leaves ca.key root-owned and 0600.

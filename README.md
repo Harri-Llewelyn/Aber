@@ -413,7 +413,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `127.0.0.1:54323:3000` (loopback only — see below) |
 | `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `5433:5432` |
 | `timescaledb-maintenance` | `acs-cymru_timescaledb_maintenance` | `timescale/timescaledb:2.29.2-pg17` | — |
-| `mosquitto-tls-init` | `acs-cymru_mosquitto_tls_init` | `./mosquitto-tls-init/Dockerfile` | — |
+| `mosquitto-tls-init` | `acs-cymru_mosquitto_tls_init` | `./mosquitto/tls-init/Dockerfile` | — |
 | `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.22` | — |
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
@@ -438,7 +438,7 @@ unrecognised role produces `403`.
 
 | Layer | Control |
 | :--- | :--- |
-| **Broker** | `allow_anonymous false`; [`mosquitto.acl`](mosquitto.acl) confines each gateway to `spBv1.0/+/+/<own-id>/#` |
+| **Broker** | `allow_anonymous false`; [`mosquitto.acl`](mosquitto/mosquitto.acl) confines each gateway to `spBv1.0/+/+/<own-id>/#` |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise, once `INGEST_WRITER_PASSWORD` and `INGEST_DB_USER` are set: `ingest_writer` may INSERT and cannot UPDATE, DELETE or TRUNCATE. Unset, the daemon keeps the admin credential and the guarantee is the Python's again — see [Historian roles](#historian-roles) |
 | **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |

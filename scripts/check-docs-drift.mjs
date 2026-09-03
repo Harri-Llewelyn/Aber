@@ -1210,7 +1210,7 @@ function edgeFunctionNames() {
 // and wrongly, what a client is allowed to do.
 // -------------------------------------------------------------------------------------------------
 {
-  const acl = read('mosquitto.acl');
+  const acl = read('mosquitto/mosquitto.acl');
   const ui = read('frontend/src/utils/serviceIdentities.js');
 
   // A `user <name>` line owns every `topic` line until the next `user` or the end of the file.

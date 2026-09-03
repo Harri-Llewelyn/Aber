@@ -54,10 +54,10 @@ groups:
   #
   # WHY THIS GROUP COULD NOT EXIST UNTIL NOW. Every signal below lives in Supabase, and this file's
   # header states the blocker plainly: postgres_fdw runs Supabase -> TimescaleDB and not the
-  # reverse, so Grafana could only ever see the historian. Migration 0027 gave it a second
+  # reverse, so Grafana could only ever see the historian. archived migration 0027 gave it a second
   # datasource against the metadata database; these rules are what that was for.
   #
-  # THEY READ ONE VIEW, `public.platform_health` (migration 0029), and the narrowness is deliberate.
+  # THEY READ ONE VIEW, `public.platform_health` (archived migration 0029), and the narrowness is deliberate.
   # `grafana_reader` may SELECT that view and `storage_footprint` and nothing else -- not `devices`,
   # not `gateways`. A rule needs a number and, where the condition is about an asset, that asset's
   # wire id; handing a browser-SSO-fronted service the plant's inventory to compute three counts is
@@ -324,7 +324,7 @@ groups:
       # worth asking. A check against the broker's own certificate would say what the SERVER will
       # present; this says what each CLIENT will accept, and the fleet-wide outage happens when
       # those two stop agreeing. `gateway_health.cert_expires_in_days` derives the day count once
-      # (migration 0036) so this rule and the dashboard panel cannot disagree about it.
+      # (archived migration 0036) so this rule and the dashboard panel cannot disagree about it.
       #
       # `for: 0s`, FOR THE SAME REASON AS THE ENROLMENT RULE ABOVE: the threshold IS the delay.
       # A debounce on a condition that has thirty days left to run postpones nothing that matters.
@@ -383,7 +383,7 @@ groups:
               # column and this view is a point-in-time answer, exactly as in rule 1.
               #
               # `IS NOT NULL` IS LOAD BEARING. A virtual gateway, and any appliance on a bundle
-              # predating migration 0035, reports no certificate date at all. Including those rows
+              # predating archived migration 0035, reports no certificate date at all. Including those rows
               # would hand the reducer a NULL per gateway and turn "has not told us" into an alert
               # instance, which is the noise that teaches an operator to ignore the rule.
               rawSql: |

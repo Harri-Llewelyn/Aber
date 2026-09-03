@@ -81,7 +81,7 @@ under any device's id. Three consequences, in ascending severity:
    which silently stops its real telemetry being stored. **A denial of service against a production
    asset, triggered by one message.**
 
-[`mosquitto.acl`](../mosquitto.acl) closes the same hole at the broker tier. **Both are needed**:
+[`mosquitto.acl`](../mosquitto/mosquitto.acl) closes the same hole at the broker tier. **Both are needed**:
 the broker cannot know which device belongs to which gateway (that lives in Supabase), and the
 daemon cannot stop a forged message being delivered to other subscribers.
 
@@ -1139,4 +1139,4 @@ still runs, because its assertions are worth reporting either way.
 
 - [`../supabase/README.md`](../supabase/README.md) — schema, RLS, triggers, edge functions
 - [`../tutorial/README.md`](../tutorial/README.md) — building a gateway, a device and the flow that publishes as it
-- [`../mosquitto.acl`](../mosquitto.acl) — per-gateway topic confinement
+- [`../mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) — per-gateway topic confinement

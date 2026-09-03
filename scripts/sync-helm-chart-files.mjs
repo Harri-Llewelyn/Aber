@@ -127,7 +127,7 @@ const MIRRORS = [
     why: 'The curated API specs swagger-ui serves',
   },
   {
-    source: '.',
+    source: 'mosquitto',
     dest: 'mosquitto',
     // mosquitto.conf declares `acl_file`, `allow_anonymous` and `password_file` ONCE in its global
     // section, which is what guarantees the TCP, WebSocket and TLS listeners are authorised
