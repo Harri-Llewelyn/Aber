@@ -85,28 +85,61 @@ class PlaybackCredentialDelivery(unittest.TestCase):
         return self.cur.fetchone()[0]
 
     def _authorize(self, gateway_id):
+        """The gate, unchanged by 0078 -- deliberately, see `_deliverable`."""
         self.cur.execute(
-            "SELECT sparkplug_id, gateway_name, is_playback_target "
+            "SELECT sparkplug_id, gateway_name "
             "  FROM public.authorize_virtual_gateway_credential(%s)", (gateway_id,)
         )
         return self.cur.fetchone()
+
+    def _deliverable(self, gateway_id):
+        self.cur.execute(
+            "SELECT public.gateway_is_playback_delivery_target(%s)", (gateway_id,)
+        )
+        return self.cur.fetchone()[0]
 
     # -----------------------------------------------------------------------------------------
     # The gate itself
     # -----------------------------------------------------------------------------------------
     def test_a_simulated_gateway_is_a_delivery_target(self):
-        row = self._authorize(self._gateway(simulated=True))
-        self.assertIsNotNone(row, "the gate returned no row for a simulated host gateway")
-        self.assertTrue(row[2], "a simulated gateway must be a delivery target")
+        gid = self._gateway(simulated=True)
+        self.assertIsNotNone(self._authorize(gid), "the gate returned no row for a simulated host")
+        self.assertTrue(self._deliverable(gid), "a simulated gateway must be a delivery target")
 
     def test_a_real_gateway_is_not(self):
         """
         THE ONE THAT MATTERS. A true here writes a real machine's broker password into a file the
         replay worker reads, and mosquitto.acl then lets that worker publish as the machine.
         """
-        row = self._authorize(self._gateway(simulated=False))
-        self.assertIsNotNone(row)
-        self.assertFalse(row[2], "a real gateway must never be a delivery target")
+        gid = self._gateway(simulated=False)
+        self.assertIsNotNone(self._authorize(gid))
+        self.assertFalse(self._deliverable(gid), "a real gateway must never be a delivery target")
+
+    def test_a_gateway_that_vanished_is_not_a_delivery_target(self):
+        """
+        Asked immediately after an authorisation that already refused a missing gateway, so the
+        only way to reach this is a row deleted in between. "Do not deliver" is the safe answer;
+        raising would turn a vanished gateway into a failed credential issue for one still present.
+        """
+        self.assertFalse(self._deliverable("00000000-0000-4000-8000-0000000000ff"))
+
+    def test_the_authorisation_gate_keeps_the_shape_0001_declares(self):
+        """
+        0078 DELIBERATELY DOES NOT TOUCH THIS FUNCTION, and the first version of it did.
+
+        Adding a third column worked on the boot that applied it and killed the next one: 0001
+        replays first, re-declares the two-column form with CREATE OR REPLACE, and that cannot
+        change a return type -- so the chain aborted at file one, after 0001 had already dropped the
+        FDW server with CASCADE. This is what says the gate must keep the shape 0001 gives it.
+        """
+        self.cur.execute(
+            "SELECT count(*), max(pg_get_function_result(p.oid)) "
+            "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            " WHERE n.nspname = 'public' AND p.proname = 'authorize_virtual_gateway_credential'"
+        )
+        count, result = self.cur.fetchone()
+        self.assertEqual(count, 1)
+        self.assertEqual(result, "TABLE(sparkplug_id text, gateway_name text)")
 
     def test_is_simulated_is_not_null_which_is_what_makes_the_coalesce_dead_code(self):
         """
@@ -131,12 +164,12 @@ class PlaybackCredentialDelivery(unittest.TestCase):
     def test_the_flag_is_a_boolean_for_both_kinds_of_gateway(self):
         # NO ROLLBACK BETWEEN THE TWO. `set_config('request.jwt.claims', ..., true)` is
         # transaction-local, so rolling back mid-test would drop the caller's identity and the
-        # second authorisation would fail on the role check instead of answering the question.
-        simulated = self._authorize(self._gateway(simulated=True))
-        real = self._authorize(self._gateway(simulated=False))
-        self.assertIsInstance(simulated[2], bool)
-        self.assertIsInstance(real[2], bool)
-        self.assertNotEqual(simulated[2], real[2])
+        # second call would fail on the role check instead of answering the question.
+        simulated = self._deliverable(self._gateway(simulated=True))
+        real = self._deliverable(self._gateway(simulated=False))
+        self.assertIsInstance(simulated, bool)
+        self.assertIsInstance(real, bool)
+        self.assertNotEqual(simulated, real)
 
     # -----------------------------------------------------------------------------------------
     # The refusals 0078 inherits and must not have dropped
@@ -182,20 +215,20 @@ class PlaybackCredentialDelivery(unittest.TestCase):
             "start_playback_job() no longer gates on is_simulated, but 0078 delivers on it",
         )
 
-    def test_the_function_is_declared_once_with_the_new_column(self):
+    def test_the_delivery_predicate_is_its_own_function_returning_a_boolean(self):
         """
-        0001 recreates the two-column form on every boot and 0078 drops it. If that DROP were ever
-        removed both would exist, and a caller selecting three columns would fail as ambiguous at
-        the call site -- in the browser, as a credential button that stopped working.
+        Declared once, by 0078 alone, and NOT a column on the authorisation gate. A function 0001
+        also declares cannot have its return type changed by a later file -- see the test above and
+        0078's header for the boot that proved it.
         """
         self.cur.execute(
             "SELECT count(*), max(pg_get_function_result(p.oid)) "
             "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-            " WHERE n.nspname = 'public' AND p.proname = 'authorize_virtual_gateway_credential'"
+            " WHERE n.nspname = 'public' AND p.proname = 'gateway_is_playback_delivery_target'"
         )
         count, result = self.cur.fetchone()
         self.assertEqual(count, 1, f"declared {count} times, not once")
-        self.assertIn("is_playback_target", result)
+        self.assertEqual(result, "boolean")
 
 
 if __name__ == "__main__":

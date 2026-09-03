@@ -542,11 +542,31 @@ separate acts is what left this stack unable to play anything back. The Playback
 and nothing said so, because `allow_anonymous false` refuses at CONNECT and Sparkplug's QoS 0 gives
 a publisher nothing to observe after it.
 
-`authorize_virtual_gateway_credential()` therefore returns a third column, `is_playback_target`, and
-the credential service writes the password where the playback worker reads it when that column is
-true. **The predicate is `is_simulated` — the same one `start_playback_job()` gates on** — so the
-set of passwords the worker can be handed is exactly the set of gateways it may publish as, and
-`0078` carries a self-check that fails if the job gate stops using it.
+`gateway_is_playback_delivery_target()` answers whether the password may be delivered, and the
+credential service writes it where the playback worker reads when it is true. **The predicate is
+`is_simulated` — the same one `start_playback_job()` gates on** — so the set of passwords the worker
+can be handed is exactly the set of gateways it may publish as, and `0078` carries a self-check that
+fails if the job gate stops using it.
+
+**It is its own function rather than a third column on the authorisation gate, and that is not a
+style choice.** It was written as a column first. That worked on the boot which applied it and
+killed the next one:
+
+```
+0001_baseline_schema.sql:611: ERROR: cannot change return type of existing function
+HINT: Use DROP FUNCTION authorize_virtual_gateway_credential(uuid) first.
+```
+
+The chain replays in filename order, so `0001` re-declares its own two-column form *before* `0078`
+can drop the three-column one — and `CREATE OR REPLACE` cannot change a return type. `0001` aborts
+having already dropped the FDW server with `CASCADE`, leaving the stack serving a database with no
+telemetry read surface at all.
+
+**The rule, now enforced by `check-docs-drift.mjs`:** a later migration may redeclare a function
+`0001` declares, but must not change its return type. `0075` is safe because a new *argument* is a
+new signature; `0076` is safe because only the body changed. Same signature, different return type
+is the one combination that cannot survive a replay — and it is invisible until the second boot,
+which a fresh CI run never reaches.
 
 **Deciding it here rather than in the caller is the whole point.** The credential service holds a
 `sparkplug_id` and no database access by design, and the edge function could compute something

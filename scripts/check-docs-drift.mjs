@@ -630,13 +630,6 @@ function edgeFunctionNames() {
     // leaving both declared would make a seven-argument call ambiguous at the call site. The
     // baseline's copy is the one being replaced.
     'public.digital_thread_page': '0077 adds the keyset cursor; the baseline holds the unpaged form',
-    // 0078 gives it a third returned column, `is_playback_target`, which is what authorises the
-    // credential service to DELIVER the password to the playback worker. A returned TABLE type
-    // cannot be changed by CREATE OR REPLACE, so the two-column form is DROPped first -- and a
-    // caller selecting three columns from a leftover two-column declaration fails at the call site,
-    // in the browser, as a credential button that quietly stopped working.
-    'public.authorize_virtual_gateway_credential':
-      '0078 adds is_playback_target; the baseline holds the two-column form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -665,6 +658,58 @@ function edgeFunctionNames() {
     if (where.length < 2) {
       stale.push(`${fn}() is listed as an intended redeclaration but is declared ${where.length} time(s) -- remove it from the list`);
     }
+  }
+
+  // -----------------------------------------------------------------------------------------
+  // A REDECLARATION MAY NOT CHANGE THE RETURN TYPE, which is a different rule from the one above
+  // and was learned the hard way.
+  //
+  // 0078 first shipped by adding a third column to authorize_virtual_gateway_credential(). It was
+  // recorded as an intended redeclaration, it DROPped the old form the way 0075 does, and it worked
+  // -- on the boot that applied it. THE NEXT BOOT DIED AT FILE ONE:
+  //
+  //     0001_baseline_schema.sql:611: ERROR: cannot change return type of existing function
+  //     HINT: Use DROP FUNCTION authorize_virtual_gateway_credential(uuid) first.
+  //
+  // Because the chain replays in filename order, 0001 re-declares its own version FIRST, with
+  // CREATE OR REPLACE, which cannot change a return type -- and the later file's DROP never runs.
+  // 0001 aborts having already dropped the FDW server with CASCADE, so the stack is left serving a
+  // database with no telemetry read surface at all.
+  //
+  // 0075 is fine because a new ARGUMENT is a new signature. 0076 is fine because the body changed
+  // and the return type did not. Same signature, different return type is the one combination that
+  // cannot survive a replay -- and it is invisible until the second boot, which on a developer's
+  // stack can be days later and on a fresh CI run never happens at all.
+  const returnTypes = new Map();
+  for (const name of files) {
+    const body = read(`${dir}/${name}`);
+    for (const m of body.matchAll(
+      /CREATE OR REPLACE FUNCTION\s+([a-z_]+\.[a-z_]+)\s*\(([\s\S]*?)\)\s*RETURNS\s+([^\n]+?)(?:\s+LANGUAGE|\s*$)/gim
+    )) {
+      const fn = m[1].toLowerCase();
+      const ret = m[3].trim().replace(/\s+/g, ' ').replace(/;$/, '');
+      if (!returnTypes.has(fn)) returnTypes.set(fn, []);
+      returnTypes.get(fn).push({ file: name, ret });
+    }
+  }
+
+  const returnDrift = [];
+  for (const [fn, decls] of returnTypes) {
+    if (decls.length < 2) continue;
+    const distinct = [...new Set(decls.map((d) => d.ret))];
+    if (distinct.length > 1) {
+      returnDrift.push(
+        `${fn}() is declared with ${distinct.length} different return types across ` +
+          `${decls.map((d) => `${d.file} -> ${d.ret}`).join(' | ')}. CREATE OR REPLACE cannot ` +
+          'change a return type, so on the SECOND boot the earlier file aborts the whole chain -- ' +
+          'after 0001 has dropped the FDW server with CASCADE. Give the new shape its own function ' +
+          'name instead, as 0078 does.'
+      );
+    }
+  }
+  for (const p of returnDrift) fail(p);
+  if (!returnDrift.length && returnTypes.size) {
+    pass(`no function changes its return type across the ${returnTypes.size} declared in the chain`);
   }
 
   if (undeclared.length || stale.length) {

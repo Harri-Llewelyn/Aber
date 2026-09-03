@@ -150,6 +150,49 @@ class Precedence(unittest.TestCase):
         self.assertEqual(playback_worker._credentials(), {})
 
 
+class ChangeDetection(unittest.TestCase):
+    """
+    Noticing that what this worker holds has changed.
+
+    THIS EXISTS BECAUSE THE FIRST VERSION COMPARED KEY SETS AND MISSED THE CASE IT WAS WRITTEN FOR.
+    On the first real delivery, the worker already held the target gateway -- from the stale `.env`
+    value -- so the ids were identical before and after and nothing was logged. The worker had in
+    fact picked up the new password and playback worked; the operator watching the log had no way
+    to know it. Every mint after the first one has that same shape, because it rotates a gateway
+    already held.
+
+    The comparison the loop makes is asserted here directly rather than through the loop, which
+    needs a Supabase client and a broker.
+    """
+
+    GW = "gwy160000000000400080000"
+
+    def test_a_rotation_is_a_change_even_though_the_ids_are_identical(self):
+        previous = {self.GW: "stale-password-0000000000"}
+        current = {self.GW: "delivered-password-000000"}
+        self.assertEqual(set(previous), set(current), "the ids are the same -- that is the trap")
+        self.assertNotEqual(previous, current, "a rotation must compare as a change")
+
+    def test_the_three_kinds_of_change_are_distinguishable(self):
+        other = "gwy170000000000400080000"
+        previous = {self.GW: "old-password-000000000000", other: "kept-password-00000000000"}
+        current = {self.GW: "new-password-000000000000", "gwy18" + "0" * 19: "added-password-0000000000"}
+
+        gained = sorted(set(current) - set(previous))
+        lost = sorted(set(previous) - set(current))
+        rotated = sorted(k for k in set(current) & set(previous) if current[k] != previous[k])
+
+        self.assertEqual(gained, ["gwy18" + "0" * 19])
+        self.assertEqual(lost, [other])
+        self.assertEqual(rotated, [self.GW])
+
+    def test_an_unchanged_map_is_not_a_change(self):
+        # The loop runs every three seconds. A comparison that reported a change each pass would
+        # fill the log with the one line an operator is meant to look for after issuing.
+        held = {self.GW: "steady-password-000000000"}
+        self.assertEqual(held, dict(held))
+
+
 class DeliveryPath(unittest.TestCase):
     def test_the_default_path_matches_the_writer_and_both_mounts(self):
         """

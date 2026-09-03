@@ -561,12 +561,14 @@ worker deletes that tier. So minting stays a human, Administrator-or-Shopfloor_M
 audit row; only delivery is automated.
 
 **Which credentials may be delivered is decided by the database.**
-`authorize_virtual_gateway_credential()` returns `is_playback_target` — `is_simulated`, the same
-predicate `start_playback_job()` gates on — and the edge function passes it to the credential
-service as `deliver_to_playback`. Not computed in the edge function, and not in the service: the
-service holds a `sparkplug_id` and no database access by design, and two definitions of *"is this a
-playback target"* would eventually disagree. The disagreement is a real machine's broker password in
-a file the replay worker reads.
+`gateway_is_playback_delivery_target()` returns `is_simulated` — the same predicate
+`start_playback_job()` gates on — and the edge function passes it to the credential service as
+`deliver_to_playback`. Not computed in the edge function, and not in the service: the service holds
+a `sparkplug_id` and no database access by design, and two definitions of *"is this a playback
+target"* would eventually disagree. The disagreement is a real machine's broker password in a file
+the replay worker reads. It is a **separate function** rather than a column on the authorisation
+gate for a migration-replay reason that cost this stack an outage — see
+[`supabase/README.md`](../supabase/README.md) under `0078`.
 
 `0078` carries a boot-time self-check that fails if `start_playback_job()` stops mentioning
 `is_simulated`, because the two moving apart is silent.

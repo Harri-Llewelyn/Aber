@@ -42,74 +42,75 @@
 -- Two definitions of "is this a playback target" would eventually disagree, and the disagreement
 -- would be a real gateway's password sitting in a file the replay worker reads.
 
-DROP FUNCTION IF EXISTS public.authorize_virtual_gateway_credential(uuid);
+-- =================================================================================================
+-- A SEPARATE FUNCTION, AND THE FIRST ATTEMPT IS WHY
+--
+-- This began by adding a third column to `authorize_virtual_gateway_credential()`, the obvious
+-- shape: one authoritative answer, one round trip, delivery decided beside the authorisation it
+-- belongs to. It DROPped the old form first, the way 0075 does, and it worked -- once.
+--
+-- ON THE SECOND BOOT THE ENTIRE CHAIN DIED AT FILE ONE:
+--
+--     0001_baseline_schema.sql:611: ERROR: cannot change return type of existing function
+--     DETAIL:  Row type defined by OUT parameters is different.
+--     HINT:    Use DROP FUNCTION authorize_virtual_gateway_credential(uuid) first.
+--
+-- Migrations replay in filename order on every boot, so 0001 runs BEFORE this file and re-declares
+-- the two-column form with CREATE OR REPLACE -- which cannot change a return type, and finds the
+-- three-column version this file left behind. The DROP here is far too late: 0001 has already
+-- aborted, and it aborts having DROPped the FDW server with CASCADE, so the stack was left running
+-- with the whole telemetry read surface missing.
+--
+-- THE RULE THIS TEACHES, and scripts/check-docs-drift.mjs now enforces it: a later migration may
+-- redeclare a function 0001 declares, but it MUST NOT change its return type. 0075 gets away with a
+-- new argument because that is a different signature, and 0076 gets away with a rewrite because the
+-- return type is unchanged. Same signature, different return type is the one combination that
+-- cannot survive a replay.
+--
+-- So the delivery predicate is its own function. It costs a second round trip from the edge
+-- function and leaves the authorisation gate exactly as 0001 declares it.
 
-CREATE OR REPLACE FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid)
-RETURNS TABLE(sparkplug_id text, gateway_name text, is_playback_target boolean)
+CREATE OR REPLACE FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid)
+RETURNS boolean
     LANGUAGE plpgsql
+    STABLE
     SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 DECLARE
-  v_gateway public.gateways%ROWTYPE;
+  v_simulated boolean;
 BEGIN
-  -- Fail closed, and before anything observable happens. The same allow-list as the write policies
-  -- on `gateways` and as 0025's issuing RPC: minting a broker credential is a gateway-management
-  -- act, and there is no reading of it that makes it less than that.
+  -- THE SAME ALLOW-LIST AS THE AUTHORISATION GATE, though this only reads a boolean. The caller has
+  -- already passed that gate by the time this is asked, so the check is redundant on the intended
+  -- path -- and it is here for the same reason `record_service_token_issued()` re-checks its actor:
+  -- authorisation must not rest on a check made only by the component that also acts on the answer.
+  -- The answer decides whether a broker password is written where the replay worker can read it.
   IF NOT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) THEN
-    RAISE EXCEPTION 'insufficient privileges to mint a gateway broker credential'
+    RAISE EXCEPTION 'insufficient privileges to resolve a playback delivery target'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
 
-  SELECT * INTO v_gateway FROM public.gateways WHERE id = p_gateway_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'gateway % does not exist', p_gateway_id
-      USING ERRCODE = 'foreign_key_violation';
-  END IF;
+  SELECT is_simulated INTO v_simulated FROM public.gateways WHERE id = p_gateway_id;
 
-  -- THE MIRROR IMAGE OF 0025, AND THE INVERSION IS THE WHOLE POINT OF THAT FILE. That function
-  -- refuses a host-run gateway because there is no appliance to carry a bundle to; this one
-  -- REQUIRES one, because a remote appliance already has a path and it is a better path -- the
-  -- credential is minted on the appliance itself and never travels through a browser.
+  -- FALSE FOR A GATEWAY THAT DOES NOT EXIST, rather than an exception. This is asked immediately
+  -- after an authorisation that already refused a missing gateway, so the only way to reach it is a
+  -- row deleted in between -- and "do not deliver" is the safe answer to that, where raising would
+  -- turn a vanished gateway into a failed credential issue for one that is still there.
   --
-  -- Offering this for a remote appliance would be offering a WORSE option beside a working one,
-  -- and the operator choosing it would have no way to know that.
-  IF v_gateway.deployment <> 'host' THEN
-    RAISE EXCEPTION
-      'gateway % runs on an appliance; use an enrolment bundle so the credential is minted there '
-      'rather than shown in a browser', v_gateway.name
-      USING ERRCODE = 'invalid_parameter_value';
-  END IF;
-
-  -- ARCHIVED IS REFUSED, following 0037. That migration made archiving withdraw an outstanding
-  -- enrolment bundle, having found that a bundle downloaded and never instantiated stayed
-  -- redeemable after the gateway was archived -- issuing a real broker credential and resurrecting
-  -- the row to ONLINE. Minting directly is the same hole reached in one step instead of two.
-  IF v_gateway.is_archived THEN
-    RAISE EXCEPTION 'gateway % is archived; restore it before minting a credential', v_gateway.name
-      USING ERRCODE = 'invalid_parameter_value';
-  END IF;
-
-  -- COALESCED THOUGH THE COLUMN IS NOT NULL TODAY, which makes this dead code and is deliberate.
-  -- The cost is a function call; the cost of being wrong is that a NULL reaches the edge function
-  -- as a missing key, and a delivery decision made on an absent boolean goes whichever way the
-  -- caller happens to read it -- so a later migration relaxing the constraint would silently
-  -- change what gets delivered rather than failing. `test_playback_credential_delivery.py` pins the
-  -- NOT NULL, so if that ever goes this stops being defence and starts being the behaviour.
-  RETURN QUERY SELECT v_gateway.sparkplug_id, v_gateway.name,
-                      coalesce(v_gateway.is_simulated, false);
+  -- COALESCED THOUGH is_simulated IS NOT NULL TODAY, which makes that half dead code and is
+  -- deliberate: a later migration relaxing the constraint would otherwise silently change what gets
+  -- delivered rather than failing. test_playback_credential_delivery.py pins the NOT NULL, so if it
+  -- ever goes this stops being defence and starts being the behaviour.
+  RETURN coalesce(v_simulated, false);
 END;
 $$;
 
-COMMENT ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) IS
-  'Gate for minting a VIRTUAL gateway''s broker credential: checks has_role(), refuses a physical or archived gateway, and returns the generated sparkplug_id the account must be named after. Since 0078 it also returns is_playback_target -- is_simulated, the same predicate start_playback_job() gates on -- which is what authorises DELIVERY of the password to the playback worker. The mirror of issue_gateway_enrollment_token(), which refuses exactly the gateways this accepts.';
+COMMENT ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) IS
+  'Whether a freshly-issued broker credential for this gateway may be DELIVERED to the playback worker. is_simulated -- the same predicate start_playback_job() gates on, so the set of passwords the worker can hold is exactly the set of gateways it may publish as. Deliberately NOT a column on authorize_virtual_gateway_credential(): 0001 redeclares that function on every boot and CREATE OR REPLACE cannot change a return type, which aborts the whole chain at file one.';
 
--- The grants 0001 puts on the two-column form do not follow it across the DROP, and a function
--- nobody may execute fails at the call site rather than here -- as a 500 from the edge function
--- with the Gateways page's credential button simply not working.
-REVOKE ALL ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) TO service_role;
-GRANT ALL ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) TO authenticated;
+REVOKE ALL ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) TO authenticated;
 
 -- =================================================================================================
 -- SELF-CHECK: THE DELIVERY PREDICATE AND THE JOB GATE MUST NOT DRIFT APART

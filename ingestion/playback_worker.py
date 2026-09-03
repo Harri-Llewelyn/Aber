@@ -491,23 +491,41 @@ def main():
         # staleness window to the one thing whose entire purpose is not having one.
         previous = credentials
         credentials = _credentials()
-        if set(credentials) != set(previous):
+        if credentials != previous:
             gained = sorted(set(credentials) - set(previous))
             lost = sorted(set(previous) - set(credentials))
-            # AT INFO, AND NAMING THE IDS. Those are gateway identifiers rather than secrets -- the
-            # values never appear here. This is the line an operator looks for after clicking
-            # "Generate broker credential", so it has to say what arrived, not merely that something
-            # did.
-            logger.info(
-                "Playback credentials changed: now holding %d gateway(s)%s%s.",
-                len(credentials),
-                f" -- gained {', '.join(gained)}" if gained else "",
-                f" -- lost {', '.join(lost)}" if lost else "",
+            # ROTATION IS A CHANGE, AND COMPARING KEY SETS MISSED IT. This was written as
+            # `set(credentials) != set(previous)` and was silent on the case it exists for: the
+            # FIRST delivery on this stack replaced a stale `.env` password for a gateway already
+            # in the map, so the ids were identical before and after and nothing was logged. The
+            # worker had picked the new credential up and was working; the operator had no way to
+            # know. Comparing the maps catches a re-issue, which is the ordinary case from here on
+            # -- every mint after the first one rotates a gateway already held.
+            rotated = sorted(
+                k for k in set(credentials) & set(previous) if credentials[k] != previous[k]
             )
-            # REPORTED IMMEDIATELY rather than at the next heartbeat. The playback dialog reads that
-            # row to decide whether a target is offerable, so waiting up to thirty seconds after an
-            # issue is thirty seconds of a page saying the opposite of what is true.
-            last_report = 0.0
+            # IDS ONLY, NEVER VALUES, which is why `rotated` names gateways rather than saying what
+            # changed. A log line is the one place a delivered password could leak into somewhere
+            # persistent and world-readable.
+            parts = []
+            if gained:
+                parts.append(f"gained {', '.join(gained)}")
+            if rotated:
+                parts.append(f"rotated {', '.join(rotated)}")
+            if lost:
+                parts.append(f"lost {', '.join(lost)}")
+            logger.info(
+                "Playback credentials changed: now holding %d gateway(s) -- %s.",
+                len(credentials), "; ".join(parts) or "no change to which gateways are held",
+            )
+            # ONLY WHEN THE REPORTED SET MOVED. `playback_report_credentials` carries edge-node ids
+            # and nothing else, so a rotation does not change what the row says and re-sending it
+            # early would be a write that tells the page nothing it does not already have.
+            if gained or lost:
+                # The playback dialog reads that row to decide whether a target is offerable, so
+                # waiting up to thirty seconds after an issue is thirty seconds of a page saying
+                # the opposite of what is true.
+                last_report = 0.0
 
         # ------------------------------------------------------------------------------------
         # Say what this worker can publish as.
