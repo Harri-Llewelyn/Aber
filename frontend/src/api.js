@@ -1721,6 +1721,17 @@ const apiMethods = {
       const since = (url.searchParams.get('since') || '').trim();
       const until = (url.searchParams.get('until') || '').trim();
 
+      // THE KEYSET CURSOR (0077): where the reader got to, not how far in they are. Both halves or
+      // neither -- `recorded_at` is not unique, because log_digital_thread_event() stamps one
+      // transaction's rows with one `now()` and a batch relocation of six devices is deliberately
+      // one transaction (0033). A cursor of "older than T" would skip the other five rows of that
+      // batch and a cursor of "T or older" would repeat the first one forever, so the id is what
+      // makes the position exact. Sent as a pair or not at all; the RPC ignores a half-cursor and
+      // this refuses to send one.
+      const beforeRecordedAt = (url.searchParams.get('before_recorded_at') || '').trim();
+      const beforeId = (url.searchParams.get('before_id') || '').trim();
+      const hasCursor = beforeRecordedAt !== '' && beforeId !== '';
+
       // A tag that matches no device must return nothing rather than everything.
       if (entityIds && entityIds.length === 0) return [];
 
@@ -1767,6 +1778,21 @@ const apiMethods = {
         p_entity_ids: entityIds && entityIds.length ? entityIds : null,
         p_since: since || null,
         p_until: until || null,
+        // OMITTED ENTIRELY WHEN THERE IS NO CURSOR, rather than sent as null, and that is a
+        // compatibility decision rather than a stylistic one. PostgREST resolves an RPC by the
+        // names it is given, so naming these two against a database that has not applied 0077
+        // fails outright:
+        //
+        //   ERROR: function public.digital_thread_page(p_limit => integer,
+        //          p_before_recorded_at => timestamptz, p_before_id => integer) does not exist
+        //
+        // -- measured, not inferred. That would take the whole Digital Thread page down on a stack
+        // whose migrations have not replayed yet, which is a worse failure than the one this change
+        // exists to fix. Omitted, the call matches the seven-argument form, the page renders
+        // unpaged, and `truncated` still tells the reader the view is cut off.
+        ...(hasCursor
+          ? { p_before_recorded_at: beforeRecordedAt, p_before_id: Number(beforeId) }
+          : {}),
       });
       if (error) throw error;
 
@@ -1792,6 +1818,12 @@ const apiMethods = {
       // simply have no opinion about deleted assets, which is the right default for a fixture.
       rows.purgedAssets = Number(payload.purged_assets || 0);
       rows.truncated = Boolean(payload.truncated);
+      // NULL IS THE ONLY END-OF-DATA SIGNAL, and it comes from the server rather than being
+      // inferred here. `rows` has already been through the description search above, so its length
+      // says nothing about whether the database had more to give -- a page can filter down to
+      // nothing and still sit in the middle of the thread. Deriving "the end" from `rows.length`
+      // would stop the walk on the first page whose text nobody matched.
+      rows.nextCursor = payload.next_cursor || null;
       return rows;
     }
 

@@ -952,6 +952,42 @@ it is, while `changed_by` still receives the principal. The row improved as well
 an ingestion write records `'ingestion'` **and** names the identity, where it used to record
 `'ingestion'` and `NULL`.
 
+### Reading past the first page (`0077`)
+
+**The page had a cap and no way to say so.** `digital_thread_page()` has returned `truncated`
+alongside every response since `0039`, and the Digital Thread tab has stored it in state since then
+and *never rendered it* — so a page answering a question about the whole plant with its newest 200
+rows was indistinguishable from one showing everything.
+
+**Raising the cap was rejected.** The expensive half of that query is `matching`, which scans every
+row the filters select in order to count deleted assets over the whole match rather than over the
+page; a bigger page costs more JSON and more DOM without touching that, and only moves the wall.
+`0077` adds a keyset cursor instead — `p_before_recorded_at` and `p_before_id`, returned as
+`next_cursor`, with the page size unchanged at 200.
+
+**`recorded_at` is not a key, and that is the whole difficulty.**
+`log_digital_thread_event()` stamps one transaction's rows with one `now()`, and a batch relocation
+of six devices is deliberately one transaction (`0033`). A cursor of *"older than T"* skips the rest
+of the batch; *"T or older"* repeats its first row forever. The cursor is therefore the pair
+`(recorded_at, id)`, `id` being the primary key and monotonic, and `ORDER BY` matches it exactly —
+as does `idx_digital_thread_recorded_id`, because a cursor walking one order against an index in
+another is *correct* while degrading to a full sort per page, which nothing notices until the table
+is large.
+
+Measured on a fixture of same-timestamp batches: the composite cursor walked **35 of 35** rows
+exactly once; the `recorded_at`-only cursor reached **28**, silently dropping seven.
+`test_digital_thread_paging.py` runs both, and the naive one is the control — without it the rest of
+the suite would pass against a broken cursor on any fixture whose timestamps happened to be
+distinct.
+
+**OFFSET would have been wrong here specifically.** The table is append-only and read newest-first,
+so rows are inserted at the end the reader started from: between page 1 and page 2 every offset has
+shifted by however many events the plant recorded meanwhile, and the reader sees some rows twice and
+misses others. For the same reason the tab's 60-second poll **merges** its first page into what is
+already loaded rather than replacing it — append-only means held rows cannot change and new ones can
+only belong at the top — and starts again only when the two ranges no longer overlap, which is the
+one case where prepending would splice a hole into the middle of the list.
+
 ---
 
 ## Machine Identities

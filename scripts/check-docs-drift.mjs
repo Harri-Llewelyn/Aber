@@ -624,6 +624,12 @@ function edgeFunctionNames() {
     // revocation has cascaded to its tokens and both arms match. The last declaration winning is
     // exactly what is wanted, and 0074 is left intact as the record of what shipped first.
     'public.auth_pre_request': '0076 adds the principal arm; 0074 holds the token-only form',
+    // 0077 gives it a keyset cursor -- two more defaulted arguments, p_before_recorded_at and
+    // p_before_id -- so the Digital Thread can be walked past its first page. It DROPs the
+    // seven-argument form first, because CREATE OR REPLACE cannot change an argument list and
+    // leaving both declared would make a seven-argument call ambiguous at the call site. The
+    // baseline's copy is the one being replaced.
+    'public.digital_thread_page': '0077 adds the keyset cursor; the baseline holds the unpaged form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

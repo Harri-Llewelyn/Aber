@@ -116,6 +116,12 @@ python supabase/migrations/test_role_permission_split.py
 python supabase/migrations/test_audit_domain.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
+# The keyset cursor (0077). THE CONTROL TEST IS THE ONE THAT MATTERS: it runs the naive
+# recorded_at-only cursor against the same fixture and asserts it LOSES rows. Without that,
+# every other test in the file would pass just as well against a broken cursor on a fixture
+# whose timestamps happen to be distinct -- and they are not, because one transaction's rows
+# all carry one now() and a batch relocation is deliberately one transaction (0033).
+python supabase/migrations/test_digital_thread_paging.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py

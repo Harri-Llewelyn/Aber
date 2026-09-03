@@ -299,6 +299,42 @@ const DEFAULT_LANE_LIMIT = 30
  */
 const DEFAULT_POLL_SECONDS = 60
 
+/**
+ * Rows per request. THE SAME 200 AS BEFORE, AND THAT IS THE POINT.
+ *
+ * The obvious answer to "the page stops at 200 events" is to make it 2000, and it is the wrong
+ * one. `digital_thread_page()` already scans every row the filters select in order to count deleted
+ * assets over the whole match rather than over the page, so a bigger page buys nothing on the
+ * expensive half and costs on the two cheap ones -- a larger JSON aggregation and more DOM. It also
+ * only moves the wall. What was missing was not a bigger first page but a second one.
+ */
+const PAGE_SIZE = 200
+
+/**
+ * Fold a freshly-polled first page into the pages already loaded.
+ *
+ * `digital_thread` is APPEND-ONLY (0003) and read newest-first, which is what makes this safe:
+ * rows already held can never change or disappear, and anything new can only belong at the top. So
+ * a poll only ever has rows to PREPEND, and the pages a reader walked back to stay put.
+ *
+ * THE ONE CASE THAT IS NOT A MERGE is a gap. If more than PAGE_SIZE events were recorded since the
+ * last poll, the fresh page and the held list no longer touch, and prepending would splice two
+ * ranges together with a hole in the middle and no indication there was one. Detected by the
+ * overlap being empty; answered by starting again from the newest page, which is the honest state.
+ *
+ * Exported for its own test: this is ordinary-looking list bookkeeping whose failure mode is a
+ * reader quietly losing history, which nothing on the page would show.
+ */
+export function mergeFirstPage (prev, fresh) {
+  if (!prev || prev.length === 0) return { events: fresh, reset: true }
+  const held = new Set(prev.map(e => e.event_id))
+  const added = fresh.filter(e => !held.has(e.event_id))
+  // Every row is new AND there are rows: the two ranges do not touch. Anything else overlaps, so
+  // the fresh rows sit directly on top of what is held.
+  if (fresh.length > 0 && added.length === fresh.length) return { events: fresh, reset: true }
+  return { events: [...added, ...prev], reset: false }
+}
+
 /*
  * MARKERS TOO CLOSE TO DRAW SEPARATELY BECOME ONE BADGE THAT SAYS HOW MANY THERE ARE.
  *
@@ -929,9 +965,30 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
       .map(([id]) => id)
   }, [nameFilter, entityNames])
 
-  const load = useCallback((isInitial = false) => {
-    if (isInitial) setLoading(true)
-    let url = '/api/v1/digital-thread?limit=200'
+  /**
+   * Where the next page starts, or null at the end of the thread.
+   *
+   * NULL IS THE END, AND IT IS THE SERVER'S ANSWER RATHER THAN A DERIVED ONE. A short page is not
+   * a reliable end-of-data test: `events` has already been through the description search in
+   * api.js by the time it arrives, so a page can filter down to nothing while the thread continues
+   * underneath it. Trusting `length < 200` would stop the walk on the first page nobody matched.
+   */
+  const [nextCursor, setNextCursor] = useState(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+
+  /**
+   * The loaded events, mirrored into a ref.
+   *
+   * The poll below has to MERGE its result into what is already loaded rather than replace it, and
+   * it therefore has to read the current list. Reading it from state would put `allEvents` in
+   * `load`'s dependency array -- which rebuilds the interval on every fetch, so the timer would
+   * restart each time it fired and the effective poll period would drift.
+   */
+  const allEventsRef = useRef([])
+  useEffect(() => { allEventsRef.current = allEvents }, [allEvents])
+
+  const buildUrl = useCallback((cursor) => {
+    let url = `/api/v1/digital-thread?limit=${PAGE_SIZE}`
     if (entityTypeFilter) url += `&entity_type=${encodeURIComponent(entityTypeFilter)}`
     if (actionFilter)     url += `&action=${encodeURIComponent(actionFilter)}`
     if (namedEntityIds)   url += `&entity_ids=${encodeURIComponent(namedEntityIds.join(','))}`
@@ -941,18 +998,71 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
     if (since) url += `&since=${encodeURIComponent(since)}`
     if (until) url += `&until=${encodeURIComponent(until)}`
     if (showPurged) url += '&include_purged=true'
-    api.get(url)
+    // BOTH HALVES OR NEITHER (0077). `recorded_at` is not unique -- one transaction's rows all
+    // carry one `now()` -- so the id is what makes the position exact rather than approximate.
+    if (cursor && cursor.recorded_at && cursor.id != null) {
+      url += `&before_recorded_at=${encodeURIComponent(cursor.recorded_at)}`
+      url += `&before_id=${encodeURIComponent(cursor.id)}`
+    }
+    return url
+  }, [entityTypeFilter, actionFilter, namedEntityIds, rangePreset, customStart, customEnd, showPurged])
+
+  const load = useCallback((isInitial = false) => {
+    if (isInitial) setLoading(true)
+    api.get(buildUrl(null))
       // `d` IS THE EVENT ARRAY, carrying the page-level counts as properties -- see api.js for why
       // the resource stayed the return value. A fixture that resolves a bare array reports no
       // deleted assets and no truncation, which is the honest answer for one that models neither.
       .then(d => {
-        setAllEvents(Array.isArray(d) ? d : [])
+        const fresh = Array.isArray(d) ? d : []
+        // THE POLL MUST NOT DISCARD PAGES THE READER ASKED FOR. Before paging existed this could
+        // replace the list outright, because the list was always exactly one page. Now a reader who
+        // has walked back six pages would lose five of them every sixty seconds, silently, while
+        // looking at them. `mergeFirstPage` prepends what is new and keeps the rest.
+        const { events, reset } = isInitial
+          ? { events: fresh, reset: true }
+          : mergeFirstPage(allEventsRef.current, fresh)
+        setAllEvents(events)
         setServerPurgedCount(typeof d?.purgedAssets === 'number' ? d.purgedAssets : null)
-        setTruncated(Boolean(d?.truncated))
+        // ONLY WHEN THE LIST WAS REPLACED. A merge leaves the deeper pages loaded, so the cursor
+        // still points past the OLDEST row held -- overwriting it with page one's cursor would
+        // send the next "Load more" back to rows already on screen.
+        if (reset) {
+          setNextCursor(d?.nextCursor || null)
+          setTruncated(Boolean(d?.truncated))
+        }
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [entityTypeFilter, actionFilter, namedEntityIds, rangePreset, customStart, customEnd, showPurged])
+  }, [buildUrl])
+
+  /**
+   * One more page, appended.
+   *
+   * The dedupe is not belt-and-braces. A poll can land between the click and the response, and the
+   * keyset cursor is a position in the table rather than in the list on screen -- so a row that
+   * arrived by merge could also arrive by page. Two React children with one key is a rendering bug
+   * rather than a cosmetic one.
+   */
+  const loadMore = useCallback(() => {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    api.get(buildUrl(nextCursor))
+      .then(d => {
+        const page = Array.isArray(d) ? d : []
+        setAllEvents(prev => {
+          const seen = new Set(prev.map(e => e.event_id))
+          return [...prev, ...page.filter(e => !seen.has(e.event_id))]
+        })
+        setNextCursor(d?.nextCursor || null)
+        setTruncated(Boolean(d?.truncated))
+        // `purgedAssets` is deliberately NOT updated here. It is counted over everything the
+        // filters select rather than over a page (0039), so every page carries the same number and
+        // page one's answer is already the whole-match one.
+        setLoadingMore(false)
+      })
+      .catch(() => setLoadingMore(false))
+  }, [nextCursor, loadingMore, buildUrl])
 
   // A later handover -- clicking Digital Thread on a second device without leaving the page --
   // replaces the filter rather than being ignored because state was already initialised.
@@ -1628,6 +1738,57 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                   Show fewer lanes
                 </button>
               )}
+
+              {/* THE END OF THE THREAD, SAID OUT LOUD.
+
+                  `truncated` has been returned by the server and stored in this component since
+                  0039 and was never once rendered -- so a page showing the newest 200 of several
+                  thousand events looked exactly like a page showing all of them. That is the
+                  failure worth fixing here; "Load more" is what makes saying it useful rather than
+                  merely honest.
+
+                  BOTH NUMBERS, WHEN THEY DISAGREE. `allEvents` is what was fetched and `events` is
+                  what survived the purged-asset filter and the description search, and a footer
+                  reading "600 events" above a timeline drawing 40 is how a reader concludes the
+                  page is broken. */}
+              <div className="dt-pagination">
+                <span className="dt-pagination-count">
+                  {events.length === allEvents.length
+                    ? `${allEvents.length} event${allEvents.length === 1 ? '' : 's'}`
+                    : `${events.length} of ${allEvents.length} loaded event${allEvents.length === 1 ? '' : 's'}`}
+                </span>
+                {nextCursor ? (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    title={`Fetch the next ${PAGE_SIZE} events, older than the oldest one loaded`}
+                  >
+                    {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
+                  </button>
+                ) : truncated ? (
+                  /* CUT OFF WITH NO WAY FORWARD, which is not a contradiction and is not dead code.
+                     `truncated` and `next_cursor` come from the same response but are not the same
+                     claim: a browser running this build against a database that has not applied
+                     0077 gets the first and not the second. Telling the reader the view is
+                     incomplete still matters when they cannot do anything about it -- more, if
+                     anything, because the alternative is a page that quietly answers a question
+                     about the whole plant with its newest 200 rows. */
+                  <span className="dt-pagination-end">
+                    Showing the newest {allEvents.length} events — there are older ones this view
+                    cannot reach.
+                  </span>
+                ) : (
+                  /* ONLY MEANINGFUL ONCE SOMETHING WAS PAGED. On a stack with forty events the
+                     first response is already the whole thread, and announcing the end of it
+                     would be noise about a limit the reader never met. */
+                  allEvents.length >= PAGE_SIZE && (
+                    <span className="dt-pagination-end">
+                      End of the thread — every event matching these filters is loaded.
+                    </span>
+                  )
+                )}
+              </div>
             </>
           )}
         </div>{/* .card-body — the timeline */}
