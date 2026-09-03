@@ -2,7 +2,10 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { ContextPanel } from '../common/ContextPanel'
-import { IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu, IconTrash } from '../common/Icons'
+import {
+  IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu, IconTrash,
+  IconShieldCheck, IconLock, IconFileCode, IconSettings
+} from '../common/Icons'
 import { DIGITAL_THREAD_ACTIONS } from '../../constants'
 import { useSetting } from '../../hooks/useSettings'
 
@@ -479,12 +482,49 @@ export function clusterSummary(events, kindOf) {
        + 'Click to open the first — narrow the time range to separate them'
 }
 
-/** The sections, in the order a plant is organised: a cell holds gateways, which hold devices. */
+/**
+ * The sections, in the order a plant is organised: a cell holds gateways, which hold devices —
+ * then the governance lane, which is not part of that hierarchy and follows it.
+ *
+ * =================================================================================================
+ * THIS LIST WAS THREE ENTRIES LONG AND SILENTLY DISCARDED FOUR OF `ENTITY_KIND`'S SEVEN.
+ *
+ * `sections` filters lanes by kind and keeps only the kinds named here, so a lane of any other kind
+ * was counted by the header and never drawn. Measured on a development stack, resting filters:
+ *
+ *     user_roles           20 lanes, 136 events      not drawn
+ *     service_principals    1 lane,   15 events      not drawn
+ *     schemas               6 lanes,  12 events      not drawn
+ *     gateways              1 lane,    4 events      drawn
+ *
+ * — a header reading "28 assets · 167 events" above a single row. The counts were right; the
+ * timeline could not express most of what it had. `0070` had already given every one of these a
+ * legible name for exactly this surface, and adding the audit domains it introduced never reached
+ * here, so the whole SECURITY lane — every role granted or revoked, every service identity — was
+ * undrawable. That is the half of the audit an Auditor comes for.
+ *
+ * =================================================================================================
+ * AND ANY KIND NOT LISTED HERE IS STILL DRAWN, under its own name.
+ *
+ * Extending this list fixes the four that exist today and not the failure, which is that the list
+ * has to be extended at all. `sections` now appends a section for every remaining kind rather than
+ * dropping it, so the next entity type the audit trigger reaches appears — unstyled and correctly
+ * labelled from `ENTITY_KIND` — instead of vanishing into a count nobody can reconcile.
+ */
 const SECTIONS = [
-  { kind: 'CELL',    label: 'Cells',    Icon: IconBuilding2 },
-  { kind: 'GATEWAY', label: 'Gateways', Icon: IconRadio },
-  { kind: 'DEVICE',  label: 'Devices',  Icon: IconCpu }
+  { kind: 'CELL',             label: 'Cells',              Icon: IconBuilding2 },
+  { kind: 'GATEWAY',          label: 'Gateways',           Icon: IconRadio },
+  { kind: 'DEVICE',           label: 'Devices',            Icon: IconCpu },
+  // THE SECURITY LANE (0070), in the order a reader meets it: who holds what, what the machines
+  // are, then the contracts and settings that shape both.
+  { kind: 'ACCESS',           label: 'Role assignments',   Icon: IconShieldCheck },
+  { kind: 'SERVICE IDENTITY', label: 'Service identities', Icon: IconLock },
+  { kind: 'SCHEMA',           label: 'Schemas',            Icon: IconFileCode },
+  { kind: 'SETTING',          label: 'Settings',           Icon: IconSettings }
 ]
+
+/** The label for a kind with no section of its own — the raw kind, which `ENTITY_KIND` made legible. */
+const FALLBACK_SECTION_ICON = IconHistory
 const SECTION_ICON = Object.fromEntries(SECTIONS.map(s => [s.kind, s.Icon]))
 
 /** A UUID shortened to something a person can compare at a glance, when there is no name. */
@@ -1169,11 +1209,38 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
    * A section with nothing in it is omitted rather than drawn empty -- "Cells (0)" is a heading
    * that promises a row and then does not deliver one.
    */
-  const sections = useMemo(() =>
-    SECTIONS
+  /**
+   * Lanes grouped into the sections that draw them.
+   *
+   * NOTHING VISIBLE MAY BE DROPPED HERE, which is the property this used to lack. It filtered
+   * `visibleLanes` down to the kinds `SECTIONS` names and discarded the rest, so a lane of an
+   * unlisted kind was counted by the header and never rendered — 27 of 28 lanes on the stack that
+   * found it. A section list is a presentation choice; it must not also be a filter.
+   *
+   * So the known kinds keep their order and their icons, and every remaining kind gets a section of
+   * its own afterwards. The result is that adding an entity type to the audit trigger degrades to
+   * "appears with a plain icon" rather than to "silently absent".
+   */
+  const sections = useMemo(() => {
+    const known = SECTIONS
       .map(s => ({ ...s, lanes: visibleLanes.filter(l => l.kind === s.kind) }))
-      .filter(s => s.lanes.length > 0),
-  [visibleLanes])
+      .filter(s => s.lanes.length > 0)
+
+    const claimed = new Set(SECTIONS.map(s => s.kind))
+    const leftovers = [...new Set(visibleLanes.map(l => l.kind).filter(k => !claimed.has(k)))]
+      .sort()
+      .map(kind => ({
+        kind,
+        // `ENTITY_KIND` already turns a table name into something readable, and an unmapped type
+        // falls through it uppercased -- which is ugly and is the point: it reads as a gap to close
+        // rather than as a considered label.
+        label: kind,
+        Icon: FALLBACK_SECTION_ICON,
+        lanes: visibleLanes.filter(l => l.kind === kind)
+      }))
+
+    return [...known, ...leftovers]
+  }, [visibleLanes])
 
   /**
    * The x-axis extent, taken from the events themselves rather than from the range control.

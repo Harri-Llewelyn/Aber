@@ -211,3 +211,66 @@ describe('DigitalThreadTab paging', () => {
     await waitFor(() => expect(screen.getByText(/^3 events$/)).toBeInTheDocument())
   })
 })
+
+/**
+ * Every lane the header counts is a lane the timeline draws.
+ *
+ * THE BUG THIS PINS was a header reading "28 assets · 167 events" above a single drawn row.
+ * `sections` kept only the kinds a hardcoded list named, and the list had three entries while
+ * `ENTITY_KIND` had seven -- so role assignments (20 lanes, 136 events), service identities and
+ * schemas were counted and silently discarded. The whole security lane of the audit, which is the
+ * half an Auditor comes for, could not be rendered at all.
+ *
+ * These assert the INVARIANT rather than the four kinds that were missing: a section list is a
+ * presentation choice and must never also act as a filter.
+ */
+describe('DigitalThreadTab section coverage', () => {
+  const laneEvent = (id, entityType, entityId) => ({
+    ...event(id), entity_type: entityType, entity_id: entityId,
+    description: `Action UPDATE on ${entityType} [${entityId}]`,
+  })
+
+  it('draws the security lane the audit records, not only the three asset types', async () => {
+    respond(() => page([
+      laneEvent(4, 'user_roles', 'a0000000-0000-4000-8000-000000000001'),
+      laneEvent(3, 'service_principals', 'b0000000-0000-4000-8000-000000000002'),
+      laneEvent(2, 'schemas', 'c0000000-0000-4000-8000-000000000003'),
+      laneEvent(1, 'gateways', 'gw-1'),
+    ], { nextCursor: null }))
+
+    render(<DigitalThreadTab />)
+    // The headings are what say a lane was drawn at all.
+    expect(await screen.findByLabelText('Role assignments lanes')).toBeInTheDocument()
+    expect(screen.getByLabelText('Service identities lanes')).toBeInTheDocument()
+    expect(screen.getByLabelText('Schemas lanes')).toBeInTheDocument()
+    expect(screen.getByLabelText('Gateways lanes')).toBeInTheDocument()
+  })
+
+  it('draws a kind nothing has a section for, rather than dropping it', async () => {
+    // The failure was not the missing kinds, it was that a missing kind vanished. A new entity type
+    // reaching the audit trigger must degrade to "plain icon", never to "absent".
+    respond(() => page([
+      laneEvent(2, 'something_new', 'd0000000-0000-4000-8000-000000000004'),
+      laneEvent(1, 'gateways', 'gw-1'),
+    ], { nextCursor: null }))
+
+    render(<DigitalThreadTab />)
+    expect(await screen.findByLabelText('SOMETHING_NEW lanes')).toBeInTheDocument()
+  })
+
+  it('the asset count in the header equals the lanes actually drawn', async () => {
+    // The reconcilable-number property, stated directly: this is what a reader checks the page
+    // against, and it was wrong by 27 on the stack that found it.
+    respond(() => page([
+      laneEvent(3, 'user_roles', 'a0000000-0000-4000-8000-000000000001'),
+      laneEvent(2, 'schemas', 'c0000000-0000-4000-8000-000000000003'),
+      laneEvent(1, 'gateways', 'gw-1'),
+    ], { nextCursor: null }))
+
+    render(<DigitalThreadTab />)
+    await screen.findByLabelText('Gateways lanes')
+    const drawn = screen.getAllByRole('separator').length
+    expect(drawn).toBe(3)
+    expect(screen.getByText(/3 assets · 3 events/)).toBeInTheDocument()
+  })
+})

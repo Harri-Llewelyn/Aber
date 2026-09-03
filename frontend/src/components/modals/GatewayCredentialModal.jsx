@@ -109,6 +109,18 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
   // playback worker, which reads ONE json object keyed by sparkplug_id -- and that key IS
   // derivable, so this half prints a line that can be pasted whole.
   const isPlayback = !!gateway.is_shadow
+
+  // WHAT THE SERVER DID, NOT WHAT THIS COMPONENT INFERS (0078). `playback_delivered` is:
+  //
+  //   true    the password was written where the worker reads it -- nothing for an operator to do
+  //   false   this IS a playback target and delivery FAILED -- it must be placed by hand
+  //   null    not a playback target, so there was nothing to deliver
+  //
+  // ABSENT IS TREATED AS null, which is what a build talking to a stack whose migrations have not
+  // replayed yet will see. That degrades to the pre-0078 instructions, which are correct there --
+  // the wrong way round would tell an operator to do nothing on a stack where nothing was done.
+  const wasDelivered = credential?.playback_delivered === true
+  const deliveryFailed = credential?.playback_delivered === false
   const envBlock = !credential
     ? ''
     : isPlayback
@@ -244,35 +256,70 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
               </div>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">For .env</label>
-              <pre className="mono" style={{
-                background: 'var(--bg-subtle)', padding: '10px', borderRadius: '4px',
-                fontSize: '12px', overflowX: 'auto', margin: 0
-              }}>{envBlock}</pre>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-                  {isPlayback ? (
-                    <>
-                      Paste it as it is, then restart the playback worker
-                      (<span className="mono">docker compose up -d playback</span>). Already have
-                      other targets in there? Add this key to the existing object rather than
-                      replacing it.
-                    </>
-                  ) : (
-                    <>
-                      Replace <span className="mono">&lt;NAME&gt;</span> with the broker node’s{' '}
-                      <span className="mono">acsCredentialsEnv</span> value — it is declared on the
-                      broker node in the Node-RED flow, and is not the gateway’s name — then restart
-                      Node-RED.
-                    </>
-                  )}
-                </span>
-                <button className="btn btn-ghost" onClick={() => copy('env', envBlock)}>
-                  {copied === 'env' ? <IconCheck size={13} /> : <IconCopy size={13} />} Copy block
-                </button>
+            {/* DELIVERED MEANS THERE IS NOTHING TO DO, and saying otherwise is the bug this
+                replaced. Until 0078 this dialog told every playback operator to paste a variable
+                into `.env` and run `docker compose up -d playback` -- which was true, and is now
+                the WRONG instruction: the credential service writes the password where the worker
+                reads it, and the worker picks it up within its poll interval. An operator who
+                followed the old text would edit `.env` to a value the delivered file already
+                overrides, and conclude the paste had failed.
+
+                THREE STATES, NOT TWO. `playback_delivered` is true, false or null, and false is
+                the one that needs a person -- see the edge function for why they cannot be
+                collapsed into a boolean. */}
+            {wasDelivered ? (
+              <div className="form-group" style={{ fontSize: '12px' }}>
+                <strong style={{ color: 'var(--success-text)' }}>
+                  <IconCheck size={13} /> Delivered to the playback worker.
+                </strong>
+                <div style={{ color: 'var(--text-muted)', marginTop: '6px' }}>
+                  Nothing further to do — no <span className="mono">.env</span> edit and no restart.
+                  The worker picks this up within a few seconds and logs{' '}
+                  <span className="mono">Playback credentials changed</span>. Copy the password above
+                  only if you want it for something else; it is not shown again.
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="form-group">
+                <label className="form-label">For .env</label>
+                <pre className="mono" style={{
+                  background: 'var(--bg-subtle)', padding: '10px', borderRadius: '4px',
+                  fontSize: '12px', overflowX: 'auto', margin: 0
+                }}>{envBlock}</pre>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                    {isPlayback ? (
+                      <>
+                        {/* THE FALLBACK PATH, and it is reached when delivery was attempted and
+                            failed -- so it has to say that, or an operator reads the same
+                            instruction they would have got on a healthy stack and never learns
+                            something went wrong. */}
+                        {deliveryFailed && (
+                          <strong style={{ color: 'var(--warning-text)', display: 'block', marginBottom: '4px' }}>
+                            Automatic delivery to the playback worker failed, so this has to be
+                            placed by hand:
+                          </strong>
+                        )}
+                        Paste it as it is, then restart the playback worker
+                        (<span className="mono">docker compose up -d playback</span>). Already have
+                        other targets in there? Add this key to the existing object rather than
+                        replacing it.
+                      </>
+                    ) : (
+                      <>
+                        Replace <span className="mono">&lt;NAME&gt;</span> with the broker node’s{' '}
+                        <span className="mono">acsCredentialsEnv</span> value — it is declared on the
+                        broker node in the Node-RED flow, and is not the gateway’s name — then restart
+                        Node-RED.
+                      </>
+                    )}
+                  </span>
+                  <button className="btn btn-ghost" onClick={() => copy('env', envBlock)}>
+                    {copied === 'env' ? <IconCheck size={13} /> : <IconCopy size={13} />} Copy block
+                  </button>
+                </div>
+              </div>
+            )}
 
             {credential.applied_to_running_broker === false && (
               <div className="form-group" style={{ color: 'var(--warning-text)', fontSize: '12px' }}>
