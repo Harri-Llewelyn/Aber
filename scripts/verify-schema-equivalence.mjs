@@ -146,14 +146,26 @@ function buildProbe(name, dir, fixture) {
                     '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', IMAGE]);
   if (r.status !== 0) throw new Error(`could not start ${name}: ${r.stderr.trim()}`);
 
-  for (let i = 0; i < 60; i++) {
-    if (docker(['exec', name, 'pg_isready', '-U', 'postgres']).status === 0) break;
+  // READINESS IS NOT `pg_isready`, and the difference cost a confusing failure. The image runs
+  // initdb against a TEMPORARY server, applies its own setup, then restarts into the real one --
+  // and pg_isready answers yes during the first of those. Work sent then lands on a server that
+  // is about to be replaced, so the `DROP SCHEMA auth` below silently did nothing and the auth
+  // fixture failed with `schema "auth" already exists`. Requiring the answer to hold steady is
+  // what tells the two servers apart.
+  let steady = 0;
+  for (let i = 0; i < 120 && steady < 4; i++) {
+    const ok = docker(['exec', name, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
+                       'SELECT 1']).status === 0;
+    steady = ok ? steady + 1 : 0;
     sleepSync(1000);
   }
+  if (steady < 4) throw new Error(`${name} never came up`);
 
   // As supabase_admin: `postgres` does not own the schema the image ships and cannot drop it.
-  docker(['exec', name, 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-q',
-          '-c', 'DROP SCHEMA auth CASCADE;']);
+  // NOT tolerated on failure -- a swallowed drop here surfaces as a confusing fixture error.
+  const d = docker(['exec', name, 'psql', '-U', 'supabase_admin', '-d', 'postgres',
+                    '-v', 'ON_ERROR_STOP=1', '-q', '-c', 'DROP SCHEMA auth CASCADE;']);
+  if (d.status !== 0) throw new Error(`could not drop the stub auth schema: ${d.stderr.trim()}`);
   const a = docker(['exec', '-i', name, 'psql', '-U', 'supabase_admin', '-d', 'postgres',
                     '-v', 'ON_ERROR_STOP=1', '-q'], { input: fixture });
   if (a.status !== 0) throw new Error(`auth fixture failed on ${name}: ${a.stderr.trim()}`);
@@ -180,7 +192,18 @@ function dumpSchema(name) {
   const r = docker(['exec', name, 'pg_dump', '-U', 'postgres', '-d', 'postgres',
                     '--schema-only', '--schema=public', '--schema=timescale']);
   if (r.status !== 0) throw new Error(`pg_dump failed on ${name}: ${r.stderr.trim()}`);
-  const body = r.stdout.split('\n').filter((l) => !/^\\(un)?restrict\s/.test(l)).join('\n');
+  // CARRIAGE RETURNS ARE STRIPPED, and they are not cosmetic -- they are a property of the
+  // CHECKOUT, not of the migrations. `.gitattributes` carries `* text=auto` with an `eol=lf` rule
+  // for *.sh only, so a Windows working tree holds every *.sql as CRLF. compose bind-mounts that
+  // tree straight into psql, so every function body created from it is STORED with a \r on each
+  // line, and the same chain applied from a Linux checkout stores those bodies without one. Two
+  // correct stacks therefore hold schemas differing by 1,556 lines of pure line-ending noise.
+  // Digesting that would make this check answer a question about the developer's machine.
+  const body = r.stdout
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter((l) => !/^\\(un)?restrict\s/.test(l))
+    .join('\n');
   return { body, digest: createHash('sha256').update(body).digest('hex') };
 }
 
