@@ -2471,6 +2471,48 @@ const apiMethods = {
     return data[0];
   },
 
+  /**
+   * Which kind of thing a UUID names, and what it is called.
+   *
+   * THE SEARCH BAR'S THIRD ANSWER. Pages and cards are matched against a static index; an asset id
+   * cannot be, because the ids are the operator's data and there are thousands of them. Pasting a
+   * UUID is how somebody arrives from a Grafana alert, a Sparkplug topic, a log line or a colleague's
+   * message -- with an identifier and no idea which of four pages it belongs on.
+   *
+   * FOUR TABLES BECAUSE FOUR PAGES CAN FOCUS ONE ROW. Every table in this schema has a uuid primary
+   * key, but only `cells`, `gateways`, `devices` and `schemas` have a page that can be opened TO one
+   * -- so resolving, say, a `digital_thread` event id would produce a result with nowhere to send it.
+   *
+   * ALL FOUR ARE ASKED AT ONCE, AND A LIST COMES BACK. A sequential probe returning on the first
+   * hit would read as a deliberate precedence and is not one -- so on the vanishingly unlikely day
+   * two tables answer, the caller is handed both rows and shows both, rather than being told a
+   * confident wrong answer by whichever table happened to be asked first.
+   *
+   * A MISS AND A REFUSAL BOTH COME BACK EMPTY, DELIBERATELY. RLS returns no rows rather than an
+   * error, so "no such device" and "not a device you may see" are indistinguishable from here and
+   * the palette must not claim to know which. Guessing would tell an Operator that an id they are
+   * not cleared for does not exist -- which is a disclosure in the other direction, and wrong.
+   */
+  resolveId: async (uuid) => {
+    if (!isUuid(uuid)) return [];
+
+    // `maybeSingle` rather than `single`: a primary-key lookup that matches nothing is the EXPECTED
+    // case here (three of the four always miss), and `single` reports that as an error.
+    // The name column is named per table -- `schemas` calls it `schema_name` -- so it is a parameter
+    // rather than assumed. A select of `*` would avoid the question and hand the palette a device's
+    // whole nameplate to render a single line with.
+    const probe = (table, kind, nameColumn) =>
+      supabase.from(table).select(`id, ${nameColumn}`).eq('id', uuid).maybeSingle()
+        .then(({ data, error }) => (error || !data ? null : { kind, id: data.id, name: data[nameColumn] }));
+
+    return (await Promise.all([
+      probe('devices', 'device', 'name'),
+      probe('gateways', 'gateway', 'name'),
+      probe('cells', 'cell', 'name'),
+      probe('schemas', 'schema', 'schema_name')
+    ])).filter(Boolean);
+  },
+
   delete: async (path, options = {}) => {
     if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];

@@ -160,7 +160,10 @@ html, body, #root {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
 
-/* ===== Layout ===== */
+/* ===== Layout =====
+   A column holding the bar and then a ROW: the navigation rail and the page beside it. The rail was
+   in the bar until it became a sidebar, so `.app-body` is the one structural element the change
+   added -- everything else it does is undone CSS. */
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -168,8 +171,18 @@ html, body, #root {
   overflow: hidden;
 }
 
+.app-body {
+  display: flex;
+  flex: 1;
+  /* WITHOUT THIS THE PAGE DOES NOT SCROLL, IT GROWS. A flex item's default `min-height: auto`
+     refuses to shrink below its content, so `.content`'s `overflow-y: auto` would never have an
+     overflow to act on and the whole shell would run off the viewport instead. */
+  min-height: 0;
+}
+
 /* ===== Top Bar =====
-   ONE row carries the brand, the primary navigation and the session controls.
+   ONE row carries the brand, the global search and the session controls. Navigation left it for
+   the rail below -- see .sidebar for the measurement that forced that.
    These used to be two stacked bars -- a 60px header and a 54px tab strip -- which cost 114px of
    every viewport before the page had said anything. On a 1366x768 shopfloor terminal that, plus
    the page heading and description each tab repeated, pushed the Overview map's first cell card
@@ -322,23 +335,6 @@ html, body, #root {
   text-overflow: ellipsis;
 }
 
-/* ===== Primary Navigation (in the top bar) =====
-   Centre region. Fixed-size and never clipped -- see the .topbar-brand comment for how the two
-   flanks centre it, and for why this one wins the space fight against the brand.
-
-   Neither grows nor shrinks: the nav is the fixed thing the two elastic sides are centred around.
-   `margin: 0 auto` used to do the centring here and is deliberately gone -- it centred the nav in
-   the space LEFT OVER by the brand and the controls, which put it off the bar's true centre by
-   half the difference between them, and with equal-weight sides it would now fight them for the
-   same free space. */
-.topbar-nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  flex: 0 0 auto;
-}
-
 /* The mirror of .topbar-brand -- same weight, opposite alignment. `justify-content: flex-end`
    is what keeps the pill and the avatar against the right edge now that this group is as wide as
    its half of the bar rather than as wide as its contents. */
@@ -486,137 +482,314 @@ html, body, #root {
 
 .user-popover-action-danger:hover { background: var(--bg-glass); color: var(--danger-text); }
 
-/* ===== Nav Tabs ===== */
-.nav-tab {
+/* ===== Sidebar =====
+   THE PRIMARY NAVIGATION. It was thirteen tabs in the top bar, and the bar had a measured ceiling:
+   the nav was rigid and the brand and session controls split what was left, so brand space came to
+   (viewport - 72px of chrome - nav width) / 2 against a brand wanting ~290px. Eleven tabs fit at
+   1920, twelve clipped, thirteen left ~134px, and fourteen left ~24px -- less than the abbreviated
+   wordmark. The density ladder that managed that decline, its two count-keyed bands and the
+   media queries behind them are all gone with it.
+
+   A rail spends the OTHER axis. Pages cost vertical space, of which a 1080px display has plenty and
+   which does not have to be shared with a wordmark, and the icon-only state stops being the
+   degradation the old bar fell into below 1400px and becomes the resting state this is drawn for.
+
+   TWO ELEMENTS, AND THE SPLIT IS THE WHOLE MECHANISM. `.sidebar` is a 52px gutter that never
+   changes width; `.sidebar-panel` is absolutely positioned inside it and is what grows to 232px.
+   So expanding paints OVER the page and reflows nothing -- which matters most on Overview, whose
+   shopfloor grid would otherwise re-lay out for as long as a pointer rested in the corner. */
+.sidebar {
   position: relative;
-  padding: 7px 11px;
-  /* A transparent border, not `none`: the active pill adds a 1px accent border, and a tab that
-     only grows a border when selected would shift its neighbours by 2px on every navigation. */
+  flex: 0 0 52px;
+  width: 52px;
+  /* Under .topbar (100) so the account popover still paints over the rail, above .content (auto)
+     so the expanded panel paints over the page. */
+  z-index: 90;
+}
+
+.sidebar-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 52px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  /* Clips the labels while collapsed. They stay in the DOM at every width -- an accessible name
+     that appears and disappears with a hover is not one. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  transition: width 0.18s ease, box-shadow 0.18s ease;
+}
+
+.sidebar-expanded .sidebar-panel {
+  width: 232px;
+  box-shadow: var(--shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-panel { transition: none; }
+}
+
+.sidebar-group { display: flex; flex-direction: column; gap: 2px; }
+
+.sidebar-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 8px 2px;
+  flex-shrink: 0;
+}
+
+/* THE HEADING KEEPS ITS BOX IN BOTH STATES and only its text fades. Collapsing the box instead
+   would shift every item below it downward on hover -- which is exactly the reflow the overlay
+   exists to avoid, moved inside the panel. Collapsed, the reserved strip reads as breathing room
+   above each group, which is what a heading would be doing there anyway. */
+.sidebar-group-label {
+  height: 23px;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 9px 4px;
+  /* THE FLOOR OF THE TYPE SCALE, not a size chosen for this element -- see the scale at the top of
+     this file. A group heading is exactly the "dense chrome" tier the 11px step exists for, and
+     the 10px this would be in most design systems is the size that tier was raised FROM. */
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.sidebar-expanded .sidebar-group-label { opacity: 1; }
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 8px 9px;
+  /* A transparent border, not `none`: the active item adds a 1px accent border, and an item that
+     only grows one when selected would shift its neighbours by 2px on every navigation. */
   border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--text-muted);
   font-family: 'Outfit', sans-serif;
+  /* The scale's nav step, which is what the tab strip used. A rail has more room for a label than
+     a bar did, so there is no reason for this to be the one navigation control that shrank. */
   font-size: 14px;
   font-weight: 500;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: var(--transition);
   letter-spacing: 0.3px;
-  display: inline-flex;
-  align-items: center;
+  text-align: left;
   white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition);
 }
 
-.nav-tab:hover { color: var(--text-primary); background: var(--bg-glass); }
+.sidebar-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
+}
 
-/* The active page is a filled pill. It used to be a 2px underline pinned to the bottom of the
-   tab strip -- a treatment that only reads as "selected" when the strip has an edge for it to sit
-   on, which the merged bar does not. It also has to survive the icon-only mode below, where the
-   label is gone and the pill is the ONLY thing distinguishing the current page. Three signals
-   carry it, so none of them is doing the job alone: fill, border and weight. */
-.nav-tab.active {
+.sidebar-item-label { opacity: 0; transition: opacity 0.12s ease; }
+.sidebar-expanded .sidebar-item-label { opacity: 1; }
+
+.sidebar-item:hover { color: var(--text-primary); background: var(--bg-glass); }
+
+/* Three signals carry the current page -- fill, border and weight -- so none is doing the job
+   alone. It has to survive the collapsed state, where the label is transparent and this is the
+   ONLY thing distinguishing the page you are on. */
+.sidebar-item.active {
   color: var(--accent);
   background: var(--accent-dim);
   border-color: var(--accent);
   font-weight: 600;
 }
 
-.nav-tab.active:hover { background: var(--accent-dim); color: var(--accent); }
+.sidebar-item.active:hover { background: var(--accent-dim); color: var(--accent); }
 
-.nav-tab:focus-visible {
+.sidebar-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-.tab-icon { margin-right: 7px; display: inline-flex; flex-shrink: 0; }
+/* ===== Global search =====
+   The centre of the top bar, where the tab strip was. A search box is the right thing to put in a
+   horizontal strip and a page list was not: its width is fixed however many pages exist.
+
+   `flex: 0 1 480px` against two `flex: 1 1 0` flanks. The flanks claim equal shares of what is
+   left, so this sits on the bar's true centre rather than in the space left over between a
+   two-line brand and a 28px avatar. It shrinks before the brand does, down to a floor at which the
+   placeholder is gone but the icon and the field are not. */
+.global-search {
+  position: relative;
+  flex: 0 1 480px;
+  min-width: 150px;
+}
+
+.global-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+
+.global-search-box:hover { border-color: var(--border-hover); }
+.global-search-box-open { border-color: var(--accent); background: var(--bg-base); }
+
+.global-search-icon { color: var(--text-muted); flex-shrink: 0; }
+
+/* `outline: none` on the input is safe HERE and nowhere else: the focus ring moves to the box
+   around it, which is a larger target drawn in the same accent. */
+.global-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+}
+
+.global-search-input::placeholder { color: var(--text-dim); }
+
+.global-search-kbd {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Escapes the bar downward, the same way the account popover does: `.app-shell` clips at the
+   viewport rather than here, and `.topbar` carries z-index 100, so no portal is needed. */
+.global-search-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 200;
+}
+
+.global-search-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+/* ONE HIGHLIGHT, DRIVEN BY THE CURSOR, and `:hover` is deliberately not a second one. The pointer
+   sets the cursor on move, so a row lit by the mouse and a row lit by the arrow keys are the same
+   row -- two independent highlights would let the list show two candidates for what Enter does. */
+.global-search-result-active { background: var(--accent-dim); }
+
+.global-search-result-icon { display: inline-flex; color: var(--text-muted); flex-shrink: 0; }
+.global-search-result-active .global-search-result-icon { color: var(--accent); }
+
+.global-search-result-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Which page a card is on, or which kind of thing an id turned out to be -- the answer the search
+   was opened to get, so it is quiet but never truncated. */
+.global-search-result-detail {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.global-search-result-enter { color: var(--accent); flex-shrink: 0; }
+
+.global-search-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.global-search-foot {
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
 /* ===== Top Bar Responsive Collapse =====
-   NO HORIZONTAL SCROLLING, at any width. A scrolling nav hides pages behind a gesture nobody
-   performs on a bar that looks complete, so the labels are dropped instead: nine icons always fit,
-   and every tab keeps a `title` carrying its full name.
+   What is left of the ladder now that the nav is not in the bar. The brand is still the region that
+   yields -- it says the same thing on every page -- but there are two steps rather than five,
+   because the thing that used to consume the bar no longer sits in it.
 
-   Three bands, each shedding the least useful thing left:
-     >= 1600px  everything
-     >= 1400px  the brand tagline drops out (it is context, not a control)
-      < 1400px  tab labels drop out; the nav becomes icons only
+     < 1400px  the strapline goes and the wordmark shortens; button labels go
+     < 1100px  the brand text goes entirely, leaving the mark
 
-   THE ACCOUNT CONTROL NO LONGER APPEARS IN ANY BAND, and its absence is the point rather than an
-   omission. It used to shed the user's own name at 1600px and keep its role badge below that. It is
-   now a 28px circle at every width, so there is nothing left in it to drop -- the declutter did at
-   every viewport what this block used to do only at narrow ones. */
-/* ---------------------------------------------------------------------------------------------
-   THE DENSITY BAND, WHICH THE WIDTH BANDS BELOW CANNOT EXPRESS.
-   ---------------------------------------------------------------------------------------------
-   The nav is `flex: 0 0 auto` and the brand and the session controls are each `flex: 1 1 0`, so
-   the nav takes what it needs and the two side groups split what is left -- equally, which is what
-   centres the bar. Brand space is therefore
-
-       (viewport - 72px of padding and gaps - nav width) / 2
-
-   against a brand that wants about 290px. That denominator is why the bar runs out of room sooner
-   than it looks like it should: the session controls need only ~140px but are handed the same
-   share as the brand, so the brand is clipped while space sits unused on the right. Fixing THAT by
-   letting the right group size to its content is possible and was rejected -- it un-centres the
-   nav for every user, including the Operator who sees 8 tabs and never had a problem.
-
-   THE NUMBERS, at 14px Outfit:
-
-     11 tabs  nav ~1250px  brand gets ~298px at 1920  -> fits, and does today
-     12 tabs  nav ~1360px  brand gets ~244px at 1920  -> clipped by ~45px
-     13 tabs  nav ~1470px  brand gets ~134px at 1920  -> still clears the short wordmark
-
-   THE THIRTEENTH TAB IS Cold Storage, and it needs no band of its own. A tab costs ~110px at this
-   size (1250 -> 1360 across the eleven/twelve step), so thirteen leaves the brand ~134px while
-   `tight` already shortens the wordmark to ~75px and hides the strapline. The existing threshold
-   is "12 or more", and the arithmetic it was measured against still holds one tab further on.
-
-   A FOURTEENTH IS WHERE THIS STOPS WORKING: ~24px of brand is less than the short wordmark, so the
-   next page added needs a real re-measure and probably a third band, not another line here.
-
-   THE STRAPLINE IS NOT THE LEVER, which is the counter-intuitive part and the reason this block
-   exists at all rather than just moving the 1599px rule up. `.brand-text` is a stacked block, so
-   it is as wide as the WIDER line: the wordmark measures ~242px and the strapline ~251px, so
-   hiding the strapline reclaims about nine pixels. The wordmark is what has to give, and it gives
-   by getting shorter -- "ACS Cymru", ~75px -- rather than by disappearing, so the product is still
-   named at every step.
-
-   Two bands because the two counts differ by ~110px of nav and one threshold would be wrong for
-   one of them. A session below 10 tabs never enters either. */
-.topbar[data-nav-dense="compact"] { /* 10-11 tabs */ }
-.topbar[data-nav-dense="tight"]   { /* 12+ tabs   */ }
-
-@media (max-width: 2099px) {
-  .topbar[data-nav-dense="tight"] .brand-sub { display: none; }
-  .topbar[data-nav-dense="tight"] .brand-name-full { display: none; }
-  .topbar[data-nav-dense="tight"] .brand-name-short { display: inline; }
-}
-
-@media (max-width: 1899px) {
-  .topbar[data-nav-dense="compact"] .brand-sub { display: none; }
-  .topbar[data-nav-dense="compact"] .brand-name-full { display: none; }
-  .topbar[data-nav-dense="compact"] .brand-name-short { display: inline; }
-}
-
-@media (max-width: 1599px) {
-  .brand-sub { display: none; }
-}
-
+   THE WORDMARK SHORTENS RATHER THAN DISAPPEARING, and the measurement behind that is unobvious:
+   `.brand-text` is a stacked block and so is as wide as the WIDER line, and the strapline (~251px)
+   is wider than the full wordmark (~242px). Hiding the strapline alone reclaims about nine pixels.
+   The wordmark is the lever, and it gives by getting shorter -- "ACS Cymru", ~75px. */
 @media (max-width: 1399px) {
-  .nav-tab-label { display: none; }
-  .nav-tab { padding: 7px 9px; }
-  .tab-icon { margin-right: 0; }
-  /* Below this the right-hand controls are what would overflow next. The icons stay, so nothing
-     becomes unreachable -- each keeps the `title` it already had. */
+  .brand-sub { display: none; }
+  .brand-name-full { display: none; }
+  .brand-name-short { display: inline; }
+  /* The right-hand controls are what would overflow next. The icons stay, so nothing becomes
+     unreachable -- each keeps the `title` it already had. */
   .btn-label { display: none; }
   /* The alert count keeps its NUMBER and loses only the word. Dropping the label costs ~40px and
-     leaves "⚠ 3", which is still both a shape and a figure -- whereas dropping the pill would hide
-     the only changing thing in the bar at exactly the widths a kiosk display uses. */
+     leaves a shape and a figure -- whereas dropping the pill would hide the only changing thing in
+     the bar at exactly the widths a kiosk display uses. */
   .alert-pill-label { display: none; }
+}
+
+@media (max-width: 1099px) {
+  /* The mark alone. The search box has a 150px floor and the session controls do not shrink at
+     all, so below this the brand is the only region with anything left to give. */
+  .brand-text { display: none; }
 }
 
 /* ===== Main Content ===== */
 .content {
   flex: 1;
+  /* The horizontal twin of .app-body's min-height. A wide table inside a flex row would otherwise
+     widen this item rather than scrolling inside it, and push the rail off the screen. */
+  min-width: 0;
   overflow-y: auto;
   padding: 18px 24px 24px;
 }

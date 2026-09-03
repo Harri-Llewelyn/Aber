@@ -1017,7 +1017,8 @@ currently prevent.
 
 ## 12 · Contextual help, and where the documentation actually lives
 
-**Builds on:** [`frontend/src/App.jsx`](../frontend/src/App.jsx)'s top bar and `navDensity()` ·
+**Builds on:** [`frontend/src/App.jsx`](../frontend/src/App.jsx)'s top bar and
+[`frontend/src/navigation.jsx`](../frontend/src/navigation.jsx) ·
 [`README.md`](../README.md) and the six subsystem READMEs ·
 [issue #39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39)
 
@@ -1054,16 +1055,34 @@ same bidirectional shape the service-directory check already uses.
 The cost is that help ships with the image rather than being editable in a browser. For a stack
 whose dashboard is versioned and deployed as one artefact, that is the right side of the trade.
 
-### What the top bar can absorb
+### Where the control goes, now that the bar has room
 
-`navDensity()` already bands the header at 10 and 12 tabs, and the bar currently carries eleven. A
-help control is a **button beside the session controls, not a twelfth tab** — it belongs with the
-things that act rather than the things that navigate, and putting it there costs the brand no width
-at any band.
+This section used to argue about width. `navDensity()` banded the header at 10 and 12 tabs, the bar
+carried eleven, and the case being made was that a help control had to be **a button beside the
+session controls rather than a twelfth tab**, because a twelfth tab cost the brand width it did not
+have.
 
-**Not a page.** A page called Help that lists everything is the README again with more clicks; the
-request is specifically for *contextual* help, which means the panel opens knowing which tab is
-active.
+**That constraint is gone.** Navigation moved out of the bar and into a rail
+([`Sidebar.jsx`](../frontend/src/components/common/Sidebar.jsx)); the density bands and the media
+queries that implemented them went with it. The conclusion survives its own reasoning, though, and
+for a better reason than width: **help is a thing that acts, not a place you navigate to**, so it
+belongs with Report Bug and the theme toggle rather than among the pages.
+
+Two homes are now plausible and the choice is worth making deliberately. A **button in the bar**
+puts it one click from anywhere and beside the account menu that already holds the other
+session-level escape hatches. An **item at the foot of the rail**, below a divider, reads as
+belonging to the chrome rather than to the page — but the rail is collapsed by default, so the
+control would be an unlabelled icon until hovered, which is the wrong resting state for the thing
+somebody reaches for when they are already lost.
+
+**Not a page**, either way. A page called Help that lists everything is the README again with more
+clicks; the request is specifically for *contextual* help, which means the panel opens knowing which
+page is active.
+
+**The search box is now the other half of this.** It answers "where is X" for pages, cards and asset
+ids, which is a real part of what issue #39 describes as unpacking the application — so the help
+corpus is narrower than it was when this item was written. What is left for it is what a
+destination cannot say: what a page is FOR, what its controls do, and what its states mean.
 
 ### Worth deciding early
 
