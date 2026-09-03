@@ -367,7 +367,7 @@ describe('telemetry filtering by device tag', () => {
 
 describe('digital thread filtering', () => {
   /*
-   * THE FILTERS ARE RPC ARGUMENTS NOW, not query-builder calls. Migration 0039 moved this page to
+   * THE FILTERS ARE RPC ARGUMENTS NOW, not query-builder calls. archived migration 0039 moved this page to
    * `digital_thread_page()` because hiding deleted assets is an anti-join PostgREST cannot
    * express -- and doing it in the browser instead spent the row limit on rows that were then
    * discarded, which is how a cleared filter bar came to list four assets on a stack of

@@ -505,7 +505,7 @@ class TestAasExportLive(unittest.TestCase):
         """
         The IDTA elements say what they mean, using IDTA's own identifiers.
 
-        These IRDIs come from IDTA 02006-3-0-1 and are seeded by migration 0011; the exporter looks
+        These IRDIs come from IDTA 02006-3-0-1 and are seeded by archived migration 0011; the exporter looks
         them up rather than hard-coding them, so this asserts the lookup actually reached the
         table. A missing semanticId here means the join silently produced nothing, which is exactly
         the failure that would otherwise ship as a valid-looking shell full of anonymous strings.

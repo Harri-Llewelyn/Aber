@@ -88,7 +88,7 @@ describe('the nav and the router agree', () => {
 
   it('gates the Settings tab on the Administrator role rather than a permission', () => {
     /*
-     * NOT A STYLE PREFERENCE. Migration 0031's UPDATE policy is
+     * NOT A STYLE PREFERENCE. archived migration 0031's UPDATE policy is
      * `has_role(ARRAY['Administrator'])`, so gating the UI on a permission uuid would put two
      * different predicates on the same question. The day they disagree, the tab is visible and
      * every save fails with a database error the page cannot explain.

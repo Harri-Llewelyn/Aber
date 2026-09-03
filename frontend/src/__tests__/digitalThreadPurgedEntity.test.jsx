@@ -4,7 +4,7 @@
  * WHY THE NAMING HALF MATTERS. `digital_thread` holds only `entity_id` -- names live on the entity
  * and carry no identity of their own -- so the page joins client-side against the live cell,
  * gateway and device lists. That join CANNOT resolve a hard-purged entity, and hard purge is a
- * shipped feature: the Archives tab offers it, and migration 0003 is what makes it safe, because
+ * shipped feature: the Archives tab offers it, and archived migration 0003 is what makes it safe, because
  * audit rows are immutable and independent of the row they describe.
  *
  * So the rows most worth reading are precisely the ones the join fails on. The fallback reads the
@@ -93,7 +93,7 @@ describe('resolveLaneName', () => {
 
 describe('SCHEMA_REJECTION events', () => {
   /**
-   * Written by record_ingestion_rejection() (migration 0026), NOT by the audit trigger -- so it is
+   * Written by record_ingestion_rejection() (archived migration 0026), NOT by the audit trigger -- so it is
    * the first `action` value that is not a TG_OP, and the first row in the table that records an
    * observation rather than a row mutation.
    */

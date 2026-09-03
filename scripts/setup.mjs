@@ -96,13 +96,13 @@ if (demoMode) {
 const jwtSecret = hex(32);
 
 /**
- * Service_Ingestor, seeded by migration 0046. Pinned here rather than looked up, for the reason
+ * Service_Ingestor, seeded by archived migration 0046. Pinned here rather than looked up, for the reason
  * 0034's principal is pinned: this file runs before any database exists.
  */
 const INGESTION_PRINCIPAL = 'b0000000-0000-4000-8000-000000000002';
 
 /**
- * Service_Playback, seeded by migration 0056. Pinned for the same reason.
+ * Service_Playback, seeded by archived migration 0056. Pinned for the same reason.
  *
  * A SECOND MACHINE IDENTITY RATHER THAN A SECOND USE OF THE FIRST, and the difference is what the
  * two hold at the BROKER. The ingestion principal may publish `spBv1.0/+/NCMD/+` and nothing else;
@@ -140,7 +140,7 @@ const generated = {
   SUPABASE_ANON_KEY: mintJwt({ role: 'anon', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
   SUPABASE_SERVICE_ROLE_KEY: mintJwt({ role: 'service_role', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
   // The ingestion daemon's own credential (see Machine Identities in supabase/README.md). `authenticated` with a `sub`, not a
-  // role that bypasses RLS: it authenticates as Service_Ingestor (migration 0046), which holds
+  // role that bypasses RLS: it authenticates as Service_Ingestor (archived migration 0046), which holds
   // Operator and therefore cannot write a single row directly. Every write it makes goes through
   // one of the SECURITY DEFINER gates in 0047, and those check that the caller IS this principal.
   //
@@ -149,7 +149,7 @@ const generated = {
   // were sent as the apikey. It travels as the Authorization bearer, the way i3X passes a caller's
   // own token through to PostgREST.
   SUPABASE_INGESTION_KEY: ingestionKey.token,
-  // The playback worker's own credential (migration 0056). Same shape and same reasoning as the
+  // The playback worker's own credential (archived migration 0056). Same shape and same reasoning as the
   // line above: `authenticated` with a `sub`, because every write it makes goes through a gate
   // that checks the caller IS Service_Playback. Its narrowness is what makes the storage read arm
   // meaningful -- that policy admits this principal for exactly one object, the capture of the

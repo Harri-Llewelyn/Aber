@@ -7,7 +7,7 @@ import {
 /**
  * The cell icon registry.
  *
- * MIRRORS THE `cells_icon_valid` CHECK CONSTRAINT (migration 0021), and the mirroring is the point:
+ * MIRRORS THE `cells_icon_valid` CHECK CONSTRAINT (archived migration 0021), and the mirroring is the point:
  * the database stores a KEY, not markup and not a URL, so the only thing that can render it is a
  * bundled component. A key the database accepts and this file does not know is a cell that draws
  * nothing -- which is why the constraint is a closed set rather than free text, and why adding an

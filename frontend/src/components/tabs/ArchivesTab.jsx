@@ -36,7 +36,7 @@ export function ArchivesTab({ showToast, hasPermission }) {
    * `auto_delete_at` already purges on a timer; this is the same destruction on demand, for the
    * ordinary case of an asset archived by mistake or decommissioned for good before its timer
    * runs. It is a real DELETE, not another soft flag -- the row leaves the table and the digital
-   * thread keeps its history, because migration 0006 makes the audit rows immutable and
+   * thread keeps its history, because archived migration 0006 makes the audit rows immutable and
    * independent of the entity they describe.
    */
   const purge = async (item) => {

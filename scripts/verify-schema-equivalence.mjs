@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Builds two databases from two sets of migrations and asserts their schemas are identical.
+ * Builds two databases from two sets of migrations and asserts they arrive at the same schema
+ * and the same seed rows.
  *
  * =================================================================================================
  * WHY THIS EXISTS
@@ -65,8 +66,11 @@
  * its output in a fresh random token every run, so two dumps of ONE database never match raw.
  * check-migration-idempotency.mjs documents finding this the same way.
  *
- * Data is NOT compared. Seed rows are the other half of a squash and belong to a separate check --
- * this one is about schema equivalence, and mixing the two would make a failure ambiguous.
+ * Seed rows are compared too, but as a SEPARATE assertion with its own verdict. A squash moves
+ * DDL and DML by different routes -- structure can be taken from a dump, seed rows have to be
+ * carried by hand -- so one combined answer would tell you something is wrong without telling you
+ * which half. Three tables are counted rather than digested because their rows carry the time they
+ * were written; see VOLATILE.
  *
  * =================================================================================================
  * USAGE
@@ -207,6 +211,95 @@ function dumpSchema(name) {
   return { body, digest: createHash('sha256').update(body).digest('hex') };
 }
 
+// -------------------------------------------------------------------------------------------
+// Seed rows
+// -------------------------------------------------------------------------------------------
+// REPORTED SEPARATELY FROM THE SCHEMA, on purpose. A squash moves DDL and DML by different
+// routes -- the structure can be taken from a dump, the seed rows have to be carried by hand --
+// so a single combined verdict would leave you knowing something is wrong and not which half.
+//
+// Per table: the row count, and a digest of the rows themselves. Ordering is by the row's own
+// text so it does not depend on physical order, which a fresh insert and a replayed one need not
+// share.
+//
+// THREE TABLES ARE COUNTED BUT NOT DIGESTED, because their rows carry the time they were written
+// -- `digital_thread` stamps recorded_at, and the two liveness tables exist to hold a timestamp.
+// Two databases built a minute apart legitimately differ there, and digesting it would produce a
+// check that fails for the wrong reason every time it is run.
+const VOLATILE = ['digital_thread', 'directory_liveness_probe', 'playback_worker_status'];
+
+function seedRows(container) {
+  // Built as one query per table through a DO block would need a temp table to return from, so
+  // the list is assembled client-side instead: one round trip per table, on a local container.
+  const names = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
+    "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1"])
+    .stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+
+  const rows = new Map();
+  for (const t of names) {
+    // TWO KINDS OF COLUMN ARE EXCLUDED FROM THE DIGEST, and neither is a loophole: both hold
+    // values that two correct databases are SUPPOSED to disagree about.
+    //
+    //   timestamps          `created_at`, `applied_at`, `updated_at` record WHEN a row was
+    //                       written, not what it says. Two databases built a minute apart hold
+    //                       identical seed data and different digests.
+    //
+    //   gen_random_uuid()   a surrogate key assigned at insert. Rows seeded by 0018 and by
+    //                       `seed_setting()` take one, so they differ between any two databases
+    //                       -- including two runs of the SAME chain. Comparing them asks whether
+    //                       the two runs drew the same random numbers.
+    //
+    // Left in, these reported five tables as differing when every meaningful value in them
+    // matched, which is the shape of check that gets ignored rather than fixed. What still gets
+    // compared is every value anybody chose: names, descriptions, flags, and the explicit ids the
+    // seed pins by hand -- and the foreign keys between rows, so the relationships are checked
+    // even where a surrogate key is not.
+    const colsQ = `SELECT coalesce(string_agg(quote_ident(column_name), ',' ORDER BY ordinal_position), '')
+                     FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = '${t}'
+                      AND data_type NOT LIKE 'timestamp%'
+                      AND coalesce(column_default, '') !~ 'gen_random_uuid|uuid_generate'`;
+    const cols = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
+                         colsQ]).stdout.trim();
+
+    const q = (VOLATILE.includes(t) || !cols)
+      ? `SELECT count(*)::text || '|-' FROM public."${t}"`
+      : `SELECT count(*)::text || '|' || md5(coalesce(string_agg(x::text, '~' ORDER BY x::text), ''))
+           FROM (SELECT ${cols} FROM public."${t}") x`;
+    const r = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc', q]);
+    if (r.status === 0) rows.set(t, r.stdout.trim());
+  }
+
+  // pg_cron schedules and vault secret NAMES travel with the seed and live outside `public`.
+  // Vault VALUES are deliberately not compared: they are encrypted with a key generated per
+  // container, so two correct databases hold different ciphertext for the same secret.
+  // PUBLICATION MEMBERSHIP AND REPLICA IDENTITY, neither of which a schema dump carries. A
+  // publication is a DATABASE object rather than a schema one, so `pg_dump --schema=public`
+  // contains not one reference to it -- which meant a baseline that dropped the Realtime setup
+  // entirely still passed the schema comparison, and only failed two migrations later on 0028's
+  // self-check reporting that the dashboard would never see an alert arrive.
+  //
+  // Replica identity is checked with it because it is the other half of the same behaviour:
+  // Realtime evaluates RLS against the OLD row, and with the default identity it has only the
+  // primary key, so a published table with the wrong identity is subscribed to and silently
+  // filtered out.
+  const pub = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
+    `SELECT coalesce(string_agg(p.pubname || ':' || c.relname || ':' || c.relreplident, ','
+                                ORDER BY p.pubname, c.relname), '(none)')
+       FROM pg_publication p
+       JOIN pg_publication_rel pr ON pr.prpubid = p.oid
+       JOIN pg_class c ON c.oid = pr.prrelid`]);
+  rows.set('(publications)', pub.stdout.trim());
+
+  const cron = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
+    "SELECT string_agg(jobname || '@' || schedule, ',' ORDER BY jobname) FROM cron.job"]);
+  rows.set('(cron.job)', cron.stdout.trim());
+  const vault = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
+    "SELECT string_agg(name, ',' ORDER BY name) FROM vault.secrets"]);
+  rows.set('(vault.secrets)', vault.stdout.trim());
+  return rows;
+}
+
 const [dirA, dirB] = process.argv.slice(2);
 if (!dirA || !dirB) {
   console.error('usage: node scripts/verify-schema-equivalence.mjs <dir-a> <dir-b>');
@@ -251,6 +344,30 @@ try {
     for (const l of added.slice(0, 8)) note(`  + ${l.slice(0, 110)}`);
     note(``);
     note(`full dumps written to ${out} -- diff a.sql b.sql`);
+  }
+
+  // -----------------------------------------------------------------------------------------
+  console.log('\n  Seed equivalence\n');
+  const sa = seedRows(A);
+  const sb = seedRows(B);
+  const tables = [...new Set([...sa.keys(), ...sb.keys()])].sort();
+  const differing = tables.filter((t) => (sa.get(t) || '') !== (sb.get(t) || ''));
+
+  if (differing.length === 0) {
+    const seeded = tables.filter((t) => !/^\(/.test(t) && !(sa.get(t) || '').startsWith('0|'));
+    console.log(`\n  PASS  both chains seed identical rows (${seeded.length} non-empty table(s))\n`);
+  } else {
+    fail(`the two chains seed DIFFERENT rows in ${differing.length} table(s).`);
+    note(`${'table'.padEnd(30)} ${dirA === dirB ? 'a' : 'chain A'.padEnd(22)} chain B`);
+    for (const t of differing) {
+      const fmt = (v) => {
+        if (v === undefined) return '(absent)';
+        const [n, d] = v.split('|');
+        return d === '-' ? `${n} rows (volatile)` : `${n} rows ${(d || '').slice(0, 8)}`;
+      };
+      note(`${t.padEnd(30)} ${fmt(sa.get(t)).padEnd(22)} ${fmt(sb.get(t))}`);
+    }
+    note(``);
   }
 } catch (err) {
   fail(err.message);

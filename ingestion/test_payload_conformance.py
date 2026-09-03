@@ -6,7 +6,7 @@ WHAT THIS PROTECTS, IN ORDER OF HOW BADLY IT FAILS.
   1. THE DEDUPLICATION. `record_payload_violations()` writes to `public.digital_thread`, which is
      append-only to every application role and cannot be pruned by the application at all. DDATA
      arrives continuously, so a regression that writes one row per message does not degrade -- it
-     fills the disk, and the first symptom is the database refusing writes. Migration 0005 made
+     fills the disk, and the first symptom is the database refusing writes. archived migration 0005 made
      this argument about heartbeat UPDATEs and gave the trigger a guard; these rows go through an
      RPC that the trigger never sees, so the ONLY guard is the one in Python and it is tested here.
 

@@ -3,7 +3,7 @@
 
     python supabase/migrations/test_gateway_deployment.py
 
-Requires the Supabase database (54322 by default) and migration 0064 applied.
+Requires the Supabase database (54322 by default) and archived migration 0064 applied.
 
 ---------------------------------------------------------------------------------------------
 WHAT THIS COLUMN IS FOR. `is_virtual` carries three incompatible definitions -- "no appliance

@@ -248,7 +248,7 @@ describe('isValidMetricName', () => {
   })
 
   it('accepts every metric the seeded catalog actually uses', () => {
-    // Migration 0007 adds the same rule as a CHECK. If these two ever disagree the operator is
+    // archived migration 0007 adds the same rule as a CHECK. If these two ever disagree the operator is
     // told one thing by the form and another by a 400 -- and `name` is immutable, so a name that
     // slipped past the client can never be corrected, only deprecated.
     for (const name of [

@@ -90,7 +90,7 @@ secrets:
   # The ingestion daemon's own credential (see Machine Identities in supabase/README.md). Signed by the same jwtSecret, but
   # unlike the two above it names a PRINCIPAL rather than a role: claims are
   # {"iss":"supabase","role":"authenticated","sub":"b0000000-0000-4000-8000-000000000002"}.
-  # That subject is Service_Ingestor, seeded by migration 0046; it holds Operator and cannot write
+  # That subject is Service_Ingestor, seeded by archived migration 0046; it holds Operator and cannot write
   # a row directly, so every write goes through a gate in 0047 that checks the caller is it.
   #
   # PART OF THE SAME MATCHING SET as anonKey and serviceRoleKey -- re-sign all FOUR together when
@@ -98,7 +98,7 @@ secrets:
   ingestionKey: ""
 
   # The playback worker's own JWT, same shape, subject b0000000-0000-4000-8000-000000000003 --
-  # Service_Playback, seeded by migration 0056.
+  # Service_Playback, seeded by archived migration 0056.
   #
   # A SECOND IDENTITY BECAUSE THE BROKER RIGHTS DIFFER. The ingestion daemon may publish
   # `spBv1.0/+/NCMD/+` and nothing else; this worker publishes asset data as one gateway. Sharing

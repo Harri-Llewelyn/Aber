@@ -59,7 +59,7 @@ const NAMESPACE = 'http://data.ashrae.org/standard223#';
 const PREFIX = 's223:';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MIGRATION = join(ROOT, 'supabase', 'migrations', '0013_ashrae223_vocabulary.sql');
+const MIGRATION = join(ROOT, 'supabase', 'migrations', '0002_seed_data.sql');
 const BEGIN_MARKER = '-- >>> BEGIN GENERATED ashrae223_vocabulary';
 const END_MARKER = '-- <<< END GENERATED ashrae223_vocabulary';
 
@@ -315,6 +315,6 @@ const byKind = rows.reduce((acc, row) => {
   acc[kind] = (acc[kind] || 0) + 1;
   return acc;
 }, {});
-console.log(`ASHRAE 223P ${ONTOLOGY_VERSION}: wrote ${rows.length} rows into 0013_ashrae223_vocabulary.sql`);
+console.log(`ASHRAE 223P ${ONTOLOGY_VERSION}: wrote ${rows.length} rows into 0002_seed_data.sql`);
 console.log(`  sha256:${digest}`);
 console.log(`  ${Object.entries(byKind).map(([k, v]) => `${v} ${k}`).join(', ')}`);

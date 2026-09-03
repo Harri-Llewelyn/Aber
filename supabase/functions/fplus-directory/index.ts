@@ -20,7 +20,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  *   Factory+            here                      why
  *   ------------------  ------------------------  ------------------------------------------
  *   Instance_UUID       devices.id / gateways.id  already RFC4122; no second namespace needed
- *   Sparkplug address   (sparkplug_group,         migration 0008 made the group part of the
+ *   Sparkplug address   (sparkplug_group,         archived migration 0008 made the group part of the
  *                        sparkplug_id)            address, which is what /v1/address needs
  *   Schema_UUID         schemas.id                LOCALLY minted -- see the note on /v1/schema
  *   Service_UUID        directory_services.id     likewise local
@@ -172,7 +172,7 @@ export default async function handler(req: Request): Promise<Response> {
     // -------------------------------------------------------------------------------------
     // GET /v1/address/{group}/{node}[/{device}]
     // -------------------------------------------------------------------------------------
-    // The endpoint migration 0008 exists for. Before `gateways.sparkplug_group`, a node id
+    // The endpoint archived migration 0008 exists for. Before `gateways.sparkplug_group`, a node id
     // alone was the whole address and two groups collided into one row.
     if (path.startsWith("/v1/address/")) {
       const parts = path.slice("/v1/address/".length).split("/").map(decodeURIComponent);
@@ -249,7 +249,7 @@ export default async function handler(req: Request): Promise<Response> {
     // GET /v1/service -- advertised services
     // -------------------------------------------------------------------------------------
     if (path === "/v1/service") {
-      // `status` IS NOW AN OBSERVATION, AND CAN BE "UNKNOWN". Until migration 0054 nothing wrote
+      // `status` IS NOW AN OBSERVATION, AND CAN BE "UNKNOWN". Until archived migration 0054 nothing wrote
       // this column, so it was the literal 'ACTIVE' on every row -- this endpoint has been serving
       // that to any Factory+ consumer since it was written.
       //

@@ -8,7 +8,7 @@ import { useSetting } from '../../hooks/useSettings'
 
 /**
  * How a machine-originated change is described. `changed_by` names WHICH user and is NULL for
- * every write no person made; `actor_source` (migration 0005) names WHAT KIND of actor it was,
+ * every write no person made; `actor_source` (archived migration 0005) names WHAT KIND of actor it was,
  * so a blank author is no longer ambiguous between "a gateway did this" and "we lost track".
  */
 const ACTOR_LABELS = {
@@ -74,7 +74,7 @@ export const entityKind = (t) =>
 /**
  * Columns excluded from every diff.
  *
- * Machine churn, not history. Migration 0005 already suppresses the two worst offenders at the
+ * Machine churn, not history. archived migration 0005 already suppresses the two worst offenders at the
  * source -- an UPDATE where nothing changed, and a heartbeat-only UPDATE -- so what these catch
  * is the residue: a real edit that also happened to bump a timestamp, which would otherwise open
  * every diff with a line nobody came to read.
@@ -164,7 +164,7 @@ export function diffFields(oldData, newData) {
  * Archiving and quarantining are UPDATEs whose boolean flipped, and a schema rebinding is an UPDATE
  * that touched `schema_id`, so the distinction that matters to an operator lives in the diff.
  *
- * THE ONE EXCEPTION IS SCHEMA_REJECTION, written by `record_ingestion_rejection()` (migration 0026)
+ * THE ONE EXCEPTION IS SCHEMA_REJECTION, written by `record_ingestion_rejection()` (archived migration 0026)
  * rather than by the trigger. It is not a row mutation at all -- it records a payload the ingestion
  * daemon judged non-conforming -- so there is no diff to classify it from and the action itself is
  * the answer. Governance rather than critical: it says the asset is publishing something its
@@ -290,7 +290,7 @@ const DEFAULT_LANE_LIMIT = 30
  * The poll interval, in seconds, when no setting overrides it.
  *
  * Named rather than inlined at the setInterval below, because it is now the FALLBACK half of a
- * declared setting (`ui.digital_thread_poll_seconds`, migration 0031) and the two have to be
+ * declared setting (`ui.digital_thread_poll_seconds`, archived migration 0031) and the two have to be
  * findable from each other. The migration names this constant in its `fallback_source`.
  */
 const DEFAULT_POLL_SECONDS = 60
@@ -579,7 +579,7 @@ const EmptyValue = ({ label }) => <span className="dt-diff-empty">{label}</span>
  * paragraph warns about.
  */
 export function causationSiblings(event, events) {
-  // NULL is not a group. Every row written before migration 0026 carries no causation, and there
+  // NULL is not a group. Every row written before archived migration 0026 carries no causation, and there
   // is no honest backfill for a transaction that is long over -- so a NULL must never match
   // another NULL, which would collect the entire pre-0026 history into one imaginary act.
   if (!event?.causation_id) return []
@@ -660,7 +660,7 @@ function CausationGroup({ siblings, entityNames, onSelect }) {
 function EventDiff({ event, diff }) {
   const action = String(event.event_type || event.action || '').toUpperCase()
   // SCHEMA_REJECTION joins the one-sided set because it records an OBSERVATION, not a mutation:
-  // `old_data` is NULL by construction (migration 0026), and rendering a "Previous" column that
+  // `old_data` is NULL by construction (archived migration 0026), and rendering a "Previous" column that
   // can never hold anything invites the reader to look for a prior state that does not exist.
   // TOKEN_MINTED joins them for the same reason: `old_data` is NULL by construction (0043), because
   // signing a token does not change a prior state -- there was no token, and now there is one more.
@@ -789,7 +789,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
   const [showAllLanes, setShowAllLanes] = useState(false)
 
   /*
-   * RUNTIME OVERRIDES (migration 0031), each falling back to the constant above.
+   * RUNTIME OVERRIDES (archived migration 0031), each falling back to the constant above.
    *
    * The constants are not dead: they are what applies on a stack whose administrator has never
    * touched Settings, which is every fresh install and every local boot. That is the whole point
@@ -1702,7 +1702,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
           // which is what you need to quote when two edits a second apart are being told apart.
           { label: 'Mutation ID', value: String(selected.event_id), copyable: true, mono: true, title: 'Audit row ID for this single change' },
           // Only when there is one, for the same reason `User ID` is conditional: every row written
-          // before migration 0026 carries no causation, and there is no honest value to backfill
+          // before archived migration 0026 carries no causation, and there is no honest value to backfill
           // for a transaction that is long over. A "Not set" row against a year of history would
           // read as a gap in the record rather than as the boundary of a feature.
           ...(selected.causation_id

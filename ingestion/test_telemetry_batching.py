@@ -419,7 +419,7 @@ class TestTransactionSemantics(BatchingTestCase):
         self.assertEqual(ingestion.counter_snapshot().get("dropped_db_unavailable"), 1)
 
 # =================================================================================================
-# Schema enforcement (migration 0050)
+# Schema enforcement (archived migration 0050)
 #
 # The half that can DESTROY DATA, so these drive the whole of process_ddata and assert on what
 # reached execute_values -- not on the validator, which is unit-tested next door. A metric that is

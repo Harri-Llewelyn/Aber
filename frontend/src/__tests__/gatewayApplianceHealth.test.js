@@ -1,5 +1,5 @@
 /**
- * The appliance-health helpers on the Gateways page (migration 0035).
+ * The appliance-health helpers on the Gateways page (archived migration 0035).
  *
  * WHY EACH OF THESE IS WORTH A TEST. Every one of them, broken, is wrong in the quiet direction --
  * a plausible number on a page an operator acts on:

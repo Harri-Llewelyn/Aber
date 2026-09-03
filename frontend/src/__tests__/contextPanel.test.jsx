@@ -773,7 +773,7 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
 
 describe('Gateway topic path carries the real Sparkplug group', () => {
   it('uses the recorded group rather than a wildcard', async () => {
-    // Migration 0008 made the edge node address (group, node) rather than node alone, so a
+    // archived migration 0008 made the edge node address (group, node) rather than node alone, so a
     // wildcard threw away half an address the row already knows -- and a topic you have to edit
     // before pasting it into an MQTT client is not much of an answer.
     api.get.mockImplementation(routeGet({
@@ -848,7 +848,7 @@ describe('Context panel layout invariants', () => {
 
   it('resolves the device topic group from its serving gateway', async () => {
     // A device's address is its edge node's address plus its own id, and the group lives on the
-    // gateway (migration 0008). Printing `+` there threw away a segment we hold.
+    // gateway (archived migration 0008). Printing `+` there threw away a segment we hold.
     api.get.mockImplementation(routeGet({
       gateways: [{ ...gateway, sparkplug_group: 'Wales' }]
     }))

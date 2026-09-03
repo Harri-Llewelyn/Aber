@@ -35,7 +35,7 @@ TIMESCALEDB_USER = os.getenv("DB_USER", "postgres")
 TIMESCALEDB_PASS = os.getenv("DB_PASSWORD", "postgres")
 
 # Supabase's own PostgreSQL, addressed directly rather than through PostgREST. Needed only by
-# the audit-row cleanup, which migration 0003 deliberately put out of reach of `service_role`.
+# the audit-row cleanup, which archived migration 0003 deliberately put out of reach of `service_role`.
 #
 # The port default mirrors TIMESCALEDB_PORT's conditional, and for the same reason: 54322 is the
 # published port, 5432 is what the server listens on. Without this an in-cluster run that set
@@ -102,7 +102,7 @@ MALFORMED_DEVICE_ID = "dev" + "f" * 20
 
 # The Sparkplug Group ID every message in this run is published under. Named rather than inlined
 # because the alias table and the rebirth topic are both scoped by it.
-# Must match gateways.sparkplug_group, whose column default is 'ACS-Cymru' (migration 0008).
+# Must match gateways.sparkplug_group, whose column default is 'ACS-Cymru' (archived migration 0008).
 # It was "Group1" while ingestion discarded the group entirely; now that resolution is
 # group-qualified, publishing under a group the seeded gateway is not registered under would
 # exercise the DEPRECATED fallback arm on every check rather than the current path.
@@ -374,7 +374,7 @@ def get_supabase_admin_connection():
     """
     A direct owner connection to the Supabase database, used only to clear this run's audit rows.
 
-    WHY NOT THROUGH POSTGREST, WHICH IS HOW EVERYTHING ELSE HERE IS DONE. Migration 0003 makes
+    WHY NOT THROUGH POSTGREST, WHICH IS HOW EVERYTHING ELSE HERE IS DONE. archived migration 0003 makes
     public.digital_thread genuinely append-only: a BEFORE UPDATE OR DELETE trigger rejects the
     operation for every application role, `service_role` included. That is the point of the
     change -- the service key ships in .env and is held by ingestion and all four edge functions,
@@ -1675,7 +1675,7 @@ def verify_results():
                       "Instance_UUID(s).")
 
                 # 11d. And one of them resolves to a Sparkplug address, which is the mapping the
-                # adapter exists to publish and the reason migration 0008 added the group.
+                # adapter exists to publish and the reason archived migration 0008 added the group.
                 if SEEDED.get("known_uuid") and SEEDED["known_uuid"] in parsed:
                     status, body = probe(f"/v1/device/{SEEDED['known_uuid']}",
                                          {"Authorization": f"Bearer {token}"})
@@ -1874,7 +1874,7 @@ def verify_results():
     # that undoes it, so the file looks correct in the region where it is wrong. Only asking the
     # running database, as an unauthenticated caller, gives a truthful answer.
     #
-    # Migration 0009 withdraws it and self-checks at boot. This is the second gate, and it is the
+    # archived migration 0009 withdraws it and self-checks at boot. This is the second gate, and it is the
     # one that survives someone re-running pg_dump: a regenerated baseline would reintroduce the
     # grant silently, and db-init's own check runs BEFORE any of this stack is up.
     # ---------------------------------------------------------------------------------------------

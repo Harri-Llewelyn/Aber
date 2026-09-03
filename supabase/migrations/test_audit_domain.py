@@ -1,5 +1,5 @@
 """
-The digital thread's security lane, and the acts that make one necessary (migration 0070).
+The digital thread's security lane, and the acts that make one necessary (archived migration 0070).
 
 WHAT THIS SUITE IS DEFENDING:
 
@@ -68,7 +68,7 @@ class AuditDomainFixture(unittest.TestCase):
             with conn.cursor() as cur:
                 cur.execute("SELECT to_regprocedure('public.audit_domain_for(text, text)');")
                 if cur.fetchone()[0] is None:
-                    raise RuntimeError("audit_domain_for() is missing -- run migration 0070 first.")
+                    raise RuntimeError("audit_domain_for() is missing -- run archived migration 0070 first.")
 
                 cur.execute(
                     "SELECT id, name FROM public.roles WHERE name IN %s;",

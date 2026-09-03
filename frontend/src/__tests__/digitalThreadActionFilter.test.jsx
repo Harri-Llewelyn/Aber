@@ -8,7 +8,7 @@
  * That is one screen carrying TWO OVERLAPPING TAXONOMIES and labelling them as if they were one:
  *
  *   * `digital_thread.action` -- what the database did. INSERT / UPDATE / DELETE, plus
- *     SCHEMA_REJECTION since migration 0026. This is what the drawer's badge shows.
+ *     SCHEMA_REJECTION since archived migration 0026. This is what the drawer's badge shows.
  *   * `MARKERS` -- what it MEANT, derived client-side from the diff. Created / Operational /
  *     Configuration / Lifecycle, which is what colours the timeline.
  *
@@ -167,7 +167,7 @@ describe('an unrecognised action must not widen the query', () => {
      */
     vi.resetModules()
     // THE STUB FOLLOWS THE MECHANISM. This page is served by the `digital_thread_page` RPC since
-    // migration 0039 -- the deleted-asset filter is an anti-join PostgREST cannot express -- so the
+    // archived migration 0039 -- the deleted-asset filter is an anti-join PostgREST cannot express -- so the
     // recognised action now has to arrive as an ARGUMENT rather than as a `.eq()` on a builder.
     // The question the test asks is unchanged: did it reach the database, and did the unrecognised
     // one stop here?

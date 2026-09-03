@@ -815,7 +815,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           <button
             className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setShowShadows(v => !v)}
-            title="Shadow devices created by broker playback (migration 0060). One per device a capture recorded, they receive replayed readings so a recording is never mistaken for live plant data. Hidden by default because they are not machines."
+            title="Shadow devices created by broker playback (archived migration 0060). One per device a capture recorded, they receive replayed readings so a recording is never mistaken for live plant data. Hidden by default because they are not machines."
           >
             <IconPlay size={13} /> Show shadow devices ({shadowCount})
           </button>

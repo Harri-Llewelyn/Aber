@@ -17,7 +17,7 @@
  * fewer moving part, in a change whose entire subject is credential lifetime.
  *
  * ---------------------------------------------------------------------------------------------
- * REVOCATION IS A ROTATION, NOT A DELETION, and that is settled in migration 0038's header rather
+ * REVOCATION IS A ROTATION, NOT A DELETION, and that is settled in archived migration 0038's header rather
  * than here. In short: the credential service is add-only by design and a delete verb would turn
  * "can mint a confined account" into "can stop the entire fleet publishing". So this re-provisions
  * the account with a fresh random password THE SERVICE GENERATES AND NOBODY RECORDS, and throws
@@ -132,7 +132,7 @@ Deno.serve(async (req: Request) => {
     // `replaced` is reported because it is the honest answer to "was there anything to revoke".
     // False means the account did not exist and one has now been created holding an unrecorded
     // password -- inert, but the caller should not be told that a credential was withdrawn when
-    // none was outstanding. Migration 0038 avoids reaching here in that case by checking
+    // none was outstanding. archived migration 0038 avoids reaching here in that case by checking
     // `enrolled_at`; this is the second line of that defence.
     return json(200, { revoked: true, replaced: Boolean(result.replaced) });
   } catch (err) {

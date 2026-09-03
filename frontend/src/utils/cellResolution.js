@@ -31,7 +31,7 @@ export const LOCATION_SCOPES = [SCOPE_CELL, SCOPE_SITE_WIDE]
  * but only one of them moves when the gateway is reassigned -- which is the whole reason the view
  * reports the source rather than just the cell.
  *
- * `shadow` and `simulated` are read off the GATEWAY rather than the device (migration 0059). They
+ * `shadow` and `simulated` are read off the GATEWAY rather than the device (archived migration 0059). They
  * are not places, and that is the point: an asset whose telemetry is generated or replayed is not
  * unfiled, it is unfileable, and every hint unassignedHint() can offer is advice that cannot be
  * taken for one. Keeping them out of Unassigned is what keeps Unassigned a queue that drains.
@@ -285,7 +285,7 @@ export function groupDevicesByCell(devices) {
 /**
  * Overlay a set of staged, uncommitted relocations onto a device list.
  *
- * Rearrange mode stages drops and applies them as one transaction (migration 0033), so between
+ * Rearrange mode stages drops and applies them as one transaction (archived migration 0033), so between
  * the drop and the Apply there is a view of the shopfloor that exists only in the browser. This
  * builds it.
  *

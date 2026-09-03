@@ -236,7 +236,7 @@ class ReportedGatewayStatusTest(unittest.TestCase):
     """
     A gateway names its own operating states; it does not name the platform's.
 
-    `gateways.status` is unconstrained text on purpose (migration 0025) -- a `Gateway_Status`
+    `gateways.status` is unconstrained text on purpose (archived migration 0025) -- a `Gateway_Status`
     metric overrides the status the message type implies, so the vocabulary belongs to the
     fleet. That was read as "any string, any length", and the payload value went to the column
     verbatim. The three reserved values are written by code that knows something the gateway

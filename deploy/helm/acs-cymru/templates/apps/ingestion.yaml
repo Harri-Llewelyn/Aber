@@ -163,7 +163,7 @@ spec:
             # Through Kong, in-cluster. THE DAEMON IS NOT A SERVICE-ROLE CLIENT: that key
             # bypasses RLS entirely and would sit in the process most exposed to the
             # plant network. It registers discovered devices, sets is_quarantined and stamps
-            # gateway heartbeats through the SECURITY DEFINER gates in migration 0047, as the
+            # gateway heartbeats through the SECURITY DEFINER gates in archived migration 0047, as the
             # Service_Ingestor principal seeded by 0046.
             #
             # BOTH KEYS, DOING DIFFERENT JOBS. The anon key is the apikey the gateway checks --

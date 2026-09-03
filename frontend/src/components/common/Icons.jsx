@@ -1,7 +1,7 @@
 import React from 'react'
 
 // =================================================================================================
-// Cell icons -- the closed set `cells.icon` may hold (migration 0021).
+// Cell icons -- the closed set `cells.icon` may hold (archived migration 0021).
 //
 // KEPT IN STEP WITH THE CHECK CONSTRAINT BY HAND, and that is deliberate rather than lazy: a value
 // the database accepts and this file cannot render is a cell that draws nothing, so adding one is

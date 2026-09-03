@@ -3,7 +3,7 @@ import { api } from '../../api'
 import { IconSettings, IconX } from '../common/Icons'
 
 /**
- * The runtime configuration plane (migration 0031), as a page.
+ * The runtime configuration plane (archived migration 0031), as a page.
  *
  * WHAT THIS PAGE DELIBERATELY CANNOT DO: add a setting, or delete one. The key set is closed in
  * the database -- RLS grants UPDATE and nothing else -- so there is no "New setting" button here

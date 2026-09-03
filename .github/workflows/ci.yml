@@ -1510,7 +1510,7 @@ jobs:
           python supabase/migrations/test_digital_thread_guard.py
           # The vocabulary seed's PROVENANCE. A metric seeded with a missing or wrong semantic id
           # breaks nothing at runtime -- it asserts an interoperability claim that is simply untrue,
-          # which no other check would notice. Reads rows seeded by migration 0018, which the loop
+          # which no other check would notice. Reads rows seeded by archived migration 0018, which the loop
           # above applies, so it needs no seed.sql either.
           python supabase/migrations/test_metric_catalog_seed.py
           # No stack here, so this run covers the authorization ladder and the Sparkplug -> XSD
@@ -1557,7 +1557,7 @@ jobs:
       # THE DEDUPLICATION IS WHAT THIS IS FOR. These rows go into `digital_thread`, which is
       # append-only to every application role and which the application cannot prune at all. DDATA
       # arrives continuously, so a regression that writes one row per message does not degrade --
-      # it fills the disk. Migration 0005 gave the audit TRIGGER a guard against exactly this; the
+      # it fills the disk. archived migration 0005 gave the audit TRIGGER a guard against exactly this; the
       # RPC these rows go through is not a trigger, so the only guard is in Python.
       - name: Run Ingestion Payload Conformance Tests
         run: |

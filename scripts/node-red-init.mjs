@@ -623,7 +623,7 @@ module.exports = {
         state: true,
 
         // The client is registered token_endpoint_auth_method = 'client_secret_post' in
-        // auth.oauth_clients (migration 0003), which is what passport-oauth2 does by default.
+        // auth.oauth_clients (archived migration 0003), which is what passport-oauth2 does by default.
         // Grafana's client is 'client_secret_basic' instead only because its Go OAuth2 client
         // needs auth_style pinned; GoTrue enforces whichever is registered, exactly.
 

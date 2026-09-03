@@ -75,7 +75,7 @@ export const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-mo
  * The IDTA Digital Nameplate template whose element semanticIds this mapping attaches.
  *
  * NOT an environment variable, and not on the exported submodel either -- it selects rows from
- * `idta_submodel_templates` (seeded by migration 0011) and nothing more. The version is part of
+ * `idta_submodel_templates` (seeded by archived migration 0011) and nothing more. The version is part of
  * the identifier: 2.0 lives under admin-shell.io/zvei, 3.0 under admin-shell.io/idta, and a shell
  * that mixed them would name two different templates.
  */

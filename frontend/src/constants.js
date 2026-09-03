@@ -32,7 +32,7 @@ export const PERMISSION_UUIDS = {
  * SHARED BECAUSE TWO PLACES MUST AGREE AND NEITHER COULD SEE THE OTHER. The Digital Thread filter
  * renders these as options; `api.js` uses the same keys as an ALLOW-LIST before turning the choice
  * into a SQL predicate. That allow-list was `['INSERT', 'UPDATE', 'DELETE']` written out by hand,
- * so when migration 0026 added SCHEMA_REJECTION the filter could not have selected it -- and the
+ * so when archived migration 0026 added SCHEMA_REJECTION the filter could not have selected it -- and the
  * failure would not have been an error. An unlisted action fell through the `if` and applied NO
  * predicate at all, so asking for one kind of event returned EVERY kind. That is the same trap the
  * empty-entityIds guard beside it exists to close: a filter that matches nothing must return

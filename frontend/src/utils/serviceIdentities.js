@@ -113,7 +113,7 @@ export const KNOWN_PRINCIPALS = {
    */
   'b0000000-0000-4000-8000-000000000002': {
     name: 'Service_Ingestor',
-    purpose: 'The ingestion daemon\'s database identity (migration 0046). Holds Operator, so it '
+    purpose: 'The ingestion daemon\'s database identity (archived migration 0046). Holds Operator, so it '
       + 'writes nothing directly: every write goes through a SECURITY DEFINER gate in 0047 that '
       + 'checks the caller IS this principal. Its key travels as the Authorization bearer, not as '
       + 'the apikey — the daemon still sends the anon key for the gateway\'s own check.',
@@ -127,7 +127,7 @@ export const KNOWN_PRINCIPALS = {
   },
   'b0000000-0000-4000-8000-000000000003': {
     name: 'Service_Playback',
-    purpose: 'The playback worker\'s database identity (migration 0056). A SECOND identity rather '
+    purpose: 'The playback worker\'s database identity (archived migration 0056). A SECOND identity rather '
       + 'than a second use of the first, deliberately: sharing one token between the two would mean '
       + 'a single leaked credential reached both sets of gates. Its narrowness is what makes the '
       + 'storage policy meaningful — it admits this principal for exactly one object, the capture '

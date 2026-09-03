@@ -1312,7 +1312,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               )}
             </div>
 
-            {/* The database says the same thing (metric_catalog_name_format, migration 0007), but
+            {/* The database says the same thing (metric_catalog_name_format, archived migration 0007), but
                 a 400 after pressing Add is a poor way to learn it -- and the name is immutable, so
                 there is no correcting it afterwards either. */}
             {nameError && (

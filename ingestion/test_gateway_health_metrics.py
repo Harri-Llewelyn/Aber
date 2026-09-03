@@ -5,7 +5,7 @@ use in `process_node_message`, both in ingestion.py).
 WHY EACH PROPERTY HERE IS WORTH A TEST. Every one of them, broken, breaks in the same direction:
 toward a number on an operator's page that is wrong in a way nothing else would notice.
 
-  * A REJECTED METRIC MUST NOT TAKE THE HEARTBEAT WITH IT. Migration 0035 declines to put CHECK
+  * A REJECTED METRIC MUST NOT TAKE THE HEARTBEAT WITH IT. archived migration 0035 declines to put CHECK
     constraints on these columns precisely because they are written in the same UPDATE as `status`
     and `last_heartbeat` -- so the validation that replaces those constraints has to drop one
     metric and keep the rest. If it ever threw instead, a gateway reporting a garbled disk figure
@@ -231,7 +231,7 @@ class ProcessNodeMessageHealthTests(unittest.TestCase):
         """
         The parameters of the ingest_record_gateway_health() call the heartbeat made.
 
-        The write goes through a gate now (Machine Identities in supabase/README.md, migration 0047), so the health
+        The write goes through a gate now (Machine Identities in supabase/README.md, archived migration 0047), so the health
         readings arrive as a `p_health` object rather than as columns spread across an UPDATE
         payload. `_flat` below keeps the assertions reading the way they did.
         """
