@@ -210,7 +210,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
           className="global-search-input"
           type="text"
           value={query}
-          placeholder="Search pages, cards or paste an asset UUID…"
+          placeholder="Search…"
           onChange={e => { setQuery(e.target.value); setOpen(true) }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
