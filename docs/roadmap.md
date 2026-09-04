@@ -222,8 +222,10 @@ rotated secret takes effect on the next boot. A third client is that migration a
 different redirect URI.
 
 What is new is the proxy, because **Studio cannot be an OAuth client — it has no login to extend**.
-`oauth2-proxy` is the standard answer: it runs the browser flow, holds the session cookie and
-forwards authenticated requests upstream. Studio stops publishing a port and the proxy takes it.
+Something in front of it has to run the browser flow, hold the session cookie and forward
+authenticated requests upstream; Studio stops publishing a port and that thing takes it. **What that
+thing is was decided by measurement rather than by reputation**, and the next two sections are the
+measurement.
 
 ### GoTrue's userinfo does not carry the role, and that is the decision to make first
 
@@ -234,18 +236,78 @@ nothing — with strict mapping every user is denied, without it every user sile
 `resolveUserRole()`, which is also why a role change takes effect on the user's next login instead
 of whenever their token happens to be reissued.
 
-`oauth2-proxy` needs the same thing and can take it from one of two places, which are not equally
-good:
+**This entry used to ask which of two places `oauth2-proxy` should read the role from — a claim in
+the ID token, or a third `studio-userinfo` function on `--profile-url` — and to say "check the ID
+token first and take the free answer if it is there." That question was run against the live stack
+on 2026-09-04 and BOTH answers are wrong**, which is worth recording in full because the reasoning
+that produced them was sound and the conclusion was still unusable.
 
-| Where the role comes from | What it costs | What is unresolved |
-| :--- | :--- | :--- |
-| A claim in the ID token, read with `--oidc-groups-claim` | Nothing, if the claim is there | `custom_access_token_hook` mirrors the role into the **access** token; whether it reaches the ID token GoTrue issues at `/oauth/token` is **unverified**, and settles the design |
-| A third `studio-userinfo` function on `--profile-url` | One edge function, on an established pattern | Nothing — it is what the other two clients do, and it reads the live role |
+**There is no ID token.** `/oauth/token` with `openid` in the scope answers `500
+unexpected_failure`, `"Error generating ID token"`, and the auth log gives the reason:
 
-**Check the ID token first and take the free answer if it is there.** If it is not, write the third
-userinfo function rather than falling back to an email allowlist: a static list of addresses is the
-htpasswd problem with extra steps — no revocation, no role, no audit row, and a further credential
-plane in `.env` for a console that can drop a table.
+```
+HS256 is not supported for ID token signing
+```
+
+The role itself is fine — `custom_access_token_hook` ran successfully on that same request. GoTrue
+simply refuses to mint an ID token at all while this stack signs with the shared HS256
+`SUPABASE_JWT_SECRET`, and **the repository already knew this**:
+[`grafana/grafana.ini`](../grafana/grafana.ini) has carried the absent `openid` scope and that exact
+error in a comment since Grafana SSO was built. The question above was asked without reading it.
+
+**Discovery is unusable too, independently.** `/.well-known/openid-configuration` reports
+`"issuer": ""` and relative endpoint paths, and advertises
+`id_token_signing_alg_values_supported: ["RS256","HS256","ES256"]` — including the one it refuses.
+Its `claims_supported` list carries no role and no `app_metadata`.
+
+**And `oauth2-proxy`'s `oidc` provider requires an ID token unconditionally** — `Redeem` fails with
+`"token response did not contain an id_token"` and has no profile-URL fallback, so the second row of
+the old table could not have rescued the first. Its one non-OIDC provider that reads groups from a
+userinfo endpoint is documented as *"the legacy and deprecated provider for Keycloak, use Keycloak
+OIDC Auth Provider if possible"* — a deprecated code path, named after software this stack does not
+run, chosen precisely because it is the one that has not been modernised onto the standard this
+stack cannot speak.
+
+**The measurement that settles it is what the access token carries when `openid` is left out.** The
+flow completes, returns no `id_token`, and hands over a JWT holding:
+
+```json
+"app_metadata": { "provider": "email", "providers": ["email"], "role": "Administrator" },
+"aal": "aal1", "session_id": "…", "email": "admin@acs-cymru.local", "scope": "email profile"
+```
+
+while `/oauth/userinfo` returns `sub`, `email`, `email_verified`, `name` and `updated_at` and **no
+role** — which is `grafana-userinfo`'s reason for existing, restated by the endpoint itself.
+
+**So the role does not need fetching. It is in the token the proxy is already holding**, and the
+third userinfo function this entry planned is not needed. An email allowlist remains refused for the
+reasons it always was: a static list of addresses is the htpasswd problem with extra steps — no
+revocation, no role, no audit row, and a further credential plane in `.env` for a console that can
+drop a table.
+
+### The proxy is Envoy, which is already the gateway
+
+`envoyproxy/envoy:v1.31.5` runs in both targets and carries every filter this needs, so the item
+adds **no new component and no new edge function**: `envoy.filters.http.oauth2` runs the browser
+flow and holds the cookie, `jwt_authn` verifies the HS256 token against an inline `oct` JWKS
+(`jwt_verify_lib` supports HMAC keys), and `rbac` requires `app_metadata.role == Administrator` out
+of the verified payload. GoTrue's OAuth server requires PKCE and the client is registered
+`client_secret_basic`, both as `grafana.ini` records for the client seeded by `0002`.
+
+**`aal` is in that token beside the role**, which turns this entry's closing argument from an
+aspiration into a mechanism: when 4 lands, requiring `aal2` for Studio is a predicate in a filter
+that already reads the claim, not a second integration.
+
+Three costs, in descending order of seriousness:
+
+- **A SEPARATE LISTENER, not a route on `:54321`.** A browser-session filter on the existing
+  listener is an outage for every machine principal, which is what *What this must not touch* below
+  says at length. The same Envoy, a second listener.
+- **`SUPABASE_JWT_SECRET` reaches the Envoy configuration** as the `oct` JWKS. It is the same secret
+  Envoy's neighbours already hold, but it is a new place it lives, and it belongs in an env or SDS
+  reference rather than a literal in `envoy.yaml`.
+- **Studio's own traffic under a cookie session is unmeasured.** Its websockets and `/api/*` calls
+  are the thing to prove before any configuration is written, not after.
 
 ### It closes the MCP endpoint, which should be a decision rather than a discovery
 
@@ -300,10 +362,11 @@ change.
 - **What the seeded Directory entry says.** `0002` lists Studio at `http://127.0.0.1:54323`, and
   that URL is wrong the moment the proxy takes the port. The Directory is where people look to find
   services, so it moves in the same migration that seeds the OAuth client.
-- **Whether this waits for 20 or 21.** It does not. Gating on `Administrator` adds another
-  Administrator-only check in the direction the token and principal revocation controls already go,
-  rather than depending on the role
-  split — and Studio inherits Entra sign-in and MFA for free if and when those land. That is the
+- **Whether this waits for 3 or 4.** It does not — and those numbers are Entra sign-in and MFA;
+  this bullet cited the old gapped scheme's 20 and 21 until 2026-09-04. Gating on `Administrator`
+  adds another Administrator-only check in the direction the token and principal revocation controls
+  already go, rather than depending on the role split — and Studio inherits Entra sign-in and MFA
+  for free if and when those land, `aal` being in the token the filter already reads. That is the
   strongest argument for the OAuth route over any proxy-local credential: it is the only design
   under which a database console ever gets a second factor.
 
