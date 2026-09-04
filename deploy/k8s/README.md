@@ -733,6 +733,64 @@ kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
 > Run `post_restore()` **even if the restore failed.** `scripts/restore-databases.sh` does this for
 > the Compose target and verifies `public.telemetry` through the wrapper afterwards.
 
+#### Rehearsing the restore, weekly and by hand
+
+**`.github/workflows/restore-rehearsal.yml` performs a full cycle every Sunday** against a
+disposable k3d cluster: seed known data → back up → **destroy the namespace and its volumes** →
+reinstall → restore → assert. It also runs on `workflow_dispatch`, which is what to use before a
+migration you are nervous about.
+
+**Destroying the volumes is the point.** A restore into a namespace that still has its PVCs proves
+almost nothing, because the data was never gone — so the workflow deletes the namespace, waits for
+every `PersistentVolume` bound to it to be released, and fails if any survives. It then asserts the
+reinstalled stack is *empty* before restoring into it, so a namespace deletion that silently did not
+take is caught as its own failure rather than as a suspiciously successful restore.
+
+The same code runs by hand against any cluster:
+
+```bash
+export NS=acs-cymru POSTGRES_PASSWORD=... DB_PASSWORD=...
+scripts/rehearse-restore.sh seed
+scripts/rehearse-restore.sh snapshot before.txt
+scripts/rehearse-restore.sh backup ./rehearsal
+# ... destroy and reinstall ...
+scripts/rehearse-restore.sh restore ./rehearsal <stamp>
+scripts/rehearse-restore.sh snapshot after.txt
+scripts/rehearse-restore.sh compare before.txt after.txt
+scripts/rehearse-restore.sh assert
+```
+
+**What it asserts, and why counts are not enough.** `compare` diffs the row counts either side, which
+catches data that did not come back. `assert` catches the rest — and the rest is the dangerous half,
+because every one of these can be missing while the counts agree:
+
+| Assertion | What its absence looks like |
+| :--- | :--- |
+| `digital_thread` append-only trigger and revoked grants | an audit table that is quietly editable |
+| RLS enabled, with both lane policies | the security audit lane readable by every logged-in user |
+| Still range-partitioned, nothing in the DEFAULT partition | retention by `DETACH` silently retires nothing |
+| No application role can reach a partition directly | `TRUNCATE` on a month, which no row trigger refuses |
+| Vault canary decrypts to its plaintext | secrets present, well-formed and undecryptable |
+| `asset-3d-models` bucket exists and is still public | every model URL 400s while `model_3d_path` looks right |
+| `telemetry` is still a hypertable, with chunks | no compression and no retention; it grows forever |
+| All three rollups exist **and return rows** | a dashboard that is a flat line on a healthy-looking stack |
+| Retention and refresh jobs registered **and scheduled** | present in every catalogue view, never running |
+| A user seeded before the backup can still sign in | GoTrue's schema or the JWT secret did not survive |
+| The storage object round-trips byte for byte | `devices.model_3d_path` pointing at objects that are gone |
+
+**A failure files itself.** A weekly job nobody watches is the same as no job, so a scheduled failure
+opens an issue labelled `restore-rehearsal` — or comments on the existing one rather than opening a
+second, since a restore path broken for six weeks is one fact, not six. The dump from the failed run
+is attached to it for seven days, so the next person diagnoses from the actual artefact instead of
+re-running and hoping it fails the same way.
+
+**What it does not rehearse.** The rehearsal installs the data layer and switches off the
+application layer — frontend, Node-RED, i3X, ingestion, edge functions, Grafana, Studio, Swagger and
+the broker (`.github/rehearsal-values.yaml` lists each with its reason). None of them holds state a
+dump carries. `supabase-realtime` stays **on** despite holding none, because it creates
+`supabase_realtime_admin` on first start and the restore refuses without it. Read a green run as
+"the data came back", not as "the whole stack came back".
+
 #### Tier 2: infrastructure and disaster recovery
 
 Tier 1 does not recover a dead node. Two routes, depending on what the cluster runs on:
