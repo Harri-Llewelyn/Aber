@@ -1922,26 +1922,49 @@ def verify_results():
             passed = False
 
         # The general form. A single named function is one regression; a grant to `anon` on
-        # anything in `public` is the class. The allow-list is empty by design -- see 0009.
+        # anything in `public` is the class.
+        #
+        # THE ALLOW-LIST WAS EMPTY BY DESIGN UNTIL 0074, AND HAS EXACTLY ONE ENTRY NOW.
+        # `auth_pre_request()` is PostgREST's `db-pre-request` hook -- `PGRST_DB_PRE_REQUEST` in
+        # docker-compose.yml names it -- and PostgREST runs that function AFTER switching to the
+        # request's role. For an unauthenticated request that role IS `anon`, so revoking this one
+        # does not harden anything: it takes the entire anonymous API surface down, /ping included.
+        # The function's own body is written around that fact, returning quietly when there are no
+        # claims because "no claims" is the ordinary majority rather than an anomaly.
+        #
+        # IT IS AN EXEMPTION FOR ONE FUNCTION, NOT A RELAXATION OF THE RULE. The entry is matched on
+        # name AND arity so an overload cannot arrive under its cover, and everything else in
+        # `public` must still come back empty -- which is the property that makes a real finding
+        # visible instead of hiding it among harmless ones. Adding a second entry here should be
+        # about as hard as this one was.
+        ANON_EXECUTE_ALLOWED = {("auth_pre_request", 0)}
         try:
             audit_conn = get_supabase_admin_connection()
             with audit_conn.cursor() as cur:
                 cur.execute("""
-                    SELECT string_agg(p.proname, ', ' ORDER BY p.proname)
+                    SELECT p.proname, p.pronargs
                     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                     WHERE n.nspname = 'public'
                       AND has_function_privilege('anon', p.oid, 'EXECUTE')
+                    ORDER BY p.proname
                 """)
-                leaked = cur.fetchone()[0]
+                found = [(name, int(nargs)) for name, nargs in cur.fetchall()]
             audit_conn.close()
+            leaked = ", ".join(
+                sorted(name for name, nargs in found if (name, nargs) not in ANON_EXECUTE_ALLOWED)
+            )
             if leaked:
                 print(f"❌ 13a. ANON PRIVILEGE BASELINE FAIL: anon can EXECUTE in public: {leaked}. "
-                      "An anon privilege review must return an EMPTY set -- that is what makes a "
-                      "real finding visible instead of hiding it among harmless trigger functions.")
+                      "An anon privilege review must return an EMPTY set apart from the "
+                      "PostgREST pre-request hook -- that is what makes a real finding visible "
+                      "instead of hiding it among harmless trigger functions. A new function is "
+                      "EXECUTE-able by PUBLIC unless the migration revokes it: add "
+                      "`REVOKE ALL ON FUNCTION ... FROM PUBLIC, anon;` before its GRANT.")
                 passed = False
             else:
                 print("✅ 13a. ANON PRIVILEGE BASELINE: anon holds no EXECUTE on any function in "
-                      "public -- the review returns an empty set.")
+                      "public beyond the PostgREST pre-request hook, which cannot be revoked "
+                      "without taking the anonymous API down.")
         except Exception as db_err:
             print(f"⚠️  13a. ANON PRIVILEGE BASELINE: skipped, no owner DB connection ({db_err}).")
     except Exception as e:

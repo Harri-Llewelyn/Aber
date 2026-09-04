@@ -166,6 +166,14 @@ python supabase/migrations/test_service_token_revocation.py
 # subject arm is checked first so its message wins, and its uuid cast must fall THROUGH to the
 # token arm rather than return, or a junk `sub` would bypass the token denylist.
 python supabase/migrations/test_service_principal_revocation.py
+# The anon EXECUTE baseline across the WHOLE schema, not a list somebody remembered to extend.
+# PostgreSQL grants EXECUTE on a new function to PUBLIC, and anon is a member of PUBLIC, so a
+# migration with a GRANT and no REVOKE has narrowed nothing. A FRESH-BOOT-ONLY FAULT: 0001's sweep
+# runs before the migrations that create these functions, so the leak is present on boot one and
+# healed on boot two -- which means it is on new installations and on no development stack that has
+# ever been restarted. These suites run against a throwaway database, which is a first boot every
+# time, and that is exactly why the assertion belongs here as well as in validate.py's check 13a.
+python supabase/migrations/test_anon_privilege_baseline.py
 # The `deployment` constraints, and the view that has to be rebuilt when a gateways column moves
 # (0064, 0066). Its transitional half went when is_virtual did -- see the suite's own header.
 python supabase/migrations/test_gateway_deployment.py

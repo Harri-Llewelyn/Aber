@@ -412,6 +412,18 @@ BEGIN
 END;
 $$;
 
+-- REVOKED FROM PUBLIC FIRST, as revoke_service_principal() and reinstate_service_principal() above
+-- both are. PostgreSQL grants EXECUTE on a new function to PUBLIC by default, and `anon` is a
+-- member of PUBLIC -- so a GRANT on its own does not narrow anything, it merely restates a
+-- permission everybody already had. This one was written without the REVOKE and leaked to `anon`,
+-- which validate.py's check 13a caught on the first end-to-end run.
+--
+-- NOT AN ESCALATION, AND STILL WORTH FIXING. The function is invoker-rights, so an anonymous caller
+-- reaching it gets `permission denied for table revoked_service_principals` -- 0076 grants that
+-- table to `authenticated` only. What it costs is the baseline: check 13a demands an EMPTY set
+-- precisely so that a real finding cannot hide among harmless ones, and every entry that is
+-- "harmless, because of something else" erodes exactly that property.
+REVOKE ALL ON FUNCTION public.assert_principal_not_revoked(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.assert_principal_not_revoked(uuid) TO authenticated, service_role;
 
 NOTIFY pgrst, 'reload schema';
