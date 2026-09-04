@@ -287,18 +287,58 @@ drop a table.
 
 ### The proxy is Envoy, which is already the gateway
 
-`envoyproxy/envoy:v1.31.5` runs in both targets and carries every filter this needs, so the item
-adds **no new component and no new edge function**: `envoy.filters.http.oauth2` runs the browser
-flow and holds the cookie, `jwt_authn` verifies the HS256 token against an inline `oct` JWKS
-(`jwt_verify_lib` supports HMAC keys), and `rbac` requires `app_metadata.role == Administrator` out
-of the verified payload. GoTrue's OAuth server requires PKCE and the client is registered
-`client_secret_basic`, both as `grafana.ini` records for the client seeded by `0002`.
+Envoy runs in both targets and carries every filter this needs, so the item adds **no new component
+and no new edge function**: `envoy.filters.http.oauth2` runs the browser flow and holds the cookie,
+`jwt_authn` verifies the HS256 token against an inline `oct` JWKS (`jwt_verify_lib` supports HMAC
+keys), and `rbac` requires `app_metadata.role == Administrator` out of the verified payload. The
+client is registered `client_secret_basic` against Envoy's `auth_type: BASIC_AUTH`, which is the
+pairing `grafana.ini` had to discover for the client seeded by `0002`.
 
 **`aal` is in that token beside the role**, which turns this entry's closing argument from an
 aspiration into a mechanism: when 4 lands, requiring `aal2` for Studio is a predicate in a filter
 that already reads the claim, not a second integration.
 
-Three costs, in descending order of seriousness:
+### It needs an Envoy no older than 1.34, and that is the item's real prerequisite
+
+**GoTrue's OAuth server requires PKCE** — `grafana.ini` records the failure verbatim, `invalid_request:
+PKCE flow requires both code_challenge and code_challenge_method` — and **the `oauth2` filter in the
+pinned `envoyproxy/envoy:v1.31.5` cannot send it.** `code_challenge` does not appear in that
+version's `OAuth2Config` at all; the `OauthCodeVerifier` cookie and the PKCE fields arrive in
+**1.34.0**. So this item is not "configure a filter that is already there": it carries a gateway
+bump, on the component every other service in the stack sits behind.
+
+That bump is a *sequencing* cost rather than an argument against the route. Envoy here is pinned
+"like every image", not frozen the way Kong 2.8 and the Supabase coordinated set are — it is this
+repository's own choice rather than a version upstream tests together. What it buys is the
+re-verification [`docs/gateway-migration.md`](gateway-migration.md) already specifies for a gateway
+change: identical `--runtime --authenticated` output, a 101 Realtime handshake, identical CORS, both
+AAS suites and a full `validate.py` pass. **Do that bump on its own commit, with those checks, before
+any Studio configuration is written.**
+
+### What a throwaway proxy proved, and the one thing it did not
+
+Measured on 2026-09-04 with `envoyproxy/envoy:v1.35.0` beside the running stack, fronting
+`supabase-studio:3000` with the three filters above and a dynamically-registered client. Every line
+below is an observation, not a design intention:
+
+| What was asked | What happened |
+| :--- | :--- |
+| Cold hit on the proxy | `302` to `/auth/v1/oauth/authorize` **carrying `code_challenge` and `code_challenge_method=S256`** — PKCE, from the filter, unaided |
+| That redirect followed with **no `apikey`**, as a browser would | `302` on to the dashboard's consent page; the gateway does not demand a key on this route |
+| Consent approved, callback redeemed | `302` home, cookies `OauthHMAC`, `OauthExpires`, `BearerToken`, `RefreshToken` set |
+| Studio through the session, as `Administrator` | `200` on `/project/default` **and on its own `/api/platform/*` JSON**, which was the half in doubt |
+| The same flow as `Operator` | Signs in, then `403 RBAC: access denied` on every path — the gate reads the token, and no userinfo function exists to be asked |
+| `POST /api/mcp` `initialize`, unauthenticated | `200` and a `serverInfo` on `:54323` today; `302` to sign-in through the proxy |
+
+**Websockets remain unmeasured.** The probe exercised HTTP only, `upgrade_configs` was configured
+but never exercised, and nothing in this pass establishes what Studio does or does not open. It is
+the one item on this list of costs that survives the probe intact.
+
+**One config detail found the hard way:** `rbac.v3.Principal.metadata` is deprecated in current
+Envoy and warns on boot. The real configuration should use the matcher form rather than copy the
+probe.
+
+Two costs remain, in descending order of seriousness:
 
 - **A SEPARATE LISTENER, not a route on `:54321`.** A browser-session filter on the existing
   listener is an outage for every machine principal, which is what *What this must not touch* below
@@ -306,14 +346,14 @@ Three costs, in descending order of seriousness:
 - **`SUPABASE_JWT_SECRET` reaches the Envoy configuration** as the `oct` JWKS. It is the same secret
   Envoy's neighbours already hold, but it is a new place it lives, and it belongs in an env or SDS
   reference rather than a literal in `envoy.yaml`.
-- **Studio's own traffic under a cookie session is unmeasured.** Its websockets and `/api/*` calls
-  are the thing to prove before any configuration is written, not after.
 
 ### It closes the MCP endpoint, which should be a decision rather than a discovery
 
 A session cookie in front of Studio covers `/api/mcp` along with everything else, and an MCP client
 cannot complete an interactive browser flow to obtain one. So this item **removes** the
-unauthenticated MCP server as a working endpoint, not merely as an open one.
+unauthenticated MCP server as a working endpoint, not merely as an open one — measured above, where
+the same unauthenticated `initialize` answers `200` with a `serverInfo` on `:54323` and a redirect
+to sign-in through the proxy.
 
 That is the right outcome, and the reason is worth recording because the endpoint is tempting. It
 runs as the owner, so it reads `digital_thread`, `auth.users` and the Vault, and it sits outside
