@@ -306,6 +306,51 @@ class SurvivedTheConversionTestCase(unittest.TestCase):
                 f"a newly created partition granted service_role {privilege}",
             )
 
+    def test_every_comment_survived_the_conversion(self):
+        """
+        THE ONE CI CAUGHT AND THIS SUITE DID NOT, which is why it is here.
+
+        A COMMENT lives on the object, so dropping the old table dropped every comment with it --
+        including the one 0077 puts on `idx_digital_thread_recorded_id`. Rebuilding the index
+        without it is invisible on a single boot and produces DRIFT on the next one: 0077's
+        `CREATE INDEX IF NOT EXISTS` skips, its unconditional `COMMENT ON INDEX` lands, and the
+        schema now differs between two runs of the same chain. check-migration-idempotency.mjs
+        refuses that, correctly -- but it needs the Compose stack, so nothing here saw it.
+
+        Asserted as "every index and column that has a comment has a NON-EMPTY one" rather than
+        against a list of names, so a comment added to this table later is covered by this test
+        without anybody remembering to extend it.
+        """
+        self.cur.execute(
+            "SELECT c.relname, obj_description(c.oid, 'pg_class') "
+            "FROM pg_index x JOIN pg_class c ON c.oid = x.indexrelid "
+            "WHERE x.indrelid = %s::regclass ORDER BY c.relname", (PARENT,)
+        )
+        commented = {name: comment for name, comment in self.cur.fetchall()}
+        self.assertIn(
+            "idx_digital_thread_recorded_id", commented,
+            "the keyset index is missing entirely",
+        )
+        self.assertTrue(
+            commented["idx_digital_thread_recorded_id"],
+            "idx_digital_thread_recorded_id lost the comment 0077 gives it -- the conversion "
+            "rebuilt the index without carrying it, which is schema drift on the next boot",
+        )
+
+        # The columns 0001 documents. Same failure mode, same fix, and the audit table is where a
+        # reader goes to find out what `actor_source` and `causation_id` actually mean.
+        self.cur.execute(
+            "SELECT a.attname, col_description(a.attrelid, a.attnum) "
+            "FROM pg_attribute a WHERE a.attrelid = %s::regclass AND a.attnum > 0 "
+            "  AND NOT a.attisdropped", (PARENT,)
+        )
+        columns = {name: comment for name, comment in self.cur.fetchall()}
+        for column in ("actor_source", "causation_id", "audit_domain"):
+            self.assertTrue(
+                columns.get(column),
+                f"digital_thread.{column} lost its comment in the conversion",
+            )
+
     def test_the_sequence_was_not_dropped_with_the_old_table(self):
         """
         0001 declares the sequence OWNED BY digital_thread.id, so DROP TABLE on the original would

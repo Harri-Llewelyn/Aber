@@ -202,6 +202,9 @@ DECLARE
   v_month timestamp with time zone;
   v_rows_before bigint;
   v_rows_after  bigint;
+  v_comments    jsonb;
+  v_key         text;
+  v_val         text;
 BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_partitioned_table WHERE partrelid = 'public.digital_thread'::regclass
@@ -212,6 +215,34 @@ BEGIN
 
   SELECT count(*) INTO v_rows_before FROM public.digital_thread;
   RAISE NOTICE '0079: converting digital_thread to monthly partitions (% existing row(s))', v_rows_before;
+
+  -- COMMENTS ARE CARRIED ACROSS, NOT RESTATED, and CI found out why it matters. A COMMENT lives on
+  -- the object, so dropping the old table drops every comment with it -- including the one 0077
+  -- puts on `idx_digital_thread_recorded_id`. Rebuilding the index without it leaves boot 1 with no
+  -- comment, while boot 2 has one: 0077's `CREATE INDEX IF NOT EXISTS` skips, and its unconditional
+  -- `COMMENT ON INDEX` lands. The schema then differs between two runs of the same chain, which is
+  -- drift by definition and is exactly what check-migration-idempotency.mjs refuses.
+  --
+  -- COPIED RATHER THAN RETYPED, deliberately. Writing the text out here would put a second copy of
+  -- every comment in a file that runs AFTER the one that owns them -- so editing 0001 or 0077 would
+  -- be silently undone by a stale duplicate on the next boot. Reading them from the catalogue means
+  -- a comment added to this table in a year is preserved by code written today.
+  SELECT coalesce(jsonb_object_agg(key, description), '{}'::jsonb) INTO v_comments
+    FROM (
+      -- Indexes, keyed by name: they are rebuilt below under exactly these names.
+      SELECT 'index:' || c.relname AS key, d.description
+        FROM pg_index x
+        JOIN pg_class c ON c.oid = x.indexrelid
+        JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass
+       WHERE x.indrelid = 'public.digital_thread'::regclass
+      UNION ALL
+      -- Columns, keyed by name: the new table has the same ones, in the same order.
+      SELECT 'column:' || a.attname, d.description
+        FROM pg_attribute a
+        JOIN pg_description d ON d.objoid = a.attrelid AND d.classoid = 'pg_class'::regclass
+                             AND d.objsubid = a.attnum
+       WHERE a.attrelid = 'public.digital_thread'::regclass AND a.attnum > 0
+    ) AS carried;
 
   -- 2a. The partition key must be NOT NULL -----------------------------------------------------
   --
@@ -309,6 +340,15 @@ BEGIN
   CREATE INDEX IF NOT EXISTS idx_digital_thread_recorded_id
     ON public.digital_thread USING btree (recorded_at DESC, id DESC);
 
+  -- The comments captured above, put back on the objects that now carry those names.
+  FOR v_key, v_val IN SELECT key, value FROM jsonb_each_text(v_comments) LOOP
+    IF v_key LIKE 'index:%' THEN
+      EXECUTE format('COMMENT ON INDEX public.%I IS %L', substr(v_key, 7), v_val);
+    ELSE
+      EXECUTE format('COMMENT ON COLUMN public.digital_thread.%I IS %L', substr(v_key, 8), v_val);
+    END IF;
+  END LOOP;
+
   -- The two triggers, in the same shape 0001 declares them. Row-level BEFORE triggers on a
   -- partitioned table are a PostgreSQL 13 feature and this image is 17; they are declared on the
   -- parent and fire for every partition, so a partition added next year inherits them rather than
@@ -354,17 +394,13 @@ END $mig$;
 
 
 -- -------------------------------------------------------------------------------------------------
--- 3. Column comments, reapplied
+-- 3. The one comment this file owns
 -- -------------------------------------------------------------------------------------------------
 --
--- COMMENT ON is not carried by LIKE and 0001 applies these to the table it created, which no longer
--- exists after a conversion boot. Restated here rather than left to the next boot: `\d+` on the
--- audit table is where an auditor reads what `actor_source` and `causation_id` mean, and a column
--- whose documentation reappears only after a restart is documentation that was not there when asked.
-
-COMMENT ON COLUMN public.digital_thread.actor_source IS 'What kind of actor made the change: user | ingestion | migration | service. Complements changed_by, which names WHICH user and is NULL for every machine-originated write.';
-COMMENT ON COLUMN public.digital_thread.causation_id IS 'The transaction that wrote this row (txid_current()). Rows sharing it were written by ONE act -- an operator approval that also rebound a schema, a delete that cascaded. NOT a global identifier: it is unique only within this database, and only until the epoch counter is reset by a restore from a dump. Group by it; never store it as a foreign reference.';
-COMMENT ON COLUMN public.digital_thread.audit_domain IS 'asset | security. Stamped by trg_digital_thread_stamp_domain from audit_domain_for(); callers do not supply it and cannot override it. Decides which SELECT policy admits the row.';
+-- The column and index comments are CARRIED ACROSS the conversion inside the block above rather than
+-- retyped here -- see the note there for why a second copy in this file would be actively harmful.
+-- This one is different: it is the only comment 0079 originates, because it describes the shape 0079
+-- gives the table and no earlier migration has anything to say about partitioning.
 
 COMMENT ON TABLE public.digital_thread IS 'Append-only audit of every attributed change to cells, gateways and devices, plus the security lane 0070 added. Range-partitioned by month on recorded_at (0079) so retention is DETACH rather than DELETE. Rows are written only by log_digital_thread_event() and its named siblings; UPDATE and DELETE are refused for every role that is not an owner.';
 
