@@ -227,8 +227,24 @@ services:
       # After an image bump:  docker compose down && docker volume rm <project>_supabase_db_config
       # (0006 now recovers from the resulting key loss on its own -- see its header.)
       - supabase_db_config:/etc/postgresql-custom
+    # -h 127.0.0.1, AND THE LOOPBACK IS THE WHOLE FIX. Without it both halves of this check speak
+    # over the UNIX SOCKET -- and so does the TEMPORARY SERVER the postgres entrypoint runs while
+    # initdb applies the image's own migrations. That server listens on the socket and NOT on TCP,
+    # so a socket-only check reports the database healthy in the middle of its own bootstrap.
+    #
+    # WHAT THAT COST: `supabase-db-roles-init` depends on `service_healthy`, connected as
+    # supabase_admin before initdb had created it, and failed with "cannot authenticate" -- whose
+    # message blames a POSTGRES_PASSWORD mismatch, because that is the failure people actually hit.
+    # A perfect diagnosis of the wrong fault, on a stack where nothing was misconfigured at all.
+    #
+    # Caught by sampling both forms against a booting container: there is a window where the socket
+    # check passes, TCP is refused, and supabase_admin does not yet exist. `pg_isready -h 127.0.0.1`
+    # is false for exactly that window, which is what makes it the right question.
+    #
+    # The SELECT stays on the socket: once TCP is up the server is the real one, and this half is
+    # asking "does it answer a query", which needs no second TCP connection.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'"]
       interval: 5s
       timeout: 5s
       retries: 10
