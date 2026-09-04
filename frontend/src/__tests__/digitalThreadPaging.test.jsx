@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { DigitalThreadTab, mergeFirstPage } from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
+import { DIGITAL_THREAD_ENTITY_TYPES } from '../constants'
 
 // SPREAD FROM THE REAL MODULE, not replaced. api.js exports constants the tab reads at import time
 // as well as the client, and a bare stub silently drops them -- which renders as an empty timeline
@@ -256,6 +257,31 @@ describe('DigitalThreadTab section coverage', () => {
 
     render(<DigitalThreadTab />)
     expect(await screen.findByLabelText('SOMETHING_NEW lanes')).toBeInTheDocument()
+  })
+
+  it('offers every kind it can draw, so a drawable lane is never unaskable', async () => {
+    // THE HALF THAT SURVIVED THE FIRST FIX. Extending SECTIONS made the security lane drawable
+    // and left the filter at four hardcoded options against seven kinds, so a reader could see
+    // role assignments only by clearing the filter and could not ask for them at all.
+    //
+    // Asserted against the shared table rather than against a list of seven, because the failure
+    // was never the number -- it was that two lists of the same thing could disagree.
+    respond(() => page([laneEvent(1, 'gateways', 'gw-1')], { nextCursor: null }))
+
+    render(<DigitalThreadTab />)
+    await screen.findByLabelText('Gateways lanes')
+
+    const select = screen.getByTitle('Show only events against one kind of asset')
+    const options = [...select.querySelectorAll('option')]
+
+    for (const { kind, label } of DIGITAL_THREAD_ENTITY_TYPES) {
+      const option = options.find(o => o.value === kind)
+      expect(option, `no filter option for ${kind}`).toBeTruthy()
+      expect(option.textContent).toBe(label)
+    }
+    // Every entry, plus the unfiltered default and nothing else.
+    expect(options).toHaveLength(DIGITAL_THREAD_ENTITY_TYPES.length + 1)
+    expect(options[0].value).toBe('')
   })
 
   it('the asset count in the header equals the lanes actually drawn', async () => {

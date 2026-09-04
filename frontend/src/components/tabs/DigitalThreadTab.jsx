@@ -6,7 +6,9 @@ import {
   IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconFileCode, IconSettings
 } from '../common/Icons'
-import { DIGITAL_THREAD_ACTIONS } from '../../constants'
+import {
+  DIGITAL_THREAD_ACTIONS, DIGITAL_THREAD_ENTITY_TYPES, ENTITY_KIND_BY_TABLE
+} from '../../constants'
 import { useSetting } from '../../hooks/useSettings'
 
 /**
@@ -35,34 +37,14 @@ function actorTitle(event) {
  * The trigger writes TG_TABLE_NAME -- 'cells' / 'gateways' / 'devices'. The UI has always spoken
  * in the singular upper case, and a handover from another page arrives already in that form, so
  * both spellings reach this component and both have to normalise to one.
- */
-/*
- * `service_principals` IS NOT A TABLE, unlike the other three. Migrations 0043 and 0044 write it as
- * an entity_type for rows about `auth.users` identities -- auth is GoTrue's schema, there is no
- * public table of them, and `entity_id` carries no foreign key anywhere.
  *
- * IT IS LISTED HERE BECAUSE THE FALLBACK IS NOT GOOD ENOUGH. `entityKind` upper-cases whatever it
- * does not know, which would render this lane as SERVICE_PRINCIPALS -- and 0031's header states the
- * bar these rows have to clear: "a half-legible audit entry is worse than an absent one, because it
- * looks like the feature works."
+ * DEFINED IN `constants.js` AND NOT HERE, since #141. This map, the filter dropdown below and the
+ * kind-to-table normaliser in `api.js` are three views of one fact, and holding them in three
+ * places is what let them drift apart -- see DIGITAL_THREAD_ENTITY_TYPES for what that cost. The
+ * reasoning about why `service_principals` is not a table and why `user_roles` reads as ACCESS
+ * moved there with it.
  */
-/*
- * `user_roles`, `system_settings` and `schemas` join it in 0070, which is when the audit trigger
- * first reached them. They are listed for the same reason: the fallback would render ROLE
- * ASSIGNMENT as USER_ROLES and a settings change as SYSTEM_SETTINGS, which clears no bar.
- *
- * `user_roles` reads as ACCESS rather than as the table's name. What the row records is that an
- * account gained or lost a role, and the join table it happens to live in is not the subject.
- */
-const ENTITY_KIND = {
-  cells: 'CELL',
-  gateways: 'GATEWAY',
-  devices: 'DEVICE',
-  service_principals: 'SERVICE IDENTITY',
-  user_roles: 'ACCESS',
-  system_settings: 'SETTING',
-  schemas: 'SCHEMA',
-}
+const ENTITY_KIND = ENTITY_KIND_BY_TABLE
 /**
  * The kinds the purge test can answer for -- the three that name a real table.
  *
@@ -510,21 +492,42 @@ export function clusterSummary(events, kindOf) {
  * has to be extended at all. `sections` now appends a section for every remaining kind rather than
  * dropping it, so the next entity type the audit trigger reaches appears — unstyled and correctly
  * labelled from `ENTITY_KIND` — instead of vanishing into a count nobody can reconcile.
+ *
+ * =================================================================================================
+ * THE ORDER AND THE LABELS COME FROM `DIGITAL_THREAD_ENTITY_TYPES`, and only the icons live here.
+ *
+ * Extending this list was the first fix and it was not enough: the FILTER was a fourth list of the
+ * same kinds, four entries long, so the security lane became drawable and stayed unreachable. A
+ * reader could see role assignments only by clearing the filter entirely, and asking for one
+ * directly was not offered. Icons are the one part of a section that is genuinely presentational,
+ * so they are the one part still written here; everything else is read from the shared table, and
+ * a kind added there arrives in the timeline and in the dropdown together.
  */
-const SECTIONS = [
-  { kind: 'CELL',             label: 'Cells',              Icon: IconBuilding2 },
-  { kind: 'GATEWAY',          label: 'Gateways',           Icon: IconRadio },
-  { kind: 'DEVICE',           label: 'Devices',            Icon: IconCpu },
+/** The icon for a kind with no section of its own — the raw kind, which `ENTITY_KIND` made legible. */
+const FALLBACK_SECTION_ICON = IconHistory
+
+const SECTION_ICONS = {
+  CELL:               IconBuilding2,
+  GATEWAY:            IconRadio,
+  DEVICE:             IconCpu,
   // THE SECURITY LANE (0070), in the order a reader meets it: who holds what, what the machines
   // are, then the contracts and settings that shape both.
-  { kind: 'ACCESS',           label: 'Role assignments',   Icon: IconShieldCheck },
-  { kind: 'SERVICE IDENTITY', label: 'Service identities', Icon: IconLock },
-  { kind: 'SCHEMA',           label: 'Schemas',            Icon: IconFileCode },
-  { kind: 'SETTING',          label: 'Settings',           Icon: IconSettings }
-]
+  ACCESS:             IconShieldCheck,
+  'SERVICE IDENTITY': IconLock,
+  SCHEMA:             IconFileCode,
+  SETTING:            IconSettings
+}
 
-/** The label for a kind with no section of its own — the raw kind, which `ENTITY_KIND` made legible. */
-const FALLBACK_SECTION_ICON = IconHistory
+/**
+ * A kind with a place in the shared table but no icon here still gets a section -- it takes the
+ * fallback, exactly as an unrecognised kind does. An icon is not permission to be drawn.
+ */
+const SECTIONS = DIGITAL_THREAD_ENTITY_TYPES.map(({ kind, label }) => ({
+  kind,
+  label,
+  Icon: SECTION_ICONS[kind] || FALLBACK_SECTION_ICON
+}))
+
 const SECTION_ICON = Object.fromEntries(SECTIONS.map(s => [s.kind, s.Icon]))
 
 /** A UUID shortened to something a person can compare at a glance, when there is no name. */
@@ -1482,13 +1485,14 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
             title="Show only events against one kind of asset"
           >
             <option value="">All entities</option>
-            <option value="CELL">Cells</option>
-            <option value="GATEWAY">Gateways</option>
-            <option value="DEVICE">Devices</option>
-            {/* A FOURTH LANE, not an action on one of the three. 0043 and 0044 write rows about
-                machine identities -- who may reach this stack -- and without an option here they
-                were reachable only by clearing the filter entirely. */}
-            <option value="SERVICE IDENTITY">Service identities</option>
+            {/* EVERY KIND THE TIMELINE CAN DRAW, from the same table the sections are built from.
+                This was four hardcoded options against seven kinds, which is the same defect as
+                the section list one screen up and outlived the fix to it: the security lane became
+                drawable and stayed unaskable, reachable only by clearing the filter entirely.
+                Deriving it means a kind cannot be drawable and unfilterable again. */}
+            {DIGITAL_THREAD_ENTITY_TYPES.map(({ kind, label }) => (
+              <option key={kind} value={kind}>{label}</option>
+            ))}
           </select>
 
           <input
