@@ -81,6 +81,13 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
             - name: PGRST_DB_USE_LEGACY_GUCS
               value: "false"
+            # The revocation choke point (0074), identical to Compose. Run in the caller's role
+            # before every request; it RAISEs on a revoked `jti` and returns quietly otherwise.
+            # A single point of failure by construction -- its fail-open paths are asserted in
+            # supabase/migrations/test_service_token_revocation.py, and a misspelling here is a
+            # total outage rather than a skipped hook.
+            - name: PGRST_DB_PRE_REQUEST
+              value: public.auth_pre_request
             # PostgREST caches the schema on connect and reloads on a NOTIFY. The migrations end
             # with `NOTIFY pgrst, 'reload schema'`, which is what makes a `helm upgrade` that adds
             # a table visible without a restart -- but only if PostgREST is listening on the right

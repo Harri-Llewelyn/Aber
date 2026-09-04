@@ -47,8 +47,9 @@ import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { timingSafeEqual } from 'node:crypto';
 import {
-  chmodSync, chownSync, existsSync, readFileSync, readdirSync, renameSync, writeFileSync,
+  chmodSync, chownSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync,
 } from 'node:fs';
+import { dirname } from 'node:path';
 
 import {
   CredentialError,
@@ -59,6 +60,9 @@ import {
   generatePassword,
   hashArgv,
   mergeCredential,
+  mergeDelivery,
+  serialiseDelivery,
+  PLAYBACK_CREDENTIAL_FILE,
 } from './lib/mosquitto-credentials.mjs';
 
 // -------------------------------------------------------------------------------------------------
@@ -68,6 +72,12 @@ const TARGET = process.env.CREDENTIAL_TARGET || 'compose';
 const PORT = Number.parseInt(process.env.MQTT_CREDENTIAL_SERVICE_PORT || '9010', 10);
 const TOKEN = process.env.MQTT_CREDENTIAL_SERVICE_TOKEN || '';
 const PASSWD_PATH = process.env.MOSQUITTO_PASSWORD_FILE || PASSWORD_FILE;
+
+// Where a playback target's password is dropped for the worker to read. The default MUST match
+// playback_worker.py's PLAYBACK_CREDENTIAL_FILE -- the two ends of one volume, and a mismatch is
+// silent at both: this side writes successfully and that side finds no file.
+const PLAYBACK_DELIVERY_PATH =
+  process.env.PLAYBACK_CREDENTIAL_FILE || PLAYBACK_CREDENTIAL_FILE;
 
 /**
  * The broker's CA, returned alongside the credential.
@@ -89,6 +99,9 @@ const BROKER_UID = Number.parseInt(process.env.MQTT_BROKER_UID || '1883', 10);
 // Kubernetes only.
 const SECRET_NAME = process.env.MOSQUITTO_SECRET || 'mosquitto-passwords';
 const SECRET_KEY = 'password_file';
+// The playback delivery, carried as a SECOND KEY in the same Secret so this pod's Role still needs
+// `patch` on exactly one Secret by name. The playback Deployment mounts this key alone.
+const PLAYBACK_SECRET_KEY = 'playback_credentials.json';
 const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
 
 const log = (...args) => console.log('[gateway-credential]', ...args);
@@ -320,7 +333,88 @@ async function patchSecret(entry) {
 // -------------------------------------------------------------------------------------------------
 // Issuing
 // -------------------------------------------------------------------------------------------------
-async function issue(sparkplugId, password) {
+/**
+ * Hand a freshly-issued password to the playback worker, by writing it where the worker reads.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * THE ONLY COMPONENT THAT CAN DO THIS, WHICH IS WHY IT IS HERE AND NOT SOMEWHERE TIDIER.
+ *
+ * The plaintext exists in exactly two places for exactly as long as this request: here, where it was
+ * generated, and in the browser that will show it once. The broker keeps a hash and the database
+ * keeps an audit row naming neither. So a delivery that does not happen now cannot happen later --
+ * there is nothing left to deliver.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * THIS FUNCTION MAKES NO DECISION ABOUT WHO IS ELIGIBLE, and must not start.
+ *
+ * `deliver` is decided by `authorize_virtual_gateway_credential()` (0078) from `is_simulated` -- the
+ * same predicate `start_playback_job()` gates on -- and arrives already answered. This service
+ * cannot check it: it holds a `sparkplug_id` and no database connection, by design. Re-deciding it
+ * here from anything locally available would mean guessing, and the failure of a wrong guess is a
+ * real gateway's password in a file the replay worker reads.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * MERGED, NOT OVERWRITTEN. A stack can have several playback targets and they are issued one at a
+ * time; writing a single-entry file would silently revoke delivery for every other target on each
+ * issue. A malformed existing file is REPLACED rather than aborting the issue -- the account already
+ * exists at the broker by the time this runs, so refusing here would strand a credential nobody can
+ * use in order to preserve a file nobody can parse.
+ */
+async function deliverToPlayback(sparkplugId, password) {
+  // ON KUBERNETES IT IS A SECOND KEY IN THE SAME SECRET, not a second Secret, and that is an RBAC
+  // decision rather than a tidiness one. This pod's Role grants `get` and `patch` on ONE Secret by
+  // name -- see the chart's own note about why that is not `secrets: ["*"]` -- so a separate Secret
+  // would mean widening the authority of the component that mints broker credentials. A PATCH
+  // merges `data` keys, so the password file beside it is untouched.
+  //
+  // The playback Deployment mounts THIS KEY ALONE via `items:`, so it never receives the broker's
+  // password file even though the two share a Secret.
+  if (TARGET === 'k8s') {
+    const ns = namespace();
+    const path = `/api/v1/namespaces/${ns}/secrets/${SECRET_NAME}`;
+
+    let existing = '';
+    try {
+      const secret = await k8sRequest('GET', path);
+      const encoded = secret?.data?.[PLAYBACK_SECRET_KEY];
+      if (encoded) existing = Buffer.from(encoded, 'base64').toString('utf8');
+    } catch (err) {
+      if (!/-> 404:/.test(err.message)) throw err;
+      log(`Secret ${ns}/${SECRET_NAME} not found; creating its first playback delivery.`);
+    }
+
+    const held = mergeDelivery(existing, sparkplugId, password, log);
+    await k8sRequest('PATCH', path, {
+      data: {
+        [PLAYBACK_SECRET_KEY]:
+          Buffer.from(serialiseDelivery(held), 'utf8').toString('base64'),
+      },
+    });
+    log(`delivered a playback credential for ${sparkplugId} (${Object.keys(held).length} held)`);
+    return { delivered: true, held: Object.keys(held).length, via: 'secret' };
+  }
+
+  const existing = existsSync(PLAYBACK_DELIVERY_PATH)
+    ? readFileSync(PLAYBACK_DELIVERY_PATH, 'utf8')
+    : '';
+  const held = mergeDelivery(existing, sparkplugId, password, log);
+
+  // ATOMIC, and 0600 like the password file beside it. The worker re-reads this every three seconds,
+  // so a plain write would eventually be read half-finished -- and the failure of that is a parse
+  // error logged once and a credential that appears never to have arrived.
+  const tmp = `${PLAYBACK_DELIVERY_PATH}.tmp`;
+  mkdirSync(dirname(PLAYBACK_DELIVERY_PATH), { recursive: true });
+  writeFileSync(tmp, serialiseDelivery(held), { mode: 0o600 });
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, PLAYBACK_DELIVERY_PATH);
+
+  // THE COUNT AND THE IDS, NEVER THE VALUES. Gateway ids are safe to log and are what an operator
+  // needs to confirm a delivery; the passwords are the thing this file exists to contain.
+  log(`delivered a playback credential for ${sparkplugId} (${Object.keys(held).length} held)`);
+  return { delivered: true, held: Object.keys(held).length, via: 'file' };
+}
+
+async function issue(sparkplugId, password, { deliver = false } = {}) {
   assertGatewayId(sparkplugId);
   assertSafePassword(password);
 
@@ -346,9 +440,28 @@ async function issue(sparkplugId, password) {
     log(`no CA at ${CA_FILE}; returning ca_cert: null (MQTTS callers will refuse this)`);
   }
 
+  // AFTER THE BROKER, NOT BEFORE. Delivering a password the broker has not accepted would give the
+  // worker a credential that fails at CONNECT -- which is the exact state this change was written to
+  // end. A delivery failure is logged and does NOT fail the issue: the account exists, the browser
+  // is about to show the password, and refusing here would strand it for the sake of a file the
+  // operator can still fill in by hand.
+  let delivery = null;
+  if (deliver) {
+    try {
+      delivery = await deliverToPlayback(sparkplugId, password);
+    } catch (err) {
+      log(`WARNING: could not deliver the playback credential: ${err.message}`);
+      delivery = { delivered: false, error: err.message };
+    }
+  }
+
   return {
     sparkplug_id: sparkplugId,
     ca_cert: caCert,
+    // Reported so the edge function can tell the operator whether the worker will pick this up on
+    // its own or whether they still have to place it -- the difference between "done" and "done,
+    // now do the other half", which is not something to leave them to discover.
+    playback_delivery: delivery,
     replaced: TARGET === 'k8s' ? durable.replaced : local.replaced,
     accounts: TARGET === 'k8s' ? durable.accounts : local.accounts,
     // Reported rather than assumed, so `enroll-gateway` can tell an appliance to retry its first
@@ -424,7 +537,15 @@ const server = createServer(async (req, res) => {
     // point of use is one fewer copy in transit.
     const password = parsed.password || generatePassword();
 
-    const result = await issue(sparkplugId, password);
+    // STRICTLY `=== true`, so an absent key, a null, or a truthy string cannot turn delivery on.
+    // The caller that sets this is `gateway-credential`, which reads it out of
+    // authorize_virtual_gateway_credential() (0078); `enroll-gateway` never sets it and must not,
+    // because a physical appliance's credential travels to the appliance and has no business in a
+    // file the replay worker reads. Defaulting off is what makes "forgot to pass it" a playback
+    // target the operator must place by hand, rather than a real gateway's password delivered.
+    const deliver = parsed.deliver_to_playback === true;
+
+    const result = await issue(sparkplugId, password, { deliver });
     log(
       `issued ${result.replaced ? '(replaced)' : '(new)'} credential for ${sparkplugId}; `
       + `${result.accounts} account(s); applied=${result.applied_to_running_broker}`

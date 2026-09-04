@@ -6,7 +6,16 @@ import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
-  api: { listGatewayCredentials: vi.fn(), listServicePrincipals: vi.fn(), listServiceTokens: vi.fn() }
+  api: {
+    listGatewayCredentials: vi.fn(),
+    listServicePrincipals: vi.fn(),
+    listServiceTokens: vi.fn(),
+    listRevokedServiceTokens: vi.fn(),
+    revokeServiceToken: vi.fn(),
+    listRevokedServicePrincipals: vi.fn(),
+    revokeServicePrincipal: vi.fn(),
+    reinstateServicePrincipal: vi.fn(),
+  }
 }))
 
 // The two modals reach for browser APIs this suite has no need to stub; the tab's job is to decide
@@ -16,6 +25,19 @@ vi.mock('../components/modals/GatewayCredentialModal', () => ({
 }))
 vi.mock('../components/modals/GatewayBundleModal', () => ({
   GatewayBundleModal: () => <div data-testid="bundle-modal" />
+}))
+vi.mock('../components/modals/ServiceTokenModal', () => ({
+  ServiceTokenModal: ({ principalName }) => <div data-testid="token-modal">{principalName}</div>
+}))
+vi.mock('../components/modals/ServicePrincipalRevocationModal', () => ({
+  ServicePrincipalRevocationModal: ({ principalName, revocation }) => (
+    <div data-testid="identity-modal">{revocation ? 'reinstate' : 'withdraw'}:{principalName}</div>
+  )
+}))
+vi.mock('../components/modals/ServiceTokenInventoryModal', () => ({
+  ServiceTokenInventoryModal: ({ principalName, status }) => (
+    <div data-testid="inventory-modal">{principalName}:{status.rows.length}</div>
+  )
 }))
 
 const provisioned = {
@@ -46,6 +68,10 @@ beforeEach(() => {
   // Defaulted so every credential-inventory test renders the whole page. Individual tests override.
   api.listServicePrincipals.mockResolvedValue([MCP_PRINCIPAL])
   api.listServiceTokens.mockResolvedValue(new Map())
+  // Empty by default, which is both the common case and the reading a caller who cannot see the
+  // denylist gets. Tests that care about a withdrawal override it.
+  api.listRevokedServiceTokens.mockResolvedValue(new Set())
+  api.listRevokedServicePrincipals.mockResolvedValue(new Map())
 })
 
 describe('AccessControlTab', () => {
@@ -146,7 +172,13 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
-    expect(screen.getByTitle(/check which one seeded this id/i)).toBeTruthy()
+    // BOTH ORIGINS, which is the assertion rather than the exact sentence. The tooltip used to say
+    // the identity "was created by a migration" and send the reader to grep for it -- confident,
+    // and wrong for the case that actually turns up on a long-lived stack, where the answer is an
+    // RLS suite that seeded a fixture and did not clean up. A reader who greps the migrations and
+    // finds nothing is left with less than they started with, so the wording has to admit the
+    // second origin and this test is what holds it to that.
+    expect(screen.getByTitle(/by a migration, or by a test suite/i)).toBeTruthy()
     // No role means every RLS policy refuses it -- said in a COLUMN, not a tooltip, because it is
     // the answer to "what can this reach" rather than background on what it is.
     expect(screen.getByText(/every RLS policy refuses it/i)).toBeTruthy()
@@ -175,6 +207,160 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     expect(screen.getByText('Service_Playback')).toBeTruthy()
     expect(screen.queryByText(/Undocumented principal/i)).toBeNull()
+  })
+
+  /**
+   * THE MINT BUTTON IS OFFERED WHERE A TOKEN IS ACTUALLY READ, AND NOWHERE ELSE.
+   *
+   * This is the same distinction the per-principal mintCommand column was built for, arriving
+   * through a control instead of a copied line. `mint-mcp-token.mjs` would happily sign a token for
+   * Service_Ingestor -- same subject, same secret, entirely valid -- and no worker would ever read
+   * it, because the daemon takes its key from the environment. A button on that row means an
+   * operator following the page issues a privileged credential that fixes nothing.
+   *
+   * Asserted per row rather than by counting buttons: a global count would pass if the button
+   * appeared on the WRONG row and vanished from the right one.
+   */
+  it('offers Issue Token for an MCP-style principal and not for the two environment keys', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([
+      MCP_PRINCIPAL,
+      { principal_id: 'b0000000-0000-4000-8000-000000000002', roles: ['Operator'], created_at: null, can_sign_in: false },
+      { principal_id: 'b0000000-0000-4000-8000-000000000003', roles: ['Operator'], created_at: null, can_sign_in: false }
+    ])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+
+    const rowFor = (name) => screen.getByText(name).closest('tr')
+    expect(within(rowFor('MCP read-only client')).queryByRole('button', { name: /Issue Token/i })).toBeTruthy()
+    expect(within(rowFor('Service_Ingestor')).queryByRole('button', { name: /Issue Token/i })).toBeNull()
+    expect(within(rowFor('Service_Playback')).queryByRole('button', { name: /Issue Token/i })).toBeNull()
+  })
+
+  /**
+   * A principal `create_service_principal()` made at runtime HAS no entry in KNOWN_PRINCIPALS and
+   * must still be mintable -- describePrincipal()'s fallback names the MCP command for it, and the
+   * button follows that rather than a hardcoded list of ids. Keyed the other way round, adding a
+   * runtime principal would mean editing the frontend before anybody could issue it a token.
+   */
+  it('offers Issue Token for an undocumented principal, because the fallback mint command is the MCP one', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([
+      { principal_id: 'c0000000-0000-4000-8000-000000000009', roles: [], created_at: null, can_sign_in: false }
+    ])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
+    expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy()
+  })
+
+  it('opens the token dialog for the principal whose button was pressed', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    screen.getByRole('button', { name: /Issue Token/i }).click()
+
+    // The NAME is carried into the modal rather than looked up again there, so asserting it here
+    // is asserting that the right row opened the dialog.
+    await waitFor(() => expect(screen.getByTestId('token-modal').textContent).toBe('MCP read-only client'))
+  })
+
+  /**
+   * THE BADGE IS THE WAY IN, because it already carries the count and a revocation follows from it.
+   * A row-level Revoke button could not work: a principal has N tokens, `revoke_service_token()`
+   * takes one jti, so the row would have to PICK -- a guess the operator cannot see being made.
+   */
+  it('opens the token inventory from the count badge, carrying the rows it counted', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServiceTokens.mockResolvedValue(new Map([[
+      MCP_PRINCIPAL.principal_id,
+      [
+        { jti: 'a', issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' },
+        { jti: 'b', issued_at: '2026-09-02T00:00:00Z', expires_at: '2099-02-01T00:00:00Z' }
+      ]
+    ]]))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
+    screen.getByRole('button', { name: /2 active tokens/i }).click()
+
+    // The STATUS is passed rather than recomputed in the dialog, so asserting the row count here
+    // asserts that the list and the badge cannot disagree.
+    await waitFor(() => expect(screen.getByTestId('inventory-modal').textContent)
+      .toBe('MCP read-only client:2'))
+  })
+
+  /**
+   * The count must not include what has been withdrawn. Overstating exposure is the same class of
+   * error as understating it, and this page is the one that must do neither.
+   */
+  it('excludes a withdrawn token from the active count', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServiceTokens.mockResolvedValue(new Map([[
+      MCP_PRINCIPAL.principal_id,
+      [
+        { jti: 'a', issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' },
+        { jti: 'b', issued_at: '2026-09-02T00:00:00Z', expires_at: '2099-02-01T00:00:00Z' }
+      ]
+    ]]))
+    api.listRevokedServiceTokens.mockResolvedValue(new Set(['a']))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('1 active token')).toBeTruthy())
+    expect(screen.queryByText('2 active tokens')).toBeNull()
+  })
+
+  /** Nothing to list means nothing to open -- a button onto an empty dialog is worse than a badge. */
+  it('leaves the badge inert when no mint is recorded', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /No token on record/i })).toBeNull()
+  })
+
+  /**
+   * WITHDRAW SITS BESIDE ISSUE, because a page that hands out credentials with no control that
+   * takes the identity back is the asymmetry the retired revocable-tokens roadmap item refused to ship in the first place.
+   */
+  it('offers Withdraw beside Issue Token for a live identity', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy())
+    expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Reinstate/i })).toBeNull()
+  })
+
+  /**
+   * MINTING IS NOT OFFERED FOR A WITHDRAWN IDENTITY, and the swap is not cosmetic:
+   * record_service_token_issued() refuses one outright (0076), so the button would sign nothing
+   * and return an error. Reinstating is the action actually available.
+   */
+  it('replaces Issue Token with Reinstate once the identity is withdrawn', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listRevokedServicePrincipals.mockResolvedValue(new Map([[
+      MCP_PRINCIPAL.principal_id,
+      { principal_id: MCP_PRINCIPAL.principal_id, revoked_at: '2026-09-03T12:00:00Z', reason: 'leaked' }
+    ]]))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('REVOKED')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /Issue Token/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Withdraw$/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /Reinstate/i })).toBeTruthy()
+  })
+
+  it('opens the dialog in the direction the identity needs', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy())
+    screen.getByRole('button', { name: /^Withdraw$/i }).click()
+    await waitFor(() => expect(screen.getByTestId('identity-modal').textContent)
+      .toBe('withdraw:MCP read-only client'))
   })
 
   it('shows the broker principals and marks which one can publish', async () => {
@@ -352,10 +538,39 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     const rowOf = (name) => screen.getByText(name).closest('tr')
 
-    expect(within(rowOf('Service_Ingestor')).getByText('npm run keys:rotate')).toBeTruthy()
-    expect(within(rowOf('Service_Ingestor')).queryByText(/mint-mcp-token/)).toBeNull()
-    // The MCP client is the one this command IS right for, so it keeps it.
-    expect(within(rowOf('MCP read-only client')).getByText(/mint-mcp-token\.mjs --principal/)).toBeTruthy()
+    // ASSERTED ON WHAT WOULD BE COPIED, NOT ON WHAT IS DRAWN. Both rows now render the same
+    // "Copy Command" label -- the full command was ~70 characters and was taking more width than
+    // the four columns carrying the actual answer -- so the command survives in the accessible
+    // name, which is also the thing an operator ends up with on their clipboard. Asserting the
+    // visible text here would only re-assert the label.
+    expect(within(rowOf('Service_Ingestor')).getByLabelText(/npm run keys:rotate/)).toBeTruthy()
+    expect(within(rowOf('Service_Ingestor')).queryByLabelText(/mint-mcp-token/)).toBeNull()
+    // The MCP client is the one that command IS right for, so it keeps it.
+    expect(within(rowOf('MCP read-only client')).getByLabelText(/mint-mcp-token\.mjs --principal/)).toBeTruthy()
+  })
+
+  /**
+   * THE COPY CONTROL IS STYLED AS A BUTTON, WHICH IS A LEGIBILITY REQUIREMENT RATHER THAN A TASTE.
+   *
+   * `.copyable-id` is deliberately understated -- no background, transparent border, icon hidden
+   * until hover -- because that is right for an identifier inside a dense cell, where the VALUE is
+   * what is being read. With a fixed "Copy Command" label there is no value to read and the element
+   * IS the affordance, and the understated treatment was reported as hard to read in dark mode.
+   *
+   * `.btn-ghost` paints --text-primary on --bg-glass with a real border, and that is the pairing
+   * themeContrast.test.js already measures against AA and APCA in BOTH themes -- so asserting the
+   * class here is what ties this control to that guarantee. Reverting it to the understated form
+   * would take the contrast cover away silently, which is how the first version got through.
+   */
+  it('renders the copy control as a ghost button, not as an understated identifier', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+
+    const copy = screen.getByLabelText(/mint-mcp-token\.mjs --principal/)
+    expect(copy.className).toMatch(/btn-ghost/)
+    expect(copy.className).not.toMatch(/copyable-id/)
   })
 
   /**

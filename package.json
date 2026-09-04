@@ -9,6 +9,8 @@
     "proto": "node scripts/generate-proto.mjs",
     "//test:lib": "Explicit file paths, NOT `node --test scripts/lib/`: the directory form's discovery behaves differently on Windows and reports the directory itself as one failing test.",
     "test:lib": "node --test scripts/lib/mosquitto-credentials.test.mjs scripts/lib/orphaned-accounts.test.mjs scripts/lib/service-jwt.test.mjs",
+    "//test:db": "The database suites against a THROWAWAY Postgres, not the live stack. They default to port 54322, which is where docker-compose publishes production -- and their committed fixtures leave permanent rows in the append-only digital_thread. Needs Docker and nothing else; --keep leaves the container up.",
+    "test:db": "node scripts/test-db.mjs",
     "//keys": "The two principal-bearing service keys (issue #101). check is safe to run anywhere and exits non-zero when one is near expiry; rotate re-signs both in place and names the containers to restart.",
     "keys:check": "node scripts/rotate-service-keys.mjs --check",
     "keys:rotate": "node scripts/rotate-service-keys.mjs",

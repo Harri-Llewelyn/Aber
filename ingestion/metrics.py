@@ -82,6 +82,8 @@ COUNTER_MAP = {
     "write_failures": ("acs_ingestion_write_failures_total", {}),
     "db_reconnects": ("acs_ingestion_db_reconnects_total", {}),
     "db_connect_failures": ("acs_ingestion_db_connect_failures_total", {}),
+    "db_heals": ("acs_ingestion_db_heals_total", {}),
+    "db_heal_failures": ("acs_ingestion_db_heal_failures_total", {}),
     # Gateway lifecycle.
     "gateway_heartbeats": ("acs_ingestion_gateway_heartbeats_total", {}),
     "gateway_status_transitions": ("acs_ingestion_gateway_status_transitions_total", {}),
@@ -116,6 +118,16 @@ HELP = {
         "Historian writes that raised. Telemetry from these is lost.",
     "acs_ingestion_db_reconnects_total": "Times the historian connection was re-opened.",
     "acs_ingestion_db_connect_failures_total": "Failed attempts to open the historian connection.",
+    "acs_ingestion_db_heals_total":
+        "Times the background recovery loop opened the historian connection the daemon should "
+        "already have been holding. NON-ZERO MEANS A STARTUP ORDERING RACE WAS LOST: the daemon "
+        "reached its MQTT loop with no database, which `depends_on` cannot prevent on a Docker "
+        "daemon restart. Nothing was dropped -- this counts a repair, not a loss.",
+    "acs_ingestion_db_heal_failures_total":
+        "Failed attempts by the background recovery loop. DISTINCT FROM "
+        "acs_ingestion_db_connect_failures_total, which counts a connection a MESSAGE needed and "
+        "therefore telemetry dropped. This one drops nothing: it is a daemon with no traffic "
+        "waiting for a historian, and only says how long it has been waiting.",
     "acs_ingestion_gateway_heartbeats_total": "Gateway heartbeat stamps written.",
     "acs_ingestion_gateway_status_transitions_total": "Gateway status changes recorded.",
     "acs_ingestion_gateway_status_reserved_rejected_total":

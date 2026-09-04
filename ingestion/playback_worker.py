@@ -88,6 +88,64 @@ CREDENTIAL_REPORT_INTERVAL_SECONDS = float(
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 
+# Where the credential service drops passwords for simulated gateways (0078).
+#
+# THE FILE EXISTS BECAUSE THE ENVIRONMENT CANNOT BE RE-READ. A container's environment is fixed at
+# creation, so before this the only way to hand this worker a newly-issued password was
+# `docker compose up -d --force-recreate playback` -- and an operator who had just clicked "Generate
+# broker credential" had no reason to think a container recreate was the next step. The credential
+# was correct, the worker held the previous one, and the failure arrived as a broker refusal.
+#
+# WRITTEN ONLY FOR GATEWAYS THE DATABASE CALLS PLAYBACK TARGETS. The filter is applied at issue time
+# by authorize_virtual_gateway_credential() (0078), not here, because `is_simulated` is the
+# database's fact and a worker deciding which passwords it is allowed to have would be deciding its
+# own blast radius. This end only reads what it was given.
+#
+# THE STRING IS DUPLICATED IN scripts/lib/mosquitto-credentials.mjs, which is the writer, and in the
+# mount both deployment targets provide. Python and JavaScript cannot share a constant, and a
+# mismatch is silent at BOTH ends -- the write succeeds and the read finds nothing -- so
+# scripts/check-docs-drift.mjs asserts all four agree.
+PLAYBACK_CREDENTIAL_FILE = os.getenv(
+    "PLAYBACK_CREDENTIAL_FILE", "/var/lib/acs-cymru/playback/credentials.json"
+)
+
+
+def _file_credentials(path=None):
+    """
+    The delivered credentials, or an empty map if none have been.
+
+    ABSENT IS NORMAL AND IS NOT AN ERROR. A stack that has never issued a playback credential has no
+    file, and a worker logging an error every three seconds about a file it does not need would
+    train an operator to ignore the log that also carries the real refusals. Unreadable or malformed
+    IS an error, because that is a delivery that happened and did not arrive.
+    """
+    path = path or PLAYBACK_CREDENTIAL_FILE
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            parsed = json.load(handle)
+    except FileNotFoundError:
+        return {}
+    except OSError as err:
+        logger.error(
+            "Could not read the playback credential file at %s (%s). Credentials issued from the "
+            "Gateways page will not reach this worker until it is readable.", path, err,
+        )
+        return {}
+    except ValueError as err:
+        logger.error(
+            "The playback credential file at %s is not valid JSON (%s), so no delivered credential "
+            "can be used. Expected {\"gwy...\": \"password\"}.", path, err,
+        )
+        return {}
+
+    if not isinstance(parsed, dict):
+        logger.error(
+            "The playback credential file at %s is not a JSON object, so no delivered credential "
+            "can be used. Expected {\"gwy...\": \"password\"}.", path,
+        )
+        return {}
+    return {str(k): str(v) for k, v in parsed.items()}
+
 
 def _credentials():
     """
@@ -127,6 +185,14 @@ def _credentials():
     password = os.getenv("MQTT_PLAYBACK_PASSWORD", "")
     if user and password and user not in credentials:
         credentials[user] = password
+
+    # THE DELIVERED FILE WINS, and the reason is the broker rather than a preference about
+    # configuration. Mosquitto holds ONE password per username, so issuing a credential REPLACES the
+    # one before it -- which means a value in `.env` is not an alternative to the delivered one, it
+    # is an OLDER one, and after any re-issue it is simply wrong. Letting the environment override
+    # would make the documented repair for a refused playback ("issue a new credential") the one
+    # thing that could not fix it.
+    credentials.update(_file_credentials())
     return credentials
 
 
@@ -411,6 +477,56 @@ def main():
     last_report = 0.0
 
     while True:
+        # ------------------------------------------------------------------------------------
+        # Re-resolve what this worker holds, every pass.
+        # ------------------------------------------------------------------------------------
+        # ONCE AT STARTUP WAS THE BUG. A credential issued from the Gateways page lands in the
+        # delivery file seconds later, and a worker holding a snapshot from boot would go on
+        # refusing every job with "this worker holds no broker credential for ..." until somebody
+        # recreated the container -- while the platform's own `gateway_has_broker_credential()`
+        # said the credential existed. Both statements were true, which is what made it hard to see.
+        #
+        # A SMALL FILE READ EVERY THREE SECONDS, deliberately not cached on mtime. The file is a few
+        # hundred bytes and this loop already makes a network round trip; a cache would add a
+        # staleness window to the one thing whose entire purpose is not having one.
+        previous = credentials
+        credentials = _credentials()
+        if credentials != previous:
+            gained = sorted(set(credentials) - set(previous))
+            lost = sorted(set(previous) - set(credentials))
+            # ROTATION IS A CHANGE, AND COMPARING KEY SETS MISSED IT. This was written as
+            # `set(credentials) != set(previous)` and was silent on the case it exists for: the
+            # FIRST delivery on this stack replaced a stale `.env` password for a gateway already
+            # in the map, so the ids were identical before and after and nothing was logged. The
+            # worker had picked the new credential up and was working; the operator had no way to
+            # know. Comparing the maps catches a re-issue, which is the ordinary case from here on
+            # -- every mint after the first one rotates a gateway already held.
+            rotated = sorted(
+                k for k in set(credentials) & set(previous) if credentials[k] != previous[k]
+            )
+            # IDS ONLY, NEVER VALUES, which is why `rotated` names gateways rather than saying what
+            # changed. A log line is the one place a delivered password could leak into somewhere
+            # persistent and world-readable.
+            parts = []
+            if gained:
+                parts.append(f"gained {', '.join(gained)}")
+            if rotated:
+                parts.append(f"rotated {', '.join(rotated)}")
+            if lost:
+                parts.append(f"lost {', '.join(lost)}")
+            logger.info(
+                "Playback credentials changed: now holding %d gateway(s) -- %s.",
+                len(credentials), "; ".join(parts) or "no change to which gateways are held",
+            )
+            # ONLY WHEN THE REPORTED SET MOVED. `playback_report_credentials` carries edge-node ids
+            # and nothing else, so a rotation does not change what the row says and re-sending it
+            # early would be a write that tells the page nothing it does not already have.
+            if gained or lost:
+                # The playback dialog reads that row to decide whether a target is offerable, so
+                # waiting up to thirty seconds after an issue is thirty seconds of a page saying
+                # the opposite of what is true.
+                last_report = 0.0
+
         # ------------------------------------------------------------------------------------
         # Say what this worker can publish as.
         # ------------------------------------------------------------------------------------

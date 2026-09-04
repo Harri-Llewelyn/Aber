@@ -3716,6 +3716,33 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .dt-lane-toggle { margin-top: 10px; }
 
+/* ===== Digital Thread: the foot of the timeline =====
+   Where the reader finds out whether they are looking at everything. Separated by a rule rather
+   than by space alone, because it makes a claim about the data above it and has to read as a
+   statement about the timeline rather than as one more control beside the lane toggles. */
+.dt-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.dt-pagination-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Muted and italic: it is a statement of completeness, not a warning. The truncated case gets the
+   button instead, and a button is louder than any colour would be here. */
+.dt-pagination-end {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
 /* The classification badge in the drawer's subtitle. Same tinted-fill convention as `.badge-*`
    above, and the same reason for the `-text` tokens: the bare signal colours are tuned for
    borders and fills, not for text. */

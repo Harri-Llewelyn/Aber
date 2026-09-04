@@ -611,7 +611,26 @@ function edgeFunctionNames() {
    * when that day comes -- and an empty map means the check now fails on the FIRST redeclaration
    * rather than on the twelfth.
    */
-  const INTENDED_REDECLARATIONS = {};
+  const INTENDED_REDECLARATIONS = {
+    // 0075 gives it a fifth argument, `p_actor_id`, so a token minted from the Access Control page
+    // records the Administrator who asked rather than the 'service' attribution 0043 pinned when
+    // every caller was a host script. It DROPs the four-argument form first -- a defaulted fifth
+    // argument alongside it would make a four-argument call ambiguous -- so the last declaration
+    // winning is exactly what is wanted here, and the baseline's copy is the one being replaced.
+    'public.record_service_token_issued': '0075 adds p_actor_id; the baseline holds the pre-0075 form',
+    // 0074 creates it with one arm -- the token denylist -- and 0076 rewrites it to add a second,
+    // the principal denylist keyed on the `sub` claim. Rewritten rather than extended because the
+    // arm ORDER is load-bearing: the subject check runs first so its message wins once a principal
+    // revocation has cascaded to its tokens and both arms match. The last declaration winning is
+    // exactly what is wanted, and 0074 is left intact as the record of what shipped first.
+    'public.auth_pre_request': '0076 adds the principal arm; 0074 holds the token-only form',
+    // 0077 gives it a keyset cursor -- two more defaulted arguments, p_before_recorded_at and
+    // p_before_id -- so the Digital Thread can be walked past its first page. It DROPs the
+    // seven-argument form first, because CREATE OR REPLACE cannot change an argument list and
+    // leaving both declared would make a seven-argument call ambiguous at the call site. The
+    // baseline's copy is the one being replaced.
+    'public.digital_thread_page': '0077 adds the keyset cursor; the baseline holds the unpaged form',
+  };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
     .filter((e) => e.isFile() && /^\d+_.*\.sql$/.test(e.name))
@@ -639,6 +658,58 @@ function edgeFunctionNames() {
     if (where.length < 2) {
       stale.push(`${fn}() is listed as an intended redeclaration but is declared ${where.length} time(s) -- remove it from the list`);
     }
+  }
+
+  // -----------------------------------------------------------------------------------------
+  // A REDECLARATION MAY NOT CHANGE THE RETURN TYPE, which is a different rule from the one above
+  // and was learned the hard way.
+  //
+  // 0078 first shipped by adding a third column to authorize_virtual_gateway_credential(). It was
+  // recorded as an intended redeclaration, it DROPped the old form the way 0075 does, and it worked
+  // -- on the boot that applied it. THE NEXT BOOT DIED AT FILE ONE:
+  //
+  //     0001_baseline_schema.sql:611: ERROR: cannot change return type of existing function
+  //     HINT: Use DROP FUNCTION authorize_virtual_gateway_credential(uuid) first.
+  //
+  // Because the chain replays in filename order, 0001 re-declares its own version FIRST, with
+  // CREATE OR REPLACE, which cannot change a return type -- and the later file's DROP never runs.
+  // 0001 aborts having already dropped the FDW server with CASCADE, so the stack is left serving a
+  // database with no telemetry read surface at all.
+  //
+  // 0075 is fine because a new ARGUMENT is a new signature. 0076 is fine because the body changed
+  // and the return type did not. Same signature, different return type is the one combination that
+  // cannot survive a replay -- and it is invisible until the second boot, which on a developer's
+  // stack can be days later and on a fresh CI run never happens at all.
+  const returnTypes = new Map();
+  for (const name of files) {
+    const body = read(`${dir}/${name}`);
+    for (const m of body.matchAll(
+      /CREATE OR REPLACE FUNCTION\s+([a-z_]+\.[a-z_]+)\s*\(([\s\S]*?)\)\s*RETURNS\s+([^\n]+?)(?:\s+LANGUAGE|\s*$)/gim
+    )) {
+      const fn = m[1].toLowerCase();
+      const ret = m[3].trim().replace(/\s+/g, ' ').replace(/;$/, '');
+      if (!returnTypes.has(fn)) returnTypes.set(fn, []);
+      returnTypes.get(fn).push({ file: name, ret });
+    }
+  }
+
+  const returnDrift = [];
+  for (const [fn, decls] of returnTypes) {
+    if (decls.length < 2) continue;
+    const distinct = [...new Set(decls.map((d) => d.ret))];
+    if (distinct.length > 1) {
+      returnDrift.push(
+        `${fn}() is declared with ${distinct.length} different return types across ` +
+          `${decls.map((d) => `${d.file} -> ${d.ret}`).join(' | ')}. CREATE OR REPLACE cannot ` +
+          'change a return type, so on the SECOND boot the earlier file aborts the whole chain -- ' +
+          'after 0001 has dropped the FDW server with CASCADE. Give the new shape its own function ' +
+          'name instead, as 0078 does.'
+      );
+    }
+  }
+  for (const p of returnDrift) fail(p);
+  if (!returnDrift.length && returnTypes.size) {
+    pass(`no function changes its return type across the ${returnTypes.size} declared in the chain`);
   }
 
   if (undeclared.length || stale.length) {
@@ -1288,6 +1359,121 @@ function edgeFunctionNames() {
         `the Access Control page lists all ${aclPrincipals.size} broker principals with the rules ` +
           'mosquitto.acl grants them'
       );
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists, on both targets.
+//
+// MEASURED, NOT ASSUMED, AND THE MEASUREMENT IS WHY THIS CHECK EXISTS. A throwaway
+// postgrest/postgrest:v14.12 was started against this database with
+// `PGRST_DB_PRE_REQUEST=public.this_function_does_not_exist`. It did NOT fail to boot: the schema
+// cache loaded, the container reported running, and BOTH admin probes answered 200 --
+// `/live` 200, `/ready` 200 -- while every data request failed:
+//
+//     404  {"code":"42883","message":"function public.this_function_does_not_exist() does not exist"}
+//
+// So a typo here is a TOTAL API OUTAGE THAT EVERY HEALTH CHECK CALLS HEALTHY, and it presents as
+// 404 rather than 5xx -- so a monitor watching for server errors sees nothing, and on Kubernetes
+// the readiness probe keeps the pod in service. The retired revocable-tokens roadmap item asked for "the function missing
+// entirely" to be tested before anything depended on the hook; this is the answer, and it is worse
+// than the item assumed.
+//
+// A RUNTIME PROBE CANNOT BE THE CONTROL, because by the time it could run the outage has already
+// started. The realistic failure is a misspelling in a compose file or a chart, which is a static
+// fact -- so it is caught here, at check time, in the two places the name is written.
+// -------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
+// 11c-ter. The playback credential delivery path is the same string in all four places (0078).
+//
+// A CREDENTIAL IS WRITTEN AT ONE PATH AND READ AT ANOTHER, AND NEITHER END COMPLAINS. That is the
+// whole reason this is checked statically: gateway-credential writes its file and reports success,
+// the playback worker looks for a file that is not there and correctly treats absence as "nothing
+// has been issued yet", and the operator sees a credential issued cleanly beside a worker that
+// never picks it up. There is no error anywhere in that sequence.
+//
+// The two ends cannot import a shared constant from each other -- one is JavaScript beside the
+// broker, one is Python in the ingestion image -- and the two mounts that carry the file between
+// them are written in a third and fourth language again. Four copies, no compiler.
+// -------------------------------------------------------------------------------------------------
+{
+  const lib = read('scripts/lib/mosquitto-credentials.mjs');
+  const worker = read('ingestion/playback_worker.py');
+  const composeSrc = read('docker-compose.yml');
+  const chartSrc = read('deploy/helm/acs-cymru/templates/apps/playback.yaml');
+
+  const libPath = lib.match(/PLAYBACK_CREDENTIAL_FILE\s*=\s*'([^']+)'/)?.[1];
+  const workerPath = worker.match(/"PLAYBACK_CREDENTIAL_FILE",\s*"([^"]+)"/)?.[1];
+
+  if (!libPath || !workerPath) {
+    fail(
+      'the playback delivery path could not be read from both ends ' +
+        `(lib: ${libPath || 'absent'}, worker: ${workerPath || 'absent'}).`
+    );
+  } else if (libPath !== workerPath) {
+    fail(
+      `the playback delivery path differs: gateway-credential writes ${libPath}, playback_worker ` +
+        `reads ${workerPath}. Neither end reports an error when these disagree -- the write ` +
+        'succeeds and the read finds nothing, which the worker reports as "no credentials issued".'
+    );
+  } else {
+    // The DIRECTORY is what the two deployment targets mount; the file is created inside it.
+    const dir = libPath.replace(/\/[^/]+$/, '');
+    const onCompose = composeSrc.includes(`playback_credentials:${dir}`);
+    const onChart = chartSrc.includes(`mountPath: ${dir}`);
+    // The Secret key's `path:` is relative to the mount, so it must be the file's basename or the
+    // worker reads a directory entry that is not there.
+    const basename = libPath.slice(dir.length + 1);
+    const chartItem = chartSrc.includes(`path: ${basename}`);
+
+    if (!onCompose || !onChart || !chartItem) {
+      fail(
+        `the playback delivery path ${libPath} is not carried by both targets (compose mount: ` +
+          `${onCompose ? 'ok' : 'MISSING'}, chart mount: ${onChart ? 'ok' : 'MISSING'}, chart ` +
+          `secret item path: ${chartItem ? 'ok' : 'MISSING'}). An issued playback credential ` +
+          'would be written into a container layer and lost, with no error on either side.'
+      );
+    } else {
+      pass(`the playback delivery path ${libPath} agrees across both ends and both targets`);
+    }
+  }
+}
+
+{
+  const compose = read('docker-compose.yml');
+  const chart = read('deploy/helm/acs-cymru/templates/supabase/rest.yaml');
+
+  const composeName = compose.match(/PGRST_DB_PRE_REQUEST:\s*([A-Za-z0-9_.]+)/)?.[1];
+  const chartName = chart.match(/name:\s*PGRST_DB_PRE_REQUEST\s*\n\s*value:\s*([A-Za-z0-9_.]+)/)?.[1];
+
+  if (!composeName || !chartName) {
+    fail(
+      'PGRST_DB_PRE_REQUEST is not set on both targets ' +
+        `(compose: ${composeName || 'absent'}, chart: ${chartName || 'absent'}). It is the choke ` +
+        'point 0074 and 0076 revoke through; unset on one target, that target enforces no revocation ' +
+        'at all and says nothing about it.'
+    );
+  } else if (composeName !== chartName) {
+    fail(`PGRST_DB_PRE_REQUEST differs: compose says ${composeName}, the chart says ${chartName}.`);
+  } else {
+    // Declared anywhere in the applied chain. The bare name is enough: a function that is dropped
+    // and recreated still has to appear in a CREATE, and this is looking for the typo case.
+    const bare = composeName.replace(/^public\./, '');
+    const declared = readdirSync(join(REPO, 'supabase/migrations'), { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.sql'))
+      .some((e) => new RegExp(
+        `CREATE\\s+OR\\s+REPLACE\\s+FUNCTION\\s+(public\\.)?${bare}\\s*\\(`, 'i'
+      ).test(read(`supabase/migrations/${e.name}`)));
+
+    if (!declared) {
+      fail(
+        `PGRST_DB_PRE_REQUEST names ${composeName}, which no migration declares. PostgREST does ` +
+          'NOT fail to boot on this -- it answers 404 (42883) to every request while /live and ' +
+          '/ready both report 200, so the outage is invisible to every health check.'
+      );
+    } else {
+      pass(`PGRST_DB_PRE_REQUEST names ${composeName} on both targets, and a migration declares it`);
     }
   }
 }

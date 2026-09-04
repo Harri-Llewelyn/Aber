@@ -68,6 +68,23 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // discovered.
   "gateway-credential": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
 
+  // Signs a long-lived JWT for a service principal and reveals it once (the retired revocable-tokens roadmap item).
+  //
+  // JWT_SECRET IS THE ENTRY, AND IT IS THE WIDEST SECRET IN THIS MAP. It signs anything -- a
+  // `service_role` token included -- and such a token is accepted by storage, realtime, the edge
+  // runtime and Studio, none of which consult 0074's denylist. So this worker is the only one here
+  // that could, if it stopped checking its caller, produce a credential nobody can withdraw.
+  //
+  // THAT IS WHY IT IS SIGNED HERE RATHER THAN IN THE DATABASE, which is where the retired revocable-tokens roadmap item
+  // proposed putting it. The runtime already holds this key; the database holds nothing that can
+  // sign a Supabase token, and moving the key there would turn every path to SQL execution into a
+  // path to an unrevocable god credential. The key stays put and the mint comes to it.
+  //
+  // NO SERVICE-ROLE KEY, deliberately. It records through record_service_token_issued(), which is
+  // SECURITY DEFINER and re-checks the actor itself (0075) -- so the write needs no identity wider
+  // than the Administrator who asked, and this worker cannot read or write anything else.
+  "mint-service-token": ["JWT_SECRET"],
+
   // Physical gateway enrolment. THE ONLY FUNCTION HERE WITH NO USER, by construction: the caller is
   // an appliance holding a single-use token, and possession of that token is the authorisation. It
   // holds the service-role key because the token table is reachable by nothing else (RLS on, no

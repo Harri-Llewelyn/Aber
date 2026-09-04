@@ -3,6 +3,9 @@ import { api } from '../../api'
 import CopyableId from '../common/CopyableId'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
+import { ServiceTokenModal } from '../modals/ServiceTokenModal'
+import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal'
+import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevocationModal'
 import { IconArchive, IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import {
   CREDENTIAL_STATES,
@@ -16,6 +19,7 @@ import {
   BROKER_PRINCIPALS,
   GATEWAY_ACL_PATTERN,
   describePrincipal,
+  isMintableFromPage,
   roleReach,
   tokenStatus,
   tokenStatusDetail,
@@ -66,6 +70,24 @@ export function AccessControlTab({ showToast }) {
   const [credentialForGw, setCredentialForGw] = useState(null)
   const [principals, setPrincipals] = useState([])
   const [tokens, setTokens] = useState(() => new Map())
+  // { principal, name } while the mint dialog is open. The NAME is carried rather than re-derived
+  // in the modal: describePrincipal() lives here, and a modal that looked it up again would be a
+  // second place for an undocumented principal to be labelled differently.
+  const [mintFor, setMintFor] = useState(null)
+  // { principal, name, status } while the inventory dialog is open. The STATUS is passed rather
+  // than recomputed, so the dialog lists exactly what the badge counted -- two derivations from
+  // the same rows is two places for the count and the list to disagree.
+  const [tokensFor, setTokensFor] = useState(null)
+  // The jtis auth_pre_request() is currently refusing. Its own state because it is its own read
+  // with its own authority: an Auditor can see the denylist, a Shopfloor_Manager cannot, and
+  // tokenStatus() degrades to the pre-0074 reading on an empty set rather than claiming
+  // everything is live.
+  const [revokedJtis, setRevokedJtis] = useState(() => new Set())
+  // Principal id -> its `revoked_service_principals` row (0076). A MAP, not a Set: the row carries
+  // when and why, and both are shown.
+  const [revokedPrincipals, setRevokedPrincipals] = useState(() => new Map())
+  // { principal, name, revocation, activeTokens } while the withdraw/reinstate dialog is open.
+  const [revokeIdentity, setRevokeIdentity] = useState(null)
   // ITS OWN ERROR, not folded into loadError. The two reads have DIFFERENT authority -- gateway
   // credentials accept Shopfloor_Manager, service principals are Administrator-only (0042) -- so a
   // single error state would blame the whole page for a refusal that applies to one section.
@@ -91,6 +113,21 @@ export function AccessControlTab({ showToast }) {
     api.listServiceTokens()
       .then(setTokens)
       .catch(() => setTokens(new Map()))
+
+    // THE THIRD READ, and it is what keeps the count honest rather than what enables the button.
+    // Without it a badge reads "5 active tokens" after four have been withdrawn -- overstating
+    // exposure on the one page whose job is to state it, which is the same error tokenStatus()
+    // exists to avoid in the other direction. api.listRevokedServiceTokens() already resolves to
+    // an empty Set on a refusal, so the .catch here is for a transport failure only.
+    api.listRevokedServiceTokens()
+      .then(setRevokedJtis)
+      .catch(() => setRevokedJtis(new Set()))
+
+    // The fourth read (0076). Its own, for the same reason as the third: different table,
+    // different authority, and an identity list that renders beats one blanked by a refusal.
+    api.listRevokedServicePrincipals()
+      .then(setRevokedPrincipals)
+      .catch(() => setRevokedPrincipals(new Map()))
   }, [])
 
   useEffect(() => { load(true) }, [load])
@@ -445,7 +482,11 @@ export function AccessControlTab({ showToast }) {
                 )}
                 {principals.map(p => {
                   const meta = describePrincipal(p.principal_id)
-                  const status = tokenStatus(tokens.get(p.principal_id))
+                  // THE DENYLIST IS PASSED, so a withdrawn token stops being counted as active.
+                  // `Date.now()` is spelled out because the third argument cannot be reached past
+                  // a defaulted second one.
+                  const status = tokenStatus(tokens.get(p.principal_id), Date.now(), revokedJtis)
+                  const revocation = revokedPrincipals.get(p.principal_id) || null
                   return (
                     <tr key={p.principal_id}>
                       {/* THE PURPOSE IS A TOOLTIP NOW. It is three lines of background on a row whose
@@ -487,6 +528,21 @@ export function AccessControlTab({ showToast }) {
                           {p.can_sign_in === false && (
                             <span className="badge badge-ok" style={{ fontSize: '11px' }}>CANNOT SIGN IN</span>
                           )}
+                          {/* BESIDE THE ROLES, NOT IN THE TOKEN COLUMN, because it is a fact about
+                              the IDENTITY rather than about its credentials -- and it outranks
+                              them: a revoked principal is refused whatever its tokens say, so a
+                              reader scanning the roles needs to see it here. */}
+                          {revocation && (
+                            <span
+                              className="badge badge-danger"
+                              style={{ fontSize: '11px', cursor: 'help' }}
+                              title={`Withdrawn ${new Date(revocation.revoked_at).toLocaleString()}`
+                                + (revocation.reason ? ` — ${revocation.reason}` : '')
+                                + '. Every token naming this identity is refused by the API, including any issued afterwards.'}
+                            >
+                              REVOKED
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '40ch' }}>
@@ -499,43 +555,138 @@ export function AccessControlTab({ showToast }) {
                           The tooltip is the copy that survives, matching the Identity column beside
                           it, and it takes that column's dotted underline with it: a title on a
                           plain element is an affordance nobody can see. */}
-                      <td>
-                        <span
-                          className={`badge badge-${tokenStatusTone(status)}`}
-                          style={{
-                            fontSize: '11px',
-                            textDecoration: 'underline dotted var(--text-muted)',
-                            textUnderlineOffset: '3px',
-                            cursor: 'help',
-                          }}
-                          title={tokenStatusDetail(status)}
-                        >
-                          {tokenStatusLabel(status)}
-                        </span>
-                      </td>
-                      {/* THE COMMAND, NOT A BUTTON. Minting stays on the host deliberately:
-                          these tokens cannot be revoked, so issuing one should cost more than
-                          a click. What the page can do is remove the part that is error-prone --
-                          transcribing a UUID -- so the whole line is copyable.
+                      {/* THE BADGE BECAME THE WAY IN, because it already carries the count and the
+                          count is the question a revocation follows from. A separate Revoke button
+                          in this row could not work: a principal has N tokens and
+                          `revoke_service_token()` takes a jti, so a row-level control would have to
+                          PICK one -- and whichever rule it used would be a guess the operator
+                          cannot see being made. See ServiceTokenInventoryModal's header.
 
-                          IT IS PER-PRINCIPAL, AND IT USED NOT TO BE. Every row rendered
+                          IT STAYS A PLAIN BADGE WHEN THERE IS NOTHING TO LIST, rather than
+                          rendering a button that opens an empty dialog. `cursor: help` is then
+                          honest -- the tooltip is all there is. */}
+                      <td>
+                        {status.rows.length > 0 ? (
+                          <button
+                            type="button"
+                            className={`badge badge-${tokenStatusTone(status)}`}
+                            style={{
+                              fontSize: '11px',
+                              border: 'none',
+                              cursor: 'pointer',
+                              textDecoration: 'underline dotted currentColor',
+                              textUnderlineOffset: '3px',
+                            }}
+                            onClick={() => setTokensFor({ principal: p, name: meta.name, status })}
+                            title={`${tokenStatusDetail(status)} Click to list them and withdraw one.`}
+                          >
+                            {tokenStatusLabel(status)}
+                          </button>
+                        ) : (
+                          <span
+                            className={`badge badge-${tokenStatusTone(status)}`}
+                            style={{
+                              fontSize: '11px',
+                              textDecoration: 'underline dotted var(--text-muted)',
+                              textUnderlineOffset: '3px',
+                              cursor: 'help',
+                            }}
+                            title={tokenStatusDetail(status)}
+                          >
+                            {tokenStatusLabel(status)}
+                          </span>
+                        )}
+                      </td>
+                      {/* A BUTTON WHERE A TOKEN IS ACTUALLY READ, AND THE COMMAND EVERYWHERE ELSE.
+                          Minting stayed on the host because these tokens could not be revoked, so
+                          issuing one should cost more than a click. 0074 removed that premise —
+                          `revoke_service_token()` withdraws a jti and `auth_pre_request()` refuses
+                          it on every PostgREST request after — and the retired revocable-tokens roadmap item is explicit that
+                          this is the order: *"Build revocation first and the same RPC stops being a
+                          hazard."*
+
+                          IT IS PER-PRINCIPAL, AND IT USED NOT TO BE. Every row once rendered
                           `mint-mcp-token.mjs --principal <id>`, which is wrong for two of the three
-                          this stack ships with -- and wrong in the direction that does damage. That
+                          this stack ships with — and wrong in the direction that does damage. That
                           script WOULD sign a token for Service_Ingestor: same subject, same secret,
                           entirely valid. No worker would ever read it, because the daemon takes its
-                          key from the environment. The result is a second unrevocable credential
-                          for a privileged identity, issued by an operator who was following the
-                          page, and nothing fixed. It also contradicted the coverage note directly
-                          below it, which named the right commands all along. */}
+                          key from the environment. The result is a second privileged credential,
+                          issued by an operator who was following the page, and nothing fixed.
+
+                          THE BUTTON INHERITS THAT DISTINCTION RATHER THAN DISCARDING IT. Offering
+                          it on every row would reintroduce the same mistake through a nicer
+                          control, so `isMintableFromPage()` decides — see its header — and the two
+                          environment-key identities keep the rotate command that actually changes
+                          what their process presents. */}
                       <td>
-                        <CopyableId
-                          value={meta.mintCommand.replace('{id}', p.principal_id)}
-                          label="mint command"
-                          title={meta.mintCommand.startsWith('npm run keys:rotate')
-                            ? 'Copy the command. This identity\'s key lives in .env and is read at boot, so rotating it — not minting a new token — is what changes what the process presents. It records the issue before writing, and names the containers to restart.'
-                            : 'Copy the command. It runs on the host that has .env, records the issue in the Digital Thread, and only then prints the token.'}
-                          onNotify={showToast}
-                        />
+                        {isMintableFromPage(meta) ? (
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            {/* MINTING IS NOT OFFERED FOR A WITHDRAWN IDENTITY, and the swap is not
+                                cosmetic: record_service_token_issued() refuses one outright (0076),
+                                so the button would sign nothing and return an error. Reinstating is
+                                the action that is actually available, so it is the one shown. */}
+                            {revocation ? (
+                              <button
+                                className="btn btn-ghost"
+                                onClick={() => setRevokeIdentity({
+                                  principal: p, name: meta.name, revocation, activeTokens: status.outstanding,
+                                })}
+                                title="This identity is withdrawn and cannot be issued a token. Reinstate it first — its previous tokens stay withdrawn."
+                              >
+                                Reinstate
+                              </button>
+                            ) : (
+                              <button
+                                className="btn btn-ghost"
+                                onClick={() => setMintFor({ principal: p, name: meta.name })}
+                                title="Sign a token for this identity and show it once. Recorded in the Digital Thread before it is returned, and revocable against the API afterwards."
+                              >
+                                <IconLock size={13} /> Issue Token
+                              </button>
+                            )}
+                            {/* WITHDRAWING IS OFFERED WHEREVER MINTING IS, which is the pairing that
+                                keeps the page honest: a control that hands out credentials and no
+                                control that takes the identity back is the asymmetry the retired revocable-tokens roadmap item
+                                refused to ship in the first place. */}
+                            {!revocation && (
+                              <button
+                                className="btn btn-ghost"
+                                onClick={() => setRevokeIdentity({
+                                  principal: p, name: meta.name, revocation: null, activeTokens: status.outstanding,
+                                })}
+                                title="Withdraw this identity. Every token naming it is refused by the API, including any issued afterwards — which is what makes this different from withdrawing tokens one at a time."
+                              >
+                                Withdraw
+                              </button>
+                            )}
+                            {/* KEPT BESIDE IT, NOT REPLACED. `mint-mcp-token.mjs` survives as
+                                break-glass for the reason item 3 gives: a stack whose only
+                                Administrator cannot sign in still needs a way to mint. What
+                                changed is that it stopped being the only way. */}
+                            <CopyableId
+                              value={meta.mintCommand.replace('{id}', p.principal_id)}
+                              label="mint command"
+                              display="Copy Command"
+                              variant="button"
+                              title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — the break-glass path, which works when nobody can sign in to this page.`}
+                              onNotify={showToast}
+                            />
+                          </div>
+                        ) : (
+                          <CopyableId
+                            value={meta.mintCommand.replace('{id}', p.principal_id)}
+                            label="rotate command"
+                            display="Copy Command"
+                            variant="button"
+                            // THE TOOLTIP CARRIES THE DISTINCTION NOW THAT THE LABEL CANNOT.
+                            // Both rows read "Copy Command", so the command itself is named here --
+                            // and it is `npm run keys:rotate`, not the MCP mint, which is the whole
+                            // reason this column is per-principal. An operator who copies without
+                            // hovering still gets the right command; one who hovers learns why.
+                            title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this identity's key lives in .env and is read at boot, so ROTATING it, not minting a new token, is what changes what the process presents. It records the issue before writing, and names the containers to restart.`}
+                            onNotify={showToast}
+                          />
+                        )}
                       </td>
                     </tr>
                   )
@@ -651,6 +802,45 @@ export function AccessControlTab({ showToast }) {
           gateway={bundleForGw}
           confirmFirst={bundleForGw.confirmFirst}
           onClose={afterAction}
+          showToast={showToast}
+        />
+      )}
+
+      {/* NOT `afterAction`, WHICH THE TWO GATEWAY MODALS USE. That helper closes the dialog and
+          reloads the credential inventory; this one has to reload the TOKEN inventory instead, so
+          the new mint appears in the row's status badge rather than the operator wondering whether
+          it worked. `load()` refreshes all three reads, which is cheap and avoids a second code
+          path that could drift from it. */}
+      {mintFor && (
+        <ServiceTokenModal
+          principal={mintFor.principal}
+          principalName={mintFor.name}
+          onClose={() => { setMintFor(null); load() }}
+          showToast={showToast}
+        />
+      )}
+
+      {/* `onChanged` RATHER THAN RELOADING ON EVERY CLOSE. This dialog is opened to look at least
+          as often as to act, and refetching three reads because somebody glanced at a list would
+          make the table flicker for nothing. It reloads only when a withdrawal actually happened. */}
+      {tokensFor && (
+        <ServiceTokenInventoryModal
+          principalName={tokensFor.name}
+          status={tokensFor.status}
+          onClose={() => setTokensFor(null)}
+          onChanged={load}
+          showToast={showToast}
+        />
+      )}
+
+      {revokeIdentity && (
+        <ServicePrincipalRevocationModal
+          principal={revokeIdentity.principal}
+          principalName={revokeIdentity.name}
+          revocation={revokeIdentity.revocation}
+          activeTokens={revokeIdentity.activeTokens}
+          onClose={() => setRevokeIdentity(null)}
+          onChanged={load}
           showToast={showToast}
         />
       )}

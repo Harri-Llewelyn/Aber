@@ -1,7 +1,7 @@
 # The broker credential-issuing service.
 #
 # BUILT FROM THE BROKER'S OWN IMAGE, and that is the whole reason this Dockerfile exists rather than
-# `node:20-alpine` plus a hashing library.
+# `node:24-alpine` plus a hashing library.
 #
 # Mosquitto's `$7$` password format is PBKDF2-SHA512 in a specific framing, and the hash has to be
 # readable by the mosquitto that will verify it. A reimplementation in Node would be perfectly

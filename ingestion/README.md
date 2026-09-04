@@ -529,6 +529,62 @@ blocks a playback; the list is then unknown rather than empty, and the gate and 
 refuse whatever they always refused. Nothing secret is stored — a `sparkplug_id` is the MQTT
 username and is on the Gateways page already.
 
+### Issuing a playback credential delivers it (`0078`)
+
+**Playback was broken on a stack that looked configured, and every surface agreed with itself.**
+Measured before the fix:
+
+| | |
+| :--- | :--- |
+| The Playback gateway | `gwy16…` |
+| The broker's only gateway account | `gwy11…`, for a gateway deleted long ago |
+| `gateway_has_broker_credential()` | **false** |
+| What the worker held | a `gwy16…` password from `.env` that nothing had ever issued |
+| Connecting with it | **`CONNACK rc = 5, not authorised`** |
+
+Nothing reported this. `mosquitto.conf` runs `allow_anonymous false`, Sparkplug publishes at QoS 0 —
+no PUBACK — so past the CONNECT there is nothing a publisher can observe, and a password sitting in
+`.env` looks exactly like configuration whether or not it was ever real.
+
+**Two things were wrong and only one was the credential.** `_credentials()` ran *once*, in `main()`,
+so even a correctly issued password reached the worker only after
+`docker compose up -d --force-recreate playback` — and an operator who had just clicked *Generate
+broker credential* had no reason to think a container recreate was outstanding. It now re-resolves
+every pass and logs the gateway ids it gains or loses.
+
+**The worker does not mint, and that was the design decision.** Letting it issue its own credentials
+would have needed no delivery mechanism at all. It was rejected on the credential service's own
+stated ground — a holder of `MQTT_CREDENTIAL_SERVICE_TOKEN` can *"publish Sparkplug telemetry as any
+gateway on the site"* — and because `_credentials()` calls itself **tier two of three** precisely
+because the worker *cannot authenticate as a gateway whose password it was not given*. A minting
+worker deletes that tier. So minting stays a human, Administrator-or-Shopfloor_Manager act with an
+audit row; only delivery is automated.
+
+**Which credentials may be delivered is decided by the database.**
+`gateway_is_playback_delivery_target()` returns `is_simulated` — the same predicate
+`start_playback_job()` gates on — and the edge function passes it to the credential service as
+`deliver_to_playback`. Not computed in the edge function, and not in the service: the service holds
+a `sparkplug_id` and no database access by design, and two definitions of *"is this a playback
+target"* would eventually disagree. The disagreement is a real machine's broker password in a file
+the replay worker reads. It is a **separate function** rather than a column on the authorisation
+gate for a migration-replay reason that cost this stack an outage — see
+[`supabase/README.md`](../supabase/README.md) under `0078`.
+
+`0078` carries a boot-time self-check that fails if `start_playback_job()` stops mentioning
+`is_simulated`, because the two moving apart is silent.
+
+**The path is one string in four places** — the writer
+([`mosquitto-credentials.mjs`](../scripts/lib/mosquitto-credentials.mjs)), the reader
+([`playback_worker.py`](playback_worker.py)), and a mount on each deployment target. Python and
+JavaScript cannot share a constant, and a mismatch is silent at *both* ends: the write succeeds and
+the read finds nothing, so the worker correctly reports "no credentials issued".
+`scripts/check-docs-drift.mjs` asserts all four agree.
+
+On Kubernetes the delivery is a **second key in the broker's existing credential Secret**, not a
+second Secret: `gateway-credential`'s Role grants `patch` on exactly one Secret by name, and a new
+one would widen the authority of the component that mints broker credentials. The playback pod
+mounts that one key via `items:`, so it never receives `password_file`.
+
 ### The Playback gateway, and its shadow devices
 
 [`0060`](../supabase/migrations/archive/0060_playback_gateway_and_shadow_devices.sql) seeds a dedicated

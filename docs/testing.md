@@ -24,6 +24,20 @@ python ingestion/test_telemetry_batching.py
 python ingestion/test_capture_playback.py
 # The daemon-side recording engine -- subject matching, the caps, and the manifest
 python ingestion/test_capture_worker.py
+# The startup recovery loop. `depends_on` orders `docker compose up` and nothing else, so when the
+# Docker daemon brings `restart: always` containers back it can start ingestion before the
+# historian -- measured at 453ms on a development stack. The daemon then reached its MQTT loop
+# having done none of the startup work that needed a database, and retried none of it: the
+# historian gauge read 0 for ever on a quiet stack, and capture reconciliation never ran, which
+# leaves every future capture refused with nothing to point at. Both are asserted here, along with
+# the race the loop opens by connecting with its lock released.
+python ingestion/test_startup_healer.py
+# How the playback worker resolves the broker passwords it holds (0078), and the precedence rule
+# that matters: a DELIVERED credential beats one in the environment. The broker keeps one password
+# per username, so a value in `.env` is not an alternative to the delivered one -- it is an older
+# one. If the environment won, "issue a new credential" would be the one repair that could not fix
+# a refused playback.
+python ingestion/test_playback_credentials.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
 # Deliberately narrow: the export path needs a historian, object storage and a chunk to mean
@@ -90,7 +104,19 @@ node scripts/check-schema-surface.mjs
 
 node scripts/check-migration-idempotency.mjs
 
-# Database suites — need Postgres
+# Database suites — ALL SIXTEEN, against a throwaway Postgres. Needs Docker and nothing else.
+#
+# RUN THEM THIS WAY. Every suite below defaults to port 54322, and that is where
+# docker-compose.yml publishes the LIVE database -- so the bare `python ...` form points at
+# production data and always has. See the note under this block for what that costs.
+#
+# Brings up a disposable supabase/postgres, applies the same auth fixture CI uses, replays
+# every migration, runs every suite, and destroys the container. `--keep` leaves it up;
+# `-k <substring>` runs a subset; `--no-run` migrates and stops.
+npm run test:db
+
+# The individual suites, for when one is being worked on. Point them at the throwaway with
+# `npm run test:db -- --keep --no-run` and SUPABASE_DB_PORT=54329 rather than running them bare.
 python supabase/migrations/test_user_roles_rls.py
 # The Administrator / Shopfloor_Manager split (0069), in both halves: the grants diverged, AND the
 # withdrawal reaches Postgres. The second half is the one worth having -- no RLS policy reads
@@ -104,6 +130,18 @@ python supabase/migrations/test_role_permission_split.py
 python supabase/migrations/test_audit_domain.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
+# The keyset cursor (0077). THE CONTROL TEST IS THE ONE THAT MATTERS: it runs the naive
+# recorded_at-only cursor against the same fixture and asserts it LOSES rows. Without that,
+# every other test in the file would pass just as well against a broken cursor on a fixture
+# whose timestamps happen to be distinct -- and they are not, because one transaction's rows
+# all carry one now() and a batch relocation is deliberately one transaction (0033).
+python supabase/migrations/test_digital_thread_paging.py
+# The delivery gate on broker-credential issuance (0078). NOT the happy path: the test that earns
+# its place is that a REAL gateway is not a delivery target, because a true there writes a real
+# machine's broker password into a file the replay worker reads -- and mosquitto.acl would then let
+# it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
+# dead code rather than the thing deciding deliveries.
+python supabase/migrations/test_playback_credential_delivery.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
@@ -117,6 +155,25 @@ python supabase/migrations/test_credential_recorder.py
 # Rolls back for a second reason: net.http_post queues inside the transaction, so the rotation
 # requests these tests provoke are un-queued rather than sent.
 python supabase/migrations/test_credential_revocation.py
+# Service-token revocation (0074): the denylist, and the PostgREST db-pre-request hook that reads
+# it. THE FAIL-OPEN TESTS ARE THE POINT and come first in the file -- auth_pre_request() runs
+# before every request in the caller's role, so a false refusal is not a failing feature, it is the
+# whole API down. No claims, unparseable claims and a token with no jti must all be served.
+python supabase/migrations/test_service_token_revocation.py
+# Principal revocation (0076): the subject arm of the same hook. THE FIRST ASSERTIONS ARE THAT THE
+# FLAG DOES SOMETHING -- 0043 rejected deleting the auth.users row because the subject is never
+# looked up, and a flag nothing reads fails identically. Also covers the arm-ordering trap: the
+# subject arm is checked first so its message wins, and its uuid cast must fall THROUGH to the
+# token arm rather than return, or a junk `sub` would bypass the token denylist.
+python supabase/migrations/test_service_principal_revocation.py
+# The anon EXECUTE baseline across the WHOLE schema, not a list somebody remembered to extend.
+# PostgreSQL grants EXECUTE on a new function to PUBLIC, and anon is a member of PUBLIC, so a
+# migration with a GRANT and no REVOKE has narrowed nothing. A FRESH-BOOT-ONLY FAULT: 0001's sweep
+# runs before the migrations that create these functions, so the leak is present on boot one and
+# healed on boot two -- which means it is on new installations and on no development stack that has
+# ever been restarted. These suites run against a throwaway database, which is a first boot every
+# time, and that is exactly why the assertion belongs here as well as in validate.py's check 13a.
+python supabase/migrations/test_anon_privilege_baseline.py
 # The `deployment` constraints, and the view that has to be rebuilt when a gateways column moves
 # (0064, 0066). Its transitional half went when is_virtual did -- see the suite's own header.
 python supabase/migrations/test_gateway_deployment.py
@@ -145,6 +202,70 @@ set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
 export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
 python ingestion/validate.py
 ```
+
+## Why the database suites get their own Postgres
+
+**The default was production.** Every suite under `supabase/migrations/` resolves its port as
+`os.getenv("SUPABASE_DB_PORT", "54322")`, and `docker-compose.yml` publishes the live Supabase
+database on `${SUPABASE_DB_PORT:-54322}`. So the documented invocation — `python
+supabase/migrations/test_audit_domain.py`, nothing set — connected to the running stack.
+
+Most of the suites roll back, which helps less than it sounds. `digital_thread` is append-only by
+`0003`, so the rows a rolled-back test provokes are exactly the ones a *committed* fixture leaves
+behind for good. Measured on a development stack:
+
+| | rows |
+| :--- | ---: |
+| `digital_thread` total | 525 |
+| stamped `actor_source = 'migration'` | 346 (66%) |
+| …of those, written by an actual migration | **0** |
+
+`Test_Host_Run_Gateway` and `Test_Remote_Gateway` account for 208 of them, 52 INSERT/DELETE pairs
+each, all from `test_gateway_enrollment.py`. That suite commits deliberately — it pins its fixture
+ids so a failed run is *reclaimed* rather than accumulated — and deletes the rows on the way out.
+The `gateways` table ends clean. The audit of their brief existence is permanent, at roughly 44 rows
+per run, for the life of the deployment.
+
+**The `migration` label is why nobody noticed.** `0070`'s classifier stamps that lane whenever a
+session carries no JWT, and a `psycopg2` connection as `postgres` carries none — so test churn is
+filed under the one `actor_source` an operator reads as *the schema did this, ignore it*.
+
+**A second database on the live cluster does not work**, which is the obvious fix and worth
+recording as tried: `0001` creates `pg_cron`, which refuses outside the single database named by the
+cluster's `cron.database_name`, and `IF NOT EXISTS` does not save it because the refusal is raised
+from inside pg_cron's own install script. The chain aborts on its first file. A throwaway *cluster*
+has its own `postgres` database and its own GUC pointing at it, so the same line succeeds untouched.
+
+**This is a paved road, not a fence.** `SUPABASE_DB_PORT` still defaults to `54322`, because `.env`
+sets it, `validate.py` derives from it and both backup scripts read it — changing the default would
+be overridden by the environment in the common case and would fight four other consumers in the
+rest. `npm run test:db` makes the clean path a one-liner; running a suite bare still reaches the
+live stack.
+
+### The fixture is shared with CI, in one file
+
+[`test-harness/auth-bootstrap.sql`](../test-harness/auth-bootstrap.sql) stands in for GoTrue —
+`auth.uid()`, `auth.jwt()` and `auth.identities`, without which four migrations fail to apply and
+the RLS suites silently pass on policies that deny everything. Both
+[`ci.yml`](../.github/workflows/ci.yml)'s **edge-function-auth-test** job and `scripts/test-db.mjs`
+apply it. It used to live inline in the workflow, which is why no local runner existed.
+
+**The runner passes the psql variables `db-init` passes**, and one of them decides whether a suite
+can pass at all. `0002` falls back to empty and warns rather than failing:
+
+```
+0038: GATEWAY_REVOKE_SECRET or SUPABASE_ANON_KEY is unset; credential revocation is INERT
+      on this stack. Archiving will not revoke, and the sweep will do nothing.
+```
+
+A `NOTICE`, so the chain applies and every schema check passes — and
+`test_credential_revocation.py` then fails four assertions with `0 != 1`, naming a queue depth
+rather than an unset secret three thousand lines upstream. The values the runner supplies are fake
+and its functions URL is deliberately unreachable.
+
+**Seven suites run in no CI job.** `edge-function-auth-test` names eight by hand and
+`test_gateway_enrollment.py` runs in **e2e-validation**; the directory holds sixteen. The runner
+*discovers* them rather than listing them, which is the difference that would have caught it.
 
 **The frontend figure is a lower bound rather than a count**, and deliberately: it moved four times
 in one afternoon and each move made both documents wrong until somebody noticed. A bound only ever

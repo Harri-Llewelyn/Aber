@@ -402,6 +402,42 @@ describe('digital thread filtering', () => {
     expect(rpcArgs().p_include_purged).toBe(true);
   });
 
+  /*
+   * THE KEYSET CURSOR (0077), AND THE COMPATIBILITY RULE AROUND IT.
+   *
+   * PostgREST resolves an RPC by the argument NAMES it is given, so naming the two cursor
+   * arguments against a database that has not applied 0077 does not fall back -- it fails with
+   * "function public.digital_thread_page(...) does not exist" and takes the whole Digital Thread
+   * page down. Measured against this stack before the omission was added.
+   *
+   * A stack mid-deploy is exactly when that would happen: the bundle ships before db-init replays.
+   * Omitted, the call matches the seven-argument form, the page renders unpaged, and `truncated`
+   * still tells the reader the view is cut off.
+   */
+  it('omits the cursor arguments entirely when there is no cursor', async () => {
+    await api.get('/api/v1/digital-thread');
+    expect(rpcArgs()).not.toHaveProperty('p_before_recorded_at');
+    expect(rpcArgs()).not.toHaveProperty('p_before_id');
+  });
+
+  it('sends both halves of the cursor when paging, because recorded_at is not unique', async () => {
+    await api.get('/api/v1/digital-thread?before_recorded_at=2026-01-01T00%3A00%3A00Z&before_id=41');
+    expect(rpcArgs().p_before_recorded_at).toBe('2026-01-01T00:00:00Z');
+    // A NUMBER, not the string off the query. `p_before_id` is bigint and the row comparison
+    // against a text argument would not resolve.
+    expect(rpcArgs().p_before_id).toBe(41);
+  });
+
+  it('ignores a half-cursor rather than sending one', async () => {
+    // `(recorded_at, id) < (NULL, 41)` is NULL, which filters out every row -- so a half-cursor
+    // reads as "end of thread" on a thread that has plenty. Neither half goes without the other.
+    await api.get('/api/v1/digital-thread?before_id=41');
+    expect(rpcArgs()).not.toHaveProperty('p_before_id');
+    state.rpcCalls.length = 0;
+    await api.get('/api/v1/digital-thread?before_recorded_at=2026-01-01T00%3A00%3A00Z');
+    expect(rpcArgs()).not.toHaveProperty('p_before_recorded_at');
+  });
+
   it('returns nothing for a tag that matches no device', async () => {
     const rows = await api.get('/api/v1/digital-thread?entity_ids=');
     expect(rows).toEqual([]);

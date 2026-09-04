@@ -534,6 +534,55 @@ the worker is up and holds nothing, while no recent report means the worker is d
 list alone cannot tell those apart. Nothing secret is stored; a `sparkplug_id` is the MQTT username
 and is on the Gateways page already.
 
+**`0078` makes issuing a playback credential also *deliver* it**, because the two halves being
+separate acts is what left this stack unable to play anything back. The Playback gateway is
+`gwy16…`; the broker's only gateway account was `gwy11…`, orphaned from a gateway deleted long ago;
+`gateway_has_broker_credential()` answered false; and the worker held a `gwy16…` password out of
+`.env` that nothing had ever issued. Connecting with it returned `CONNACK rc = 5, not authorised` —
+and nothing said so, because `allow_anonymous false` refuses at CONNECT and Sparkplug's QoS 0 gives
+a publisher nothing to observe after it.
+
+`gateway_is_playback_delivery_target()` answers whether the password may be delivered, and the
+credential service writes it where the playback worker reads when it is true. **The predicate is
+`is_simulated` — the same one `start_playback_job()` gates on** — so the set of passwords the worker
+can be handed is exactly the set of gateways it may publish as, and `0078` carries a self-check that
+fails if the job gate stops using it.
+
+**It is its own function rather than a third column on the authorisation gate, and that is not a
+style choice.** It was written as a column first. That worked on the boot which applied it and
+killed the next one:
+
+```
+0001_baseline_schema.sql:611: ERROR: cannot change return type of existing function
+HINT: Use DROP FUNCTION authorize_virtual_gateway_credential(uuid) first.
+```
+
+The chain replays in filename order, so `0001` re-declares its own two-column form *before* `0078`
+can drop the three-column one — and `CREATE OR REPLACE` cannot change a return type. `0001` aborts
+having already dropped the FDW server with `CASCADE`, leaving the stack serving a database with no
+telemetry read surface at all.
+
+**The rule, now enforced by `check-docs-drift.mjs`:** a later migration may redeclare a function
+`0001` declares, but must not change its return type. `0075` is safe because a new *argument* is a
+new signature; `0076` is safe because only the body changed. Same signature, different return type
+is the one combination that cannot survive a replay — and it is invisible until the second boot,
+which a fresh CI run never reaches.
+
+**Deciding it here rather than in the caller is the whole point.** The credential service holds a
+`sparkplug_id` and no database access by design, and the edge function could compute something
+similar from the gateway row — which would be a *second* definition of "is this a playback target".
+Two definitions eventually disagree, and the disagreement is a real machine's broker password
+written into a file the replay worker reads, from where `mosquitto.acl` would let it publish as that
+machine.
+
+**Letting the worker mint its own was rejected**, though it needs no delivery mechanism at all. The
+credential service's own header states the cost: a holder of its token can *"publish Sparkplug
+telemetry as any gateway on the site"*. `playback_worker._credentials()` calls itself **tier two of
+three** because the worker cannot authenticate as a gateway whose password it was not given, and a
+minting worker deletes that tier. Minting stays a human act with an audit row; only delivery is
+automated. The operational half — the file, the mounts, and why `_credentials()` had to stop running
+once at startup — is in [`ingestion/README.md`](../ingestion/README.md#issuing-a-playback-credential-delivers-it-0078).
+
 **`0058` is `rebirth_requests`, and it is named for the one thing it carries.** A capture opens by
 asking its subject's edge node to rebirth, because birth certificates cannot be queried, and a
 person can now ask for one too. Sparkplug's NCMD channel could equally write metric *values* — a
@@ -696,7 +745,7 @@ first role-assignment surface is where `authz:manage` starts meaning something, 
 into a schema where the two roles already differ rather than one where they do not.
 
 **It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
-deploys flows. The repair is to make that person an `Administrator`. Roadmap §5 (multi-factor
+deploys flows. The repair is to make that person an `Administrator`. Roadmap §4 (multi-factor
 authentication) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
@@ -951,6 +1000,42 @@ than the bug. A machine falls through to the `X-ACS-Cymru-Actor` header path and
 it is, while `changed_by` still receives the principal. The row improved as well as being corrected:
 an ingestion write records `'ingestion'` **and** names the identity, where it used to record
 `'ingestion'` and `NULL`.
+
+### Reading past the first page (`0077`)
+
+**The page had a cap and no way to say so.** `digital_thread_page()` has returned `truncated`
+alongside every response since `0039`, and the Digital Thread tab has stored it in state since then
+and *never rendered it* — so a page answering a question about the whole plant with its newest 200
+rows was indistinguishable from one showing everything.
+
+**Raising the cap was rejected.** The expensive half of that query is `matching`, which scans every
+row the filters select in order to count deleted assets over the whole match rather than over the
+page; a bigger page costs more JSON and more DOM without touching that, and only moves the wall.
+`0077` adds a keyset cursor instead — `p_before_recorded_at` and `p_before_id`, returned as
+`next_cursor`, with the page size unchanged at 200.
+
+**`recorded_at` is not a key, and that is the whole difficulty.**
+`log_digital_thread_event()` stamps one transaction's rows with one `now()`, and a batch relocation
+of six devices is deliberately one transaction (`0033`). A cursor of *"older than T"* skips the rest
+of the batch; *"T or older"* repeats its first row forever. The cursor is therefore the pair
+`(recorded_at, id)`, `id` being the primary key and monotonic, and `ORDER BY` matches it exactly —
+as does `idx_digital_thread_recorded_id`, because a cursor walking one order against an index in
+another is *correct* while degrading to a full sort per page, which nothing notices until the table
+is large.
+
+Measured on a fixture of same-timestamp batches: the composite cursor walked **35 of 35** rows
+exactly once; the `recorded_at`-only cursor reached **28**, silently dropping seven.
+`test_digital_thread_paging.py` runs both, and the naive one is the control — without it the rest of
+the suite would pass against a broken cursor on any fixture whose timestamps happened to be
+distinct.
+
+**OFFSET would have been wrong here specifically.** The table is append-only and read newest-first,
+so rows are inserted at the end the reader started from: between page 1 and page 2 every offset has
+shifted by however many events the plant recorded meanwhile, and the reader sees some rows twice and
+misses others. For the same reason the tab's 60-second poll **merges** its first page into what is
+already loaded rather than replacing it — append-only means held rows cannot change and new ones can
+only belong at the top — and starts again only when the two ranges no longer overlap, which is the
+one case where prepending would splice a hole into the middle of the list.
 
 ---
 
@@ -1495,16 +1580,106 @@ overlap. Rotating a ten-year one left ten years.
 
 ### The Access Control page states what is outstanding
 
-Since nothing can be revoked, knowing how many unexpired tokens exist and when the first lapses
-*is* the safety story — an inventory question, which is what the page is for. It lists every gateway
-with what the platform knows about its broker credential, lists the machine identities on both
-planes, lets an Administrator create one, and shows what tokens stand against it.
+The page lists every gateway with what the platform knows about its broker credential, lists the
+machine identities on both planes, lets an Administrator create one, mints tokens for the identities
+that read one, and shows what stands against each.
 
 `tokenStatus()` counts **every** unexpired mint rather than reading the latest, because a re-mint
 adds a live credential rather than replacing one — reporting the newer of two would state half the
 exposure on the one page whose job is to state all of it.
 
-Built by `0041`–`0044`, `supabase/functions/gateway-credential`,
+#### Tokens became revocable in `0074`, and the mint followed in `0075`
+
+This section used to open *"Since nothing can be revoked, knowing how many unexpired tokens exist
+and when the first lapses **is** the safety story."* That was the honest position for as long as it
+held, and it no longer does.
+
+`0043` surveyed three revocation designs and found none workable: deleting the `auth.users` row does
+nothing (the signature is validated and the subject never looked up), removing the role does nothing
+that matters (the relations the i3X address space is assembled from are
+`FOR SELECT TO authenticated USING (true)`), and a `revoked_at` predicate would have to be added to
+every RLS policy in the schema. **The fourth design is PostgREST's `db-pre-request`** — a function
+run in the caller's role before every request, which can `RAISE` and abort it, and which touches no
+policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
+`revoke_service_token()`; `PGRST_DB_PRE_REQUEST` names the hook on both targets.
+
+**The key it needs had been recorded since `0043`.** Both host scripts stamp a `jti` and hand it to
+`record_service_token_issued()`, for an inventory that could not act on it.
+
+**Revocation reaches PostgREST and nothing else, and the page says so.** `supabase-storage`,
+`supabase-realtime`, the edge runtime (which boots `VERIFY_JWT="false"`) and Studio each verify
+`SUPABASE_JWT_SECRET` for themselves and consult no denylist. That is complete coverage for what
+this is about — the MCP reader and `Service_Ingestor` reach PostgREST and nothing else — but the
+expiry is still the only bound that reaches every service, which is why the 90-day ceiling stays.
+
+**`0075` is the mint, and it is deliberately not an RPC.** The retired revocable-tokens roadmap item sketched a
+`SECURITY DEFINER` function signing with `pgjwt`, on the reasoning that it needed "no secret leaving
+the database". The extension is installed; the premise is not true — `SUPABASE_JWT_SECRET` is not in
+this database, and `vault` holds four secrets, none of them that one. Putting it there would let any
+path to SQL execution mint a `service_role` token, which is valid at the four services above and
+which `0074` cannot revoke. So the signing lives in
+[`mint-service-token`](functions/mint-service-token/index.ts), which already holds `JWT_SECRET`, and
+`0075`'s change to the database is narrower: `record_service_token_issued()` gains `p_actor_id`, so a
+mint from the page names the Administrator who asked instead of the `'service'` attribution `0043`
+pinned when every caller was a host script. The actor is **re-checked** against `user_roles` there
+rather than believed, so authorisation does not rest solely on a check made inside the component
+that holds the signing key.
+
+**The button is not offered on every row.** `Service_Ingestor` and `Service_Playback` read their
+keys from the environment, so a token minted for either is valid and unread —
+`isMintableFromPage()` is the rule, and those two keep `npm run keys:rotate`, which is what actually
+changes what those processes present.
+
+#### `0076` revokes the identity, which reaches further than revoking its tokens
+
+`revoke_service_principal()` flags a principal and `auth_pre_request()` then refuses every token
+naming it — **including ones this stack has no `TOKEN_MINTED` row for, and any issued afterwards**.
+Withdrawing tokens one at a time from the inventory dialog cannot do either: it reaches exactly the
+recorded jtis, and the next mint works.
+
+**A flag nothing reads would have been the same defect `0043` already rejected.** That migration
+ruled out deleting the `auth.users` row because *"the signature is validated and the subject never
+looked up"* — and writing `revoked_at` somewhere has precisely that failure available to it. The
+flag is enforced at the same choke point as the token denylist, keyed on the `sub` claim, which is
+what makes it a revocation rather than an annotation.
+
+**It cascades, and that is what makes reinstatement safe.** Revoking also denylists each outstanding
+token individually — redundant for PostgREST, since the subject arm already refuses them, and not
+redundant for the audit trail or for `reinstate_service_principal()`. Lifting the flag restores the
+**identity**, not the credentials that were live when it was withdrawn; `revoke_service_token()` has
+no inverse, so those stay refused and a new token must be minted.
+
+**A person's account is refused outright.** `sub` is on every JWT, so a row naming a human would
+lock them out of PostgREST through a control built for machines — and out of the request that would
+undo it. `is_machine_principal()` is the guard.
+
+#### A missing hook is a total outage that every health check calls healthy
+
+Worth knowing before anyone edits `PGRST_DB_PRE_REQUEST`. Measured against
+`postgrest/postgrest:v14.12` by starting one that named a function which does not exist:
+
+| Signal | Result |
+| :--- | :--- |
+| Boot | **Succeeds.** Schema cache loads, container runs. |
+| `/live`, `/ready` on the admin server | **200** |
+| Every data request | **404**, `{"code":"42883","message":"function … does not exist"}` |
+
+So a typo in that variable takes the whole API down, reports healthy on both probes, and surfaces
+as **404 rather than 5xx** — invisible to a monitor watching for server errors, and on Kubernetes
+the readiness probe keeps the pod in service.
+
+`scripts/check-docs-drift.mjs` is the control: it asserts the name is identical on Compose and the
+chart, and that a migration declares it. That has to be a **static** check — by the time a runtime
+probe could notice, the outage has already begun.
+
+**The arm order is about the message.** Both arms refuse the request, so the outcome is identical;
+the subject arm runs first because after a cascade both match, and *"this identity has been
+revoked"* explains the mint refusal that follows, where *"this token has been revoked"* invites a
+replacement request that will also fail. Its uuid cast falls **through** to the token arm rather
+than returning — otherwise a token carrying a junk `sub` would bypass the token denylist entirely.
+
+Built by `0041`–`0044`, `0074`, `0075`, `supabase/functions/gateway-credential`,
+`supabase/functions/mint-service-token`,
 [`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx),
 [`credentialState.js`](../frontend/src/utils/credentialState.js) and
 [`serviceIdentities.js`](../frontend/src/utils/serviceIdentities.js).

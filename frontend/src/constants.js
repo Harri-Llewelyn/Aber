@@ -56,6 +56,11 @@ export const DIGITAL_THREAD_ACTIONS = {
   // filterable because both are the reason somebody opens this page -- "who was given what, when".
   CREDENTIAL_ISSUED: 'Credential issued',
   TOKEN_MINTED:      'Token minted',
+  // 0074, and it sits beside TOKEN_MINTED for the same reason ROLE_REVOKED sits beside
+  // ROLE_GRANTED: the pair is the question. "Who was given what, when" is only half an answer
+  // without "and when was it taken away" -- and until 0074 there was no second half to record,
+  // because a signed token could not be withdrawn at all.
+  TOKEN_REVOKED:     'Token revoked',
   // WRITTEN BY `log_role_assignment()` (0070), not by the generic audit trigger -- `user_roles`
   // has no `id` column for it to read. Named rather than INSERT/DELETE because the raw verb would
   // say a row appeared in a join table, where what happened is that somebody became an

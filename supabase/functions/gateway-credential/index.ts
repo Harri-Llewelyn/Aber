@@ -170,10 +170,40 @@ serve(async (req) => {
     });
   }
 
+  // 1b. MAY THE PASSWORD BE DELIVERED TO THE PLAYBACK WORKER? (0078)
+  //
+  // A SECOND CALL RATHER THAN A COLUMN ON THE GATE ABOVE, and the reason is the migration model
+  // rather than the design. 0001 redeclares that function on every boot with CREATE OR REPLACE,
+  // which cannot change a return type -- so adding a column to it aborted the entire chain at file
+  // one on the second boot, with the FDW server already dropped by CASCADE. See 0078's header.
+  //
+  // STILL THE DATABASE'S ANSWER, which is the part that matters: `is_simulated`, the same predicate
+  // start_playback_job() gates on. Computing it here from the gateway row would make it a second
+  // definition of "is this a playback target", and two definitions eventually disagree -- the
+  // disagreement being a real machine's broker password written into a file the replay worker reads.
+  //
+  // FALSE ON ERROR, NEVER TRUE. A failure here must not fail the issue: the operator asked for a
+  // credential and is entitled to one. It must also not deliver on a guess -- so an unreachable
+  // answer means the password is shown once and placed by hand, which is the behaviour before this
+  // change and is safe.
+  let deliverToPlayback = false;
+  const { data: isPlaybackTarget, error: deliveryError } = await supabase
+    .rpc("gateway_is_playback_delivery_target", { p_gateway_id: gatewayId });
+
+  if (deliveryError) {
+    console.error(`gateway-credential: delivery predicate unavailable: ${deliveryError.message}`);
+  } else {
+    deliverToPlayback = isPlaybackTarget === true;
+  }
+
   // 2. THE MINT. No password is supplied: the credential service generates it at the point of use,
   //    which is one fewer copy in transit and keeps the alphabet guarantee (base64url, an injection
   //    boundary) with the code that depends on it. Same call enroll-gateway makes.
-  let credential: { password?: string; applied_to_running_broker?: boolean };
+  let credential: {
+    password?: string;
+    applied_to_running_broker?: boolean;
+    playback_delivery?: { delivered?: boolean } | null;
+  };
   try {
     const response = await fetch(`${credentialUrl.replace(/\/+$/, "")}/credentials`, {
       method: "POST",
@@ -181,7 +211,10 @@ serve(async (req) => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${credentialToken}`,
       },
-      body: JSON.stringify({ sparkplug_id: identity.sparkplug_id }),
+      body: JSON.stringify({
+        sparkplug_id: identity.sparkplug_id,
+        deliver_to_playback: deliverToPlayback,
+      }),
     });
 
     if (!response.ok) {
@@ -236,6 +269,18 @@ serve(async (req) => {
     password: credential.password,
     applied_to_running_broker: credential.applied_to_running_broker ?? false,
     audit_recorded: auditRecorded,
+    // WHETHER THE OPERATOR STILL HAS WORK TO DO, which is the difference between "issued" and
+    // "issued, and playback will now work". Three distinct states and the page must not merge them:
+    //
+    //   true   delivered -- the worker picks it up within its poll interval, nothing else to do
+    //   false  this IS a playback target and delivery FAILED -- the password must be placed by hand
+    //   null   not a playback target, so there was nothing to deliver
+    //
+    // `false` and `null` would collapse into "not delivered" if this were a plain boolean, and the
+    // first of those is the one that needs an operator.
+    playback_delivered: deliverToPlayback
+      ? (credential.playback_delivery?.delivered ?? false)
+      : null,
     // The env-pair names node-red-init reconciles from, so the reveal-once panel can show the two
     // lines an operator pastes into .env rather than making them derive the naming convention.
     env_hint: {

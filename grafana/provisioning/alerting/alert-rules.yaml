@@ -707,11 +707,26 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 4. HISTORIAN UNREACHABLE.
+      # 4. HISTORIAN UNREACHABLE, WITH TELEMETRY ARRIVING.
       #
-      # A GAUGE, NOT A RATE: 0 means telemetry is being dropped NOW. `for: 2m` is short because the
-      # daemon already retries internally -- three attempts inside a second -- so two minutes of
-      # this reading 0 means the retries are not winning.
+      # BOTH HALVES, AND THE SECOND IS WHAT MAKES THE SUMMARY TRUE. This rule used to read the gauge
+      # alone and assert "telemetry is being dropped" from it -- a claim it had never checked. On an
+      # idle stack that was simply false: nothing was publishing, so nothing was being dropped, and
+      # the alert fired for hours against a historian that was reachable throughout. An alert that
+      # is wrong whenever the plant is quiet is one an operator learns to close unread, which costs
+      # the times it is right.
+      #
+      # `$B < 1` is the daemon holding no connection. `$E > 0` is somebody actually publishing --
+      # `or vector(0)` for the same reason rule 1 needs it, since the counter does not exist until
+      # the first message and Grafana reads an empty frame as NoData rather than as zero.
+      #
+      # THE IDLE CASE IS NOT DISCARDED, IT IS DEMOTED -- see 4b, which catches a historian this
+      # daemon cannot reach on a stack with no traffic. That is worth knowing about and is not data
+      # loss, and the two deserve different severities and different words.
+      #
+      # `for: 2m` stays short because the daemon retries internally -- three attempts inside a
+      # second on the message path, and a resident recovery loop besides -- so two minutes of this
+      # means the retries are not winning.
       #
       # `db_connected` is psycopg2's own view and cannot see a connection dropped by the SERVER,
       # which still reports open and fails on first use. `acs_ingestion_db_connect_failures_total`
@@ -719,17 +734,20 @@ groups:
       # -------------------------------------------------------------------------------------------
       - uid: acs-ingestion-db-down
         title: Historian Unreachable From Ingestion
-        condition: C
+        condition: F
         for: 2m
-        noDataState: Alerting
+        # OK, NOT Alerting. NoData here means the ingestion scrape has gone away, which is the
+        # silent-daemon rule's job -- and firing a data-loss alert on a missing scrape is how this
+        # rule produced its loudest false positives.
+        noDataState: OK
         execErrState: Error
         labels:
           severity: critical
           entity_type: platform
         annotations:
           summary: >-
-            The ingestion daemon cannot reach TimescaleDB. Telemetry is being dropped for as long as
-            this lasts.
+            The ingestion daemon cannot reach TimescaleDB while telemetry is arriving. Readings are
+            being dropped for as long as this lasts and will not be restated.
         data:
           - refId: A
             relativeTimeRange:
@@ -753,6 +771,96 @@ groups:
               datasource:
                 type: __expr__
                 uid: __expr__
+          - refId: D
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: D
+              datasource:
+                type: prometheus
+                uid: prometheus
+              # sum() ACROSS msg_type, as rule 1 does: a daemon receiving only NDATA is still being
+              # published to, and this half of the condition asks only whether anything is.
+              expr: sum(rate(acs_ingestion_messages_total[5m])) or vector(0)
+              instant: true
+          - refId: E
+            datasourceUid: __expr__
+            model:
+              refId: E
+              type: reduce
+              reducer: last
+              expression: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: F
+            datasourceUid: __expr__
+            model:
+              refId: F
+              type: math
+              expression: ($B < 1) && ($E > 0)
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 4b. HISTORIAN UNREACHABLE, AND NOTHING PUBLISHING.
+      #
+      # THE OTHER HALF OF 4, AND DELIBERATELY NOT CRITICAL. A daemon that cannot reach the historian
+      # on a quiet stack is losing nothing -- there is nothing to lose -- but it is not healthy
+      # either, and the moment a gateway starts publishing it becomes rule 4. Saying so at warning,
+      # in words that do not claim data loss, is the difference between a useful early signal and
+      # the false alarm this pair replaced.
+      #
+      # READ FROM THE RECOVERY LOOP'S OWN COUNTER RATHER THAN FROM THE GAUGE, which is the whole
+      # point. `acs_ingestion_db_heal_failures_total` rises ONLY when the daemon tried to reach the
+      # historian off the message path and could not. It cannot be produced by a stack that has
+      # simply not written anything yet -- the state that made the old rule lie. A gauge at 0 with
+      # this counter flat means the daemon has not looked lately; a gauge at 0 with this rising
+      # means it looked and the historian was not there.
+      #
+      # `for: 10m` against a loop that runs every 30s: twenty consecutive failures, not a restart.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-ingestion-db-unreachable-idle
+        title: Historian Unreachable From Ingestion (No Traffic)
+        condition: C
+        for: 10m
+        # OK: the counter does not exist until the recovery loop first fails, so an empty frame
+        # means it never has.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The ingestion daemon cannot reach TimescaleDB. Nothing is being dropped, because nothing
+            is publishing -- but any telemetry arriving while this lasts will be.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: rate(acs_ingestion_db_heal_failures_total[10m])
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
           - refId: C
             datasourceUid: __expr__
             model:
@@ -761,8 +869,8 @@ groups:
               expression: B
               conditions:
                 - evaluator:
-                    type: lt
-                    params: [1]
+                    type: gt
+                    params: [0]
               datasource:
                 type: __expr__
                 uid: __expr__

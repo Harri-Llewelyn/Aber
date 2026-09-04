@@ -14,25 +14,42 @@ addresses: source comments cited them, so deleting an entry and closing the gap 
 every citation without erroring, and the list was therefore left gapped as the record of what
 shipped. Moving the roadmap out of `README.md` ended that — the comments state what the code does
 instead — and `scripts/check-docs-drift.mjs` dropped the four invariants that enforced it. The
-numbers are labels for reading order, they run 1-12 with no gaps, and **a renumber costs one grep**
+numbers are labels for reading order, they run 1-14 with no gaps, and **a renumber costs one grep**
 (`§[0-9]`, `roadmap item [0-9]`) across the repository for the prose that still cites them.
 
-**Ordered by subject rather than by age**, in three groups. **1-7 are the platform's own**, led by
+**Ordered by subject rather than by age**, in four groups. **1-7 are the platform's own**, led by
 the one item somebody else sets the deadline for and then by the credential and operations chain:
-2 is Administrator-only from the start and deliberately does not wait for 4, and 3 adds a sixth
-Administrator-only policy in the same direction rather than depending on the role split. **The role
-split those three would otherwise have queued behind has already shipped**, as `0069` and `0070`,
-which is why 4 is now Entra sign-in alone and 5 no longer waits on it. **7 is the newest and the
-only one here that arrived from a change being REFUSED** rather than from an audit or a request —
-it is what has to exist before an `Operator` can be granted anything else. **8-11 arrive from
-feature requests** — 8, 9 and 11 from GitHub issues
+2 is Administrator-only from the start and deliberately does not wait for 3. **The role split those
+would otherwise have queued behind has already shipped**, as `0069` and `0070`, which is why 3 is
+now Entra sign-in alone and 4 no longer waits on it. **6 arrived from a change being REFUSED**
+rather than from an audit or a request — it is what has to exist before an `Operator` can be granted
+anything else. **7 is the only item here whose subject is the BROKER credential plane** rather than
+the database one; it sits at the end of the chain because the database plane's own credential work
+has now shipped and explicitly scoped that plane out, and because its strongest argument is a gap
+(a revoked gateway that is already connected keeps publishing) rather than a feature. **8-11 arrive
+from feature requests** — 8, 9 and 11 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 10 was not filed, and is sequenced
 *after* 9 because it removes what 9 replaces. **12 is documentation**, and is the one item whose
 remaining work is mostly writing; it arrives from
 [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built.
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **13 is the platform's own
+and sits last anyway**, because its subject is the transport under every other item rather than any
+one chain — and because reading it before 7 and 9 invites starting it in the wrong order, which is
+the one thing it asks not to happen.
+
+**Revocable service tokens shipped and left this list**, which is what an item shipping looks like.
+It was 3 until `0074`–`0076`; everything above 3 moved down by one. Its substance is in
+[The Access Control page states what is outstanding](../supabase/README.md#the-access-control-page-states-what-is-outstanding),
+which now carries the four things the entry argued: the `db-pre-request` choke point that made
+revocation possible at all, why the mint signs in an edge function rather than in the database
+(`SUPABASE_JWT_SECRET` is not there, and putting it there would make every path to SQL a path to an
+unrevocable `service_role` token), why revoking a principal reaches further than revoking its
+tokens, and what none of it reaches — storage, realtime, the edge runtime and Studio verify the
+signature for themselves. **The one measurement worth carrying forward** is that a missing
+`PGRST_DB_PRE_REQUEST` function is a total outage which `/live` and `/ready` both report as
+healthy, answering 404 rather than 5xx; `check-docs-drift.mjs` is the guard.
 
 **When an item ships, check what cited it as a blocker.** This list has already aged in the one
 direction nobody watches for: an entry correctly marked blocked, whose blocker then cleared as a
@@ -70,7 +87,7 @@ Shopfloor Operations dashboard, the three machine alert rules, `provision-gatewa
 seeded schemas are all gone; `0073` retires the last of them from databases that already have them.
 A fresh install now has no cells, no gateways, no devices and no schemas, and Node-RED opens empty.
 **`deploy-nodered` went with it**, because the only flow it could deploy was the demonstrator's — see
-8, which absorbed that.
+9, which absorbed that.
 
 **Two further entries were retired the same day as answered rather than built**, which is a third
 outcome this file did not previously have a place for. **Horizontal ingestion scaling** was retired because
@@ -236,8 +253,8 @@ unauthenticated MCP server as a working endpoint, not merely as an open one.
 That is the right outcome, and the reason is worth recording because the endpoint is tempting. It
 runs as the owner, so it reads `digital_thread`, `auth.users` and the Vault, and it sits outside
 every control this repository built for that exact question: `0034`'s read-only principal holds
-`Operator` and nothing else *precisely* so a model cannot see the audit trail, and §3's revocation
-acts at PostgREST, which Studio does not go through. The model-facing surface this stack intends is
+`Operator` and nothing else *precisely* so a model cannot see the audit trail, and service-token
+revocation acts at PostgREST, which Studio does not go through. The model-facing surface this stack intends is
 the i3X one, where RLS is in the path. A developer-facing MCP is recoverable later by exempting the
 route and giving it a credential of its own — on its own argument, not as a side effect of how
 Studio happens to be published.
@@ -281,145 +298,15 @@ change.
   that URL is wrong the moment the proxy takes the port. The Directory is where people look to find
   services, so it moves in the same migration that seeds the OAuth client.
 - **Whether this waits for 20 or 21.** It does not. Gating on `Administrator` adds another
-  Administrator-only check in the direction §3 already goes, rather than depending on the role
+  Administrator-only check in the direction the token and principal revocation controls already go,
+  rather than depending on the role
   split — and Studio inherits Entra sign-in and MFA for free if and when those land. That is the
   strongest argument for the OAuth route over any proxy-local credential: it is the only design
   under which a database console ever gets a second factor.
 
 ---
 
-## 3 · Revocable service tokens, and the mint that becomes safe once they exist
-
-**Builds on:** `create_service_principal()`
-([0044](../supabase/migrations/archive/0044_create_service_principal.sql)) ·
-`record_service_token_issued()` and `service_token_max_days()`
-([0043](../supabase/migrations/archive/0043_record_service_token_issued.sql)) ·
-[`scripts/mint-mcp-token.mjs`](../scripts/mint-mcp-token.mjs) ·
-[`scripts/rotate-service-keys.mjs`](../scripts/rotate-service-keys.mjs) ·
-[`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx) ·
-`PGRST_DB_PRE_REQUEST`, which is unset
-
-Mint and revoke a service principal's tokens from the Access Control page, Administrator-only, so
-the last credential workflow that requires a shell on the host stops requiring one. **Revocation is
-the item and the buttons are its consequence**, in that order, for a reason that is already written
-down.
-
-### The CLI step is standing in for a control, not for a missing screen
-
-Half of this is built. [`0044`](../supabase/migrations/archive/0044_create_service_principal.sql) already lets
-an Administrator create a machine identity from the page, and
-[`supabase/README.md`](../supabase/README.md#the-access-control-page-states-what-is-outstanding)
-describes it doing so. What is left on the host is minting a **token** for one.
-
-That button was designed and refused, and the refusal is the whole design constraint here. `pgjwt`
-is installed and `extensions.sign()` exists, so a `SECURITY DEFINER` RPC could mint one today with
-no new dependency and no secret leaving the database — and the argument against it was not effort:
-
-> *"technically neat, and it would have made an unrevocable credential a button press with a tidy
-> audit trail of a thing nobody can undo. **Solving the wrong half well is worse than not solving
-> it, because the clean implementation reads as safety.** So minting stays on the host."*
-
-So building the mint first removes the friction and keeps the missing control, and the page then
-hands out unrevocable credentials pleasantly. Build revocation first and the same RPC stops being a
-hazard: it is then the ordinary shape this stack already uses for `gateway-credential` — the
-database decides, the row is written before the secret is returned, and the secret is revealed once.
-
-### A fourth revocation design, and the key it needs has been recorded all along
-
-[`0043`](../supabase/migrations/archive/0043_record_service_token_issued.sql) surveys three ways of adding
-revocation and none works: deleting the `auth.users` row does nothing because the signature is
-validated and the subject never looked up; removing the role does nothing because the relations the
-i3X address space is assembled from are `FOR SELECT TO authenticated USING (true)`; and a
-`revoked_at` predicate would have to be added to **every RLS policy in the schema**.
-
-The fourth is not considered there. **PostgREST's `db-pre-request` names a function run before every
-request, in the caller's role, which can `RAISE` and abort it** — the single choke point the third
-design lacked, and it touches no policy at all. `postgrest/postgrest:v14.12` supports it and
-`PGRST_DB_PRE_REQUEST` is unset on both targets, so nothing is being displaced.
-
-**And the identifier is already in the inventory.** `mint-mcp-token.mjs` stamps a `jti` from
-`randomUUID()` and hands it to `record_service_token_issued(p_jti)`; `rotate-service-keys.mjs` does
-the same for the ingestion and playback keys. Every token this item would revoke has been recording
-the exact key a denylist needs, for an inventory that could not act on it.
-
-### What it does not reach belongs on the page, not in a comment
-
-A revocation covering most of the stack is the same failure as the tidy mint: it reads as safety.
-The four services holding `SUPABASE_JWT_SECRET` alongside PostgREST each verify independently, and
-a pre-request function is invisible to all of them.
-
-| Reached | Not reached |
-| :--- | :--- |
-| PostgREST — every table RLS guards, which is the whole `public` schema | `supabase-storage` · `supabase-realtime` · the edge runtime, which boots `VERIFY_JWT="false"` so each function authorises itself · Studio |
-
-**That is complete coverage for what this item is actually about, and the entry should say why
-rather than leave the gap looking accidental.** The MCP reader and `Service_Ingestor` reach
-PostgREST and nothing else, so for a machine principal the choke point is the only door. For a
-person's session it is not — and a person's session is already revocable through GoTrue's refresh
-tokens, which is a different mechanism for a different problem. The edge functions are reachable
-later if wanted: several already call the database, so it is one added check rather than a redesign.
-
-### Fail-closed is the risk, and the negative tests come before the feature
-
-A function that runs before every PostgREST request is a single point of failure by construction. If
-it raises when it should not, the entire API is down — which is the correct direction for a security
-control and an outage all the same. Three cases have to be tested before anything depends on it: an
-empty denylist, a token carrying no `jti` at all, and the function missing entirely.
-
-The cost is one indexed lookup per request. Keeping only **unexpired** revoked jtis bounds the table
-and makes it self-pruning: a revoked token past its own `exp` is already refused by the signature
-check.
-
-### Two credential planes, and only one of them is in scope
-
-The broker plane is not this item, and the reason is specific rather than a boundary drawn for
-tidiness. Gateway accounts are already mintable from the dashboard
-([0041](../supabase/migrations/archive/0041_virtual_gateway_credential.sql)) and already revoked on archive or
-delete ([0038](../supabase/migrations/archive/0038_revoke_gateway_credentials.sql),
-[0063](../supabase/migrations/archive/0063_virtual_gateways_get_revoked.sql)).
-
-**The five platform principals cannot be given the same controls, and a first attempt would look
-like it worked.** `factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor`, the validator
-and the legacy simulator account come from `.env`, and `mosquitto-init` says what it does with them:
-*"THE PLATFORM PRINCIPALS ARE REWRITTEN ON EVERY RUN — they come from .env and must follow it."* A
-revocation performed in the UI would be undone by the next `docker compose up`, silently, on a page
-whose entire job is to state what is outstanding.
-
-Worth recording while the subject is open: **a broker password has no expiry at all.** `0062` says
-so deliberately — *"it is bounded by revocation (`0038`), not by a countdown"* — which is the right
-answer for an account confined by `mosquitto.acl` and the wrong one to discover by assuming the
-90-day ceiling covers everything.
-
-### Administrator-only, which anticipates item 4 rather than waiting for it
-
-`system_settings` for read and for write, `list_service_principals()` and
-`create_service_principal()` are the **five policies** §4 cites as the database already separating
-`Administrator` from `Shopfloor_Manager` by hand, against 58 sites that check the pair. Gating this
-on `Administrator` alone adds a sixth in the same direction, so it does not need §4 to land first
-and does not contradict it when it does.
-
-It touches the audit domains in one line: a revocation writes `TOKEN_REVOKED` beside
-`TOKEN_MINTED`, and `audit_domain_for()` already files everything on `service_principals` under
-`security` — so the row lands in the right lane with no change at all, and what is left is one more
-entry in `DIGITAL_THREAD_ACTIONS`. See
-[Two lanes, and one of them an engineer cannot read](../supabase/README.md#two-lanes-and-one-of-them-an-engineer-cannot-read-0070).
-
-### Worth deciding early
-
-- **Whether revoking a principal deletes its `auth.users` row or flags it.** Flagging it and
-  revoking its outstanding tokens is the recommendation: deleting orphans the `digital_thread`
-  attribution, and the history of a revoked principal is the part most worth keeping.
-- **Whether the ingestion and playback keys are revocable from the page.** They carry jtis, so
-  mechanically they are — and revoking one stops ingestion until somebody rotates the key and
-  recreates the container. Surfacing them read-only and leaving rotation to `npm run keys:rotate`
-  keeps the one control that has a recovery path attached to it.
-- **Whether `mint-mcp-token.mjs` survives.** It should, as break-glass, for the same reason §5
-  documents the service-role factor delete: a stack whose only Administrator cannot sign in still
-  needs a way to mint. What changes is that it stops being the only way.
-
----
-
-## 4 · Microsoft Entra ID sign-in, and a role model worth mapping onto
+## 3 · Microsoft Entra ID sign-in, and a role model worth mapping onto
 
 **Builds on:** `custom_access_token_hook()` and `handle_new_user()` in
 [`supabase/migrations/0001_baseline_schema.sql`](../supabase/migrations/0001_baseline_schema.sql) ·
@@ -483,7 +370,7 @@ work. The repair is to make that person an Administrator.
 
 ### What is left of this item is Entra itself
 
-Everything below is unbuilt. The role split was sequenced first because §5 and the audit-domain
+Everything below is unbuilt. The role split was sequenced first because §4 and the audit-domain
 work both depended on it and neither depended on Entra. The second of those has since shipped as
 `0070`.
 
@@ -573,7 +460,7 @@ claims to enable, and the group-object-ID to role table. It lives in `docs/`, wh
 
 ---
 
-## 5 · Multi-factor authentication, and what happens when the phone is lost
+## 4 · Multi-factor authentication, and what happens when the phone is lost
 
 **Builds on:** GoTrue v2.189.0's factor API · `has_role()` and the `aal` claim ·
 [`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx) · the immutable audit in
@@ -660,7 +547,7 @@ principal writes is an outage, not a hardening.
 
 ---
 
-## 6 · A backup an operator can take without a shell
+## 5 · A backup an operator can take without a shell
 
 **Builds on:** [`scripts/backup-databases.sh`](../scripts/backup-databases.sh) ·
 [`scripts/restore-databases.sh`](../scripts/restore-databases.sh) ·
@@ -767,7 +654,7 @@ than offer it.
 
 ---
 
-## 7 · Machine principals with their own authority, instead of borrowing a person's role
+## 6 · Machine principals with their own authority, instead of borrowing a person's role
 
 **Builds on:** `is_machine_principal()` ([`0048`](../supabase/migrations/archive/0048_machine_principals_are_not_users.sql),
 the predicate is [`0042`](../supabase/migrations/archive/0042_list_service_principals.sql)'s) ·
@@ -847,6 +734,102 @@ inventory and live telemetry. Cannot read the audit trail."* That sentence is th
 
 ---
 
+## 7 · The broker's Dynamic Security plugin, and the two things a file cannot do
+
+**Builds on:** [`mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) ·
+[`mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf) ·
+[`scripts/gateway-credential-service.mjs`](../scripts/gateway-credential-service.mjs) ·
+`revoke_gateway_credentials()`
+([0038](../supabase/migrations/archive/0038_revoke_gateway_credentials.sql),
+[0063](../supabase/migrations/archive/0063_virtual_gateways_get_revoked.sql)) ·
+`BROKER_PRINCIPALS` in
+[`serviceIdentities.js`](../frontend/src/utils/serviceIdentities.js) ·
+[`scripts/check-broker-config.mjs`](../scripts/check-broker-config.mjs) ·
+`mosquitto_dynamic_security.so`, which **already ships in the pinned image**
+
+Move broker authentication and authorisation from `password_file` + `acl_file` onto Mosquitto's
+Dynamic Security plugin, managed at runtime over `$CONTROL/dynamic-security/v1`. The plugin is at
+`/usr/lib/mosquitto_dynamic_security.so` in `eclipse-mosquitto:2.0.22` — the tag both targets
+already run — so this adds no dependency and no image change.
+
+**This is not the answer to the playback credential question, and the entry says so first because
+that is the request it will most often arrive attached to.** Getting a broker password to the
+playback worker without recreating its container is blocked in
+[`ingestion/playback_worker.py`](../ingestion/playback_worker.py) — `_credentials()` is read once in
+`main()`, from the environment — and no broker-side change reaches that. The broker half is already
+solved besides: the credential service SIGHUPs Mosquitto, which *"re-reads the password and ACL
+files in place and keeps every connection."* Dynsec would add nothing to the no-restart property,
+because there is nothing left to add.
+
+### Two things the files cannot do, and one of them is a security gap
+
+**REVOCATION DOES NOT DISCONNECT, AND THAT IS THE ITEM.** `0038` and `0063` revoke a gateway by
+removing its line from the password file — but Mosquitto checks credentials at CONNECT and never
+again. An archived or deleted gateway that is **already connected keeps publishing** until something
+makes it reconnect, and nothing in the stack does. The dashboard reports the credential revoked, the
+audit row says revoked, and telemetry keeps arriving. Dynsec's `disableClient`/`deleteClient` kick
+the live session, which is the only form of revocation the word actually promises.
+
+**THERE IS NO LIST, WHICH IS WHY THE PAGE HOLDS A LITERAL.**
+[`serviceIdentities.js`](../frontend/src/utils/serviceIdentities.js) argues the current arrangement
+at length and its premise is a fact about the file: *"There is nowhere to fetch it from. The ACL is
+mounted read-only into the broker container and is never parsed by anything that has an HTTP
+surface."* Dynsec has `listClients`, so that premise stops being true and the broker half of the
+Access Control page could become a live read instead of three hand-maintained objects kept honest by
+`check-docs-drift`.
+
+### What it costs, in descending order of seriousness
+
+**1. It inverts the credential service's minimal authority, which is that service's whole design.**
+Its header states what it deliberately cannot do: *"it cannot issue a Mosquitto account... cannot
+read a password back... cannot delete accounts"*, because *"issuing a Mosquitto account is a far
+larger authority than 'add one line to a password file'."* Dynsec management is admin-or-not, so an
+HTTP service that today can only append a hashed line would hold create, delete, list and
+ACL-rewrite over every principal on the broker. **That is the trade this item is, and it should be
+argued rather than absorbed.**
+
+**2. `mosquitto.acl` is the most heavily verified artifact in the repository**, and its guarantees
+are measured rather than assumed — `check-broker-config.mjs` re-runs them against whatever tag
+`docker-compose.yml` pins. Porting means re-deriving all of it in dynsec's JSON, in particular
+`pattern readwrite spBv1.0/+/+/%u/#`, which the file calls *"the rule doing the actual work"*, and
+the delivery-time semantics recorded beside it: a wildcard subscription is **granted** at QoS 0 and
+enforced per message at delivery, and the refusal is invisible to the publisher because Sparkplug
+mandates QoS 0 and there is no PUBACK to carry a reason code. **A dynsec policy that is subtly wider
+than the file would therefore fail silently, in the one direction this repository has already paid
+to close.**
+
+**3. Mutable state fights the `.env` model on both targets.** `dynamic-security.json` is runtime
+state; `mosquitto-init` regenerates the platform principals from `.env` on every run
+(*"THE PLATFORM PRINCIPALS ARE REWRITTEN ON EVERY RUN — they come from .env and must follow it"*).
+Boot would have to **reconcile idempotently rather than rewrite**, and the failure mode inverts:
+instead of the database plane's *"a revocation performed in the UI would be undone by the next
+`docker compose up`"*,
+the risk becomes broker state that drifts from `.env` and is never corrected. On Kubernetes it is
+worse — the ACL and config arrive as read-only ConfigMaps, and mutable state needs a PVC the broker
+does not currently have.
+
+### Worth deciding early
+
+- **Whether dynsec can coexist with `password_file` for one listener.** If it cannot — which is what
+  should be assumed until measured — every principal moves in one flag day, and there is no
+  incremental path to test on a live stack.
+- **Whether dynsec ACLs substitute `%u`.** The entire per-gateway confinement rests on it, and
+  adding a gateway costs an ACL edit rather than nothing if they do not. Measure it on 2.0.22
+  before anything else in this item is planned; `check-broker-config.mjs` is where the measurement
+  belongs, for the reason `mosquitto.acl` already gives: *"A config that starts is not a config that
+  is safe."*
+- **Whether `listClients` is exposed to the dashboard at all.** A LIST verb on the credential
+  service was already refused once, partly because *"it would hand whoever holds one bearer token an
+  inventory of every account on the broker."* Dynsec's list has exactly that property, so the
+  objection transfers intact and needs a fresh answer rather than being assumed away by the new
+  mechanism.
+- **Whether revocation alone justifies the move.** It is the strongest argument here and it may have
+  a cheaper answer: disconnecting a revoked client could also be reached by having the credential
+  service rewrite the account to an unguessable password and then bounce that one session, without
+  moving the authorisation model at all. That should be priced before the plugin is.
+
+---
+
 ## 8 · The Directory's MQTT half, and the one lookup it still lacks
 
 **Builds on:** [`supabase/functions/fplus-directory/index.ts`](../supabase/functions/fplus-directory/index.ts) ·
@@ -887,14 +870,19 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
-## 9 · GitOps edge sync
+## 9 · GitOps edge sync, and the review step a bucket cannot give a flow
 
 **Builds on:** the `gateway-backups` bucket in
-[`scripts/storage-init.mjs`](../scripts/storage-init.mjs) · `digital_thread` (`0005`, `0026`) ·
+[`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
+[`FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
+[`gateway-bundle-template/bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs) and the flow hash
+its heartbeat already reports · `digital_thread` (`0005`, `0026`) ·
 [`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts), which is now the only place
 `gitops:manage` is enforced · [issue #63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
 
-**The push half existed and has been retired, which makes this item larger than it was.** A
+### The push half existed and has been retired, which makes this item larger than it was
+
+A
 `deploy-nodered` edge function deployed **only** `node_red_flow.json` as committed to the repository,
 refusing an inline flow array in the request body with a 400 and a stated reason — a Node-RED
 `function` node is arbitrary JavaScript inside a container that holds the MQTT credential. Its
@@ -907,7 +895,9 @@ the honest option; rebuilding it is now part of this item rather than a thing to
 worth keeping from it** is the refusal: whatever replaces it must deploy only what is committed, or
 it becomes a remote-code-execution endpoint with a friendly name.
 
-**The storage claim needs correcting before anything is planned against it.** The issue describes
+### The storage claim needs correcting before anything is planned against it
+
+The issue describes
 "manual zip backups inside Supabase Storage". The `gateway-backups` bucket holds `flows.json` — JSON,
 5 MiB cap, private, keyed `<sparkplug_id>/` — and it is a backup taken **from** an appliance, not the
 channel a deployment travels down. Nothing about it sits on the deploy path, so replacing it is not
@@ -915,20 +905,118 @@ where this item starts. Its privacy setting is the one thing to preserve if it i
 `flows.json` describes the plant's edge topology, broker addresses and device ids, and a public bucket
 bypasses `storage-policies.sql` entirely.
 
-**The pull half is still the half carrying the security argument, and is the better place to start.**
-The retired design pushed inbound to `:1880`, which means something must be able to reach the edge
-node's admin API, and reconciliation happened only when a human pressed deploy. A sidecar that polls
-`git pull` and calls Node-RED's local reload API inverts both: outbound-only from the edge, and
-self-healing on a timer rather than on attention. Drift detection is the same mechanism read backwards
-— compare the running flow against the committed revision.
+### Pull, and the reason that is a decision rather than a preference
 
-**Two details the issue does not settle.** Node-RED holds MQTT credentials in its *credential store*,
-encrypted separately and deliberately not in the flow file; a puller that overwrites flows
-without accounting for that disconnects the gateway it has just reconciled. And logging the revision
-hash into `digital_thread` needs an actor — rows from the daemon and the edge functions are attributed
-through the `request.headers` GUC, and the trigger accepts only `ingestion` / `service` / `migration`,
-never `user`. A sidecar reconciling on its own timer is a fourth kind of actor and should say so
-rather than borrow `service`.
+**The retired design pushed inbound to `:1880`, and an inbound path per gateway is the thing this
+architecture exists to avoid.** The bundle README states the rule for a different subject and it
+generalises exactly: `node_exporter` runs on the appliance and is *never* scraped from the centre,
+because gateways enrol dynamically so no static inventory can address them, and the centre reaching
+into plants is the property being refused. A deploy channel that dials the edge asks for that path
+back, permanently, for every appliance. It also asks for the editor credential to be re-centralised —
+`bootstrap.mjs` generates that password on the appliance, prints it once and keeps only its bcrypt
+hash, and anything pushing to the admin API needs it back in a fleet-wide store.
+
+**So a sidecar on the appliance polls `git pull` and calls Node-RED's local reload API.** Outbound-only
+from the edge, and self-healing on a timer rather than on attention. This is also the answer to any
+proposal to place a general-purpose orchestrator or job runner in the plant: a component that executes
+whatever the centre queues for it is a strictly larger surface than the `deploy-nodered` endpoint that
+was refused for exactly that reason, and it earns nothing the puller does not already have.
+
+**Drift detection is the same mechanism read backwards, and half of it is already built.** The
+heartbeat already reports a **flow hash** — recorded by `bootstrap` at enrolment and carried in the
+same 30-second message as uptime and load. Comparing that against the committed head of the gateway's
+tracked branch is the whole of drift detection, and it needs no new telemetry from the edge and no
+connection into it.
+
+### The approval gate is the missing thing, and Git already is one
+
+**The gap §10 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
+no diff. That is the real complaint, and it is worth stating that Git answers it directly rather than
+being merely the transport: *pending approval* is an open pull request, *approved* is a merge, and
+*undo* is a revert commit. Anything that models those three states in the database beside a stored
+blob rebuilds a worse version of what the forge already does, and splits the audit record across two
+systems that will disagree.
+
+**So the upload becomes a commit.** `FlowBackupUploader` already takes `flows.json` from an operator
+and already refuses `flows_cred.json` **by shape rather than by filename**; what changes is its
+destination — a branch and a pull request in the gateway's source repository instead of an object in
+a private bucket. The upload is then the backup and the proposed deployment in one artefact, which
+also removes the awkward sequencing between this item and §10: the bucket stops being load-bearing at
+the moment the first flow lands in a repository, not before.
+
+**`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
+place — `nodered-userinfo`'s `ALLOWED_ROLES`, as `0069` records — and the merge is the control it was
+named for. **Authoring a proposal and approving one are different privileges** and should not collapse
+into one: proposing is the write that `storage-policies.sql` already grants Administrator and
+Shopfloor_Manager, approving is `gitops:manage`.
+
+### A Git page, and the one thing it must not become
+
+**What it should show, per gateway:** the tracked repository and branch, the open pull requests
+against it, the commit history with the deployed revision marked, and the gateway's own reported flow
+hash beside the committed head — which is drift, stated as a fact the appliance sent rather than as
+something the centre inferred. A revert control, and an approve control gated on `gitops:manage`.
+
+**A revert must be a new commit and never a force-push.** A force-push rewrites history a gateway may
+already have pulled, and the sidecar cannot distinguish that from a legitimate advance — it would
+reconcile to the rewritten head and report success, having silently deployed something no pull request
+ever showed. A revert commit is visible, reviewable and itself revertible.
+
+**The page must not become an editor.** Nothing on it should author or edit flow JSON, and nothing
+should accept a blob that reaches an appliance without passing the same merge. That is the refusal
+worth keeping from `deploy-nodered`, restated for a UI: **deploy only what is committed**, or it is a
+remote-code-execution endpoint with a friendly name and a nicer table.
+
+### The credential store is the hazard that can invalidate the shape
+
+**Node-RED keys credentials by node id**, and holds them in `flows_cred.json`, encrypted separately
+and deliberately not in the flow file. A flow round-tripped through export, repository and pull can
+come back with the broker node re-created under a new id; the credential then keys to a node that no
+longer exists, the sidecar reconciles successfully, and the gateway drops off the broker immediately
+afterwards. **This constrains the design more than the transport does and should be proved before
+anything else is built** — if a round trip cannot preserve credential binding, the puller needs a
+merge strategy rather than an overwrite, and that is a different piece of work.
+
+### A third credential plane arrives with this item, and it should be named now
+
+**The appliance needs a way to authenticate to the repository**, which is neither the broker plane
+(§7) nor the database one. It should be **per gateway and read-only** — a shared key across the
+fleet makes one compromised appliance a fleet-wide read, and a writable one lets an appliance author
+what it will later be asked to deploy. `enroll-gateway` already mints a per-gateway broker credential
+at bundle time and is the natural place to issue this one, which also means revocation has a home
+alongside the credential it sits beside.
+
+**Verifying the commit is what makes the transport untrusted-safe.** If the sidecar checks a signature
+over the revision it is about to apply, the forge and the network between are no longer things that
+have to be trusted — a much stronger position than TLS to the host alone, and the one that makes a
+hosted forge an acceptable answer to the question below.
+
+### What this must not touch
+
+The enrolment token's single-use semantics and the once-only guard in `bootstrap.mjs`; the broker
+ACL's `%u` confinement, which is what stops one gateway forging another's telemetry and is enforced
+independently of anything here; `flows_cred.json`, which must not leave the appliance in a backup, a
+commit or a diff; and the `gateway-backups` bucket's privacy setting, which stays exactly as it is
+until §10 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
+dead weight until the pull half replaces what it does.
+
+### Worth deciding early
+
+**The forge.** Self-hosted or hosted, and for an on-premises deployment on a private domain that is
+the same question `deploy/k8s/internal-ca.yaml` already answers for certificates. Commit signature
+verification makes it a smaller question than it looks.
+
+**One repository or one per gateway.** A repository per gateway gives clean per-appliance deploy keys
+and independent history; one repository with a branch per gateway gives a fleet-wide diff and one
+place to review. The deploy key granularity is the deciding constraint, not the ergonomics.
+
+**Where `target_branch` lives** — deferred to §10, which owns the links-store question, but this item
+is what makes it load-bearing rather than cosmetic.
+
+**The actor kind for the audit row.** Logging the revision hash into `digital_thread` needs one: rows
+from the daemon and the edge functions are attributed through the `request.headers` GUC, and the
+trigger accepts only `ingestion` / `service` / `migration`, never `user`. A sidecar reconciling on its
+own timer is a fourth kind of actor and should say so rather than borrow `service`.
 
 ---
 
@@ -1090,5 +1178,153 @@ destination cannot say: what a page is FOR, what its controls do, and what its s
   what to put there are the same moment, and "no gateways yet" is where a reader is most receptive.
 - **Whether it survives translation.** Nothing here is localised today, and a help corpus is the
   first thing that would make that expensive.
+
+---
+
+## 13 · The transport between services, and the two targets that disagree about it
+
+**Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
+[`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
+[`mosquitto/mosquitto-tls.conf`](../mosquitto/mosquitto-tls.conf) ·
+`mosquitto.tls.internalClients` in [`values.yaml`](../deploy/helm/acs-cymru/values.yaml) and the
+client-TLS block in [`.env.example`](../.env.example) ·
+[`_helpers.tpl`](../deploy/helm/acs-cymru/templates/_helpers.tpl)'s DSN helper ·
+[`datasources.template.yml`](../grafana/provisioning/datasources/datasources.template.yml) ·
+[`check-compose-chart-parity.mjs`](../scripts/check-compose-chart-parity.mjs) ·
+**not yet filed as an issue**
+
+### What is already built, so that it is not re-argued
+
+Default-deny NetworkPolicy on Kubernetes, with **both directions generated from one edge list** and a
+CI check asserting the pairs are symmetric. An internal CA whose root deliberately lives outside the
+chart. TLS on the Ingress and on the broker's 8883 listener with a TLS 1.2 floor. The broker ACL's
+`%u` confinement. The `apikey` gate and the single statement of origin policy in `envoy.yaml`. And a
+principle worth quoting because the rest of this item leans on it: **there is deliberately no "skip
+verification" setting anywhere in this stack**, on the grounds that TLS which does not verify is
+indistinguishable from an interception. None of that is in question here.
+
+### The gap is that NetworkPolicy answers *who*, and nothing answers *what is on the wire*
+
+**Every internal hop is plaintext, and four files say so by name.** `sslmode=disable` is written into
+GoTrue's DSN on Compose, into the PostgREST authenticator DSN the chart's `dsn` helper builds, and
+into **both** Grafana datasources on both targets. PostgREST on 3000, GoTrue on 9999, storage on 5000,
+functions on 9000 and `pg_net`'s quarantine call to `node-red:1880` are all HTTP.
+
+**That is a different question from the one the policy layer answers, and it is easy to mistake one
+for the other.** A NetworkPolicy makes a path reachable only from the right pod label; it says nothing
+about what is legible to something that has already landed on a pod at either end of an allowed edge,
+or on the CNI between them. On the Postgres links what is legible is scoped role credentials and every
+row in the platform. **The most valuable link in the stack is the one with the weakest transport**, and
+the reason is historical rather than considered: these DSNs were written before there was a CA to
+issue against, and nothing has revisited them since `internal-ca.yaml` landed.
+
+### The cheapest real move is a switch that already exists and defaults off
+
+`mosquitto.tls.internalClients` moves the ingestion daemon, i3X and Node-RED to 8883 **together** —
+one switch for all three deliberately, because they share a trust domain and a partial migration
+would only create a configuration nobody tests. All three **fail closed** if the CA is unreadable.
+The NetworkPolicy edge list already derives `$brokerPort` from the same flag, so the policy follows
+it without editing. Compose has the equivalent in `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE`.
+
+**It is off by default on both targets, and the default is the whole of the work.** Turning it on is
+not a feature; deciding it is the supported posture, and moving the documentation and CI to match, is.
+
+### Postgres is the link worth taking next, and it is the one with real cost
+
+The internal CA already issues leaves, so the certificates are not the problem — the DSNs and the
+naming are. `require` gets encryption without solving verification; `verify-full` is the target and
+needs the certificate to name the service the client dials, which on Compose is a container name and
+on Kubernetes a Service DNS name. **Compose has no cert-manager**, so this is the point where the two
+targets need separate mechanisms for the same property, which is exactly the divergence the rest of
+this repository spends its effort preventing.
+
+### The two targets disagree about security posture, and nothing compares them
+
+`check-compose-chart-parity.mjs` exists because work landed on Compose and the chart did not follow,
+six times in one branch — and it now compares the two targets **as sets of services**. It does not
+compare their posture, and on posture they are not close: **the whole default-deny layer is
+Kubernetes-only**, and Compose has no equivalent and no seam for one. That is a defensible position —
+a single-host Compose stack has a Docker network rather than a cluster — but it is currently an
+undocumented one, and "Compose is a supported target" is stated elsewhere in the repository as a
+constraint on other decisions. **What is missing is the statement of what Compose is and is not
+expected to enforce**, so that a control present on one target and absent on the other is a recorded
+decision rather than a discovery.
+
+### The two database ports are published for a reason that does not require publishing them
+
+Compose binds `5433:5432` and `${SUPABASE_DB_PORT:-54322}:5432` on all interfaces. The reason is
+recorded in `deploy/k8s/README.md` and in CI, and it is **collision avoidance with a local Postgres**
+— the *number* is what matters, and `127.0.0.1:5433:5432` avoids the collision identically while
+taking two databases off the host's network.
+
+**The precedent for that is already in the same file, twice, with the argument written out.** Studio
+is bound to `127.0.0.1` because "the only way to reach it from elsewhere is an SSH tunnel, which is
+the correct amount of friction for a tool that can drop a table", and Prometheus the same way. A raw
+Postgres port is the tool that can drop a table. The comment beside the remaining published ports
+states the rule the stack means to follow — everything else is published because it **authenticates**
+(Grafana, the frontend, Node-RED) or is **a protocol endpoint that has to be reachable** (the broker)
+— and the two databases satisfy neither clause. This is the smallest change in this item and the
+largest reduction in exposed surface.
+
+### Plaintext 1883 is deliberate today and should have an end state
+
+The listener stays open because in-network services speak to the broker over the Docker network, and
+the NetworkPolicy comment correctly explains that a fleet migrates gateway by gateway, so a window
+where both ports are in use is the normal state rather than an edge case. **What is missing is that
+the window has an end.** `mosquitto.external.plaintext` already gates the external half; once
+`internalClients` is on, nothing on either target needs 1883, and the default should say so.
+
+### A service mesh is the complete answer and is the wrong size
+
+Automatic mTLS on every HTTP hop, with identity-based authorisation that pod-label selectors only
+approximate, is genuinely what the first section asks for. It is also a second control plane, a proxy
+in every pod, and a second identity system beside the CA this deployment already runs — **and it does
+nothing for Compose**, so it would widen the divergence above rather than close it. Per-service TLS
+issued by the CA that already exists reaches most of the same place on both targets. **Revisit if
+Compose stops being a supported target**, which is the same condition `envoy.yaml` attaches to
+HTTPRoute, and for the same reason.
+
+### The gateway link's upgrade is client certificates, and it is sequenced behind §7
+
+`mosquitto-tls.conf` states the current position and its cost explicitly: password authentication over
+TLS, `require_certificate false`, because turning it on means `use_identity_as_username` replaces the
+password file "at which point the ACL's `%u` no longer matches the sparkplug_id the provisioning
+script writes."
+
+**That objection has an answer: issue the client certificate with `CN = <sparkplug_id>`, and `%u`
+matches again** — `mosquitto.acl` needs no change at all. `enroll-gateway` already mints a per-gateway
+credential and already writes the CA into the bundle, so returning a signed client certificate fits
+the enrolment model that exists rather than replacing it. The gain is that a gateway's identity stops
+being a bearer secret that can be replayed by anything that reads it.
+
+**The cost is revocation, and it is why this waits.** Mosquitto's `crlfile` is awkward and needs a
+reload to take effect — which is precisely the gap §7 exists to close, and §7's own strongest argument
+is already that *a revoked gateway which is already connected keeps publishing*. Client certificates
+make that sharper, not softer. **This is the intended direction; it should not start before §7.**
+
+### What this must not touch
+
+The `%u` confinement in `mosquitto.acl`, which is enforced independently of transport and is not
+improved by any of this. The origin policy's single home in `envoy.yaml` — encrypting a hop is not a
+reason to state CORS a second way. The internal CA root's residence outside the chart. The
+fail-closed behaviour of every TLS client here, and the absence of a skip-verification setting: a
+switch added "temporarily" to get past a naming problem during this work is the one change that would
+leave the stack worse than it started.
+
+### Worth deciding early
+
+- **Whether Compose is in scope for the posture, or only for the transport.** Encrypting hops is
+  achievable on both targets; a policy layer is not. Saying so plainly is better than a chart that is
+  hardened and a Compose stack that is assumed to be.
+- **`require` or `verify-full` for Postgres.** `require` is a week's less work and stops a passive
+  reader; only `verify-full` stops an active one, and the difference is entirely in the certificate
+  naming, not in the client configuration.
+- **Whether `internalClients` and the loopback bindings flip in the same change.** They should not.
+  One is a transport migration with a fail-closed mode; the other is two lines and no runtime risk,
+  and bundling them means the risky half gates the free half.
+- **Where the posture statement lives.** `check-compose-chart-parity.mjs` compares the targets and
+  prints known gaps on every run precisely so a gap nobody is looking at cannot hide — which makes it
+  the natural home for "Compose does not have a policy layer, and here is what stands in for it",
+  rather than a paragraph in a README that nothing checks.
 
 ---

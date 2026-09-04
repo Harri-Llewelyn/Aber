@@ -761,6 +761,82 @@ const apiMethods = {
   },
 
   /**
+   * The jtis `auth_pre_request()` is currently refusing (0074), as a Set.
+   *
+   * SEPARATE FROM listServiceTokens(), because the two answer different questions and have
+   * different authority. That one reads `digital_thread`, needs the audit lane, and is the
+   * permanent history -- every mint ever. This reads `revoked_service_tokens`, needs Administrator
+   * or Auditor, and is OPERATIONAL: rows are pruned once the token they name has expired, because
+   * the signature check refuses it from then on.
+   *
+   * SO AN EMPTY SET IS NOT "NOTHING WAS EVER REVOKED". It is "nothing is currently being refused",
+   * which is also what a caller who cannot read the table gets -- RLS returns no rows rather than
+   * an error. `tokenStatus()` defaults to an empty set for exactly that reason: a Shopfloor_Manager
+   * sees the pre-0074 reading rather than a page that claims every token is live.
+   *
+   * FAILURE IS SWALLOWED TO AN EMPTY SET, matching listServiceTokens(). The section is
+   * supplementary; a principal list that renders is worth more than one blanked by a refusal on
+   * the newest of the three reads behind it.
+   */
+  listRevokedServiceTokens: async () => {
+    const { data, error } = await supabase
+      .from('revoked_service_tokens')
+      .select('jti,revoked_at,revoked_by,expires_at');
+
+    if (error) return new Set();
+    return new Set((data || []).map(r => r.jti).filter(Boolean));
+  },
+
+  /**
+   * The service principals `auth_pre_request()` is refusing by subject (0076), keyed by id.
+   *
+   * A MAP RATHER THAN A SET, unlike the token denylist, because the row carries facts the page
+   * shows: when it was withdrawn and why. A token's denylist row has nothing a reader wants that
+   * the mint row does not already carry.
+   *
+   * NOT SELF-PRUNING, so an empty map really does mean "none revoked" -- where the token equivalent
+   * only means "none currently being refused". Same swallow-to-empty on a refusal, for the same
+   * reason: an Auditor can read this and a Shopfloor_Manager cannot, and the identities are worth
+   * more than a section blanked by the newest of four reads.
+   */
+  listRevokedServicePrincipals: async () => {
+    const { data, error } = await supabase
+      .from('revoked_service_principals')
+      .select('principal_id,revoked_at,revoked_by,reason');
+
+    if (error) return new Map();
+    return new Map((data || []).map(r => [r.principal_id, r]));
+  },
+
+  /**
+   * Withdraw a whole identity: every token naming it is refused, including ones issued later.
+   *
+   * IT CASCADES, and the caller must say so. The RPC also denylists each outstanding token
+   * individually -- redundant for PostgREST, and what makes reinstatement safe, since lifting the
+   * principal flag then does not hand those credentials back.
+   */
+  revokeServicePrincipal: async (principalId, reason) => {
+    const { data, error } = await supabase.rpc('revoke_service_principal', {
+      p_principal_id: principalId,
+      p_reason: reason || null,
+    });
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  /**
+   * Lift the flag. RESTORES THE IDENTITY, NOT ITS CREDENTIALS -- the tokens revoked alongside it
+   * stay revoked, because revoke_service_token() has no inverse. A new token must be minted.
+   */
+  reinstateServicePrincipal: async (principalId) => {
+    const { data, error } = await supabase.rpc('reinstate_service_principal', {
+      p_principal_id: principalId,
+    });
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  /**
    * Create a machine identity that cannot sign in.
    *
    * THROUGH THE RPC, AS THE CALLER. `create_service_principal()` (0044) is SECURITY DEFINER and
@@ -863,6 +939,62 @@ const apiMethods = {
     }
 
     return body;
+  },
+
+  /**
+   * Sign a long-lived token for a service principal and get it back ONCE.
+   *
+   * SAME SHAPE AS mintGatewayCredential ABOVE, and for the same reasons: a raw fetch rather than
+   * `functions.invoke()` so both minting paths read alike, the CALLER's token rather than the anon
+   * key, and `details` preferred over `error` because the database's own sentence is the one an
+   * operator can act on ("... can sign in, so it is a person's account").
+   *
+   * WHAT COMES BACK IS UNRECOVERABLE. Nothing stores the token -- the signature is reproducible
+   * only from JWT_SECRET, which lives in the edge runtime and nowhere a browser can reach -- so a
+   * caller that drops this value must mint again. Unlike a broker credential, minting again does
+   * NOT replace the previous one: both are valid until they expire or are revoked, which is why
+   * the modal says so and why revoking is a separate act.
+   *
+   * @param {string} principalId the service principal to sign for
+   * @param {number} [days] TTL, bounded by service_token_max_days() at both tiers
+   */
+  mintServiceToken: async (principalId, days) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/mint-service-token`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        // The CALLER's token, and here it is load-bearing twice over: the function resolves the
+        // caller's role from it, and record_service_token_issued() re-checks that same id before
+        // it will write an attributed row. The anon key would fail both.
+        Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(days ? { principal_id: principalId, days } : { principal_id: principalId })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw new Error(body?.details || body?.error || `Could not mint a token (${res.status})`);
+    }
+
+    return body;
+  },
+
+  /**
+   * Withdraw a minted token, so PostgREST refuses it from the next request onward.
+   *
+   * NOT A COMPLETE REVOCATION, AND THE CALLER MUST SAY SO. `auth_pre_request()` is a PostgREST
+   * hook (0074); storage, realtime, the edge runtime and Studio each verify the JWT signature for
+   * themselves and consult no denylist, so a withdrawn token still satisfies those four until it
+   * expires. The RPC records the same scope on its audit row.
+   */
+  revokeServiceToken: async (jti) => {
+    const { data, error } = await supabase.rpc('revoke_service_token', { p_jti: jti });
+    if (error) throw new Error(error.message);
+    return data;
   },
 
   /**
@@ -1589,6 +1721,17 @@ const apiMethods = {
       const since = (url.searchParams.get('since') || '').trim();
       const until = (url.searchParams.get('until') || '').trim();
 
+      // THE KEYSET CURSOR (0077): where the reader got to, not how far in they are. Both halves or
+      // neither -- `recorded_at` is not unique, because log_digital_thread_event() stamps one
+      // transaction's rows with one `now()` and a batch relocation of six devices is deliberately
+      // one transaction (0033). A cursor of "older than T" would skip the other five rows of that
+      // batch and a cursor of "T or older" would repeat the first one forever, so the id is what
+      // makes the position exact. Sent as a pair or not at all; the RPC ignores a half-cursor and
+      // this refuses to send one.
+      const beforeRecordedAt = (url.searchParams.get('before_recorded_at') || '').trim();
+      const beforeId = (url.searchParams.get('before_id') || '').trim();
+      const hasCursor = beforeRecordedAt !== '' && beforeId !== '';
+
       // A tag that matches no device must return nothing rather than everything.
       if (entityIds && entityIds.length === 0) return [];
 
@@ -1635,6 +1778,21 @@ const apiMethods = {
         p_entity_ids: entityIds && entityIds.length ? entityIds : null,
         p_since: since || null,
         p_until: until || null,
+        // OMITTED ENTIRELY WHEN THERE IS NO CURSOR, rather than sent as null, and that is a
+        // compatibility decision rather than a stylistic one. PostgREST resolves an RPC by the
+        // names it is given, so naming these two against a database that has not applied 0077
+        // fails outright:
+        //
+        //   ERROR: function public.digital_thread_page(p_limit => integer,
+        //          p_before_recorded_at => timestamptz, p_before_id => integer) does not exist
+        //
+        // -- measured, not inferred. That would take the whole Digital Thread page down on a stack
+        // whose migrations have not replayed yet, which is a worse failure than the one this change
+        // exists to fix. Omitted, the call matches the seven-argument form, the page renders
+        // unpaged, and `truncated` still tells the reader the view is cut off.
+        ...(hasCursor
+          ? { p_before_recorded_at: beforeRecordedAt, p_before_id: Number(beforeId) }
+          : {}),
       });
       if (error) throw error;
 
@@ -1660,6 +1818,12 @@ const apiMethods = {
       // simply have no opinion about deleted assets, which is the right default for a fixture.
       rows.purgedAssets = Number(payload.purged_assets || 0);
       rows.truncated = Boolean(payload.truncated);
+      // NULL IS THE ONLY END-OF-DATA SIGNAL, and it comes from the server rather than being
+      // inferred here. `rows` has already been through the description search above, so its length
+      // says nothing about whether the database had more to give -- a page can filter down to
+      // nothing and still sit in the middle of the thread. Deriving "the end" from `rows.length`
+      // would stop the walk on the first page whose text nobody matched.
+      rows.nextCursor = payload.next_cursor || null;
       return rows;
     }
 

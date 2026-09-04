@@ -497,13 +497,22 @@ def _loop():
 
 def reconcile(supabase):
     """
-    Sweep jobs abandoned by a restart. Called once, before the MQTT loop.
+    Sweep jobs abandoned by a restart. Returns True if the sweep ran.
 
     NOT OPTIONAL, AND THE FAILURE IS TOTAL RATHER THAN COSMETIC. A job left at RECORDING has no
     buffer to resume, so without this the page shows a card counting down that never clears -- and,
     worse, the single-flight index still matches that row, so EVERY future capture on the stack is
     refused with nothing to point at. Nothing errors; the feature is simply dead until somebody
     finds the row by hand.
+
+    WHICH IS WHY THE OUTCOME IS RETURNED RATHER THAN ONLY LOGGED. This used to be called exactly
+    once, before the MQTT loop, and swallow its own failure -- so a Supabase that was not up yet
+    left capture dead for the life of the process with a single ERROR line to show for it. That is
+    not hypothetical: on a Docker daemon restart the containers come back in an order `depends_on`
+    has no say over, and this lost that race. ingestion.py's startup healer retries until this
+    returns True, and the boolean is how it knows.
+
+    IDEMPOTENT, so retrying costs nothing: sweeping an empty set of abandoned jobs is a no-op.
     """
     try:
         res = supabase.rpc("ingest_reconcile_capture_jobs", {}).execute()
@@ -513,16 +522,20 @@ def reconcile(supabase):
                 "Capture: %d job(s) were left in flight by a previous run and have been failed. "
                 "Their recordings did not survive the restart.", swept,
             )
+        return True
     except Exception as err:
         logger.error(
             "Capture: startup reconciliation failed: %s. A job abandoned by a restart would block "
             "every future capture, so this is worth fixing rather than ignoring.", err,
         )
+        return False
 
 
 def start(supabase, rebirth=None):
     """
-    Run the capture worker. `rebirth(group, edge_node) -> bool` requests a birth certificate.
+    Run the capture worker. Returns True if startup reconciliation ran.
+
+    `rebirth(group, edge_node) -> bool` requests a birth certificate.
 
     PASSED IN RATHER THAN IMPORTED. ingestion.py imports this module, so reaching back for
     `request_node_rebirth` would be a cycle -- and the callable keeps this module testable without
@@ -532,10 +545,13 @@ def start(supabase, rebirth=None):
     _supabase = supabase
     _storage = _storage_client()
     _rebirth = rebirth
-    reconcile(supabase)
+    reconciled = reconcile(supabase)
     threading.Thread(target=_loop, name="capture-worker", daemon=True).start()
     logger.info(
         "Capture worker running: polling for queued jobs every %.0fs, reporting progress every "
         "%.0fs, uploading to the %s bucket.",
         POLL_INTERVAL_SECONDS, PROGRESS_INTERVAL_SECONDS, BUCKET,
     )
+    # The worker starts either way: it polls for NEW jobs, which is useful even while the abandoned
+    # ones are still unswept. The caller retries the sweep.
+    return reconciled

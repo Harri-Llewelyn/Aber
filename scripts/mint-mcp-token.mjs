@@ -236,10 +236,21 @@ if (asJson) {
     )
   );
   console.error(`\n# read-only principal ${SUBJECT}, valid until ${until} (jti ${jti})`);
-  console.error('# recorded in the Digital Thread as TOKEN_MINTED; it cannot be revoked before it expires');
+  console.error('# recorded in the Digital Thread as TOKEN_MINTED; revoke with revoke_service_token');
 } else {
   console.log(token);
   console.error(`\n# read-only principal ${SUBJECT} (Operator), valid until ${until}`);
-  console.error('# Paste as I3X_TOKEN. There is no revocation short of rotating');
-  console.error('# SUPABASE_JWT_SECRET, which invalidates every token in the stack.');
+  // THESE TWO LINES SAID REVOCATION WAS IMPOSSIBLE, AND 0074 MADE THAT FALSE. They read: "There is
+  // no revocation short of rotating SUPABASE_JWT_SECRET, which invalidates every token in the
+  // stack." An operator who believed it would rotate the secret to withdraw one credential and take
+  // the whole stack down with it -- which is why this is corrected at the same time as the
+  // mechanism rather than left for the docs pass.
+  //
+  // THE SCOPE IS PART OF THE MESSAGE. `auth_pre_request()` is a PostgREST hook, so a revoked token
+  // still satisfies storage, realtime, the edge runtime and Studio, each of which verifies the
+  // signature for itself. Printing "revocable" without that qualifier would trade one wrong belief
+  // for another.
+  console.error(`# Paste as I3X_TOKEN. jti ${jti} — revoke it against the API with`);
+  console.error(`# SELECT revoke_service_token('${jti}'); storage, realtime and the edge`);
+  console.error('# functions verify the signature only and will still accept it until it expires.');
 }

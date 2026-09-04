@@ -93,6 +93,71 @@ def ensure_auth_user(cur, user_id, label):
     )
 
 
+def drop_fixture_principals(user_ids):
+    """
+    Remove the identities `ensure_auth_user()` committed, so the suite leaves no principal behind.
+
+    =============================================================================================
+    WHY THIS EXISTS: A FIXTURE THAT COMMITS AND NEVER CLEANS UP IS A PERMANENT ACCOUNT
+
+    Every test method runs in a transaction that `tearDown` rolls back, so the suite has always
+    been clean about the rows it writes DURING a test. `setUpClass` is the exception -- it has to
+    commit, because the fixture must be visible to the fresh connections `setUp` opens -- and
+    nothing undid it. `ensure_auth_user()` inserts `ON CONFLICT (id) DO NOTHING`, which makes
+    re-running the suite harmless and also makes the leak invisible: the second run finds its
+    users already there and says nothing.
+
+    The result on a long-lived stack is machine identities nobody created on purpose, listed on
+    the Access Control page as `Undocumented principal` -- and two of the four found this way held
+    Administrator. They cannot sign in (no password), so this is not a live credential, but the
+    page whose entire job is to enumerate what can reach the stack should not be enumerating
+    fixtures.
+
+    =============================================================================================
+    THE AUDIT ROWS ARE LEFT ALONE, DELIBERATELY, AND THIS COSTS TWO ROWS PER RUN
+
+    Dropping the `user_roles` grants fires `log_role_assignment()`, which writes a ROLE_REVOKED
+    row -- so cleaning up is itself audited, and this teardown ADDS to `digital_thread` rather
+    than subtracting from it.
+
+    Deleting those rows too was considered and refused. The suite connects as `postgres`, which is
+    one of the two roles `enforce_digital_thread_append_only()` lets through, so it is mechanically
+    possible -- and that trigger's own header says why it must not be done here: *"clearing audit
+    rows is an act that should require the same authority as dropping a table."* A test suite that
+    quietly exercises that authority every run is a worse outcome than the noise it removes, and it
+    would establish the precedent that audit history is tidyable by whoever finds it inconvenient.
+
+    So this fixes the LEAKED PRINCIPAL, which is a live-identity problem, and does not pretend to
+    fix audit volume, which is a test-isolation problem and belongs upstream in a database the
+    suite can throw away.
+
+    =============================================================================================
+    ITS OWN CONNECTION, AND FAILURES ARE SWALLOWED
+
+    `tearDownClass` runs after the last test, whose connection is already closed, so there is
+    nothing to borrow. And a teardown that raises masks the real failure with a cleanup error:
+    whatever went wrong in the tests is what the operator needs to read, so this reports and
+    returns.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # ORDER MATTERS ONLY FOR THE AUDIT ROW, not for integrity: `user_roles.user_id` is
+            # `text` and carries no foreign key to `auth.users`, so neither delete constrains the
+            # other. Grants go first so the ROLE_REVOKED row is written while the identity it
+            # names still exists, which is what `changed_by` attribution assumes.
+            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s);",
+                        ([str(u) for u in user_ids],))
+            cur.execute("DELETE FROM auth.users WHERE id = ANY(%s::uuid[]);",
+                        ([str(u) for u in user_ids],))
+        conn.commit()
+    except psycopg2.Error as err:
+        conn.rollback()
+        print(f"warning: could not remove fixture principals {list(user_ids)}: {err}")
+    finally:
+        conn.close()
+
+
 def as_user(cur, user_id):
     """
     Become `authenticated` with a JWT subject, THE WAY PostgREST 12.2 ACTUALLY DOES IT.
@@ -160,6 +225,12 @@ class SystemSettingsRLS(unittest.TestCase):
                     raise RuntimeError(f"fixture user {ADMIN_ID} is not an Administrator: {roles}")
         finally:
             conn.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        # The counterpart to the commit in setUpClass. See drop_fixture_principals() for why the
+        # audit rows this generates are left in place.
+        drop_fixture_principals((ADMIN_ID, OPERATOR_ID))
 
     def setUp(self):
         self.conn = get_connection()

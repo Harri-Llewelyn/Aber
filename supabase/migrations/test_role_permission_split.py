@@ -99,6 +99,41 @@ def ensure_auth_user(cur, user_id, label):
     )
 
 
+def drop_fixture_principals(user_ids):
+    """
+    Remove the identities `ensure_auth_user()` committed, so the suite leaves no principal behind.
+
+    Same helper, and the same reasoning, as test_system_settings_rls.py -- which carries the long
+    form. The short version: `setUpClass` has to COMMIT, because the fixture must be visible to the
+    fresh connections `setUp` opens, and nothing undid that commit. `ON CONFLICT DO NOTHING` then
+    makes the leak invisible on re-runs. What accumulates is machine identities on the Access
+    Control page that nobody created, two of them holding Administrator.
+
+    THE ROLE_REVOKED ROWS THIS WRITES ARE LEFT IN PLACE. Dropping the grants is audited by
+    `log_role_assignment()`, so cleanup adds two rows rather than removing any. Deleting those is
+    possible here (the suite connects as `postgres`) and is refused on purpose:
+    `enforce_digital_thread_append_only()` says clearing audit rows should need the authority of
+    dropping a table, and a suite that quietly uses it every run is worse than the noise.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # `user_roles.user_id` is `text` with no foreign key to `auth.users`, so neither delete
+            # constrains the other. Grants first, so the ROLE_REVOKED row is written while the
+            # identity it names still exists.
+            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s);",
+                        ([str(u) for u in user_ids],))
+            cur.execute("DELETE FROM auth.users WHERE id = ANY(%s::uuid[]);",
+                        ([str(u) for u in user_ids],))
+        conn.commit()
+    except psycopg2.Error as err:
+        # Reported, not raised: a cleanup error must not mask the test failure underneath it.
+        conn.rollback()
+        print(f"warning: could not remove fixture principals {list(user_ids)}: {err}")
+    finally:
+        conn.close()
+
+
 def as_user(cur, user_id):
     """Become `authenticated` with a JWT subject, the way PostgREST 12.2 does it: claims only."""
     cur.execute("SET LOCAL ROLE authenticated;")
@@ -149,6 +184,12 @@ class RoleSplitFixture(unittest.TestCase):
                         raise RuntimeError(f"fixture user {user_id} is not a {expected}: {roles}")
         finally:
             conn.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        # The counterpart to the commit in setUpClass. See drop_fixture_principals() for why the
+        # audit rows this generates are left in place.
+        drop_fixture_principals((ADMIN_ID, MANAGER_ID))
 
     def setUp(self):
         self.conn = get_connection()

@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import ssl
@@ -172,6 +173,24 @@ DB_CONNECT_MAX_ATTEMPTS = int(os.getenv("DB_CONNECT_MAX_ATTEMPTS", "3"))
 DB_CONNECT_BACKOFF_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_SECONDS", "0.25"))
 DB_CONNECT_BACKOFF_MAX_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_MAX_SECONDS", "2.0"))
 
+# Unbounded retry, off the message path, for the connection the daemon is supposed to be holding.
+#
+# WHY THIS EXISTS, AND WHY IT IS SEPARATE FROM THE THREE ATTEMPTS ABOVE. Those run on the paho
+# callback thread and are deliberately mean, because that thread is shared by the whole fleet. This
+# one runs on a thread of its own with nothing waiting on it, so it can afford to be patient -- and
+# it has to be, because the fault it exists for is a dependency that is not up YET rather than one
+# that has gone away. `restart: always` brings containers back in whatever order the Docker daemon
+# chooses, and `depends_on` does not apply on that path; measured on this stack, ingestion started
+# 453ms before timescaledb and lost the race.
+#
+# The interval is generous on purpose. Nothing is being dropped while this waits -- an idle daemon
+# with no connection is not losing telemetry, it simply has nothing to write -- so a tight loop
+# would buy nothing and log a great deal.
+DB_HEAL_INTERVAL_SECONDS = float(os.getenv("DB_HEAL_INTERVAL_SECONDS", "30"))
+# Bounded so the healer's period is its own, rather than whatever the OS decides a dead TCP peer
+# is worth. psycopg2's default is the kernel's, which can be minutes.
+DB_HEAL_CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_HEAL_CONNECT_TIMEOUT_SECONDS", "10"))
+
 # -----------------------------------------------------------------------------
 # Payload conformance auditing
 # -----------------------------------------------------------------------------
@@ -259,6 +278,26 @@ except Exception as e:
 # -----------------------------------------------------------------------------
 _ts_conn = None
 
+# THE ONE-WRITER PROPERTY IS UNCHANGED; WHAT THIS GUARDS IS THE VARIABLE, NOT THE CONNECTION.
+#
+# get_timescaledb_connection() documents that the module-level global is safe because every write
+# happens on the paho callback thread, and names a second thread as the thing to revisit first. The
+# healer below IS that second thread, so here is the revisit.
+#
+# It is still one writer. The healer never executes a statement: it OPENS a connection and hands it
+# over, and every cursor is still created on the callback thread. psycopg2 is threadsafety 2 --
+# connections may be shared between threads, cursors may not -- so that hand-off is supported by
+# the driver. What is not safe without this lock is two threads assigning `_ts_conn` at once, which
+# would leak whichever connection lost, and that is all this exists for.
+#
+# THE LOCK IS NEVER HELD ACROSS A CONNECT ATTEMPT BY THE HEALER, which is the rule that keeps it
+# from mattering on the message path. The healer connects into a local with the lock released and
+# takes it only to publish the result -- microseconds -- so a message arriving mid-heal is never
+# made to wait on a network round trip. The callback thread, by contrast, does hold it across its
+# own bounded retry, exactly as it did when the global was unguarded; the healer waits instead,
+# which costs nothing.
+_ts_conn_lock = threading.RLock()
+
 
 def _open_timescaledb_connection():
     """One connection attempt. Split out so the retry loop below stays readable."""
@@ -299,18 +338,23 @@ def _is_authentication_failure(err):
     return "password authentication failed" in text or "no password supplied" in text
 
 
-def _connect_timescaledb():
+def _connect_timescaledb(connect_timeout=None):
     """
     One connection attempt, with the exception left to the caller.
 
     Separate from get_timescaledb_connection() because that function's contract is to absorb
     failures and return None -- which is right on the message path and useless at startup, where
     the DIFFERENCE between failures is the whole question.
+
+    `connect_timeout` is for the healer and defaults to absent, which leaves startup behaving
+    exactly as it did: the kernel's timeout. Passing it as a keyword alongside a DSN is supported --
+    libpq merges the two, with the keyword winning.
     """
+    kwargs = {} if connect_timeout is None else {"connect_timeout": connect_timeout}
     if TIMESCALEDB_URL:
-        return psycopg2.connect(TIMESCALEDB_URL)
+        return psycopg2.connect(TIMESCALEDB_URL, **kwargs)
     return psycopg2.connect(
-        host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD
+        host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, **kwargs
     )
 
 
@@ -398,47 +442,53 @@ def get_timescaledb_connection():
     runs on the callback thread shared by the whole fleet, so a generous retry would stall every
     other device's messages behind one unreachable database. Three attempts over well under a
     second is the compromise: it absorbs a restart without becoming a stall.
+
+    THE LOCK DOES NOT MAKE THIS CONCURRENT, and is not an invitation to make it so. It serialises
+    assignment to `_ts_conn` against the healer thread, which opens connections and never uses
+    them; see the note on `_ts_conn_lock`. Cursors are still created on one thread only, which is
+    the property psycopg2 actually requires.
     """
     global _ts_conn
 
-    if _ts_conn is not None and _ts_conn.closed == 0:
-        return _ts_conn
-
-    if _ts_conn is not None:
-        # Closed on this side. Say so rather than reconnecting silently -- a connection that keeps
-        # having to be re-opened is a symptom worth seeing in the log.
-        logger.info("TimescaleDB connection was closed; re-opening.")
-        count("db_reconnects")
-        _ts_conn = None
-
-    delay = DB_CONNECT_BACKOFF_SECONDS
-    for attempt in range(1, DB_CONNECT_MAX_ATTEMPTS + 1):
-        try:
-            _ts_conn = _open_timescaledb_connection()
-            if attempt > 1:
-                logger.info("Connected to TimescaleDB on attempt %d.", attempt)
-            else:
-                logger.info("Connected to TimescaleDB successfully.")
+    with _ts_conn_lock:
+        if _ts_conn is not None and _ts_conn.closed == 0:
             return _ts_conn
-        except Exception as e:
-            count("db_connect_failures")
-            if attempt == DB_CONNECT_MAX_ATTEMPTS:
-                # Final failure. The caller drops the message; the counter is what makes that
-                # loss visible without reading the log.
-                logger.warning(
-                    "TimescaleDB connection failed after %d attempt(s): %s. Telemetry for this "
-                    "message is dropped; the next message retries.",
-                    DB_CONNECT_MAX_ATTEMPTS, e
-                )
-                _ts_conn = None
-                return None
 
-            logger.warning(
-                "TimescaleDB connection attempt %d/%d failed: %s. Retrying in %.2fs.",
-                attempt, DB_CONNECT_MAX_ATTEMPTS, e, delay
-            )
-            time.sleep(delay)
-            delay = min(delay * 2, DB_CONNECT_BACKOFF_MAX_SECONDS)
+        if _ts_conn is not None:
+            # Closed on this side. Say so rather than reconnecting silently -- a connection that
+            # keeps having to be re-opened is a symptom worth seeing in the log.
+            logger.info("TimescaleDB connection was closed; re-opening.")
+            count("db_reconnects")
+            _ts_conn = None
+
+        delay = DB_CONNECT_BACKOFF_SECONDS
+        for attempt in range(1, DB_CONNECT_MAX_ATTEMPTS + 1):
+            try:
+                _ts_conn = _open_timescaledb_connection()
+                if attempt > 1:
+                    logger.info("Connected to TimescaleDB on attempt %d.", attempt)
+                else:
+                    logger.info("Connected to TimescaleDB successfully.")
+                return _ts_conn
+            except Exception as e:
+                count("db_connect_failures")
+                if attempt == DB_CONNECT_MAX_ATTEMPTS:
+                    # Final failure. The caller drops the message; the counter is what makes that
+                    # loss visible without reading the log.
+                    logger.warning(
+                        "TimescaleDB connection failed after %d attempt(s): %s. Telemetry for "
+                        "this message is dropped; the next message retries.",
+                        DB_CONNECT_MAX_ATTEMPTS, e
+                    )
+                    _ts_conn = None
+                    return None
+
+                logger.warning(
+                    "TimescaleDB connection attempt %d/%d failed: %s. Retrying in %.2fs.",
+                    attempt, DB_CONNECT_MAX_ATTEMPTS, e, delay
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, DB_CONNECT_BACKOFF_MAX_SECONDS)
 
     return None
 
@@ -3680,6 +3730,175 @@ def start_stats_reporter():
     logger.info("Throughput counters reporting every %ss", INGESTION_STATS_INTERVAL)
 
 
+class _HealState:
+    """
+    What the startup healer still owes, carried between passes.
+
+    A CLASS RATHER THAN CLOSURE VARIABLES so that one pass is callable on its own. The loop is
+    otherwise only reachable through a thread with a sleep in it, which makes the interesting
+    behaviour -- the race with the callback thread, the one-shot privilege check, the retry that
+    stops retrying -- testable only by timing, and that is how a healer becomes a flaky test.
+    """
+
+    def __init__(self, check_privileges=False, reconcile_capture=False):
+        self.privileges_checked = not check_privileges
+        self.capture_reconciled = not reconcile_capture
+        # Logged once per outage rather than once per attempt: a historian down for an hour is one
+        # event, and 120 identical WARNING lines would bury the one that says it came back.
+        self.reported_down = False
+
+    @property
+    def settled(self):
+        """True when nothing deferred is outstanding. The loop keeps running anyway; see below."""
+        return self.privileges_checked and self.capture_reconciled
+
+
+def _heal_pass(state, supabase=None):
+    """
+    One iteration of the startup recovery loop. Mutates `state`; returns the usable connection.
+
+    See start_startup_healer() for why any of this exists.
+    """
+    global _ts_conn
+
+    # SUPABASE, NOT THE HISTORIAN, and first because it depends on neither the connection below nor
+    # its outcome -- reconciliation can succeed on a stack whose historian is still down, and
+    # should. The two startup steps this loop owes have different dependencies, so a single "is the
+    # database up" flag would tie the recovery of one to the availability of the other.
+    if not state.capture_reconciled and supabase is not None:
+        if capture_worker.reconcile(supabase):
+            logger.info(
+                "Capture reconciliation succeeded on retry; the sweep skipped at startup has now "
+                "run, and captures are no longer blocked by a job a restart abandoned."
+            )
+            state.capture_reconciled = True
+
+    conn = _ts_conn
+    if conn is None or conn.closed != 0:
+        # CONNECTED WITH THE LOCK RELEASED. Holding it across a network round trip would put the
+        # whole fleet behind an unreachable database on the next message; see the note on
+        # `_ts_conn_lock`. The window that opens is that the callback thread may connect first,
+        # which is resolved below by discarding this one rather than by excluding it.
+        try:
+            fresh = _connect_timescaledb(connect_timeout=DB_HEAL_CONNECT_TIMEOUT_SECONDS)
+        except Exception as err:
+            # NOT `db_connect_failures`. That counter means a message needed the historian and did
+            # not get it, which is telemetry dropped -- and the alerting reads it that way. This
+            # drops nothing: it is a daemon with no traffic waiting for a database.
+            count("db_heal_failures")
+            if not state.reported_down:
+                logger.warning(
+                    "Historian not reachable from the recovery loop: %s. Retrying every %.0fs. "
+                    "Nothing is being dropped by this on its own -- a message arriving meanwhile "
+                    "takes its own retry path.",
+                    err, DB_HEAL_INTERVAL_SECONDS,
+                )
+                state.reported_down = True
+            return None
+
+        redundant = None
+        with _ts_conn_lock:
+            if _ts_conn is not None and _ts_conn.closed == 0:
+                # The callback thread got there first, so its connection is the one in use and this
+                # one is closed rather than leaked. Losing this race is the normal case on a busy
+                # stack and is not worth a log line.
+                redundant, conn = fresh, _ts_conn
+            else:
+                _ts_conn = conn = fresh
+                count("db_heals")
+                logger.info(
+                    "Historian connection recovered by the startup recovery loop; "
+                    "acs_ingestion_db_connected now reads 1."
+                )
+        if redundant is not None:
+            redundant.close()
+
+    state.reported_down = False
+
+    # ON THE HEALED CONNECTION, because that is the connection whose privileges matter. It is the
+    # check main() skipped when the startup connect failed, so without it a daemon that lost the
+    # ordering race runs unverified against a historian it may hold superuser on -- and the
+    # security model's "append-only historian writes" would again be a claim nothing enforces.
+    if not state.privileges_checked and conn is not None:
+        try:
+            _assert_historian_is_least_privilege(conn)
+        except SystemExit:
+            # A DAEMON THREAD SWALLOWS SystemExit: it unwinds this thread and leaves the process
+            # running, which would turn a deliberate refusal to start into a warning nobody sees.
+            # The refusal has to reach the process, and os._exit is what does so from here without
+            # some handler elsewhere choosing to ignore it. The assertion has already logged why.
+            logging.shutdown()
+            os._exit(1)
+        state.privileges_checked = True
+
+    return conn
+
+
+def _heal_loop(state, supabase=None):
+    """The sleep around _heal_pass(). Separate so that one pass can be tested without a thread."""
+    while True:
+        time.sleep(DB_HEAL_INTERVAL_SECONDS)
+        try:
+            _heal_pass(state, supabase)
+        except Exception as exc:  # noqa: BLE001 - a recovery loop must never stop ingestion
+            logger.warning("Startup recovery pass failed: %s", exc)
+
+
+def start_startup_healer(supabase=None, check_privileges=False, reconcile_capture=False):
+    """
+    Retry, off the message path, the startup work a dependency that was not up yet prevented.
+
+    ===============================================================================================
+    THE FAULT THIS EXISTS FOR. `depends_on` orders `docker compose up` and NOTHING ELSE. When the
+    Docker daemon brings `restart: always` containers back -- a host reboot, a Docker Desktop
+    restart -- it starts them in an order of its own choosing and the dependency graph does not
+    apply. Measured on this stack:
+
+        acs-cymru_ingestion    started 20:08:52.370   restarts=0   policy=always
+        acs-cymru_timescaledb  started 20:08:52.823   restarts=0   policy=always
+
+    Ingestion won by 453ms, so `_connect_timescaledb()` met a refused connection and the daemon
+    entered its MQTT loop having done none of the startup work that needed a database.
+
+    ===============================================================================================
+    AND NOTHING RETRIED IT, WHICH IS THE ACTUAL DEFECT. Two consequences, both silent:
+
+    1. `_ts_conn` was never set, and only a WRITE sets it. On a stack with nothing publishing there
+       is no first write, so the connection was never opened and `acs_ingestion_db_connected` read
+       0 indefinitely -- firing `Historian Unreachable From Ingestion` against a historian that was
+       reachable the whole time and dropping no telemetry, because there was none to drop. Keeping
+       the startup connection instead of discarding it fixed the case where that connection
+       SUCCEEDS; this is the case where it fails.
+
+    2. capture_worker.reconcile() ran once and lost, and its own docstring calls that failure total
+       rather than cosmetic: a job left at RECORDING still matches the single-flight index, so
+       every future capture on the stack is refused with nothing to point at. That one is worse
+       than the alert, and it is invisible until somebody presses the button.
+
+    Note that those have DIFFERENT dependencies -- the historian for one, Supabase for the other --
+    so they are retried independently rather than behind a single "is the database up" flag.
+
+    ===============================================================================================
+    THIS THREAD DOES NOT EXIT once the deferred work is done, and that is deliberate. `_ts_conn` is
+    also cleared by a write that fails, so a database restart on a quiet stack leaves the gauge at
+    0 until traffic resumes -- the same false alarm arriving by a different road. Staying resident
+    means the gauge answers "can this daemon reach the historian" at all times rather than "has a
+    write succeeded since boot", which is what its own HELP text claims and what the alert reads it
+    as. The cost is one thread asleep for DB_HEAL_INTERVAL_SECONDS at a time.
+    """
+    threading.Thread(
+        target=_heal_loop,
+        args=(_HealState(check_privileges, reconcile_capture), supabase),
+        name="startup-healer",
+        daemon=True,
+    ).start()
+    logger.info(
+        "Startup recovery loop running every %.0fs (historian connection%s%s).",
+        DB_HEAL_INTERVAL_SECONDS,
+        ", deferred privilege check" if check_privileges else "",
+        ", deferred capture reconciliation" if reconcile_capture else "",
+    )
+
 def start_metrics_endpoint():
     """
     Serve the counter registry in Prometheus exposition format (issues #22 and #24).
@@ -3789,8 +4008,14 @@ def main():
         # dropped by the server still reports `closed == 0`; that is the documented gap the caller's
         # exception handler covers, and it is why `acs_ingestion_db_connect_failures_total` rising
         # while this gauge reads 1 remains the shape of a server-side drop.
+        #
+        # AND IT ONLY COVERS THE BOOT WHERE THIS CONNECT SUCCEEDS, which is the half that was
+        # missed: when the historian is not up yet, `_startup_conn` is None, this block does not
+        # run, and the gauge is back to reading 0 for ever on a quiet stack. start_startup_healer()
+        # below is the other half.
         global _ts_conn
-        _ts_conn = _startup_conn
+        with _ts_conn_lock:
+            _ts_conn = _startup_conn
     if supabase_client is None:
         logger.critical(
             "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL, "
@@ -3843,12 +4068,23 @@ def main():
     # reaching back for this would be a cycle.
     # Also after the client exists, for the same reason: it publishes.
     start_rebirth_poller(client)
-    capture_worker.start(
+    capture_reconciled = capture_worker.start(
         supabase_client,
         # force=True: see request_node_rebirth(). A capture is one button press, single-flight
         # across the stack, and worthless without the birth certificate it opens by asking for.
         rebirth=lambda group_id, edge_node_id: request_node_rebirth(
             client, group_id, edge_node_id, force=True),
+    )
+
+    # LAST OF THE BACKGROUND THREADS, because it needs to know what the ones above did not manage.
+    # Both flags are the outcome of a startup step that a dependency which was not up yet could
+    # have prevented, and each is retried until it succeeds; see the function for the ordering race
+    # that makes that necessary. On a stack that came up cleanly both are False and this thread
+    # only keeps the historian gauge honest.
+    start_startup_healer(
+        supabase=supabase_client,
+        check_privileges=_startup_conn is None,
+        reconcile_capture=not capture_reconciled,
     )
 
     while True:
