@@ -142,6 +142,14 @@ python supabase/migrations/test_digital_thread_paging.py
 # it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
 # dead code rather than the thing deciding deliveries.
 python supabase/migrations/test_playback_credential_delivery.py
+# The monthly partitioning of digital_thread (0079). THE INTERESTING TESTS ARE THE BORING ONES:
+# converting a populated table to partitioned means rebuilding by hand every object PostgreSQL
+# does not carry across -- the primary key, the FK, three indexes, two triggers, RLS and its two
+# policies, and the ACL -- and a missing ENABLE ROW LEVEL SECURITY would publish the security
+# audit lane to every logged-in user with nothing else in the stack saying so. It also pins the
+# one hole partitioning opens: a partition does not inherit the parent's ACL, gets the image's
+# default grants instead, and TRUNCATE raises no row trigger.
+python supabase/migrations/test_digital_thread_partitioning.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py

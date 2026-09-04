@@ -1037,6 +1037,43 @@ already loaded rather than replacing it — append-only means held rows cannot c
 only belong at the top — and starts again only when the two ranges no longer overlap, which is the
 one case where prepending would splice a hole into the middle of the list.
 
+### A shape that can be pruned (`0079`)
+
+**The table could only grow, and suppression was never going to fix that.** `0005` already removes
+both classes of machine non-event — an UPDATE that changes nothing, and one that moves only
+`gateways.last_heartbeat` — and measured on the shipped stack, fourteen minutes of steady state with
+heartbeats and rebirths flowing added *zero* rows. That bounds the rate of noise and does nothing
+about the total: every row that survives is a real change, every real change is kept forever.
+
+`0079` range-partitions `digital_thread` by month on `recorded_at`, so retiring history is
+`DETACH PARTITION` — instant, barely logged, and leaving the data queryable as a standalone table —
+instead of a `DELETE` that is fully logged, bloats the heap and needs a `VACUUM` afterwards. The
+runbook is in [`deploy/k8s/README.md`](../deploy/k8s/README.md#trimming-the-digital-thread).
+
+**Nothing about who may clear audit rows changes.** `0003` already settles it: the append-only
+trigger exempts `postgres` and `supabase_admin` and refuses everyone else, on the stated grounds
+that a trigger cannot constrain a role that can issue DDL. Pruning as an owner was always
+sanctioned; what was missing was a shape that made it cheap.
+
+**There is a DEFAULT partition, which the plan did not call for, and it is the important decision.**
+A range-partitioned table refuses a row no partition accepts — and because the audit INSERT is a
+trigger on `cells`, `gateways` and `devices`, a refused audit row **fails the asset write that
+caused it**. "Create partitions ahead of need and alert if the next is missing" makes that outage
+less likely without making it less severe: the alert fires at the moment the platform stops
+accepting writes. The default partition turns the whole failure class into a slow, observable
+degradation instead, and `digital_thread_partition_health` is what observes it. A daily `pg_cron`
+job keeps three months of headroom, so the default stays empty in every state that has not already
+gone wrong.
+
+**A partition does not inherit the parent's ACL, and the default it gets instead is wrong.** The
+first conversion produced `digital_thread` as `service_role=rxtm` — correct — beside
+`digital_thread_2026_09` as `service_role=arwdDxtm`, which is everything, from the image's default
+privileges. The append-only trigger covers a direct `DELETE`, because a row trigger on the parent
+fires for every partition; **`TRUNCATE` is not a row operation and raises no trigger at all**, so a
+month of audit history was erasable through a table name as a role the platform hands out.
+`secure_digital_thread_partition()` strips every application-role privilege at both creation
+sites — the conversion and the monthly job — because otherwise the hole reopens every month.
+
 ---
 
 ## Machine Identities

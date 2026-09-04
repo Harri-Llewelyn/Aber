@@ -781,6 +781,90 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
+      # 3c. THE AUDIT TABLE'S PARTITIONS FALLING BEHIND -- a maintenance failure, caught before it
+      # becomes a data one.
+      #
+      # 0079 range-partitions `digital_thread` by month so retention is DETACH rather than DELETE,
+      # and a pg_cron job keeps three months of partitions ahead of the writes. A cron job that
+      # stops is SILENT -- 0025's own header says so, and there is no log line and nothing in the UI.
+      #
+      # THE DEFAULT PARTITION IS WHY THIS IS A WARNING AND NOT A CRITICAL. Without one, a month with
+      # no partition would refuse every audit INSERT, and because the audit write is a trigger on
+      # cells/gateways/devices that refusal FAILS THE ASSET WRITE -- nobody could create a device or
+      # approve a quarantine. 0079 keeps a default partition precisely so that outage cannot happen,
+      # which turns "the job died" from a stopped line into an untidiness. This rule is what makes
+      # the untidiness visible, and it is the only thing that does.
+      #
+      # `default_rows > 0` IS THE CONDITION, not "is the next partition missing". A missing partition
+      # is harmless while the default absorbs it; what is not harmless is a row sitting in the
+      # default, because retention works by detaching a month and a row filed outside its month is
+      # never detached with it. So this fires on the consequence rather than on the cause, and stays
+      # quiet for a stack that is merely close to the edge.
+      #
+      # `for: 30m` because the repair is automatic and daily: the job runs at 03:20, and a single
+      # evaluation catching the minutes between a partition boundary and the next run would be noise.
+      # A row still in the default half an hour later is a job that did not run.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-digital-thread-partitions
+        title: Digital Thread Partitions Falling Behind
+        condition: C
+        for: 30m
+        # OK rather than NoData: the view always returns exactly one row, so an empty frame here
+        # means the datasource is broken, which the Grafana datasource health check owns.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            {{ printf "%.0f" $values.B.Value }} audit row(s) have landed in the digital_thread
+            DEFAULT partition, so the monthly partition job has stopped. Nothing is lost and
+            nothing is refused, but retention by DETACH will skip these rows. Run
+            SELECT public.ensure_digital_thread_partitions(3); and check cron.job_run_details.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT now()        AS "time",
+                       default_rows AS default_partition_rows
+                  FROM public.digital_thread_partition_health
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
       # 4. HISTORIAN UNREACHABLE, WITH TELEMETRY ARRIVING.
       #
       # BOTH HALVES, AND THE SECOND IS WHAT MAKES THE SUMMARY TRUE. This rule used to read the gauge

@@ -812,6 +812,76 @@ RWO permits several pods only within one node, so without it the Job schedules e
 is also why it is off by default — a backup that silently stops running is worse than one never
 enabled.
 
+### Trimming the Digital Thread
+
+`public.digital_thread` is range-partitioned by month on `recorded_at` (`0079`), so history is
+retired by **detaching a partition**, not by deleting rows. That distinction is the whole point:
+`DELETE` over a large audit table is fully logged, bloats the heap and needs a `VACUUM` afterwards,
+while `DETACH` is instant, writes almost nothing, and leaves the data queryable as a standalone
+table you can inspect before it is destroyed.
+
+**A pg_cron job keeps three months of partitions ahead of the writes** (`digital_thread_partitions`,
+daily at 03:20). Nothing routine is required of you. There is also a DEFAULT partition, so a lapsed
+job cannot refuse an audit write — which matters more than it sounds, because the audit INSERT is a
+trigger on `cells`, `gateways` and `devices`: a refused audit row fails **the asset write that
+caused it**, and the operator sees "cannot create device" with the audit table named in the error.
+
+Check the state before doing anything:
+
+```sql
+SELECT * FROM public.digital_thread_partition_health;
+--  partition_count | default_rows |     covered_until
+-- -----------------+--------------+------------------------
+--               28 |            0 | 2027-01-01 00:00:00+00
+```
+
+`default_rows` must be **0**. Anything else means the job has stopped and rows are landing outside
+their month — they are not lost, but they will not be detached with the month they belong to. The
+Grafana rule *Digital Thread Partitions Falling Behind* watches exactly this. Repair it with:
+
+```sql
+SELECT public.ensure_digital_thread_partitions(3);
+SELECT j.jobname, d.status, d.return_message, d.start_time
+  FROM cron.job_run_details d JOIN cron.job j USING (jobid)
+ WHERE j.jobname = 'digital_thread_partitions' ORDER BY d.start_time DESC LIMIT 5;
+```
+
+Rows already in the default partition stay there. Moving them means an owner-level
+`INSERT ... SELECT` into the parent followed by a `DELETE` from the default — both permitted for
+`postgres`, neither permitted for anything else, and neither necessary unless you are about to
+detach that month.
+
+#### Detach, verify, drop
+
+**Retire a month in three steps, and do not collapse them into one.** The detached table is your
+only chance to check the archive before the data stops existing.
+
+```bash
+# 1. DETACH -- instant, and reversible with ATTACH until you drop it.
+kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.digital_thread DETACH PARTITION public.digital_thread_2026_03;"
+
+# 2. VERIFY -- copy it out, then confirm the object exists and is the size you expect.
+kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.digital_thread_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
+#    ...then move it off the pod and into wherever your retained audit lives.
+
+# 3. DROP -- only once step 2's artefact has been checked.
+kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.digital_thread_2026_03;"
+```
+
+> **`DETACH` alone does not free any space.** The table is still there, still on the PVC, just no
+> longer part of the parent. If you detached to reclaim a full disk, nothing changes until step 3 —
+> and a detached partition is invisible to `SELECT ... FROM digital_thread`, so it is easy to
+> believe the space was recovered.
+
+**Clearing audit rows requires an owner connection, and that is deliberate.** `0003`'s append-only
+trigger exempts `postgres` and `supabase_admin` and nobody else, on the stated grounds that a
+trigger cannot constrain a role that can issue DDL — so retiring history should require the same
+authority as dropping a table. `service_role` cannot do any of the above, and since `0079` it
+cannot reach the partitions directly either.
+
+**Keep the online window generous.** Twenty-four months costs little on any realistic volume, and
+the rarer this procedure is, the more likely it is to be performed carefully.
+
 ### Self-monitoring
 
 Requires the **Prometheus Operator CRDs** first; `ServiceMonitor` is not a core type, so with them

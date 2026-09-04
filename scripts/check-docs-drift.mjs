@@ -781,6 +781,24 @@ function edgeFunctionNames() {
       + 'connection, never over PostgREST. The browser reads the same facts from `gateways` and '
       + '`gateway_status` with RLS applied, which is why publishing a second, RLS-free path to '
       + 'them would be a downgrade rather than a convenience',
+  digital_thread_partition_health:
+      'Partition counts and default-partition depth for the audit table (0079), granted to '
+      + '`grafana_reader` alone and revoked from anon/authenticated -- the same arrangement as '
+      + 'platform_health and storage_footprint above. It is read by the Grafana `supabase` '
+      + 'datasource over a direct connection so an alert can see that the monthly partition job '
+      + 'has stopped, and it counts audit rows: a published path would be a way to size the '
+      + 'security lane without holding digital_thread:read',
+  digital_thread_default:
+      'The DEFAULT partition of digital_thread (0079), which exists so that a lapsed partition '
+      + 'job degrades instead of refusing every audit write -- and therefore every asset write, '
+      + 'since the audit INSERT is a trigger on cells/gateways/devices. Not an endpoint in its '
+      + 'own right: readers use the parent, where the RLS policies are, and 0079 revokes every '
+      + 'application-role privilege on partitions precisely so that this name is unreachable',
+  digital_thread_partitioned:
+      'SCAFFOLDING, AND IT DOES NOT OUTLIVE ITS OWN TRANSACTION. 0079 builds the partitioned '
+      + 'table under this name, copies into it, then renames it to digital_thread inside one DO '
+      + 'block -- so no database ever has a relation called this. Listed only because this check '
+      + 'reads CREATE statements out of the migration text rather than the live catalogue',
   one_shot_migrations:
       'The ledger for migrations that must run EXACTLY ONCE rather than on every boot like the '
       + 'rest of the chain (0040). RLS on with no policy at all and the anon/authenticated grants '
