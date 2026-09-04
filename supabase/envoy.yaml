@@ -2,18 +2,22 @@
 # Envoy gateway -- a translation of supabase/kong.yml, route for route.
 #
 # THIS IS A TEMPLATE, NOT A CONFIG. `__SUPABASE_ANON_KEY__`, `__SUPABASE_SERVICE_ROLE_KEY__`,
-# `__REALTIME_UPSTREAM_HOST__` and `__CORS_ORIGINS__` are substituted at boot by
-# `supabase-envoy-init`, exactly as `supabase-kong-init` does for kong.yml. A real key committed
-# here would be a leaked key, not a config change -- which is why
-# scripts/check-gateway-surface.mjs asserts the placeholders are still placeholders.
+# `__REALTIME_UPSTREAM_HOST__`, `__REALTIME_UPSTREAM_ADDRESS__`, `__CORS_ORIGINS__`,
+# `__SUPABASE_PUBLIC_URL__`, `__STUDIO_PUBLIC_URL__`, `__STUDIO_UPSTREAM_ADDRESS__` and
+# `__SUPABASE_JWT_SECRET_B64URL__` are substituted at boot by `supabase-envoy-init`, exactly as
+# `supabase-kong-init` did for kong.yml. A real key committed here would be a leaked key, not a
+# config change -- which is why scripts/check-gateway-surface.mjs asserts the placeholders are
+# still placeholders. BOTH TARGETS substitute this file and both scan for leftovers, so a
+# placeholder added here has to be taught to the init in docker-compose.yml AND the one in
+# deploy/helm/acs-cymru/templates/supabase/envoy.yaml, or the chart's gateway will not boot.
 #
 # -------------------------------------------------------------------------------------------------
-# WHAT THIS IS FOR, AND WHAT IT IS NOT YET
+# WHAT THIS IS FOR
 #
-# It runs BESIDE Kong on a second port so the two can be probed against each other --
-# `check-gateway-surface.mjs --runtime` against 54321 and against 54331 must report the same
-# posture before Envoy becomes primary. It is not wired into `docker-compose.yml`; it arrives
-# through `docker-compose.envoy.yml`.
+# It is the gateway on both targets. It arrived beside Kong on a second port so the two could be
+# probed against each other -- `check-gateway-surface.mjs --runtime` against both must report the
+# same posture -- and that protocol, in docs/gateway-migration.md, is still what governs a change
+# to this file or to the Envoy version.
 #
 # -------------------------------------------------------------------------------------------------
 # THE FIVE TRANSLATION TRAPS, each of which produces a stack that looks fine and is not:
@@ -50,6 +54,15 @@
 # would not be a translation, it would be new exposure, and `--runtime` could not catch it: that
 # mode asserts the posture of routes in the inventory and cannot report a route nobody declared.
 # =================================================================================================
+
+# REQUIRED BY SDS, and by nothing else here. Envoy refuses to start any secret discovery source
+# without a node identity -- `GenericSecretSdsApi: node 'id' and 'cluster' are required` -- and the
+# studio listener's client secret and cookie key are both SDS. The values are labels for a
+# management server this stack does not run, so they identify rather than configure; setting them
+# here keeps both targets' start commands unchanged.
+node:
+  id: acs-cymru-gateway
+  cluster: acs-cymru
 
 admin:
   # INTERNAL ONLY, matching KONG_STATUS_LISTEN's treatment: no `ports:` entry publishes 9901.
@@ -420,6 +433,160 @@ static_resources:
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
+    # ===========================================================================================
+    # THE STUDIO LISTENER. A SECOND DOOR, DELIBERATELY NOT A ROUTE ON THE ONE ABOVE.
+    #
+    # Supabase Studio has no authentication of its own -- no login, no roles, no session -- and
+    # runs as the database owner, for whom RLS is not enforced. This listener is the login it
+    # does not have: an OAuth 2.1 authorization-code flow against this stack's own GoTrue, a
+    # session cookie, and an `Administrator` check before anything reaches it.
+    #
+    # WHY NOT PORT 8000. Every machine principal in this stack authenticates on the gateway
+    # listener with an API key and no browser. A cookie-session filter anywhere on that path
+    # redirects them to a login screen they cannot complete -- the same reason 0048 keeps
+    # machine identities out of the `aal2` predicates. Two listeners, one process, no shared
+    # filter chain.
+    #
+    # WHAT MAKES THIS DIFFERENT FROM EVERY OTHER OAUTH CLIENT HERE: Grafana and Node-RED are
+    # OAuth clients that read a role from a userinfo edge function, because GoTrue's OIDC claims
+    # carry no `app_metadata`. Envoy does not need one. `custom_access_token_hook` mirrors the
+    # role into the ACCESS token, and this listener verifies that token itself -- so the role
+    # arrives in the request rather than being fetched about it. Do not add a third userinfo
+    # function for this; there is nothing for it to answer.
+    #
+    # THE `openid` SCOPE IS ABSENT AND MUST STAY ABSENT. Requesting it makes GoTrue mint an ID
+    # token, and it refuses: `HS256 is not supported for ID token signing`. This whole stack is
+    # HS256 on a shared secret. grafana.ini carries the same note for the same reason.
+    #
+    # MINIMUM ENVOY 1.34. GoTrue's OAuth server requires PKCE, and the oauth2 filter could not
+    # send it before then. See the pin comments in docker-compose.yml and values.yaml.
+    # ===========================================================================================
+    - name: studio
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8001 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: studio
+                # Studio is a Next.js application and this has NOT been measured against whatever
+                # sockets it opens; the roadmap records that gap. Declared so an upgrade is
+                # answered 101 rather than 426 if it does open one.
+                upgrade_configs:
+                  - upgrade_type: websocket
+                route_config:
+                  name: studio
+                  virtual_hosts:
+                    - name: studio
+                      domains: ["*"]
+                      routes:
+                        # ONE ROUTE, NO EXEMPTIONS. `/api/mcp` is served on this same port -- an
+                        # unauthenticated Supabase MCP server exposing `execute_sql` and
+                        # `apply_migration` as the owner. It is covered here because it is not
+                        # exempted, and that is the intended outcome rather than a side effect:
+                        # an MCP client cannot complete a browser flow, so this removes the
+                        # endpoint rather than merely hiding it. A developer-facing MCP is
+                        # recoverable later, on its own argument and with a credential of its own.
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: studio
+                            # Studio streams long-running queries from the SQL editor; the
+                            # gateway's own routes take the default because nothing behind them
+                            # holds a response open.
+                            timeout: 0s
+                http_filters:
+                  # 1. THE DOOR. Runs the authorization-code flow, holds the cookies, and
+                  #    refreshes without bouncing the user back through consent.
+                  - name: envoy.filters.http.oauth2
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
+                      config:
+                        # THE BROWSER FOLLOWS THIS, so it is the host-facing address; the token
+                        # exchange below is made by Envoy itself and dials the container. Getting
+                        # these the same way round is the classic way this breaks -- grafana.ini
+                        # carries the identical split for the identical reason.
+                        authorization_endpoint: __SUPABASE_PUBLIC_URL__/auth/v1/oauth/authorize
+                        token_endpoint:
+                          cluster: auth-v1
+                          uri: http://supabase-auth:9999/oauth/token
+                          timeout: 10s
+                        redirect_uri: __STUDIO_PUBLIC_URL__/oauth2/callback
+                        redirect_path_matcher: { path: { exact: /oauth2/callback } }
+                        signout_path: { path: { exact: /oauth2/signout } }
+                        # The client is registered `client_secret_basic` (0081). GoTrue enforces
+                        # the registered method exactly and answers 400 invalid_credentials when a
+                        # client uses the other one -- which surfaces to the user as nothing more
+                        # specific than a failed login.
+                        auth_type: BASIC_AUTH
+                        auth_scopes: [email, profile]
+                        # The verified token has to reach the next filter as a header; without
+                        # this the role check below has nothing to read.
+                        forward_bearer_token: true
+                        use_refresh_token: true
+                        credentials:
+                          client_id: c0ffee00-0000-4000-8000-000000000003
+                          # TWO FILES, ONE SECRET EACH. A path config source is expected to carry
+                          # exactly one resource: both secrets in one file is accepted at boot and
+                          # then rejected at runtime with `Unexpected SDS secrets length ...
+                          # number of added resources 2 ... Expected sum is 1`, leaving a listener
+                          # that is up and has no credentials.
+                          token_secret:
+                            name: studio-oauth-client-secret
+                            sds_config:
+                              path_config_source: { path: /etc/envoy/studio-client-secret.yaml }
+                          hmac_secret:
+                            name: studio-proxy-hmac-secret
+                            sds_config:
+                              path_config_source: { path: /etc/envoy/studio-hmac-secret.yaml }
+                  # 2. THE TOKEN. Verifies what GoTrue signed, rather than trusting the cookie the
+                  #    filter above set. `oct` is the JWKS key type for HMAC -- this stack signs
+                  #    with a shared secret, so there is no public key to fetch and no jwks_uri to
+                  #    point at.
+                  #
+                  #    NO ISSUER CHECK, and that is measured rather than lazy: GoTrue's OAuth
+                  #    access token carries no `iss` claim at all, and requiring one refuses every
+                  #    request.
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      providers:
+                        gotrue:
+                          audiences: [authenticated]
+                          local_jwks:
+                            inline_string: '{"keys":[{"kty":"oct","alg":"HS256","k":"__SUPABASE_JWT_SECRET_B64URL__"}]}'
+                          payload_in_metadata: jwt_payload
+                      rules:
+                        - match: { prefix: "/" }
+                          requires: { provider_name: gotrue }
+                  # 3. THE PRIVILEGE. Authenticating is not authorising: every persona in this
+                  #    stack can complete the flow above, and an `Operator` reaching the SQL
+                  #    editor would be a worse outcome than the open port this replaces.
+                  #
+                  #    `sourced_metadata`, not the bare `metadata` principal -- that one is
+                  #    deprecated and warns on boot.
+                  - name: envoy.filters.http.rbac
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                      rules:
+                        action: ALLOW
+                        policies:
+                          administrators:
+                            permissions: [{ any: true }]
+                            principals:
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path:
+                                      - { key: jwt_payload }
+                                      - { key: app_metadata }
+                                      - { key: role }
+                                    value: { string_match: { exact: Administrator } }
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
   # -----------------------------------------------------------------------------------------------
   # Clusters. One per upstream Kong names, and no others -- see "what is deliberately absent".
   #
@@ -492,3 +659,20 @@ static_resources:
               - endpoint:
                   address:
                     socket_address: { address: supabase-functions, port_value: 9000 }
+
+    # NOT ONE OF KONG'S. Studio has never been behind the gateway on either target -- it was a
+    # published port and nothing else. This cluster exists for the studio listener above and is
+    # reachable from nowhere else in this file.
+    #
+    # The ADDRESS is target-specific, exactly as realtime-v1's is: Compose dials the container
+    # `supabase-studio`, and the chart names its own Service.
+    - name: studio
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: studio
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: __STUDIO_UPSTREAM_ADDRESS__, port_value: 3000 }

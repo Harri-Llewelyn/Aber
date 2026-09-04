@@ -2053,6 +2053,44 @@ against the surface rather than against Kong, so it is also the specification th
 > to it. `key-auth` had to be named explicitly or Kong would refuse to start on a config
 > referencing it.
 
+### The second listener, which is Studio's login (`0081`)
+
+**The gateway carries a second listener on `8001`, and everything above describes the first.** They
+share a process and nothing else: no filters, no routes, no credentials. The API listener admits
+machine principals holding an `apikey`; this one admits a person holding a browser session, and the
+separation is the design rather than an implementation detail — a cookie-session filter on the API
+path would redirect every daemon in the stack to a login screen it cannot complete, for the same
+reason `0048` keeps machine identities out of the `aal2` predicates.
+
+Studio has no authentication of its own and connects as the database owner. Three filters supply
+what it lacks:
+
+| Filter | What it does | The thing worth knowing |
+| :--- | :--- | :--- |
+| `oauth2` | Runs the authorization-code flow against this stack's GoTrue and holds the session cookie | Needs **Envoy ≥ 1.34**: GoTrue requires PKCE and the filter could not send it before that release |
+| `jwt_authn` | Verifies the access token GoTrue signed | An **`oct` JWKS** — the HS256 secret, not a public key — and **no issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
+| `rbac` | Requires `app_metadata.role == Administrator` | Reads the claim out of the verified payload; every persona can complete the flow, and only one gets through this |
+
+**`0081` registers the client** — `c0ffee00-…-0003`, the third of the same shape after Grafana
+(`0002`) and Node-RED (archived `0006`) — with `client_secret_basic`, matching the filter's
+`auth_type: BASIC_AUTH`. GoTrue enforces the registered method exactly.
+
+**What differs from the other two clients is that there is no userinfo function, and there must not
+be.** Grafana and Node-RED call one because GoTrue's OIDC claims carry no `app_metadata`;
+`custom_access_token_hook` puts the role in the *access* token, and this listener verifies that
+token itself. The role arrives in the request rather than being fetched about it — one fewer edge
+function, and one fewer round trip per request.
+
+**`openid` is absent from the requested scope and must stay absent.** GoTrue refuses to mint an ID
+token while signing HS256 (`HS256 is not supported for ID token signing`), which is what the whole
+stack signs with; `grafana.ini` carries the same note for the same reason.
+
+**Two operational consequences.** The listener publishes on the port Studio itself used to publish,
+so `0002`'s Directory entry stays true and the container publishes nothing. And both halves fail
+closed: without `STUDIO_OAUTH_CLIENT_SECRET`, `0081` skips the registration with a `WARNING` and the
+substituter renders credentials that cannot authenticate — a stack that runs normally with a console
+nobody can open, which is the same posture as the loopback binding it replaces.
+
 ---
 
 ## Schema Versioning

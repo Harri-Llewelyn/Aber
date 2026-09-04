@@ -185,9 +185,23 @@ this entry was written against the wrong one once already:
 feedback rather than from an audit**
 
 Put an authenticating proxy in front of Supabase Studio, so reaching it costs a Supabase login as an
-`Administrator` rather than a position on the host. **`values.yaml` already asks for this by name** —
-turning the ingress on "belongs with an authenticating proxy in front" — and until one exists, the
-chart's answer and Compose's answer are the same answer: do not let anyone reach it.
+`Administrator` rather than a position on the host.
+
+**THE COMPOSE HALF HAS SHIPPED**, as `0081` and a second listener in
+[`supabase/envoy.yaml`](../supabase/envoy.yaml): the gateway publishes `54323`, runs the browser
+flow, verifies the token and admits `Administrator` only; the Studio container publishes nothing.
+The substance is in
+[The second listener, which is Studio's login](../supabase/README.md#the-second-listener-which-is-studios-login-0081)
+and on the front page. **Three things keep this entry open:**
+
+1. **The chart renders the listener and does not publish it.** `routes.studio` is still `false`, and
+   turning it on is the decision below rather than a follow-up commit — it is the one that puts a
+   database console on a public hostname. The NetworkPolicy between the gateway and Studio has not
+   been written either, because nothing needs it while the route is off.
+2. **Websockets are unmeasured.** `upgrade_configs` is declared and never exercised; nothing here
+   establishes what Studio opens.
+3. **The read-only database role is untouched**, and it is the *privilege* half of this entry rather
+   than the *door* half — see below.
 
 ### The binding is a real control, and it is the only one
 
@@ -391,15 +405,17 @@ change.
 
 ### Worth deciding early
 
-- **Whether the loopback binding survives the proxy.** Publishing both leaves the proxy optional,
-  and an optional control is not one. Unpublish `127.0.0.1:54323` in the same commit that publishes
-  the proxy, or the old door stays open beside the new one.
-- **Whether `routes.studio` flips to `true`.** Not in the same change. The chart's default is
-  currently right because no proxy exists; making it right for a different reason is a second
-  decision, and it is the one that puts a database console on a public hostname.
-- **What the seeded Directory entry says.** `0002` lists Studio at `http://127.0.0.1:54323`, and
-  that URL is wrong the moment the proxy takes the port. The Directory is where people look to find
-  services, so it moves in the same migration that seeds the OAuth client.
+- ~~**Whether the loopback binding survives the proxy.**~~ **Decided and done:** it does not. The
+  Studio container's `ports:` block was removed in the same commit that published the listener,
+  because publishing both would have left the old door open beside the new one.
+- ~~**What the seeded Directory entry says.**~~ **Decided and done, by not moving it.** This entry
+  assumed the Directory row would have to be corrected; the answer was to take over the port instead,
+  so `0002`'s `http://127.0.0.1:54323` is still true and now names a door with a login on it. A
+  migration that edits a row is more expensive than a listener that picks a number.
+- **Whether `routes.studio` flips to `true`.** Still open, and still not in the same change. The
+  chart's default was right because no proxy existed; it is now right for a different reason — that
+  publishing a database console on a public hostname is a decision about exposure rather than about
+  authentication. It brings a NetworkPolicy for gateway→Studio with it.
 - **Whether this waits for 3 or 4.** It does not — and those numbers are Entra sign-in and MFA;
   this bullet cited the old gapped scheme's 20 and 21 until 2026-09-04. Gating on `Administrator`
   adds another Administrator-only check in the direction the token and principal revocation controls

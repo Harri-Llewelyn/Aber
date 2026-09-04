@@ -549,6 +549,13 @@ const TEMPLATE_PLACEHOLDERS = [
   '__REALTIME_UPSTREAM_HOST__',
   '__SUPABASE_ANON_KEY__',
   '__SUPABASE_SERVICE_ROLE_KEY__',
+  // The studio listener's four (0081). The last is the HS256 signing secret as an `oct` JWKS key,
+  // and it is the reason this list is worth reading before adding to it: unlike the two keys
+  // above, it is not a credential the gateway PRESENTS -- it is the one it VERIFIES with.
+  '__SUPABASE_JWT_SECRET_B64URL__',
+  '__SUPABASE_PUBLIC_URL__',
+  '__STUDIO_PUBLIC_URL__',
+  '__STUDIO_UPSTREAM_ADDRESS__',
 ];
 
 const template = read(ENVOY_TEMPLATE);

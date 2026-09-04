@@ -203,6 +203,15 @@ secrets:
   # reopens the authority it was created to withhold.
   grafanaAlertWebhookSecret: ""
 
+  # Studio's door: the OAuth client the gateway authenticates as (hashed into auth.oauth_clients
+  # by 0081) and the key that signs its session cookie. Both empty by default, and that is
+  # consistent rather than an omission -- `routes.studio` is false, so the chart does not publish
+  # the listener these belong to. Set both, then turn that route on, if a deployment wants a
+  # database console behind a login. Empty is FAIL-CLOSED at both ends: the migration skips the
+  # registration and the gateway substitutes credentials that cannot authenticate.
+  studioOAuthClientSecret: ""
+  studioProxyHmacSecret: ""
+
   # The read-only historian role external BI tools connect as -- and the role GRAFANA connects as,
   # replacing the `postgres` superuser it used to hold. Created on the TimescaleDB instance by
   # timescaledb/roles.sql, which the maintenance Job applies after the rollups it grants on.

@@ -192,6 +192,18 @@ const generated = {
   // other credential: it is the whole reason Grafana is not given the service-role key, and a secret
   // reused elsewhere would mean one leak reopens the authority this one exists to withhold.
   GRAFANA_ALERT_WEBHOOK_SECRET: hex(32),
+  // The two halves of Studio's door (0081, and the `studio` listener in supabase/envoy.yaml). The
+  // first is one credential written to two places -- the gateway presents it at GoTrue's token
+  // endpoint, and the migration stores its hash -- so they are read from ONE variable rather than
+  // set twice. The second signs the session cookie the gateway hands the browser, and is nothing
+  // else's: rotating it signs everyone out and grants nobody anything.
+  //
+  // GENERATED RATHER THAN LEFT EMPTY for the same reason as GATEWAY_REVOKE_SECRET above, with the
+  // sign flipped -- unset here does not silently disable a control, it silently disables ACCESS.
+  // The gateway and the migration both fail closed, so an unset pair is a Studio that answers a
+  // login nobody can complete, on a stack that otherwise looks perfectly healthy.
+  STUDIO_OAUTH_CLIENT_SECRET: hex(32),
+  STUDIO_PROXY_HMAC_SECRET: hex(32),
   // The bearer token supabase-functions presents to the gateway-credential service. Its own value
   // for the same reason as the one above: that service can mint a Mosquitto account for any edge
   // node, and mosquitto.acl makes an account the ability to publish telemetry as that gateway --
