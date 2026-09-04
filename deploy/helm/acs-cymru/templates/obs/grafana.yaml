@@ -240,6 +240,7 @@ spec:
           env:
             {{- include "acs-cymru.secretEnv" (dict "name" "GRAFANA_ALERT_WEBHOOK_SECRET" "secretName" $secretName "key" "GRAFANA_ALERT_WEBHOOK_SECRET") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
           command:
             - /bin/sh
             - -e
@@ -249,15 +250,19 @@ spec:
                 echo 'GRAFANA_ALERT_WEBHOOK_SECRET must be set -- Grafana would otherwise provision the alert contact point with an empty bearer token, and grafana-alert-webhook would refuse every notification with 401 while the rules themselves looked healthy.' >&2
                 exit 1
               fi
-              if [ -z "$SUPABASE_ANON_KEY" ]; then
-                echo 'SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past Kong key-auth.' >&2
+              # EITHER FORMAT SATISFIES THIS, and the publishable key wins where both are
+              # set. The contact point needs A credential the gateway accepts, not
+              # specifically the legacy one. Matches the Compose entrypoint exactly.
+              GATEWAY_KEY="${SUPABASE_PUBLISHABLE_KEY:-$SUPABASE_ANON_KEY}"
+              if [ -z "$GATEWAY_KEY" ]; then
+                echo 'SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past the gateway key-auth.' >&2
                 exit 1
               fi
               # Globbed so a rules file added to grafana/provisioning/alerting/ is carried
               # through without editing this line.
               cp /alerting-config/policies.yaml /alerting-config/*alert-rules.yaml /alerting/
               sed -e "s|__GRAFANA_ALERT_WEBHOOK_SECRET__|$GRAFANA_ALERT_WEBHOOK_SECRET|g" \
-                  -e "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" \
+                  -e "s|__SUPABASE_ANON_KEY__|$GATEWAY_KEY|g" \
                   /alerting-config/contact-points.template.yaml > /alerting/contact-points.yaml
               # Comment lines excluded, same as above: the template documents the placeholder
               # convention by name in its own header.

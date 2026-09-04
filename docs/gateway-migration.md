@@ -15,7 +15,8 @@ and — the part that turns a preference into a deadline — the **new `sb_publi
 sees one: the gateway matches the key as a string and synthesises the `Authorization: Bearer <JWT>`
 the upstreams require. Upstream ships that translation in Envoy only. So roadmap §1's key migration,
 whose end date is set by someone else, runs through this work -- and since this work is done, that
-item is unblocked on both targets.
+item is unblocked on both targets. **The translation is now built**: see
+[The two key formats, accepted at once](#3-the-two-key-formats-accepted-at-once).
 
 ---
 
@@ -275,3 +276,169 @@ while every other `aas-api` route authenticates the caller itself and fails clos
 belongs outside the gate. `docs/openapi.yaml` currently describes `/description` as *"Unauthenticated
 by specification"*, which is true of the **function** and not of the **deployed route** — that
 wording needs correcting either way.
+
+---
+
+## 3. The two key formats, accepted at once
+
+Supabase deprecates the `anon` and `service_role` JWTs **by the end of 2026** and replaces them with
+opaque `sb_publishable_*` and `sb_secret_*` keys. The gateway now accepts **both formats
+simultaneously**, which is the whole point: consumers move one at a time, and there is no flag day.
+
+### It is a gateway feature, not a component upgrade
+
+The new keys are **not JWTs**, and nothing downstream ever sees one. Given a non-JWT bearer,
+`postgrest v14.12` answers `PGRST301 "Expected 3 parts in JWT; got 1"` — measured, not read. So no
+component is taught the new format. The Lua filter in [`supabase/envoy.yaml`](../supabase/envoy.yaml)
+matches the presented key **as a string**, exactly as it already did for the legacy pair, and hands
+the upstream the legacy JWT it has always required.
+
+That is why Kong has no equivalent, and why this waited on the migration above.
+
+### Turning it on
+
+Set **both** `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`. `node scripts/setup.mjs` mints a
+pair for a new install; the Helm path takes `secrets.publishableKey` / `secrets.secretKey`, which are
+`optional: true` secret refs so a cluster on an `existingSecret` upgrades without minting anything.
+
+**Empty means legacy-only**, which is what every existing install is and a supported state rather
+than a degraded one. The filter checks `PUBLISHABLE ~= ""` before comparing, because an empty
+registered key would otherwise be matched by every caller who sends an empty `apikey` header.
+
+**Set both or neither.** Both substituters refuse to render a half-configured pair. Half a pair
+fails at the edge for server-side callers while the browser keeps working, which is the kind of
+half-migration nobody notices until something breaks in production.
+
+### What the translation does, and the one thing it refuses to do
+
+| Presented | Bearer the upstream receives |
+| :--- | :--- |
+| Legacy `anon` / `service_role` JWT | Untouched — today's behaviour, exactly |
+| `sb_publishable_*`, no Authorization | `Bearer <anon JWT>` |
+| `sb_secret_*`, no Authorization | `Bearer <service_role JWT>` |
+| Either new key, sent as **both** apikey and bearer (the `supabase-js` shape) | The mapped JWT |
+| Either new key as apikey, **somebody else's JWT** as bearer | **Untouched** |
+
+The last row is the security half. The i3X service and all eight edge functions pass the *caller's*
+JWT as the bearer and use the API key purely as the gateway credential — overwriting that would
+silently promote every one of their callers to `anon` or `service_role`. The filter replaces the
+Authorization header only when it is absent, or when it is the presented key itself.
+
+**One deliberate divergence from the legacy pair**, recorded because it is a privilege difference
+rather than a formatting one: `apikey: <secret key>` with no Authorization reaches PostgREST as
+`service_role`, where `apikey: <service_role JWT>` with no Authorization reaches it as the anon role.
+That is what the new format means — the secret key *is* the credential rather than a ticket to
+present one — and it grants nothing a holder of that key could not already take by setting the
+header themselves.
+
+### Realtime is the exception, and it substitutes rather than strips
+
+Every other route **strips** the apikey before forwarding (`hide_credentials`). Realtime does not,
+because it reads the key from the query string *itself* to identify the tenant and evaluate RLS —
+trap 4 in the template's header.
+
+That makes an opaque key a different failure there: not a credential Realtime fails to recognise,
+but a JWT it cannot parse, and the handshake dies with nothing in any log naming the key format. So
+the `keyauth_preserve` filter **replaces** the key in the query string and header with the JWT it
+stands for, preserving every other parameter and their order. Kong's `hide_credentials: false` says
+"do not delete this"; substituting honours that.
+
+### Verifying it
+
+`node scripts/check-gateway-surface.mjs` covers the static half: both substituters know all seven
+placeholders, and no literal credential is committed **in either format** — the new keys have no
+structure to match, so the `sb_publishable_` / `sb_secret_` prefixes are what makes a leaked one
+recognisable, which is the second reason to keep upstream's prefixes rather than mint a bare random
+string.
+
+The behaviour was verified by rendering the real template against an echo upstream and driving
+Envoy directly: gating in both formats, bearer synthesis for each new key, a caller's own token left
+intact, query-form stripping on REST, query-form *substitution* on Realtime, and — with the pair
+rendered empty — an empty `apikey` header refused and a new-format key rejected.
+
+### What the consumers do with it
+
+**Every gateway caller in the repository now prefers the publishable key and falls back to the
+anon key.** That fallback is the migration: a deployment that has not minted the pair leaves it
+empty and behaves exactly as it always did, so there is no flag day at the consumer end either.
+
+The pattern is the same everywhere, in four dialects:
+
+| Where | How it resolves |
+| :--- | :--- |
+| The Python daemons — ingestion, capture, playback, cold archive, i3X | `SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY` |
+| The nine edge functions that hold one | [`_shared/gatewayKey.ts`](../supabase/functions/_shared/gatewayKey.ts), one helper rather than nine copies |
+| The browser bundle | `SUPABASE_GATEWAY_KEY` in [`config.js`](../frontend/src/config.js) — the publishable key is optional where the anon key is still `required()` |
+| The shell substituters — Grafana's contact point, db-init's Vault write | `${SUPABASE_PUBLISHABLE_KEY:-$SUPABASE_ANON_KEY}` |
+
+**TRUTHINESS, NOT `??`.** Both substituters set the variable to the EMPTY STRING on a
+legacy-only install rather than leaving it unset, so a null-coalescing fallback would let that
+empty value win and every consumer would present an empty `apikey` — refused at the gate, on
+exactly the deployments the fallback exists to protect.
+
+**Two things deliberately did not move.** The Vault secret `supabase_anon_key` keeps its name:
+it names the ROLE the value plays, nothing in SQL parses it, and renaming a Vault entry would
+strand every database that already has one — so db-init writes whichever format it has under the
+existing name. And the **e2e test harness stays on the legacy key**, which is not an oversight:
+something has to keep exercising the legacy half of dual-accept, and a suite that moved with
+everything else would leave that path unproven until it broke in production.
+
+### Retiring the legacy pair, and how to know it is safe
+
+`LEGACY_KEYS_ACCEPTED=false` (Compose) / `supabaseEnvoy.legacyKeysAccepted: false` (Helm) stops the
+gateway accepting the anon and service-role JWTs at all. **That is the step that actually answers
+the deprecation** — everything above it only made the step possible.
+
+**It defaults to true, and flipping it is an operational decision rather than a code one.** It is an
+outage for anything still presenting a legacy key, and the caller may not live in this repository: a
+Grafana somebody wired up, a script on an engineer's laptop, an integration written against the
+published quickstart. This repository cannot know who they are. So the gateway measures it instead.
+
+#### The two instruments
+
+```
+docker compose logs supabase-envoy | grep acs-legacy-api-key
+acs-legacy-api-key method=GET route=rest-v1-routes status=200 ua=curl/8.21.0 downstream=172.20.0.1
+```
+
+One line per request that presented a legacy key. **Silence is the pass condition.** A line is a
+named thing to go and fix — the route, the user agent and the caller.
+
+**No key, no token, no path.** The apikey travels in the query string on the Realtime route, so
+logging `%REQ(:PATH)%` would write the credential to stdout on every line; the format uses
+`%ROUTE_NAME%` instead. A log is a worse place for a key than the upstream access log
+`hide_credentials` already exists to keep it out of.
+
+```
+rbac.legacy_api_key_.shadow_allowed   # requests that presented a legacy key -- must be flat at zero
+rbac.legacy_api_key_.shadow_denied    # everything else
+```
+
+The same fact as a counter, on the `/stats/prometheus` endpoint the ServiceMonitor already scrapes —
+no new target, no new wiring. It is a **shadow** rule: it decides nothing, and deactivation is done
+by the Lua filter, never here. Envoy's Lua has no API for creating a stat, which is why the count
+cannot come from the filter that does the matching.
+
+**The counter works only while legacy keys are still accepted**, and that asymmetry is measured
+rather than assumed. `handle:respond()` ends the filter chain, so once the switch is false a legacy
+request is refused *before* the RBAC filter runs and the counter stays at zero. That is the right way
+round — the counter's job is to say when the switch is safe, a question asked before it is thrown —
+but it means the counter cannot find stragglers afterwards. The access log can: it is attached to the
+connection manager, so it still fires for a refused request and records `status=401`, which is
+exactly the line naming whoever just broke.
+
+#### The order
+
+1. Mint the pair, if this install has not (`node scripts/setup.mjs` does it for new ones).
+2. Watch both instruments over a window covering the deployment's slowest periodic job — a backup
+   cycle, a month end. Anything less and a monthly job is the thing that discovers the switch.
+3. Set the flag false. Both substituters refuse `false` with no publishable key set, because that
+   combination accepts nothing at all and answers 401 to everything while reporting healthy.
+4. Watch the log again. A `status=401` line is a caller you missed; the flag is one value to revert.
+
+### What this does not do
+
+**It does not remove the legacy keys.** They are still minted, still in `.env`, still substituted
+into the filter — `LEGACY_KEYS_ACCEPTED=false` stops them being *accepted*, which is reversible in
+one value. Deleting them is a later and much smaller change, and there is no reason to make it until
+a deployment has run deactivated for long enough to trust it.

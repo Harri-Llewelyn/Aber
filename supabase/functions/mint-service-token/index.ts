@@ -59,6 +59,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 // signing endpoint, and those two things should not ride together. Cross-directory imports work
 // (see _shared/roles.ts, which measured it on v1.74.2).
 import { isUuid } from "../approve-quarantine/isUuid.ts";
+import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 // ADMINISTRATOR ALONE. Minting is an access-control act, and gating it here adds a sixth
 // Administrator-only decision in the direction the database already goes -- it did not wait on the
@@ -97,7 +98,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabaseAnonKey = gatewayKey();
     const jwtSecret = Deno.env.get("JWT_SECRET");
 
     // 500 WITH NOTHING SPECIFIC, matching every other function here. A response naming the missing

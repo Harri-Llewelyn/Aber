@@ -545,9 +545,15 @@ const CHART_ENVOY = 'deploy/helm/acs-cymru/templates/supabase/envoy.yaml';
 /** Substituted by BOTH targets. All three lists below must agree. */
 const TEMPLATE_PLACEHOLDERS = [
   '__CORS_ORIGINS__',
+  // Not a credential -- a bare `true`/`false` substituted into the Lua filter, deciding whether the
+  // legacy anon and service-role JWTs are still accepted at all. Both substituters validate the
+  // value, because anything else is a config Envoy refuses to parse.
+  '__LEGACY_KEYS_ACCEPTED__',
   '__REALTIME_UPSTREAM_ADDRESS__',
   '__REALTIME_UPSTREAM_HOST__',
   '__SUPABASE_ANON_KEY__',
+  '__SUPABASE_PUBLISHABLE_KEY__',
+  '__SUPABASE_SECRET_KEY__',
   '__SUPABASE_SERVICE_ROLE_KEY__',
 ];
 
@@ -595,8 +601,26 @@ const template = read(ENVOY_TEMPLATE);
       + 'The template is committed; the rendered config is not. Replace it with a placeholder and '
       + 'ROTATE THE KEY -- it is in the git history now.'
     );
-  } else {
-    pass(`${ENVOY_TEMPLATE} carries no literal credential`);
+  }
+  // AND THE NEW FORMAT, which the JWT shape above cannot see. `sb_publishable_*` and `sb_secret_*`
+  // are opaque strings with no structure to match, so the PREFIX is the only thing that identifies
+  // one -- which is the second reason upstream's prefixes are worth keeping rather than minting a
+  // bare random string. The template's own comments name both prefixes, so the scan excludes
+  // comment lines exactly as assertion 1 does: documenting the rule must not violate it.
+  const newKey = template
+    .split('\n')
+    .filter((l) => !/^\s*(#|\s*--)/.test(l))
+    .map((l) => l.match(/sb_(?:publishable|secret)_[A-Za-z0-9_-]{8,}/))
+    .find(Boolean);
+  if (newKey) {
+    fail(
+      `${ENVOY_TEMPLATE} contains what looks like a real API key (${newKey[0].slice(0, 24)}…). `
+      + 'The template is committed; the rendered config is not. Replace it with a placeholder and '
+      + 'ROTATE THE KEY -- it is in the git history now.'
+    );
+  }
+  if (!jwt && !newKey) {
+    pass(`${ENVOY_TEMPLATE} carries no literal credential in either key format`);
   }
 }
 

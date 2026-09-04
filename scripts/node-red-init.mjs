@@ -487,7 +487,9 @@ async function userinfo(accessToken) {
     const res = await fetch(env.NODERED_USERINFO_URL, {
       headers: {
         Authorization: 'Bearer ' + accessToken,
-        apikey: env.SUPABASE_ANON_KEY
+        // The gateway credential in whichever format this install registered. Both are
+        // accepted at once; see docs/gateway-migration.md.
+        apikey: env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY
       }
     });
     if (!res.ok) {

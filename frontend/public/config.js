@@ -22,6 +22,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   VITE_SUPABASE_URL: '',
   // Public by design: this key is the `anon` role and is readable in any built bundle.
   VITE_SUPABASE_ANON_KEY: '',
+  VITE_SUPABASE_PUBLISHABLE_KEY: '',
   // "true" | "false". Gates every supabase.channel() subscription.
   VITE_ENABLE_REALTIME: '',
   // Repository the Report Bug button files against.

@@ -4,6 +4,7 @@ import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
 
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
  * Package the physical gateway bootstrap bundle as a ZIP, with a freshly minted enrolment token.
@@ -105,7 +106,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabaseAnonKey = gatewayKey();
 
     // BOUND TO THE CALLER'S TOKEN. Every read and the RPC below run as them, so RLS applies and
     // this function cannot see or do more than the operator could themselves.
@@ -261,6 +262,11 @@ export default async function handler(req: Request): Promise<Response> {
     // ACS_SUPABASE_ANON_KEY, ACS_ENROLLMENT_TOKEN, ACS_AGENT_VERSION, ACS_GATEWAY_NAME and
     // NODERED_CREDENTIAL_SECRET are what that script looks up, and a rename on either side produces
     // an appliance that reports a missing variable at first boot with the token already spent.
+    //
+    // WHICH IS WHY THE NEW KEY IS ADDED RATHER THAN SUBSTITUTED. Bundles already downloaded carry
+    // ACS_SUPABASE_ANON_KEY and nothing else; an appliance commissioned from one of those must
+    // still boot. So both are written, bootstrap.mjs prefers the publishable one, and a bundle
+    // generated on a legacy-only install simply carries an empty value for it.
     files[`${folder}/.env`] = strToU8(`# =============================================================================
 # ACS-Cymru physical gateway -- ${gateway.name}
 #
@@ -275,8 +281,13 @@ export default async function handler(req: Request): Promise<Response> {
 ACS_SUPABASE_URL=${publicUrl}
 
 # Public by construction -- the same key every browser running the dashboard holds. It gets the
-# enrolment request past Kong's key-auth; the token below is what actually authorises it.
+# enrolment request past the gateway's key-auth; the token below is what actually authorises it.
+#
+# TWO FORMATS, AND THE APPLIANCE PREFERS THE SECOND. Supabase deprecates the anon JWT by the end
+# of 2026; the platform's gateway accepts both at once, so this bundle carries whichever this
+# install has. An empty publishable key here means the platform has not minted one yet.
 ACS_SUPABASE_ANON_KEY=${Deno.env.get("SUPABASE_ANON_KEY") ?? ""}
+ACS_SUPABASE_PUBLISHABLE_KEY=${Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? ""}
 
 # SINGLE USE. Redeemed by bootstrap.mjs on first boot and spent thereafter, whether or not that boot
 # succeeded. If bootstrap reports the token was RELEASED (a transient broker outage), this same

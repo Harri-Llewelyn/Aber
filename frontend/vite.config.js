@@ -53,11 +53,17 @@ export default defineConfig(({ mode, command }) => {
       (env.VITE_RUNTIME_CONFIG || process.env.VITE_RUNTIME_CONFIG || '').toLowerCase() === 'true'
     const supabaseUrl = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL
     const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY
-    if (!runtimeConfig && (!supabaseUrl || !supabaseAnonKey)) {
+    // EITHER FORMAT SATISFIES THIS. The bundle needs A gateway credential, not specifically the
+    // legacy one -- Supabase deprecates the anon JWT by the end of 2026 and the gateway accepts
+    // both at once, so a build given only the publishable key is correct and must not fail here.
+    const supabasePublishableKey =
+      env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY
+    if (!runtimeConfig && (!supabaseUrl || !(supabaseAnonKey || supabasePublishableKey))) {
       throw new Error(
-        '[FATAL] Production build failed: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment ' +
-          'variables are required. Set VITE_RUNTIME_CONFIG=true instead to build a bundle that is ' +
-          'configured at deploy time through /config.js.'
+        '[FATAL] Production build failed: VITE_SUPABASE_URL and one of VITE_SUPABASE_ANON_KEY or ' +
+          'VITE_SUPABASE_PUBLISHABLE_KEY environment variables are required. Set ' +
+          'VITE_RUNTIME_CONFIG=true instead to build a bundle that is configured at deploy time ' +
+          'through /config.js.'
       )
     }
   }
