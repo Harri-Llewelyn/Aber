@@ -7,7 +7,7 @@
 # stop this line quietly covering a future ARG that IS sensitive.
 
 # Stage 1: Build Vite application
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
