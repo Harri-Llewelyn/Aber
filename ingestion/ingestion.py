@@ -70,7 +70,8 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 # before PostgREST ever saw it.
 #
 # The ingestion token is the Authorization bearer and is what actually authorises the writes. It
-# names Service_Ingestor (archived migration 0046), an `authenticated` principal holding Operator, which
+# names Service_Ingestor (archived migration 0046), an `authenticated` principal holding telemetry:read
+# as a grant of its own since 0080, which
 # cannot write a single row directly: every write goes through a SECURITY DEFINER gate in 0047 that
 # checks the caller is that principal. This is the same shape i3X uses -- pass a bearer through to
 # PostgREST and let RLS answer -- rather than a key that bypasses RLS entirely.

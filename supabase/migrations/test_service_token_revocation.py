@@ -68,7 +68,7 @@ def get_connection():
     return conn
 
 
-def ensure_auth_user(cur, user_id, label):
+def ensure_auth_user(cur, user_id, label, with_email=False):
     """
     Make `user_id` exist in `auth.users`. Same helper, same reasoning, as the other RLS suites:
     `log_digital_thread_event()` writes `changed_by = auth.uid()` under a foreign key to
@@ -76,13 +76,27 @@ def ensure_auth_user(cur, user_id, label):
 
     THE SUBJECT NEEDS IT FOR A SECOND REASON HERE. record_service_token_issued() reads
     `auth.users` to prove the principal cannot sign in, and refuses outright if the row is absent.
+
+    `with_email` IS WHAT MAKES A ROW LOOK LIKE A PERSON, and it is now load-bearing in BOTH
+    directions -- the same split test_service_principal_revocation.py already draws. A row carrying
+    only an id satisfies is_machine_principal(), so:
+
+        the two HUMAN fixtures need an email, or 0080's trigger on `user_roles` refuses them the
+        role this suite hands them a line later;
+
+        the SUBJECT must NOT have one, or record_service_token_issued() refuses to mint for it --
+        "can sign in, so it is a person's account and not a service principal".
+
+    One helper, two shapes, and the caller says which fixture it is seeding.
     """
-    for columns, values in (
-        ("(id)", (user_id,)),
+    shapes = (
         ("(instance_id, id, aud, role, email)",
          ("00000000-0000-0000-0000-000000000000", user_id, "authenticated",
           "authenticated", f"{user_id}@{label}.test")),
-    ):
+    ) if with_email else (
+        ("(id)", (user_id,)),
+    )
+    for columns, values in shapes:
         cur.execute("SAVEPOINT ensure_user;")
         try:
             cur.execute(
@@ -157,8 +171,12 @@ class ServiceTokenRevocation(unittest.TestCase):
                     if needed not in cls.role_id:
                         raise RuntimeError(f"role {needed!r} is missing; 0001 did not run cleanly.")
 
+                # THE SUBJECT IS SEEDED AS A MACHINE AND THE OTHER TWO AS PEOPLE. See the helper:
+                # the two roles assigned immediately below would be refused for a machine, and the
+                # mint below that would be refused for a person.
                 for user_id in FIXTURE_IDS:
-                    ensure_auth_user(cur, user_id, "revocation")
+                    ensure_auth_user(cur, user_id, "revocation",
+                                     with_email=(user_id != SUBJECT_ID))
 
                 cur.execute(
                     "INSERT INTO public.user_roles (user_id, role_id) VALUES (%s, %s), (%s, %s)"

@@ -696,16 +696,22 @@ const apiMethods = {
    * THROUGH AN RPC, because neither table this needs is reachable from a browser and both are
    * unreachable on purpose: `auth.users` is GoTrue's and is not served by PostgREST at all, and
    * `public.user_roles` is in check-docs-drift's NOT_PUBLISHED list -- "read server-side by the two
-   * userinfo functions, never by a client". `list_service_principals()` (0042) returns four columns
+   * userinfo functions, never by a client". `list_machine_principals()` (0080) returns four columns
    * and no secret, which is the narrow alternative to granting the browser the two tables that
    * decide who is who.
+   *
+   * IT REPLACED `list_service_principals()` (0042) UNDER A NEW NAME, and the rename is load-bearing
+   * rather than cosmetic: its second column went from the ROLE a machine borrowed to the PERMISSIONS
+   * it holds in its own right, and 0001 re-declares its own copy of every function on each boot with
+   * CREATE OR REPLACE -- which cannot change a return type. Same name, different columns, and the
+   * chain aborts at file one on the SECOND boot.
    *
    * ADMINISTRATOR ONLY at the database, so a Shopfloor_Manager reaching this gets a raise rather
    * than an empty list -- which the caller surfaces rather than rendering as "no service accounts".
    */
   listServicePrincipals: async () => {
-    const { data, error } = await supabase.rpc('list_service_principals');
-    if (error) throw new Error(error.message || 'Could not list service principals');
+    const { data, error } = await supabase.rpc('list_machine_principals');
+    if (error) throw new Error(error.message || 'Could not list machine principals');
     return data || [];
   },
 
@@ -839,16 +845,25 @@ const apiMethods = {
   /**
    * Create a machine identity that cannot sign in.
    *
-   * THROUGH THE RPC, AS THE CALLER. `create_service_principal()` (0044) is SECURITY DEFINER and
+   * THROUGH THE RPC, AS THE CALLER. `create_machine_principal()` (0080) is SECURITY DEFINER and
    * checks has_role() itself -- it writes to `auth.users`, which no browser-facing role can reach
    * and which nothing else in this application writes to except archived migration 0034.
+   *
+   * IT TAKES PERMISSIONS, NOT A ROLE, and replaced `create_service_principal()` (0044) under a new
+   * name for the reason listServicePrincipals() records: the return type moved, and a return type
+   * cannot move under the same name on a chain that replays. The identity it makes holds grants of
+   * its own, so widening `Operator` no longer widens it.
+   *
+   * The database refuses anything outside `telemetry:read`, `quarantine:view` and
+   * `digital_thread:read` -- an allow-list, so a permission added later is refused here until
+   * somebody decides otherwise.
    */
-  createServicePrincipal: async (roleName, note) => {
-    const { data, error } = await supabase.rpc('create_service_principal', {
-      p_role_name: roleName,
+  createServicePrincipal: async (permissions, note) => {
+    const { data, error } = await supabase.rpc('create_machine_principal', {
+      p_permissions: Array.isArray(permissions) ? permissions : [permissions],
       p_note: note || null,
     });
-    if (error) throw new Error(error.message || 'Could not create the service principal');
+    if (error) throw new Error(error.message || 'Could not create the machine principal');
     return Array.isArray(data) ? data[0] : data;
   },
 

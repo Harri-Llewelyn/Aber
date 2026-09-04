@@ -18,7 +18,7 @@ vi.mock('../components/common/CopyableId', () => ({
 
 const PRINCIPAL = {
   principal_id: 'b0000000-0000-4000-8000-000000000001',
-  roles: ['Operator'],
+  permissions: ['telemetry:read'],
   can_sign_in: false,
 }
 

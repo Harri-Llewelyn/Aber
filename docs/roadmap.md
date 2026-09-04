@@ -14,29 +14,32 @@ addresses: source comments cited them, so deleting an entry and closing the gap 
 every citation without erroring, and the list was therefore left gapped as the record of what
 shipped. Moving the roadmap out of `README.md` ended that — the comments state what the code does
 instead — and `scripts/check-docs-drift.mjs` dropped the four invariants that enforced it. The
-numbers are labels for reading order, they run 1-14 with no gaps, and **a renumber costs one grep**
+numbers are labels for reading order, they run 1-13 with no gaps, and **a renumber costs one grep**
 (`§[0-9]`, `roadmap item [0-9]`) across the repository for the prose that still cites them.
 
-**Ordered by subject rather than by age**, in four groups. **1-7 are the platform's own**, led by
+**Ordered by subject rather than by age**, in four groups. **1-6 are the platform's own**, led by
 the one item somebody else sets the deadline for and then by the credential and operations chain:
 2 is Administrator-only from the start and deliberately does not wait for 3. **The role split those
 would otherwise have queued behind has already shipped**, as `0069` and `0070`, which is why 3 is
-now Entra sign-in alone and 4 no longer waits on it. **6 arrived from a change being REFUSED**
-rather than from an audit or a request — it is what has to exist before an `Operator` can be granted
-anything else. **7 is the only item here whose subject is the BROKER credential plane** rather than
-the database one; it sits at the end of the chain because the database plane's own credential work
-has now shipped and explicitly scoped that plane out, and because its strongest argument is a gap
-(a revoked gateway that is already connected keeps publishing) rather than a feature. **8-11 arrive
-from feature requests** — 8, 9 and 11 from GitHub issues
+now Entra sign-in alone and 4 no longer waits on it. **So has the machine-principal split**, as
+`0080` — it was the entry that arrived from a change being REFUSED rather than from an audit or a
+request, and it had to exist before an `Operator` could be granted anything else, which is exactly
+what 8 goes on to do. **6 is the only item here whose subject is the BROKER credential plane**
+rather than the database one; it sits at the end of the chain because the database plane's own
+credential work has now shipped and explicitly scoped that plane out, and because its strongest
+argument is a gap (a revoked gateway that is already connected keeps publishing) rather than a
+feature. **7-11 arrive from feature requests** — 7, 9 and 11 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
-[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 10 was not filed, and is sequenced
-*after* 9 because it removes what 9 replaces. **12 is documentation**, and is the one item whose
-remaining work is mostly writing; it arrives from
-[#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
+[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 8 and 10 were not filed. **10 is
+sequenced *after* 9 because it removes what 9 replaces, and 8 is sequenced *before* it because 9
+cannot ask an `Operator` for a proposal until 8 has given that role a way to make one** — 8 is the
+queue and the authority, 9 is one lane's payload and the edge sync that carries it. **12 is
+documentation**, and is the one item whose remaining work is mostly writing;
+it arrives from [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **13 is the platform's own
 and sits last anyway**, because its subject is the transport under every other item rather than any
-one chain — and because reading it before 7 and 9 invites starting it in the wrong order, which is
+one chain — and because reading it before 6 and 9 invites starting it in the wrong order, which is
 the one thing it asks not to happen.
 
 **Revocable service tokens shipped and left this list**, which is what an item shipping looks like.
@@ -654,87 +657,7 @@ than offer it.
 
 ---
 
-## 6 · Machine principals with their own authority, instead of borrowing a person's role
-
-**Builds on:** `is_machine_principal()` ([`0048`](../supabase/migrations/archive/0048_machine_principals_are_not_users.sql),
-the predicate is [`0042`](../supabase/migrations/archive/0042_list_service_principals.sql)'s) ·
-the MCP reader ([`0034`](../supabase/migrations/archive/0034_mcp_read_only_principal.sql)) ·
-`Service_Ingestor` ([`0046`](../supabase/migrations/archive/0046_service_ingestor_principal.sql)) ·
-`Service_Playback` ([`0060`](../supabase/migrations/archive/0060_playback_gateway_and_shadow_devices.sql)) ·
-`has_role()` and its 58 call sites · the audit lanes ([`0070`](../supabase/migrations/archive/0070_audit_domain_and_the_acts_nothing_recorded.sql)) ·
-**not filed as an issue, and arriving from a change that was refused rather than from an audit**
-
-Give a machine principal an authority of its own — a set of permissions it was granted — instead of
-handing it `Operator` and inheriting whatever `Operator` happens to mean that month.
-
-### Three principals hold one human role, and the Access Control page says so
-
-`MCP read-only client`, `Service_Ingestor` and `Service_Playback` all hold **`Operator` and nothing
-else**. That was a good decision when it was made and it is written down as one: `0034`'s header
-says Operator was chosen **over `Auditor`** *precisely* so a model could not read the audit trail.
-The role was picked for the shape it had.
-
-**The problem is that the shape is not theirs.** `Operator` is a *person's* role — the read-only
-shopfloor user — and it is the role that changes whenever somebody asks for an operator to be able
-to see one more thing. Every one of those requests silently re-grants three machine identities.
-
-### This has already happened once, and it is why this entry exists
-
-A request to let an `Operator` read the asset lane of `digital_thread` — reasonable, and no wider
-than what an Operator can already see, since they read `cells`, `gateways` and `devices` themselves
-— **was refused by `0034`'s own self-check**:
-
-> *0034 self-check: the MCP principal read 2 digital_thread row(s). Operator was chosen over Auditor
-> precisely so it could not.*
-
-The check did its job. But note what it cost: a change about **people** was blocked by a property of
-a **machine**, and the only reason it was caught is that somebody had written that assertion down
-years' worth of migrations earlier. The next such request will collide the same way, and the one
-after that will be tempted to relax the assertion rather than the design.
-
-### The obvious fix does not work, and knowing why saves the attempt
-
-Excluding machine principals inside the policy — `AND NOT is_machine_principal(auth.uid())` — is the
-natural repair and it **cannot work here**. [`0001`](../supabase/migrations/0001_baseline_schema.sql)
-runs `REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated` on every boot,
-and `0048` re-grants `is_machine_principal` **after** `0034` has already run. So at the moment
-`0034` evaluates that policy as `authenticated`, the function is not executable and the rule fails
-with `permission denied for function is_machine_principal` — surfacing 40 migrations away as a row
-count. Granting it again later does not help: the revoke is upstream of the check, on every boot.
-
-**Nor is a second predicate acceptable.** `auth.jwt()->>'email' IS NOT NULL` would sidestep the grant
-entirely, and `0048` forbids it in as many words: *"a second definition of 'is this a service
-account' would be worse than none."*
-
-So the exclusion cannot live in the policy, which leaves the design.
-
-### What to build
-
-**A machine principal gets permissions, not a role.** `role_permissions` already models the join;
-what is missing is a principal-scoped grant — `principal_permissions(principal_id, permission_id)` —
-and a `has_authority()` that resolves a *person* through `user_roles` and a *machine* through its
-own grants. `has_role()` stays what it is for people, which matters because 58 policy sites call it.
-
-**Each of the three then declares what it actually needs**, which is narrower than `Operator` in
-every case and is already written in prose on the Access Control page: *"Read-only across the asset
-inventory and live telemetry. Cannot read the audit trail."* That sentence is the specification.
-
-### Worth deciding early
-
-- **Whether `0034`'s self-check moves or stays.** It is the best test in this area and it should end
-  up asserting the same property against the new mechanism, not be deleted with the old one.
-- **Whether a machine principal may ever hold a role.** Allowing both is how the ambiguity comes
-  back. If a principal resolves through grants only, that has to be enforced rather than assumed —
-  `0048` already has the predicate to enforce it with.
-- **What happens to a permission nobody granted.** Fail-closed, on `0070`'s argument: the safe
-  failure is a machine that cannot read something, not one that can.
-- **Whether this unblocks the Operator change that prompted it.** It does, and that is the point —
-  but the audit-lane grant should land *after* this, not alongside it, or the same self-check fires
-  during the migration that is meant to make it safe.
-
----
-
-## 7 · The broker's Dynamic Security plugin, and the two things a file cannot do
+## 6 · The broker's Dynamic Security plugin, and the two things a file cannot do
 
 **Builds on:** [`mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) ·
 [`mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf) ·
@@ -830,7 +753,7 @@ does not currently have.
 
 ---
 
-## 8 · The Directory's MQTT half, and the one lookup it still lacks
+## 7 · The Directory's MQTT half, and the one lookup it still lacks
 
 **Builds on:** [`supabase/functions/fplus-directory/index.ts`](../supabase/functions/fplus-directory/index.ts) ·
 `directory_services` (`0001`) · `gateways.sparkplug_group` (`0008`) · `relocate_devices()` (`0033`) ·
@@ -870,6 +793,166 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
+## 8 · An approvals queue, and the first write an `Operator` has ever had
+
+**Builds on:** [`approve_quarantined_device()`](../supabase/migrations/0001_baseline_schema.sql) and the
+role re-check inside it · `has_role()` and the write policies it gates · the `Operator` role as seeded
+in [`0002`](../supabase/migrations/0002_seed_data.sql) · `device_nameplate` · `publish_schema_version()` ·
+[`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) ·
+[`FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
+`system_settings` and its `min_value` / `max_value` bounds · `digital_thread` and
+[`0079`](../supabase/migrations/0079_the_thread_stops_growing_without_end.sql)'s pruning ·
+[`0069`](../supabase/migrations/0069_the_two_roles_stop_being_the_same.sql)'s permission split ·
+**not filed as an issue, and it is the substrate §9 needs rather than a feature beside it**
+
+One queue for every change a person proposes but may not make: a gateway's flow, an asset's details,
+a schema's publication. An `Operator` proposes; a `Shopfloor_Manager` or `Administrator` approves;
+the approval is the write.
+
+### The role this is built for currently holds nothing to build on
+
+`Operator` is role 3, seeded as *"Operational dashboard view, live telemetry streaming, and document
+viewing"*, and it holds **no write permission at all**. So this is not a loosening of an existing
+grant — it is the first write an `Operator` has ever been given, and it is worth being exact about
+what it is a write **to**: a queue, not an asset. **The asset write policies do not move.** `devices`,
+`cells` and `gateways` stay gated on `has_role(ARRAY['Administrator', 'Shopfloor_Manager'])` exactly
+as they are; what is new is one table an `Operator` may insert into, and an apply path that runs as
+the approver.
+
+That distinction is the whole security argument, and it should survive review: **if this item ever
+adds a second write path to an asset table, it has failed**, however convenient that path looks.
+
+### The proposal row is the record in every lane, including the Git one
+
+**Even for flows, whose payload lives in a forge.** The row holds the proposer, the target, the
+status and the discussion; for the flow lane it holds a pointer to the pull request rather than the
+diff itself. The cap, the ordering, the audit attribution and the page then read one table, and the
+forge is storage for one lane's payload instead of a second queue with its own permission model.
+
+**The consequence is that an `Operator` never holds a forge account.** They insert a proposal row;
+an edge function holding one machine account opens the pull request on their behalf after checking
+`user_roles`. Any other arrangement duplicates the role model into a system that has never heard of
+`gitops:manage`, and then has to keep the two in step.
+
+### Approving is applying, and that is what a forge cannot give the records lane
+
+[`approve_quarantined_device()`](../supabase/migrations/0001_baseline_schema.sql) is the precedent and
+it already has the three properties that matter: it re-checks the actor's role **server-side** rather
+than trusting the caller, it applies in one transaction, and it attributes the resulting
+`digital_thread` rows to the approver.
+
+**So the constraints run at approval time, and an invalid change cannot be approved** — because the
+approval *is* the write, and a patch that violates a CHECK or an FK aborts the approval rather than
+being merged and then rejected. That is the failure this shape avoids and the forge cannot: an
+approved-but-unapplied change is an audit record of something that did not happen.
+
+**The proposal body is operator-controlled input.** The apply path re-validates rather than trusts
+it, and it must never build SQL from the patch's keys — each entity gets an allowlist of proposable
+columns, because the fields ingestion writes (`status`, `first_dbirth_at`, `reported_identity`,
+`identity_source`, `is_quarantined`) must not be reachable through a proposal at all.
+
+### Quarantine is a lane to read, not a lane to propose into
+
+It belongs in the inbox, because an approver should not have two places to look. **Its approve
+control does not move.** A quarantine entry is a discovery the *system* made rather than a change a
+person authored, and approving it mints identity and binds a device to a gateway —
+`quarantine:approve` and `quarantine:reject` stay where `0002` put them, and no `Operator` gains an
+approval here or anywhere.
+
+### Schemas already version themselves, and this must not fork that
+
+`publish_schema_version()` archives the parent, atomically repoints every `device_submodels` row and
+the legacy `devices.schema_id` pointer, and drops the duplicate links that would otherwise collide —
+all in one transaction. **That is fork, review and merge with the side effects included, and no Git
+lane can be transactional with the rebinding.** So the schema lane proposes *the publish* and the
+approval calls that function; it does not model versions beside the ones `schemas` already carries.
+
+**Its approver is narrower than the other lanes', and that should be stated rather than smoothed
+over:** `schema:manage` became Administrator-only in `0069`, so a `Shopfloor_Manager` who can approve
+a nameplate edit cannot approve a schema publication. One inbox, two approval gates.
+
+### Two caps, doing two different jobs, and both in the database
+
+**A partial unique index on `(entity_type, entity_id, proposed_by) WHERE status = 'open'`.** One open
+proposal per asset per person, which forces three nameplate edits into one coherent diff instead of
+three. **Scoped to the proposer deliberately:** a cap on the asset alone lets one operator's forgotten
+proposal block everyone else from proposing against that machine, which is a denial of service by
+accident rather than by intent.
+
+**A cap on total open proposals per proposer**, held in `system_settings`. This is the one that
+actually bounds reviewer load — the per-asset rule still permits one proposal against each of five
+hundred devices — and it belongs in the settings table rather than in a constant because the right
+number differs per plant.
+
+**Both are enforced in the database, and the reason is written down.** `0069`'s header makes the
+argument against the alternative: a revoked permission whose policy still admits the role is *"a
+frontend flag and therefore never an access control."* A cap enforced by disabling a button is the
+same object.
+
+**The cap is only usable if editing an open proposal is one click from the refusal.** An operator
+told *"you already have an open proposal on this device"* has to be able to open it and add to it
+immediately; otherwise the constraint reads as a wall, and people route around it by proposing
+against a neighbouring asset or stop proposing at all. This is the part most likely to be deferred
+and it is the part that decides whether the cap is structure or friction.
+
+### Expiry needs a floor, and it needs an actor
+
+An open proposal nobody acts on holds a slot indefinitely, so it closes on a timer — **a week is the
+default**, set by an Administrator on the Settings page. `system_settings` already carries
+`min_value` and `max_value`, and this setting needs the floor: a value of zero auto-closes every
+proposal at the moment it is created, which is a working configuration that silently disables the
+feature.
+
+**The auto-close needs an actor kind.** `digital_thread.actor_source` admits `user`, `ingestion`,
+`migration` and `service`, but only the last three can be *declared* — `user` is derived from
+`auth.uid()`, not claimed. A timer closing a proposal has no session and is not a person, so it
+either declares `service` or earns a kind of its own. **§9 asks the identical question for the
+reconciling sidecar, and the two should be answered together rather than separately.**
+
+### What this must not touch
+
+The write policies on `devices`, `cells`, `gateways` and `schemas`, which stay exactly as `has_role()`
+gates them today; `quarantine:approve` and `quarantine:reject`, which are not proposable and not
+delegable; the schema lineage invariants in `schemas_version_lineage_coherent`, which
+`publish_schema_version()` maintains and a proposal must go through rather than around; and `0079`'s
+pruning, which proposals and their comments fall **inside** rather than beside — they are
+operator-authored free text attached to assets, and a queue that grows without end is the thing
+`0079` has just finished fixing elsewhere.
+
+### Worth deciding early
+
+**The blocking dependency has been removed, and knowing that it existed is what stops it coming
+back.** `MCP read-only client`, `Service_Ingestor` and `Service_Playback` all held **`Operator` and
+nothing else**, so an INSERT policy naming `Operator` would have admitted three machine identities
+along with the shopfloor, and the per-proposer cap would have given each of them its own allowance.
+`0080` ended that: a machine principal now holds permissions of its own on `principal_permissions`,
+a trigger on `user_roles` refuses it a role at all, and `has_authority()` is the predicate to reach
+for wherever a policy would otherwise name a role machines happen to share. See **They hold
+permissions, not a person's role** in [`supabase/README.md`](../supabase/README.md).
+
+**So the proposing grant is `Operator`'s alone to receive** — which is the property this item needs
+and could not have assumed a migration ago.
+
+**A patch or a whole row.** A patch conflicts cleanly: two proposals touching different fields of the
+same asset can both apply. A whole row silently reverts whatever changed underneath it between
+proposal and approval. Patch, unless something specific argues otherwise.
+
+**Who `updated_by` names once an approval writes a nameplate.** The column's comment says a nameplate
+is *an assertion about an asset, so who made it is part of the record* — that is the proposer. The
+approver is who authorised it. Both belong in the record, which probably means the pair lands in
+`digital_thread` rather than the table growing a second column.
+
+**Whether a withdrawn proposal is closed or deleted.** An operator withdrawing their own proposal
+should free the slot; whether the row survives is a retention question that `0079` has already made
+the repository think about once.
+
+**Rejection carries a reason, and there is no cooldown.** A rejected proposal frees the slot at once
+and the same change can be proposed again immediately — that is correct, and the control that makes
+it work is the required reason, not a timer. It is also the only thing the operator gets in the
+thread other than *no*.
+
+---
+
 ## 9 · GitOps edge sync, and the review step a bucket cannot give a flow
 
 **Builds on:** the `gateway-backups` bucket in
@@ -878,7 +961,8 @@ carry the qualification, or the interoperability claim becomes false the moment 
 [`gateway-bundle-template/bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs) and the flow hash
 its heartbeat already reports · `digital_thread` (`0005`, `0026`) ·
 [`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts), which is now the only place
-`gitops:manage` is enforced · [issue #63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
+`gitops:manage` is enforced · **§8, which owns the queue, the page and the proposing role, and is a
+prerequisite rather than a neighbour** · [issue #63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
 
 ### The push half existed and has been retired, which makes this item larger than it was
 
@@ -947,25 +1031,33 @@ the moment the first flow lands in a repository, not before.
 **`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
 place — `nodered-userinfo`'s `ALLOWED_ROLES`, as `0069` records — and the merge is the control it was
 named for. **Authoring a proposal and approving one are different privileges** and should not collapse
-into one: proposing is the write that `storage-policies.sql` already grants Administrator and
-Shopfloor_Manager, approving is `gitops:manage`.
+into one: approving is `gitops:manage`, and **proposing is the `Operator` write that §8 adds** — not,
+as this item originally said, the write `storage-policies.sql` already grants Administrator and
+Shopfloor_Manager. That was written before the approvals queue existed and it inverted the point: a
+review step whose proposals can only come from the two roles that may already merge them is a
+formality, not a gate.
 
-### A Git page, and the one thing it must not become
+### The flow lane of the approvals page, and the one thing it must not become
 
-**What it should show, per gateway:** the tracked repository and branch, the open pull requests
-against it, the commit history with the deployed revision marked, and the gateway's own reported flow
-hash beside the committed head — which is drift, stated as a fact the appliance sent rather than as
-something the centre inferred. A revert control, and an approve control gated on `gitops:manage`.
+**§8 owns the page; this item owns what the flow lane shows on it.** Per gateway: the tracked
+repository and branch, the open pull requests against it, the commit history with the deployed
+revision marked, and the gateway's own reported flow hash beside the committed head — which is drift,
+stated as a fact the appliance sent rather than as something the centre inferred. A revert control,
+and an approve control gated on `gitops:manage` rather than on the approver role the records lanes
+use.
 
 **A revert must be a new commit and never a force-push.** A force-push rewrites history a gateway may
 already have pulled, and the sidecar cannot distinguish that from a legitimate advance — it would
 reconcile to the rewritten head and report success, having silently deployed something no pull request
 ever showed. A revert commit is visible, reviewable and itself revertible.
 
-**The page must not become an editor.** Nothing on it should author or edit flow JSON, and nothing
+**The lane must not become an editor, and that is a constraint this item places on §8's page rather
+than a note about a page of its own.** Nothing in it should author or edit flow JSON, and nothing
 should accept a blob that reaches an appliance without passing the same merge. That is the refusal
 worth keeping from `deploy-nodered`, restated for a UI: **deploy only what is committed**, or it is a
-remote-code-execution endpoint with a friendly name and a nicer table.
+remote-code-execution endpoint with a friendly name and a nicer table. Note that the records lanes
+§8 describes are the opposite case — there the approval *is* the write — so the two lanes do not
+share a submit path and should not be generalised into one.
 
 ### The credential store is the hazard that can invalidate the shape
 
@@ -980,7 +1072,7 @@ merge strategy rather than an overwrite, and that is a different piece of work.
 ### A third credential plane arrives with this item, and it should be named now
 
 **The appliance needs a way to authenticate to the repository**, which is neither the broker plane
-(§7) nor the database one. It should be **per gateway and read-only** — a shared key across the
+(§6) nor the database one. It should be **per gateway and read-only** — a shared key across the
 fleet makes one compromised appliance a fleet-wide read, and a writable one lets an appliance author
 what it will later be asked to deploy. `enroll-gateway` already mints a per-gateway broker credential
 at bundle time and is the natural place to issue this one, which also means revocation has a home
@@ -1004,7 +1096,9 @@ dead weight until the pull half replaces what it does.
 
 **The forge.** Self-hosted or hosted, and for an on-premises deployment on a private domain that is
 the same question `deploy/k8s/internal-ca.yaml` already answers for certificates. Commit signature
-verification makes it a smaller question than it looks.
+verification makes it a smaller question than it looks. **What it is not is an identity store:** §8
+puts the queue in Postgres and reaches the forge through one machine account, so no `Operator` needs
+a forge login and the forge never has to learn what `gitops:manage` means.
 
 **One repository or one per gateway.** A repository per gateway gives clean per-appliance deploy keys
 and independent history; one repository with a branch per gateway gives a fleet-wide diff and one
@@ -1016,7 +1110,9 @@ is what makes it load-bearing rather than cosmetic.
 **The actor kind for the audit row.** Logging the revision hash into `digital_thread` needs one: rows
 from the daemon and the edge functions are attributed through the `request.headers` GUC, and the
 trigger accepts only `ingestion` / `service` / `migration`, never `user`. A sidecar reconciling on its
-own timer is a fourth kind of actor and should say so rather than borrow `service`.
+own timer is a fourth kind of actor and should say so rather than borrow `service`. **§8's proposal
+expiry needs the same answer for the same reason** — a timer with no session — so decide it once,
+for both.
 
 ---
 
@@ -1284,7 +1380,7 @@ issued by the CA that already exists reaches most of the same place on both targ
 Compose stops being a supported target**, which is the same condition `envoy.yaml` attaches to
 HTTPRoute, and for the same reason.
 
-### The gateway link's upgrade is client certificates, and it is sequenced behind §7
+### The gateway link's upgrade is client certificates, and it is sequenced behind §6
 
 `mosquitto-tls.conf` states the current position and its cost explicitly: password authentication over
 TLS, `require_certificate false`, because turning it on means `use_identity_as_username` replaces the
@@ -1298,9 +1394,9 @@ the enrolment model that exists rather than replacing it. The gain is that a gat
 being a bearer secret that can be replayed by anything that reads it.
 
 **The cost is revocation, and it is why this waits.** Mosquitto's `crlfile` is awkward and needs a
-reload to take effect — which is precisely the gap §7 exists to close, and §7's own strongest argument
+reload to take effect — which is precisely the gap §6 exists to close, and §6's own strongest argument
 is already that *a revoked gateway which is already connected keeps publishing*. Client certificates
-make that sharper, not softer. **This is the intended direction; it should not start before §7.**
+make that sharper, not softer. **This is the intended direction; it should not start before §6.**
 
 ### What this must not touch
 

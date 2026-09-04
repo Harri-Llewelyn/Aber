@@ -284,7 +284,7 @@ def _run_job(supabase, storage, credentials, job):
     try:
         body = storage.from_(BUCKET).download(job["capture_storage_path"])
     except Exception as err:
-        # 42501 here is the read gate: `Service_Playback` holds Operator, and the bucket's SELECT
+        # 42501 here is the read gate: `Service_Playback` holds telemetry:read alone (0080), and the bucket's SELECT
         # policy admits it only for the object of a RUNNING job. If this fails on a job that IS
         # running, the policy arm is missing rather than the file.
         return 0, "could not read %s: %s" % (job["capture_storage_path"], err)
