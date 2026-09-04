@@ -298,22 +298,20 @@ pairing `grafana.ini` had to discover for the client seeded by `0002`.
 aspiration into a mechanism: when 4 lands, requiring `aal2` for Studio is a predicate in a filter
 that already reads the claim, not a second integration.
 
-### It needs an Envoy no older than 1.34, and that is the item's real prerequisite
+### It needed an Envoy no older than 1.34, and that bump has now shipped
 
 **GoTrue's OAuth server requires PKCE** — `grafana.ini` records the failure verbatim, `invalid_request:
 PKCE flow requires both code_challenge and code_challenge_method` — and **the `oauth2` filter in the
-pinned `envoyproxy/envoy:v1.31.5` cannot send it.** `code_challenge` does not appear in that
-version's `OAuth2Config` at all; the `OauthCodeVerifier` cookie and the PKCE fields arrive in
-**1.34.0**. So this item is not "configure a filter that is already there": it carries a gateway
-bump, on the component every other service in the stack sits behind.
+formerly pinned `envoyproxy/envoy:v1.31.5` could not send it.** `code_challenge` does not appear in
+that version's `OAuth2Config` at all; the `OauthCodeVerifier` cookie and the PKCE fields arrive in
+**1.34.0**. So this item was never "configure a filter that is already there": it carried a bump of
+the component every other service in the stack sits behind.
 
-That bump is a *sequencing* cost rather than an argument against the route. Envoy here is pinned
-"like every image", not frozen the way Kong 2.8 and the Supabase coordinated set are — it is this
-repository's own choice rather than a version upstream tests together. What it buys is the
-re-verification [`docs/gateway-migration.md`](gateway-migration.md) already specifies for a gateway
-change: identical `--runtime --authenticated` output, a 101 Realtime handshake, identical CORS, both
-AAS suites and a full `validate.py` pass. **Do that bump on its own commit, with those checks, before
-any Studio configuration is written.**
+**The stack is now on `v1.39.1` on both targets**, moved on its own commit under the protocol in
+[`docs/gateway-migration.md`](gateway-migration.md) and recorded there. The floor is stated in the
+pin comments in `docker-compose.yml` and `values.yaml`, because nothing in the repository *uses*
+the oauth2 filter yet — everything else works fine on 1.31, so a well-meaning downgrade would take
+the floor away without anything failing until this item is built.
 
 ### What a throwaway proxy proved, and the one thing it did not
 

@@ -522,7 +522,10 @@ supabaseEnvoy:
     # PINNED, as every image here is. The v3 config API is stable across 1.3x, but a moving tag
     # would still shift the Lua runtime and the CORS filter's defaults underneath a config that
     # nothing in this chart validates.
-    tag: "v1.31.5"
+    #
+    # THERE IS A FLOOR, AND IT IS 1.34: the oauth2 filter gained PKCE in 1.34.0, and GoTrue's
+    # OAuth server refuses a flow without it. See the same note in docker-compose.yml.
+    tag: "v1.39.1"
     pullPolicy: IfNotPresent
   replicas: 1
   logLevel: info

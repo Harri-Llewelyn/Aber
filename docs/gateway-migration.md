@@ -140,6 +140,29 @@ the protocol existing:
    `PGRST100` where Kong answered `200`. Every *unauthenticated* assertion was green throughout —
    which is why `--authenticated` exists and why the unauthenticated pass alone is not a gate.
 
+### The protocol also governs a version bump, and did on 2026-09-04
+
+**`v1.31.5` → `v1.39.1`**, driven by roadmap item 2: the `oauth2` filter gained PKCE in **1.34.0**
+and GoTrue's OAuth server refuses a flow without it, so the Studio proxy has a floor the old pin sat
+below. Nothing else in the stack needed it, which is exactly why the bump is recorded rather than
+absorbed.
+
+The comparison above works unchanged for this case, reading the incumbent Envoy on `54321` where it
+reads Kong: run the candidate image against the **same** `envoy_config` volume on `54331`, so the
+config is held constant and only the binary moves.
+
+What passed: the rendered configuration validates (`--mode validate`) on 1.36, 1.38 and 1.39 with no
+deprecation warning; the `--runtime --authenticated` probe diffs **empty** between 54321 and 54331;
+`101` on both Realtime handshakes; byte-identical CORS on both, including `401` and no ACAO for an
+unknown origin; `66/66` on `test_aas_export.py` through both; and a full `validate.py` pass through
+the candidate.
+
+**One pre-existing failure, on both gateways equally:** `test_aas_api.py` is `39/40`, failing
+*"expected more than two devices on the demo stack"*. That is the retired demonstration floor, not
+the bump — the suite still assumes seeded devices that a fresh install no longer has. It is recorded
+here so the next person to run this protocol does not read it as a regression, and it belongs to
+whoever revisits that suite.
+
 ---
 
 ## 2. Promotion plan

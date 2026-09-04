@@ -853,7 +853,14 @@ services:
     # PINNED, like every image here. The v3 config API is stable across 1.3x, but a moving tag
     # would still shift the Lua runtime and the CORS filter's defaults underneath a config that
     # nothing else in this repository validates.
-    image: envoyproxy/envoy:v1.31.5
+    #
+    # THERE IS A FLOOR, AND IT IS 1.34. The oauth2 filter could not send PKCE before then --
+    # `code_challenge` is absent from OAuth2Config in 1.31 and arrives in 1.34.0 -- and GoTrue's
+    # OAuth server REFUSES a flow without it ("PKCE flow requires both code_challenge and
+    # code_challenge_method", the same refusal grafana.ini records). Nothing in this file uses
+    # that filter yet; roadmap item 2 does, and a well-meaning downgrade would take the floor
+    # away silently, because everything else here works fine on 1.31.
+    image: envoyproxy/envoy:v1.39.1
     restart: always
     ports:
       # THE VARIABLE STILL SAYS KONG, deliberately: it is set in existing .env files and in

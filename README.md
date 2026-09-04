@@ -404,7 +404,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v14.12` | — |
 | `supabase-envoy-init` | `acs-cymru_supabase_envoy_init` | `alpine:3.24` | — |
-| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.31.5` | `54321:8000` |
+| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.39.1` | `54321:8000` |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
 | `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.102.3` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.60.4` | — |
