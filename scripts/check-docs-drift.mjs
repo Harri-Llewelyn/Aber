@@ -756,6 +756,11 @@ function edgeFunctionNames() {
     permissions: 'RBAC internals',
     role_permissions: 'RBAC internals',
     user_roles: 'RBAC internals — read server-side by the two userinfo functions, never by a client',
+    principal_permissions:
+      'RBAC internals — the machine-side twin of role_permissions (0080). A browser reads it only '
+      + 'through list_machine_principals(), which is Administrator-only and returns permission '
+      + 'NAMES rather than the join, for the same reason user_roles is not published: the tables '
+      + 'that decide who is who are read server-side, never by a client',
     webhook_endpoints:
       'migration-managed with NO write RLS policy by design; a writable endpoint table is an SSRF primitive',
     gateway_enrollment_tokens:

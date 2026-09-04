@@ -20,7 +20,7 @@ import {
   GATEWAY_ACL_PATTERN,
   describePrincipal,
   isMintableFromPage,
-  roleReach,
+  permissionReach,
   tokenStatus,
   tokenStatusDetail,
   tokenStatusLabel,
@@ -411,8 +411,8 @@ export function AccessControlTab({ showToast }) {
           </h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '6px 0 0' }}>
             The non-human clients that can reach this stack. They are two separate lists because they
-            live on two separate planes — a database identity is a role, a broker identity is an ACL
-            entry, and nothing here holds both.
+            live on two separate planes — a database identity is a set of permissions, a broker
+            identity is an ACL entry, and nothing here holds both.
           </p>
         </div>
 
@@ -442,8 +442,9 @@ export function AccessControlTab({ showToast }) {
               The identities the stack's own processes authenticate as. Each has no email and no
               password, so none of them can sign in — they exist to be named by a token, and every
               write they make goes through a gate that checks which one is calling. They hold
-              <strong> Operator</strong> and can write nothing directly, which is what makes the
-              gates the whole of their authority rather than a convention they follow.
+              <strong> permissions of their own</strong> rather than a person's role, and can write
+              nothing directly, which is what makes the gates the whole of their authority rather
+              than a convention they follow.
             </p>
           </div>
 
@@ -519,8 +520,11 @@ export function AccessControlTab({ showToast }) {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                          {(p.roles || []).map(r => (
-                            <span key={r} className="badge badge-neutral" style={{ fontSize: '11px' }}>{r}</span>
+                          {/* PERMISSIONS, NOT A ROLE. 0080 stopped these identities holding
+                              `Operator`: it is a person's role, and every widening of it silently
+                              re-granted three of the stack's own processes. */}
+                          {(p.permissions || []).map(perm => (
+                            <span key={perm} className="badge badge-neutral" style={{ fontSize: '11px' }}>{perm}</span>
                           ))}
                           {/* STATED, NOT ASSUMED. It is the property that makes listing these safe,
                               and 0042 returns it rather than letting the page infer it from the
@@ -528,10 +532,10 @@ export function AccessControlTab({ showToast }) {
                           {p.can_sign_in === false && (
                             <span className="badge badge-ok" style={{ fontSize: '11px' }}>CANNOT SIGN IN</span>
                           )}
-                          {/* BESIDE THE ROLES, NOT IN THE TOKEN COLUMN, because it is a fact about
+                          {/* BESIDE THE GRANTS, NOT IN THE TOKEN COLUMN, because it is a fact about
                               the IDENTITY rather than about its credentials -- and it outranks
                               them: a revoked principal is refused whatever its tokens say, so a
-                              reader scanning the roles needs to see it here. */}
+                              reader scanning what it holds needs to see it here. */}
                           {revocation && (
                             <span
                               className="badge badge-danger"
@@ -546,7 +550,7 @@ export function AccessControlTab({ showToast }) {
                         </div>
                       </td>
                       <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '40ch' }}>
-                        {roleReach(p.roles)}
+                        {permissionReach(p.permissions)}
                       </td>
                       {/* SAID ONCE. The detail was rendered as a tooltip AND as a paragraph below
                           the badge -- the identical tokenStatusDetail(status) string, twice, in a

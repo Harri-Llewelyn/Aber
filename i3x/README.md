@@ -318,12 +318,19 @@ migration `0034`, using the same HS256 secret the rest of the stack shares — s
 it exactly as it validates a GoTrue token and there is no second trust path. `GOTRUE_JWT_EXP`
 governs what GoTrue *issues* and does not apply.
 
-**The principal holds `Operator`, and the choice of role is deliberate.** Every write policy in this
-schema names `Administrator`, alone or with `Shopfloor_Manager` — `0069` narrowed the schema and
-metric-catalog policies to the former — so `Operator` writes nothing. But neither does `Auditor`. The difference is `digital_thread_select_privileged_or_auditor`: an Auditor can read the
-audit trail. This client has no surface for the Digital Thread and deliberately never will, so
-granting Auditor would leave a capability sitting on a long-lived credential that nothing can use
-and someone might later find. `0034`'s self-check asserts all three properties on every boot.
+**The principal holds `telemetry:read` and nothing else, and the narrowness is deliberate.** Every
+write policy in this schema names `Administrator`, alone or with `Shopfloor_Manager` — `0069`
+narrowed the schema and metric-catalog policies to the former — so it writes nothing. What it must
+also not have is `digital_thread:read`: the difference the old choice of `Operator` **over**
+`Auditor` was making is `digital_thread_select_privileged_or_auditor`, and an Auditor can read the
+audit trail. This client has no surface for the Digital Thread and deliberately never will, so that
+grant would leave a capability sitting on a long-lived credential that nothing can use and someone
+might later find.
+
+**It used to hold `Operator` itself, and `0080` ended that** — a person's role widening whenever
+somebody asked for a shopfloor user to see one more thing is not a thing a machine credential should
+inherit. `0080`'s self-check re-asserts `0034`'s property against the new mechanism on every boot:
+this principal must not hold `digital_thread:read`.
 
 **It is not `service_role`**, which would be the one-line answer and would bypass the RLS scoping
 that makes the paragraph above true.

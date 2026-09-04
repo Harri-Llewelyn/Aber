@@ -7677,21 +7677,15 @@ INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000001')
 ON CONFLICT (id) DO NOTHING;
 
-DO $$
-DECLARE
-    v_operator integer;
-BEGIN
-    -- BY NAME, not by a hardcoded id. `roles.id` is an integer assigned by 0001, and a migration
-    -- that hardcodes it is asserting a fact about a sequence.
-    SELECT id INTO v_operator FROM public.roles WHERE name = 'Operator';
-    IF v_operator IS NULL THEN
-        RAISE EXCEPTION '0034: the Operator role is missing; 0001 did not run cleanly.';
-    END IF;
-
-    INSERT INTO public.user_roles (user_id, role_id)
-    VALUES ('b0000000-0000-4000-8000-000000000001', v_operator)
-    ON CONFLICT (user_id, role_id) DO NOTHING;
-END $$;
+-- NO ROLE IS ASSIGNED HERE ANY MORE. This block used to give the principal `Operator`, and 0080
+-- moved it onto `principal_permissions` -- the grant is `telemetry:read`, which is what this
+-- identity actually uses, and it no longer arrives by way of a role that changes whenever somebody
+-- asks for a shopfloor user to be able to do one more thing.
+--
+-- THE ASSIGNMENT IS NOT MERELY REDUNDANT, IT IS NOW REFUSED. 0080 puts a BEFORE INSERT trigger on
+-- `user_roles` that rejects any identity `is_machine_principal()` recognises, so leaving this INSERT
+-- here would abort the chain at file two on every boot after the first. The `auth.users` row above
+-- stays exactly as it was: the identity was never the thing that was wrong.
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. The principal
@@ -7708,21 +7702,13 @@ INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000002')
 ON CONFLICT (id) DO NOTHING;
 
-DO $$
-DECLARE
-    v_operator integer;
-BEGIN
-    -- BY NAME, not by a hardcoded id -- 0034's reason: `roles.id` is an integer assigned by 0001,
-    -- and a migration that hardcodes it is asserting a fact about a sequence.
-    SELECT id INTO v_operator FROM public.roles WHERE name = 'Operator';
-    IF v_operator IS NULL THEN
-        RAISE EXCEPTION '0046: the Operator role is missing; 0001 did not run cleanly.';
-    END IF;
-
-    INSERT INTO public.user_roles (user_id, role_id)
-    VALUES ('b0000000-0000-4000-8000-000000000002', v_operator)
-    ON CONFLICT (user_id, role_id) DO NOTHING;
-END $$;
+-- NO ROLE IS ASSIGNED HERE ANY MORE -- see the note under 0034's principal above. 0080 grants this
+-- identity `telemetry:read` on `principal_permissions` instead, and its trigger on `user_roles`
+-- would refuse this INSERT if it were left in place.
+--
+-- The daemon's authority was never the role in any case: every write it makes goes through an
+-- `ingest_*` gate that is SECURITY DEFINER and checks `is_ingestion_caller()`, which names this
+-- uuid and nothing else.
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. The principal
@@ -7739,26 +7725,20 @@ INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000003')
 ON CONFLICT (id) DO NOTHING;
 
-DO $$
-DECLARE
-    v_operator integer;
-BEGIN
-    -- BY NAME, not by a hardcoded id: `roles.id` is an integer assigned by 0001, and a migration
-    -- that hardcodes it is asserting a fact about a sequence.
-    SELECT id INTO v_operator FROM public.roles WHERE name = 'Operator';
-    IF v_operator IS NULL THEN
-        RAISE EXCEPTION '0056: the Operator role is missing; 0001 did not run cleanly.';
-    END IF;
-
-    -- `Operator`, NOT `Auditor`, and the reason is 0046's applied to a different process. The
-    -- difference between the two is that an Auditor can read the digital thread. This worker writes
-    -- nothing to it and reads nothing from it, so granting Auditor would hand a credential that
-    -- lives in a process holding BROKER PUBLISH RIGHTS the ability to read every attributed change
-    -- anyone has ever made to this stack, in support of a code path that does not exist.
-    INSERT INTO public.user_roles (user_id, role_id)
-    VALUES ('b0000000-0000-4000-8000-000000000003', v_operator)
-    ON CONFLICT (user_id, role_id) DO NOTHING;
-END $$;
+-- NO ROLE IS ASSIGNED HERE ANY MORE -- see the note under 0034's principal above. 0080 grants this
+-- identity `telemetry:read` on `principal_permissions` instead, and its trigger on `user_roles`
+-- would refuse this INSERT if it were left in place.
+--
+-- THE ARGUMENT THIS BLOCK USED TO CARRY SURVIVES THE MOVE, and is worth keeping where the grant now
+-- is rather than deleting with the role. It read: `Operator`, NOT `Auditor`, because the difference
+-- between the two is that an Auditor can read the digital thread -- and this worker writes nothing
+-- to it and reads nothing from it, so granting Auditor would hand a credential that lives in a
+-- process holding BROKER PUBLISH RIGHTS the ability to read every attributed change anyone has ever
+-- made to this stack, in support of a code path that does not exist.
+--
+-- Under 0080 that is no longer an argument about which of two roles to borrow. It is the reason
+-- `digital_thread:read` is not among this principal's grants, and 0080's self-check asserts the
+-- same property for the MCP reader directly.
 
 
 

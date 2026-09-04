@@ -59,10 +59,11 @@ def ensure_auth_user(cur, user_id, label, with_email=False):
          ("00000000-0000-0000-0000-000000000000", user_id, "authenticated",
           "authenticated", f"{user_id}@{label}.test", "not-a-real-hash")),
     ) if with_email else (
+        # THE ID-ONLY SHAPE IS THE POINT HERE, not a fallback. This arm seeds the SUBJECT -- the
+        # machine principal the suite revokes -- and it has to fail is_machine_principal()'s
+        # negation, i.e. it must genuinely be a machine. Do not add an email to it: the emailed
+        # shape belongs to the `with_email` arm above, which is what the human fixtures take.
         ("(id)", (user_id,)),
-        ("(instance_id, id, aud, role, email)",
-         ("00000000-0000-0000-0000-000000000000", user_id, "authenticated",
-          "authenticated", f"{user_id}@{label}.test")),
     )
     for columns, values in shapes:
         cur.execute("SAVEPOINT ensure_user;")

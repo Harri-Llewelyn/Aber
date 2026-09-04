@@ -58,7 +58,7 @@ const enrolled = {
 
 const MCP_PRINCIPAL = {
   principal_id: 'b0000000-0000-4000-8000-000000000001',
-  roles: ['Operator'],
+  permissions: ['telemetry:read'],
   created_at: null,
   can_sign_in: false
 }
@@ -167,7 +167,7 @@ describe('AccessControlTab', () => {
   it('lists a principal the dashboard has no description for, rather than hiding it', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
-      { principal_id: 'c0000000-0000-4000-8000-000000000009', roles: [], created_at: null, can_sign_in: false }
+      { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [], created_at: null, can_sign_in: false }
     ])
     render(<AccessControlTab showToast={vi.fn()} />)
 
@@ -179,9 +179,14 @@ describe('AccessControlTab', () => {
     // finds nothing is left with less than they started with, so the wording has to admit the
     // second origin and this test is what holds it to that.
     expect(screen.getByTitle(/by a migration, or by a test suite/i)).toBeTruthy()
-    // No role means every RLS policy refuses it -- said in a COLUMN, not a tooltip, because it is
-    // the answer to "what can this reach" rather than background on what it is.
-    expect(screen.getByText(/every RLS policy refuses it/i)).toBeTruthy()
+    // NO GRANT OF ITS OWN, said in a COLUMN rather than a tooltip, because it is the answer to
+    // "what can this reach" rather than background on what it is.
+    //
+    // THE SENTENCE CHANGED WITH 0080 AND THE CORRECTION IS THE POINT OF RE-READING IT. It used to
+    // claim "every RLS policy refuses it", which was false in the reassuring direction: the asset
+    // inventory reads are `TO authenticated USING (true)`, so a signed token reaches them with no
+    // role and no grant at all. What a grant adds is what has_authority() gates.
+    expect(screen.getByText(/reaches only what is open to any authenticated caller/i)).toBeTruthy()
   })
 
   /**
@@ -199,8 +204,8 @@ describe('AccessControlTab', () => {
   it('names the two principals npm run setup signs keys for', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
-      { principal_id: 'b0000000-0000-4000-8000-000000000002', roles: ['Operator'], created_at: null, can_sign_in: false },
-      { principal_id: 'b0000000-0000-4000-8000-000000000003', roles: ['Operator'], created_at: null, can_sign_in: false }
+      { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
+      { principal_id: 'b0000000-0000-4000-8000-000000000003', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
     render(<AccessControlTab showToast={vi.fn()} />)
 
@@ -225,8 +230,8 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
       MCP_PRINCIPAL,
-      { principal_id: 'b0000000-0000-4000-8000-000000000002', roles: ['Operator'], created_at: null, can_sign_in: false },
-      { principal_id: 'b0000000-0000-4000-8000-000000000003', roles: ['Operator'], created_at: null, can_sign_in: false }
+      { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
+      { principal_id: 'b0000000-0000-4000-8000-000000000003', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
     render(<AccessControlTab showToast={vi.fn()} />)
 
@@ -247,7 +252,7 @@ describe('AccessControlTab', () => {
   it('offers Issue Token for an undocumented principal, because the fallback mint command is the MCP one', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
-      { principal_id: 'c0000000-0000-4000-8000-000000000009', roles: [], created_at: null, can_sign_in: false }
+      { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [], created_at: null, can_sign_in: false }
     ])
     render(<AccessControlTab showToast={vi.fn()} />)
 
@@ -505,7 +510,7 @@ describe('AccessControlTab', () => {
   it('drops the coverage note once every principal has a recorded token', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
-      { principal_id: 'b0000000-0000-4000-8000-000000000002', roles: ['Operator'], created_at: null, can_sign_in: false }
+      { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
     api.listServiceTokens.mockResolvedValue(new Map([
       ['b0000000-0000-4000-8000-000000000002',
@@ -530,8 +535,8 @@ describe('AccessControlTab', () => {
   it('offers rotation, not a fresh mint, for the two keys that live in .env', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
-      { principal_id: 'b0000000-0000-4000-8000-000000000002', roles: ['Operator'], created_at: null, can_sign_in: false },
-      { principal_id: 'b0000000-0000-4000-8000-000000000001', roles: ['Operator'], created_at: null, can_sign_in: false }
+      { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
+      { principal_id: 'b0000000-0000-4000-8000-000000000001', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
     render(<AccessControlTab showToast={vi.fn()} />)
 

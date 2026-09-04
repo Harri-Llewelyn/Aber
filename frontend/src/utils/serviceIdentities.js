@@ -149,12 +149,11 @@ export const KNOWN_PRINCIPALS = {
  * write nothing, and the difference is that an Auditor can read the Digital Thread. A page that
  * showed only the role name would make the two look interchangeable.
  */
-export const ROLE_REACH = {
-  Administrator: 'Everything, including onboarding approval and archive retention.',
-  Shopfloor_Manager: 'Cells, gateways, devices and schemas. No access-control changes.',
-  Operator: 'Read-only across the asset inventory and live telemetry. Cannot read the audit trail.',
-  Auditor: 'Read-only, and the only non-privileged role that can read the Digital Thread.',
-}
+// ROLE_REACH LIVED HERE AND HAS GONE WITH ITS ONLY CALLER. It described what each of the four human
+// roles reaches, and this file's single consumer -- the Service Identities table -- stopped asking:
+// 0080 gave machine principals permissions of their own, so the column now renders PERMISSION_REACH
+// below. The human roles are described where a person meets them, on the Roles card of the same
+// page, and a second copy here was a mirror nothing compared.
 
 export function describePrincipal(principalId) {
   return KNOWN_PRINCIPALS[principalId] || {
@@ -224,13 +223,32 @@ export function isMintableFromPage(meta) {
     && meta.mintCommand.startsWith(MCP_MINT_PREFIX)
 }
 
-export function roleReach(roles) {
-  if (!roles || roles.length === 0) {
-    // A principal with NO role reaches nothing through RLS -- every policy names a role -- but it
-    // is still a subject a signed JWT can name, so it is worth saying so rather than showing a gap.
-    return 'Holds no role, so every RLS policy refuses it. It can authenticate and read nothing.'
+/**
+ * What one PERMISSION reaches. Keyed on the permission name rather than on a role, because 0080
+ * stopped machine identities holding roles at all: `Operator` is a person's role, and every time
+ * somebody widened it three of the stack's own processes were widened with it.
+ *
+ * The Operator line that used to answer for all three principals is preserved almost word for word
+ * under `telemetry:read`, because it was always a description of what they actually do rather than
+ * of what the role happened to contain.
+ */
+export const PERMISSION_REACH = {
+  'telemetry:read': 'Read-only across the asset inventory and live telemetry. Cannot read the audit trail.',
+  'quarantine:view': 'Can see the onboarding quarantine queue, but cannot approve or reject anything in it.',
+  'digital_thread:read': 'Can read the Digital Thread — every attributed change anyone has made to this stack.',
+}
+
+export function permissionReach(permissions) {
+  if (!permissions || permissions.length === 0) {
+    // A principal with NO grant reaches nothing it has to be granted -- but saying "reads nothing"
+    // would be false and the falsehood is in the reassuring direction. The asset-inventory read
+    // policies are `TO authenticated USING (true)`, so a signed token alone reaches them; what a
+    // grant adds is everything gated on has_authority(). 0080's header states the same thing from
+    // the database's side.
+    return 'Holds no permission of its own. It can authenticate, and reaches only what is open to '
+      + 'any authenticated caller.'
   }
-  return roles.map(r => ROLE_REACH[r] || `Holds ${r}.`).join(' ')
+  return permissions.map(p => PERMISSION_REACH[p] || `Holds ${p}.`).join(' ')
 }
 
 /**

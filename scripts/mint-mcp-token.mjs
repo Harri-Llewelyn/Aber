@@ -11,7 +11,8 @@
 // WHAT THIS SIGNS, AND WHY IT IS NOT A BACK DOOR. The same HS256 secret the whole stack shares, so
 // PostgREST validates it exactly as it validates a GoTrue token -- there is no second trust path.
 // The subject is `b0000000-0000-4000-8000-000000000001`, the read-only principal seeded by
-// archived migration 0034, which holds `Operator` and nothing else: it reads every relation the i3X address
+// archived migration 0034, which holds `telemetry:read` and nothing else (0080 moved it off `Operator`):
+// it reads every relation the i3X address
 // space is assembled from and writes nothing, and it cannot read `digital_thread`.
 //
 // GOTRUE_JWT_EXP DOES NOT APPLY. It governs what GoTrue ISSUES; a JWT signed here is validated on
@@ -123,7 +124,7 @@ const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
 const payload = b64url(
   JSON.stringify({
     sub: SUBJECT,
-    // `authenticated` is the POSTGRES role PostgREST switches to. The ACS-Cymru role -- Operator --
+    // `authenticated` is the POSTGRES role PostgREST switches to. The principal's own grant --
     // is not carried in the token at all: it is read from public.user_roles by has_role(), so a
     // token cannot claim a privilege it was not granted in the database.
     role: 'authenticated',
@@ -239,7 +240,7 @@ if (asJson) {
   console.error('# recorded in the Digital Thread as TOKEN_MINTED; revoke with revoke_service_token');
 } else {
   console.log(token);
-  console.error(`\n# read-only principal ${SUBJECT} (Operator), valid until ${until}`);
+  console.error(`\n# read-only principal ${SUBJECT} (telemetry:read), valid until ${until}`);
   // THESE TWO LINES SAID REVOCATION WAS IMPOSSIBLE, AND 0074 MADE THAT FALSE. They read: "There is
   // no revocation short of rotating SUPABASE_JWT_SECRET, which invalidates every token in the
   // stack." An operator who believed it would rotate the secret to withdraw one credential and take

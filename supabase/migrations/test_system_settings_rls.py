@@ -67,14 +67,21 @@ def ensure_auth_user(cur, user_id, label):
     them with a synthetic subject were relying on those tables not being watched.
 
     auth.users differs between GoTrue's real schema and the base image's legacy one, so the
-    intersection (the primary key alone) is tried first and the fuller shape second. Each attempt
-    is savepointed: a failure here must not abort the caller's transaction.
+    fuller shape is tried first and the intersection (the primary key alone) second. Each
+    attempt is savepointed: a failure here must not abort the caller's transaction.
     """
     for columns, values in (
-        ("(id)", (user_id,)),
+        # THE EMAILED SHAPE IS TRIED FIRST, and the order is the whole point rather than a preference.
+        # `is_machine_principal()` is "no email, no password, no identity provider", so an id-only row is
+        # indistinguishable from one of the stack's own service identities -- and 0080 puts a trigger on
+        # `user_roles` refusing a role to anything that predicate recognises. A persona standing in for a
+        # PERSON must look like one, or the fixture cannot be given the role it is testing. This also
+        # settles a complaint serviceIdentities.js already recorded: suite-seeded rows were showing up on
+        # the Access Control page as "Undocumented principal".
         ("(instance_id, id, aud, role, email)",
          ("00000000-0000-0000-0000-000000000000", user_id, "authenticated",
           "authenticated", f"{user_id}@{label}.test")),
+        ("(id)", (user_id,)),
     ):
         cur.execute("SAVEPOINT ensure_user;")
         try:

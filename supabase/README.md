@@ -693,6 +693,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `*_vocabulary` | `authenticated` | **no write policy at all** |
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
 | `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none |
+| `principal_permissions` | own row, or `Administrator` | none — `create_machine_principal()` is the only write path |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
 ### The two privileged roles, and what separates them (`0069`)
@@ -702,8 +703,9 @@ that sentence was not true of anything: `0002` granted both roles **the same thi
 so the distinction between them was the description text on the `roles` row.
 
 The database had already started separating them by hand — `system_settings` for read and for
-write, `list_service_principals()` and `create_service_principal()` check `Administrator` alone,
-against dozens of sites that check the pair. `0069` makes the permission table agree with that
+write, `list_machine_principals()` and `create_machine_principal()` check `Administrator` alone
+(as their predecessors `list_service_principals()` and `create_service_principal()` did before
+`0080` renamed them), against dozens of sites that check the pair. `0069` makes the permission table agree with that
 direction. Three permissions moved:
 
 | Withdrawn from `Shopfloor_Manager` | What it decides | Where it is enforced |
@@ -1084,23 +1086,63 @@ here rather than left on a checklist.
 
 | Identity | Holds | May do |
 | :--- | :--- | :--- |
-| `Service_Ingestor` (`0046`) | `Operator` | Nothing directly. Eight `SECURITY DEFINER` functions -- seven gates in `0047` plus `record_ingestion_rejection()` from `0026`, brought under the same rule by `0051` -- each checking the caller **is** this principal |
-| MCP reader (`0034`) | `Operator` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `digital_thread` |
+| `Service_Ingestor` (`0046`) | `telemetry:read` | Nothing directly. Eight `SECURITY DEFINER` functions -- seven gates in `0047` plus `record_ingestion_rejection()` from `0026`, brought under the same rule by `0051` -- each checking the caller **is** this principal |
+| `Service_Playback` (`0056`) | `telemetry:read` | Nothing directly. The `playback_*` gates, each checking `is_playback_caller()` |
+| MCP reader (`0034`) | `telemetry:read` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `digital_thread` |
 | `factoryplus_i3x` | broker account | Reads the namespace, publishes nothing |
 | `gateway-credential-service` | broker admin, scoped | Adds one broker account and nothing else |
 
-All four are `auth.users` rows with **no email, no password and no identity provider**, so none can
-sign in. That is also `0042`'s predicate for listing them, and `0048`'s for keeping their writes out
-of the audit trail's `'user'` bucket.
+The three database identities are `auth.users` rows with **no email, no password and no identity
+provider**, so none can sign in. That is also `0042`'s predicate for listing them, and `0048`'s for
+keeping their writes out of the audit trail's `'user'` bucket.
+
+### They hold permissions, not a person's role (`0080`)
+
+**All three used to hold `Operator`**, and the column above used to say so. It was a good choice when
+it was made and `0034` records it as one: `Operator` was picked **over `Auditor`** precisely so a
+model could not read the audit trail. The role was chosen for the shape it had.
+
+**The shape was not theirs.** `Operator` is a *person's* role — the read-only shopfloor user — and it
+is the role that changes whenever somebody asks for an operator to be able to do one more thing.
+Every one of those requests silently re-granted three machine identities, and it had already
+happened once: a request to let an `Operator` read the asset lane of `digital_thread` was refused by
+`0034`'s own self-check. **A change about people was blocked by a property of a machine.**
+
+`0080` gives each principal grants of its own on `principal_permissions` — the machine-side twin of
+`role_permissions` — and `has_authority()` resolves a person through `user_roles` and a machine
+through those grants. Two things about it are worth knowing before writing a policy against either:
+
+- **A machine principal may not hold a role at all**, and that is enforced rather than assumed:
+  `refuse_role_for_machine_principal()` is a `BEFORE INSERT OR UPDATE` trigger on `user_roles` that
+  rejects any identity `is_machine_principal()` recognises. Without it the separation is a
+  convention, and the next `create_*_principal()` re-introduces the problem in one INSERT.
+- **`has_role()` is untouched**, and should stay that way. Fifty-eight policy sites call it, every
+  one names `Administrator` or `Shopfloor_Manager`, and no machine principal has ever satisfied one.
+  Use `has_authority()` where a policy would otherwise name a role machine principals happen to
+  share — which, since `0080`, means `Operator` and nothing else.
+
+**The change was provably inert when it shipped, which is why it shipped before it was needed.**
+`Operator` is named in exactly three places in `0001` and none of them is an RLS policy, so the role
+granted these three nothing: every read they depend on is `FOR SELECT TO authenticated USING (true)`.
+What it would have granted is the *next* policy naming `Operator` — an approvals queue admitting a
+shopfloor user as a proposer would have admitted the ingestion daemon in the same breath.
+
+`create_machine_principal()` and `list_machine_principals()` replace `create_service_principal()`
+(`0044`) and `list_service_principals()` (`0042`). **The rename is not cosmetic:** their second
+column moved from the role a machine borrowed to the permissions it holds, and `0001` re-declares its
+own copy of every function on each boot with `CREATE OR REPLACE`, which cannot change a return type.
+Same name, different columns, and the chain aborts at file one on the *second* boot — after `0001`
+has dropped the FDW server with `CASCADE`. `scripts/check-docs-drift.mjs` asserts against exactly
+that and names the remedy.
 
 ### The ingestion daemon does not hold `service_role`
 
 It used to, and that was the one credential on this stack whose compromise no policy written
 anywhere else could contain — sitting in the process most exposed to the plant network. It now
-authenticates as `Service_Ingestor`, an `Operator` principal that cannot write a single row
-directly, and every write it makes goes through a gate in `0047`.
+authenticates as `Service_Ingestor`, a principal holding `telemetry:read` and nothing else, which
+cannot write a single row directly — every write it makes goes through a gate in `0047`.
 
-`Operator` is not "enough" and that is the design. Every write policy in this schema names
+Its grant is not "enough" and that is the design. Every write policy in this schema names
 `Administrator` or `Shopfloor_Manager`, so the gates are the **only** route rather than the tidy
 one. A credential that could perform those writes by holding a role that permits them would be a
 smaller `service_role`, not a narrower one: it could still write anything that role can write, to

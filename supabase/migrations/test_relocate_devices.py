@@ -120,9 +120,14 @@ class RelocateDevices(unittest.TestCase):
                           (MANAGER_ID, "Shopfloor_Manager"),
                           (OPERATOR_ID, "Operator")):
             # `id` is the only column without a default on this image's auth.users, which is what
-            # makes seeding one here viable at all.
-            cur.execute("INSERT INTO auth.users (id) VALUES (%s) ON CONFLICT (id) DO NOTHING;",
-                        (uid,))
+            # makes seeding one here viable at all -- but an id ALONE is the definition of a machine
+            # principal ("no email, no password, no identity provider"), and 0080 refuses a role to
+            # anything is_machine_principal() recognises. These three stand in for PEOPLE, so they
+            # are given the email that says so.
+            cur.execute(
+                "INSERT INTO auth.users (id, email) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING;",
+                (uid, f"{uid}@relocate-devices.test"),
+            )
             cur.execute(
                 "INSERT INTO public.user_roles (user_id, role_id) VALUES (%s, %s)"
                 " ON CONFLICT (user_id, role_id) DO NOTHING;",

@@ -525,18 +525,20 @@ Two consequences worth stating on the front page; both are detailed in
 
 ### Machine identities
 
-Four identities here are held by software rather than people, and each is narrow by construction:
-`Service_Ingestor` and the MCP reader hold `Operator`, `factoryplus_i3x` reads the broker namespace
-and publishes nothing, and `gateway-credential-service` can add one broker account and do nothing
-else. All four are `auth.users` rows with no email, no password and no identity provider, so none
-can sign in.
+Five identities here are held by software rather than people, and each is narrow by construction:
+`Service_Ingestor`, `Service_Playback` and the MCP reader hold `telemetry:read` **as a grant of their
+own** rather than a person's role (`0080`), `factoryplus_i3x` reads the broker namespace and
+publishes nothing, and `gateway-credential-service` can add one broker account and do nothing else.
+The three database identities are `auth.users` rows with no email, no password and no identity
+provider, so none can sign in — and a trigger on `user_roles` refuses any of them a role, so widening
+`Operator` for the people who hold it cannot widen them by accident.
 
 **The ingestion daemon does not hold `SUPABASE_SERVICE_ROLE_KEY`.** It used to, and that was the one
 credential whose compromise no policy written anywhere else could contain, sitting in the process
-most exposed to the plant network. It authenticates as `Service_Ingestor` — an `Operator` principal
-that cannot write a single row directly — and every write it makes goes through a `SECURITY DEFINER`
-gate that checks the caller is that principal. `Operator` being insufficient is the design, not an
-oversight: it makes those gates the only route rather than the tidy one.
+most exposed to the plant network. It authenticates as `Service_Ingestor` — a principal that cannot
+write a single row directly — and every write it makes goes through a `SECURITY DEFINER` gate that
+checks the caller is that principal. Its `telemetry:read` grant being insufficient is the design, not
+an oversight: it makes those gates the only route rather than the tidy one.
 
 **Tokens cannot be revoked.** PostgREST checks the signature, not a session table, so revoking means
 rotating `SUPABASE_JWT_SECRET` and invalidating every key in the stack. Expiry is therefore the only

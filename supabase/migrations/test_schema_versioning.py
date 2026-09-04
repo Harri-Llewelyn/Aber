@@ -134,10 +134,17 @@ class SchemaVersioningTestCase(unittest.TestCase):
             # try the intersection (the primary key alone) first and fall back to the fuller shape.
             # Each attempt is savepointed: a failure here must not abort the whole transaction.
             for columns, values in (
-                ("(id)", (user_id,)),
+                # THE EMAILED SHAPE IS TRIED FIRST, and the order is the whole point rather than a preference.
+                # `is_machine_principal()` is "no email, no password, no identity provider", so an id-only row is
+                # indistinguishable from one of the stack's own service identities -- and 0080 puts a trigger on
+                # `user_roles` refusing a role to anything that predicate recognises. A persona standing in for a
+                # PERSON must look like one, or the fixture cannot be given the role it is testing. This also
+                # settles a complaint serviceIdentities.js already recorded: suite-seeded rows were showing up on
+                # the Access Control page as "Undocumented principal".
                 ("(instance_id, id, aud, role, email)",
                  ("00000000-0000-0000-0000-000000000000", user_id, "authenticated",
                   "authenticated", f"{user_id}@versioning.test")),
+                ("(id)", (user_id,)),
             ):
                 self.cur.execute("SAVEPOINT ensure_user;")
                 try:

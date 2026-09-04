@@ -623,7 +623,7 @@ def audit_orphans(storage, bucket, manifest_keys):
     interrupted export, or a manifest restored from a backup older than the storage beside it.
 
     REPORTED, NEVER DELETED. Removing an object is the one irreversible act in this file, this
-    process holds Operator and the bucket admits only an Administrator to DELETE, and an orphan is
+    process holds telemetry:read alone (0080) and the bucket admits only an Administrator to DELETE, and an orphan is
     precisely the case where the tool is least sure what it is looking at. Naming them is the whole
     job; deciding is a person's.
     """
