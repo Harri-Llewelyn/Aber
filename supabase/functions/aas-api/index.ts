@@ -57,6 +57,7 @@ import {
   loadDeviceRecord,
 } from "../_shared/aas/shell.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 const SERVICE_NAME = "aas-api";
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
@@ -319,7 +320,7 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const anonKey = gatewayKey();
 
   // As the caller. Every read below runs under that user's RLS policies, which is what keeps this
   // from becoming a way around them.

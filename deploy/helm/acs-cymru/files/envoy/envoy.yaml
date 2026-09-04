@@ -1,19 +1,31 @@
 # =================================================================================================
 # Envoy gateway -- a translation of supabase/kong.yml, route for route.
 #
-# THIS IS A TEMPLATE, NOT A CONFIG. `__SUPABASE_ANON_KEY__`, `__SUPABASE_SERVICE_ROLE_KEY__`,
-# `__REALTIME_UPSTREAM_HOST__` and `__CORS_ORIGINS__` are substituted at boot by
-# `supabase-envoy-init`, exactly as `supabase-kong-init` does for kong.yml. A real key committed
-# here would be a leaked key, not a config change -- which is why
-# scripts/check-gateway-surface.mjs asserts the placeholders are still placeholders.
+# THIS IS A TEMPLATE, NOT A CONFIG. Eight `__UPPER_SNAKE__` placeholders are substituted at boot by
+# `supabase-envoy-init` on Compose and by an initContainer on Kubernetes -- the two share this file
+# and not the substituter, which is why `scripts/check-gateway-surface.mjs` asserts that both know
+# every one of them. A real key committed here would be a leaked key, not a config change, and the
+# same script asserts the placeholders are still placeholders.
+#
+# Four carry the API keys (`__SUPABASE_ANON_KEY__`, `__SUPABASE_SERVICE_ROLE_KEY__`,
+# `__SUPABASE_PUBLISHABLE_KEY__`, `__SUPABASE_SECRET_KEY__`), one carries the posture that decides
+# whether the first two are still accepted (`__LEGACY_KEYS_ACCEPTED__`, a BARE BOOLEAN), and three
+# carry deployment facts (`__REALTIME_UPSTREAM_HOST__`, `__REALTIME_UPSTREAM_ADDRESS__`,
+# `__CORS_ORIGINS__`).
 #
 # -------------------------------------------------------------------------------------------------
-# WHAT THIS IS FOR, AND WHAT IT IS NOT YET
+# WHAT THIS IS, AND WHAT IT IS PART-WAY THROUGH
 #
-# It runs BESIDE Kong on a second port so the two can be probed against each other --
-# `check-gateway-surface.mjs --runtime` against 54321 and against 54331 must report the same
-# posture before Envoy becomes primary. It is not wired into `docker-compose.yml`; it arrives
-# through `docker-compose.envoy.yml`.
+# THIS IS THE GATEWAY. On Compose, Envoy publishes 54321 and Kong is retired; on Kubernetes the
+# chart sets `supabaseEnvoy.enabled` with Kong retained and off. The note that used to sit here --
+# that this ran beside Kong on a second port pending an equivalence probe -- described the migration
+# while it was happening and was wrong to still be here once it had. See docs/gateway-migration.md.
+#
+# IT ACCEPTS TWO API KEY FORMATS AT ONCE, deliberately and temporarily. Supabase deprecates the anon
+# and service-role JWTs by the end of 2026; this gateway matches both those and the opaque
+# `sb_publishable_*` / `sb_secret_*` keys that replace them, translating the latter into the former
+# because no upstream can read a non-JWT. `__LEGACY_KEYS_ACCEPTED__` is how that ends -- and the
+# access log and RBAC shadow counter below are how a deployment learns when ending it is safe.
 #
 # -------------------------------------------------------------------------------------------------
 # THE FIVE TRANSLATION TRAPS, each of which produces a stack that looks fine and is not:
@@ -69,6 +81,48 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: gateway
+                # -----------------------------------------------------------------------------
+                # THE ONE LINE THAT SAYS THE MIGRATION IS NOT FINISHED.
+                #
+                # Supabase deprecates the anon and service-role JWTs by the end of 2026. Every
+                # consumer in this repository now presents the publishable key -- but "every
+                # consumer in this repository" is not the question. The question is whether
+                # ANYTHING still presents a legacy key, including callers nobody here wrote, and
+                # until this stack could answer it, turning the legacy pair off was a guess.
+                #
+                # SILENCE IS THE PASS CONDITION. This logs only when a request presented a legacy
+                # key, so an empty log over a representative window -- a full backup cycle, a
+                # month-end, whatever this deployment's slowest periodic job is -- is the evidence
+                # that `LEGACY_KEYS_ACCEPTED=false` is safe. One line is a named path to go and fix.
+                #
+                # A LOG AND A COUNTER, DELIBERATELY BOTH. The RBAC shadow rule below counts these
+                # for Prometheus, which answers "how many, and is it trending to zero" on a
+                # dashboard. It cannot answer "WHICH route, so who do I go and talk to". This can.
+                # -----------------------------------------------------------------------------
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    filter:
+                      metadata_filter:
+                        matcher:
+                          filter: acs.gateway
+                          path: [ { key: key_format } ]
+                          value: { string_match: { exact: "legacy" } }
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        text_format_source:
+                          # THE ROUTE NAME, NOT THE PATH, AND THAT IS A CREDENTIAL DECISION.
+                          # The apikey travels in the QUERY STRING on the Realtime route -- a
+                          # browser cannot set a header on a WebSocket handshake -- so `%REQ(:PATH)%`
+                          # would write the key itself to stdout on every one of these lines. That
+                          # is exactly what hide_credentials exists to prevent one layer down, and
+                          # a log is a worse place for it than an upstream access log.
+                          #
+                          # `%ROUTE_NAME%` is the matched route from the inventory above
+                          # (`rest-v1-routes`, `realtime-v1-ws`, ...). With the user agent and the
+                          # downstream address that is enough to identify the consumer, which is
+                          # the only thing this line is for. The key never is.
+                          inline_string: "acs-legacy-api-key method=%REQ(:METHOD)% route=%ROUTE_NAME% status=%RESPONSE_CODE% ua=%REQ(USER-AGENT)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
                 # Realtime is a WebSocket upstream; without this the handshake is answered 426.
                 upgrade_configs:
                   - upgrade_type: websocket
@@ -292,6 +346,66 @@ static_resources:
                           local ANON = "__SUPABASE_ANON_KEY__"
                           local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
 
+                          -- THE NEW KEY FORMAT, and the two locals that make this a GATEWAY feature
+                          -- rather than a component upgrade. `sb_publishable_*` and `sb_secret_*` ARE NOT
+                          -- JWTS: given one as a bearer, postgrest v14.12 answers
+                          -- `PGRST301 "Expected 3 parts in JWT; got 1"` -- measured here, not read.
+                          -- Nothing downstream is taught to understand them, and nothing downstream ever
+                          -- sees one. This filter matches the key as a STRING, exactly as it already does
+                          -- for the legacy pair, and hands the upstream the legacy JWT it has always
+                          -- required. That is the whole of the migration at this layer.
+                          --
+                          -- EMPTY MEANS OFF, and the comparison says so out loud rather than relying on
+                          -- the substituters. A stack that has not been given new keys renders "" here,
+                          -- and `PUBLISHABLE ~= ""` is what stops an empty apikey header from matching an
+                          -- empty registered key -- which is every caller who sends the header at all,
+                          -- and the exact failure both substituters refuse to boot on for the legacy
+                          -- pair. Legacy-only is the supported state, not a degraded one: the two formats
+                          -- are accepted SIMULTANEOUSLY so consumers move one at a time.
+                          local PUBLISHABLE = "__SUPABASE_PUBLISHABLE_KEY__"
+                          local SECRET = "__SUPABASE_SECRET_KEY__"
+
+                          -- The legacy JWT a new key stands for, or nil if this is not a new key.
+                          -- THE DEACTIVATION SWITCH, and the step this whole migration exists to reach. Substituted as a
+                          -- BARE LUA BOOLEAN, not a string: `false` here stops the gateway accepting the anon and
+                          -- service-role JWTs at all, which is what actually answers the upstream deprecation. Everything
+                          -- before it -- the translation, the consumer sweep -- was preparation for flipping this.
+                          --
+                          -- DEFAULT TRUE, AND CHANGING THAT IS AN OPERATIONAL DECISION RATHER THAN A CODE ONE. Turning it
+                          -- off while anything still presents a legacy key is an outage for that caller, and the caller
+                          -- may not live in this repository. The RBAC shadow counter below is how you find out first.
+                          local LEGACY_ACCEPTED = __LEGACY_KEYS_ACCEPTED__
+
+                          local function translated(key)
+                            if PUBLISHABLE ~= "" and key == PUBLISHABLE then return ANON end
+                            if SECRET ~= "" and key == SECRET then return SERVICE end
+                            return nil
+                          end
+
+                          -- WHICH FORMAT THE CALLER PRESENTED, independent of whether it is ACCEPTED. That separation is
+                          -- the measurement: a key can be recognised and refused, and the two questions get different
+                          -- answers the moment LEGACY_ACCEPTED goes false.
+                          local function key_format(key)
+                            if key == nil then return "absent" end
+                            if PUBLISHABLE ~= "" and key == PUBLISHABLE then return "new" end
+                            if SECRET ~= "" and key == SECRET then return "new" end
+                            if key == ANON or key == SERVICE then return "legacy" end
+                            return "unregistered"
+                          end
+
+                          -- RECORDED BEFORE ANY DECISION, refusals included. `handle:respond()` ends the filter chain, so
+                          -- metadata set after a refusal would never be written -- and a request refused BECAUSE it used
+                          -- a legacy key is exactly the one an operator needs to see once the switch is thrown.
+                          local function record_format(handle, fmt)
+                            handle:streamInfo():dynamicMetadata():set("acs.gateway", "key_format", fmt)
+                          end
+
+                          local function accepted(key)
+                            local fmt = key_format(key)
+                            if fmt == "legacy" then return LEGACY_ACCEPTED end
+                            return fmt == "new"
+                          end
+
                           -- The key may arrive in the header or the query string; Kong accepts
                           -- both (key_in_header + key_in_query) so one configuration serves every
                           -- client. Returns the value and where it came from.
@@ -339,13 +453,44 @@ static_resources:
                             end
                           end
 
+                          -- Synthesise the bearer the upstreams authorise on, for a NEW key only.
+                          --
+                          -- WHY IT IS NEEDED AT ALL. `service_role` is always BOTH the apikey and the
+                          -- bearer, because its whole purpose is the `role` claim PostgREST switches on;
+                          -- and supabase-js sends the key as the bearer when there is no session, which
+                          -- is the unauthenticated browser. Both of those are a JWT today and neither can
+                          -- be an opaque string.
+                          --
+                          -- WHAT IT DELIBERATELY LEAVES ALONE, which is the security half. An
+                          -- Authorization header carrying somebody ELSE'S token is untouched: the i3X
+                          -- service and all eight edge functions pass the CALLER'S JWT as the bearer and
+                          -- use the API key purely as the gateway credential, so overwriting it would
+                          -- silently promote every one of their callers to `anon` or `service_role`.
+                          -- This replaces the header only when it is absent, or when it is the presented
+                          -- key itself.
+                          --
+                          -- ONE DIVERGENCE FROM THE LEGACY PAIR, stated because it is a privilege
+                          -- difference and not a formatting one: `apikey: <secret key>` with NO
+                          -- Authorization now reaches PostgREST as `service_role`, where
+                          -- `apikey: <service_role JWT>` with no Authorization reaches it as the anon
+                          -- role. That is what the new format means -- the secret key IS the credential
+                          -- rather than a ticket to present one -- and it grants nothing a holder of that
+                          -- key could not already take by setting the header themselves.
+                          local function synthesise_bearer(handle, key, jwt)
+                            local auth = handle:headers():get("authorization")
+                            if auth == nil or auth == "" or auth == key or auth == "Bearer " .. key then
+                              handle:headers():replace("authorization", "Bearer " .. jwt)
+                            end
+                          end
+
                           function envoy_on_request(handle)
                             local key = presented_key(handle)
+                            record_format(handle, key_format(key))
                             if key == nil then
                               refuse(handle)
                               return
                             end
-                            if key ~= ANON and key ~= SERVICE then
+                            if not accepted(key) then
                               handle:respond(
                                 { [":status"] = "401", ["content-type"] = "application/json" },
                                 -- Kong answers "Unauthorized" for a RECOGNISED-but-wrong key and
@@ -355,6 +500,10 @@ static_resources:
                                 '{"message":"Unauthorized"}'
                               )
                               return
+                            end
+                            local jwt = translated(key)
+                            if jwt ~= nil then
+                              synthesise_bearer(handle, key, jwt)
                             end
                             -- hide_credentials. PostgREST, storage-api and the edge runtime all
                             -- authorise on the JWT in Authorization; forwarding the apikey serves
@@ -379,6 +528,48 @@ static_resources:
                           inline_string: |
                             local ANON = "__SUPABASE_ANON_KEY__"
                             local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
+                            local PUBLISHABLE = "__SUPABASE_PUBLISHABLE_KEY__"
+                            local SECRET = "__SUPABASE_SECRET_KEY__"
+
+                            -- THE DEACTIVATION SWITCH, and the step this whole migration exists to reach. Substituted as a
+                            -- BARE LUA BOOLEAN, not a string: `false` here stops the gateway accepting the anon and
+                            -- service-role JWTs at all, which is what actually answers the upstream deprecation. Everything
+                            -- before it -- the translation, the consumer sweep -- was preparation for flipping this.
+                            --
+                            -- DEFAULT TRUE, AND CHANGING THAT IS AN OPERATIONAL DECISION RATHER THAN A CODE ONE. Turning it
+                            -- off while anything still presents a legacy key is an outage for that caller, and the caller
+                            -- may not live in this repository. The RBAC shadow counter below is how you find out first.
+                            local LEGACY_ACCEPTED = __LEGACY_KEYS_ACCEPTED__
+
+                            local function translated(key)
+                              if PUBLISHABLE ~= "" and key == PUBLISHABLE then return ANON end
+                              if SECRET ~= "" and key == SECRET then return SERVICE end
+                              return nil
+                            end
+
+                            -- WHICH FORMAT THE CALLER PRESENTED, independent of whether it is ACCEPTED. That separation is
+                            -- the measurement: a key can be recognised and refused, and the two questions get different
+                            -- answers the moment LEGACY_ACCEPTED goes false.
+                            local function key_format(key)
+                              if key == nil then return "absent" end
+                              if PUBLISHABLE ~= "" and key == PUBLISHABLE then return "new" end
+                              if SECRET ~= "" and key == SECRET then return "new" end
+                              if key == ANON or key == SERVICE then return "legacy" end
+                              return "unregistered"
+                            end
+
+                            -- RECORDED BEFORE ANY DECISION, refusals included. `handle:respond()` ends the filter chain, so
+                            -- metadata set after a refusal would never be written -- and a request refused BECAUSE it used
+                            -- a legacy key is exactly the one an operator needs to see once the switch is thrown.
+                            local function record_format(handle, fmt)
+                              handle:streamInfo():dynamicMetadata():set("acs.gateway", "key_format", fmt)
+                            end
+
+                            local function accepted(key)
+                              local fmt = key_format(key)
+                              if fmt == "legacy" then return LEGACY_ACCEPTED end
+                              return fmt == "new"
+                            end
 
                             local function presented_key(handle)
                               local from_header = handle:headers():get("apikey")
@@ -395,12 +586,45 @@ static_resources:
                               return nil
                             end
 
+                            -- REPLACED HERE RATHER THAN STRIPPED, and that is this filter's whole
+                            -- difference from the other one under the new key format. Realtime does not
+                            -- merely CARRY the apikey, it PARSES it: the tenant and the RLS claims come out
+                            -- of that token. So an opaque `sb_publishable_*` left in place is not a
+                            -- credential Realtime fails to recognise, it is a JWT it cannot read, and the
+                            -- handshake dies with nothing in any log naming the key format -- the same
+                            -- shape of silent failure as trap 2 and trap 3 in the header.
+                            --
+                            -- Kong's `hide_credentials: false` on this route says "do not DELETE this".
+                            -- Substituting the JWT the key stands for honours that: the parameter is still
+                            -- there, still first, and now readable by the one upstream that reads it.
+                            --
+                            -- NO ESCAPING IS NEEDED. A JWT is three base64url segments and two dots, every
+                            -- character of which is already safe in a query string.
+                            local function replace_key(handle, jwt)
+                              if handle:headers():get("apikey") ~= nil then
+                                handle:headers():replace("apikey", jwt)
+                              end
+                              local path = handle:headers():get(":path") or ""
+                              local base, query = string.match(path, "^([^?]*)%?(.*)$")
+                              if query == nil then return end
+                              local kept = {}
+                              for pair in string.gmatch(query, "[^&]+") do
+                                if string.match(pair, "^([^=]+)") == "apikey" then
+                                  kept[#kept + 1] = "apikey=" .. jwt
+                                else
+                                  kept[#kept + 1] = pair
+                                end
+                              end
+                              handle:headers():replace(":path", base .. "?" .. table.concat(kept, "&"))
+                            end
+
                             -- NOTHING IS REMOVED HERE. Realtime reads the apikey from the query
                             -- string itself to identify the tenant and evaluate RLS; stripping it
                             -- breaks the handshake, which is why Kong sets hide_credentials false
                             -- on this route and only this one.
                             function envoy_on_request(handle)
                               local key = presented_key(handle)
+                              record_format(handle, key_format(key))
                               if key == nil then
                                 handle:respond(
                                   { [":status"] = "401", ["content-type"] = "application/json" },
@@ -408,13 +632,66 @@ static_resources:
                                 )
                                 return
                               end
-                              if key ~= ANON and key ~= SERVICE then
+                              if not accepted(key) then
                                 handle:respond(
                                   { [":status"] = "401", ["content-type"] = "application/json" },
                                   '{"message":"Unauthorized"}'
                                 )
+                                return
+                              end
+                              local jwt = translated(key)
+                              if jwt ~= nil then
+                                replace_key(handle, jwt)
+                                -- The browser client sends the key in the query string; a server-side
+                                -- client may send it as the bearer instead. Same rule as the other
+                                -- filter: somebody else's token is never overwritten.
+                                local auth = handle:headers():get("authorization")
+                                if auth == nil or auth == "" or auth == key or auth == "Bearer " .. key then
+                                  handle:headers():replace("authorization", "Bearer " .. jwt)
+                                end
                               end
                             end
+
+                  # -------------------------------------------------------------------------
+                  # THE LEGACY-KEY COUNTER, and it is a SHADOW rule: it decides nothing.
+                  #
+                  # Envoy's Lua filter has no API for creating a stat, so the count cannot come
+                  # from the filter that does the matching. `shadow_rules` is the way to turn a
+                  # match into a counter without letting it affect a single request: the policy is
+                  # evaluated, the result is recorded, and the traffic is unaffected either way.
+                  # Deactivation is done by LEGACY_ACCEPTED in the Lua above, never here.
+                  #
+                  # READ IT AS: `rbac.legacy_api_key_.shadow_allowed` is the number of requests
+                  # that presented a LEGACY key -- the number that must reach zero and stay there
+                  # before the switch is thrown. `shadow_denied` is everything else. The prometheus
+                  # endpoint the ServiceMonitor already scrapes carries both, so this needs no new
+                  # scrape target and no new dashboard wiring.
+                  #
+                  # IT COUNTS ONLY WHILE LEGACY KEYS ARE STILL ACCEPTED, and that asymmetry is
+                  # measured rather than assumed. `handle:respond()` in the Lua ENDS THE FILTER
+                  # CHAIN, so once LEGACY_ACCEPTED is false a legacy request is refused before this
+                  # filter ever runs and the counter stays flat at zero. That is the right way
+                  # round -- the counter's whole job is to say when the switch is safe, which is a
+                  # question asked BEFORE it is thrown -- but it means the counter cannot be used
+                  # to find stragglers AFTERWARDS. The access log can: it is attached to the
+                  # connection manager, so it still fires for a refused request and records
+                  # `status=401`, which is exactly the line that names whoever just broke.
+                  # -------------------------------------------------------------------------
+                  - name: envoy.filters.http.rbac
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                      shadow_rules_stat_prefix: legacy_api_key_
+                      shadow_rules:
+                        action: ALLOW
+                        policies:
+                          legacy_key:
+                            permissions:
+                              - metadata:
+                                  filter: acs.gateway
+                                  path: [ { key: key_format } ]
+                                  value: { string_match: { exact: "legacy" } }
+                            principals:
+                              - any: true
 
                   - name: envoy.filters.http.router
                     typed_config:

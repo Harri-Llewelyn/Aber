@@ -111,58 +111,70 @@ item, and leaving it in the tracker teaches people to skim it.
 
 ---
 
-## 1 · Supabase's legacy API keys
+## 1 · Moving off Supabase's legacy API keys
 
-**Builds on:** [`scripts/setup.mjs`](../scripts/setup.mjs) · the gateway's `apikey` check in
-[`supabase/envoy.yaml`](../supabase/envoy.yaml) · `custom_access_token_hook` (`0001`) ·
-the edge-function registry
+**Builds on:** the gateway's translation in [`supabase/envoy.yaml`](../supabase/envoy.yaml), which
+is BUILT — see
+[The two key formats, accepted at once](gateway-migration.md#3-the-two-key-formats-accepted-at-once) ·
+`scripts/setup.mjs` · the i3X service · the edge functions · [`frontend/src/lib/supabaseClient.js`](../frontend/src/lib/supabaseClient.js) ·
+`custom_access_token_hook` (`0001`)
 
-The `anon` and `service_role` JWTs this stack mints in `setup.mjs` are the key format Supabase has
-since superseded with **publishable and secret keys**. This is a real upstream deprecation with a
-real end date, and it is the only item on this list whose timing is set by somebody else.
+Supabase deprecates the `anon` and `service_role` JWTs **by the end of 2026**, replacing them with
+publishable and secret keys. It is the only item on this list whose timing is set by somebody else,
+and the deadline is now inside a year.
 
-**Scoped against the pinned versions, as this entry used to say it must be — and the answer changed
-the plan.** The new keys are **not JWTs**, and no component downstream ever sees one. Given a
-non-JWT bearer, `postgrest v14.12` answers
-`PGRST301 "Expected 3 parts in JWT; got 1"` — measured here, not read. They work because the
-**gateway** matches the key as a string and synthesises the `Authorization: Bearer <JWT>` the
-upstreams require. That makes this a gateway feature, not a component-version upgrade, and it is why
-this item waited on the gateway migration: upstream ships the translation in Envoy and Kong has
-no equivalent. See [`docs/gateway-migration.md`](gateway-migration.md).
+**The gateway half shipped and left this entry.** The stack accepts `sb_publishable_*` and
+`sb_secret_*` alongside the legacy pair, on both targets: `setup.mjs` mints a pair, the chart takes
+`secrets.publishableKey` / `secrets.secretKey` as `optional: true` refs so an existing cluster
+upgrades without minting anything, and the Lua filter matches the new key as a string and hands the
+upstream the legacy JWT it has always required. Empty means legacy-only, which is what every
+existing install is. The reasoning, the translation table and what it deliberately refuses to
+rewrite are in the gateway document; the one thing worth repeating here is **why** it could be
+built at all — the new keys are not JWTs, no component downstream ever sees one, so this was a
+gateway feature rather than a component-version upgrade.
 
-**The rehearsal path this entry called "the first thing to build" now exists**, and it did not have
-to be built. Upstream's Envoy configuration accepts legacy and new keys **simultaneously**, so
-consumers migrate one at a time instead of on a flag day. Translation activates only when all four
-of `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `ANON_KEY_ASYMMETRIC` and
-`SERVICE_ROLE_KEY_ASYMMETRIC` are set; short of that it runs legacy-only, which is what the stack
-does today.
+**The consumer sweep has now shipped too, and it left this entry.** Every gateway caller in the
+repository prefers the publishable key and falls back to the anon key: the five Python daemons
+through a `SUPABASE_GATEWAY_KEY` constant, the nine edge functions that hold one through a shared
+[`_shared/gatewayKey.ts`](../supabase/functions/_shared/gatewayKey.ts), the browser bundle through
+`config.js`, and the two shell substituters through `${SUPABASE_PUBLISHABLE_KEY:-$SUPABASE_ANON_KEY}`.
+The chart gained an `optionalSecretEnv` helper so a cluster on an `existingSecret` upgrades without
+minting anything. The table of what moved, what deliberately did not, and why the fallback tests
+for an empty string rather than for an absent one is in
+[What the consumers do with it](gateway-migration.md#what-the-consumers-do-with-it).
 
-**The surface is 67 files, not the twelve this entry used to claim** — but the count matters less
-than the split, which decides the work:
+**The switch and its measurement have now shipped too.** `LEGACY_KEYS_ACCEPTED=false` (Compose) or
+`supabaseEnvoy.legacyKeysAccepted: false` (Helm) stops the gateway accepting the anon and
+service-role JWTs at all, and both substituters refuse the one combination that locks everybody
+out -- legacy off with no publishable key registered, which accepts nothing and answers 401 to
+every request while every container reports healthy.
 
-- **Most consumers send the key as `apikey` ONLY**, and are format-agnostic. The i3X service and all
-  eight edge functions pass the *caller's* token as the bearer and use the anon key purely as the
-  gateway credential. Those migrate for free.
-- **`service_role` is always both**, and that is the hard half. Its whole purpose is the `role`
-  claim PostgREST switches on, so it depends on the gateway's synthesis. `0026`'s premise — that a
-  holder of it must not be able to forge an audit row — has to survive whatever mints it.
-- **The unauthenticated browser is the other one.** `supabase-js` sends the anon key as the bearer
-  when there is no session, so it needs the same translation.
-- **`anon` is public by construction**, readable in any built bundle, which is why the chart renders
-  it outside a Secret deliberately. Replacing it changes what the gateway accepts as a registered
-  key, not a secret rotation.
-- **`custom_access_token_hook` shapes the claims** the rest of the stack reads. PostgREST resolves
-  RLS from them, and `grafana-userinfo` maps a role out of `public.user_roles` beside them.
+**What was actually blocking this was a measurement, and the gateway now takes it.** Two
+instruments, deliberately both: an access log line per legacy-key request naming the route, the
+user agent and the caller -- silence is the pass condition -- and
+`rbac.legacy_api_key_.shadow_allowed` on the `/stats/prometheus` endpoint the ServiceMonitor already
+scrapes, which must be flat at zero. The log answers "who do I go and talk to"; the counter answers
+"is it trending to zero" on a dashboard. Neither logs the key: the apikey travels in the query
+string on the Realtime route, so the format records `%ROUTE_NAME%` rather than the path.
 
-**This entry said it was blocked on Kubernetes, and it is not — the blocker cleared and nothing
-swept back to say so.** The claim was that the chart still deployed Kong, which cannot translate an
-opaque key, so the two targets would accept different key formats until the Envoy templates landed.
-Those templates landed: [`values.yaml`](../deploy/helm/acs-cymru/values.yaml) now sets
-`supabaseEnvoy.enabled: true` and `supabaseKong.enabled: false`, with Kong retained and off.
-**Unblocked on both targets**, which matters because this is the one item on the list whose timing
-is set by somebody else. The divergence argument that made it a blocker still applies to anyone
-re-enabling Kong: a stack whose authentication differs by deployment target is the class of
-divergence the shared gateway template exists to prevent.
+**WHAT IS LEFT IS AN OBSERVATION, NOT A CHANGE, and it is deliberately not automated.** The flag
+still defaults to `true`, because turning it off is an outage for anything still presenting a legacy
+key and this repository cannot know who that is -- a Grafana somebody wired up, a script on an
+engineer's laptop, an integration written against the published quickstart. The remaining work is to
+watch both instruments on a real deployment over a window covering its slowest periodic job -- a
+backup cycle, a month end -- and then set one value. The order, and what to do when a `status=401`
+line appears afterwards, is in
+[Retiring the legacy pair](gateway-migration.md#retiring-the-legacy-pair-and-how-to-know-it-is-safe).
+
+**This entry stays until a deployment has actually run deactivated**, which is the only thing that
+would prove the chain works end to end. It is the one item on this list whose remaining work is
+operational rather than editorial, and shortening it to "done" while every install still accepts the
+deprecated format would be exactly the kind of entry the header of this file warns about.
+
+**The divergence argument still applies to anyone re-enabling Kong.** Kong cannot translate an
+opaque key, so a stack that turns it back on accepts only the legacy format — a stack whose
+authentication differs by deployment target is the class of divergence the shared gateway template
+exists to prevent.
 
 **Sources**, since the upstream guidance for the hosted platform and for self-hosting differ and
 this entry was written against the wrong one once already:

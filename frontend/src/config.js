@@ -35,6 +35,10 @@ export const RUNTIME_CONFIG_GLOBAL = '__ACS_CYMRU_CONFIG__';
 export const RUNTIME_SETTING_NAMES = [
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_ANON_KEY',
+  // The replacement for the key above, and OPTIONAL where that one is required. Supabase
+  // deprecates the anon JWT by the end of 2026; the gateway accepts both formats at once, so a
+  // deployment that has not minted the new pair leaves this empty and keeps working.
+  'VITE_SUPABASE_PUBLISHABLE_KEY',
   'VITE_ENABLE_REALTIME',
   'VITE_GITHUB_REPO_URL',
   'VITE_GRAFANA_URL',
@@ -62,6 +66,7 @@ export const RUNTIME_SETTING_NAMES = [
 const BUILD_TIME_SETTINGS = {
   VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
   VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY,
+  VITE_SUPABASE_PUBLISHABLE_KEY: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
   VITE_ENABLE_REALTIME: import.meta.env.VITE_ENABLE_REALTIME,
   VITE_GITHUB_REPO_URL: import.meta.env.VITE_GITHUB_REPO_URL,
   VITE_GRAFANA_URL: import.meta.env.VITE_GRAFANA_URL,
@@ -134,3 +139,21 @@ function required(name) {
 
 export const SUPABASE_URL = required('VITE_SUPABASE_URL');
 export const SUPABASE_ANON_KEY = required('VITE_SUPABASE_ANON_KEY');
+
+/**
+ * THE KEY THE BROWSER ACTUALLY PRESENTS -- the new publishable format where this deployment has
+ * one, the legacy anon key where it does not.
+ *
+ * NOT `required()`, deliberately, and that asymmetry is the migration. Both formats are accepted
+ * by the gateway at once so consumers move one at a time; making this mandatory would turn that
+ * into a flag day and break every install that has not minted the pair.
+ *
+ * THE ANON KEY STAYS REQUIRED because it is still the fallback. It stops being required when the
+ * legacy pair is deactivated, which is a later step and a deliberate one.
+ *
+ * `supabase-js` sends this as the bearer as well as the apikey when there is no session. That is
+ * safe for an opaque key: the gateway synthesises the JWT the upstreams need. See
+ * docs/gateway-migration.md.
+ */
+export const SUPABASE_GATEWAY_KEY =
+  readSetting('VITE_SUPABASE_PUBLISHABLE_KEY') || SUPABASE_ANON_KEY;

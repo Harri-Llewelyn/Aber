@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
  * Mint a broker credential for a VIRTUAL gateway and reveal it exactly once.
@@ -78,13 +79,13 @@ serve(async (req) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const anonKey = gatewayKey();
   const credentialUrl = Deno.env.get("MQTT_CREDENTIAL_SERVICE_URL") ?? "";
   const credentialToken = Deno.env.get("MQTT_CREDENTIAL_SERVICE_TOKEN") ?? "";
 
   const missing = [
     !supabaseUrl && "SUPABASE_URL",
-    !anonKey && "SUPABASE_ANON_KEY",
+    !anonKey && "SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY",
     !credentialUrl && "MQTT_CREDENTIAL_SERVICE_URL",
     !credentialToken && "MQTT_CREDENTIAL_SERVICE_TOKEN",
   ].filter(Boolean);

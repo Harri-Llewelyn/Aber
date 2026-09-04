@@ -89,6 +89,7 @@ spec:
               Authorization bearer that names Service_Playback.
             */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PLAYBACK_KEY" "secretName" $secretName "key" "SUPABASE_PLAYBACK_KEY") | nindent 12 }}
             - name: CAPTURE_BUCKET
               value: {{ .Values.supabaseStorage.captureBucket | quote }}

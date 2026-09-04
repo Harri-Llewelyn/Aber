@@ -904,6 +904,35 @@ message; without it the message names only the host, which is the least useful h
 {{- end -}}
 
 {{/*
+The same, but `optional: true` -- for a key the Secret is allowed NOT to carry.
+
+WHY A SECOND HELPER RATHER THAN A FLAG ON THE ONE ABOVE. The default must stay fail-closed. A
+required secretKeyRef stops the pod from starting when the key is absent, which is the right
+outcome for every credential this chart has ever passed: a container that boots without its
+credential fails later, further away, and in a way that reads as a broken upstream.
+
+THIS EXISTS FOR THE API-KEY MIGRATION, and the asymmetry is the point. Supabase deprecates the
+anon and service-role JWTs by the end of 2026 and replaces them with `sb_publishable_*` /
+`sb_secret_*`. The gateway accepts BOTH formats at once so consumers move one at a time -- and with
+`secrets.existingSecret` set, the chart does not own the Secret, so an operator's existing one has
+neither new key. A required ref would then refuse to start every workload on every cluster that
+upgraded without minting them, turning a migration designed to avoid a flag day into one.
+
+Absent means empty, empty means the consumer falls back to the legacy key, and each consumer does
+that fallback itself. When the legacy pair is finally deactivated, these become required and this
+helper's callers move back to the one above -- which is the change that will prove the sweep is
+finished.
+*/}}
+{{- define "acs-cymru.optionalSecretEnv" -}}
+- name: {{ .name }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secretName }}
+      key: {{ .key }}
+      optional: true
+{{- end -}}
+
+{{/*
 The MQTT principals the chart itself provisions, as env, for the two containers that write them:
 the broker's assemble-config initContainer and the credential-reload sidecar.
 
