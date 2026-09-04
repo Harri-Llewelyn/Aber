@@ -67,6 +67,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" $gw      "to" "realtime"           "port" 4000 "why" "/realtime/v1/ -> /socket/")
   (dict "from" $gw      "to" "supabase-storage"   "port" 5000 "why" "/storage/v1/")
   (dict "from" $gw      "to" "supabase-functions" "port" 9000 "why" "/functions/v1/")
+  (dict "from" $gw      "to" "supabase-studio"    "port" 3000 "why" "the studio listener on 8001 -- the ONLY path to the console, which has no login of its own. Note the direction: this is the gateway reaching Studio, the opposite of the `supabase-studio -> gateway` edge below, which is Studio making its own server-side API calls")
 
   (dict "from" "supabase-storage"   "to" "supabase-rest"      "port" 3000 "why" "resolves the caller's claims through PostgREST")
   (dict "from" "supabase-studio"    "to" "supabase-meta"      "port" 8080 "why" "the Database pages")

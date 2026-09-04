@@ -187,21 +187,27 @@ feedback rather than from an audit**
 Put an authenticating proxy in front of Supabase Studio, so reaching it costs a Supabase login as an
 `Administrator` rather than a position on the host.
 
-**THE COMPOSE HALF HAS SHIPPED**, as `0081` and a second listener in
-[`supabase/envoy.yaml`](../supabase/envoy.yaml): the gateway publishes `54323`, runs the browser
-flow, verifies the token and admits `Administrator` only; the Studio container publishes nothing.
-The substance is in
-[The second listener, which is Studio's login](../supabase/README.md#the-second-listener-which-is-studios-login-0081)
-and on the front page. **Three things keep this entry open:**
+**THE DOOR HAS SHIPPED ON BOTH TARGETS**, as `0081` and a second listener in
+[`supabase/envoy.yaml`](../supabase/envoy.yaml): the gateway runs the browser flow, verifies the
+token and admits `Administrator` only. Compose publishes it on `54323` and the Studio container
+publishes nothing; on Kubernetes `ingress.routes.studio` points at the gateway's listener rather
+than at Studio, the NetworkPolicy gives the console exactly one inbound edge, and the render fails
+if the route is turned on without the credentials that make it a door. The substance is in
+[The second listener, which is Studio's login](../supabase/README.md#the-second-listener-which-is-studios-login-0081),
+[`deploy/k8s/README.md`](../deploy/k8s/README.md) and the front page.
 
-1. **The chart renders the listener and does not publish it.** `routes.studio` is still `false`, and
-   turning it on is the decision below rather than a follow-up commit — it is the one that puts a
-   database console on a public hostname. The NetworkPolicy between the gateway and Studio has not
-   been written either, because nothing needs it while the route is off.
-2. **Websockets are unmeasured.** `upgrade_configs` is declared and never exercised; nothing here
+**`routes.studio` still defaults to `false`, and that is now an EXPOSURE decision rather than an
+authentication one** — the console is authenticated either way; what the operator is choosing is
+whether it is reachable by everyone who can reach the ingress. That belongs to a deployment, not to
+this file, so it is not an open item.
+
+**Two things keep this entry open:**
+
+1. **Websockets are unmeasured.** `upgrade_configs` is declared and never exercised; nothing here
    establishes what Studio opens.
-3. **The read-only database role is untouched**, and it is the *privilege* half of this entry rather
-   than the *door* half — see below.
+2. **The read-only database role is untouched**, and it is the *privilege* half of this entry rather
+   than the *door* half — see below. It is the larger of the two: everything shipped so far gates
+   *who may open the console*, and everything inside it still runs as the database owner.
 
 ### The binding is a real control, and it is the only one
 
@@ -412,10 +418,12 @@ change.
   assumed the Directory row would have to be corrected; the answer was to take over the port instead,
   so `0002`'s `http://127.0.0.1:54323` is still true and now names a door with a login on it. A
   migration that edits a row is more expensive than a listener that picks a number.
-- **Whether `routes.studio` flips to `true`.** Still open, and still not in the same change. The
-  chart's default was right because no proxy existed; it is now right for a different reason — that
-  publishing a database console on a public hostname is a decision about exposure rather than about
-  authentication. It brings a NetworkPolicy for gateway→Studio with it.
+- ~~**Whether `routes.studio` flips to `true`.**~~ **Decided: it stays `false`, and can now be
+  turned on.** The route was rebuilt to name the gateway's listener rather than `supabase-studio`,
+  so enabling it publishes an authenticated console; the NetworkPolicy gives Studio one inbound edge
+  and the ingress controller none. The default holds because the remaining question is exposure —
+  who can reach the ingress — which is a deployment's to answer. Enabling it without the two secrets
+  fails the render rather than publishing a login nobody can complete.
 - **Whether this waits for 3 or 4.** It does not — and those numbers are Entra sign-in and MFA;
   this bullet cited the old gapped scheme's 20 and 21 until 2026-09-04. Gating on `Administrator`
   adds another Administrator-only check in the direction the token and principal revocation controls

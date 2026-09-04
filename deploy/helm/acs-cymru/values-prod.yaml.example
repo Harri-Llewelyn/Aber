@@ -153,6 +153,16 @@ secrets:
   grafanaAdminPassword: ""
   grafanaOAuthClientSecret: ""
 
+  # Studio's door. NEEDED ONLY IF `ingress.routes.studio` is turned on -- that route publishes the
+  # gateway's studio listener, which runs an OAuth flow and admits `Administrator` alone, and the
+  # render fails naming these two rather than publishing a login nobody can complete. Left empty
+  # here because the route is off by default and a console on a public hostname is a decision.
+  #
+  # openssl rand -hex 32, both. The first is one credential in two places (the gateway presents it,
+  # migration 0081 stores its hash); the second signs the session cookie and is nothing else's.
+  studioOAuthClientSecret: ""
+  studioProxyHmacSecret: ""
+
   noderedCredentialSecret: ""
   noderedOAuthClientSecret: ""
   # openssl rand -hex 32. A SIGNING key, not a bearer credential -- /hooks/quarantine is an

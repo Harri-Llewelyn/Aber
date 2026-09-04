@@ -84,6 +84,14 @@ spec:
       port: 8000
       targetPort: http
       protocol: TCP
+    # STUDIO'S DOOR, and the only backend the studio ingress route may name. Pointing that route at
+    # the `supabase-studio` Service instead reaches the console with no login in front of it, which
+    # is what this port exists to prevent -- so the route is built from the gateway Service in
+    # `acs-cymru.ingressRoutes`, where there is one definition of it to get right.
+    - name: studio
+      port: 8001
+      targetPort: studio
+      protocol: TCP
     {{- if .Values.supabaseEnvoy.metrics.enabled }}
     # NAMED `metrics`, selected BY NAME by the ServiceMonitor, as Kong's is.
     #
@@ -285,6 +293,12 @@ spec:
           ports:
             - name: http
               containerPort: 8000
+            # Studio's listener. Declared unconditionally because the bootstrap declares it
+            # unconditionally -- the port is open in the pod whether or not `ingress.routes.studio`
+            # publishes it, and a containerPort that disagreed with the config would make the pod
+            # describe itself wrongly without changing what it serves.
+            - name: studio
+              containerPort: 8001
             {{- if .Values.supabaseEnvoy.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.supabaseEnvoy.metrics.port }}

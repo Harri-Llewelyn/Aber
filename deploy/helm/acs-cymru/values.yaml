@@ -1235,18 +1235,25 @@ ingress:
   # nodered, grafana, studio, docs, mqtt. Set one to false to keep a service off the ingress while
   # leaving it running in-cluster.
   #
-  # STUDIO IS OFF BY DEFAULT, AND THAT IS A SECURITY DEFAULT RATHER THAN A PREFERENCE. Supabase
-  # Studio has NO AUTHENTICATION of its own -- no login, no roles, no session. The official stack
-  # fronts it with a basic-auth pair on Kong; this chart does not. So anything that can reach it
-  # gets the SQL editor, the table editor and the Vault UI as the database owner, and RLS does not
-  # apply because the owner is exempt from it.
+  # STUDIO IS STILL OFF BY DEFAULT, AND THE REASON HAS CHANGED. It used to be off because there was
+  # nothing to put in front of it: Supabase Studio has no authentication of its own -- no login, no
+  # roles, no session -- and connects as the database owner, for whom RLS is not enforced. The
+  # official stack fronts it with a basic-auth pair on Kong; this chart does not.
   #
-  # It used to default to ON, with a comment recommending it be turned off. A default that has to
-  # be read to be safe is not a safe default: it publishes an unauthenticated database console at
-  # `studio.<publicBaseDomain>` for anyone who installs the chart without editing this file.
-  # Turning it on is now a deliberate act, and belongs with an authenticating proxy in front.
+  # THE PROXY NOW EXISTS. `acs-cymru.ingressRoutes` points this route at the GATEWAY's studio
+  # listener (8001), never at `supabase-studio:3000`, so turning it on publishes an OAuth flow
+  # against this stack's own GoTrue that admits `Administrator` and nobody else -- and the
+  # NetworkPolicy allows the gateway to reach Studio, so there is no second path to it.
   #
-  # Reach it without the ingress the same way Compose does -- a port-forward:
+  # What is left is an EXPOSURE decision rather than an authentication one, and it is the operator's
+  # rather than this file's: a database console on a public hostname is reachable by anyone who can
+  # reach the ingress, and the whole of what stands between them and the SQL editor is one account's
+  # credentials. That is a defensible thing to want and a poor thing to default to.
+  #
+  # Turning it on requires `secrets.studioOAuthClientSecret` and `secrets.studioProxyHmacSecret`;
+  # the render fails naming them if they are unset, rather than publishing a login nobody can pass.
+  #
+  # Reach it without the ingress the same way Compose used to -- a port-forward:
   #   kubectl -n <ns> port-forward svc/<release>-acs-cymru-supabase-studio 54323:3000
   routes:
     studio: false
