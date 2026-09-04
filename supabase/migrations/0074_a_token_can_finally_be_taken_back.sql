@@ -193,6 +193,26 @@ COMMENT ON FUNCTION public.auth_pre_request() IS
 
 -- EVERY ROLE POSTGREST SWITCHES TO, and the omission of one is an outage for that role alone --
 -- which is the kind of partial failure that gets diagnosed as anything but this function.
+-- REVOKED FROM PUBLIC, GRANTED TO anon -- AND THOSE ARE NOT THE SAME GRANTEE.
+--
+-- PostgreSQL gives every new function EXECUTE to PUBLIC. Issuing a GRANT on a function whose ACL is
+-- still NULL MATERIALISES that default first and then adds to it, so the GRANT below does not
+-- replace PUBLIC's entry -- it preserves it. Measured on a database booted exactly once, before
+-- this line existed:
+--
+--     auth_pre_request  {=X/postgres,postgres=X/postgres,service_role=X/postgres,anon=X/postgres,...}
+--                        ^^^^^^^^^^^ PUBLIC
+--
+-- and on the same chain booted twice, where 0001's section 6 sweep has since removed it. TWO BOOTS
+-- OF THE SAME FILES PRODUCED TWO DIFFERENT SCHEMAS, which is what check-migration-idempotency.mjs
+-- refuses -- it caught this as `REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC;`
+-- appearing in the second dump and not the first.
+--
+-- Revoking PUBLIC here settles it on boot one instead. `anon` KEEPS its explicit grant, which it
+-- must: PostgREST runs this hook after switching to the request's role, and for an unauthenticated
+-- request that role is `anon`. Revoking anon as the sibling functions do would take the whole
+-- anonymous API down.
+REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.auth_pre_request() TO anon, authenticated, service_role;
 
 

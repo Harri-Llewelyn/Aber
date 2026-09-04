@@ -181,6 +181,51 @@ COMMENT ON FUNCTION public.auth_pre_request() IS
   '-- no claims, unparseable claims, a token with no jti, a sub that is not a uuid -- because '
   'those are the ordinary majority and refusing them would take the whole API down.';
 
+-- REVOKED FROM PUBLIC, GRANTED TO anon -- AND THOSE ARE NOT THE SAME GRANTEE.
+--
+-- PostgreSQL gives every new function EXECUTE to PUBLIC. Issuing a GRANT on a function whose ACL is
+-- still NULL MATERIALISES that default first and then adds to it, so the GRANT below does not
+-- replace PUBLIC's entry -- it preserves it. Measured on a database booted exactly once, before
+-- this line existed:
+--
+--     auth_pre_request  {=X/postgres,postgres=X/postgres,service_role=X/postgres,anon=X/postgres,...}
+--                        ^^^^^^^^^^^ PUBLIC
+--
+-- and on the same chain booted twice, where 0001's section 6 sweep has since removed it. TWO BOOTS
+-- OF THE SAME FILES PRODUCED TWO DIFFERENT SCHEMAS, which is what check-migration-idempotency.mjs
+-- refuses -- it caught this as `REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC;`
+-- appearing in the second dump and not the first.
+--
+-- Revoking PUBLIC here settles it on boot one instead. `anon` KEEPS its explicit grant, which it
+-- must: PostgREST runs this hook after switching to the request's role, and for an unauthenticated
+-- request that role is `anon`. Revoking anon as the sibling functions do would take the whole
+-- anonymous API down.
+-- ALL FOUR GRANTEES REVOKED AND RE-GRANTED IN ONE FIXED ORDER, which is stronger than it looks
+-- and is about the DUMP rather than about privilege.
+--
+-- An ACL is an ordered array, and pg_dump renders it in that order, so two boots that arrive at the
+-- same PERMISSIONS by different routes still produce different SQL -- and
+-- check-migration-idempotency.mjs compares a sha256 of the dump, so a pure reordering fails it
+-- while reporting no added or removed line at all.
+--
+-- The routes genuinely differ, because this is the only function in `public` that `anon` is meant
+-- to reach. 0001's section 6 sweep strips PUBLIC and anon from every function and then restores
+-- only the `authenticated` and `service_role` grants it found, so `anon` is re-added afterwards by
+-- the GRANT below and lands LAST -- but only from the second boot onwards, since on the first this
+-- function does not exist when 0001 runs. Measured:
+--
+--     boot 1       {postgres, service_role, anon, authenticated}
+--     boot 2+      {postgres, service_role, authenticated, anon}
+--
+-- Revoking all three roles here empties the array to `{postgres}` whatever preceded it, so the
+-- three GRANTs below always append in the same order. This is the last declaration of the function
+-- in the chain, so its ordering is the one that survives.
+--
+-- ANON KEEPS ITS GRANT, which it must: PostgREST runs this hook after switching to the request's
+-- role, and for an unauthenticated request that role is `anon`. Revoking anon as the sibling
+-- functions do would take the whole anonymous API down, /ping included.
+REVOKE ALL ON FUNCTION public.auth_pre_request()
+  FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.auth_pre_request() TO anon, authenticated, service_role;
 
 
