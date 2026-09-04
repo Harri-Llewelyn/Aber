@@ -2160,9 +2160,48 @@ jobs:
         run: |
           node scripts/setup.mjs --demo
 
+      # LOGS ON FAILURE, BECAUSE `up` DOES NOT PRINT THEM (#134). A one-shot dependency declared
+      # `service_completed_successfully` failing takes the whole `up` down, and compose reports
+      # only its own exit 1 and the service's name:
+      #
+      #     Container acs-cymru_supabase_db_roles_init  Started
+      #     Container acs-cymru_supabase_db_roles_init  Waiting
+      #     service "supabase-db-roles-init" didn't complete successfully: exit 1
+      #
+      # The container's own stderr -- which says whether its preflight failed or one of its
+      # ALTER USER statements did -- is discarded, so a one-off has to be inferred from the
+      # compose file rather than read. That is exactly what happened on run 33515575981, and it
+      # is why that issue is filed as a lead rather than a diagnosis.
+      #
+      # The same idiom as the Realtime upgrade check further down: fail loudly, and print what the
+      # next person needs before exiting.
       - name: Launch Unified Docker Compose Stack
         run: |
-          docker compose up -d
+          if docker compose up -d; then
+            exit 0
+          fi
+
+          echo "::error::docker compose up failed. Container states and logs follow (#134)."
+
+          # WHICH service failed is already answered -- compose says so itself, in the output
+          # directly above this. This table adds the exit codes and the state of everything else,
+          # which is what separates "one Job exited 1" from "half the stack never started".
+          echo "--- container states ---"
+          docker compose ps -a || true
+
+          # EVERY SERVICE, NOT JUST THE FAILED ONE, and deliberately not clever about it. Selecting
+          # the failed containers means parsing `docker compose ps --format json`, whose shape
+          # changed at v2.21 (JSON lines, a single array before it) -- a branch that runs only when
+          # the stack is already broken and cannot be exercised until then. A diagnostic that
+          # itself needs debugging at the moment it is finally read is worth less than a verbose
+          # one, so this dumps the lot and lets the reader use the table above to pick.
+          #
+          # `|| true` on each: a step that aborts before printing what it came to print is the
+          # failure this whole block exists to correct.
+          echo "--- logs (all services, newest 150 lines each) ---"
+          docker compose logs --no-color --tail 150 || true
+
+          exit 1
 
       - name: Wait for Services Health
         run: |

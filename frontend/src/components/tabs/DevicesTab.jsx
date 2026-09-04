@@ -1060,7 +1060,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                               })
                             }
 
-                            return <TagList limit={4} tags={entries} limit={2} />
+                            return <TagList limit={4} tags={entries}/>
                           })()}
                         </td>
                         <td style={{ maxWidth: '170px' }}>

@@ -955,7 +955,24 @@ Prometheus, the log line is for whoever is reading `docker logs` at 3am with no 
 | `acs_ingestion_unmapped_counter_total` | `counter` | A counter exists in `ingestion.py` with no mapping in `metrics.py`. Not a data fault — a monitoring one. |
 
 `reason` on the drop counter: `gateway_binding` (a device published under a gateway that does not
-own it), `quarantined_or_unregistered`, `directory_unavailable`, `db_unavailable`.
+own it), `gateway_archived`, `quarantined_or_unregistered`, `db_unavailable`, and the four
+directory-unavailable reasons below.
+
+**The directory being unreachable costs a different amount depending on what was lost**, which is
+why it is four reasons and not one. A brief PostgREST restart, Kong reload or failover produces
+all of them; only the first two are recoverable on their own.
+
+| `reason` | What was dropped | What it costs |
+| :--- | :--- | :--- |
+| `directory_unavailable` | A DDATA message | One sample. The stream resumes by itself. |
+| `ddeath_directory_unavailable` | A death certificate | A delayed status. The watchdog marks the device OFFLINE after `DEVICE_OFFLINE_TIMEOUT_SECONDS`. |
+| `dbirth_directory_unavailable` | **A birth certificate** | **The alias table for that device.** Every later alias-only DDATA from its edge node is undecodable until the next rebirth. |
+| `node_message_directory_unavailable` | An NBIRTH or NDEATH | The edge node's heartbeat. An NBIRTH also resets the whole node's alias table, so losing one has the reach of a DBIRTH drop across every device behind it. |
+
+The last two are worth waking someone for and the first two are not, which is the whole reason
+they are separable — see the `Ingestion Dropping Birth Certificates` alert. Note that the node
+counter is **not** throttled while its log warning is: on that path the counter is the accurate
+number and the log undercounts deliberately.
 
 ### The sequence counters are a lower bound, and that is inherent
 

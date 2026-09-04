@@ -733,6 +733,64 @@ kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
 > Run `post_restore()` **even if the restore failed.** `scripts/restore-databases.sh` does this for
 > the Compose target and verifies `public.telemetry` through the wrapper afterwards.
 
+#### Rehearsing the restore, weekly and by hand
+
+**`.github/workflows/restore-rehearsal.yml` performs a full cycle every Sunday** against a
+disposable k3d cluster: seed known data → back up → **destroy the namespace and its volumes** →
+reinstall → restore → assert. It also runs on `workflow_dispatch`, which is what to use before a
+migration you are nervous about.
+
+**Destroying the volumes is the point.** A restore into a namespace that still has its PVCs proves
+almost nothing, because the data was never gone — so the workflow deletes the namespace, waits for
+every `PersistentVolume` bound to it to be released, and fails if any survives. It then asserts the
+reinstalled stack is *empty* before restoring into it, so a namespace deletion that silently did not
+take is caught as its own failure rather than as a suspiciously successful restore.
+
+The same code runs by hand against any cluster:
+
+```bash
+export NS=acs-cymru POSTGRES_PASSWORD=... DB_PASSWORD=...
+scripts/rehearse-restore.sh seed
+scripts/rehearse-restore.sh snapshot before.txt
+scripts/rehearse-restore.sh backup ./rehearsal
+# ... destroy and reinstall ...
+scripts/rehearse-restore.sh restore ./rehearsal <stamp>
+scripts/rehearse-restore.sh snapshot after.txt
+scripts/rehearse-restore.sh compare before.txt after.txt
+scripts/rehearse-restore.sh assert
+```
+
+**What it asserts, and why counts are not enough.** `compare` diffs the row counts either side, which
+catches data that did not come back. `assert` catches the rest — and the rest is the dangerous half,
+because every one of these can be missing while the counts agree:
+
+| Assertion | What its absence looks like |
+| :--- | :--- |
+| `digital_thread` append-only trigger and revoked grants | an audit table that is quietly editable |
+| RLS enabled, with both lane policies | the security audit lane readable by every logged-in user |
+| Still range-partitioned, nothing in the DEFAULT partition | retention by `DETACH` silently retires nothing |
+| No application role can reach a partition directly | `TRUNCATE` on a month, which no row trigger refuses |
+| Vault canary decrypts to its plaintext | secrets present, well-formed and undecryptable |
+| `asset-3d-models` bucket exists and is still public | every model URL 400s while `model_3d_path` looks right |
+| `telemetry` is still a hypertable, with chunks | no compression and no retention; it grows forever |
+| All three rollups exist **and return rows** | a dashboard that is a flat line on a healthy-looking stack |
+| Retention and refresh jobs registered **and scheduled** | present in every catalogue view, never running |
+| A user seeded before the backup can still sign in | GoTrue's schema or the JWT secret did not survive |
+| The storage object round-trips byte for byte | `devices.model_3d_path` pointing at objects that are gone |
+
+**A failure files itself.** A weekly job nobody watches is the same as no job, so a scheduled failure
+opens an issue labelled `restore-rehearsal` — or comments on the existing one rather than opening a
+second, since a restore path broken for six weeks is one fact, not six. The dump from the failed run
+is attached to it for seven days, so the next person diagnoses from the actual artefact instead of
+re-running and hoping it fails the same way.
+
+**What it does not rehearse.** The rehearsal installs the data layer and switches off the
+application layer — frontend, Node-RED, i3X, ingestion, edge functions, Grafana, Studio, Swagger and
+the broker (`.github/rehearsal-values.yaml` lists each with its reason). None of them holds state a
+dump carries. `supabase-realtime` stays **on** despite holding none, because it creates
+`supabase_realtime_admin` on first start and the restore refuses without it. Read a green run as
+"the data came back", not as "the whole stack came back".
+
 #### Tier 2: infrastructure and disaster recovery
 
 Tier 1 does not recover a dead node. Two routes, depending on what the cluster runs on:
@@ -811,6 +869,76 @@ RWO permits several pods only within one node, so without it the Job schedules e
 `Multi-Attach error for volume`, which reads as a broken volume rather than a scheduling rule. That
 is also why it is off by default — a backup that silently stops running is worse than one never
 enabled.
+
+### Trimming the Digital Thread
+
+`public.digital_thread` is range-partitioned by month on `recorded_at` (`0079`), so history is
+retired by **detaching a partition**, not by deleting rows. That distinction is the whole point:
+`DELETE` over a large audit table is fully logged, bloats the heap and needs a `VACUUM` afterwards,
+while `DETACH` is instant, writes almost nothing, and leaves the data queryable as a standalone
+table you can inspect before it is destroyed.
+
+**A pg_cron job keeps three months of partitions ahead of the writes** (`digital_thread_partitions`,
+daily at 03:20). Nothing routine is required of you. There is also a DEFAULT partition, so a lapsed
+job cannot refuse an audit write — which matters more than it sounds, because the audit INSERT is a
+trigger on `cells`, `gateways` and `devices`: a refused audit row fails **the asset write that
+caused it**, and the operator sees "cannot create device" with the audit table named in the error.
+
+Check the state before doing anything:
+
+```sql
+SELECT * FROM public.digital_thread_partition_health;
+--  partition_count | default_rows |     covered_until
+-- -----------------+--------------+------------------------
+--               28 |            0 | 2027-01-01 00:00:00+00
+```
+
+`default_rows` must be **0**. Anything else means the job has stopped and rows are landing outside
+their month — they are not lost, but they will not be detached with the month they belong to. The
+Grafana rule *Digital Thread Partitions Falling Behind* watches exactly this. Repair it with:
+
+```sql
+SELECT public.ensure_digital_thread_partitions(3);
+SELECT j.jobname, d.status, d.return_message, d.start_time
+  FROM cron.job_run_details d JOIN cron.job j USING (jobid)
+ WHERE j.jobname = 'digital_thread_partitions' ORDER BY d.start_time DESC LIMIT 5;
+```
+
+Rows already in the default partition stay there. Moving them means an owner-level
+`INSERT ... SELECT` into the parent followed by a `DELETE` from the default — both permitted for
+`postgres`, neither permitted for anything else, and neither necessary unless you are about to
+detach that month.
+
+#### Detach, verify, drop
+
+**Retire a month in three steps, and do not collapse them into one.** The detached table is your
+only chance to check the archive before the data stops existing.
+
+```bash
+# 1. DETACH -- instant, and reversible with ATTACH until you drop it.
+kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.digital_thread DETACH PARTITION public.digital_thread_2026_03;"
+
+# 2. VERIFY -- copy it out, then confirm the object exists and is the size you expect.
+kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.digital_thread_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
+#    ...then move it off the pod and into wherever your retained audit lives.
+
+# 3. DROP -- only once step 2's artefact has been checked.
+kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.digital_thread_2026_03;"
+```
+
+> **`DETACH` alone does not free any space.** The table is still there, still on the PVC, just no
+> longer part of the parent. If you detached to reclaim a full disk, nothing changes until step 3 —
+> and a detached partition is invisible to `SELECT ... FROM digital_thread`, so it is easy to
+> believe the space was recovered.
+
+**Clearing audit rows requires an owner connection, and that is deliberate.** `0003`'s append-only
+trigger exempts `postgres` and `supabase_admin` and nobody else, on the stated grounds that a
+trigger cannot constrain a role that can issue DDL — so retiring history should require the same
+authority as dropping a table. `service_role` cannot do any of the above, and since `0079` it
+cannot reach the partitions directly either.
+
+**Keep the online window generous.** Twenty-four months costs little on any realistic volume, and
+the rarer this procedure is, the more likely it is to be performed carefully.
 
 ### Self-monitoring
 

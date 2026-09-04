@@ -4,7 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, SCOPE_SITE_WIDE } from './utils/cellResolution';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
-import { DIGITAL_THREAD_ACTIONS } from './constants';
+import { DIGITAL_THREAD_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { readSetting } from './config';
 import {
@@ -1761,18 +1761,19 @@ const apiMethods = {
         // Normalised to the stored form. The trigger writes TG_TABLE_NAME -- 'cells' / 'gateways' /
         // 'devices' -- and the UI has always offered 'CELL' / 'GATEWAY' / 'DEVICE'.
         //
-        // `service_principals` is NOT a table name, unlike the other three: 0043 and 0044 write it
-        // for auth.users identities, which live in GoTrue's schema. It is mapped here anyway
-        // because this map is the only thing that turns a dropdown label into what is stored --
-        // an entry missing from it falls through unchanged and matches no row at all, which reads
-        // as "no events" rather than as a broken filter.
+        // THIS MAP WAS WRITTEN OUT HERE WITH FOUR ENTRIES AND IS NOW READ FROM `constants.js`
+        // (#141), because the warning the old comment carried came true. It said an entry missing
+        // from the map "falls through unchanged and matches no row at all, which reads as 'no
+        // events' rather than as a broken filter" -- and when 0070 added `user_roles`, `schemas`
+        // and `system_settings` to the audit trigger, three kinds arrived that this map did not
+        // know. Sharing one table with the dropdown that offers them is what makes that
+        // unrepeatable: a kind cannot now be offered without also being resolvable.
+        //
+        // The fallback stays. A kind this build does not recognise is passed through rather than
+        // nulled, because searching for it and finding nothing is a better answer than silently
+        // widening to every row.
         p_entity_type: entityType
-          ? ({
-              CELL: 'cells',
-              GATEWAY: 'gateways',
-              DEVICE: 'devices',
-              'SERVICE IDENTITY': 'service_principals',
-            }[entityType.toUpperCase()] || entityType)
+          ? (ENTITY_TABLE_BY_KIND[entityType.toUpperCase()] || entityType)
           : null,
         p_action: action || null,
         p_entity_ids: entityIds && entityIds.length ? entityIds : null,

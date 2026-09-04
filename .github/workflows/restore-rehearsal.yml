@@ -1,0 +1,367 @@
+# =================================================================================================
+# Backup and restore rehearsal against a disposable cluster.
+#
+# THE SPECIFIC RISK IS NOT THAT THE SCRIPTS ARE WRONG TODAY. `scripts/restore-databases.sh` was
+# rehearsed by hand once and the defects that rehearsal found (3bc6400) are the argument for doing
+# it on a schedule. The risk is that the restore path depends on the shape of two databases, the
+# Supabase role set, the pgsodium root key and the migration chain -- ALL OF WHICH CHANGE. A
+# restore that worked in August fails in November, and the current design guarantees nobody finds
+# out until it is needed.
+#
+# THE COMPOUNDING FACTOR IS THAT THIS IS TWO INDEPENDENT DATABASES joined by postgres_fdw. A
+# restore that recovers one and not the other, or recovers them at inconsistent points, produces a
+# stack that starts cleanly and answers queries wrongly -- which is worse than one that fails.
+#
+# =================================================================================================
+# WHY IT IS NOT PART OF ci.yml
+#
+# It stands up a cluster twice and is slow, and its value is catching DRIFT OVER TIME rather than
+# catching a bad commit. Running it per pull request would add fifteen minutes to every push to
+# answer a question that does not change between two commits an hour apart. `workflow_dispatch` is
+# the answer before a migration somebody is nervous about.
+#
+# =================================================================================================
+# WHAT THIS INSTALLS, AND WHAT IT THEREFORE DOES NOT REHEARSE
+#
+# Most of the stack is switched off: frontend, Node-RED, i3X, ingestion, edge functions, Grafana,
+# Studio, Swagger, the broker and the gateway-credential sidecar. None of them holds state that a
+# dump carries, and building their images would roughly triple the runtime for no assertion.
+#
+# WHAT IS DELIBERATELY KEPT, because the restore depends on it:
+#
+#   supabase-db, timescaledb   the two databases, which are the subject
+#   supabase-realtime          creates `supabase_realtime_admin` ON FIRST START -- no migration
+#                              does, and restore-databases.sh refuses without it. Switching this
+#                              off would make the rehearsal fail in a way that says nothing about
+#                              backups.
+#   supabase-auth              so the rehearsal can prove a password set before the backup still
+#                              works after it, which is GoTrue's schema AND the JWT secret
+#   supabase-storage           the 3D model objects live on its volume, and they are the artefact
+#                              the nightly dump is documented as missing
+#   supabase-rest, envoy       the gateway the storage and auth paths sit behind
+#   db-init                    the migration chain, which is the only image built here
+#
+# So this rehearses the DATA layer completely and the application layer not at all. That is the
+# right split -- a frontend cannot fail to be restored -- but it is stated rather than implied,
+# because "the rehearsal passed" should not be read as "the whole stack came back".
+# =================================================================================================
+name: Backup and Restore Rehearsal
+
+on:
+  schedule:
+    # Weekly, early Sunday. Far from the monthly CVE scan and from Renovate's window so that a
+    # runner-capacity problem cannot present as three unrelated jobs failing at once.
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # To file the failure. A weekly job nobody watches is the same as no job, so a failure here
+  # opens or updates an issue rather than only reddening a badge.
+  issues: write
+
+concurrency:
+  # One at a time. Two rehearsals sharing a runner pool is fine; two of them is simply waste, and
+  # cancelling the older one loses nothing because each starts from an empty cluster.
+  group: restore-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    name: Seed → Backup → Destroy → Reinstall → Restore → Assert
+    runs-on: ubuntu-latest
+    # The target is under 30 minutes so it stays enabled; this is the ceiling that stops a hung
+    # wait burning an hour, not the expectation.
+    timeout-minutes: 45
+    env:
+      RELEASE: acs-cymru
+      NS: acs-cymru
+      BACKUP_DIR: ${{ github.workspace }}/rehearsal-backups
+      # values-dev.yaml's credentials, which is what this installs with. Named here so the script's
+      # psql calls and the chart cannot disagree about them.
+      POSTGRES_PASSWORD: postgres
+      DB_PASSWORD: postgres
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+
+      - name: Install psql
+        # The rehearsal talks to both databases directly over a port-forward, so the CLIENT has to
+        # be on the runner. ubuntu-latest ships one, but not necessarily a 17 -- and pg_dump refuses
+        # to dump a server newer than itself, which would present as a backup failure rather than
+        # as a missing package.
+        run: |
+          set -eu
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          sudo sed -i 's|deb http|deb [signed-by=/usr/share/keyrings/pgdg.gpg] http|' /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          psql --version
+          pg_dump --version
+
+      - name: Set up k3d
+        run: |
+          curl -sfL https://raw.githubusercontent.com/k3d-io/k3d/v5.7.4/install.sh | TAG=v5.7.4 bash
+          k3d version
+
+      - name: Create k3d Cluster
+        run: |
+          k3d cluster create acs-cymru \
+            --agents 0 \
+            --k3s-arg "--disable=metrics-server@server:0" \
+            --k3s-arg "--disable=traefik@server:0" \
+            --wait
+          kubectl cluster-info
+
+      # Read from Chart.yaml rather than repeated, for the same reason the k8s-validation job does
+      # it: the chart resolves an empty image.tag to Chart.AppVersion, so a build tagged anything
+      # else is not the reference the pods ask for and they would try to PULL it instead.
+      - name: Resolve The Chart's appVersion
+        id: appversion
+        run: |
+          set -eu
+          V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml \
+              | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
+          test -n "$V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      # ONE IMAGE, not eight. Everything else this install runs is a pinned upstream image, which
+      # is what keeps the rehearsal inside its time budget -- see the header for what is switched
+      # off and why that is the right split.
+      - name: Build And Import db-init
+        env:
+          IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
+          V: ${{ steps.appversion.outputs.version }}
+        run: |
+          set -eu
+          docker build -f supabase/db-init/Dockerfile -t "$IMG_NS/db-init:$V" supabase
+          k3d image import -c acs-cymru "$IMG_NS/db-init:$V"
+          docker exec k3d-acs-cymru-server-0 ctr -n k8s.io images ls -q \
+            | grep -q "db-init:$V" || { echo "::error::db-init was not imported into the node"; exit 1; }
+
+      - name: Mirror Repository Config Into The Chart
+        run: node scripts/sync-helm-chart-files.mjs --check
+
+      # --------------------------------------------------------------------------------------
+      # INSTALL #1
+      # --------------------------------------------------------------------------------------
+      # No `--wait`, for the reason ci.yml's k8s-validation job documents at length: the bootstrap
+      # is post-install hooks, and --wait blocks on pods that are waiting for those hooks. Hooks are
+      # waited on regardless; readiness is asserted explicitly below.
+      - name: Install The Chart
+        run: |
+          set -eu
+          kubectl create namespace "$NS"
+          helm install "$RELEASE" deploy/helm/acs-cymru \
+            --namespace "$NS" \
+            --values deploy/helm/acs-cymru/values-dev.yaml \
+            --values .github/rehearsal-values.yaml \
+            --timeout 15m
+
+      - name: Wait For The Stack
+        run: bash .github/scripts/wait-for-stack.sh
+
+      # --------------------------------------------------------------------------------------
+      # SEED AND BACK UP
+      # --------------------------------------------------------------------------------------
+      - name: Seed Known Data
+        run: bash scripts/rehearse-restore.sh seed
+
+      - name: Snapshot The Counts Before
+        run: bash scripts/rehearse-restore.sh snapshot "$RUNNER_TEMP/before.txt"
+
+      - name: Take The Backup
+        run: bash scripts/rehearse-restore.sh backup "$BACKUP_DIR"
+
+      # A backup that produced nothing must fail HERE, while the cluster that could have been
+      # re-dumped is still standing -- not two steps later as a restore with no input.
+      - name: Assert The Backup Is Real
+        id: backup
+        run: |
+          set -eu
+          STAMP=$(ls -1 "$BACKUP_DIR" | sed -n 's/^manifest-\(.*\)\.txt$/\1/p' | tail -1)
+          [ -n "$STAMP" ] || { echo "::error::no manifest in $BACKUP_DIR -- the backup produced nothing"; exit 1; }
+          echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"
+          for f in "supabase-db-$STAMP.sql.gz" "timescaledb-$STAMP.sql.gz" "storage-objects-$STAMP.tar.gz"; do
+            [ -f "$BACKUP_DIR/$f" ] || { echo "::error::$f is missing from the backup"; exit 1; }
+            SZ=$(wc -c < "$BACKUP_DIR/$f")
+            [ "$SZ" -ge 2048 ] || { echo "::error::$f is only $SZ bytes"; exit 1; }
+            echo "  ok $f ($SZ bytes)"
+          done
+
+      # --------------------------------------------------------------------------------------
+      # DESTROY -- and the PVCs are the point
+      # --------------------------------------------------------------------------------------
+      #
+      # A restore into a namespace that still has its volumes tests almost nothing: the data was
+      # never gone. Deleting the namespace deletes the PVCs in it, and this asserts that rather
+      # than assuming it -- a StatefulSet's volumeClaimTemplates PVCs outlive `helm uninstall`, so
+      # getting this wrong is easy and would make every assertion below vacuous.
+      #
+      # It also matters for a second reason restore-databases.sh documents: `--clean` cannot drop
+      # an inherited constraint on Realtime's daily partitions, so a restore over a surviving
+      # volume fails outright. The rehearsal must start from an empty one, exactly as a real
+      # recovery would.
+      - name: Destroy The Namespace And Its Volumes
+        run: |
+          set -eu
+          echo "--- PVCs before"
+          kubectl -n "$NS" get pvc
+          kubectl delete namespace "$NS" --wait --timeout=10m
+
+          # Namespaced objects go with the namespace; PVs are cluster-scoped and are released
+          # asynchronously, so this waits for them rather than reading immediately.
+          for _ in $(seq 1 60); do
+            LEFT=$(kubectl get pv -o json \
+              | jq -r --arg ns "$NS" '.items[] | select(.spec.claimRef.namespace == $ns) | .metadata.name' \
+              | wc -l)
+            [ "$LEFT" -eq 0 ] && break
+            sleep 5
+          done
+          if [ "$LEFT" -ne 0 ]; then
+            echo "::error::$LEFT PersistentVolume(s) still bound to $NS -- the rehearsal would restore over surviving data and prove nothing"
+            kubectl get pv
+            exit 1
+          fi
+          echo "namespace and every volume it held are gone"
+
+      # --------------------------------------------------------------------------------------
+      # INSTALL #2 -- a fresh stack, same credentials
+      # --------------------------------------------------------------------------------------
+      - name: Reinstall The Chart
+        run: |
+          set -eu
+          kubectl create namespace "$NS"
+          helm install "$RELEASE" deploy/helm/acs-cymru \
+            --namespace "$NS" \
+            --values deploy/helm/acs-cymru/values-dev.yaml \
+            --values .github/rehearsal-values.yaml \
+            --timeout 15m
+
+      - name: Wait For The Fresh Stack
+        run: bash .github/scripts/wait-for-stack.sh
+
+      # A fresh stack must NOT already contain the seeded rows. If it does, the namespace deletion
+      # did not take and everything below would be asserting against data that was never restored.
+      - name: Assert The Fresh Stack Is Empty
+        run: |
+          set -eu
+          bash scripts/rehearse-restore.sh snapshot "$RUNNER_TEMP/fresh.txt"
+          if grep -q '^supabase:cells=0$' "$RUNNER_TEMP/fresh.txt"; then
+            echo "the fresh stack has no cells, as it should"
+          else
+            echo "::error::the reinstalled stack already has cells -- the old volumes survived and the restore below would prove nothing"
+            cat "$RUNNER_TEMP/fresh.txt"
+            exit 1
+          fi
+
+      # --------------------------------------------------------------------------------------
+      # RESTORE AND ASSERT
+      # --------------------------------------------------------------------------------------
+      - name: Restore The Backup
+        run: bash scripts/rehearse-restore.sh restore "$BACKUP_DIR" "${{ steps.backup.outputs.stamp }}"
+
+      - name: Snapshot The Counts After
+        run: bash scripts/rehearse-restore.sh snapshot "$RUNNER_TEMP/after.txt"
+
+      - name: Compare The Counts
+        run: bash scripts/rehearse-restore.sh compare "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt"
+
+      - name: Assert What A Count Cannot Catch
+        run: bash scripts/rehearse-restore.sh assert
+
+      # The FDW gate, reused rather than restated. It is the same check the k8s-validation job runs
+      # and the one restore-databases.sh ends on, and it is the assertion that catches the failure
+      # unique to this stack: two databases restored to inconsistent points, which starts cleanly
+      # and answers queries wrongly.
+      - name: Helm Test — postgres_fdw Cross-Database Check
+        run: |
+          helm test "$RELEASE" --namespace "$NS" --timeout 5m
+          kubectl -n "$NS" logs "$RELEASE-test-fdw"
+
+      # --------------------------------------------------------------------------------------
+      # DIAGNOSTICS AND CLEANUP
+      # --------------------------------------------------------------------------------------
+      - name: Cluster State On Failure
+        if: failure()
+        run: |
+          kubectl -n "$NS" get pods -o wide || true
+          kubectl -n "$NS" get pvc || true
+          kubectl -n "$NS" describe pods | tail -120 || true
+          for c in supabase-db timescaledb supabase-storage supabase-auth supabase-realtime; do
+            echo "--- logs: $c"
+            kubectl -n "$NS" logs "deploy/$c" --tail 60 2>/dev/null \
+              || kubectl -n "$NS" logs "statefulset/$c" --tail 60 2>/dev/null || true
+          done
+
+      # THE ARTEFACTS ARE THE EVIDENCE. A failed rehearsal is worth diagnosing from the actual dump
+      # rather than by re-running and hoping it fails the same way. Kept briefly: they contain a
+      # full database, so they are not something to accumulate.
+      - name: Upload The Backup On Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rehearsal-backup-${{ github.run_id }}
+          path: ${{ env.BACKUP_DIR }}
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Delete The Cluster
+        if: always()
+        run: k3d cluster delete acs-cymru || true
+
+      # A WEEKLY JOB NOBODY WATCHES IS THE SAME AS NO JOB. The badge on a scheduled workflow is not
+      # on anybody's route, so a failure files itself. Updated rather than duplicated: a restore
+      # path that has been broken for six weeks should be one issue with six comments, not six
+      # issues -- the first is a fact about the repository, the second is noise that gets muted.
+      - name: File Or Update The Failure
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Backup and restore rehearsal is failing';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `The weekly restore rehearsal failed on \`${context.sha.slice(0, 7)}\`.`,
+              '',
+              `Run: ${runUrl}`,
+              '',
+              'This does not mean a backup was lost. It means **the restore path is not known to work**,',
+              'which is the same position the repository was in before this job existed. The dump from',
+              'the failed run is attached to it as an artefact for seven days.',
+              '',
+              'Start with the step that failed:',
+              '',
+              '| Step | What it means |',
+              '| :--- | :--- |',
+              '| Assert The Backup Is Real | the backup produced nothing usable — look at `backup-databases.sh` |',
+              '| Destroy The Namespace | volumes outlived the namespace, so nothing downstream was meaningful |',
+              '| Assert The Fresh Stack Is Empty | the same, caught one step later |',
+              '| Compare The Counts | rows did not come back — the diff names which table |',
+              '| Assert What A Count Cannot Catch | rows came back without a trigger, a policy, a grant, the partitioning or the pgsodium key |',
+              '| Helm Test — postgres_fdw | the two databases were restored to inconsistent points |',
+            ].join('\n');
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'restore-rehearsal',
+            });
+
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body: `Still failing on \`${context.sha.slice(0, 7)}\`. Run: ${runUrl}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['bug', 'production-readiness', 'restore-rehearsal'],
+              });
+            }

@@ -1,0 +1,59 @@
+# What the restore rehearsal switches off, and why each one is safe to switch off.
+#
+# LAYERED OVER values-dev.yaml, NOT INSTEAD OF IT. The credentials, the resource sizes and the dev
+# domain all come from that file; this one only subtracts. Keeping it separate is what stops the
+# rehearsal's trimming leaking into the fixture the k8s-validation job installs with.
+#
+# THE RULE FOR WHAT MAY BE OFF: a component may be disabled here only if it holds no state that
+# `pg_dump` or the storage volume carries. That is the whole test -- a frontend cannot fail to be
+# restored. Anything the RESTORE ITSELF depends on stays on, even when it holds no state of its own,
+# and supabase-realtime is the example that matters: nothing in this repository creates
+# `supabase_realtime_admin`, the Realtime container does on first start, and restore-databases.sh
+# refuses without it.
+#
+# Disabling these also removes seven image builds, which is what keeps the rehearsal inside a
+# runtime that lets it stay enabled. That is the benefit, not the reason.
+
+# --- The application layer: no database state of its own ----------------------------------------
+frontend:
+  enabled: false
+nodeRed:
+  # Node-RED has a PVC, and it is deliberately out of scope. Its flows are configuration deployed
+  # by the chart, not user data recovered from a dump, and `scripts/backup-databases.sh` does not
+  # claim to carry them. Rehearsing a volume the backup never touches would assert nothing.
+  enabled: false
+i3xService:
+  enabled: false
+grafana:
+  enabled: false
+supabaseStudio:
+  enabled: false
+swaggerUi:
+  enabled: false
+
+# --- The data-plane workloads: they WRITE state, they do not HOLD it ----------------------------
+ingestion:
+  # The daemon's output is rows in the two databases, which the rehearsal seeds directly instead.
+  # Running it would add a live writer racing the backup -- a moving target for a job whose whole
+  # assertion is that a count did not change.
+  enabled: false
+mosquitto:
+  # Nothing publishes with ingestion off, and the broker's own state is credentials the chart
+  # generates rather than data a dump carries.
+  enabled: false
+gatewayCredential:
+  enabled: false
+supabaseFunctions:
+  # The edge runtime serves functions; it stores nothing. `supabase_functions_admin` -- which the
+  # restore preflight requires -- comes from `CREATE EXTENSION pg_net` in 0001, not from this
+  # container, so disabling it does not remove a required role.
+  enabled: false
+e2e:
+  enabled: false
+
+# --- Off because it would compete with the rehearsal ---------------------------------------------
+backup:
+  # The chart's own backup CronJob. The rehearsal drives scripts/backup-databases.sh explicitly and
+  # asserts on the artefact it produces; a second, scheduled writer into the same story would make
+  # a failure ambiguous about which backup was being tested.
+  enabled: false

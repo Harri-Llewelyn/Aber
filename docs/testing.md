@@ -142,6 +142,14 @@ python supabase/migrations/test_digital_thread_paging.py
 # it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
 # dead code rather than the thing deciding deliveries.
 python supabase/migrations/test_playback_credential_delivery.py
+# The monthly partitioning of digital_thread (0079). THE INTERESTING TESTS ARE THE BORING ONES:
+# converting a populated table to partitioned means rebuilding by hand every object PostgreSQL
+# does not carry across -- the primary key, the FK, three indexes, two triggers, RLS and its two
+# policies, and the ACL -- and a missing ENABLE ROW LEVEL SECURITY would publish the security
+# audit lane to every logged-in user with nothing else in the stack saying so. It also pins the
+# one hole partitioning opens: a partition does not inherit the parent's ACL, gets the image's
+# default grants instead, and TRUNCATE raises no row trigger.
+python supabase/migrations/test_digital_thread_partitioning.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
@@ -297,13 +305,38 @@ topology-agnostic and runs against both; if both pass, the wiring agrees where i
 
 ## Keeping the pinned versions current
 
-Two scheduled workflows, and they answer different questions. Neither runs on a pull request:
-version drift and published advisories move on the world's schedule, not on this repository's.
+Three scheduled workflows, and they answer different questions. None runs on a pull request:
+version drift, published advisories and the slow rot of a restore path all move on the world's
+schedule, not on this repository's.
 
 | Workflow | Job | Asks |
 | :--- | :--- | :--- |
 | [`renovate.yml`](../.github/workflows/renovate.yml) | **renovate** | *Is there a newer version?* — routine PRs monthly, security PRs immediately |
 | [`image-scan.yml`](../.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly |
+| [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) | **rehearse** | *Would a restore actually work today?* — weekly |
+
+### The restore rehearsal is the odd one out
+
+The other two ask about versions. This one asks whether a capability the repository CLAIMS still
+exists, and it is scheduled for the same reason: the restore path depends on the shape of two
+databases, the Supabase role set, the pgsodium root key and the migration chain, and every one of
+those changes. A restore that worked in August fails in November, and nothing else would notice
+until it was needed.
+
+It runs a full cycle against a disposable k3d cluster — seed → back up → **destroy the namespace
+and its volumes** → reinstall → restore → assert — driven by `scripts/rehearse-restore.sh`, which
+an operator can also run by hand against any cluster. Destroying the volumes is what makes it
+meaningful; a restore over surviving data proves nothing, so the workflow fails if a
+`PersistentVolume` outlives the namespace or if the reinstalled stack is not empty before the
+restore.
+
+**The assertions that earn their place are not the row counts.** Counts catch data that did not come
+back. What they cannot catch is data that came back without the machinery that gives it meaning — a
+missing append-only trigger, RLS switched off, a partition set that did not survive, a Vault secret
+that is present and undecryptable, a rollup that exists and returns nothing. The full table is in
+[`deploy/k8s/README.md`](../deploy/k8s/README.md#rehearsing-the-restore-weekly-and-by-hand).
+
+A scheduled failure opens an issue labelled `restore-rehearsal`, or comments on the existing one.
 
 **The dependency dashboard is the deliverable**, more than the pull requests are: one issue listing
 every available update, including the ones deliberately held back.

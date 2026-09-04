@@ -70,6 +70,57 @@ export const DIGITAL_THREAD_ACTIONS = {
 };
 
 /**
+ * Every entity type the Digital Thread records, in the order the timeline draws them.
+ *
+ * ONE LIST, BECAUSE THERE WERE THREE AND THEY DISAGREED (#141). The same seven kinds were spelled
+ * out separately in `SECTIONS` (what the timeline can draw), in the filter dropdown (what a reader
+ * can ask for), and in `api.js` (what a kind means to the database). Each was written when a
+ * different feature needed it and none was extended when 0070 reached `user_roles`, `schemas` and
+ * `system_settings`, so the page counted twenty-eight assets and drew one.
+ *
+ * THE THREE DISAGREED SILENTLY, WHICH IS THE PART WORTH FIXING. A kind missing from `SECTIONS` was
+ * counted and never rendered. A kind missing from the dropdown was unreachable. A kind missing from
+ * the api.js map fell through unchanged and matched no stored row -- so the page answered "no
+ * events" to a filter that was simply broken, which is the least safe of the three failures because
+ * it looks like an answer.
+ *
+ * `table` IS WHAT THE TRIGGER STORES and is not always a table. `log_digital_thread_event()` writes
+ * TG_TABLE_NAME for the rows it fires on, but 0043 and 0044 write `service_principals` by hand for
+ * identities that live in GoTrue's schema, where there is no public table and `entity_id` carries
+ * no foreign key. It is the stored string either way, which is all this map claims.
+ *
+ * `kind` IS THE UI'S SPELLING and is what a handover from another page arrives already carrying, so
+ * both forms reach the timeline and both normalise through here. `ACCESS` rather than `USER_ROLES`
+ * because what the row records is that an account gained or lost a role; the join table it happens
+ * to live in is not the subject. 0031's header sets the bar these labels have to clear: "a
+ * half-legible audit entry is worse than an absent one, because it looks like the feature works."
+ *
+ * Adding a kind here is now the whole change: it becomes drawable, filterable and resolvable at
+ * once, and `digitalThreadEntityTypes.test.js` fails if any consumer is left behind.
+ */
+export const DIGITAL_THREAD_ENTITY_TYPES = [
+  { kind: 'CELL',             table: 'cells',              label: 'Cells' },
+  { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways' },
+  { kind: 'DEVICE',           table: 'devices',            label: 'Devices' },
+  // The security lane (0070), in the order a reader meets it: who holds what, what the machines
+  // are, then the contracts and settings that shape both.
+  { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments' },
+  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Service identities' },
+  { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas' },
+  { kind: 'SETTING',          table: 'system_settings',    label: 'Settings' },
+];
+
+/** Stored `entity_type` -> the UI's spelling. What the timeline reads rows through. */
+export const ENTITY_KIND_BY_TABLE = Object.fromEntries(
+  DIGITAL_THREAD_ENTITY_TYPES.map(e => [e.table, e.kind])
+);
+
+/** The UI's spelling -> stored `entity_type`. What a filter has to become before it is a query. */
+export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
+  DIGITAL_THREAD_ENTITY_TYPES.map(e => [e.kind, e.table])
+);
+
+/**
  * Every tab id the router will accept.
  *
  * THIS LIST AND `TABS` IN App.jsx MUST AGREE, AND NOTHING USED TO CHECK THAT. `handleNavClick`

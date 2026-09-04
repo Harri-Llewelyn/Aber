@@ -466,9 +466,22 @@ than minutes, and why `0` disables the cache outright.
 ## Known limitations
 
 
-- **HTTPS terminates at the ingress**, not here. The conformance suite raises this as an advisory
-  warning (CORE-05) on a plain-HTTP endpoint; in-cluster the TLS edge is browser-only, as it is for
-  every other service.
+- **HTTPS terminates at the ingress**, not here, and the conformance suite's CORE-05 advisory on a
+  plain-HTTP endpoint is expected rather than outstanding (#135).
+
+  The suite runs against Compose — `http://127.0.0.1:8090/v1` — and **Compose is the local
+  development path, not a deployment target**; Kubernetes is where this is deployed, and the
+  [deployment-target table](../README.md#deployment-targets) is the statement of that. On
+  Kubernetes i3X rides the shared Ingress like every other service (`acs-cymru.ingressRoutes`
+  appends it), which terminates TLS against one wildcard certificate issued by cert-manager, so a
+  production endpoint is served over HTTPS and the advisory does not apply to it.
+
+  **Nothing here is asymmetric.** i3X publishing its port directly on Compose is what twelve of the
+  services do; Envoy fronts the Supabase routes and was never a gateway for the whole stack. In
+  cluster the TLS edge is browser-only, as it is for every other service.
+
+  So this advisory is noise on the target it fires against. It is recorded here because it is
+  raised on every conformance run and is otherwise rediscovered on each reading of the log.
 - **`isExtended` reads `last_birth_metrics`**, so it reflects the device's most recent DBIRTH. A
   device that has never birthed reports `false` rather than unknown.
 - **The address space can be up to `I3X_ADDRESS_SPACE_TTL_SECONDS` stale**, including with

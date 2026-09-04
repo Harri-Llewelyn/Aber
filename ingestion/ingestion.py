@@ -1848,6 +1848,11 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
             # rebirths on a timer, and ingestion asks for one itself (request_rebirth) whenever it
             # sees an alias it cannot decode. The aliases from this payload are already registered
             # above, so nothing is lost by waiting for the next one.
+            # THE MOST EXPENSIVE DROP THE DAEMON MAKES, and until #126 the only one that was
+            # invisible. A birth certificate carries the alias table, so losing one leaves every
+            # later alias-only DDATA from this node unresolvable until the next rebirth -- a
+            # dropped DDATA costs one sample, this costs a device until it speaks again.
+            count("dropped_dbirth_directory_unavailable")
             logger.warning(
                 "DIRECTORY UNAVAILABLE: dropping DBIRTH for '%s' without registering it (%s). "
                 "The device is NOT quarantined -- this is a transport fault, not an identity "
@@ -1955,6 +1960,10 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         # verify_gateway_binding() or quarantine_new_device(). Caught explicitly rather than left
         # to the generic arm below so the log says what happened; either way nothing further is
         # written, which is the property that matters.
+        # The same counter as the arm above: both lose a birth certificate, and an operator
+        # asking "are we losing births" wants one number, not two to add together. Where it
+        # failed is a question for the log line, which distinguishes them.
+        count("dropped_dbirth_directory_unavailable")
         logger.warning(
             "DIRECTORY UNAVAILABLE part way through DBIRTH for '%s' (%s). No device state was "
             "changed; the next birth certificate will complete it.", wire_id, e
@@ -1980,6 +1989,10 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
         # saying ONLINE until DEVICE_OFFLINE_TIMEOUT_SECONDS elapses and the watchdog corrects it,
         # which is the mechanism that exists for exactly this -- a device that stops speaking
         # without announcing it.
+        # Separate from the birth counter because the consequence is different and bounded: the
+        # watchdog corrects a missed death after DEVICE_OFFLINE_TIMEOUT_SECONDS, so this is a
+        # delayed status, not lost telemetry. Summing it with births would overstate the harm.
+        count("dropped_ddeath_directory_unavailable")
         logger.warning(
             "DIRECTORY UNAVAILABLE: dropping DDEATH for '%s' (%s). The watchdog will mark it "
             "OFFLINE if it stays silent.", wire_id, e
@@ -2280,6 +2293,11 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     except DirectoryUnavailable as e:
         # Throttled on the same key as the unregistered-node warning below: a heartbeat arrives
         # every 30s, and a directory that is down is down for all of them.
+        # OUTSIDE THE THROTTLE, DELIBERATELY. The warning is rate-limited because a heartbeat
+        # arrives every 30s and the log would be unreadable; the counter must not be, or the
+        # metric would report one drop per throttle window instead of one per message. This is
+        # the one site where the counter and the log legitimately disagree, and this is why.
+        count("dropped_node_message_directory_unavailable")
         if _throttled(_unknown_gateway_warned, edge_node_id, UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS):
             logger.warning(
                 "DIRECTORY UNAVAILABLE: dropping %s from edge node '%s' (%s). This is NOT the "
