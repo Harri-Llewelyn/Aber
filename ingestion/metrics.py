@@ -69,8 +69,20 @@ COUNTER_MAP = {
         "acs_ingestion_messages_dropped_total", {"reason": "gateway_archived"}),
     "dropped_quarantined_or_unregistered": (
         "acs_ingestion_messages_dropped_total", {"reason": "quarantined_or_unregistered"}),
+    # The four directory-unavailable reasons are split by MESSAGE KIND because the harm differs
+    # by an order of magnitude and one series could not express that (#126): a dropped DDATA is
+    # one sample, a dropped DBIRTH is a device nothing can decode until it births again.
+    # The unqualified `directory_unavailable` is the DDATA case and keeps its original name --
+    # it is a shipped series that dashboards and the drop alert already read, and renaming it
+    # for symmetry would break continuity to say nothing new.
     "dropped_directory_unavailable": (
         "acs_ingestion_messages_dropped_total", {"reason": "directory_unavailable"}),
+    "dropped_dbirth_directory_unavailable": (
+        "acs_ingestion_messages_dropped_total", {"reason": "dbirth_directory_unavailable"}),
+    "dropped_ddeath_directory_unavailable": (
+        "acs_ingestion_messages_dropped_total", {"reason": "ddeath_directory_unavailable"}),
+    "dropped_node_message_directory_unavailable": (
+        "acs_ingestion_messages_dropped_total", {"reason": "node_message_directory_unavailable"}),
     "dropped_db_unavailable": (
         "acs_ingestion_messages_dropped_total", {"reason": "db_unavailable"}),
     # Per-metric rejections, which are NOT message drops -- the message was accepted and some of

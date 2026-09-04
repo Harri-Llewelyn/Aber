@@ -707,6 +707,80 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
+      # 3b. BIRTH CERTIFICATES BEING DROPPED -- the same counter again, at critical, for the same
+      # reason 3 is separated from 2: the drop rule above is true of this and does not say enough.
+      #
+      # A DROPPED DDATA COSTS ONE SAMPLE. A DROPPED DBIRTH COSTS A DEVICE. The birth certificate
+      # carries the alias table, so every later alias-only message from that edge node is
+      # undecodable until it births again -- and an NBIRTH resets the alias table for every device
+      # behind the node, so losing one has that reach across all of them. Rule 2 fires at warning
+      # for any drop reason; an operator triaging it cannot tell those apart, which is exactly the
+      # blindness #126 was about one level down.
+      #
+      # BOTH REASONS, NOT JUST DBIRTH. `node_message_directory_unavailable` is an NBIRTH or NDEATH
+      # dropped from an edge node, and the NBIRTH half is the more damaging of the two.
+      # `sum by (reason)` so the notification names which, since the remedies differ.
+      #
+      # `for: 5m` rather than 15: the trigger is a directory that is briefly unreachable -- a
+      # PostgREST restart, a Kong reload, a failover -- and those resolve in minutes. Fifteen would
+      # miss the event that caused it. The daemon does NOT retry these: the drop is deliberate and
+      # fail-closed (see process_dbirth), so recovery waits on the next rebirth timer, and knowing
+      # promptly is what lets an operator request one instead.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-ingestion-birth-drops
+        title: Ingestion Dropping Birth Certificates
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            Birth certificates are being dropped ({{ $labels.reason }}) because the device
+            directory is unreachable. Affected devices cannot be decoded until they birth again --
+            check PostgREST and the gateway, then request a rebirth rather than waiting on the
+            timer.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                sum by (reason) (rate(acs_ingestion_messages_dropped_total{reason=~"dbirth_directory_unavailable|node_message_directory_unavailable"}[5m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
       # 4. HISTORIAN UNREACHABLE, WITH TELEMETRY ARRIVING.
       #
       # BOTH HALVES, AND THE SECOND IS WHAT MAKES THE SUMMARY TRUE. This rule used to read the gauge

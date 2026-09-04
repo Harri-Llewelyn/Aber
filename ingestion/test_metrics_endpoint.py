@@ -76,6 +76,84 @@ class ExpositionTestCase(unittest.TestCase):
                 f"be invisible to a scraper",
             )
 
+    def test_every_directory_unavailable_drop_path_is_counted(self):
+        """
+        THE INVERSE ASSERTION, and the defect from #126.
+
+        The check above proves that a counted drop is exported. It cannot prove the thing that
+        actually went wrong: four `except DirectoryUnavailable` arms dropped a message and called
+        `count()` at none of them, so the daemon reported two drops in a minute it made six. A
+        test reading `count("dropped_*")` out of the source can only ever see the sites that are
+        already there -- it is blind to the absence.
+
+        So this reads the CONTROL FLOW instead of the strings. Every handler for
+        DirectoryUnavailable is a path where a message is being given up on, and every one of
+        them must increment something. Structural rather than textual on purpose: a new drop arm
+        added in a year fails here on the day it is written, without anyone remembering #126.
+
+        `count()` ANYWHERE IN THE HANDLER SATISFIES THIS, including inside a branch. That is
+        deliberate -- process_node_message counts outside its throttle and could reasonably be
+        restructured -- and it is the reason the behavioural suite below asserts the increments
+        themselves rather than trusting this check alone.
+        """
+        import ast
+        source = open(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "ingestion.py"),
+            encoding="utf-8",
+        ).read()
+
+        def catches_directory_unavailable(handler):
+            caught = handler.type
+            if caught is None:
+                return False
+            parts = caught.elts if isinstance(caught, ast.Tuple) else [caught]
+            return any(getattr(p, "id", None) == "DirectoryUnavailable" for p in parts)
+
+        handlers = [
+            node for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.ExceptHandler) and catches_directory_unavailable(node)
+        ]
+        self.assertTrue(
+            handlers, "found no DirectoryUnavailable handlers -- this check has gone stale"
+        )
+
+        for handler in handlers:
+            counted = any(
+                isinstance(call, ast.Call) and getattr(call.func, "id", None) == "count"
+                for call in ast.walk(handler)
+            )
+            self.assertTrue(
+                counted,
+                f"ingestion.py:{handler.lineno} catches DirectoryUnavailable and drops the "
+                f"message without calling count(). The drop is then visible only as a WARNING in "
+                f"a log nobody is tailing, and Prometheus reports nothing (#126).",
+            )
+
+    def test_a_dropped_birth_is_a_different_series_from_a_dropped_sample(self):
+        """
+        WHY FOUR REASONS AND NOT ONE. A dropped DDATA is one sample. A dropped DBIRTH takes the
+        alias table with it, so every later alias-only message from that node is undecodable
+        until the next rebirth. Summed into one `directory_unavailable` series those are
+        indistinguishable, and the alert on the birth rate could not be written.
+        """
+        out = metrics.render_exposition({
+            "dropped_directory_unavailable": 1,
+            "dropped_dbirth_directory_unavailable": 2,
+            "dropped_ddeath_directory_unavailable": 3,
+            "dropped_node_message_directory_unavailable": 4,
+        })
+        for reason, value in [
+            ("directory_unavailable", 1), ("dbirth_directory_unavailable", 2),
+            ("ddeath_directory_unavailable", 3), ("node_message_directory_unavailable", 4),
+        ]:
+            self.assertIn(
+                f'acs_ingestion_messages_dropped_total{{reason="{reason}"}} {value}',
+                self.lines(out),
+            )
+        # Still one metric family, so `sum by (reason)` -- which the drop alert uses -- picks the
+        # three new reasons up with no change to the rule.
+        self.assertEqual(1, out.count("# HELP acs_ingestion_messages_dropped_total"))
+
     def test_an_unmapped_counter_is_surfaced_rather_than_dropped(self):
         """
         A counter with no mapping still appears, under a name that says the mapping is missing.
@@ -595,6 +673,100 @@ class WriteLatencyRegistryTestCase(unittest.TestCase):
         out = metrics.render_exposition({}, histograms=self.ing.histogram_snapshot())
         self.assertIn('acs_ingestion_write_seconds_bucket{le="0.005"} 1', out)
         self.assertIn("acs_ingestion_write_seconds_count 1", out)
+
+
+# =================================================================================================
+# The four uncounted drop paths (#126), against the real process_* functions
+#
+# The structural check in ExpositionTestCase proves each handler calls count(). It cannot prove
+# the call is REACHED, that it names the counter the mapping expects, or that the throttle on the
+# node path does not swallow it. That is what these do: drive the real function with a directory
+# that is unavailable and read the counter a scraper would see.
+# =================================================================================================
+class DirectoryUnavailableDropTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.ing = _load_ingestion()
+
+    def setUp(self):
+        self.ing._counters.clear()
+        self.ing._unknown_gateway_warned.clear()
+        # The daemon returns early on every one of these paths when there is no client, so a
+        # falsy one would make all four tests pass against code that never ran.
+        self._saved = {
+            name: getattr(self.ing, name)
+            for name in ("supabase_client", "resolve_device", "resolve_gateway",
+                         "verify_gateway_binding", "register_birth_aliases")
+        }
+        self.ing.supabase_client = object()
+        self.ing.register_birth_aliases = lambda *a, **k: None
+
+    def tearDown(self):
+        for name, value in self._saved.items():
+            setattr(self.ing, name, value)
+
+    def unavailable(self, *a, **k):
+        raise self.ing.DirectoryUnavailable("directory is down")
+
+    def counter(self, name):
+        return self.ing.counter_snapshot().get(name, 0)
+
+    def test_a_dbirth_dropped_before_registration_is_counted(self):
+        self.ing.resolve_device = self.unavailable
+        self.ing.process_dbirth("dev-1", "node-a", _Payload(None))
+        self.assertEqual(1, self.counter("dropped_dbirth_directory_unavailable"))
+
+    def test_a_dbirth_abandoned_part_way_through_is_counted(self):
+        """The second birth arm: the directory answered, then went away inside the binding check."""
+        self.ing.resolve_device = lambda *a, **k: {
+            "id": "d1", "sparkplug_id": "dev-1", "is_quarantined": False,
+            "_identity_source": self.ing.SOURCE_REPORTED_IDENTITY,
+        }
+        self.ing.verify_gateway_binding = self.unavailable
+        self.ing.process_dbirth("dev-1", "node-a", _Payload(None))
+        self.assertEqual(1, self.counter("dropped_dbirth_directory_unavailable"))
+
+    def test_a_dropped_ddeath_is_counted_separately_from_a_birth(self):
+        self.ing.resolve_device = self.unavailable
+        self.ing.process_ddeath("dev-1", "node-a")
+        self.assertEqual(1, self.counter("dropped_ddeath_directory_unavailable"))
+        self.assertEqual(0, self.counter("dropped_dbirth_directory_unavailable"))
+
+    def test_a_dropped_node_message_is_counted(self):
+        self.ing.resolve_gateway = self.unavailable
+        self.ing.process_node_message("node-a", "NDEATH", _NodePayload())
+        self.assertEqual(1, self.counter("dropped_node_message_directory_unavailable"))
+
+    def test_the_node_counter_is_not_throttled_with_the_warning(self):
+        """
+        THE REASON THAT COUNTER SITS OUTSIDE THE `if`. A heartbeat arrives every 30s and the
+        warning is rate-limited to one per UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS. A counter
+        sharing that guard would report one drop per window however many messages were lost --
+        an undercount of exactly the kind #126 is about, reintroduced one level down.
+        """
+        self.ing.resolve_gateway = self.unavailable
+        for _ in range(5):
+            self.ing.process_node_message("node-a", "NDEATH", _NodePayload())
+        self.assertEqual(5, self.counter("dropped_node_message_directory_unavailable"))
+
+    def test_the_counters_reach_the_exposition_under_their_mapped_names(self):
+        """
+        End to end: the increment the daemon makes is the series a scraper reads. Both halves
+        have their own test above; this is the one that fails if they drift apart.
+        """
+        self.ing.resolve_device = self.unavailable
+        self.ing.process_dbirth("dev-1", "node-a", _Payload(None))
+        out = metrics.render_exposition(self.ing.counter_snapshot())
+        self.assertIn(
+            'acs_ingestion_messages_dropped_total{reason="dbirth_directory_unavailable"} 1',
+            [l for l in out.splitlines() if l and not l.startswith("#")],
+        )
+
+
+class _NodePayload:
+    """process_node_message iterates payload.metrics before resolving the gateway."""
+
+    metrics = []
 
 
 if __name__ == "__main__":
