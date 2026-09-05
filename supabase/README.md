@@ -2153,6 +2153,48 @@ nobody can open, which is the same posture as the loopback binding it replaces.
 
 ---
 
+## A replay lane is minted, not assigned (`0083`)
+
+The Playback gateway's devices are **replay lanes**. Each stands in for one real machine, records
+which one in `shadow_of`, and is created by `ensure_shadow_devices()` when a capture is played — one
+per recorded device, reused across runs so a comparison chart holds still between them.
+
+The dashboard offered that gateway in three "Assigned Edge Gateway" pickers like any other, and
+choosing it worked. The result was not obviously wrong on screen: the device appeared on the shadow
+lane, correctly badged, because `is_shadow` is a property of the **gateway** and devices inherit it.
+What it lacked was `shadow_of` — and the migration that introduced these lanes names that state
+exactly, while explaining why it refuses to mint one: *"a shadow with no `shadow_of` is an asset
+with no provenance, which is the thing this design exists to avoid creating."* The dashboard was
+creating it around the back of the function that refuses to.
+
+Nothing raised. `device_locations` resolved it to the Shadow lane, so it was a thing on no shopfloor
+that nothing on the shopfloor explained; the AAS export emitted a shell for it, asserting an asset
+identity corresponding to no asset; and `uq_devices_shadow_per_gateway` is partial
+(`WHERE shadow_of IS NOT NULL`), so the row was not even covered by the index that makes lanes
+one-per-machine. Any number could pile up.
+
+**The gate is on arrival, and only on arrival**, which is the part worth reading twice. The obvious
+rule — *a device on a shadow gateway must have `shadow_of`* — is wrong. `devices_shadow_of_fkey` is
+`ON DELETE SET NULL`, chosen over `CASCADE` because *"a shadow outliving its original is a lane whose
+label has gone vague, which is recoverable"* whereas cascading would orphan every telemetry row keyed
+on its `sparkplug_id`. So a lane whose original was deleted sits on the shadow gateway with a null
+`shadow_of`, **legally** — and the FK reaches that state by `UPDATE`-ing the lane, which fires
+triggers. A guard written against the state rather than the act would have made deleting any
+replayed machine fail, with an error about playback provenance on an operation that mentions
+neither.
+
+So `trg_devices_replay_lane_is_minted` fires on `INSERT`, and on an `UPDATE` that **changes**
+`gateway_id`. An update that merely mentions it — which PostgREST does on every `PATCH`, since it
+sends the whole row — is not an arrival and is left alone.
+
+The three pickers are fixed too, and disable the option rather than hiding it: a device that *is* a
+lane must still see its own gateway in the list, or its form would fall back to "Unassigned" and
+saving would move it off the lane. But the pickers are a courtesy. `devices` is writable through
+PostgREST by any Administrator or Shopfloor_Manager, so they are three doors of an unbounded number,
+and the trigger is the one that holds for the fourth.
+
+---
+
 ## Schema Versioning
 
 A published schema is **read-only**. Changing one means forking the next version, editing the

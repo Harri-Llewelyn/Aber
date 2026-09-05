@@ -75,6 +75,8 @@ import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { suitesInLane } from './python-suites.mjs'
+
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 // PINNED TO THE SAME TAG THE STACK RUNS. The bootstrap above is a list of things that are true of
@@ -229,12 +231,18 @@ if (noRun) {
 // -------------------------------------------------------------------------------------------
 // Run the suites
 // -------------------------------------------------------------------------------------------
-// EVERY suite in the directory, discovered rather than listed. A hand-maintained list is how
-// seven of these came to run in no CI job at all -- edge-function-auth-test names eight by hand
-// and the directory holds sixteen.
-let suites = readdirSync(migrationsDir)
-  .filter(f => f.startsWith('test_') && f.endsWith('.py'))
-  .sort()
+// THE `db` LANE, FROM scripts/python-suites.mjs -- not a second discovery of its own.
+//
+// This used to readdirSync `supabase/migrations` and run whatever it found, which was right about
+// discovery and wrong about scope: three suites needing exactly this database live under
+// `supabase/functions/`, and a rule shaped like "the migrations directory" could never reach them.
+// They ran in CI and not here, so `npm run test:db` passing locally did not mean the db-lane job
+// would pass -- which is the specific way a local runner stops being trusted.
+//
+// The manifest is now the one place that answers "which suites need a migrated Postgres", and both
+// callers read it. It is also checked against the tree in both directions, so a new suite added to
+// this directory and forgotten fails the runner by name instead of silently not running.
+let suites = suitesInLane('db')
 if (filter) suites = suites.filter(f => f.includes(filter))
 if (suites.length === 0) die(`no suites matched ${filter}.`)
 
@@ -262,9 +270,7 @@ console.log(`\n${c.bold(`Running ${suites.length} database suites`)} against loc
 const failed = []
 for (const suite of suites) {
   console.log(c.bold(`── ${suite}`))
-  const result = spawnSync(python, [path.join('supabase', 'migrations', suite)], {
-    cwd: REPO, env, stdio: 'inherit'
-  })
+  const result = spawnSync(python, [suite], { cwd: REPO, env, stdio: 'inherit' })
   if (result.status !== 0) failed.push(suite)
 }
 

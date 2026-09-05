@@ -4,6 +4,7 @@ import { ActionButton } from '../common/ActionButton'
 import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { usePendingKey } from '../../hooks/usePendingAction'
+import { gatewayAcceptsDevices } from '../../utils/gatewayType'
 
 export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onApprove, onMerge, onCancel }) {
   // One key space across BOTH buttons: approving as new and merging into the suggested match are
@@ -113,9 +114,12 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
               <label className="form-label">Active Edge Gateway Selection</label>
               <select className="form-control" value={gatewayId} onChange={e => setGatewayId(e.target.value)} title="Select the edge gateway that will serve this device">
                 <option value="">— Unassigned Gateway —</option>
+                {/* Disabled rather than absent, for the reason DevicesTab states at its own
+                    picker (#144): a replay lane is minted by a playback, never approved onto. */}
                 {gateways.filter(g => !g.is_archived).map(g => (
-                  <option key={g.gateway_id} value={g.gateway_id}>
+                  <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
                     {g.gateway_name} — {g.status}
+                    {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
                   </option>
                 ))}
               </select>

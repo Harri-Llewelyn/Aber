@@ -43,6 +43,7 @@ import {
   unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
 } from '../../utils/deviceTags'
 import { suggestMatches } from '../../utils/quarantineMatching'
+import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
 import {
   IconCpu,
   IconDrive,
@@ -1175,12 +1176,25 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
               <label className="form-label">Assigned Edge Gateway</label>
               <select className="form-control" value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))} title="Select edge gateway serving this device">
                 <option value="">— Unassigned Gateway —</option>
+                {/* A REPLAY LANE IS LISTED BUT DISABLED, not filtered out. Issue 144.
+                    Filtering would be a quieter control and a worse one: a device that IS a
+                    replay lane would open this form with its own gateway absent from the list,
+                    the select would fall back to "Unassigned", and saving would silently move it
+                    off the lane. The disabled option keeps an existing lane displaying correctly
+                    and still cannot be chosen. migration 0083 refuses the write either way. */}
                 {gateways.filter(g => !g.is_archived).map(g => (
-                  <option key={g.gateway_id} value={g.gateway_id}>
+                  <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
                     {g.gateway_name} ({g.gateway_id}) — Status: {g.status}
+                    {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
                   </option>
                 ))}
               </select>
+              {/* Shown ALWAYS rather than only when a lane is selected: the question this answers
+                  is "why can I not pick Playback", which is asked while something else is
+                  selected. */}
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                {noDeviceAssignmentReason({ is_shadow: true })}
+              </div>
             </div>
 
             {/* WHERE the device is, which is not the same question as how its data reaches us.

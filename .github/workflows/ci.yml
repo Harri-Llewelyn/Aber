@@ -1379,7 +1379,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # jsonschema validates the AAS export against the vendored official IDTA schema.
-          pip install psycopg2-binary jsonschema
+          #
+          # pytest AND pyarrow ARE BOTH FOR ONE SUITE, ingestion/test_cold_archive.py, and neither
+          # is optional for it. That file is the only one in the tree written in pytest's
+          # bare-function style with no `if __name__ == "__main__"` block, so running it the way
+          # every other suite runs -- `python <file>` -- imports it, calls none of its eight
+          # functions and exits 0. It was in the orphan list, and adding it to a lane without this
+          # line would have "fixed" it into a green step over zero assertions.
+          #
+          # pyarrow is the difference between seven checks and eight, and the eighth is the Parquet
+          # round trip -- half of what the suite is for. `pytest.importorskip` means its absence is
+          # a silent skip rather than a failure, which is precisely why it is installed rather than
+          # left to chance.
+          pip install psycopg2-binary jsonschema pytest pyarrow
 
       # THE FIXTURE IS SHARED WITH THE LOCAL RUNNER, in one file applied by both this job and
       # scripts/test-db.mjs. It carries its own reasoning: which auth helpers the base image is
@@ -1408,174 +1420,75 @@ jobs:
             PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 -U postgres -d postgres -f "$f";
           done
 
-      - name: Run Edge Function Auth & RLS Policy Unit Tests
+      # =========================================================================================
+      # THE PYTHON SUITES, DISCOVERED RATHER THAN LISTED.
+      #
+      # This job used to name twenty-one suites in twenty-one `run:` steps. The tree had grown to
+      # fifty-three, and the difference was not a rounding error: TWENTY suites -- thousands of
+      # lines of assertions -- ran in no job anywhere, and nothing noticed, because a list with
+      # nothing to compare it against cannot be wrong, only incomplete (#147).
+      #
+      # The suites that had fallen off were disproportionately the ones guarding faults that were
+      # SILENT when they happened, which is why somebody wrote a suite for them in the first place.
+      # `test_startup_healer.py` opens by explaining that its fault had two consequences and "both
+      # of its consequences were silent in opposite directions". It did not run. Neither did
+      # `test_mqtt_tls.py`, every failure of which is a break toward a connection that looks
+      # encrypted and verifies nothing.
+      #
+      # THE FRONTEND ALREADY DID THIS CORRECTLY and that is where the fix came from: in
+      # `frontend-build`, `npm test` hands vitest a DIRECTORY and a following step fails the build
+      # if the count drops below what README claims. The discipline existed in this repository; it
+      # was pointed at the frontend and never at Python.
+      #
+      # WHERE THE REASONING WENT. Each of those twenty-one steps carried a paragraph on why the
+      # suite was worth a job's time -- written, mostly, by whoever fixed the thing it now guards.
+      # None of it was deleted: it lives in `scripts/python-suites.mjs` beside the lane each suite
+      # declares, where it also answers a question the steps could not, which is what should happen
+      # when somebody adds a suite. The runner refuses to run a tree it cannot account for, and
+      # check-docs-drift.mjs makes the same comparison earlier and more cheaply.
+      #
+      # STILL ONE PROCESS PER SUITE -- `python <file>`, exactly as these steps did, rather than
+      # collecting the tree with pytest: two suites tear down provisioned fixtures in
+      # `if __name__ == "__main__"`, which no collecting runner executes. ONE suite is the
+      # exception and declares `runner: 'pytest'` because it is written in that style and has no
+      # `__main__` block at all -- run as a script it would assert nothing and exit 0, which is why
+      # pytest is installed above. python-suites.mjs sets all of this out at length.
+      # =========================================================================================
+
+      # The `db` lane: suites needing the migrated Postgres above and no seed. Twenty-four of them,
+      # where this job used to run eleven -- the other thirteen were reachable only by somebody
+      # remembering to type `npm run test:db` on their own machine.
+      #
+      # THE SAME LANE `npm run test:db` RUNS, against the same image with the same bootstrap. That
+      # is what makes the local runner worth trusting: passing there now means passing here.
+      - name: Run Database & Edge Function Authorization Suites
         env:
           SUPABASE_DB_HOST: localhost
           SUPABASE_DB_PORT: '54322'
           SUPABASE_DB_PASSWORD: postgres
-        run: |
-          python supabase/functions/approve-quarantine/test_approve_quarantine.py
-          # Node-RED's authorization: an unmapped or revoked role must yield NO `permissions`
-          # key, because settings.js keys its refusal on the key's absence.
-          python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
-          python supabase/migrations/test_user_roles_rls.py
-          # Schema versioning (archived migration 0037). Runs its assertions as `authenticated` with
-          # simulated JWT claims, because the immutability guard deliberately exempts the owner --
-          # a suite connecting as `postgres` would pass against a database with the trigger dropped.
-          python supabase/migrations/test_schema_versioning.py
-          # 0026's two halves: causation grouping, and -- the security one -- that `service_role`
-          # can no longer INSERT into digital_thread directly. That key ships in .env and is held
-          # by the daemon and every edge function; while it could insert, any holder could forge an
-          # audit row naming an operator who was not there. A later migration re-granting INSERT
-          # would restore that silently and nothing else here would notice.
-          python supabase/migrations/test_ingestion_rejection_rpc.py
-          # 0030's retention window. THE INVARIANT IS THAT A LONG-FIRING ALERT SURVIVES THE PRUNE:
-          # `recorded_at` is stamped on the first write and never refreshed, so an alert firing for
-          # longer than the window has one row, older than the cutoff, and a flat age cutoff deletes
-          # the current state of a live alert -- the pill disappears while Grafana still has it
-          # firing. The suite also runs the naive predicate against the same fixture and asserts it
-          # DOES destroy the row, so the other cases cannot pass vacuously.
-          python supabase/migrations/test_platform_alerts_retention.py
-          # 0031's settings plane, and NONE OF THE INTERESTING TESTS ARE "an admin can edit a
-          # setting". Two properties are: the key set is CLOSED -- enforced by the ABSENCE of
-          # INSERT and DELETE policies, so a later migration could reopen it without failing
-          # anything else -- and `updated_by` cannot be supplied by the client. That second one
-          # was BROKEN when the migration was first applied: this database carries a Supabase
-          # default ACL granting every privilege on every new public table to authenticated, so
-          # the `GRANT UPDATE (value)` meant to confine an admin's write landed on top of a
-          # table-level UPDATE already held and did nothing. The settings page would have worked
-          # perfectly while provenance was forgeable.
-          python supabase/migrations/test_system_settings_rls.py
-          # 0033's batch relocation, and the property it defends is NOT "an admin can move
-          # devices". It is that one rearrangement is ONE transaction, so six machines reassigned
-          # in one gesture carry one causation_id instead of six -- a property that does not live
-          # in 0033 at all, but in log_digital_thread_event() stamping txid_current(). A later
-          # migration could re-declare that trigger without it and 0033 would keep working in
-          # every visible way while quietly going back to six unrelated audit rows.
-          #
-          # The other half is the hole atomicity opens: the RPC is SECURITY DEFINER, so RLS does
-          # not apply inside it and `devices_update_privileged` never runs. If its own has_role()
-          # check were dropped, ANY authenticated user could relocate the whole shopfloor and no
-          # policy anywhere would refuse. This is the only thing that would notice.
-          python supabase/migrations/test_relocate_devices.py
-          # THE AUDIT SUPPRESSION RULES. 0005 suppresses the no-op UPDATE and the heartbeat-only
-          # UPDATE, and ingestion.py relies on that being true -- a regression here does not fail
-          # anything, it just resumes writing an audit row per heartbeat until the table is mostly
-          # noise. Self-seeding and rolled back, so it needs no seed.sql; its one attribution test
-          # skips without a seeded account and the other 26 run.
-          python supabase/migrations/test_digital_thread_guard.py
-          # The vocabulary seed's PROVENANCE. A metric seeded with a missing or wrong semantic id
-          # breaks nothing at runtime -- it asserts an interoperability claim that is simply untrue,
-          # which no other check would notice. Reads rows seeded by archived migration 0018, which the loop
-          # above applies, so it needs no seed.sql either.
-          python supabase/migrations/test_metric_catalog_seed.py
-          # No stack here, so this run covers the authorization ladder and the Sparkplug -> XSD
-          # mapper parity guard; its live export checks skip themselves and run in e2e-validation.
-          python supabase/functions/aas-export/test_aas_export.py
+        run: node scripts/run-python-suites.mjs --lane db
 
-      # Runs here rather than in e2e-validation because it needs no stack: the suite stubs
-      # protobuf/MQTT/psycopg2 before importing ingestion.py, so a pure-logic test does not
-      # depend on `protoc` being installed or on Docker being up.
-      - name: Run Ingestion Birth-Metric Observation Unit Tests
-        run: |
-          python ingestion/test_declared_metrics.py
-
-      # The Prometheus endpoint and the sequence-gap counters (issues #22, #24). Same reason this
-      # runs here rather than in e2e: `render_exposition` is a pure function, and the sequence
-      # tests stub protobuf/MQTT/psycopg2 before importing ingestion.py -- so neither `protoc` nor
-      # a running stack is needed.
+      # The `unit` lane: no database, no broker, no stack. Twenty-two suites, where this job used to
+      # run nine.
       #
-      # ONE ASSERTION IN IT READS ingestion.py's SOURCE: every `count("dropped_*")` must have a
-      # mapping in metrics.py, or the drop would be counted and never exported. That is the
-      # acceptance criterion from #22 expressed as a test rather than as a review step.
-      - name: Run Ingestion Metrics Endpoint Unit Tests
-        run: |
-          python ingestion/test_metrics_endpoint.py
+      # NOTHING IN THIS LANE MAY BE A SUITE THAT SKIPS ITSELF WITHOUT A STACK, and five candidates
+      # were kept out for exactly that -- test_enroll_gateway.py skips all fourteen of its checks,
+      # test_gateway_bundle.py all fifteen, test_historian_role_grants.py runs zero. A fully-skipped
+      # unittest run reports `OK (skipped=14)` and exits 0, so putting them here would have added
+      # five green steps asserting nothing. They are in the `stack` lane, in e2e-validation, where
+      # the thing they need exists. See the vacuous-green note in python-suites.mjs.
+      - name: Run Python Unit Suites
+        run: node scripts/run-python-suites.mjs --lane unit
 
-      # The bounded entity caches (issue #23). Stubs the same heavy imports, so no stack either.
+      # The three suites under `scripts/lib/`, which no workflow called either (#147) -- the
+      # mosquitto credential merge, the orphan sweep's filter, and the service JWT. The merge and
+      # the filter are both things whose failure is silent and expensive: one loses a broker
+      # account, the other decides which accounts the sweep may rotate, and it is what keeps it
+      # from revoking `factoryplus_ingestion` and stopping the stack ingesting.
       #
-      # THE EVICTION TESTS ARE NOT THE POINT OF RUNNING THIS IN CI. Bounding a cache is easy; the
-      # two contracts it can break are silent. `get` must return the STORED OBJECT rather than a
-      # copy, because process_dbirth() and record_declared_metrics() mutate the cached row in place
-      # so the next lookup inside the TTL sees the change -- a copying cache would resurrect the
-      # duplicate UPDATE and duplicate digital_thread row that the write-only-what-moved work
-      # exists to prevent, and nothing would point at the cache. And `get` must distinguish a
-      # cached `None` (the NEGATIVE entry) from a miss, or negative caching quietly stops working
-      # and every message from an unregistered device costs a directory round trip.
-      - name: Run Ingestion Entity Cache Unit Tests
-        run: |
-          python ingestion/test_entity_cache.py
-
-      # Payload conformance -- the SCHEMA_REJECTION half of the digital thread. Same reasoning as
-      # the suite above for why it runs here: it stubs protobuf/MQTT/psycopg2 before importing
-      # ingestion.py, so it needs neither `protoc` nor a running stack.
-      #
-      # THE DEDUPLICATION IS WHAT THIS IS FOR. These rows go into `digital_thread`, which is
-      # append-only to every application role and which the application cannot prune at all. DDATA
-      # arrives continuously, so a regression that writes one row per message does not degrade --
-      # it fills the disk. archived migration 0005 gave the audit TRIGGER a guard against exactly this; the
-      # RPC these rows go through is not a trigger, so the only guard is in Python.
-      - name: Run Ingestion Payload Conformance Tests
-        run: |
-          python ingestion/test_payload_conformance.py
-
-      # The Python half of the modelled-metrics contract; the JavaScript half runs in
-      # frontend-build. Both assert test-harness/fixtures/modelled-metrics.json, because the rule is
-      # BEHAVIOUR and neither language can import the other -- grepping both files for `required`
-      # would prove they spell it, not that they agree about a schema whose `required` is a string.
-      # Writing the pair found a live divergence: for `properties: ['A','B']` the JS returned the
-      # array INDICES as metric names while the Python returned None.
-      - name: Run Modelled-Metrics Mirror Contract
-        run: |
-          python ingestion/test_modelled_metrics_contract.py
-
-      # Pins the invariant that the daemon never writes an asset's location. devices.cell_id is
-      # NULL-means-inherit with no column default (archived migration 0036), which only holds while
-      # nothing writes a value on an operator's behalf -- and a regression here would be silent:
-      # devices would simply stop inheriting and the Unassigned queue would stop filling.
-      - name: Run Ingestion Device Location Invariant Tests
-        run: |
-          python ingestion/test_device_location.py
-
-      # The Kubernetes liveness probe reads nothing but this file's age, so the heartbeat's
-      # behaviour IS the health signal. Every property it pins would break in the same direction --
-      # toward a daemon that looks healthy while its MQTT loop is dead (writing regardless of
-      # connection state), or one restarted while it is fine (crashing on a write error). Neither is
-      # visible on the Compose path, which declares no healthcheck at all.
-      - name: Run Ingestion Liveness Heartbeat Tests
-        run: |
-          python ingestion/test_health_heartbeat.py
-
-      # Audit blocker B1. A sparkplug_id is an identifier, not a secret, so before the binding
-      # check any credentialed edge node could publish under another device's id -- forging
-      # telemetry, forging ONLINE state, or forcing a healthy device into quarantine (a denial
-      # of service against a production asset). Also pins the telemetry sanity window and that
-      # the historian insert stays DO NOTHING rather than DO UPDATE.
-      - name: Run Ingestion Gateway Binding & Telemetry Integrity Tests
-        run: |
-          python ingestion/test_gateway_binding.py
-
-      # Report-by-exception. Both halves of this are invisible to an end-to-end run, which is why
-      # they are pinned here: a timer-driven flow and an RBE flow both look like "telemetry is
-      # arriving", and a sequence gap looks like nothing at all.
-      #
-      #   SPARSE DDATA IS COMPLETE. A payload carrying one metric is a device saying one thing
-      #   moved, not a payload that lost five. Synthesising rows for the metrics that stayed put
-      #   would fabricate observations indistinguishable from real readings.
-      #
-      #   A DROPPED MESSAGE IS THE LOST CHANGE. Under a timer the next tick restated everything
-      #   and a drop self-healed. Under RBE, lose the DDATA that said INTERRUPTED and every
-      #   consumer holds ACTIVE forever. `seq` is the only evidence, which is why a gap requests
-      #   a rebirth rather than merely logging.
-      #
-      # THE EDGE HALF NO LONGER HAS A SUBJECT. It ran in frontend-build as nodeRedRbe.test.js,
-      # evaluating the demonstrator flow's function bodies because nothing else imported them. The
-      # flow was retired with the demonstrator and the suite went with it; what is tested here is
-      # the DAEMON's side of report-by-exception, which is the half that has to keep working
-      # whatever an edge node publishes.
-      - name: Run Report-by-Exception Telemetry Tests
-        run: |
-          python ingestion/test_rbe_telemetry.py
+      # Explicit file paths, not the directory: `npm run test:lib` carries a comment saying why.
+      - name: Run Node Library Suites
+        run: npm run test:lib
 
   # =============================================================================================
   # The in-cluster half of the two-target guarantee.
@@ -2515,15 +2428,6 @@ jobs:
       # covering a secrecy boundary, where "not checked" and "not broken" look identical from
       # outside. The flag turns the absence into a failure, because here the seed is guaranteed.
       # ---------------------------------------------------------------------------------------
-      - name: Enrolment Token Secrecy — Against The Seeded Stack
-        env:
-          SUPABASE_DB_HOST: localhost
-          SUPABASE_DB_PORT: '54322'
-          REQUIRE_SEEDED_ACCOUNTS: '1'
-        run: |
-          set -a && . ./.env && set +a
-          export SUPABASE_DB_PASSWORD="$POSTGRES_PASSWORD"
-          python supabase/migrations/test_gateway_enrollment.py
 
       # ---------------------------------------------------------------------------------------
       # i3X 1.0 conformance, run by CESMII'S OWN TEST SUITE rather than by assertions of ours.
@@ -2577,17 +2481,58 @@ jobs:
           fi
 
 
-      # The live half of the AAS export suite: composes a shell for the subject it provisions,
-      # running stack and validates the emitted document. The same file runs in
-      # edge-function-auth-test, where these checks skip themselves for want of a stack.
+      # =========================================================================================
+      # THE `stack` LANE -- every suite that needs a running stack, discovered rather than listed.
       #
-      # Its subject is provisioned by the suite itself (test-harness/aas_fixture.py), which is what
-      # its IDTA nameplate -- so it needs no simulator to have published and no operator to have
-      # approved anything. This step used to be ordered after validate.py on the stated grounds
-      # that validate.py approved the demo device and recorded its birth parameters; it does
-      # neither, and never did (it works entirely through its own VALIDATE_* fixtures).
-      - name: Validate AAS V3 Export
+      # This step used to be two, naming test_aas_export.py and test_gateway_enrollment.py. Eight
+      # further suites needed exactly this stack and were called by nothing at all (#147):
+      # enroll-gateway, gateway-bundle, gateway-credential, aas-api and the four under
+      # `timescaledb/`. Several of them are the only check on their subject anywhere.
+      #
+      # THEY COULD NOT HAVE BEEN PUT IN THE NO-STACK JOB INSTEAD, which is the tempting cheap fix
+      # and is worse than leaving them out. Measured with nothing up, test_enroll_gateway.py skips
+      # all fourteen of its checks, test_gateway_bundle.py all fifteen, test_gateway_credential.py
+      # all thirteen, and test_historian_role_grants.py runs zero -- and a fully-skipped unittest
+      # run reports `OK (skipped=14)` and exits 0. That is the trap this workflow already names at
+      # REQUIRE_SEEDED_ACCOUNTS below: a green tick over nothing, on suites covering credential
+      # issuance and a secrecy boundary. Here the stack exists, so they assert.
+      #
+      # ORDER IS ALPHABETICAL BY PATH AND THAT IS SAFE HERE, but not by luck --
+      # test_enroll_gateway.py STOPS the credential container to exercise the 503 rollback, and
+      # restarts it in tearDown, waiting for it to answer before returning. `gateway-credential/`
+      # sorts before `supabase/` in any case, so it runs first.
+      #
+      # ONE ENVIRONMENT, THE UNION OF WHAT THE TEN NEED. Everything but the four below comes out of
+      # `.env`, which the suites read directly.
+      #
+      #   SUPABASE_URL          the aas-export and aas-api suites take the gateway, not the
+      #                         container name.
+      #   SUPABASE_DB_*         test_gateway_enrollment.py connects to Postgres directly; its
+      #                         password is POSTGRES_PASSWORD, NOT DB_PASSWORD, which is the
+      #                         historian's and would send it to a database with none of this
+      #                         schema.
+      #   REQUIRE_SEEDED_ACCOUNTS
+      #                         READ BY test_gateway_enrollment.py ALONE, and it is what makes
+      #                         running that suite here worth anything. It asserts that the raw
+      #                         enrolment token is never stored, that RLS is on with no policies,
+      #                         and that not even an Administrator can SELECT claim material --
+      #                         every one of those AS a seeded demo account. Without the flag a
+      #                         stack that had lost its seed would skip all six and report success,
+      #                         on the suite covering a secrecy boundary, where "not checked" and
+      #                         "not broken" look identical from outside. The flag turns the
+      #                         absence into a failure, because here the seed is guaranteed.
+      #
+      # The AAS suites provision their own subjects (test-harness/aas_fixture.py) and tear them down
+      # in `if __name__ == "__main__"` -- which is why the runner spawns `python <file>` per suite
+      # rather than collecting them, since no collecting runner executes that block.
+      # =========================================================================================
+      - name: Run Stack-Dependent Python Suites
+        env:
+          REQUIRE_SEEDED_ACCOUNTS: '1'
+          SUPABASE_DB_HOST: localhost
+          SUPABASE_DB_PORT: '54322'
         run: |
           set -a && . ./.env && set +a
           export SUPABASE_URL=http://127.0.0.1:54321
-          python supabase/functions/aas-export/test_aas_export.py
+          export SUPABASE_DB_PASSWORD="$POSTGRES_PASSWORD"
+          node scripts/run-python-suites.mjs --lane stack

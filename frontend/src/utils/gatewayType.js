@@ -126,3 +126,44 @@ export function gatewayTypeFields(type) {
     default:                      return { deployment: 'remote', is_simulated: false }
   }
 }
+
+/**
+ * Whether a DEVICE may be assigned to this gateway at all.
+ *
+ * =================================================================================================
+ * MIRRORS THE GATE IN migration 0083, and is not a policy of its own.
+ *
+ * A shadow gateway's devices are REPLAY LANES. Each stands in for one real machine and records
+ * which one in `shadow_of`, and they are minted by `ensure_shadow_devices()` when a capture is
+ * played -- one per recorded device, reused across runs so a comparison chart holds still.
+ *
+ * Three pickers used to offer the Playback gateway like any other (#144). Choosing it worked: the
+ * device landed on the shadow lane, correctly badged, with no `shadow_of`. Archived migration 0060
+ * names that outcome while explaining why it refuses to create one -- "a shadow with no
+ * `shadow_of` is an asset with no provenance, which is the thing this design exists to avoid
+ * creating" -- and the dashboard was creating it around the back of the function that refuses to.
+ *
+ * The database now refuses it too, which is where the real guard belongs: `devices` is writable
+ * through PostgREST and these three pickers are three doors of an unbounded number. This exists so
+ * that an operator is not OFFERED a choice that will be refused.
+ *
+ * Null-safe in the permissive direction, matching gatewayAcceptsCell(): "no gateway yet" is the
+ * Unassigned queue, not a lane.
+ */
+export function gatewayAcceptsDevices(gateway) {
+  return !gateway?.is_shadow
+}
+
+/**
+ * Why this gateway takes no devices, as a sentence, or null when it does.
+ *
+ * Kept beside the predicate for the reason noCellReason() is: a control that silently omits or
+ * disables an option is the version of this that generates support questions. An operator looking
+ * for "Playback" in the list needs to be told it is not missing -- it is not assignable, and there
+ * is a different gesture that does what they want.
+ */
+export function noDeviceAssignmentReason(gateway) {
+  if (gatewayAcceptsDevices(gateway)) return null
+  return 'Its devices are replay lanes, minted when a capture is played rather than assigned. '
+    + 'Start a playback from the capture instead.'
+}
