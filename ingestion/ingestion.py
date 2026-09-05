@@ -65,7 +65,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 
 # TWO KEYS, DOING DIFFERENT JOBS, AND NEITHER IS THE SERVICE-ROLE KEY ANY MORE (see Machine Identities in supabase/README.md).
 #
-# The anon key is the `apikey` the gateway checks. Its Lua filter admits exactly two literal
+# The anon key is the `apikey` the gateway checks. Its Lua filter admits a fixed set of literal
 # strings, so the ingestion token cannot be sent in its place -- it would be refused at the edge
 # before PostgREST ever saw it.
 #
@@ -76,7 +76,20 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 # checks the caller is that principal. This is the same shape i3X uses -- pass a bearer through to
 # PostgREST and let RLS answer -- rather than a key that bypasses RLS entirely.
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SUPABASE_INGESTION_KEY = os.getenv("SUPABASE_INGESTION_KEY", "")
+
+# THE GATEWAY CREDENTIAL, in whichever format this deployment registered.
+#
+# Supabase deprecates the anon and service-role JWTs by the end of 2026 and replaces them with
+# opaque `sb_publishable_*` / `sb_secret_*` keys. The gateway accepts BOTH at once and translates
+# the new one, so this daemon does not care which it holds -- it is a string presented as `apikey`
+# and nothing here parses it.
+#
+# PREFERRED, NOT REQUIRED. An install that has not minted the new pair leaves
+# SUPABASE_PUBLISHABLE_KEY empty and keeps working on the legacy key, which is the whole reason
+# both formats are accepted at once: consumers move one at a time rather than on a flag day.
+SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
 
 # Liveness heartbeat. OPT-IN, empty by default: Docker Compose declares no healthcheck for this
 # service and nothing reads the file there, so writing one would be litter. Kubernetes sets it and
@@ -221,7 +234,7 @@ SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "300"))
 supabase_client = None
 try:
     from supabase import create_client, Client
-    if SUPABASE_URL and SUPABASE_ANON_KEY and SUPABASE_INGESTION_KEY:
+    if SUPABASE_URL and SUPABASE_GATEWAY_KEY and SUPABASE_INGESTION_KEY:
         # Declares the daemon as the actor behind its writes, so digital_thread rows say
         # "ingestion" rather than the generic "service".
         #
@@ -243,7 +256,7 @@ try:
         # constructor is incomplete in supabase-py 2.x and raises on an attribute the Auth client
         # then expects ("'ClientOptions' object has no attribute 'storage'"). Mutating the
         # session's headers is the path that actually reaches PostgREST, verified end to end.
-        supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_GATEWAY_KEY)
         try:
             # `.auth()` AND NOT `session.headers["Authorization"] = ...`, which is the obvious
             # thing and does not work. Setting the session header appears to succeed -- read it
@@ -252,8 +265,9 @@ try:
             # resolves the role as `anon`. That failure is quiet in the worst way: reads of
             # `devices` and `gateways` come back 42501 while the header says what you set.
             #
-            # The apikey stays the anon key (create_client put it there), so the request carries
-            # `apikey: <anon>` for the gateway's filter and `Bearer <ingestion token>` for
+            # The apikey stays the gateway key (create_client put it there), so the request
+            # carries `apikey: <publishable or anon>` for the gateway's filter and
+            # `Bearer <ingestion token>` for
             # PostgREST -- which is what makes auth.uid() resolve to Service_Ingestor and opens
             # the 0047 gates.
             supabase_client.postgrest.auth(SUPABASE_INGESTION_KEY)
@@ -267,7 +281,8 @@ try:
         logger.info("Supabase client initialized successfully.")
     else:
         logger.warning(
-            "SUPABASE_URL, SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY missing. Supabase "
+            "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY/SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY "
+            "missing. Supabase "
             "integration disabled. SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY -- "
             "see Machine Identities in supabase/README.md; run scripts/setup.mjs or copy the key from .env.example."
         )
@@ -4038,7 +4053,7 @@ def main():
     if supabase_client is None:
         logger.critical(
             "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL, "
-            "SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY missing or invalid. "
+            "SUPABASE_PUBLISHABLE_KEY/SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY missing or invalid. "
             "SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY here (see Machine Identities in supabase/README.md); an "
             ".env predating that change has no such key -- run scripts/setup.mjs, or copy it from "
             ".env.example for a demonstration stack. "

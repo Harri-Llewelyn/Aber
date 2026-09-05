@@ -69,7 +69,18 @@ const die = (message, hint) => {
 // Configuration, from .env via compose's env_file
 // -------------------------------------------------------------------------------------------------
 const SUPABASE_URL = (process.env.ACS_SUPABASE_URL || '').replace(/\/+$/, '');
-const ANON_KEY = process.env.ACS_SUPABASE_ANON_KEY || '';
+// THE GATEWAY CREDENTIAL, in whichever format the bundle carries.
+//
+// The platform's gateway accepts the legacy anon JWT and the new `sb_publishable_*` key at the
+// same time, so an appliance does not care which it was given -- it presents the string and the
+// gateway matches it. This appliance sends it as `apikey` AND as the bearer, which is safe for an
+// opaque key because the gateway synthesises the JWT its upstreams need.
+//
+// THE FALLBACK IS FOR BUNDLES, NOT FOR INSTALLS. A bundle downloaded before the platform minted
+// a publishable key carries only ACS_SUPABASE_ANON_KEY, and an appliance commissioned from one of
+// those must still boot -- the token in it is single-use and a failed first boot spends it.
+const ANON_KEY =
+  process.env.ACS_SUPABASE_PUBLISHABLE_KEY || process.env.ACS_SUPABASE_ANON_KEY || '';
 const TOKEN = (process.env.ACS_ENROLLMENT_TOKEN || '').trim();
 const GATEWAY_NAME = process.env.ACS_GATEWAY_NAME || 'gateway';
 const AGENT_VERSION = process.env.ACS_AGENT_VERSION || 'unknown';
@@ -308,7 +319,7 @@ if (existsSync(MARKER) && !force) {
 
 const missing = [
   !SUPABASE_URL && 'ACS_SUPABASE_URL',
-  !ANON_KEY && 'ACS_SUPABASE_ANON_KEY',
+  !ANON_KEY && 'ACS_SUPABASE_PUBLISHABLE_KEY or ACS_SUPABASE_ANON_KEY',
   !TOKEN && 'ACS_ENROLLMENT_TOKEN',
   !CREDENTIAL_SECRET && 'NODERED_CREDENTIAL_SECRET',
 ].filter(Boolean);

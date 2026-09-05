@@ -23,12 +23,17 @@ const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
 /**
  * Environment every worker needs regardless of what it does: how to reach Supabase, and the
- * anon key, which is public by construction.
+ * gateway credential, which is public by construction in either format.
+ *
+ * SUPABASE_PUBLISHABLE_KEY is the replacement for the anon key and is passed alongside it, not
+ * instead of it. `_shared/gatewayKey.ts` prefers it and falls back, so a legacy-only install
+ * leaves it empty and every function keeps working. `sb_secret_*` is NOT here for the same
+ * reason SUPABASE_SERVICE_ROLE_KEY is not.
  *
  * SUPABASE_SERVICE_ROLE_KEY is deliberately NOT here. It is granted per function below, to the
  * three that genuinely need to act outside the caller's RLS context.
  */
-const COMMON_ENV = ["SUPABASE_URL", "SUPABASE_ANON_KEY"];
+const COMMON_ENV = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_PUBLISHABLE_KEY"];
 
 /**
  * The function allow-list, and the secrets each function may see.

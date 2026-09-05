@@ -62,6 +62,13 @@ logger = get_logger("playback")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 SUPABASE_PLAYBACK_KEY = os.getenv("SUPABASE_PLAYBACK_KEY", "")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+
+# THE GATEWAY CREDENTIAL, in whichever format this deployment registered -- the new
+# `sb_publishable_*` key where one has been minted, the legacy anon JWT where it has not. The
+# gateway accepts both at once and translates the new one, so nothing here parses it: it is a
+# string presented as `apikey`. See docs/gateway-migration.md.
+SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
 
 BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
 POLL_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_POLL_INTERVAL_SECONDS", "3"))
@@ -198,7 +205,7 @@ def _credentials():
 
 def _supabase():
     from supabase import create_client
-    client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    client = create_client(SUPABASE_URL, SUPABASE_GATEWAY_KEY)
     # `.auth()` on the PostgREST sub-client, which is the ONLY thing this pattern authenticates --
     # ingestion.py records at length that setting the session header instead silently sends the
     # anon key. The storage client is built separately below for exactly that reason.
@@ -221,8 +228,8 @@ def _storage():
         # is noise that trains a reader to skip the startup lines.
         SUPABASE_URL.rstrip("/") + "/storage/v1/",
         {
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": "Bearer " + (SUPABASE_PLAYBACK_KEY or SUPABASE_ANON_KEY),
+            "apikey": SUPABASE_GATEWAY_KEY,
+            "Authorization": "Bearer " + (SUPABASE_PLAYBACK_KEY or SUPABASE_GATEWAY_KEY),
         },
         is_async=False,
     )

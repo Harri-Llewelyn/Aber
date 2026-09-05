@@ -72,6 +72,7 @@ spec:
             # silent, total RLS bypass across every asset on the site. Do not add the service-role
             # key here "for convenience".
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "acs-cymru.brokerClientEnv" . | nindent 12 }}
             {{- /*
               THE BROKER CREDENTIAL WAS MISSING HERE ENTIRELY, and this is a fix rather than a

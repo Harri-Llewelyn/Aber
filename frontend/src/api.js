@@ -1,4 +1,4 @@
-import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './lib/supabaseClient';
+import { supabase, SUPABASE_URL, SUPABASE_GATEWAY_KEY } from './lib/supabaseClient';
 import { withActivityTracking } from './lib/apiActivity';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
@@ -536,7 +536,7 @@ export function gatewayBackupPath(sparkplugId, when = new Date()) {
  */
 function withApiKey(signedUrl) {
   if (!signedUrl) return signedUrl;
-  return signedUrl + (signedUrl.includes('?') ? '&' : '?') + `apikey=${SUPABASE_ANON_KEY}`;
+  return signedUrl + (signedUrl.includes('?') ? '&' : '?') + `apikey=${SUPABASE_GATEWAY_KEY}`;
 }
 
 /** The public URL for a stored model path. Composed, never stored -- see archived migration 0035. */
@@ -664,10 +664,10 @@ const apiMethods = {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-bundle`, {
       method: 'POST',
       headers: {
-        apikey: SUPABASE_ANON_KEY,
+        apikey: SUPABASE_GATEWAY_KEY,
         // The CALLER's token: gateway-bundle mints the enrolment token as them, through a SECURITY
         // DEFINER RPC that checks has_role() itself. The anon key alone would be refused.
-        Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ gateway_id: gatewayId, ...(ttlMinutes ? { ttl_minutes: ttlMinutes } : {}) })
@@ -933,11 +933,11 @@ const apiMethods = {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-credential`, {
       method: 'POST',
       headers: {
-        apikey: SUPABASE_ANON_KEY,
+        apikey: SUPABASE_GATEWAY_KEY,
         // The CALLER's token. authorize_virtual_gateway_credential() is SECURITY DEFINER and
         // checks has_role() itself, and the audit row is attributed to auth.uid() -- so the anon
         // key alone would be refused, and would have nobody to attribute the mint to if it were not.
-        Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ gateway_id: gatewayId })
@@ -978,11 +978,11 @@ const apiMethods = {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/mint-service-token`, {
       method: 'POST',
       headers: {
-        apikey: SUPABASE_ANON_KEY,
+        apikey: SUPABASE_GATEWAY_KEY,
         // The CALLER's token, and here it is load-bearing twice over: the function resolves the
         // caller's role from it, and record_service_token_issued() re-checks that same id before
         // it will write an attributed row. The anon key would fail both.
-        Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(days ? { principal_id: principalId, days } : { principal_id: principalId })
@@ -2370,8 +2370,8 @@ const apiMethods = {
         const res = await fetch(`${SUPABASE_URL}/functions/v1/aas-export?format=aasx`, {
           method: 'POST',
           headers: {
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+            apikey: SUPABASE_GATEWAY_KEY,
+            Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({ device_id: body.device_id })

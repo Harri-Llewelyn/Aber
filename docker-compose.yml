@@ -227,8 +227,24 @@ services:
       # After an image bump:  docker compose down && docker volume rm <project>_supabase_db_config
       # (0006 now recovers from the resulting key loss on its own -- see its header.)
       - supabase_db_config:/etc/postgresql-custom
+    # -h 127.0.0.1, AND THE LOOPBACK IS THE WHOLE FIX. Without it both halves of this check speak
+    # over the UNIX SOCKET -- and so does the TEMPORARY SERVER the postgres entrypoint runs while
+    # initdb applies the image's own migrations. That server listens on the socket and NOT on TCP,
+    # so a socket-only check reports the database healthy in the middle of its own bootstrap.
+    #
+    # WHAT THAT COST: `supabase-db-roles-init` depends on `service_healthy`, connected as
+    # supabase_admin before initdb had created it, and failed with "cannot authenticate" -- whose
+    # message blames a POSTGRES_PASSWORD mismatch, because that is the failure people actually hit.
+    # A perfect diagnosis of the wrong fault, on a stack where nothing was misconfigured at all.
+    #
+    # Caught by sampling both forms against a booting container: there is a window where the socket
+    # check passes, TCP is refused, and supabase_admin does not yet exist. `pg_isready -h 127.0.0.1`
+    # is false for exactly that window, which is what makes it the right question.
+    #
+    # The SELECT stays on the socket: once TCP is up the server is the real one, and this half is
+    # asking "does it answer a query", which needs no second TCP connection.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -327,9 +343,15 @@ services:
       # the secret unset and the webhook goes out unauthenticated.
       NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
       # Read by 0038, which stores both in Vault so a trigger on `gateways` can reach the
-      # revoke-gateway-credential function through Kong. The anon key only gets past Kong's
+      # revoke-gateway-credential function through the gateway. The anon key only gets past its
       # key-auth; GATEWAY_REVOKE_SECRET is what authorises the revocation.
+      #
+      # THE VAULT SECRET IS NOT RENAMED, and this is the one consumer where the value moves rather
+      # than the variable. `supabase_anon_key` names the ROLE the secret plays, nothing in SQL
+      # parses it, and renaming a Vault entry would strand every database that already has one --
+      # so the entrypoint below picks the format and stores it under the existing name.
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
       GATEWAY_REVOKE_SECRET: ${GATEWAY_REVOKE_SECRET:-}
       # Hashed into auth.oauth_clients by 0002_seed_data.sql. Grafana
       # reads the same plaintext from its own environment via grafana.ini.
@@ -386,7 +408,7 @@ services:
           echo \"Executing migration $$f...\";
           attempt=1;
           while :; do
-            if PGOPTIONS=\"-c lock_timeout=5s\" psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v studio_oauth_client_secret=\"$$STUDIO_OAUTH_CLIENT_SECRET\" -v studio_public_url=\"$$STUDIO_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$$SUPABASE_ANON_KEY\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
+            if PGOPTIONS=\"-c lock_timeout=5s\" psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v studio_oauth_client_secret=\"$$STUDIO_OAUTH_CLIENT_SECRET\" -v studio_public_url=\"$$STUDIO_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$${SUPABASE_PUBLISHABLE_KEY:-$$SUPABASE_ANON_KEY}\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
             cat /tmp/migration.log;
             # RETRIED ONLY ON LOCK CONTENTION, never on anything else. Every migration here is
             # idempotent and is replayed on every boot already, so re-running one is safe by
@@ -771,6 +793,22 @@ services:
     environment:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # THE NEW KEY FORMAT, and DEFAULTED TO EMPTY rather than required. Supabase deprecates the
+      # anon and service-role JWTs by the end of 2026, and the replacements are opaque strings
+      # rather than JWTs -- so the translation lives here, at the only layer that sees a request
+      # before deciding to route it. Empty means the gateway runs LEGACY-ONLY, which is what an
+      # existing `.env` does and what the Lua filter checks for by name. Both formats are accepted
+      # at once, so consumers migrate one at a time rather than on a flag day.
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      # THE DEACTIVATION SWITCH. `false` stops the gateway accepting the anon and service-role JWTs,
+      # which is the step that actually answers the upstream deprecation.
+      #
+      # DEFAULT TRUE, AND DELIBERATELY SO. Every existing install presents legacy keys, and so may
+      # callers that live nowhere near this repository. Flip it only once the gateway has gone quiet:
+      # `docker compose logs supabase-envoy | grep acs-legacy-api-key` empty over a representative
+      # window, and `rbac.legacy_api_key_.shadow_allowed` flat at zero on the stats endpoint.
+      LEGACY_KEYS_ACCEPTED: ${LEGACY_KEYS_ACCEPTED:-true}
       # Realtime resolves its tenant from the LEADING HOSTNAME LABEL, so this must begin
       # `realtime-dev.`. On Compose that is the network alias declared on the supabase-realtime
       # service; on Kubernetes the Service is simply named `realtime-dev`.
@@ -831,6 +869,30 @@ services:
         fi
         if [ -z "$$SUPABASE_JWT_SECRET" ]; then
           echo 'SUPABASE_JWT_SECRET must be set -- it is the JWKS key the Studio listener verifies session tokens against, and an empty one is a door that verifies nothing.' >&2
+          exit 1
+        fi
+        # THE ONE COMBINATION THAT LOCKS EVERYBODY OUT, refused here rather than discovered.
+        # Legacy off with no new keys registered leaves the filter accepting NOTHING: every request
+        # to every gated route answers 401, the containers all report healthy, and the cause is one
+        # boolean three layers down.
+        case "$$LEGACY_KEYS_ACCEPTED" in
+          true|false) ;;
+          *)
+            echo "LEGACY_KEYS_ACCEPTED must be exactly 'true' or 'false' -- it is substituted into the Lua filter as a bare boolean, and any other value is a config Envoy refuses to parse. Got: $$LEGACY_KEYS_ACCEPTED" >&2
+            exit 1
+            ;;
+        esac
+        if [ "$$LEGACY_KEYS_ACCEPTED" = "false" ] && [ -z "$$SUPABASE_PUBLISHABLE_KEY" ]; then
+          echo 'LEGACY_KEYS_ACCEPTED=false with no SUPABASE_PUBLISHABLE_KEY set -- the gateway would accept no API key at all and refuse every request. Mint the new pair first, migrate your consumers onto it, and only then turn the legacy keys off.' >&2
+          exit 1
+        fi
+        # ONE OF THE NEW PAIR IS WORSE THAN NEITHER. Setting only the publishable key leaves the
+        # secret one empty, which the filter reads as "the new format is off for service_role" -- so
+        # a deployment that believed it had migrated would find its server-side callers refused at
+        # the edge while the browser kept working. Fail here instead, where the message can name
+        # which half is missing.
+        if { [ -n "$$SUPABASE_PUBLISHABLE_KEY" ] && [ -z "$$SUPABASE_SECRET_KEY" ]; } || { [ -z "$$SUPABASE_PUBLISHABLE_KEY" ] && [ -n "$$SUPABASE_SECRET_KEY" ]; }; then
+          echo 'SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY are a pair -- set BOTH to accept the new key format, or NEITHER to run legacy-only.' >&2
           exit 1
         fi
         case "$$KONG_CORS_ORIGINS" in
@@ -900,6 +962,9 @@ services:
         # `|` as the delimiter, because every value here contains `/`.
         sed -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
             -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$$SUPABASE_SERVICE_ROLE_KEY|g" \
+            -e "s|__SUPABASE_PUBLISHABLE_KEY__|$$SUPABASE_PUBLISHABLE_KEY|g" \
+            -e "s|__SUPABASE_SECRET_KEY__|$$SUPABASE_SECRET_KEY|g" \
+            -e "s|__LEGACY_KEYS_ACCEPTED__|$$LEGACY_KEYS_ACCEPTED|g" \
             -e "s|__REALTIME_UPSTREAM_HOST__|$$REALTIME_UPSTREAM_HOST|g" \
             -e "s|__REALTIME_UPSTREAM_ADDRESS__|$$REALTIME_UPSTREAM_ADDRESS|g" \
             -e "s|__CORS_ORIGINS__|$$CORS_MATCHERS|g" \
@@ -1022,6 +1087,9 @@ services:
     environment:
       SUPABASE_URL: http://supabase-kong:8000
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      # Forwarded to every worker by main/index.ts's COMMON_ENV, beside the anon key rather
+      # than instead of it -- _shared/gatewayKey.ts prefers this and falls back.
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       JWT_SECRET: ${SUPABASE_JWT_SECRET}
       VERIFY_JWT: "false"
@@ -1500,6 +1568,9 @@ services:
       args:
         VITE_SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
         VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+        # Public in exactly the same way -- readable in any built bundle. config.js prefers it
+        # and falls back to the anon key, so an install without one builds unchanged.
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
         VITE_ENABLE_REALTIME: ${VITE_ENABLE_REALTIME:-true}
         VITE_GITHUB_REPO_URL: ${VITE_GITHUB_REPO_URL:-https://github.com/Harri-Llewelyn/ACS-Cymru}
         # Defaults to GRAFANA_PUBLIC_URL, so a stack that moves Grafana gets the dashboard's
@@ -1587,6 +1658,9 @@ services:
       # (archived migration 0046) -- an Operator principal that cannot write a single row directly. Every
       # write goes through a gate in 0047 that checks the caller is that principal.
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      # The gateway credential. The ingestion token stays the Authorization bearer, which is
+      # what actually authorises the writes -- see the comment on SUPABASE_INGESTION_KEY.
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
       SUPABASE_INGESTION_KEY: ${SUPABASE_INGESTION_KEY}
       # Device liveness watchdog. A device that stops publishing writes nothing and emits no
       # DDEATH, so without this it stays ONLINE forever. 0 disables it; raise the window for a
@@ -1682,6 +1756,8 @@ services:
       # Both, for the reason the ingestion service gives: the anon key is the apikey the gateway
       # checks, and the ingestion key is the Authorization bearer the storage bucket admits.
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      # The gateway credential. The ingestion token stays the Authorization bearer.
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
       SUPABASE_INGESTION_KEY: ${SUPABASE_INGESTION_KEY}
       PYTHONUNBUFFERED: "1"
     depends_on:
@@ -1742,6 +1818,8 @@ services:
       # Both, for the reason the ingestion service gives above: the anon key is the apikey the
       # gateway checks, and the playback key is the Authorization bearer naming Service_Playback.
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      # The gateway credential. The playback token stays the Authorization bearer.
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
       SUPABASE_PLAYBACK_KEY: ${SUPABASE_PLAYBACK_KEY:?SUPABASE_PLAYBACK_KEY is required -- the playback worker authenticates as Service_Playback (archived migration 0056) and can claim nothing without it. Run `npm run setup`, or copy it from .env.example.}
       CAPTURE_BUCKET: ${CAPTURE_BUCKET:-broker-captures}
       PYTHONUNBUFFERED: "1"
@@ -1791,6 +1869,10 @@ services:
       # copy-paste of the ingestion environment block into a container that will not boot rather
       # than into a silent, total RLS bypass over every asset on the site.
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      # The gateway credential this service presents as `apikey`. It does no other work
+      # here -- the CALLER'S token goes in Authorization so RLS decides the address space --
+      # which is why an opaque key serves as well as a JWT.
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       # READ-ONLY at the broker, matching what this service already refuses to do in code: writes
@@ -2032,6 +2114,9 @@ services:
       # the service-role key -- see that file's header for why that distinction is load-bearing.
       GRAFANA_ALERT_WEBHOOK_SECRET: ${GRAFANA_ALERT_WEBHOOK_SECRET:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      # Preferred over the anon key by the entrypoint below. Grafana never reads a claim from
+      # either -- the key only gets the webhook call past the gate.
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
     ports:
       - "3002:3000"
     volumes:
@@ -2089,8 +2174,11 @@ services:
           echo 'GRAFANA_ALERT_WEBHOOK_SECRET must be set -- Grafana would otherwise provision the alert contact point with an empty bearer token, and grafana-alert-webhook would refuse every notification with 401 while the rules themselves looked healthy. Run: node scripts/setup.mjs' >&2
           exit 1
         fi
-        if [ -z "$$SUPABASE_ANON_KEY" ]; then
-          echo 'SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past Kong key-auth. Run: node scripts/setup.mjs' >&2
+        # EITHER FORMAT SATISFIES THIS, and the publishable key wins where both are set. The
+        # contact point needs A credential the gateway accepts, not specifically the legacy one.
+        GATEWAY_KEY=$${SUPABASE_PUBLISHABLE_KEY:-$$SUPABASE_ANON_KEY}
+        if [ -z "$$GATEWAY_KEY" ]; then
+          echo 'SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past the gateway key-auth. Run: node scripts/setup.mjs' >&2
           exit 1
         fi
         # GLOBBED ON THE SUFFIX so a rules file added to grafana/provisioning/alerting/ is picked
@@ -2100,7 +2188,7 @@ services:
         cp /tmp/alerting-template/policies.yaml /tmp/alerting-template/*alert-rules.yaml \
            /etc/grafana/provisioning/alerting/
         sed -e "s|__GRAFANA_ALERT_WEBHOOK_SECRET__|$$GRAFANA_ALERT_WEBHOOK_SECRET|g" \
-            -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
+            -e "s|__SUPABASE_ANON_KEY__|$$GATEWAY_KEY|g" \
             /tmp/alerting-template/contact-points.template.yaml \
             > /etc/grafana/provisioning/alerting/contact-points.yaml
         if grep -vE '^[[:space:]]*#' /etc/grafana/provisioning/alerting/contact-points.yaml \

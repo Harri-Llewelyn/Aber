@@ -890,6 +890,9 @@ function edgeFunctionNames() {
     'VITE_RUNTIME_CONFIG',   // selects baked vs runtime config; not a credential
     'VITE_SUPABASE_URL',     // an endpoint, public
     'VITE_SUPABASE_ANON_KEY', // public anon JWT -- the reason for the skip; see the Dockerfile
+    // The format replacing the key above, and public for exactly the same reason: it is readable
+    // in any built bundle. `sb_secret_*` is NOT here and must never be -- see the Dockerfile.
+    'VITE_SUPABASE_PUBLISHABLE_KEY',
     'VITE_ENABLE_REALTIME',  // feature flag
     'VITE_GITHUB_REPO_URL',  // issue tracker URL
     'VITE_GRAFANA_URL',      // an endpoint, public

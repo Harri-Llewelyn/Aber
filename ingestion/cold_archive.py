@@ -66,7 +66,7 @@ import psycopg2.extras
 # the connection logic cannot leave this file behind.
 from ingestion import (  # noqa: E402
     SUPABASE_URL,
-    SUPABASE_ANON_KEY,
+    SUPABASE_GATEWAY_KEY,
     SUPABASE_INGESTION_KEY,
     _connect_timescaledb,
 )
@@ -96,8 +96,8 @@ def _storage_client():
     return create_storage_client(
         SUPABASE_URL.rstrip("/") + "/storage/v1/",
         {
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": "Bearer " + (SUPABASE_INGESTION_KEY or SUPABASE_ANON_KEY),
+            "apikey": SUPABASE_GATEWAY_KEY,
+            "Authorization": "Bearer " + (SUPABASE_INGESTION_KEY or SUPABASE_GATEWAY_KEY),
         },
         is_async=False,
     )
@@ -121,8 +121,8 @@ def read_settings():
     try:
         from supabase import create_client
 
-        client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-        client.postgrest.auth(SUPABASE_INGESTION_KEY or SUPABASE_ANON_KEY)
+        client = create_client(SUPABASE_URL, SUPABASE_GATEWAY_KEY)
+        client.postgrest.auth(SUPABASE_INGESTION_KEY or SUPABASE_GATEWAY_KEY)
         rows = (
             client.table("system_settings")
             .select("key,value")

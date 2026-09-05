@@ -55,6 +55,9 @@ COPY . .
 ARG VITE_RUNTIME_CONFIG=false
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
+# The format that replaces the key above. Public by construction in exactly the same way --
+# it is readable in any built bundle, which is why it is a build ARG rather than a secret.
+ARG VITE_SUPABASE_PUBLISHABLE_KEY
 # Gates every supabase.channel() subscription.
 ARG VITE_ENABLE_REALTIME
 # Where the Report Bug button files issues. Unset is survivable -- constants.js falls back to

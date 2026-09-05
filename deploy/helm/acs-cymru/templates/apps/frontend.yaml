@@ -14,6 +14,9 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // inside the cluster and for nothing outside it.
   VITE_SUPABASE_URL: %q,
   VITE_SUPABASE_ANON_KEY: %q,
+  // The format replacing the key above. src/config.js prefers it and falls back to the anon key,
+  // so an install that has not minted the pair renders this empty and behaves as it always did.
+  VITE_SUPABASE_PUBLISHABLE_KEY: %q,
   VITE_ENABLE_REALTIME: %q,
   VITE_GITHUB_REPO_URL: %q,
   // Grafana as the BROWSER reaches it, for the "View in Grafana" links on active alerts.
@@ -33,6 +36,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
 `
   (include "acs-cymru.supabaseUrl" .)
   .Values.secrets.anonKey
+  (.Values.secrets.publishableKey | default "")
   (.Values.frontend.enableRealtime | toString)
   .Values.frontend.githubRepoUrl
   (include "acs-cymru.grafanaUrl" .)

@@ -139,6 +139,25 @@ const generated = {
   SUPABASE_JWT_SECRET: jwtSecret,
   SUPABASE_ANON_KEY: mintJwt({ role: 'anon', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
   SUPABASE_SERVICE_ROLE_KEY: mintJwt({ role: 'service_role', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
+  // THE FORMAT THAT REPLACES THE TWO ABOVE, minted alongside them so a fresh install is already
+  // on it. Supabase deprecates the anon and service-role JWTs by the end of 2026.
+  //
+  // NOT SIGNED, AND NOT PART OF THE MATCHING SET. These are opaque random strings: they are not
+  // JWTs, they are not derived from SUPABASE_JWT_SECRET, and nothing verifies them -- given one as
+  // a bearer, postgrest v14.12 answers `PGRST301 "Expected 3 parts in JWT; got 1"`. They work
+  // because the GATEWAY matches the key as a string, exactly as it already does for the legacy
+  // pair, and hands the upstream the legacy JWT it has always required. So `npm run keys:rotate`
+  // does not touch them, and rotating jwtSecret does not invalidate them.
+  //
+  // HEX, for the reason every other generated value here is hex: these land in a `sed` expression,
+  // a Lua string literal, a YAML scalar and a WebSocket query string, and hex is the one encoding
+  // that needs no escaping in any of them.
+  //
+  // THE PREFIXES ARE UPSTREAM'S and are not decoration -- they are how an operator reading a log
+  // or a bug report tells which of the two formats a caller presented, and `sb_secret_` is what
+  // makes a leaked one recognisable on sight.
+  SUPABASE_PUBLISHABLE_KEY: `sb_publishable_${hex(24)}`,
+  SUPABASE_SECRET_KEY: `sb_secret_${hex(24)}`,
   // The ingestion daemon's own credential (see Machine Identities in supabase/README.md). `authenticated` with a `sub`, not a
   // role that bypasses RLS: it authenticates as Service_Ingestor (archived migration 0046), which holds
   // Operator and therefore cannot write a single row directly. Every write it makes goes through
@@ -278,6 +297,9 @@ fs.writeFileSync(envPath, contents, { mode: 0o600 });
 console.log(`✅ Created .env with ${Object.keys(generated).length} freshly generated credentials.`);
 console.log('   The anon and service-role JWTs were signed with the new SUPABASE_JWT_SECRET, so the');
 console.log('   three are a matching set. Nothing in .env is shared with any other install.');
+console.log('   A publishable/secret key pair was minted too — the format Supabase replaces the anon');
+console.log('   and service-role JWTs with by the end of 2026. The gateway accepts BOTH formats at');
+console.log('   once, so nothing has to move to them today.');
 console.log(`   Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
 console.log('');
 // SAID AT THE MOMENT THEY ARE CREATED, because these now expire and the failure this change has to

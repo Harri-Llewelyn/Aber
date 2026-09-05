@@ -87,6 +87,22 @@ secrets:
   jwtSecret: ""
   anonKey: ""
   serviceRoleKey: ""
+
+  # THE FORMAT THAT REPLACES THE TWO ABOVE, and the one pair on this list that is OPTIONAL rather
+  # than part of the matching set. Supabase deprecates the anon and service-role JWTs by the end of
+  # 2026. `sb_publishable_*` and `sb_secret_*` are NOT JWTs -- they are not signed by `jwtSecret`,
+  # nothing verifies them, and no component downstream ever sees one: the GATEWAY matches them as a
+  # string and hands the upstream the legacy JWT it has always required. So they are not re-minted
+  # when `jwtSecret` changes, and `validateSecrets` does not require them.
+  #
+  # EMPTY MEANS LEGACY-ONLY, which is what every existing install is and a supported state rather
+  # than a degraded one -- both formats are accepted at once so consumers migrate one at a time.
+  # Set BOTH or NEITHER: the gateway's initContainer refuses to render a half-configured pair,
+  # because the half that is missing would fail at the edge for server-side callers only.
+  #
+  # `node scripts/setup.mjs` mints a pair for the Compose path; any opaque random string works.
+  publishableKey: ""
+  secretKey: ""
   # The ingestion daemon's own credential (see Machine Identities in supabase/README.md). Signed by the same jwtSecret, but
   # unlike the two above it names a PRINCIPAL rather than a role: claims are
   # {"iss":"supabase","role":"authenticated","sub":"b0000000-0000-4000-8000-000000000002"}.
@@ -538,6 +554,29 @@ supabaseEnvoy:
     pullPolicy: IfNotPresent
   replicas: 1
   logLevel: info
+
+  # WHETHER THE GATEWAY STILL ACCEPTS THE LEGACY API KEYS, and turning this off is the step that
+  # actually answers Supabase's deprecation of the anon and service-role JWTs at the end of 2026.
+  #
+  # A POSTURE, NOT A CREDENTIAL, which is why it lives here rather than in `secrets` -- an operator
+  # reading this file should be able to see which formats their gateway admits.
+  #
+  # DEFAULT TRUE, AND FLIPPING IT IS AN OPERATIONAL DECISION. Every install that has not migrated
+  # still presents legacy keys, and so may callers that live nowhere near this repository -- so
+  # `false` is an outage for whoever was still using one, and this chart cannot know who that is.
+  #
+  # HOW TO KNOW IT IS SAFE. The gateway now measures its own answer to that question, two ways:
+  #
+  #   rbac.legacy_api_key_.shadow_allowed   on the /stats/prometheus endpoint the ServiceMonitor
+  #                                         already scrapes -- the number of requests that presented
+  #                                         a legacy key. It must be flat at zero.
+  #   acs-legacy-api-key ...                one stdout line per legacy-key request, naming the route,
+  #                                         the user agent and the caller. Silence is the pass.
+  #
+  # Watch both over a window that covers this deployment's slowest periodic job -- a backup cycle, a
+  # month end -- and only then set this false. The initContainer refuses `false` with no publishable
+  # key, which would otherwise accept nothing at all.
+  legacyKeysAccepted: true
   # THE PROMOTED NAME. `supabase-envoy` is what to set while running both side by side; every
   # in-cluster consumer addresses `supabase-kong:8000` and none of them had to learn a new one.
   serviceName: supabase-kong

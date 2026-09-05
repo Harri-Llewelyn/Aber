@@ -40,6 +40,7 @@ import {
 } from "../_shared/aas/shell.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
@@ -161,7 +162,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabaseAnonKey = gatewayKey();
     const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!supabaseServiceRoleKey) {

@@ -145,6 +145,30 @@ spec:
                 echo 'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set -- an empty key substituted into the Lua filter would be accepted from any caller sending an empty apikey.' >&2
                 exit 1
               fi
+              # THE ONE COMBINATION THAT LOCKS EVERYBODY OUT, refused here rather than
+              # discovered. Legacy off with no new keys registered leaves the filter accepting
+              # NOTHING: every gated route answers 401, every pod reports healthy, and the cause is
+              # one boolean three layers down. Made on both targets for the reason every other check
+              # here is: they share the template and not the substituter.
+              case "$LEGACY_KEYS_ACCEPTED" in
+                true|false) ;;
+                *)
+                  echo "LEGACY_KEYS_ACCEPTED must be exactly 'true' or 'false' -- it is substituted into the Lua filter as a bare boolean. Got: $LEGACY_KEYS_ACCEPTED" >&2
+                  exit 1
+                  ;;
+              esac
+              if [ "$LEGACY_KEYS_ACCEPTED" = "false" ] && [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+                echo 'LEGACY_KEYS_ACCEPTED=false with no SUPABASE_PUBLISHABLE_KEY set -- the gateway would accept no API key at all and refuse every request. Mint the new pair first, migrate your consumers onto it, and only then turn the legacy keys off.' >&2
+                exit 1
+              fi
+              # ONE OF THE NEW PAIR IS WORSE THAN NEITHER -- the same guard Compose's substituter
+              # makes, and it has to be made twice for the reason every other check here is: the
+              # two targets share the template and not the substituter, so a rule enforced on one
+              # is a per-target divergence that surfaces as a boot failure on the other.
+              if { [ -n "$SUPABASE_PUBLISHABLE_KEY" ] && [ -z "$SUPABASE_SECRET_KEY" ]; } || { [ -z "$SUPABASE_PUBLISHABLE_KEY" ] && [ -n "$SUPABASE_SECRET_KEY" ]; }; then
+                echo 'SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY are a pair -- set BOTH to accept the new key format, or NEITHER to run legacy-only.' >&2
+                exit 1
+              fi
               case "$ENVOY_CORS_ORIGINS" in
                 '['*']') ;;
                 *)
@@ -202,6 +226,9 @@ spec:
 
               sed -e "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" \
                   -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$SUPABASE_SERVICE_ROLE_KEY|g" \
+                  -e "s|__SUPABASE_PUBLISHABLE_KEY__|$SUPABASE_PUBLISHABLE_KEY|g" \
+                  -e "s|__SUPABASE_SECRET_KEY__|$SUPABASE_SECRET_KEY|g" \
+                  -e "s|__LEGACY_KEYS_ACCEPTED__|$LEGACY_KEYS_ACCEPTED|g" \
                   -e "s|__REALTIME_UPSTREAM_HOST__|$REALTIME_UPSTREAM_HOST|g" \
                   -e "s|__REALTIME_UPSTREAM_ADDRESS__|$REALTIME_UPSTREAM_ADDRESS|g" \
                   -e "s|__CORS_ORIGINS__|$CORS_MATCHERS|g" \
@@ -230,6 +257,29 @@ spec:
                 secretKeyRef:
                   name: {{ include "acs-cymru.secretName" . }}
                   key: SUPABASE_SERVICE_ROLE_KEY
+            # THE NEW KEY FORMAT, and `optional: true` is the whole compatibility story on this
+            # target. With `secrets.existingSecret` set, the chart does not own the Secret and an
+            # operator's existing one has neither of these keys -- a required secretKeyRef would
+            # then refuse to start the gateway on every cluster that upgraded without minting them.
+            # Absent means empty, empty means legacy-only, and the Lua filter checks for exactly
+            # that. The pair guard above catches the half-configured case.
+            - name: SUPABASE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "acs-cymru.secretName" . }}
+                  key: SUPABASE_PUBLISHABLE_KEY
+                  optional: true
+            - name: SUPABASE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "acs-cymru.secretName" . }}
+                  key: SUPABASE_SECRET_KEY
+                  optional: true
+            # THE DEACTIVATION SWITCH, from VALUES rather than from the Secret: it is a
+            # posture, not a credential, and it belongs where an operator reads the rest of the
+            # gateway's configuration. See supabaseEnvoy.legacyKeysAccepted in values.yaml.
+            - name: LEGACY_KEYS_ACCEPTED
+              value: {{ .Values.supabaseEnvoy.legacyKeysAccepted | toString | quote }}
             # Kong's initContainer builds a full URL because Kong routes on one. Envoy splits the
             # concern: the cluster carries the address, this carries only the Host header.
             - name: REALTIME_UPSTREAM_HOST

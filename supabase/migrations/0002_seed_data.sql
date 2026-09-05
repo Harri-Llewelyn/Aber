@@ -8084,8 +8084,18 @@ SELECT set_config('acs_cymru.revoke_key',  :'gateway_revoke_secret', false);
 -- to configure one outbound call.
 --
 --   supabase_functions_url        where Kong serves /functions/v1 on this target
---   supabase_anon_key             gets past Kong's key-auth, and proves NOTHING else -- it ships
---                                 inside every browser bundle
+--   supabase_anon_key             gets past the gateway's key-auth, and proves NOTHING else -- it
+--                                 ships inside every browser bundle.
+--
+--                                 THE NAME IS THE ROLE, NOT THE FORMAT. Supabase deprecates the
+--                                 anon JWT by the end of 2026 and replaces it with an opaque
+--                                 `sb_publishable_*` key; the gateway accepts both at once and
+--                                 matches either as a string. So this secret holds whichever
+--                                 format the deployment registered -- db-init passes the
+--                                 publishable key where one exists and the anon key otherwise --
+--                                 and the secret is NOT renamed, because nothing in SQL parses
+--                                 it and a renamed Vault entry would strand every database that
+--                                 already has one.
 --   gateway_revoke_secret         what actually authorises the revocation, checked by the function
 DO $vault$
 DECLARE

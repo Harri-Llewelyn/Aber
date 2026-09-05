@@ -64,6 +64,13 @@ BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 SUPABASE_INGESTION_KEY = os.getenv("SUPABASE_INGESTION_KEY", "")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+
+# THE GATEWAY CREDENTIAL, in whichever format this deployment registered -- the new
+# `sb_publishable_*` key where one has been minted, the legacy anon JWT where it has not. The
+# gateway accepts both at once and translates the new one, so nothing here parses it: it is a
+# string presented as `apikey`. See docs/gateway-migration.md.
+SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
 
 # How often an idle worker looks for a queued job. Three seconds is the delay an operator sees
 # between pressing Capture and the card appearing; polling faster buys nothing, because the rebirth
@@ -235,8 +242,8 @@ def _storage_client():
         # is noise that trains a reader to skip the startup lines.
         SUPABASE_URL.rstrip("/") + "/storage/v1/",
         {
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": "Bearer " + (SUPABASE_INGESTION_KEY or SUPABASE_ANON_KEY),
+            "apikey": SUPABASE_GATEWAY_KEY,
+            "Authorization": "Bearer " + (SUPABASE_INGESTION_KEY or SUPABASE_GATEWAY_KEY),
         },
         is_async=False,
     )

@@ -21,6 +21,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
  * Supabase RBAC role -> Grafana org role.
@@ -56,7 +57,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const anonKey = gatewayKey();
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
     // Validate the bearer token by resolving it to a user. This is the authentication step --

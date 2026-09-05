@@ -81,6 +81,16 @@ LISTEN_PORT = int(os.getenv("I3X_PORT", "8090"))
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://supabase-kong:8000").rstrip("/")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+
+# THE GATEWAY CREDENTIAL, in whichever format this deployment registered -- the new
+# `sb_publishable_*` key where one has been minted, the legacy anon JWT where it has not.
+#
+# THIS SERVICE IS THE CLEAREST CASE FOR THE NEW FORMAT, because the key does no work here beyond
+# getting past the gate: `_headers()` below sends it as `apikey` and puts the CALLER'S OWN token
+# in Authorization, so RLS decides what the address space contains. Nothing in this process reads
+# a claim out of it, which is exactly why an opaque string serves as well as a JWT.
+SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
 
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -151,8 +161,8 @@ class PostgrestClient:
 
     def _headers(self) -> dict:
         headers = {"Accept": "application/json", "Authorization": self.bearer}
-        if SUPABASE_ANON_KEY:
-            headers["apikey"] = SUPABASE_ANON_KEY
+        if SUPABASE_GATEWAY_KEY:
+            headers["apikey"] = SUPABASE_GATEWAY_KEY
         return headers
 
     def get(self, path: str, params: Optional[dict] = None) -> List[dict]:
@@ -1651,9 +1661,10 @@ def main():
             "queries PostgREST as the CALLER so that RLS applies to the address space; holding a "
             "service-role key would defeat that. Remove it from the i3x-service environment."
         )
-    if not SUPABASE_ANON_KEY:
+    if not SUPABASE_GATEWAY_KEY:
         logger.warning(
-            "SUPABASE_ANON_KEY is unset -- PostgREST reads will be refused by the gateway's key-auth."
+            "Neither SUPABASE_PUBLISHABLE_KEY nor SUPABASE_ANON_KEY is set -- PostgREST reads "
+            "will be refused by the gateway's key-auth."
         )
 
     start_mqtt()

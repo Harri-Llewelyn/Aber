@@ -1,0 +1,191 @@
+// =================================================================================================
+// Spell checking -- what the EDITOR flags, and the vocabulary that stops it flagging the domain.
+//
+// WHY THIS FILE EXISTS. This repository comments heavily: over half of docker-compose.yml is prose,
+// and the same is true of the migrations, the Helm templates and the READMEs. That is a deliberate
+// choice made elsewhere, and this file is its cost. Without it the Code Spell Checker extension
+// reports ~850 problems in docker-compose.yml alone and several thousand across the tree, ALL of
+// them false positives -- which does not merely annoy, it hides the real ones. A checker nobody
+// believes is a checker nobody reads, and that is the state this file ends.
+//
+// NOTHING HERE SUPPRESSES A REAL MISSPELLING. At the time of writing there were none in this
+// repository's own prose. Three exist in text copied VERBATIM from ASHRAE 223P
+// ("Depiciton", "differentate", "tranforms") and must stay, because one of them is in an asset
+// filename the standard itself ships; they are excluded by the vocabulary rule below rather than
+// added as words, so the same typos elsewhere would still be caught. `telemetry_retenton_days` is
+// deliberate and marked `(sic)` where it appears -- it is an EXAMPLE of a mistyped setting key.
+//
+// -------------------------------------------------------------------------------------------------
+// THE THREE MECHANISMS, in the order to reach for them:
+//
+//   1. `language` -- en-GB alongside en. This project writes "behaviour", "organisation",
+//      "authorised", "artefacts". Those are house style, not errors, and a US-only dictionary
+//      flagged every one of them.
+//   2. `ignorePaths` -- files whose content nobody wrote. Build output, backups, vendored schemas.
+//   3. `words` -- the project's actual vocabulary. LOWERCASE, because a lowercase entry matches
+//      every capitalisation: one `mqtt` covers MQTT, Mqtt and mqtt, which is why this list is 596
+//      entries rather than the 736 the checker first reported.
+//
+// ADDING A WORD IS THE LAST RESORT, NOT THE FIRST. If the checker flags something new, read it
+// first: it is a typo often enough to be worth the two seconds. Add it here only once you are sure,
+// and add it in lowercase.
+//
+// PREFER THE WHOLE COMPOUND OVER THE FRAGMENT. cspell splits identifiers on case boundaries, so
+// `PostgREST` was reported as an unknown `Postg`, and `columns`, `boolean` and `extension` as
+// `olumns`, `oolean` and `xtension` where they follow one. Listing `postgrest` resolves all of
+// those, because the checker tries the full word before it splits. Listing `postg` would have
+// whitelisted a genuine misspelling of that shape instead, so it is not listed.
+//
+// EIGHT FRAGMENTS ARE LISTED ANYWAY, each because the source really does contain that fragment and
+// is right to: `polic` from the parenthetical `polic(ies)`, `passw` from the literal `Passw0rd!`,
+// `orize` from the package `oauth2orize`, `metr` from a quoted search prefix, `rearrang` from the
+// partial regex `/Rearrang/i` in a test matcher, `indistinguish` from a hyphenated line break,
+// `unre` from the coinage "unre-verified", and `retenton` from `telemetry_retenton_days`.
+// =================================================================================================
+{
+  "version": "0.2",
+
+  // en-GB SECOND, NOT INSTEAD OF en. Both dictionaries load: the codebase is British in its prose
+  // and unavoidably American in its identifiers (`color`, `serialize`, `normalized` all appear in
+  // library APIs), and dropping `en` would trade one class of false positive for another.
+  "language": "en,en-GB",
+
+  // -----------------------------------------------------------------------------------------------
+  // Files nobody in this repository wrote the words in.
+  //
+  // `frontend/dist/**` ALONE ACCOUNTED FOR 4,400 PROBLEMS -- a bundled model-viewer whose minified
+  // identifiers and embedded wasm read as thousands of unique "words". Checking generated output
+  // says nothing about anything a person could fix.
+  // -----------------------------------------------------------------------------------------------
+  "ignorePaths": [
+    "node_modules/**",
+    "**/node_modules/**",
+    ".git/**",
+    "**/dist/**",
+    "**/build/**",
+    "backups/**",
+    "**/*.min.js",
+    "**/*.map",
+    "**/package-lock.json",
+    // Third-party specifications carried verbatim. AAS_V3_0_JSON_Schema.json is IDTA's, and its
+    // property names are not ours to spell differently.
+    "test-harness/schemas/**",
+    // Binary and near-binary. The .gz entry matters most: the chart carries the migration chain as
+    // one gzip per file, and reading those as text produces noise proportional to the schema.
+    "**/*.gz", "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.svg", "**/*.ico",
+    "**/*.pdf", "**/*.glb", "**/*.stl", "**/*.woff", "**/*.woff2",
+    // Credentials, and a permission allowlist that is a log of shell commands rather than prose.
+    ".env", ".env.*",
+    ".claude/settings.local.json",
+    // GENERATED PROTOBUF. `protoc` inlines the serialised descriptor as one 6,000-character string
+    // literal, and the checker reads fragments of it as words -- `loat`, `oolean`, `ytes`, which are
+    // the tails of "float", "boolean" and "bytes" in the Sparkplug B schema. Nothing there is
+    // written by hand and nothing there is fixable.
+    "**/*_pb2.py",
+    // THIS FILE, which necessarily names the misspellings it exists to explain -- three from ASHRAE
+    // and the compound fragments in the header. Checking it would report every one of them.
+    "cspell.json"
+  ],
+
+  // -----------------------------------------------------------------------------------------------
+  // Text that is data rather than language.
+  // -----------------------------------------------------------------------------------------------
+  "ignoreRegExpList": [
+    // THE SEEDED VOCABULARIES, which are ontology prose copied verbatim from ASHRAE 223P, OPC UA,
+    // MTConnect and ISO 22400. 1,322 such lines in 0002_seed_data.sql alone. They are quoted
+    // standards text: this repository does not get to correct their spelling, and should not be
+    // asked about it on every run. Scoped to the INSERT lines so the rest of the migration -- which
+    // IS ours -- stays checked.
+    "/INSERT INTO public\\.[a-z0-9_]*vocabulary VALUES .*/g",
+    // JWTs, hex secrets, publishable/secret API keys and base64 blobs. Committed demo values in
+    // .env.example and the dev chart values, plus every key this repository documents by example.
+    "/eyJ[A-Za-z0-9_.-]+/g",
+    "/\\b[0-9a-f]{16,}\\b/g",
+    "/\\bsb_(publishable|secret)_[A-Za-z0-9_-]+/g",
+    "/\\b[A-Za-z0-9+/]{40,}={0,2}\\b/g"
+  ],
+
+  // -----------------------------------------------------------------------------------------------
+  // The project's vocabulary. Lowercase; see the header.
+  //
+  // Roughly: the stack's components (supabase, postgrest, gotrue, mosquitto, timescaledb, envoy),
+  // Postgres catalog columns the migrations query by name (attrelid, relnamespace, polqual),
+  // Sparkplug B and MQTT protocol terms (dbirth, ncmd, connack, suback), the industrial standards
+  // this platform speaks (ashrae, opcua, mtconnect, qudt, irdi, packml, modbus), and the words this
+  // repository coins for its own ideas (unauditable, unprobeable, greppable, requarantine).
+  // -----------------------------------------------------------------------------------------------
+  "words": [
+    "aaaabbbbccccdddd", "aasenv", "aasx", "acao", "aclexplode", "acreateserial", "acscymru", "acscymrusecret",
+    "activatable", "addext", "aflags", "aggs", "agnostically", "amrc", "andon", "apca", "apikey", "arwd",
+    "asgi", "ashrae", "askable", "assertable", "attisdropped", "attname", "attnotnull", "attnum", "attrelid",
+    "autofs", "automounted", "autoscalable", "autovacuum", "badbulk", "badname", "ballscrew", "barchart",
+    "basyx", "bcol", "bcryptjs", "bfbb", "bgwriter", "binfmt", "birthless", "bitnamilegacy", "bitwarden",
+    "bpropertyset", "brinell", "btrim", "buildx", "bypassrls", "cafile", "caname", "certfile", "certname",
+    "cesmii", "cfgsrc", "checkpointer", "chgrp", "chowned", "chowns", "classoid", "cleansession", "clientid",
+    "clmp", "clusterissuer", "codrops", "colourblind", "colourish", "columnstore", "configfs", "configmap",
+    "connack", "conname", "conrelid", "constraintdef", "contype", "conv", "convalidated", "coshh",
+    "credentialled", "creds", "criticals", "crlfile", "cstring", "ctemplate", "curlimages", "datasetvalue",
+    "datasetvalueextension", "datatypes", "dbirth", "dbname", "dcmd", "dcol", "dcterms", "ddata", "ddeath",
+    "deadband", "deadbands", "debugfs", "dedup", "dedupe", "deptype", "devaaaaaaaa", "devaaaaaaaaaaaaaaaaaaaaa",
+    "devccd", "devfffffffffffffffffff", "devffffffffffffffffffff", "devfffffffffffffffffffff", "devpts",
+    "devtmpfs", "diffable", "distroless", "dockerfiles", "driftable", "duckdb", "dxtm", "dynsec", "eacces",
+    "eclass", "eclipsebasyx", "econnrefused", "ecto", "ellipsed", "ellipsing", "ellipsised", "elts",
+    "emqx", "enddate", "enochian", "entr", "entrancy", "envoyproxy", "envsubst", "errcode", "errcodes",
+    "esac", "etemplate", "excludedportrange", "extfile", "factoryplus", "feedrate", "finalizer", "finalizers",
+    "fkey", "forgeable", "forkable", "fplus", "frozenset", "fusectl", "galvanomotor", "gapfill", "gateable",
+    "gencode", "getent", "getenv", "getkey", "getpid", "ghhc", "gltf", "gmatch", "gotrue", "greppable",
+    "gucs", "guoyu", "gwya", "gwyaaaaaaaaaaaaaaaaaaaaa", "gwybbbbbbbbbbbbbbbbbbbbb", "gwyccd", "harri",
+    "hcaptcha", "hdrs", "headerless", "healthcheck", "healthchecks", "healthz", "heartbeating", "helpdesk",
+    "historised", "hmac", "hostpath", "hpas", "htpasswd", "hugetlbfs", "hvac", "hypercore", "hypertable",
+    "hypertables", "idta", "ilike", "indexdef", "indexrelid", "indistinguish", "indrelid", "industrialdigitaltwin",
+    "ingestor", "inhparent", "inhrelid", "inotifywait", "inoutput", "inspectable", "irdi", "irdis",
+    "isinstance", "isready", "jobid", "jobname", "jsonschema", "jsonwebtoken", "jtis", "jwts", "keepalive",
+    "keyauth", "keyout", "klipper", "kubeconfig", "kubeconform", "kubelet", "lastcert", "leeb", "letsencrypt",
+    "libc", "libpq", "libprotoc", "locf", "lojban", "lookback", "messagebird", "metamodel", "metr",
+    "metricvalueextension", "metricz", "metrolog", "microtorr", "migra", "mintable", "misconfiguring",
+    "mktemp", "mname", "modbus", "mohs", "mori", "mosquitto", "mountpoint", "mqtt", "mqtts", "mqttv",
+    "mqueue", "mtbf", "mtconnect", "mttr", "nbirth", "ncmd", "ncmds", "ndata", "ndeath", "netsh", "newermt",
+    "nextval", "nindent", "nodelimiter", "nodered", "nodeset", "noerr", "noextension", "nofile", "nologin",
+    "noout", "norole", "nothex", "nowcert", "nspname", "nsupabase", "nullgood", "numberofports", "nums",
+    "objecttypes", "objid", "objoid", "objsubid", "odva", "omac", "oneshot", "onesided", "opcfoundation",
+    "opclass", "opcua", "openidconnect", "openxmlformats", "optgroup", "optgroups", "orioledb", "orize",
+    "ozjvptzyo", "packml", "paho", "parameterised", "parameterising", "parametervalueextension", "partkeydef",
+    "partrelid", "partstrat", "passw", "pasteable", "pathconv", "pathlen", "paytoqs", "pdbs", "percentunit",
+    "pgcrypto", "pgdata", "pgdelta", "pgjwt", "pgoptions", "pgpassword", "pgrst", "pgsodium", "pipefs",
+    "pitr", "pièce", "pkce", "pkey", "plpgsql", "pluginized", "polcmd", "polic", "polname", "polqual",
+    "polrelid", "portalling", "postgrest", "postgrex", "powerbi", "preconversion", "principalrevoke",
+    "proacl", "prokind", "proname", "pronamespace", "pronargs", "propertyset", "propertysetlist", "propertysets",
+    "propertyvalue", "propertyvalueextension", "proposable", "prosecdef", "prosrc", "protoc", "prpubid",
+    "prrelid", "psql", "pstore", "psycopg", "puback", "pubname", "punct", "pushdown", "pwfile", "pyarrow",
+    "pycache", "pydantic", "pytest", "pythonunbuffered", "pytz", "qualifiable", "quar", "qudt", "quiesces",
+    "quiescing", "rdflib", "rdfs", "readwrite", "rearrang", "reassemblable", "reauthentication", "recordset",
+    "redactable", "refetched", "refobjid", "refobjsubid", "regclass", "regprocedure", "regrole", "relationshiptypes",
+    "relitigating", "relkind", "relname", "relnamespace", "relpartbound", "relreplident", "relrowsecurity",
+    "rels", "reltoastrelid", "renameable", "renderable", "replayable", "repredicated", "reqs", "requarantine",
+    "resynced", "retag", "retenton", "rethrew", "rgba", "rlimit", "rolbypassrls", "rolcreatedb", "rolcreaterole",
+    "rolesplit", "rollup", "rollups", "rolname", "rolsuper", "rootfs", "rowstore", "rowtype", "rtrim",
+    "rxtm", "sapcc", "savepointed", "schemaname", "scol", "scrapeable", "securityfs", "segmentby",
+    "selfcheck", "selfsigned", "selinuxfs", "senderr", "sendgrid", "serviceaccount", "servicelb", "servicemonitor",
+    "servicemonitors", "sess", "setpoints", "setval", "shacl", "shopfloor", "signups", "singularises",
+    "siws", "snat'd", "sparkline", "spinbox", "sqlerrm", "sqlstate", "sqlstates", "srvname", "srvoptions",
+    "sslmode", "stackless", "stakater", "startable", "startport", "statefulset", "strapline", "stringifying",
+    "stringly", "strpos", "suback", "subcharts", "subflow", "subflows", "submodel", "submodels", "subselect",
+    "substituters", "subtransaction", "supabase", "supabaserealtime", "supautils", "superbase", "swaggerapi",
+    "sysfs", "tablename", "tableoid", "tahu", "tdev", "testver", "textlocal", "tgfoid", "tgisinternal",
+    "tgname", "tgrelid", "threadsafety", "thrs", "tidyable", "timebox", "timescaledb", "timespec",
+    "timestamptz", "tlsv", "tmpfs", "toolchanger", "topbar", "tosidebar", "tostatus", "totp", "tracefs",
+    "trunc", "tspassword", "udbfe", "udbff", "udfff", "ufffd", "uitg", "ukca", "unappliable", "unaskable",
+    "unasserted", "unauditable", "unbootable", "unclamp", "unclickable", "uncollapsed", "unconfigured",
+    "undecryptable", "undraggable", "undrainable", "undrawable", "undropped", "unece", "unexportable",
+    "unfileable", "unfilterable", "ungated", "ungranted", "unhashed", "unhelped", "unholding", "unioned",
+    "unioning", "unjudged", "unloadable", "unlogged", "unmarshal", "unmodelled", "unnormalised", "unopenable",
+    "unparseable", "unpartitioned", "unprobeable", "unprovisionable", "unprunable", "unpruneable",
+    "unpurged", "unquarantined", "unre", "unreconstructable", "unrender", "unreviewable", "unrevocable",
+    "unrevokable", "unrouted", "unrunnable", "unsane", "unsavable", "unsayable", "unschedules", "unschematised",
+    "unskippable", "unstages", "unstarted", "unstub", "unsuspending", "untar", "unusability", "unwindowed",
+    "upsertable", "upserted", "upserts", "urandom", "urllib", "urlopen", "urlquery", "usename", "userinfo",
+    "usesuper", "usetls", "valuehere", "vdma", "velero", "verifyservercert", "virt", "vite", "vmid",
+    "vonage", "vundefined", "webauthn", "webstore", "winnat", "wordmark", "workholding", "workos",
+    "xact", "zvei"
+  ]
+}

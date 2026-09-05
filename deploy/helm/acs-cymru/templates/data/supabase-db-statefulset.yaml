@@ -128,12 +128,18 @@ spec:
           # answers pg_isready during its own bootstrap while still refusing connections. Both are
           # kept: readiness gates the init Jobs, and a database that accepts a connection
           # but not a query would let the migrations start and fail.
+          #
+          # AND BOTH GATING PROBES ASK OVER TCP (-h 127.0.0.1), for the reason recorded at the
+          # Compose healthcheck: the temporary server initdb runs listens on the UNIX SOCKET ONLY,
+          # so a socket-only probe reports Ready in the middle of the bootstrap and lets the init
+          # Jobs connect as roles that do not exist yet. Liveness below is deliberately left on the
+          # socket -- it asks whether the process is lost, long after any of this.
           startupProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
-                - pg_isready -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'
+                - pg_isready -h 127.0.0.1 -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'
             periodSeconds: 10
             timeoutSeconds: 10
             # 5 minutes. This image does substantially more first-boot work than stock postgres.
@@ -143,7 +149,7 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - pg_isready -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'
+                - pg_isready -h 127.0.0.1 -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'
             periodSeconds: 5
             timeoutSeconds: 10
             failureThreshold: 3
