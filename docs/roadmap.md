@@ -14,33 +14,47 @@ addresses: source comments cited them, so deleting an entry and closing the gap 
 every citation without erroring, and the list was therefore left gapped as the record of what
 shipped. Moving the roadmap out of `README.md` ended that — the comments state what the code does
 instead — and `scripts/check-docs-drift.mjs` dropped the four invariants that enforced it. The
-numbers are labels for reading order, they run 1-13 with no gaps, and **a renumber costs one grep**
+numbers are labels for reading order, they run 1-12 with no gaps, and **a renumber costs one grep**
 (`§[0-9]`, `roadmap item [0-9]`) across the repository for the prose that still cites them.
 
-**Ordered by subject rather than by age**, in four groups. **1-6 are the platform's own**, led by
-the one item somebody else sets the deadline for and then by the credential and operations chain:
-2 is Administrator-only from the start and deliberately does not wait for 3. **The role split those
-would otherwise have queued behind has already shipped**, as `0069` and `0070`, which is why 3 is
-now Entra sign-in alone and 4 no longer waits on it. **So has the machine-principal split**, as
-`0080` — it was the entry that arrived from a change being REFUSED rather than from an audit or a
-request, and it had to exist before an `Operator` could be granted anything else, which is exactly
-what 8 goes on to do. **6 is the only item here whose subject is the BROKER credential plane**
-rather than the database one; it sits at the end of the chain because the database plane's own
-credential work has now shipped and explicitly scoped that plane out, and because its strongest
-argument is a gap (a revoked gateway that is already connected keeps publishing) rather than a
-feature. **7-11 arrive from feature requests** — 7, 9 and 11 from GitHub issues
+**Ordered by subject rather than by age**, in four groups. **1-5 are the platform's own**, led by
+the one item somebody else sets the deadline for and then by the credential and operations chain.
+**The role split that chain would otherwise have queued behind has already shipped**, as `0069` and
+`0070`, which is why 2 is now Entra sign-in alone and 3 no longer waits on it. **So has the
+machine-principal split**, as `0080` — it was the entry that arrived from a change being REFUSED
+rather than from an audit or a request, and it had to exist before an `Operator` could be granted
+anything else, which is exactly what 7 goes on to do. **5 is the only item here whose subject is the
+BROKER credential plane** rather than the database one; it sits at the end of the chain because the
+database plane's own credential work has now shipped and explicitly scoped that plane out, and
+because its strongest argument is a gap (a revoked gateway that is already connected keeps
+publishing) rather than a feature. **6-10 arrive from feature requests** — 6, 8 and 10 from GitHub
+issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
-[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 8 and 10 were not filed. **10 is
-sequenced *after* 9 because it removes what 9 replaces, and 8 is sequenced *before* it because 9
-cannot ask an `Operator` for a proposal until 8 has given that role a way to make one** — 8 is the
-queue and the authority, 9 is one lane's payload and the edge sync that carries it. **12 is
+[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 7 and 9 were not filed. **9 is
+sequenced *after* 8 because it removes what 8 replaces, and 7 is sequenced *before* it because 8
+cannot ask an `Operator` for a proposal until 7 has given that role a way to make one** — 7 is the
+queue and the authority, 8 is one lane's payload and the edge sync that carries it. **11 is
 documentation**, and is the one item whose remaining work is mostly writing;
 it arrives from [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **13 is the platform's own
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **12 is the platform's own
 and sits last anyway**, because its subject is the transport under every other item rather than any
-one chain — and because reading it before 6 and 9 invites starting it in the wrong order, which is
+one chain — and because reading it before 5 and 8 invites starting it in the wrong order, which is
 the one thing it asks not to happen.
+
+**Studio behind a login shipped and left this list on 2026-09-05.** It was 2 until `0081` and
+`0082`; everything above 2 moved down by one, and the grep above found three prose citations to
+move with it. Its substance is in
+[The second listener, which is Studio's login](../supabase/README.md#the-second-listener-which-is-studios-login-0081)
+and the two sections after it, in [`deploy/k8s/README.md`](../deploy/k8s/README.md), and on the
+front page. **Three things it argued are worth carrying forward, because each one contradicted the
+entry that asked for them.** The role does not need a third `studio-userinfo` function — GoTrue
+refuses to sign an ID token with HS256, so there is no ID token to read a claim from, and the role
+arrives in the *access* token the gateway already verifies. The read-only database branch was not
+running as the owner as the entry assumed; it was failing to authenticate, because the image's role
+ships with no password, and the only caller that takes it is `/api/mcp?read_only=true`. And the
+`ingress.routes.studio` default stayed `false` — not because the console is unauthenticated any
+more, but because publishing one is an exposure decision that belongs to a deployment.
 
 **Revocable service tokens shipped and left this list**, which is what an item shipping looks like.
 It was 3 until `0074`–`0076`; everything above 3 moved down by one. Its substance is in
@@ -172,283 +186,7 @@ this entry was written against the wrong one once already:
 
 ---
 
-## 2 · Studio behind the login everything else already uses
-
-**Builds on:** the `supabase-studio` block in [`docker-compose.yml`](../docker-compose.yml) ·
-`routes.studio` in [`values.yaml`](../deploy/helm/acs-cymru/values.yaml) ·
-`GOTRUE_OAUTH_SERVER_ENABLED` · [`0002`](../supabase/migrations/0002_seed_data.sql)'s Grafana client and
-[`0006`](../supabase/migrations/archive/0006_nodered_oidc_auth.sql)'s Node-RED client ·
-[`grafana-userinfo`](../supabase/functions/grafana-userinfo/index.ts) ·
-[`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts) ·
-[`OAuthConsent.jsx`](../frontend/src/pages/OAuthConsent.jsx) ·
-[`supabase/envoy.yaml`](../supabase/envoy.yaml) · **not filed as an issue, and arriving from user
-feedback rather than from an audit**
-
-Put an authenticating proxy in front of Supabase Studio, so reaching it costs a Supabase login as an
-`Administrator` rather than a position on the host.
-
-**THE DOOR HAS SHIPPED ON BOTH TARGETS**, as `0081` and a second listener in
-[`supabase/envoy.yaml`](../supabase/envoy.yaml): the gateway runs the browser flow, verifies the
-token and admits `Administrator` only. Compose publishes it on `54323` and the Studio container
-publishes nothing; on Kubernetes `ingress.routes.studio` points at the gateway's listener rather
-than at Studio, the NetworkPolicy gives the console exactly one inbound edge, and the render fails
-if the route is turned on without the credentials that make it a door. The substance is in
-[The second listener, which is Studio's login](../supabase/README.md#the-second-listener-which-is-studios-login-0081),
-[`deploy/k8s/README.md`](../deploy/k8s/README.md) and the front page.
-
-**`routes.studio` still defaults to `false`, and that is now an EXPOSURE decision rather than an
-authentication one** — the console is authenticated either way; what the operator is choosing is
-whether it is reachable by everyone who can reach the ingress. That belongs to a deployment, not to
-this file, so it is not an open item.
-
-**The privilege half has shipped too, as `0082`** — and it turned out to be smaller than this entry
-believed, because the premise it rested on was wrong. The measurement is below.
-
-**One thing keeps this entry open: websockets are unmeasured.** `upgrade_configs` is declared and
-never exercised, and nothing here establishes what Studio opens. Until that is measured this entry
-cannot honestly say the console works fully behind the proxy — every HTTP path was verified and no
-socket was.
-
-### The binding is a real control, and it is the only one
-
-Studio has no authentication of its own: no login, no roles, no session. The official stack puts it
-behind a basic-auth pair and this one does not run that, so whoever reaches the port gets the SQL
-editor, the table editor and the Vault UI **as the database owner, for whom RLS is not enforced**.
-Compose binds it to `127.0.0.1` and the chart leaves `routes.studio` off; both comments say why at
-length and both are right as far as they go.
-
-What they buy is that reaching Studio needs shell access or a tunnel. What they do not buy is a
-second credential once somebody has one — and the same port also serves `/api/mcp`, a Supabase MCP
-server (`supabase` v0.7.0, protocol `2025-06-18`) that completes `initialize` with no credential at
-all and exposes `execute_sql` and `apply_migration` among its eleven tools. That is not a new
-privilege. It is the SQL editor's privilege in a shape a process can drive rather than one a human
-has to sit in front of, which is a different risk with the same blast radius.
-
-### The cheapest fix is refused by the people who asked for the feature
-
-Not starting Studio at all — `profiles: [debug]` in Compose, matching what the chart already does —
-removes the surface completely and costs one edit. It is the right answer to the security question
-and the wrong answer to the request that prompted this entry: **users have asked to be able to reach
-Studio**, and an item that answers "you cannot" is not an item. It remains the correct default for
-any deployment nobody has asked that of, and nothing here argues for turning it on by default.
-
-### The integration exists twice already, and a third is the same shape
-
-This stack is an OAuth 2.1 authorization server. `GOTRUE_OAUTH_SERVER_ENABLED` is on, GoTrue ships
-no consent UI so the React dashboard serves one at `/oauth/consent`, and two clients already
-authenticate humans through it: Grafana, seeded by `0002`, and Node-RED, seeded by `0006`. Both
-migrations hash a secret out of `.env` into `auth.oauth_clients` and `DO UPDATE` on replay, so a
-rotated secret takes effect on the next boot. A third client is that migration again with a
-different redirect URI.
-
-What is new is the proxy, because **Studio cannot be an OAuth client — it has no login to extend**.
-Something in front of it has to run the browser flow, hold the session cookie and forward
-authenticated requests upstream; Studio stops publishing a port and that thing takes it. **What that
-thing is was decided by measurement rather than by reputation**, and the next two sections are the
-measurement.
-
-### GoTrue's userinfo does not carry the role, and that is the decision to make first
-
-`grafana-userinfo` exists because of this and says so: GoTrue's OIDC server advertises the standard
-claims only, `app_metadata` is not among them, and a client reading a role attribute out of it finds
-nothing — with strict mapping every user is denied, without it every user silently becomes a Viewer.
-`nodered-userinfo` is the same function for the same reason. Both read `public.user_roles` through
-`resolveUserRole()`, which is also why a role change takes effect on the user's next login instead
-of whenever their token happens to be reissued.
-
-**This entry used to ask which of two places `oauth2-proxy` should read the role from — a claim in
-the ID token, or a third `studio-userinfo` function on `--profile-url` — and to say "check the ID
-token first and take the free answer if it is there." That question was run against the live stack
-on 2026-09-04 and BOTH answers are wrong**, which is worth recording in full because the reasoning
-that produced them was sound and the conclusion was still unusable.
-
-**There is no ID token.** `/oauth/token` with `openid` in the scope answers `500
-unexpected_failure`, `"Error generating ID token"`, and the auth log gives the reason:
-
-```
-HS256 is not supported for ID token signing
-```
-
-The role itself is fine — `custom_access_token_hook` ran successfully on that same request. GoTrue
-simply refuses to mint an ID token at all while this stack signs with the shared HS256
-`SUPABASE_JWT_SECRET`, and **the repository already knew this**:
-[`grafana/grafana.ini`](../grafana/grafana.ini) has carried the absent `openid` scope and that exact
-error in a comment since Grafana SSO was built. The question above was asked without reading it.
-
-**Discovery is unusable too, independently.** `/.well-known/openid-configuration` reports
-`"issuer": ""` and relative endpoint paths, and advertises
-`id_token_signing_alg_values_supported: ["RS256","HS256","ES256"]` — including the one it refuses.
-Its `claims_supported` list carries no role and no `app_metadata`.
-
-**And `oauth2-proxy`'s `oidc` provider requires an ID token unconditionally** — `Redeem` fails with
-`"token response did not contain an id_token"` and has no profile-URL fallback, so the second row of
-the old table could not have rescued the first. Its one non-OIDC provider that reads groups from a
-userinfo endpoint is documented as *"the legacy and deprecated provider for Keycloak, use Keycloak
-OIDC Auth Provider if possible"* — a deprecated code path, named after software this stack does not
-run, chosen precisely because it is the one that has not been modernised onto the standard this
-stack cannot speak.
-
-**The measurement that settles it is what the access token carries when `openid` is left out.** The
-flow completes, returns no `id_token`, and hands over a JWT holding:
-
-```json
-"app_metadata": { "provider": "email", "providers": ["email"], "role": "Administrator" },
-"aal": "aal1", "session_id": "…", "email": "admin@acs-cymru.local", "scope": "email profile"
-```
-
-while `/oauth/userinfo` returns `sub`, `email`, `email_verified`, `name` and `updated_at` and **no
-role** — which is `grafana-userinfo`'s reason for existing, restated by the endpoint itself.
-
-**So the role does not need fetching. It is in the token the proxy is already holding**, and the
-third userinfo function this entry planned is not needed. An email allowlist remains refused for the
-reasons it always was: a static list of addresses is the htpasswd problem with extra steps — no
-revocation, no role, no audit row, and a further credential plane in `.env` for a console that can
-drop a table.
-
-### The proxy is Envoy, which is already the gateway
-
-Envoy runs in both targets and carries every filter this needs, so the item adds **no new component
-and no new edge function**: `envoy.filters.http.oauth2` runs the browser flow and holds the cookie,
-`jwt_authn` verifies the HS256 token against an inline `oct` JWKS (`jwt_verify_lib` supports HMAC
-keys), and `rbac` requires `app_metadata.role == Administrator` out of the verified payload. The
-client is registered `client_secret_basic` against Envoy's `auth_type: BASIC_AUTH`, which is the
-pairing `grafana.ini` had to discover for the client seeded by `0002`.
-
-**`aal` is in that token beside the role**, which turns this entry's closing argument from an
-aspiration into a mechanism: when 4 lands, requiring `aal2` for Studio is a predicate in a filter
-that already reads the claim, not a second integration.
-
-### It needed an Envoy no older than 1.34, and that bump has now shipped
-
-**GoTrue's OAuth server requires PKCE** — `grafana.ini` records the failure verbatim, `invalid_request:
-PKCE flow requires both code_challenge and code_challenge_method` — and **the `oauth2` filter in the
-formerly pinned `envoyproxy/envoy:v1.31.5` could not send it.** `code_challenge` does not appear in
-that version's `OAuth2Config` at all; the `OauthCodeVerifier` cookie and the PKCE fields arrive in
-**1.34.0**. So this item was never "configure a filter that is already there": it carried a bump of
-the component every other service in the stack sits behind.
-
-**The stack is now on `v1.39.1` on both targets**, moved on its own commit under the protocol in
-[`docs/gateway-migration.md`](gateway-migration.md) and recorded there. The floor is stated in the
-pin comments in `docker-compose.yml` and `values.yaml`, because nothing in the repository *uses*
-the oauth2 filter yet — everything else works fine on 1.31, so a well-meaning downgrade would take
-the floor away without anything failing until this item is built.
-
-### What a throwaway proxy proved, and the one thing it did not
-
-Measured on 2026-09-04 with `envoyproxy/envoy:v1.35.0` beside the running stack, fronting
-`supabase-studio:3000` with the three filters above and a dynamically-registered client. Every line
-below is an observation, not a design intention:
-
-| What was asked | What happened |
-| :--- | :--- |
-| Cold hit on the proxy | `302` to `/auth/v1/oauth/authorize` **carrying `code_challenge` and `code_challenge_method=S256`** — PKCE, from the filter, unaided |
-| That redirect followed with **no `apikey`**, as a browser would | `302` on to the dashboard's consent page; the gateway does not demand a key on this route |
-| Consent approved, callback redeemed | `302` home, cookies `OauthHMAC`, `OauthExpires`, `BearerToken`, `RefreshToken` set |
-| Studio through the session, as `Administrator` | `200` on `/project/default` **and on its own `/api/platform/*` JSON**, which was the half in doubt |
-| The same flow as `Operator` | Signs in, then `403 RBAC: access denied` on every path — the gate reads the token, and no userinfo function exists to be asked |
-| `POST /api/mcp` `initialize`, unauthenticated | `200` and a `serverInfo` on `:54323` today; `302` to sign-in through the proxy |
-
-**Websockets remain unmeasured.** The probe exercised HTTP only, `upgrade_configs` was configured
-but never exercised, and nothing in this pass establishes what Studio does or does not open. It is
-the one item on this list of costs that survives the probe intact.
-
-**One config detail found the hard way:** `rbac.v3.Principal.metadata` is deprecated in current
-Envoy and warns on boot. The real configuration should use the matcher form rather than copy the
-probe.
-
-Two costs remain, in descending order of seriousness:
-
-- **A SEPARATE LISTENER, not a route on `:54321`.** A browser-session filter on the existing
-  listener is an outage for every machine principal, which is what *What this must not touch* below
-  says at length. The same Envoy, a second listener.
-- **`SUPABASE_JWT_SECRET` reaches the Envoy configuration** as the `oct` JWKS. It is the same secret
-  Envoy's neighbours already hold, but it is a new place it lives, and it belongs in an env or SDS
-  reference rather than a literal in `envoy.yaml`.
-
-### It closes the MCP endpoint, which should be a decision rather than a discovery
-
-A session cookie in front of Studio covers `/api/mcp` along with everything else, and an MCP client
-cannot complete an interactive browser flow to obtain one. So this item **removes** the
-unauthenticated MCP server as a working endpoint, not merely as an open one — measured above, where
-the same unauthenticated `initialize` answers `200` with a `serverInfo` on `:54323` and a redirect
-to sign-in through the proxy.
-
-That is the right outcome, and the reason is worth recording because the endpoint is tempting. It
-runs as the owner, so it reads `digital_thread`, `auth.users` and the Vault, and it sits outside
-every control this repository built for that exact question: `0034`'s read-only principal holds
-`Operator` and nothing else *precisely* so a model cannot see the audit trail, and service-token
-revocation acts at PostgREST, which Studio does not go through. The model-facing surface this stack intends is
-the i3X one, where RLS is in the path. A developer-facing MCP is recoverable later by exempting the
-route and giving it a credential of its own — on its own argument, not as a side effect of how
-Studio happens to be published.
-
-### The door and the privilege were separate decisions, and the privilege half has now shipped too
-
-**`0082`, and it is worth reading for what the measurement did to the argument rather than for the
-change.** This entry reasoned that because the stack sets only `POSTGRES_USER_READ_WRITE`, "every
-path that asks for the restricted user is handed the owner instead." **That was wrong.** The image's
-default for `POSTGRES_USER_READ_ONLY` is `supabase_read_only_user`, so those paths already asked for
-the restricted role — and got `password authentication failed`, because the role ships with no
-password and `pg_hba` requires scram from every container network. The read-only mode was not too
-powerful. It did not work, and nothing said so, because the only caller was one nobody used.
-
-So the fix is not the variable — setting it names what the image already defaults to — but the
-`ALTER` that gives the role a password, which lives in the roles-init step because
-`supabase_read_only_user` is RESERVED and `db-init` connects as a non-superuser. `0082` carries the
-assertions instead, including a self-check that refuses a role which has stopped being read-only.
-
-**The caveat about the shared password stands and is now recorded as a limit**: the image
-substitutes one password into both branches, so this role cannot be rotated independently of the
-owner. It is not a new exposure — the two are the same string in the same environment — but it is
-not free either.
-
-**The other caveat was measured, and the answer is narrow.** With `log_connections` on, the only
-caller that takes the read-only branch is **`/api/mcp?read_only=true`**; the SQL editor's query
-endpoint, the table editor's listings and MCP without the flag all connect as `postgres`. Under the
-flag a write is refused (`cannot execute CREATE TABLE in a read-only transaction`) and reads still
-work. **Everything a human does in the console still runs as the database owner** — which is the
-honest summary of what this half of the item bought, and the reason it is recorded in
-[`supabase/README.md`](../supabase/README.md#the-read-only-branch-which-was-broken-rather-than-wide-0082)
-rather than described as narrowing Studio.
-
-### What this must not touch
-
-The proxy fronts **Studio only**. Envoy already fronts Auth, PostgREST, Realtime, Storage and the
-edge runtime on `:54321` with API-key auth and four deliberate exemptions, and every machine
-principal in the stack authenticates there without a browser. A browser-session proxy anywhere on
-that path is an outage, for the same reason `0048` keeps machine identities out of the `aal2`
-predicates.
-
-`supabase-envoy` also answers to the network alias `supabase-kong`, which Studio's own
-`SUPABASE_URL` points at for server-side calls. That is Studio talking *outward* and it does not
-change.
-
-### Worth deciding early
-
-- ~~**Whether the loopback binding survives the proxy.**~~ **Decided and done:** it does not. The
-  Studio container's `ports:` block was removed in the same commit that published the listener,
-  because publishing both would have left the old door open beside the new one.
-- ~~**What the seeded Directory entry says.**~~ **Decided and done, by not moving it.** This entry
-  assumed the Directory row would have to be corrected; the answer was to take over the port instead,
-  so `0002`'s `http://127.0.0.1:54323` is still true and now names a door with a login on it. A
-  migration that edits a row is more expensive than a listener that picks a number.
-- ~~**Whether `routes.studio` flips to `true`.**~~ **Decided: it stays `false`, and can now be
-  turned on.** The route was rebuilt to name the gateway's listener rather than `supabase-studio`,
-  so enabling it publishes an authenticated console; the NetworkPolicy gives Studio one inbound edge
-  and the ingress controller none. The default holds because the remaining question is exposure —
-  who can reach the ingress — which is a deployment's to answer. Enabling it without the two secrets
-  fails the render rather than publishing a login nobody can complete.
-- **Whether this waits for 3 or 4.** It does not — and those numbers are Entra sign-in and MFA;
-  this bullet cited the old gapped scheme's 20 and 21 until 2026-09-04. Gating on `Administrator`
-  adds another Administrator-only check in the direction the token and principal revocation controls
-  already go, rather than depending on the role split — and Studio inherits Entra sign-in and MFA
-  for free if and when those land, `aal` being in the token the filter already reads. That is the
-  strongest argument for the OAuth route over any proxy-local credential: it is the only design
-  under which a database console ever gets a second factor.
-
----
-
-## 3 · Microsoft Entra ID sign-in, and a role model worth mapping onto
+## 2 · Microsoft Entra ID sign-in, and a role model worth mapping onto
 
 **Builds on:** `custom_access_token_hook()` and `handle_new_user()` in
 [`supabase/migrations/0001_baseline_schema.sql`](../supabase/migrations/0001_baseline_schema.sql) ·
@@ -512,7 +250,7 @@ work. The repair is to make that person an Administrator.
 
 ### What is left of this item is Entra itself
 
-Everything below is unbuilt. The role split was sequenced first because §4 and the audit-domain
+Everything below is unbuilt. The role split was sequenced first because §3 and the audit-domain
 work both depended on it and neither depended on Entra. The second of those has since shipped as
 `0070`.
 
@@ -602,7 +340,7 @@ claims to enable, and the group-object-ID to role table. It lives in `docs/`, wh
 
 ---
 
-## 4 · Multi-factor authentication, and what happens when the phone is lost
+## 3 · Multi-factor authentication, and what happens when the phone is lost
 
 **Builds on:** GoTrue v2.189.0's factor API · `has_role()` and the `aal` claim ·
 [`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx) · the immutable audit in
@@ -612,7 +350,7 @@ TOTP second factors, required of the roles that can change the platform and opti
 else. Any authenticator that implements TOTP works — Microsoft Authenticator, Google Authenticator,
 Bitwarden, 1Password — which is a documentation fact, not an integration.
 
-**This item depended on item 4's role divergence, and that dependency is now satisfied.** The
+**This item depended on the role split, and that dependency is now satisfied.** The
 reset control below is gated on `authz:manage`, which is Administrator-only *only once Manager has
 given it up* — `0069` did that, so this no longer builds an MFA boundary that a Shopfloor_Manager
 could dissolve. Nothing else here waits on Entra.
@@ -639,9 +377,9 @@ control.
 
 So the requirement is conditional on how the session was obtained, which `amr` carries: **federated
 users inherit assurance from the IdP; password users enrol a factor here.** Password users do not go
-away when item 4 ships — the seeded personas, break-glass accounts, and any air-gapped shopfloor
-install with no Entra to reach are all password paths, which is why this cannot simply be delegated
-upward and forgotten.
+away when Entra sign-in (§2) ships — the seeded personas, break-glass accounts, and any air-gapped
+shopfloor install with no Entra to reach are all password paths, which is why this cannot simply be
+delegated upward and forgotten.
 
 ### There are no recovery codes, and that is survivable
 
@@ -689,7 +427,7 @@ principal writes is an outage, not a hardening.
 
 ---
 
-## 5 · A backup an operator can take without a shell
+## 4 · A backup an operator can take without a shell
 
 **Builds on:** [`scripts/backup-databases.sh`](../scripts/backup-databases.sh) ·
 [`scripts/restore-databases.sh`](../scripts/restore-databases.sh) ·
@@ -796,7 +534,7 @@ than offer it.
 
 ---
 
-## 6 · The broker's Dynamic Security plugin, and the two things a file cannot do
+## 5 · The broker's Dynamic Security plugin, and the two things a file cannot do
 
 **Builds on:** [`mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) ·
 [`mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf) ·
@@ -892,7 +630,7 @@ does not currently have.
 
 ---
 
-## 7 · The Directory's MQTT half, and the one lookup it still lacks
+## 6 · The Directory's MQTT half, and the one lookup it still lacks
 
 **Builds on:** [`supabase/functions/fplus-directory/index.ts`](../supabase/functions/fplus-directory/index.ts) ·
 `directory_services` (`0001`) · `gateways.sparkplug_group` (`0008`) · `relocate_devices()` (`0033`) ·
@@ -932,7 +670,7 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
-## 8 · An approvals queue, and the first write an `Operator` has ever had
+## 7 · An approvals queue, and the first write an `Operator` has ever had
 
 **Builds on:** [`approve_quarantined_device()`](../supabase/migrations/0001_baseline_schema.sql) and the
 role re-check inside it · `has_role()` and the write policies it gates · the `Operator` role as seeded
@@ -942,7 +680,7 @@ in [`0002`](../supabase/migrations/0002_seed_data.sql) · `device_nameplate` · 
 `system_settings` and its `min_value` / `max_value` bounds · `digital_thread` and
 [`0079`](../supabase/migrations/0079_the_thread_stops_growing_without_end.sql)'s pruning ·
 [`0069`](../supabase/migrations/0069_the_two_roles_stop_being_the_same.sql)'s permission split ·
-**not filed as an issue, and it is the substrate §9 needs rather than a feature beside it**
+**not filed as an issue, and it is the substrate §8 needs rather than a feature beside it**
 
 One queue for every change a person proposes but may not make: a gateway's flow, an asset's details,
 a schema's publication. An `Operator` proposes; a `Shopfloor_Manager` or `Administrator` approves;
@@ -1045,7 +783,7 @@ feature.
 **The auto-close needs an actor kind.** `digital_thread.actor_source` admits `user`, `ingestion`,
 `migration` and `service`, but only the last three can be *declared* — `user` is derived from
 `auth.uid()`, not claimed. A timer closing a proposal has no session and is not a person, so it
-either declares `service` or earns a kind of its own. **§9 asks the identical question for the
+either declares `service` or earns a kind of its own. **§8 asks the identical question for the
 reconciling sidecar, and the two should be answered together rather than separately.**
 
 ### What this must not touch
@@ -1092,7 +830,7 @@ thread other than *no*.
 
 ---
 
-## 9 · GitOps edge sync, and the review step a bucket cannot give a flow
+## 8 · GitOps edge sync, and the review step a bucket cannot give a flow
 
 **Builds on:** the `gateway-backups` bucket in
 [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
@@ -1100,7 +838,7 @@ thread other than *no*.
 [`gateway-bundle-template/bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs) and the flow hash
 its heartbeat already reports · `digital_thread` (`0005`, `0026`) ·
 [`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts), which is now the only place
-`gitops:manage` is enforced · **§8, which owns the queue, the page and the proposing role, and is a
+`gitops:manage` is enforced · **§7, which owns the queue, the page and the proposing role, and is a
 prerequisite rather than a neighbour** · [issue #63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
 
 ### The push half existed and has been retired, which makes this item larger than it was
@@ -1153,7 +891,7 @@ connection into it.
 
 ### The approval gate is the missing thing, and Git already is one
 
-**The gap §10 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
+**The gap §9 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
 no diff. That is the real complaint, and it is worth stating that Git answers it directly rather than
 being merely the transport: *pending approval* is an open pull request, *approved* is a merge, and
 *undo* is a revert commit. Anything that models those three states in the database beside a stored
@@ -1164,13 +902,13 @@ systems that will disagree.
 and already refuses `flows_cred.json` **by shape rather than by filename**; what changes is its
 destination — a branch and a pull request in the gateway's source repository instead of an object in
 a private bucket. The upload is then the backup and the proposed deployment in one artefact, which
-also removes the awkward sequencing between this item and §10: the bucket stops being load-bearing at
+also removes the awkward sequencing between this item and §9: the bucket stops being load-bearing at
 the moment the first flow lands in a repository, not before.
 
 **`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
 place — `nodered-userinfo`'s `ALLOWED_ROLES`, as `0069` records — and the merge is the control it was
 named for. **Authoring a proposal and approving one are different privileges** and should not collapse
-into one: approving is `gitops:manage`, and **proposing is the `Operator` write that §8 adds** — not,
+into one: approving is `gitops:manage`, and **proposing is the `Operator` write that §7 adds** — not,
 as this item originally said, the write `storage-policies.sql` already grants Administrator and
 Shopfloor_Manager. That was written before the approvals queue existed and it inverted the point: a
 review step whose proposals can only come from the two roles that may already merge them is a
@@ -1178,7 +916,7 @@ formality, not a gate.
 
 ### The flow lane of the approvals page, and the one thing it must not become
 
-**§8 owns the page; this item owns what the flow lane shows on it.** Per gateway: the tracked
+**§7 owns the page; this item owns what the flow lane shows on it.** Per gateway: the tracked
 repository and branch, the open pull requests against it, the commit history with the deployed
 revision marked, and the gateway's own reported flow hash beside the committed head — which is drift,
 stated as a fact the appliance sent rather than as something the centre inferred. A revert control,
@@ -1190,12 +928,12 @@ already have pulled, and the sidecar cannot distinguish that from a legitimate a
 reconcile to the rewritten head and report success, having silently deployed something no pull request
 ever showed. A revert commit is visible, reviewable and itself revertible.
 
-**The lane must not become an editor, and that is a constraint this item places on §8's page rather
+**The lane must not become an editor, and that is a constraint this item places on §7's page rather
 than a note about a page of its own.** Nothing in it should author or edit flow JSON, and nothing
 should accept a blob that reaches an appliance without passing the same merge. That is the refusal
 worth keeping from `deploy-nodered`, restated for a UI: **deploy only what is committed**, or it is a
 remote-code-execution endpoint with a friendly name and a nicer table. Note that the records lanes
-§8 describes are the opposite case — there the approval *is* the write — so the two lanes do not
+§7 describes are the opposite case — there the approval *is* the write — so the two lanes do not
 share a submit path and should not be generalised into one.
 
 ### The credential store is the hazard that can invalidate the shape
@@ -1211,7 +949,7 @@ merge strategy rather than an overwrite, and that is a different piece of work.
 ### A third credential plane arrives with this item, and it should be named now
 
 **The appliance needs a way to authenticate to the repository**, which is neither the broker plane
-(§6) nor the database one. It should be **per gateway and read-only** — a shared key across the
+(§5) nor the database one. It should be **per gateway and read-only** — a shared key across the
 fleet makes one compromised appliance a fleet-wide read, and a writable one lets an appliance author
 what it will later be asked to deploy. `enroll-gateway` already mints a per-gateway broker credential
 at bundle time and is the natural place to issue this one, which also means revocation has a home
@@ -1228,14 +966,14 @@ The enrolment token's single-use semantics and the once-only guard in `bootstrap
 ACL's `%u` confinement, which is what stops one gateway forging another's telemetry and is enforced
 independently of anything here; `flows_cred.json`, which must not leave the appliance in a backup, a
 commit or a diff; and the `gateway-backups` bucket's privacy setting, which stays exactly as it is
-until §10 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
+until §9 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
 dead weight until the pull half replaces what it does.
 
 ### Worth deciding early
 
 **The forge.** Self-hosted or hosted, and for an on-premises deployment on a private domain that is
 the same question `deploy/k8s/internal-ca.yaml` already answers for certificates. Commit signature
-verification makes it a smaller question than it looks. **What it is not is an identity store:** §8
+verification makes it a smaller question than it looks. **What it is not is an identity store:** §7
 puts the queue in Postgres and reaches the forge through one machine account, so no `Operator` needs
 a forge login and the forge never has to learn what `gitops:manage` means.
 
@@ -1243,19 +981,19 @@ a forge login and the forge never has to learn what `gitops:manage` means.
 and independent history; one repository with a branch per gateway gives a fleet-wide diff and one
 place to review. The deploy key granularity is the deciding constraint, not the ergonomics.
 
-**Where `target_branch` lives** — deferred to §10, which owns the links-store question, but this item
+**Where `target_branch` lives** — deferred to §9, which owns the links-store question, but this item
 is what makes it load-bearing rather than cosmetic.
 
 **The actor kind for the audit row.** Logging the revision hash into `digital_thread` needs one: rows
 from the daemon and the edge functions are attributed through the `request.headers` GUC, and the
 trigger accepts only `ingestion` / `service` / `migration`, never `user`. A sidecar reconciling on its
-own timer is a fourth kind of actor and should say so rather than borrow `service`. **§8's proposal
+own timer is a fourth kind of actor and should say so rather than borrow `service`. **§7's proposal
 expiry needs the same answer for the same reason** — a timer with no session — so decide it once,
 for both.
 
 ---
 
-## 10 · Retiring the flow-backup bucket, and pointing at repositories instead
+## 9 · Retiring the flow-backup bucket, and pointing at repositories instead
 
 **Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
 the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
@@ -1263,7 +1001,7 @@ the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) and its tag vocabulary ·
 `digital_thread` (`0005`) · **not yet filed as an issue**
 
-**The other end of §9, and it should be sequenced against it rather than planned beside it.** §9
+**The other end of §8, and it should be sequenced against it rather than planned beside it.** §8
 adds the pull; this removes what the push made necessary. Doing the removal first would leave a
 physical gateway with no copy of its flow anywhere, which is the exact loss `FlowBackupUploader`
 exists to prevent — its header states the case plainly: the appliance is the only copy, and a failed
@@ -1300,7 +1038,7 @@ against the same column.
 
 ---
 
-## 11 · An ISA-95 Unified Namespace bridge
+## 10 · An ISA-95 Unified Namespace bridge
 
 **Builds on:** the DDATA path in [`ingestion/ingestion.py`](../ingestion/ingestion.py) ·
 `public.device_locations` (`0001`) · `cells` (`0001`, `0021`) · `devices.location_scope` ·
@@ -1338,7 +1076,7 @@ currently prevent.
 
 ---
 
-## 12 · Contextual help, and where the documentation actually lives
+## 11 · Contextual help, and where the documentation actually lives
 
 **Builds on:** [`frontend/src/App.jsx`](../frontend/src/App.jsx)'s top bar and
 [`frontend/src/navigation.jsx`](../frontend/src/navigation.jsx) ·
@@ -1416,7 +1154,7 @@ destination cannot say: what a page is FOR, what its controls do, and what its s
 
 ---
 
-## 13 · The transport between services, and the two targets that disagree about it
+## 12 · The transport between services, and the two targets that disagree about it
 
 **Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
@@ -1519,7 +1257,7 @@ issued by the CA that already exists reaches most of the same place on both targ
 Compose stops being a supported target**, which is the same condition `envoy.yaml` attaches to
 HTTPRoute, and for the same reason.
 
-### The gateway link's upgrade is client certificates, and it is sequenced behind §6
+### The gateway link's upgrade is client certificates, and it is sequenced behind §5
 
 `mosquitto-tls.conf` states the current position and its cost explicitly: password authentication over
 TLS, `require_certificate false`, because turning it on means `use_identity_as_username` replaces the
@@ -1533,9 +1271,9 @@ the enrolment model that exists rather than replacing it. The gain is that a gat
 being a bearer secret that can be replayed by anything that reads it.
 
 **The cost is revocation, and it is why this waits.** Mosquitto's `crlfile` is awkward and needs a
-reload to take effect — which is precisely the gap §6 exists to close, and §6's own strongest argument
+reload to take effect — which is precisely the gap §5 exists to close, and §5's own strongest argument
 is already that *a revoked gateway which is already connected keeps publishing*. Client certificates
-make that sharper, not softer. **This is the intended direction; it should not start before §6.**
+make that sharper, not softer. **This is the intended direction; it should not start before §5.**
 
 ### What this must not touch
 

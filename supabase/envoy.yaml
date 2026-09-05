@@ -470,9 +470,19 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: studio
-                # Studio is a Next.js application and this has NOT been measured against whatever
-                # sockets it opens; the roadmap records that gap. Declared so an upgrade is
-                # answered 101 rather than 426 if it does open one.
+                # MEASURED, AND THE ANSWER IS THAT NOTHING UPGRADES HERE. Studio's client bundle
+                # opens no socket to its own origin, its server declares no upgrade handler, and an
+                # upgrade sent to it through this listener is forwarded and then RESET BY STUDIO
+                # (Envoy reports `503 upstream connect error`), which is the upstream refusing
+                # rather than the gateway blocking.
+                #
+                # The console's one websocket is the Realtime inspector's, and it does not come
+                # here: `/api/platform/projects/default/settings` hands the browser
+                # `endpoint: 127.0.0.1:54321`, so that handshake goes to the API listener, which
+                # answers 101 and always has.
+                #
+                # KEPT ANYWAY. It costs nothing, and a Studio version that grows a socket would
+                # otherwise fail with a 426 that names neither this line nor its absence.
                 upgrade_configs:
                   - upgrade_type: websocket
                 route_config:

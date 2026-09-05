@@ -142,7 +142,7 @@ the protocol existing:
 
 ### The protocol also governs a version bump, and did on 2026-09-04
 
-**`v1.31.5` → `v1.39.1`**, driven by roadmap item 2: the `oauth2` filter gained PKCE in **1.34.0**
+**`v1.31.5` → `v1.39.1`**, driven by the Studio listener: the `oauth2` filter gained PKCE in **1.34.0**
 and GoTrue's OAuth server refuses a flow without it, so the Studio proxy has a floor the old pin sat
 below. Nothing else in the stack needed it, which is exactly why the bump is recorded rather than
 absorbed.

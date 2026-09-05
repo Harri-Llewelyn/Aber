@@ -747,7 +747,7 @@ first role-assignment surface is where `authz:manage` starts meaning something, 
 into a schema where the two roles already differ rather than one where they do not.
 
 **It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
-deploys flows. The repair is to make that person an `Administrator`. Roadmap §4 (multi-factor
+deploys flows. The repair is to make that person an `Administrator`. Roadmap §3 (multi-factor
 authentication) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
@@ -2085,6 +2085,20 @@ function, and one fewer round trip per request.
 token while signing HS256 (`HS256 is not supported for ID token signing`), which is what the whole
 stack signs with; `grafana.ini` carries the same note for the same reason.
 
+#### Nothing upgrades on this listener, and that was measured rather than assumed
+
+The console's one websocket is the Realtime inspector's, and it does not arrive here:
+`/api/platform/projects/default/settings` hands the browser `endpoint: 127.0.0.1:54321`, so the
+handshake goes to the **API** listener, which answers `101` and always has. Studio's own client
+bundle constructs no socket against its own origin and its server declares no upgrade handler; an
+upgrade sent to it through this listener is forwarded and then reset by Studio, which Envoy reports
+as `503 upstream connect error` — the upstream refusing, not the gateway blocking. An unauthenticated
+upgrade attempt is answered by the same `302` to sign-in as any other request, so a socket is not a
+way past the door.
+
+`upgrade_configs` is declared anyway. It costs nothing, and a Studio version that grows a socket
+would otherwise fail with a `426` naming neither the line nor its absence.
+
 #### The read-only branch, which was broken rather than wide (`0082`)
 
 Studio picks its database user per request — `readOnly ? POSTGRES_USER_READ_ONLY :
@@ -2119,6 +2133,11 @@ refused — `cannot execute CREATE TABLE in a read-only transaction` — and rea
 the image's role holds `pg_read_all_data` and `BYPASSRLS`. Everything a human does in the console
 still runs as the owner, and no setting in this repository changes that: the table editor cannot use
 a read-only connection, and the SQL editor does not ask for one.
+
+**Which is why the `Administrator` check is load bearing rather than tidy.** Studio's own
+`/api/platform/projects/default/settings` hands whoever is signed in the project's `jwt_secret` and
+both service API keys, and the SQL editor runs as the owner. The door is not defence in depth over a
+restricted console; it is the only thing between a signed-in session and the database.
 
 **The password is the owner's, necessarily.** The image substitutes one password into both branches,
 so there is no separate secret to hold: this role cannot be rotated independently of `postgres`. It

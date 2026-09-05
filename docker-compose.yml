@@ -946,9 +946,10 @@ services:
     # THERE IS A FLOOR, AND IT IS 1.34. The oauth2 filter could not send PKCE before then --
     # `code_challenge` is absent from OAuth2Config in 1.31 and arrives in 1.34.0 -- and GoTrue's
     # OAuth server REFUSES a flow without it ("PKCE flow requires both code_challenge and
-    # code_challenge_method", the same refusal grafana.ini records). Nothing in this file uses
-    # that filter yet; roadmap item 2 does, and a well-meaning downgrade would take the floor
-    # away silently, because everything else here works fine on 1.31.
+    # code_challenge_method", the same refusal grafana.ini records). The `studio` listener in
+    # supabase/envoy.yaml is what uses that filter, and a downgrade would take the floor away
+    # silently: every OTHER route here works fine on 1.31, so the only symptom is a console whose
+    # login cannot complete.
     image: envoyproxy/envoy:v1.39.1
     restart: always
     ports:
