@@ -14,7 +14,7 @@ addresses: source comments cited them, so deleting an entry and closing the gap 
 every citation without erroring, and the list was therefore left gapped as the record of what
 shipped. Moving the roadmap out of `README.md` ended that — the comments state what the code does
 instead — and `scripts/check-docs-drift.mjs` dropped the four invariants that enforced it. The
-numbers are labels for reading order, they run 1-12 with no gaps, and **a renumber costs one grep**
+numbers are labels for reading order, they run 1-13 with no gaps, and **a renumber costs one grep**
 (`§[0-9]`, `roadmap item [0-9]`) across the repository for the prose that still cites them.
 
 **Ordered by subject rather than by age**, in four groups. **1-5 are the platform's own**, led by
@@ -37,10 +37,12 @@ cannot ask an `Operator` for a proposal until 7 has given that role a way to mak
 queue and the authority, 8 is one lane's payload and the edge sync that carries it. **11 is
 documentation**, and is the one item whose remaining work is mostly writing;
 it arrives from [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **12 is the platform's own
-and sits last anyway**, because its subject is the transport under every other item rather than any
-one chain — and because reading it before 5 and 8 invites starting it in the wrong order, which is
-the one thing it asks not to happen.
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **12 and 13 are the
+platform's own and sit last anyway**, because each has for its subject something that runs under or
+over every other item rather than any one chain: 12 is the transport between the services, 13 the
+record of what they did. Neither blocks the other. 12 is written first because reading it before 5
+and 8 invites starting it in the wrong order, which is the one thing it asks not to happen; 13 has
+no such constraint and is last because it is the newest.
 
 **Studio behind a login shipped and left this list on 2026-09-05.** It was 2 until `0081` and
 `0082`; everything above 2 moved down by one, and the grep above found three prose citations to
@@ -531,6 +533,14 @@ than offer it.
 - **What the retention window means once a human can ask.** `BACKUP_RETENTION_DAYS=14` prunes on the
   next run. A backup somebody took deliberately before a risky migration is the one most worth
   keeping and the one a timer is most likely to delete.
+- **Whether the new service should drive `pg_dump` at all.** This entry is deliberately scoped to the
+  caller rather than the mechanism, and that scoping is right — but the moment a privileged service is
+  being designed is the cheapest moment to ask what it should hold. `pg_dump` gives a consistent
+  snapshot and nothing else: no incrementals, and **no point-in-time recovery**, so the real RPO is
+  the CronJob interval however good the page in front of it is. `pgBackRest` (or CloudNativePG on
+  k3s, which subsumes this item's service entirely) changes what the privilege *is* — a WAL archiver
+  holding a continuous stream rather than a verb producing a file — and that is a different object to
+  put behind `has_role()`. Cheaper to price now than after the service exists.
 
 ---
 
@@ -1301,3 +1311,104 @@ leave the stack worse than it started.
   rather than a paragraph in a README that nothing checks.
 
 ---
+
+## 13 · The other half of every drop counter, which is a log nothing keeps
+
+**Builds on:** the drop counters and their paired `logger.warning` in
+[`ingestion.py`](../ingestion/ingestion.py) · [`ingestion/metrics.py`](../ingestion/metrics.py) ·
+[`grafana/provisioning/datasources/datasources.template.yml`](../grafana/provisioning/datasources/datasources.template.yml)
+· [`deploy/helm/acs-cymru/templates/obs/`](../deploy/helm/acs-cymru/templates/obs) ·
+[`docs/incidents.md`](incidents.md) · `alerts.retention_days` in `system_settings` (`0032`) ·
+[`0079`](../supabase/migrations/0079_the_thread_stops_growing_without_end.sql) ·
+**arrives from the 2026-09-05 ethos audit, and is not filed as an issue**
+
+Ship a log store, and query it from the Grafana that is already provisioned. There is none today — no
+Loki, no Alloy, no fluent-bit, no OpenTelemetry — on either target. Metrics are well covered and logs
+are `docker logs` and `kubectl logs`.
+
+### The instrument was designed in two halves and one of them was never deployed
+
+This is the argument, and it is stronger here than the general case for log aggregation, because the
+daemon's diagnostics were **deliberately** built as a pair. From `ingestion.py`, beside the counter
+registry:
+
+> Every `drop` reason below corresponds one-to-one with an existing `logger.warning`, so the counters
+> and the log cannot disagree about what happened.
+
+That is a good design and Prometheus holds exactly half of it. `acs_ingestion_dropped_*` says a drop
+happened and how many; the half naming **which device, under which edge node, and why** exists only
+in a line nothing retains. On Compose it survives until the container is recreated. On Kubernetes it
+is gone when the pod is rescheduled — which is the moment an operator is most likely to be looking.
+
+`0026`'s `record_ingestion_rejection()` is the counter-example that proves the shape is wanted: a
+payload judged non-conforming gets a durable, queryable row rather than a log line. That path was
+built because a warning was not enough. It covers one class of event, and every other drop reason is
+still only a warning.
+
+### The second argument is that `docs/incidents.md` exists
+
+Its first entry is the broker password file truncated by a re-entered one-shot. Two properties, both
+recorded there:
+
+> **It is invisible when it happens.** Mosquitto keeps authenticated accounts in memory, so the
+> running stack carries on working perfectly. The loss only appears at the broker's next reload or
+> restart, by which point nothing connects the two events.
+
+Connecting two events hours apart, across two containers, from evidence written at the time, is the
+one thing log aggregation does and nothing else in this stack does at all. That file is a record of
+faults diagnosed the hard way; several of its entries were reconstructed from logs that happened to
+still be there.
+
+### Why the argument that refused Grafana over cold storage does not transfer
+
+Rendering archived ranges in a dashboard was declined on the grounds that it would add *"a container,
+a gateway route and an auth surface over raw plant history"*, for a resolution nothing charts. That
+reasoning was right and it should not be quietly reused here in either direction.
+
+This pays **one** of those three costs. The container, yes. No gateway route — the store is reached
+by Grafana over the container network, not published. No auth surface — it is a datasource beside the
+three `datasources.template.yml` already provisions, behind the Grafana login that already exists,
+with no new principal and no second place to manage access. And unlike archived telemetry, there is
+something to chart: the drop reasons already have counters, so the log is the drill-down from a panel
+that exists rather than a new question nobody asks.
+
+### What it must not become, and this is the part to argue before building
+
+**Every other store in this stack has a retention answer, and a log store would arrive without one.**
+Telemetry has a retention window and rollups; the cold archive has tiering; `platform_alerts` prunes
+on `alerts.retention_days` with a bound in `system_settings`; `digital_thread` stopped growing without
+end in `0079`. Logs would be the only durable store in the repository with no policy, and log volume
+does not scale with plant size the way any of those do — it scales with fault rate, which is highest
+exactly when nobody has time to look at disk.
+
+**And logs are not the audit trail.** `digital_thread` is append-only, immutable by trigger, attributed
+to an actor, and split into two lanes one of which an engineer cannot read. A log store has none of
+those properties and must never be presented as though it does. The risk is not technical, it is that
+"we have the logs" starts being offered as an answer to a question `digital_thread` is the answer to.
+Anything in a log line that matters for audit belongs in a row.
+
+**What the lines contain is a disclosure decision.** The daemon's warnings carry `sparkplug_id`s and
+edge-node names; the broker's carry client ids and source addresses; a flow describes the plant's edge
+topology, which is why `flows.json` backups sit in a private bucket. Aggregating all of it into one
+searchable place is a real concentration, and the Realtime timing side-channel under
+[Accepted risks](../README.md#accepted-risks) is the precedent for how that gets argued rather than
+assumed.
+
+### Worth deciding early
+
+- **Whether it is enabled by default, and on which target.** The chart gates observability behind
+  flags and Compose largely does not. Defaulting on for local development and off for the chart is
+  defensible; the two defaults differing silently is not — and by the README's own rule that would need
+  a divergence row.
+- **Retention and a size ceiling, chosen in the same change as the store.** Both belong in
+  `system_settings` if an Administrator is expected to own them, and the `min_value` / `max_value`
+  bounds are already there for exactly this. A retention setting added later never gets added.
+- **Whether it collects from the edge.** A physical gateway's Node-RED logs are where an enrolment
+  failure is legible, and they are also on hardware outside the cluster, on a link that is not
+  assumed to be up. Almost certainly out of scope for a first version, and worth saying so rather than
+  leaving the boundary to be discovered.
+- **Whether structured logging comes first.** `logging_config.py` is 33 lines of plain formatting.
+  Shipping unstructured lines into a label-based store means parsing them at query time forever, and
+  the drop paths are the ones whose fields — reason, device, edge node — would most benefit from being
+  fields. That is a smaller change than the store and it is the one that decides how useful the store
+  is.
