@@ -283,7 +283,17 @@ services:
         # literal `:'pw'` and answers `syntax error at or near ":"`.
         echo "ALTER USER :\"role\" WITH PASSWORD :'pw';" > /tmp/set-role-password.sql
 
-        for role in supabase_auth_admin authenticator supabase_storage_admin; do
+        # `supabase_read_only_user` IS THE ODD ONE, and it is here because of WHO MAY WRITE IT
+        # rather than because it is scoped. It is a RESERVED role in supabase/postgres -- `only
+        # superusers can modify it` -- so the migrations cannot: supabase-db-init connects as
+        # `postgres`, which is not a superuser on this image. This service is the superuser step,
+        # which is why the ALTER lives here and its assertions live in 0082.
+        #
+        # It ships with NO PASSWORD, and pg_hba requires scram from the container network, so
+        # Studio cannot authenticate as it until this runs. Pointing POSTGRES_USER_READ_ONLY at it
+        # without this BREAKS the read paths rather than narrowing them. Same password as the rest
+        # by necessity: Studio substitutes ONE password into both branches of its connection string.
+        for role in supabase_auth_admin authenticator supabase_storage_admin supabase_read_only_user; do
           psql -h supabase-db -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
                -v pw="$$PGPASSWORD" -v role="$$role" -f /tmp/set-role-password.sql
         done
@@ -1155,6 +1165,20 @@ services:
       POSTGRES_DB: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_USER_READ_WRITE: postgres
+      # THE OTHER HALF OF THE IMAGE'S CONNECTION STRING, and it was missing.
+      #
+      # Studio picks its database user per request -- `readOnly ? POSTGRES_USER_READ_ONLY :
+      # POSTGRES_USER_READ_WRITE` -- and with this unset the image's own default was used, so every
+      # path that ASKED for the restricted user was handed `postgres` instead. The fallback is
+      # silent: nothing reports having taken it.
+      #
+      # `supabase_read_only_user` is the image's own role, holding `pg_read_all_data` (so it reads
+      # through RLS, which is what makes a console usable) and no write privilege anywhere. It ships
+      # WITHOUT A PASSWORD, and pg_hba requires scram from this network -- so `0082` is what makes
+      # this line work rather than break the same paths it aims to narrow. Both branches take
+      # POSTGRES_PASSWORD above; the role therefore holds the owner's password, which 0082 argues
+      # rather than assumes.
+      POSTGRES_USER_READ_ONLY: supabase_read_only_user
       # Server-side calls run inside the container, so this must be the internal
       # Kong address. SUPABASE_PUBLIC_URL stays host-facing for the browser.
       SUPABASE_URL: http://supabase-kong:8000

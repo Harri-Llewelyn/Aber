@@ -2085,6 +2085,47 @@ function, and one fewer round trip per request.
 token while signing HS256 (`HS256 is not supported for ID token signing`), which is what the whole
 stack signs with; `grafana.ini` carries the same note for the same reason.
 
+#### The read-only branch, which was broken rather than wide (`0082`)
+
+Studio picks its database user per request — `readOnly ? POSTGRES_USER_READ_ONLY :
+POSTGRES_USER_READ_WRITE`, with one `POSTGRES_PASSWORD` substituted into both. This stack set only
+the read-write half, and **the entry that asked for this predicted the wrong failure**: it reasoned
+that the unset variable meant the read-only paths were handed the owner. They were not. The image's
+own default for that variable is `supabase_read_only_user`, so those paths already asked for the
+restricted role — and got `password authentication failed`, because the role ships **with no
+password** while `pg_hba.conf` trusts `127.0.0.1` and requires `scram-sha-256` from every container
+network. Read-only mode was not too powerful; it did not work.
+
+That also inverts what the fix is. Setting `POSTGRES_USER_READ_ONLY` explicitly changes no
+behaviour — it names the value the image already defaults to, and is set on both targets so the
+dependency is visible rather than inherited. **What makes the difference is the password**, and it
+is issued in the roles-init step rather than here: `supabase_read_only_user` is a RESERVED role
+(`only superusers can modify it`), and `db-init` connects as `postgres`, which is not a superuser on
+this image. So the `ALTER` sits beside the three scoped passwords in `supabase-db-roles-init` /
+`db-roles-init`, and `0082` holds the assertions — that the role exists, has a password, still holds
+`pg_read_all_data`, and **cannot write**, which is an `EXCEPTION` rather than a warning.
+
+**Which paths actually take it, measured** with `log_connections` on and one request per path:
+
+| Path | Connects as |
+| :--- | :--- |
+| `/api/mcp?read_only=true` | **`supabase_read_only_user`** |
+| `/api/mcp` (no flag) | `postgres` |
+| SQL editor (`/api/platform/pg-meta/default/query`), with or without `read_only` in the body | `postgres` |
+| Table editor listings (`/tables`) | `postgres` |
+
+So this narrows **one** caller: an MCP client that asks for read-only mode. Under it a write is
+refused — `cannot execute CREATE TABLE in a read-only transaction` — and reads still work, because
+the image's role holds `pg_read_all_data` and `BYPASSRLS`. Everything a human does in the console
+still runs as the owner, and no setting in this repository changes that: the table editor cannot use
+a read-only connection, and the SQL editor does not ask for one.
+
+**The password is the owner's, necessarily.** The image substitutes one password into both branches,
+so there is no separate secret to hold: this role cannot be rotated independently of `postgres`. It
+is not a new exposure — anything that can read it can already read `POSTGRES_PASSWORD`, in the same
+environment, in the same container — but it is a real limit on what this control is, and `0082`
+states it rather than absorbing it.
+
 **Two operational consequences.** The listener publishes on the port Studio itself used to publish,
 so `0002`'s Directory entry stays true and the container publishes nothing. And both halves fail
 closed: without `STUDIO_OAUTH_CLIENT_SECRET`, `0081` skips the registration with a `WARNING` and the

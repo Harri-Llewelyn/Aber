@@ -201,13 +201,13 @@ authentication one** — the console is authenticated either way; what the opera
 whether it is reachable by everyone who can reach the ingress. That belongs to a deployment, not to
 this file, so it is not an open item.
 
-**Two things keep this entry open:**
+**The privilege half has shipped too, as `0082`** — and it turned out to be smaller than this entry
+believed, because the premise it rested on was wrong. The measurement is below.
 
-1. **Websockets are unmeasured.** `upgrade_configs` is declared and never exercised; nothing here
-   establishes what Studio opens.
-2. **The read-only database role is untouched**, and it is the *privilege* half of this entry rather
-   than the *door* half — see below. It is the larger of the two: everything shipped so far gates
-   *who may open the console*, and everything inside it still runs as the database owner.
+**One thing keeps this entry open: websockets are unmeasured.** `upgrade_configs` is declared and
+never exercised, and nothing here establishes what Studio opens. Until that is measured this entry
+cannot honestly say the console works fully behind the proxy — every HTTP path was verified and no
+socket was.
 
 ### The binding is a real control, and it is the only one
 
@@ -382,20 +382,34 @@ the i3X one, where RLS is in the path. A developer-facing MCP is recoverable lat
 route and giving it a credential of its own — on its own argument, not as a side effect of how
 Studio happens to be published.
 
-### The door and the privilege are separate decisions, and only one of them is this item
+### The door and the privilege were separate decisions, and the privilege half has now shipped too
 
-Worth doing whether or not the proxy is built, and it does not block on it. The pinned image builds
-its connection string as `readOnly ? POSTGRES_USER_READ_ONLY : POSTGRES_USER_READ_WRITE`, and **this
-stack sets only the read-write half** — `POSTGRES_USER_READ_WRITE: postgres`, with no read-only
-counterpart — so every path that asks for the restricted user is handed the owner instead. Creating
-that role and setting the variable narrows what Studio can *do*, where the proxy narrows who can
-open it.
+**`0082`, and it is worth reading for what the measurement did to the argument rather than for the
+change.** This entry reasoned that because the stack sets only `POSTGRES_USER_READ_WRITE`, "every
+path that asks for the restricted user is handed the owner instead." **That was wrong.** The image's
+default for `POSTGRES_USER_READ_ONLY` is `supabase_read_only_user`, so those paths already asked for
+the restricted role — and got `password authentication failed`, because the role ships with no
+password and `pg_hba` requires scram from every container network. The read-only mode was not too
+powerful. It did not work, and nothing said so, because the only caller was one nobody used.
 
-Two caveats before it is treated as free. Both branches take the same `POSTGRES_PASSWORD`, so the
-read-only role has to be created holding the owner's password, which is not obviously acceptable and
-should be decided rather than absorbed. And which of Studio's own paths request the read-only branch
-was not measured — the table editor plainly cannot use it. Measure before promising anything about
-what it covers.
+So the fix is not the variable — setting it names what the image already defaults to — but the
+`ALTER` that gives the role a password, which lives in the roles-init step because
+`supabase_read_only_user` is RESERVED and `db-init` connects as a non-superuser. `0082` carries the
+assertions instead, including a self-check that refuses a role which has stopped being read-only.
+
+**The caveat about the shared password stands and is now recorded as a limit**: the image
+substitutes one password into both branches, so this role cannot be rotated independently of the
+owner. It is not a new exposure — the two are the same string in the same environment — but it is
+not free either.
+
+**The other caveat was measured, and the answer is narrow.** With `log_connections` on, the only
+caller that takes the read-only branch is **`/api/mcp?read_only=true`**; the SQL editor's query
+endpoint, the table editor's listings and MCP without the flag all connect as `postgres`. Under the
+flag a write is refused (`cannot execute CREATE TABLE in a read-only transaction`) and reads still
+work. **Everything a human does in the console still runs as the database owner** — which is the
+honest summary of what this half of the item bought, and the reason it is recorded in
+[`supabase/README.md`](../supabase/README.md#the-read-only-branch-which-was-broken-rather-than-wide-0082)
+rather than described as narrowing Studio.
 
 ### What this must not touch
 
