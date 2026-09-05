@@ -84,6 +84,14 @@ spec:
       port: 8000
       targetPort: http
       protocol: TCP
+    # STUDIO'S DOOR, and the only backend the studio ingress route may name. Pointing that route at
+    # the `supabase-studio` Service instead reaches the console with no login in front of it, which
+    # is what this port exists to prevent -- so the route is built from the gateway Service in
+    # `acs-cymru.ingressRoutes`, where there is one definition of it to get right.
+    - name: studio
+      port: 8001
+      targetPort: studio
+      protocol: TCP
     {{- if .Values.supabaseEnvoy.metrics.enabled }}
     # NAMED `metrics`, selected BY NAME by the ServiceMonitor, as Kong's is.
     #
@@ -182,6 +190,40 @@ spec:
               # bootstrap. Verified on Compose, where it refused to start.
               CORS_MATCHERS=$(printf '%s' "$ENVOY_CORS_ORIGINS" | sed 's/"\([^"]*\)"/{exact: "\1"}/g')
 
+              # The signing secret as an `oct` JWKS key, which the studio listener verifies session
+              # tokens against. base64url, so the wrapping, the +/ alphabet and the padding all
+              # have to go -- a stray newline yields a JWKS Envoy parses and then rejects every
+              # token against.
+              JWT_B64URL=$(printf '%s' "$SUPABASE_JWT_SECRET" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
+
+              # FAIL CLOSED, NOT SHUT, matching Compose. The chart does not publish the studio
+              # listener at all by default (routes.studio is false), so an unset pair here is the
+              # ordinary case rather than a misconfiguration -- and refusing to boot over it would
+              # take down the gateway every other service sits behind.
+              if [ -z "$STUDIO_OAUTH_CLIENT_SECRET" ] || [ -z "$STUDIO_PROXY_HMAC_SECRET" ]; then
+                echo 'NOTE: Studio OAuth client secret / cookie key are not set. The studio listener will answer a login that cannot complete.' >&2
+                STUDIO_OAUTH_CLIENT_SECRET='unconfigured'
+                STUDIO_PROXY_HMAC_SECRET=$(tr -dc 'a-f0-9' < /dev/urandom | head -c 64)
+              fi
+
+              # SDS, because OAuth2Credentials takes a secret config source rather than a string.
+              # ONE SECRET PER FILE: a path source carrying two is accepted at boot and rejected at
+              # runtime, leaving a listener with no credentials in it.
+              printf '%s\n' \
+                'resources:' \
+                '  - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret' \
+                '    name: studio-oauth-client-secret' \
+                '    generic_secret:' \
+                "      secret: { inline_string: \"$STUDIO_OAUTH_CLIENT_SECRET\" }" \
+                > /config/studio-client-secret.yaml
+              printf '%s\n' \
+                'resources:' \
+                '  - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret' \
+                '    name: studio-proxy-hmac-secret' \
+                '    generic_secret:' \
+                "      secret: { inline_string: \"$STUDIO_PROXY_HMAC_SECRET\" }" \
+                > /config/studio-hmac-secret.yaml
+
               sed -e "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" \
                   -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$SUPABASE_SERVICE_ROLE_KEY|g" \
                   -e "s|__SUPABASE_PUBLISHABLE_KEY__|$SUPABASE_PUBLISHABLE_KEY|g" \
@@ -190,6 +232,10 @@ spec:
                   -e "s|__REALTIME_UPSTREAM_HOST__|$REALTIME_UPSTREAM_HOST|g" \
                   -e "s|__REALTIME_UPSTREAM_ADDRESS__|$REALTIME_UPSTREAM_ADDRESS|g" \
                   -e "s|__CORS_ORIGINS__|$CORS_MATCHERS|g" \
+                  -e "s|__SUPABASE_PUBLIC_URL__|$SUPABASE_PUBLIC_URL|g" \
+                  -e "s|__STUDIO_PUBLIC_URL__|$STUDIO_PUBLIC_URL|g" \
+                  -e "s|__STUDIO_UPSTREAM_ADDRESS__|$STUDIO_UPSTREAM_ADDRESS|g" \
+                  -e "s|__SUPABASE_JWT_SECRET_B64URL__|$JWT_B64URL|g" \
                   /template/envoy.yaml > /config/envoy.yaml
 
               # The leftover scan both targets run. Comments are excluded -- envoy.yaml's header
@@ -248,6 +294,38 @@ spec:
             # origin policy has one source or it has none.
             - name: ENVOY_CORS_ORIGINS
               value: {{ include "acs-cymru.corsOrigins" . | quote }}
+            # ------------------------------------------------------------------------------
+            # The studio listener's inputs. See the listener in files/envoy/envoy.yaml.
+            # ------------------------------------------------------------------------------
+            # What jwt_authn verifies the session token against -- the same secret GoTrue signs
+            # with, which is why it is this key and not one of its own.
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_JWT_SECRET" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            # OPTIONAL, unlike every secret above. `routes.studio` is false by default, so most
+            # installs never publish this listener and have no reason to hold its credential; a
+            # required ref would fail those pods on a key nothing reads. The init container's
+            # fail-closed branch covers the absent case.
+            - name: STUDIO_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "acs-cymru.secretName" . }}
+                  key: STUDIO_OAUTH_CLIENT_SECRET
+                  optional: true
+            - name: STUDIO_PROXY_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "acs-cymru.secretName" . }}
+                  key: STUDIO_PROXY_HMAC_SECRET
+                  optional: true
+            # Both are addresses the BROWSER uses -- the ingress hostnames, never the in-cluster
+            # Service names, which is what the token endpoint in the config uses instead.
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ include "acs-cymru.supabaseUrl" . | quote }}
+            - name: STUDIO_PUBLIC_URL
+              value: {{ include "acs-cymru.studioUrl" . | quote }}
+            # The name Envoy DIALS. Compose has a container of the same name; here it is the
+            # Service in templates/supabase/studio.yaml.
+            - name: STUDIO_UPSTREAM_ADDRESS
+              value: supabase-studio
           volumeMounts:
             - name: template
               mountPath: /template
@@ -265,6 +343,12 @@ spec:
           ports:
             - name: http
               containerPort: 8000
+            # Studio's listener. Declared unconditionally because the bootstrap declares it
+            # unconditionally -- the port is open in the pod whether or not `ingress.routes.studio`
+            # publishes it, and a containerPort that disagreed with the config would make the pod
+            # describe itself wrongly without changing what it serves.
+            - name: studio
+              containerPort: 8001
             {{- if .Values.supabaseEnvoy.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.supabaseEnvoy.metrics.port }}

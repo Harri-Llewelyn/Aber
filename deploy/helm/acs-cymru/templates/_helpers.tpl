@@ -549,8 +549,31 @@ Skipped when `existingSecret` is set -- the values are then not the chart's to s
 {{- end -}}
 {{- end -}}
 
+{{/*
+Publishing Studio requires the credentials that make it a door rather than a hole.
+
+`ingress.routes.studio` names the GATEWAY's studio listener, so the console is behind an OAuth flow
+and an `Administrator` check -- but only if that flow has a client to run. With the secrets unset the
+gateway substitutes credentials that cannot authenticate and 0081 registers no client, so the route
+publishes a hostname whose every request ends at a login nobody can complete.
+
+THAT IS NOT A SECURITY FAILURE, and it is refused anyway. Fail-closed is the right RUNTIME behaviour
+for a stack that was upgraded before the variables existed; it is the wrong INSTALL behaviour for an
+operator who has just asked for the route by name, because the symptom -- a redirect loop through
+GoTrue ending in `invalid client` -- reads as a broken proxy rather than as two empty values. The
+chart's rule is to validate values and fail the render, never the pod.
+*/}}
+{{- define "acs-cymru.validateStudioRoute" -}}
+{{- if and .Values.ingress.enabled (eq (index .Values.ingress.routes "studio") true) -}}
+{{- if or (not .Values.secrets.studioOAuthClientSecret) (not .Values.secrets.studioProxyHmacSecret) -}}
+{{- fail "\n\nacs-cymru: ingress.routes.studio is true but Studio's door has no credentials.\n\nThe route publishes the gateway's studio listener, which runs an OAuth flow against this stack's own\nGoTrue and admits `Administrator` only. Without both values below the flow has no registered client\nand no cookie key, so every request to studio.<publicBaseDomain> ends at a login that cannot\ncomplete -- which looks like a broken proxy rather than like an unset value.\n\nSet both:\n  secrets.studioOAuthClientSecret   (also hashed into auth.oauth_clients by migration 0081)\n  secrets.studioProxyHmacSecret     (signs the session cookie; nothing else reads it)\n\nOr leave ingress.routes.studio at its default of false and reach the console with a port-forward.\n" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "acs-cymru.validate" -}}
 {{- include "acs-cymru.validateSecrets" . -}}
+{{- include "acs-cymru.validateStudioRoute" . -}}
 {{- include "acs-cymru.validateMqttPrincipals" . -}}
 {{- include "acs-cymru.validateRealtime" . -}}
 {{- include "acs-cymru.validateRealtimeServiceName" . -}}
@@ -783,8 +806,19 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
 {{- if .Values.grafana.enabled -}}
 {{- $routes = append $routes (dict "name" "grafana" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "grafana")) "service" "grafana" "port" 3000) -}}
 {{- end -}}
-{{- if .Values.supabaseStudio.enabled -}}
-{{- $routes = append $routes (dict "name" "studio" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "studio")) "service" "supabase-studio" "port" 3000) -}}
+{{/* STUDIO IS PUBLISHED THROUGH THE GATEWAY, NEVER DIRECTLY, and this line is the whole control.
+     `supabase-studio:3000` is a database console with no login, no roles and no session, running
+     as the database owner -- naming it here would put that on a public hostname. The gateway's
+     `studio` listener on 8001 is the same console behind an OAuth flow and an `Administrator`
+     check, so the route names the GATEWAY Service and the Studio Service is reachable in-cluster
+     only.
+
+     It follows the gateway's name for the same reason the API route does: `supabaseEnvoy.serviceName`
+     is what the promotion mechanism moves. Gated on the gateway being Envoy AS WELL as on Studio
+     existing -- Kong has no such listener, so on a Kong stack this route has no backend to name and
+     is correctly absent rather than pointed somewhere unauthenticated. */}}
+{{- if and .Values.supabaseStudio.enabled .Values.supabaseEnvoy.enabled -}}
+{{- $routes = append $routes (dict "name" "studio" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "studio")) "service" .Values.supabaseEnvoy.serviceName "port" 8001) -}}
 {{- end -}}
 {{- if .Values.swaggerUi.enabled -}}
 {{- $routes = append $routes (dict "name" "docs" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "docs")) "service" "swagger-ui" "port" 8080) -}}

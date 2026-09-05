@@ -17,30 +17,46 @@ instead — and `scripts/check-docs-drift.mjs` dropped the four invariants that 
 numbers are labels for reading order, they run 1-13 with no gaps, and **a renumber costs one grep**
 (`§[0-9]`, `roadmap item [0-9]`) across the repository for the prose that still cites them.
 
-**Ordered by subject rather than by age**, in four groups. **1-6 are the platform's own**, led by
-the one item somebody else sets the deadline for and then by the credential and operations chain:
-2 is Administrator-only from the start and deliberately does not wait for 3. **The role split those
-would otherwise have queued behind has already shipped**, as `0069` and `0070`, which is why 3 is
-now Entra sign-in alone and 4 no longer waits on it. **So has the machine-principal split**, as
-`0080` — it was the entry that arrived from a change being REFUSED rather than from an audit or a
-request, and it had to exist before an `Operator` could be granted anything else, which is exactly
-what 8 goes on to do. **6 is the only item here whose subject is the BROKER credential plane**
-rather than the database one; it sits at the end of the chain because the database plane's own
-credential work has now shipped and explicitly scoped that plane out, and because its strongest
-argument is a gap (a revoked gateway that is already connected keeps publishing) rather than a
-feature. **7-11 arrive from feature requests** — 7, 9 and 11 from GitHub issues
+**Ordered by subject rather than by age**, in four groups. **1-5 are the platform's own**, led by
+the one item somebody else sets the deadline for and then by the credential and operations chain.
+**The role split that chain would otherwise have queued behind has already shipped**, as `0069` and
+`0070`, which is why 2 is now Entra sign-in alone and 3 no longer waits on it. **So has the
+machine-principal split**, as `0080` — it was the entry that arrived from a change being REFUSED
+rather than from an audit or a request, and it had to exist before an `Operator` could be granted
+anything else, which is exactly what 7 goes on to do. **5 is the only item here whose subject is the
+BROKER credential plane** rather than the database one; it sits at the end of the chain because the
+database plane's own credential work has now shipped and explicitly scoped that plane out, and
+because its strongest argument is a gap (a revoked gateway that is already connected keeps
+publishing) rather than a feature. **6-10 arrive from feature requests** — 6, 8 and 10 from GitHub
+issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
-[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 8 and 10 were not filed. **10 is
-sequenced *after* 9 because it removes what 9 replaces, and 8 is sequenced *before* it because 9
-cannot ask an `Operator` for a proposal until 8 has given that role a way to make one** — 8 is the
-queue and the authority, 9 is one lane's payload and the edge sync that carries it. **12 is
+[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 7 and 9 were not filed. **9 is
+sequenced *after* 8 because it removes what 8 replaces, and 7 is sequenced *before* it because 8
+cannot ask an `Operator` for a proposal until 7 has given that role a way to make one** — 7 is the
+queue and the authority, 8 is one lane's payload and the edge sync that carries it. **11 is
 documentation**, and is the one item whose remaining work is mostly writing;
 it arrives from [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **13 is the platform's own
-and sits last anyway**, because its subject is the transport under every other item rather than any
-one chain — and because reading it before 6 and 9 invites starting it in the wrong order, which is
-the one thing it asks not to happen.
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **12 and 13 are the
+platform's own and sit last anyway**, because each has for its subject something that runs under or
+over every other item rather than any one chain: 12 is the transport between the services, 13 the
+record of what they did. Neither blocks the other. 12 is written first because reading it before 5
+and 8 invites starting it in the wrong order, which is the one thing it asks not to happen; 13 has
+no such constraint and is last because it is the newest.
+
+**Studio behind a login shipped and left this list on 2026-09-05.** It was 2 until `0081` and
+`0082`; everything above 2 moved down by one, and the grep above found three prose citations to
+move with it. Its substance is in
+[The second listener, which is Studio's login](../supabase/README.md#the-second-listener-which-is-studios-login-0081)
+and the two sections after it, in [`deploy/k8s/README.md`](../deploy/k8s/README.md), and on the
+front page. **Three things it argued are worth carrying forward, because each one contradicted the
+entry that asked for them.** The role does not need a third `studio-userinfo` function — GoTrue
+refuses to sign an ID token with HS256, so there is no ID token to read a claim from, and the role
+arrives in the *access* token the gateway already verifies. The read-only database branch was not
+running as the owner as the entry assumed; it was failing to authenticate, because the image's role
+ships with no password, and the only caller that takes it is `/api/mcp?read_only=true`. And the
+`ingress.routes.studio` default stayed `false` — not because the console is unauthenticated any
+more, but because publishing one is an exposure decision that belongs to a deployment.
 
 **Revocable service tokens shipped and left this list**, which is what an item shipping looks like.
 It was 3 until `0074`–`0076`; everything above 3 moved down by one. Its substance is in
@@ -184,144 +200,7 @@ this entry was written against the wrong one once already:
 
 ---
 
-## 2 · Studio behind the login everything else already uses
-
-**Builds on:** the `supabase-studio` block in [`docker-compose.yml`](../docker-compose.yml) ·
-`routes.studio` in [`values.yaml`](../deploy/helm/acs-cymru/values.yaml) ·
-`GOTRUE_OAUTH_SERVER_ENABLED` · [`0002`](../supabase/migrations/0002_seed_data.sql)'s Grafana client and
-[`0006`](../supabase/migrations/archive/0006_nodered_oidc_auth.sql)'s Node-RED client ·
-[`grafana-userinfo`](../supabase/functions/grafana-userinfo/index.ts) ·
-[`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts) ·
-[`OAuthConsent.jsx`](../frontend/src/pages/OAuthConsent.jsx) ·
-[`supabase/envoy.yaml`](../supabase/envoy.yaml) · **not filed as an issue, and arriving from user
-feedback rather than from an audit**
-
-Put an authenticating proxy in front of Supabase Studio, so reaching it costs a Supabase login as an
-`Administrator` rather than a position on the host. **`values.yaml` already asks for this by name** —
-turning the ingress on "belongs with an authenticating proxy in front" — and until one exists, the
-chart's answer and Compose's answer are the same answer: do not let anyone reach it.
-
-### The binding is a real control, and it is the only one
-
-Studio has no authentication of its own: no login, no roles, no session. The official stack puts it
-behind a basic-auth pair and this one does not run that, so whoever reaches the port gets the SQL
-editor, the table editor and the Vault UI **as the database owner, for whom RLS is not enforced**.
-Compose binds it to `127.0.0.1` and the chart leaves `routes.studio` off; both comments say why at
-length and both are right as far as they go.
-
-What they buy is that reaching Studio needs shell access or a tunnel. What they do not buy is a
-second credential once somebody has one — and the same port also serves `/api/mcp`, a Supabase MCP
-server (`supabase` v0.7.0, protocol `2025-06-18`) that completes `initialize` with no credential at
-all and exposes `execute_sql` and `apply_migration` among its eleven tools. That is not a new
-privilege. It is the SQL editor's privilege in a shape a process can drive rather than one a human
-has to sit in front of, which is a different risk with the same blast radius.
-
-### The cheapest fix is refused by the people who asked for the feature
-
-Not starting Studio at all — `profiles: [debug]` in Compose, matching what the chart already does —
-removes the surface completely and costs one edit. It is the right answer to the security question
-and the wrong answer to the request that prompted this entry: **users have asked to be able to reach
-Studio**, and an item that answers "you cannot" is not an item. It remains the correct default for
-any deployment nobody has asked that of, and nothing here argues for turning it on by default.
-
-### The integration exists twice already, and a third is the same shape
-
-This stack is an OAuth 2.1 authorization server. `GOTRUE_OAUTH_SERVER_ENABLED` is on, GoTrue ships
-no consent UI so the React dashboard serves one at `/oauth/consent`, and two clients already
-authenticate humans through it: Grafana, seeded by `0002`, and Node-RED, seeded by `0006`. Both
-migrations hash a secret out of `.env` into `auth.oauth_clients` and `DO UPDATE` on replay, so a
-rotated secret takes effect on the next boot. A third client is that migration again with a
-different redirect URI.
-
-What is new is the proxy, because **Studio cannot be an OAuth client — it has no login to extend**.
-`oauth2-proxy` is the standard answer: it runs the browser flow, holds the session cookie and
-forwards authenticated requests upstream. Studio stops publishing a port and the proxy takes it.
-
-### GoTrue's userinfo does not carry the role, and that is the decision to make first
-
-`grafana-userinfo` exists because of this and says so: GoTrue's OIDC server advertises the standard
-claims only, `app_metadata` is not among them, and a client reading a role attribute out of it finds
-nothing — with strict mapping every user is denied, without it every user silently becomes a Viewer.
-`nodered-userinfo` is the same function for the same reason. Both read `public.user_roles` through
-`resolveUserRole()`, which is also why a role change takes effect on the user's next login instead
-of whenever their token happens to be reissued.
-
-`oauth2-proxy` needs the same thing and can take it from one of two places, which are not equally
-good:
-
-| Where the role comes from | What it costs | What is unresolved |
-| :--- | :--- | :--- |
-| A claim in the ID token, read with `--oidc-groups-claim` | Nothing, if the claim is there | `custom_access_token_hook` mirrors the role into the **access** token; whether it reaches the ID token GoTrue issues at `/oauth/token` is **unverified**, and settles the design |
-| A third `studio-userinfo` function on `--profile-url` | One edge function, on an established pattern | Nothing — it is what the other two clients do, and it reads the live role |
-
-**Check the ID token first and take the free answer if it is there.** If it is not, write the third
-userinfo function rather than falling back to an email allowlist: a static list of addresses is the
-htpasswd problem with extra steps — no revocation, no role, no audit row, and a further credential
-plane in `.env` for a console that can drop a table.
-
-### It closes the MCP endpoint, which should be a decision rather than a discovery
-
-A session cookie in front of Studio covers `/api/mcp` along with everything else, and an MCP client
-cannot complete an interactive browser flow to obtain one. So this item **removes** the
-unauthenticated MCP server as a working endpoint, not merely as an open one.
-
-That is the right outcome, and the reason is worth recording because the endpoint is tempting. It
-runs as the owner, so it reads `digital_thread`, `auth.users` and the Vault, and it sits outside
-every control this repository built for that exact question: `0034`'s read-only principal holds
-`Operator` and nothing else *precisely* so a model cannot see the audit trail, and service-token
-revocation acts at PostgREST, which Studio does not go through. The model-facing surface this stack intends is
-the i3X one, where RLS is in the path. A developer-facing MCP is recoverable later by exempting the
-route and giving it a credential of its own — on its own argument, not as a side effect of how
-Studio happens to be published.
-
-### The door and the privilege are separate decisions, and only one of them is this item
-
-Worth doing whether or not the proxy is built, and it does not block on it. The pinned image builds
-its connection string as `readOnly ? POSTGRES_USER_READ_ONLY : POSTGRES_USER_READ_WRITE`, and **this
-stack sets only the read-write half** — `POSTGRES_USER_READ_WRITE: postgres`, with no read-only
-counterpart — so every path that asks for the restricted user is handed the owner instead. Creating
-that role and setting the variable narrows what Studio can *do*, where the proxy narrows who can
-open it.
-
-Two caveats before it is treated as free. Both branches take the same `POSTGRES_PASSWORD`, so the
-read-only role has to be created holding the owner's password, which is not obviously acceptable and
-should be decided rather than absorbed. And which of Studio's own paths request the read-only branch
-was not measured — the table editor plainly cannot use it. Measure before promising anything about
-what it covers.
-
-### What this must not touch
-
-The proxy fronts **Studio only**. Envoy already fronts Auth, PostgREST, Realtime, Storage and the
-edge runtime on `:54321` with API-key auth and four deliberate exemptions, and every machine
-principal in the stack authenticates there without a browser. A browser-session proxy anywhere on
-that path is an outage, for the same reason `0048` keeps machine identities out of the `aal2`
-predicates.
-
-`supabase-envoy` also answers to the network alias `supabase-kong`, which Studio's own
-`SUPABASE_URL` points at for server-side calls. That is Studio talking *outward* and it does not
-change.
-
-### Worth deciding early
-
-- **Whether the loopback binding survives the proxy.** Publishing both leaves the proxy optional,
-  and an optional control is not one. Unpublish `127.0.0.1:54323` in the same commit that publishes
-  the proxy, or the old door stays open beside the new one.
-- **Whether `routes.studio` flips to `true`.** Not in the same change. The chart's default is
-  currently right because no proxy exists; making it right for a different reason is a second
-  decision, and it is the one that puts a database console on a public hostname.
-- **What the seeded Directory entry says.** `0002` lists Studio at `http://127.0.0.1:54323`, and
-  that URL is wrong the moment the proxy takes the port. The Directory is where people look to find
-  services, so it moves in the same migration that seeds the OAuth client.
-- **Whether this waits for 20 or 21.** It does not. Gating on `Administrator` adds another
-  Administrator-only check in the direction the token and principal revocation controls already go,
-  rather than depending on the role
-  split — and Studio inherits Entra sign-in and MFA for free if and when those land. That is the
-  strongest argument for the OAuth route over any proxy-local credential: it is the only design
-  under which a database console ever gets a second factor.
-
----
-
-## 3 · Microsoft Entra ID sign-in, and a role model worth mapping onto
+## 2 · Microsoft Entra ID sign-in, and a role model worth mapping onto
 
 **Builds on:** `custom_access_token_hook()` and `handle_new_user()` in
 [`supabase/migrations/0001_baseline_schema.sql`](../supabase/migrations/0001_baseline_schema.sql) ·
@@ -385,7 +264,7 @@ work. The repair is to make that person an Administrator.
 
 ### What is left of this item is Entra itself
 
-Everything below is unbuilt. The role split was sequenced first because §4 and the audit-domain
+Everything below is unbuilt. The role split was sequenced first because §3 and the audit-domain
 work both depended on it and neither depended on Entra. The second of those has since shipped as
 `0070`.
 
@@ -475,7 +354,7 @@ claims to enable, and the group-object-ID to role table. It lives in `docs/`, wh
 
 ---
 
-## 4 · Multi-factor authentication, and what happens when the phone is lost
+## 3 · Multi-factor authentication, and what happens when the phone is lost
 
 **Builds on:** GoTrue v2.189.0's factor API · `has_role()` and the `aal` claim ·
 [`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx) · the immutable audit in
@@ -485,7 +364,7 @@ TOTP second factors, required of the roles that can change the platform and opti
 else. Any authenticator that implements TOTP works — Microsoft Authenticator, Google Authenticator,
 Bitwarden, 1Password — which is a documentation fact, not an integration.
 
-**This item depended on item 4's role divergence, and that dependency is now satisfied.** The
+**This item depended on the role split, and that dependency is now satisfied.** The
 reset control below is gated on `authz:manage`, which is Administrator-only *only once Manager has
 given it up* — `0069` did that, so this no longer builds an MFA boundary that a Shopfloor_Manager
 could dissolve. Nothing else here waits on Entra.
@@ -512,9 +391,9 @@ control.
 
 So the requirement is conditional on how the session was obtained, which `amr` carries: **federated
 users inherit assurance from the IdP; password users enrol a factor here.** Password users do not go
-away when item 4 ships — the seeded personas, break-glass accounts, and any air-gapped shopfloor
-install with no Entra to reach are all password paths, which is why this cannot simply be delegated
-upward and forgotten.
+away when Entra sign-in (§2) ships — the seeded personas, break-glass accounts, and any air-gapped
+shopfloor install with no Entra to reach are all password paths, which is why this cannot simply be
+delegated upward and forgotten.
 
 ### There are no recovery codes, and that is survivable
 
@@ -562,7 +441,7 @@ principal writes is an outage, not a hardening.
 
 ---
 
-## 5 · A backup an operator can take without a shell
+## 4 · A backup an operator can take without a shell
 
 **Builds on:** [`scripts/backup-databases.sh`](../scripts/backup-databases.sh) ·
 [`scripts/restore-databases.sh`](../scripts/restore-databases.sh) ·
@@ -666,10 +545,18 @@ than offer it.
 - **What the retention window means once a human can ask.** `BACKUP_RETENTION_DAYS=14` prunes on the
   next run. A backup somebody took deliberately before a risky migration is the one most worth
   keeping and the one a timer is most likely to delete.
+- **Whether the new service should drive `pg_dump` at all.** This entry is deliberately scoped to the
+  caller rather than the mechanism, and that scoping is right — but the moment a privileged service is
+  being designed is the cheapest moment to ask what it should hold. `pg_dump` gives a consistent
+  snapshot and nothing else: no incrementals, and **no point-in-time recovery**, so the real RPO is
+  the CronJob interval however good the page in front of it is. `pgBackRest` (or CloudNativePG on
+  k3s, which subsumes this item's service entirely) changes what the privilege *is* — a WAL archiver
+  holding a continuous stream rather than a verb producing a file — and that is a different object to
+  put behind `has_role()`. Cheaper to price now than after the service exists.
 
 ---
 
-## 6 · The broker's Dynamic Security plugin, and the two things a file cannot do
+## 5 · The broker's Dynamic Security plugin, and the two things a file cannot do
 
 **Builds on:** [`mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) ·
 [`mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf) ·
@@ -765,7 +652,7 @@ does not currently have.
 
 ---
 
-## 7 · The Directory's MQTT half, and the one lookup it still lacks
+## 6 · The Directory's MQTT half, and the one lookup it still lacks
 
 **Builds on:** [`supabase/functions/fplus-directory/index.ts`](../supabase/functions/fplus-directory/index.ts) ·
 `directory_services` (`0001`) · `gateways.sparkplug_group` (`0008`) · `relocate_devices()` (`0033`) ·
@@ -805,7 +692,7 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
-## 8 · An approvals queue, and the first write an `Operator` has ever had
+## 7 · An approvals queue, and the first write an `Operator` has ever had
 
 **Builds on:** [`approve_quarantined_device()`](../supabase/migrations/0001_baseline_schema.sql) and the
 role re-check inside it · `has_role()` and the write policies it gates · the `Operator` role as seeded
@@ -815,7 +702,7 @@ in [`0002`](../supabase/migrations/0002_seed_data.sql) · `device_nameplate` · 
 `system_settings` and its `min_value` / `max_value` bounds · `digital_thread` and
 [`0079`](../supabase/migrations/0079_the_thread_stops_growing_without_end.sql)'s pruning ·
 [`0069`](../supabase/migrations/0069_the_two_roles_stop_being_the_same.sql)'s permission split ·
-**not filed as an issue, and it is the substrate §9 needs rather than a feature beside it**
+**not filed as an issue, and it is the substrate §8 needs rather than a feature beside it**
 
 One queue for every change a person proposes but may not make: a gateway's flow, an asset's details,
 a schema's publication. An `Operator` proposes; a `Shopfloor_Manager` or `Administrator` approves;
@@ -918,7 +805,7 @@ feature.
 **The auto-close needs an actor kind.** `digital_thread.actor_source` admits `user`, `ingestion`,
 `migration` and `service`, but only the last three can be *declared* — `user` is derived from
 `auth.uid()`, not claimed. A timer closing a proposal has no session and is not a person, so it
-either declares `service` or earns a kind of its own. **§9 asks the identical question for the
+either declares `service` or earns a kind of its own. **§8 asks the identical question for the
 reconciling sidecar, and the two should be answered together rather than separately.**
 
 ### What this must not touch
@@ -965,7 +852,7 @@ thread other than *no*.
 
 ---
 
-## 9 · GitOps edge sync, and the review step a bucket cannot give a flow
+## 8 · GitOps edge sync, and the review step a bucket cannot give a flow
 
 **Builds on:** the `gateway-backups` bucket in
 [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
@@ -973,7 +860,7 @@ thread other than *no*.
 [`gateway-bundle-template/bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs) and the flow hash
 its heartbeat already reports · `digital_thread` (`0005`, `0026`) ·
 [`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts), which is now the only place
-`gitops:manage` is enforced · **§8, which owns the queue, the page and the proposing role, and is a
+`gitops:manage` is enforced · **§7, which owns the queue, the page and the proposing role, and is a
 prerequisite rather than a neighbour** · [issue #63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
 
 ### The push half existed and has been retired, which makes this item larger than it was
@@ -1026,7 +913,7 @@ connection into it.
 
 ### The approval gate is the missing thing, and Git already is one
 
-**The gap §10 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
+**The gap §9 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
 no diff. That is the real complaint, and it is worth stating that Git answers it directly rather than
 being merely the transport: *pending approval* is an open pull request, *approved* is a merge, and
 *undo* is a revert commit. Anything that models those three states in the database beside a stored
@@ -1037,13 +924,13 @@ systems that will disagree.
 and already refuses `flows_cred.json` **by shape rather than by filename**; what changes is its
 destination — a branch and a pull request in the gateway's source repository instead of an object in
 a private bucket. The upload is then the backup and the proposed deployment in one artefact, which
-also removes the awkward sequencing between this item and §10: the bucket stops being load-bearing at
+also removes the awkward sequencing between this item and §9: the bucket stops being load-bearing at
 the moment the first flow lands in a repository, not before.
 
 **`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
 place — `nodered-userinfo`'s `ALLOWED_ROLES`, as `0069` records — and the merge is the control it was
 named for. **Authoring a proposal and approving one are different privileges** and should not collapse
-into one: approving is `gitops:manage`, and **proposing is the `Operator` write that §8 adds** — not,
+into one: approving is `gitops:manage`, and **proposing is the `Operator` write that §7 adds** — not,
 as this item originally said, the write `storage-policies.sql` already grants Administrator and
 Shopfloor_Manager. That was written before the approvals queue existed and it inverted the point: a
 review step whose proposals can only come from the two roles that may already merge them is a
@@ -1051,7 +938,7 @@ formality, not a gate.
 
 ### The flow lane of the approvals page, and the one thing it must not become
 
-**§8 owns the page; this item owns what the flow lane shows on it.** Per gateway: the tracked
+**§7 owns the page; this item owns what the flow lane shows on it.** Per gateway: the tracked
 repository and branch, the open pull requests against it, the commit history with the deployed
 revision marked, and the gateway's own reported flow hash beside the committed head — which is drift,
 stated as a fact the appliance sent rather than as something the centre inferred. A revert control,
@@ -1063,12 +950,12 @@ already have pulled, and the sidecar cannot distinguish that from a legitimate a
 reconcile to the rewritten head and report success, having silently deployed something no pull request
 ever showed. A revert commit is visible, reviewable and itself revertible.
 
-**The lane must not become an editor, and that is a constraint this item places on §8's page rather
+**The lane must not become an editor, and that is a constraint this item places on §7's page rather
 than a note about a page of its own.** Nothing in it should author or edit flow JSON, and nothing
 should accept a blob that reaches an appliance without passing the same merge. That is the refusal
 worth keeping from `deploy-nodered`, restated for a UI: **deploy only what is committed**, or it is a
 remote-code-execution endpoint with a friendly name and a nicer table. Note that the records lanes
-§8 describes are the opposite case — there the approval *is* the write — so the two lanes do not
+§7 describes are the opposite case — there the approval *is* the write — so the two lanes do not
 share a submit path and should not be generalised into one.
 
 ### The credential store is the hazard that can invalidate the shape
@@ -1084,7 +971,7 @@ merge strategy rather than an overwrite, and that is a different piece of work.
 ### A third credential plane arrives with this item, and it should be named now
 
 **The appliance needs a way to authenticate to the repository**, which is neither the broker plane
-(§6) nor the database one. It should be **per gateway and read-only** — a shared key across the
+(§5) nor the database one. It should be **per gateway and read-only** — a shared key across the
 fleet makes one compromised appliance a fleet-wide read, and a writable one lets an appliance author
 what it will later be asked to deploy. `enroll-gateway` already mints a per-gateway broker credential
 at bundle time and is the natural place to issue this one, which also means revocation has a home
@@ -1101,14 +988,14 @@ The enrolment token's single-use semantics and the once-only guard in `bootstrap
 ACL's `%u` confinement, which is what stops one gateway forging another's telemetry and is enforced
 independently of anything here; `flows_cred.json`, which must not leave the appliance in a backup, a
 commit or a diff; and the `gateway-backups` bucket's privacy setting, which stays exactly as it is
-until §10 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
+until §9 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
 dead weight until the pull half replaces what it does.
 
 ### Worth deciding early
 
 **The forge.** Self-hosted or hosted, and for an on-premises deployment on a private domain that is
 the same question `deploy/k8s/internal-ca.yaml` already answers for certificates. Commit signature
-verification makes it a smaller question than it looks. **What it is not is an identity store:** §8
+verification makes it a smaller question than it looks. **What it is not is an identity store:** §7
 puts the queue in Postgres and reaches the forge through one machine account, so no `Operator` needs
 a forge login and the forge never has to learn what `gitops:manage` means.
 
@@ -1116,19 +1003,19 @@ a forge login and the forge never has to learn what `gitops:manage` means.
 and independent history; one repository with a branch per gateway gives a fleet-wide diff and one
 place to review. The deploy key granularity is the deciding constraint, not the ergonomics.
 
-**Where `target_branch` lives** — deferred to §10, which owns the links-store question, but this item
+**Where `target_branch` lives** — deferred to §9, which owns the links-store question, but this item
 is what makes it load-bearing rather than cosmetic.
 
 **The actor kind for the audit row.** Logging the revision hash into `digital_thread` needs one: rows
 from the daemon and the edge functions are attributed through the `request.headers` GUC, and the
 trigger accepts only `ingestion` / `service` / `migration`, never `user`. A sidecar reconciling on its
-own timer is a fourth kind of actor and should say so rather than borrow `service`. **§8's proposal
+own timer is a fourth kind of actor and should say so rather than borrow `service`. **§7's proposal
 expiry needs the same answer for the same reason** — a timer with no session — so decide it once,
 for both.
 
 ---
 
-## 10 · Retiring the flow-backup bucket, and pointing at repositories instead
+## 9 · Retiring the flow-backup bucket, and pointing at repositories instead
 
 **Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
 the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
@@ -1136,7 +1023,7 @@ the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) and its tag vocabulary ·
 `digital_thread` (`0005`) · **not yet filed as an issue**
 
-**The other end of §9, and it should be sequenced against it rather than planned beside it.** §9
+**The other end of §8, and it should be sequenced against it rather than planned beside it.** §8
 adds the pull; this removes what the push made necessary. Doing the removal first would leave a
 physical gateway with no copy of its flow anywhere, which is the exact loss `FlowBackupUploader`
 exists to prevent — its header states the case plainly: the appliance is the only copy, and a failed
@@ -1173,7 +1060,7 @@ against the same column.
 
 ---
 
-## 11 · An ISA-95 Unified Namespace bridge
+## 10 · An ISA-95 Unified Namespace bridge
 
 **Builds on:** the DDATA path in [`ingestion/ingestion.py`](../ingestion/ingestion.py) ·
 `public.device_locations` (`0001`) · `cells` (`0001`, `0021`) · `devices.location_scope` ·
@@ -1211,7 +1098,7 @@ currently prevent.
 
 ---
 
-## 12 · Contextual help, and where the documentation actually lives
+## 11 · Contextual help, and where the documentation actually lives
 
 **Builds on:** [`frontend/src/App.jsx`](../frontend/src/App.jsx)'s top bar and
 [`frontend/src/navigation.jsx`](../frontend/src/navigation.jsx) ·
@@ -1289,7 +1176,7 @@ destination cannot say: what a page is FOR, what its controls do, and what its s
 
 ---
 
-## 13 · The transport between services, and the two targets that disagree about it
+## 12 · The transport between services, and the two targets that disagree about it
 
 **Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
@@ -1392,7 +1279,7 @@ issued by the CA that already exists reaches most of the same place on both targ
 Compose stops being a supported target**, which is the same condition `envoy.yaml` attaches to
 HTTPRoute, and for the same reason.
 
-### The gateway link's upgrade is client certificates, and it is sequenced behind §6
+### The gateway link's upgrade is client certificates, and it is sequenced behind §5
 
 `mosquitto-tls.conf` states the current position and its cost explicitly: password authentication over
 TLS, `require_certificate false`, because turning it on means `use_identity_as_username` replaces the
@@ -1406,9 +1293,9 @@ the enrolment model that exists rather than replacing it. The gain is that a gat
 being a bearer secret that can be replayed by anything that reads it.
 
 **The cost is revocation, and it is why this waits.** Mosquitto's `crlfile` is awkward and needs a
-reload to take effect — which is precisely the gap §6 exists to close, and §6's own strongest argument
+reload to take effect — which is precisely the gap §5 exists to close, and §5's own strongest argument
 is already that *a revoked gateway which is already connected keeps publishing*. Client certificates
-make that sharper, not softer. **This is the intended direction; it should not start before §6.**
+make that sharper, not softer. **This is the intended direction; it should not start before §5.**
 
 ### What this must not touch
 
@@ -1436,3 +1323,104 @@ leave the stack worse than it started.
   rather than a paragraph in a README that nothing checks.
 
 ---
+
+## 13 · The other half of every drop counter, which is a log nothing keeps
+
+**Builds on:** the drop counters and their paired `logger.warning` in
+[`ingestion.py`](../ingestion/ingestion.py) · [`ingestion/metrics.py`](../ingestion/metrics.py) ·
+[`grafana/provisioning/datasources/datasources.template.yml`](../grafana/provisioning/datasources/datasources.template.yml)
+· [`deploy/helm/acs-cymru/templates/obs/`](../deploy/helm/acs-cymru/templates/obs) ·
+[`docs/incidents.md`](incidents.md) · `alerts.retention_days` in `system_settings` (`0032`) ·
+[`0079`](../supabase/migrations/0079_the_thread_stops_growing_without_end.sql) ·
+**arrives from the 2026-09-05 ethos audit, and is not filed as an issue**
+
+Ship a log store, and query it from the Grafana that is already provisioned. There is none today — no
+Loki, no Alloy, no fluent-bit, no OpenTelemetry — on either target. Metrics are well covered and logs
+are `docker logs` and `kubectl logs`.
+
+### The instrument was designed in two halves and one of them was never deployed
+
+This is the argument, and it is stronger here than the general case for log aggregation, because the
+daemon's diagnostics were **deliberately** built as a pair. From `ingestion.py`, beside the counter
+registry:
+
+> Every `drop` reason below corresponds one-to-one with an existing `logger.warning`, so the counters
+> and the log cannot disagree about what happened.
+
+That is a good design and Prometheus holds exactly half of it. `acs_ingestion_dropped_*` says a drop
+happened and how many; the half naming **which device, under which edge node, and why** exists only
+in a line nothing retains. On Compose it survives until the container is recreated. On Kubernetes it
+is gone when the pod is rescheduled — which is the moment an operator is most likely to be looking.
+
+`0026`'s `record_ingestion_rejection()` is the counter-example that proves the shape is wanted: a
+payload judged non-conforming gets a durable, queryable row rather than a log line. That path was
+built because a warning was not enough. It covers one class of event, and every other drop reason is
+still only a warning.
+
+### The second argument is that `docs/incidents.md` exists
+
+Its first entry is the broker password file truncated by a re-entered one-shot. Two properties, both
+recorded there:
+
+> **It is invisible when it happens.** Mosquitto keeps authenticated accounts in memory, so the
+> running stack carries on working perfectly. The loss only appears at the broker's next reload or
+> restart, by which point nothing connects the two events.
+
+Connecting two events hours apart, across two containers, from evidence written at the time, is the
+one thing log aggregation does and nothing else in this stack does at all. That file is a record of
+faults diagnosed the hard way; several of its entries were reconstructed from logs that happened to
+still be there.
+
+### Why the argument that refused Grafana over cold storage does not transfer
+
+Rendering archived ranges in a dashboard was declined on the grounds that it would add *"a container,
+a gateway route and an auth surface over raw plant history"*, for a resolution nothing charts. That
+reasoning was right and it should not be quietly reused here in either direction.
+
+This pays **one** of those three costs. The container, yes. No gateway route — the store is reached
+by Grafana over the container network, not published. No auth surface — it is a datasource beside the
+three `datasources.template.yml` already provisions, behind the Grafana login that already exists,
+with no new principal and no second place to manage access. And unlike archived telemetry, there is
+something to chart: the drop reasons already have counters, so the log is the drill-down from a panel
+that exists rather than a new question nobody asks.
+
+### What it must not become, and this is the part to argue before building
+
+**Every other store in this stack has a retention answer, and a log store would arrive without one.**
+Telemetry has a retention window and rollups; the cold archive has tiering; `platform_alerts` prunes
+on `alerts.retention_days` with a bound in `system_settings`; `digital_thread` stopped growing without
+end in `0079`. Logs would be the only durable store in the repository with no policy, and log volume
+does not scale with plant size the way any of those do — it scales with fault rate, which is highest
+exactly when nobody has time to look at disk.
+
+**And logs are not the audit trail.** `digital_thread` is append-only, immutable by trigger, attributed
+to an actor, and split into two lanes one of which an engineer cannot read. A log store has none of
+those properties and must never be presented as though it does. The risk is not technical, it is that
+"we have the logs" starts being offered as an answer to a question `digital_thread` is the answer to.
+Anything in a log line that matters for audit belongs in a row.
+
+**What the lines contain is a disclosure decision.** The daemon's warnings carry `sparkplug_id`s and
+edge-node names; the broker's carry client ids and source addresses; a flow describes the plant's edge
+topology, which is why `flows.json` backups sit in a private bucket. Aggregating all of it into one
+searchable place is a real concentration, and the Realtime timing side-channel under
+[Accepted risks](../README.md#accepted-risks) is the precedent for how that gets argued rather than
+assumed.
+
+### Worth deciding early
+
+- **Whether it is enabled by default, and on which target.** The chart gates observability behind
+  flags and Compose largely does not. Defaulting on for local development and off for the chart is
+  defensible; the two defaults differing silently is not — and by the README's own rule that would need
+  a divergence row.
+- **Retention and a size ceiling, chosen in the same change as the store.** Both belong in
+  `system_settings` if an Administrator is expected to own them, and the `min_value` / `max_value`
+  bounds are already there for exactly this. A retention setting added later never gets added.
+- **Whether it collects from the edge.** A physical gateway's Node-RED logs are where an enrolment
+  failure is legible, and they are also on hardware outside the cluster, on a link that is not
+  assumed to be up. Almost certainly out of scope for a first version, and worth saying so rather than
+  leaving the boundary to be discovered.
+- **Whether structured logging comes first.** `logging_config.py` is 33 lines of plain formatting.
+  Shipping unstructured lines into a label-based store means parsing them at query time forever, and
+  the drop paths are the ones whose fields — reason, device, edge node — would most benefit from being
+  fields. That is a smaller change than the store and it is the one that decides how useful the store
+  is.

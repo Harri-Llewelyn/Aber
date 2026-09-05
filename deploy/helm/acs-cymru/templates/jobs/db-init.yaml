@@ -119,6 +119,18 @@ spec:
             # what Grafana's did until it was parameterised.
             - name: GRAFANA_PUBLIC_URL
               value: {{ include "acs-cymru.grafanaUrl" . | quote }}
+            # Studio's client (0081), and the address its redirect_uri is built from. OPTIONAL for
+            # the same reason the gateway's copy is: `routes.studio` is false by default, and an
+            # install that never publishes the console has no credential for it. Absent, 0081 logs
+            # a WARNING and registers nothing.
+            - name: STUDIO_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: STUDIO_OAUTH_CLIENT_SECRET
+                  optional: true
+            - name: STUDIO_PUBLIC_URL
+              value: {{ include "acs-cymru.studioUrl" . | quote }}
             - name: NODERED_OAUTH_CALLBACK_URL
               value: {{ printf "%s/auth/strategy/callback" (include "acs-cymru.noderedUrl" .) | quote }}
             {{- /*
@@ -225,6 +237,8 @@ spec:
                     -v nodered_admin_token="$NODERED_ADMIN_TOKEN" \
                     -v grafana_oauth_client_secret="$GRAFANA_OAUTH_CLIENT_SECRET" \
                     -v grafana_public_url="$GRAFANA_PUBLIC_URL" \
+                    -v studio_oauth_client_secret="$STUDIO_OAUTH_CLIENT_SECRET" \
+                    -v studio_public_url="$STUDIO_PUBLIC_URL" \
                     -v nodered_oauth_client_secret="$NODERED_OAUTH_CLIENT_SECRET" \
                     -v nodered_webhook_jwt_secret="$NODERED_WEBHOOK_JWT_SECRET" \
                     -v nodered_redirect_uri="$NODERED_OAUTH_CALLBACK_URL" \

@@ -101,6 +101,8 @@ const PSQL_VARS = {
   nodered_admin_token: 'probe-nodered-admin-token',
   grafana_oauth_client_secret: 'probe-grafana-secret',
   grafana_public_url: 'http://localhost:3000',
+  studio_oauth_client_secret: 'probe-studio-secret',
+  studio_public_url: 'http://localhost:54323',
   nodered_oauth_client_secret: 'probe-nodered-secret',
   nodered_webhook_jwt_secret: 'probe-webhook-secret',
   nodered_redirect_uri: 'http://localhost:1880/auth/strategy/callback',

@@ -81,7 +81,18 @@ spec:
               # `:'pw'` and answers `syntax error at or near ":"`.
               echo "ALTER USER :\"role\" WITH PASSWORD :'pw';" > /tmp/set-role-password.sql
 
-              for role in supabase_auth_admin authenticator supabase_storage_admin; do
+              # `supabase_read_only_user` IS THE ODD ONE, and it is here because of who may write
+              # it rather than because it is scoped. It is a RESERVED role in supabase/postgres --
+              # `only superusers can modify it` -- so the migrations cannot: db-init connects as
+              # `postgres`, which is not a superuser on this image. This Job is the superuser step,
+              # and that is the whole reason the ALTER lives here and its assertions live in 0082.
+              #
+              # It ships with NO PASSWORD and pg_hba requires scram from every pod network, so
+              # Studio's read-only paths cannot authenticate as it until this runs -- pointing
+              # POSTGRES_USER_READ_ONLY at it without this BREAKS those paths rather than narrowing
+              # them. Same password as the rest by necessity: Studio substitutes one password into
+              # both branches of its connection string.
+              for role in supabase_auth_admin authenticator supabase_storage_admin supabase_read_only_user; do
                 psql -v ON_ERROR_STOP=1 -h {{ include "acs-cymru.supabaseDb.host" . }} -p {{ include "acs-cymru.supabaseDb.port" . }} \
                      -U supabase_admin -d postgres \
                      -v pw="$ROLE_PASSWORD" -v role="$role" -f /tmp/set-role-password.sql

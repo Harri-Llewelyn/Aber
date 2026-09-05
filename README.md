@@ -212,7 +212,7 @@ for — plus demo accounts (`supabase/seed.sql`).
 | Interface | URL |
 | :--- | :--- |
 | React Dashboard | http://localhost:3000 |
-| Supabase Studio | http://127.0.0.1:54323 |
+| Supabase Studio | http://127.0.0.1:54323 (sign in as an `Administrator`) |
 | Swagger UI | http://localhost:8088 |
 | Node-RED | http://localhost:1880 |
 | Grafana | http://localhost:3002 |
@@ -262,7 +262,7 @@ in that range, and the one that matters is not the one in the message:
 | :--- | :--- | :--- |
 | `54321` | Envoy | **the browser has no API** — the dashboard loads and every request fails |
 | `54322` | supabase-db | no `psql` from the host; the stack itself is unaffected |
-| `54323` | Supabase Studio | Studio unreachable |
+| `54323` | Envoy (Studio's listener) | Studio unreachable |
 
 So fixing the port in the error changes nothing: `supabase-db` fails, every service that depends on
 it never starts, and what you see is a dashboard that loads and then reports **`Failed to fetch`**.
@@ -404,14 +404,14 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v14.12` | — |
 | `supabase-envoy-init` | `acs-cymru_supabase_envoy_init` | `alpine:3.24` | — |
-| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.31.5` | `54321:8000` |
+| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.39.1` | `54321:8000`, `54323:8001` (Studio, behind a login) |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
 | `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.102.3` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.60.4` | — |
 | `supabase-storage-init` | `acs-cymru_supabase_storage_init` | `node:24-alpine` | — |
 | `supabase-storage-policies` | `acs-cymru_supabase_storage_policies` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-meta` | `acs-cymru_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
-| `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `127.0.0.1:54323:3000` (loopback only — see below) |
+| `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | — (reached through the gateway's `54323` — see below) |
 | `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `5433:5432` |
 | `timescaledb-maintenance` | `acs-cymru_timescaledb_maintenance` | `timescale/timescaledb:2.29.2-pg17` | — |
 | `mosquitto-tls-init` | `acs-cymru_mosquitto_tls_init` | `./mosquitto/tls-init/Dockerfile` | — |
@@ -495,20 +495,43 @@ it is what a human debugging the FDW connects through.
 and what they must not.
 
 **Supabase Studio is a database console, not a dashboard with admin features**, and it is the one
-component here with no login, no roles and no session. The official Supabase stack fronts it with a
-basic-auth pair on Kong; this stack does not run that, so whatever can reach it holds the SQL
-editor, the table editor and the Vault UI **as the database owner** — for whom RLS is not enforced.
-Every control in the table above is downstream of that.
+component here with no login, no roles and no session of its own. The official Supabase stack fronts
+it with a basic-auth pair on Kong; this stack does not run that, so whatever can reach it holds the
+SQL editor, the table editor and the Vault UI **as the database owner** — for whom RLS is not
+enforced. Every control in the table above is downstream of that.
 
-So it is reachable from the host and nowhere else. `127.0.0.1:54323` on Compose; on Kubernetes
-`ingress.routes.studio` defaults to `false`, and reaching it is a port-forward:
+**On Compose it now has a door, and the gateway is it.** `supabase-envoy` publishes `54323` and
+holds a second listener there: an OAuth 2.1 authorization-code flow against this stack's own GoTrue,
+a session cookie, and an `Administrator` check before anything reaches the console. The Studio
+container publishes nothing — the old `127.0.0.1:54323` binding was removed in the same change,
+because publishing both would leave the previous door open beside the new one.
+
+Three things follow, and none of them is obvious:
+
+- **The role is read from the token, not fetched.** `custom_access_token_hook` mirrors it into the
+  access token and the gateway verifies that token itself, so Studio needs no `studio-userinfo`
+  function of the kind Grafana and Node-RED have. `openid` is deliberately absent from the requested
+  scope: GoTrue refuses to sign an ID token with HS256, which is what this whole stack signs with.
+- **It closes the unauthenticated MCP server.** Studio's port also served `/api/mcp` — a Supabase
+  MCP server exposing `execute_sql` and `apply_migration` as the owner, completing `initialize` with
+  no credential at all. It is covered because it is not exempted, and an MCP client cannot complete
+  a browser flow. The model-facing surface this stack intends is the i3X one, where RLS is in the
+  path.
+- **The credential fails closed.** `STUDIO_OAUTH_CLIENT_SECRET` and `STUDIO_PROXY_HMAC_SECRET` are
+  generated by `node scripts/setup.mjs`. Without them the stack runs normally and Studio answers a
+  login nobody can complete — including on an existing stack upgraded before the variables exist.
+
+**On Kubernetes the same door can be published, and is not by default.** `ingress.routes.studio`
+stays `false`, but the reason has changed: the route now points at the gateway's studio listener
+rather than at Studio itself, so what is left is a decision about *exposure* rather than about
+authentication — a console on a public hostname is reachable by anyone who can reach the ingress.
+Turning it on requires `secrets.studioOAuthClientSecret` and `secrets.studioProxyHmacSecret`, and
+the render fails naming them rather than publishing a login nobody can complete. Without the route,
+reaching it is a port-forward:
 
 ```bash
 kubectl -n <ns> port-forward svc/<release>-acs-cymru-supabase-studio 54323:3000
 ```
-
-Turning that route on publishes an unauthenticated database console at `studio.<publicBaseDomain>`
-and should be paired with an authenticating proxy in front of it.
 
 Two consequences worth stating on the front page; both are detailed in
 [`supabase/README.md`](supabase/README.md):

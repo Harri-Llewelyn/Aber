@@ -63,6 +63,13 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "POSTGRES_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
             - name: POSTGRES_USER_READ_WRITE
               value: postgres
+            # The other half of the image's per-request user choice, which was unset -- so the
+            # read-only paths silently took the image's default and connected as the owner. The
+            # role is the image's own (`pg_read_all_data`, no write privilege, BYPASSRLS so a
+            # console still shows rows); `0082` gives it the password pg_hba requires, without
+            # which pointing at it FAILS those paths rather than narrowing them.
+            - name: POSTGRES_USER_READ_ONLY
+              value: supabase_read_only_user
             # SERVER-SIDE calls run inside the container, so this is the in-cluster gateway...
             - name: SUPABASE_URL
               value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}

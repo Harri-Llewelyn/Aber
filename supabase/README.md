@@ -747,7 +747,7 @@ first role-assignment surface is where `authz:manage` starts meaning something, 
 into a schema where the two roles already differ rather than one where they do not.
 
 **It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
-deploys flows. The repair is to make that person an `Administrator`. Roadmap §4 (multi-factor
+deploys flows. The repair is to make that person an `Administrator`. Roadmap §3 (multi-factor
 authentication) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
@@ -2052,6 +2052,104 @@ against the surface rather than against Kong, so it is also the specification th
 > Adding a plugin name to `KONG_PLUGINS` **replaces** the default `bundled` set rather than adding
 > to it. `key-auth` had to be named explicitly or Kong would refuse to start on a config
 > referencing it.
+
+### The second listener, which is Studio's login (`0081`)
+
+**The gateway carries a second listener on `8001`, and everything above describes the first.** They
+share a process and nothing else: no filters, no routes, no credentials. The API listener admits
+machine principals holding an `apikey`; this one admits a person holding a browser session, and the
+separation is the design rather than an implementation detail — a cookie-session filter on the API
+path would redirect every daemon in the stack to a login screen it cannot complete, for the same
+reason `0048` keeps machine identities out of the `aal2` predicates.
+
+Studio has no authentication of its own and connects as the database owner. Three filters supply
+what it lacks:
+
+| Filter | What it does | The thing worth knowing |
+| :--- | :--- | :--- |
+| `oauth2` | Runs the authorization-code flow against this stack's GoTrue and holds the session cookie | Needs **Envoy ≥ 1.34**: GoTrue requires PKCE and the filter could not send it before that release |
+| `jwt_authn` | Verifies the access token GoTrue signed | An **`oct` JWKS** — the HS256 secret, not a public key — and **no issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
+| `rbac` | Requires `app_metadata.role == Administrator` | Reads the claim out of the verified payload; every persona can complete the flow, and only one gets through this |
+
+**`0081` registers the client** — `c0ffee00-…-0003`, the third of the same shape after Grafana
+(`0002`) and Node-RED (archived `0006`) — with `client_secret_basic`, matching the filter's
+`auth_type: BASIC_AUTH`. GoTrue enforces the registered method exactly.
+
+**What differs from the other two clients is that there is no userinfo function, and there must not
+be.** Grafana and Node-RED call one because GoTrue's OIDC claims carry no `app_metadata`;
+`custom_access_token_hook` puts the role in the *access* token, and this listener verifies that
+token itself. The role arrives in the request rather than being fetched about it — one fewer edge
+function, and one fewer round trip per request.
+
+**`openid` is absent from the requested scope and must stay absent.** GoTrue refuses to mint an ID
+token while signing HS256 (`HS256 is not supported for ID token signing`), which is what the whole
+stack signs with; `grafana.ini` carries the same note for the same reason.
+
+#### Nothing upgrades on this listener, and that was measured rather than assumed
+
+The console's one websocket is the Realtime inspector's, and it does not arrive here:
+`/api/platform/projects/default/settings` hands the browser `endpoint: 127.0.0.1:54321`, so the
+handshake goes to the **API** listener, which answers `101` and always has. Studio's own client
+bundle constructs no socket against its own origin and its server declares no upgrade handler; an
+upgrade sent to it through this listener is forwarded and then reset by Studio, which Envoy reports
+as `503 upstream connect error` — the upstream refusing, not the gateway blocking. An unauthenticated
+upgrade attempt is answered by the same `302` to sign-in as any other request, so a socket is not a
+way past the door.
+
+`upgrade_configs` is declared anyway. It costs nothing, and a Studio version that grows a socket
+would otherwise fail with a `426` naming neither the line nor its absence.
+
+#### The read-only branch, which was broken rather than wide (`0082`)
+
+Studio picks its database user per request — `readOnly ? POSTGRES_USER_READ_ONLY :
+POSTGRES_USER_READ_WRITE`, with one `POSTGRES_PASSWORD` substituted into both. This stack set only
+the read-write half, and **the entry that asked for this predicted the wrong failure**: it reasoned
+that the unset variable meant the read-only paths were handed the owner. They were not. The image's
+own default for that variable is `supabase_read_only_user`, so those paths already asked for the
+restricted role — and got `password authentication failed`, because the role ships **with no
+password** while `pg_hba.conf` trusts `127.0.0.1` and requires `scram-sha-256` from every container
+network. Read-only mode was not too powerful; it did not work.
+
+That also inverts what the fix is. Setting `POSTGRES_USER_READ_ONLY` explicitly changes no
+behaviour — it names the value the image already defaults to, and is set on both targets so the
+dependency is visible rather than inherited. **What makes the difference is the password**, and it
+is issued in the roles-init step rather than here: `supabase_read_only_user` is a RESERVED role
+(`only superusers can modify it`), and `db-init` connects as `postgres`, which is not a superuser on
+this image. So the `ALTER` sits beside the three scoped passwords in `supabase-db-roles-init` /
+`db-roles-init`, and `0082` holds the assertions — that the role exists, has a password, still holds
+`pg_read_all_data`, and **cannot write**, which is an `EXCEPTION` rather than a warning.
+
+**Which paths actually take it, measured** with `log_connections` on and one request per path:
+
+| Path | Connects as |
+| :--- | :--- |
+| `/api/mcp?read_only=true` | **`supabase_read_only_user`** |
+| `/api/mcp` (no flag) | `postgres` |
+| SQL editor (`/api/platform/pg-meta/default/query`), with or without `read_only` in the body | `postgres` |
+| Table editor listings (`/tables`) | `postgres` |
+
+So this narrows **one** caller: an MCP client that asks for read-only mode. Under it a write is
+refused — `cannot execute CREATE TABLE in a read-only transaction` — and reads still work, because
+the image's role holds `pg_read_all_data` and `BYPASSRLS`. Everything a human does in the console
+still runs as the owner, and no setting in this repository changes that: the table editor cannot use
+a read-only connection, and the SQL editor does not ask for one.
+
+**Which is why the `Administrator` check is load bearing rather than tidy.** Studio's own
+`/api/platform/projects/default/settings` hands whoever is signed in the project's `jwt_secret` and
+both service API keys, and the SQL editor runs as the owner. The door is not defence in depth over a
+restricted console; it is the only thing between a signed-in session and the database.
+
+**The password is the owner's, necessarily.** The image substitutes one password into both branches,
+so there is no separate secret to hold: this role cannot be rotated independently of `postgres`. It
+is not a new exposure — anything that can read it can already read `POSTGRES_PASSWORD`, in the same
+environment, in the same container — but it is a real limit on what this control is, and `0082`
+states it rather than absorbing it.
+
+**Two operational consequences.** The listener publishes on the port Studio itself used to publish,
+so `0002`'s Directory entry stays true and the container publishes nothing. And both halves fail
+closed: without `STUDIO_OAUTH_CLIENT_SECRET`, `0081` skips the registration with a `WARNING` and the
+substituter renders credentials that cannot authenticate — a stack that runs normally with a console
+nobody can open, which is the same posture as the loopback binding it replaces.
 
 ---
 

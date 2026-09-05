@@ -776,7 +776,7 @@ Compose port layout 1:1:
 | `api.<domain>` | supabase-kong | `:54321` |
 | `nodered.<domain>` | node-red | `:1880` |
 | `grafana.<domain>` | grafana | `:3002` |
-| `studio.<domain>` | supabase-studio | `:54323` |
+| `studio.<domain>` | supabase-kong `:8001` — the gateway's studio listener, off by default | `:54323` |
 | `docs.<domain>` | swagger-ui | `:8088` |
 
 Path-based routing on a single host is possible but fragile here: Grafana needs

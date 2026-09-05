@@ -105,7 +105,7 @@ project's own repository.
 | `supabase/edge-runtime:v1.74.2` | Supabase Edge Runtime |
 | `supabase/postgres-meta:v0.96.6` | Supabase postgres-meta |
 | `supabase/studio:2026.07.07-sha-a6a04f2` | Supabase Studio |
-| `envoyproxy/envoy:v1.31.5` | Envoy Proxy |
+| `envoyproxy/envoy:v1.39.1` | Envoy Proxy |
 | `prom/node-exporter:v1.12.1` | Prometheus node_exporter |
 | `swaggerapi/swagger-ui:v5.32.14` | Swagger UI |
 | `node:24-alpine`, `alpine:3.24` | Node.js, Alpine Linux and their packages |

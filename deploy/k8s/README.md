@@ -191,7 +191,7 @@ Seven subdomains, all on one Ingress, all derived from `global.publicBaseDomain`
 | `api.<domain>` | `supabase-kong:8000` | `:54321` |
 | `nodered.<domain>` | `node-red:1880` | `:1880` |
 | `grafana.<domain>` | `grafana:3000` | `:3002` |
-| `studio.<domain>` | `supabase-studio:3000` | `:54323` |
+| `studio.<domain>` | `supabase-kong:8001` (the gateway's studio listener — **off by default**) | `:54323` |
 | `docs.<domain>` | `swagger-ui:8080` | `:8088` |
 | `mqtt.<domain>` | `mosquitto:9001` (WebSockets) | `:9001` |
 | — | `mosquitto-external:1883` (LoadBalancer) | `:1883` |
@@ -207,12 +207,35 @@ curl -H 'Host: app.127.0.0.1.nip.io' http://127.0.0.1/
 kubectl -n acs-cymru get ingress
 ```
 
-Remove a route without disabling the service — `studio` and `docs` are the usual candidates, since
-neither is meant for anyone outside the operations team:
+Remove a route without disabling the service — `docs` is the usual candidate, since it is not meant
+for anyone outside the operations team:
 
 ```bash
-helm upgrade ... --set ingress.routes.studio=false --set ingress.routes.docs=false
+helm upgrade ... --set ingress.routes.docs=false
 ```
+
+**`studio` goes the other way: it is off by default and turning it on is the deliberate act.** The
+route publishes `supabase-kong:8001` — the gateway's studio listener, which runs an OAuth flow
+against this stack's own GoTrue and admits `Administrator` alone — and never `supabase-studio:3000`,
+which is a database console with no login of its own, running as the database owner. The
+NetworkPolicy follows the same shape: the ingress controller may reach the gateway on `8001`, the
+gateway may reach Studio on `3000`, and nothing else may reach Studio at all.
+
+```bash
+helm upgrade ... \
+  --set ingress.routes.studio=true \
+  --set secrets.studioOAuthClientSecret=$(openssl rand -hex 32) \
+  --set secrets.studioProxyHmacSecret=$(openssl rand -hex 32)
+```
+
+Both secrets are required and the **render fails naming them** if they are missing — publishing a
+door whose flow has no registered client would present as a broken proxy rather than as two empty
+values. Rotating `studioOAuthClientSecret` needs `db-init` to re-run, since `0081` stores its hash;
+rotating `studioProxyHmacSecret` signs everyone out and grants nobody anything.
+
+What this does **not** do is give Studio a second factor or a per-user audit trail of what was run
+in the SQL editor. It gates *who may open the console*; everything inside it still executes as the
+database owner.
 
 ### TLS
 

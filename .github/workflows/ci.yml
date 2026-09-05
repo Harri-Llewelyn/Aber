@@ -820,31 +820,51 @@ jobs:
             }
           done
 
-          # SUPABASE STUDIO MUST NOT BE ON THE INGRESS, and this is the assertion most worth
-          # having in this step. Studio has NO AUTHENTICATION -- no login, no roles, no session --
-          # and connects as the database owner, for whom RLS is not enforced. Routing it publishes
-          # an unauthenticated SQL editor, table editor and Vault UI at studio.<publicBaseDomain>.
+          # SUPABASE STUDIO MUST NOT BE ON THE INGRESS. Studio now has a login -- the gateway
+          # gates its listener on an Administrator session -- so this is no longer the assertion
+          # that it is unauthenticated. It is the assertion that PUBLISHING IT IS A DEPLOYMENT'S
+          # DECISION rather than a chart default: the console hands whoever signs in the project's
+          # jwt_secret and both service API keys, and its SQL editor runs as the database owner.
           #
           # It defaulted to ON until a review noticed, with a comment in values.yaml recommending
           # it be turned off. A default that has to be READ to be safe is not a safe default, and
-          # a comment is not a control. This is the control.
+          # a comment is not a control. This is the control, and the login did not retire it.
           if grep -qE '^\s+- host: studio\.' /tmp/prod-render.yaml; then
             echo "::error::the production example routes Supabase Studio on the Ingress."
-            echo "::error::Studio has no authentication and connects as the database owner, so"
-            echo "::error::that publishes an unauthenticated database console. If this is"
-            echo "::error::deliberate, it belongs behind an authenticating proxy -- and this"
-            echo "::error::check should be changed to assert THAT, not deleted."
+            echo "::error::It is behind a login, but it still hands whoever passes that login the"
+            echo "::error::project's jwt_secret and both service keys, and its SQL editor runs as"
+            echo "::error::the database owner. Publishing it is a deployment's decision to make"
+            echo "::error::deliberately, so ingress.routes.studio stays false in this example."
             exit 1
           fi
 
-          # And the Compose target's equivalent: published on loopback rather than 0.0.0.0. Checked
-          # here rather than in a compose-only job because the two targets' posture has to move
-          # together -- fixing one and forgetting the other is the drift this repository is built
-          # around catching.
-          if ! grep -qE '^\s+- "127\.0\.0\.1:\$\{STUDIO_PORT:-54323\}:3000"' docker-compose.yml; then
-            echo "::error::docker-compose.yml does not publish Supabase Studio on 127.0.0.1."
-            echo "::error::On 0.0.0.0 it is an unauthenticated database console reachable by"
-            echo "::error::anyone on the host's network."
+          # And the Compose target's equivalent. Checked here rather than in a compose-only job
+          # because the two targets' posture has to move together -- fixing one and forgetting the
+          # other is the drift this repository is built around catching.
+          #
+          # THIS USED TO ASSERT A LOOPBACK BINDING, and it was right until Studio got a door. The
+          # old posture was `127.0.0.1:${STUDIO_PORT:-54323}:3000` on the studio service, where the
+          # binding was the ONLY control and cost the thing people kept asking for -- reaching the
+          # console from anywhere but the host. The control is now an authenticating listener, so
+          # the assertion moves with it: studio publishes NOTHING of its own, and 54323 is the
+          # gateway's gated port. Asserting the old string here would demand the weaker control
+          # back.
+          awk '/^  supabase-studio:/{f=1;next} /^  [a-z]/{f=0} f' docker-compose.yml > /tmp/studio-block.yaml
+          if [ ! -s /tmp/studio-block.yaml ]; then
+            echo "::error::no supabase-studio service found in docker-compose.yml, so the checks"
+            echo "::error::below would pass vacuously. If the service was renamed, rename it here."
+            exit 1
+          fi
+          if grep -qE '^\s+ports:' /tmp/studio-block.yaml; then
+            echo "::error::the supabase-studio service publishes a port of its own."
+            echo "::error::It is reached through the gateway's authenticating listener; a direct"
+            echo "::error::publish bypasses that login entirely and exposes the console raw."
+            exit 1
+          fi
+          if ! grep -qE '^\s+- "\$\{STUDIO_PORT:-54323\}:8001"' docker-compose.yml; then
+            echo "::error::the gateway does not publish Studio's listener on 54323."
+            echo "::error::Studio has no ports of its own, so without this the console is"
+            echo "::error::unreachable on Compose and the login cannot be exercised at all."
             exit 1
           fi
 
