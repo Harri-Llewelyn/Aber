@@ -70,6 +70,12 @@ python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
 python supabase/functions/aas-export/test_aas_export.py
 python supabase/functions/aas-api/test_aas_api.py
 python supabase/functions/grafana-alert-webhook/test_grafana_alert_webhook.py
+# The Factory+ Directory adapter. Six checks run with nothing up -- that its registry entry still
+# grants no service-role key, and that the bearer check still precedes routing, which is the whole
+# boundary in front of routes the gateway deliberately exempts from key-auth. The rest need the
+# stack and centre on the reverse schema lookup: /v1/device and /v1/schema/{uuid} answer the same
+# question from opposite ends and nothing else compares them, so a disagreement is a 200 at both.
+python supabase/functions/fplus-directory/test_fplus_directory.py
 
 # Physical gateway enrolment — signs in as Administrator to mint tokens (issuing is a USER's act,
 # gated on has_role, so the service key cannot do it), then redeems them the way an appliance does:

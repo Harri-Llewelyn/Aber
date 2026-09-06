@@ -27,11 +27,11 @@
  * The obvious move is `pytest ingestion/`, and it was tried. It works today -- all 424 ingestion
  * tests pass in one interpreter. It is still not what this does, for reasons that are not taste:
  *
- *   * TWO SUITES DO REAL WORK IN `if __name__ == "__main__"`. test_aas_api.py and
- *     test_aas_export.py tear down the AAS fixture they provisioned there, AFTER the report, so a
- *     failing run still leaves its console output intact. pytest and `unittest discover` both skip
- *     that block outright. Against a live stack either one would leave provisioned rows behind on
- *     every run, and nothing would say so.
+ *   * THREE SUITES DO REAL WORK IN `if __name__ == "__main__"`. test_aas_api.py,
+ *     test_aas_export.py and test_fplus_directory.py tear down the AAS fixture they provisioned
+ *     there, AFTER the report, so a failing run still leaves its console output intact. pytest and
+ *     `unittest discover` both skip that block outright. Against a live stack either one would
+ *     leave provisioned rows behind on every run, and nothing would say so.
  *
  *   * THE SUITES SHARE MUTABLE MODULE STATE. They stub protobuf/paho/psycopg2 with
  *     `sys.modules.setdefault` and then rebind attributes on the imported module -- so the SECOND
@@ -58,10 +58,10 @@
  *   stack  Needs the composed stack up. Runs in `e2e-validation`.
  *   manual Deliberately has no automated runner. Must say why.
  *
- * A SUITE MAY DECLARE MORE THAN ONE LANE, and three do. test_aas_export.py and test_aas_api.py
- * each hold an offline layer that always runs and a live layer that skips itself for want of a
- * stack; test_gateway_enrollment.py asserts against seeded accounts that only e2e has. Running
- * them in both places is not duplication -- the two runs check different things.
+ * A SUITE MAY DECLARE MORE THAN ONE LANE, and four do. test_aas_export.py, test_aas_api.py and
+ * test_fplus_directory.py each hold an offline layer that always runs and a live layer that skips
+ * itself for want of a stack; test_gateway_enrollment.py asserts against seeded accounts that only
+ * e2e has. Running them in both places is not duplication -- the two runs check different things.
  *
  * =================================================================================================
  * THE VACUOUS-GREEN RULE, WHICH DECIDED SEVEN OF THESE PLACEMENTS
@@ -485,6 +485,22 @@ export const SUITES = {
       'That agreement is the whole reason the mapping lives in _shared/aas/shell.ts, and it is ' +
       'the property that would rot silently -- an ERP reading a live submodel and a partner ' +
       'reading a shipped .aasx would disagree, with both endpoints reporting success.',
+  },
+  'supabase/functions/fplus-directory/test_fplus_directory.py': {
+    lanes: ['unit', 'stack'],
+    why:
+      'The Factory+ Directory adapter, and above all the reverse schema lookup. Six of its ' +
+      'nineteen checks run offline: that the registry entry still grants no service-role key -- a ' +
+      'Directory is a live read over the WHOLE address space, so the key would hand every ' +
+      'authenticated user a view their policies do not grant -- and that the bearer check still ' +
+      'precedes routing, which is the entire boundary in front of these key-auth-exempt routes. ' +
+      'THE REST NEED THE STACK, and two of them are the reason the suite exists: /v1/device and ' +
+      '/v1/schema/{uuid} answer the same question from opposite ends, composed by different ' +
+      'queries, and a disagreement is a 200 at both endpoints. The live layer also provisions a ' +
+      'device attached through the legacy `devices.schema_id` beside the join-table ' +
+      '`device_submodels` one, because a reverse lookup written against the join table alone ' +
+      'passes every other assertion in the file while omitting every device provisioned the ' +
+      'older way.',
   },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of

@@ -680,15 +680,29 @@ entry, because a Directory is a live read across the whole address space and the
 hand every authenticated user a view their RLS policies do not grant. That property is the thing any
 expansion must not quietly drop.
 
-**What is genuinely missing is smaller, and worth naming exactly.** `GET /v1/schema` lists the schema
-UUIDs in use, but there is **no `/v1/schema/{uuid}`** — the reverse lookup, *which devices implement
-this schema*, is the one route in the issue that does not exist. UUID-to-topic resolution already
-works, and already survives relocation, because the address is composed from
-`(sparkplug_group, sparkplug_id)` at read time rather than stored: `relocate_devices()` moves a device
-between cells without touching either, so continuity is a property of the schema rather than something
-the Directory has to maintain.
+**The reverse lookup shipped on 2026-09-06 and has left this entry**, which is what remains of the
+REST half. `GET /v1/schema/{uuid}` — *which devices implement this schema* — was the one route in
+the issue that did not exist; its substance is now in
+[The Factory+ Directory adapter](../supabase/README.md#the-factory-directory-adapter), and
+`test_fplus_directory.py` is the suite. UUID-to-topic resolution already worked, and already
+survived relocation, because the address is composed from `(sparkplug_group, sparkplug_id)` at read
+time rather than stored: `relocate_devices()` moves a device between cells without touching either,
+so continuity is a property of the schema rather than something the Directory has to maintain.
 
-**The MQTT interface is the real new surface, and the file already argues with itself about it.** Its
+**Three things that route argued came out differently in the building.** It deliberately does NOT
+filter on `status` the way the collection does — `/v1/schema` lists what is in use and returns only
+`active` versions, but an identifier a caller already holds resolves to whatever it names, and the
+most useful case a filter would have hidden is an **archived** schema with devices still attached,
+which is a migration that has not finished. It reads `device_schemas` rather than
+`device_submodels`, because the view unions the join table with the legacy 1:1 `devices.schema_id`
+and the join table alone would silently omit exactly the devices an old schema still holds — the
+suite provisions one of each rather than trusting that. And the forward and reverse answers are
+composed by **different queries over the same view**, so a disagreement between them is a `200` at
+both endpoints; the suite asserts the round trip rather than either half, which is the same
+reasoning `TestExportAgreement` follows for the two AAS surfaces.
+
+**What is left of this item is the MQTT interface, which is the real new surface, and the file
+already argues with itself about it.** Its
 header states what this deliberately is not: *"It does not consume Sparkplug births to build its own
 registry, it has no change-notify metrics, and it does not register itself with a Configuration Store,
 because there is no ConfigDB here to register with."* The issue's first implementation step — have the
@@ -698,8 +712,10 @@ from what devices claim about themselves. Given the rule that a self-declared ma
 -- see [Schema Conformance](../ingestion/README.md#schema-conformance) -- that is a trust decision, not
 a plumbing one.
 
-**And the local-namespace caveats are load bearing.** Both `/v1/schema` and `/v1/service` return
-`namespace: "local"` with a note that these are not registered Factory+ UUIDs. Publishing the same
+**And the local-namespace caveats are load bearing.** All three of `/v1/schema`,
+`/v1/schema/{uuid}` and `/v1/service` return `namespace: "local"` with a note that these are not
+registered Factory+ UUIDs — from one shared constant, since the qualification is the thing a second
+route is most likely to be written without. Publishing the same
 values to a well-known MQTT topic strips that note off them — a headless subscriber receives bare
 UUIDs with no way to know they were locally minted. Whatever the topic payload looks like, it has to
 carry the qualification, or the interoperability claim becomes false the moment it leaves HTTP.

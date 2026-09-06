@@ -1514,8 +1514,10 @@ paths:
         stack's* components.
 
         > This is **not** the Factory+ Directory service. It answers "where is Grafana", not
-        > "which devices exist and what schemas do they use". There is no `/v1/device`,
-        > `/v1/address/{group}/{node}` or `/v1/service/{uuid}` endpoint on this platform.
+        > "which devices exist and what schemas do they use" — those are the `Directory` tag's
+        > `/v1/…` paths, served by `fplus-directory` against different tables. This relation has
+        > no `/v1/` surface of its own, and there is no `/v1/service/{uuid}` endpoint anywhere on
+        > this platform.
       parameters:
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
@@ -2460,8 +2462,8 @@ paths:
         | `Schema_UUID` | `schemas.id` — **locally minted**, not registered with AMRC |
         | `Service_UUID` | `directory_services.id` — likewise local |
 
-        See `/ping`, `/v1/device`, `/v1/address/{group_id}/{node_id}`, `/v1/schema` and
-        `/v1/service` below for the individual endpoints.
+        See `/ping`, `/v1/device`, `/v1/address/{group_id}/{node_id}`, `/v1/schema`,
+        `/v1/schema/{schema_uuid}` and `/v1/service` below for the individual endpoints.
       responses:
         '404':
           description: |
@@ -2603,6 +2605,52 @@ paths:
                         name: { type: string }
                         version: { type: integer }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/schema/{schema_uuid}:
+    get:
+      tags: [Directory]
+      summary: Which devices implement one schema
+      description: |
+        The reverse of every other lookup here. The rest of this tag starts from an asset and
+        reports its schemas; this starts from a schema and reports its assets — the question a
+        client integrating against a **model** rather than against a machine asks.
+
+        **No status filter, unlike `/v1/schema`.** That route lists what is in use and returns
+        only `active` versions; this one resolves an identifier the caller already holds, and the
+        most useful case it answers is the one a filter would hide — an **archived** schema with
+        devices still attached, which is a migration that has not finished. `status` is returned
+        so the caller can tell the two apart.
+
+        Members are read through the `device_schemas` **view**, so a device provisioned through
+        the legacy 1:1 `devices.schema_id` is reported alongside one carrying `device_submodels`
+        rows. Each device reports its **full** schema set, not just this one. Archived devices are
+        excluded; a schema nothing implements is `200` with an empty `devices` array, not `404`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: schema_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: '`schemas.id`. A `schema_name` here returns `400` with a pointer to `/v1/schema`.'
+      responses:
+        '200':
+          description: The schema and the devices implementing it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespace: { type: string, example: local }
+                  note: { type: string }
+                  uuid: { type: string, format: uuid }
+                  name: { type: string }
+                  version: { type: integer }
+                  status: { type: string, enum: [draft, active, archived] }
+                  devices: { type: array, items: { $ref: '#/components/schemas/DirectoryDevice' } }
+        '400': { description: Not an RFC4122 UUID. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: No such schema, or none the caller's policies let it read. }
 
   /v1/service:
     get:

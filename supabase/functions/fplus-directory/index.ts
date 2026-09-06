@@ -9,11 +9,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  * no column, trigger or ingestion path changed to support it, exactly as `aas-export` is an
  * adapter rather than a storage format.
  *
- * WHAT IT IS NOT. This is not the AMRC Directory service. It answers the four questions an
- * upstream Factory+ client asks -- which devices exist, what is at this Sparkplug address, which
- * schemas are in use, which services are advertised -- and nothing else. It does not consume
- * Sparkplug births to build its own registry, it has no change-notify metrics, and it does not
- * register itself with a Configuration Store, because there is no ConfigDB here to register with.
+ * WHAT IT IS NOT. This is not the AMRC Directory service. It answers the questions an upstream
+ * Factory+ client asks -- which devices exist, what is at this Sparkplug address, which schemas
+ * are in use and which devices implement one, which services are advertised -- and nothing else.
+ * It does not consume Sparkplug births to build its own registry, it has no change-notify
+ * metrics, and it does not register itself with a Configuration Store, because there is no
+ * ConfigDB here to register with.
  *
  * IDENTITY MAPPING, which is the whole substance of the adapter:
  *
@@ -77,6 +78,16 @@ interface DirectoryEntry {
 }
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * The qualification every schema identifier leaves this service wearing.
+ *
+ * ONE constant, read by both schema routes. It is the sentence that stops a local `schemas.id`
+ * being mistaken for a registered Factory+ Schema_UUID, so the two routes must not be able to
+ * word it differently -- a client that strips it off is making a choice, one that never carried
+ * it is being misled.
+ */
+const LOCAL_SCHEMA_NOTE = "Locally minted schema identifiers, not registered Factory+ Schema_UUIDs.";
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
@@ -223,13 +234,29 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     // -------------------------------------------------------------------------------------
-    // GET /v1/schema -- Schema UUIDs in use
+    // GET /v1/schema            -> Schema UUIDs in use
+    // GET /v1/schema/{uuid}     -> which devices implement one
     // -------------------------------------------------------------------------------------
-    // LOCALLY MINTED, and the response says so. Factory+ Schema_UUIDs are registered against
-    // the AMRC schema repository; these are this deployment's own `schemas.id` values. Handing
-    // them back unqualified would assert an interoperability that does not exist -- the same
-    // rule the semantic-id namespace follows.
-    if (path === "/v1/schema") {
+    // LOCALLY MINTED, and BOTH responses say so, from the same constant. Factory+ Schema_UUIDs
+    // are registered against the AMRC schema repository; these are this deployment's own
+    // `schemas.id` values. Handing them back unqualified would assert an interoperability that
+    // does not exist -- the same rule the semantic-id namespace follows. The qualification is a
+    // shared constant rather than two string literals precisely because it is load bearing: a
+    // second copy is a second thing to forget when a route is added.
+    if (path === "/v1/schema" || path.startsWith("/v1/schema/")) {
+      const requested = path === "/v1/schema" ? null : decodeURIComponent(path.slice("/v1/schema/".length));
+
+      if (requested !== null && !UUID_RE.test(requested)) {
+        // Same courtesy as /v1/device: a client that sent `schema_name` sent the wrong
+        // identifier, and saying which one is right beats an empty 404.
+        return json({
+          error: "Schema_UUID must be an RFC4122 UUID",
+          hint: "This platform's schema_name is a different identifier; GET /v1/schema lists the UUIDs in use.",
+        }, 400);
+      }
+
+      if (requested) return await schemaMembers(supabase, requested);
+
       const { data, error } = await supabase
         .from("schemas")
         .select("id,schema_name,version,status")
@@ -237,7 +264,7 @@ export default async function handler(req: Request): Promise<Response> {
       if (error) return json({ error: "Schema lookup failed", details: error.message }, 500);
       return json({
         namespace: "local",
-        note: "Locally minted schema identifiers, not registered Factory+ Schema_UUIDs.",
+        note: LOCAL_SCHEMA_NOTE,
         schemas: (data ?? []).map((s) => ({
           uuid: s.id,
           name: s.schema_name,
@@ -278,7 +305,15 @@ export default async function handler(req: Request): Promise<Response> {
 
     return json({
       error: "Not found",
-      served: ["/ping", "/v1/device", "/v1/device/{uuid}", "/v1/address/{group}/{node}", "/v1/schema", "/v1/service"],
+      served: [
+        "/ping",
+        "/v1/device",
+        "/v1/device/{uuid}",
+        "/v1/address/{group}/{node}",
+        "/v1/schema",
+        "/v1/schema/{uuid}",
+        "/v1/service",
+      ],
     }, 404);
   } catch (err) {
     return json(
@@ -286,6 +321,82 @@ export default async function handler(req: Request): Promise<Response> {
       500,
     );
   }
+}
+
+/**
+ * GET /v1/schema/{uuid} -- the reverse of the lookup every other route performs.
+ *
+ * Every other endpoint here starts from an asset and reports its schemas. This starts from a
+ * schema and reports its assets, which is the one question a client integrating against a MODEL
+ * rather than against a machine actually asks: it holds a Schema_UUID and wants the addresses
+ * publishing to it.
+ *
+ * THE STATUS FILTER IS DELIBERATELY ABSENT, unlike the collection above. `/v1/schema` lists what
+ * is in use and filters to `active`; this resolves an identifier a client already holds, and the
+ * most useful case it answers is the one a filter would hide -- an ARCHIVED schema with devices
+ * still attached to it, which is a migration that has not finished. Answering 404 there would
+ * report "no such schema" about a schema whose members are the answer. The status is returned
+ * instead, so a caller can tell the two apart for itself.
+ *
+ * DEVICES AS FULL ENTRIES, not the UUID list `/v1/device` returns, following
+ * `/v1/address/{group}/{node}`: both routes answer "what is behind this thing", and a client
+ * asking either one is about to want the addresses. The bare device collection is a different
+ * shape because it is the whole fleet.
+ *
+ * THROUGH THE VIEW for the same reason attachSchemas reads it -- `device_submodels` alone would
+ * silently omit every device provisioned through the legacy 1:1 `devices.schema_id`, and those
+ * are exactly the devices an archived schema still holds.
+ */
+async function schemaMembers(
+  supabase: ReturnType<typeof createClient>,
+  schemaId: string,
+): Promise<Response> {
+  const { data: schemas, error: schemaError } = await supabase
+    .from("schemas")
+    .select("id,schema_name,version,status")
+    .eq("id", schemaId);
+  if (schemaError) return json({ error: "Schema lookup failed", details: schemaError.message }, 500);
+
+  const schema = (schemas ?? [])[0] as
+    | { id: string; schema_name: string; version: number; status: string }
+    | undefined;
+  if (!schema) return json({ error: "No such schema" }, 404);
+
+  const { data: members, error: memberError } = await supabase
+    .from("device_schemas")
+    .select("device_id")
+    .eq("schema_id", schemaId);
+  if (memberError) return json({ error: "Schema lookup failed", details: memberError.message }, 500);
+
+  const deviceIds = [...new Set((members ?? []).map((row) => String((row as { device_id: string }).device_id)))];
+
+  // A schema with no members is a 200 with an empty list, NOT a 404. "Nothing implements this
+  // yet" is an answer, and it is the answer a client gets while a model is being rolled out.
+  let entries: DirectoryEntry[] = [];
+  if (deviceIds.length) {
+    const { data: devices, error: deviceError } = await supabase
+      .from("devices")
+      .select("id,name,sparkplug_id,status,is_quarantined,gateway_id,gateways(sparkplug_id,sparkplug_group)")
+      .in("id", deviceIds)
+      .eq("is_archived", false);
+    if (deviceError) return json({ error: "Schema lookup failed", details: deviceError.message }, 500);
+    // attachSchemas re-reads the view to give each device its FULL set, which is not the set of
+    // one this query filtered on: a device implementing three submodels reports three here, the
+    // same as it does through /v1/device.
+    entries = await attachSchemas(supabase, (devices ?? []).map(deviceEntry));
+  }
+
+  return json({
+    namespace: "local",
+    note: LOCAL_SCHEMA_NOTE,
+    uuid: schema.id,
+    name: schema.schema_name,
+    version: schema.version,
+    // See the docblock: this is here so that an archived schema does not have to be inferred
+    // from its absence somewhere else.
+    status: schema.status,
+    devices: entries,
+  });
 }
 
 /**

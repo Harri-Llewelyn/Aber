@@ -1863,6 +1863,7 @@ rather than an adopted format.
 | `GET /v1/device/{uuid}` | One device's Sparkplug address, status and schemas |
 | `GET /v1/address/{group}/{node}` | The edge node at that address and the devices behind it |
 | `GET /v1/schema` · `GET /v1/service` | Locally minted schema / service identifiers |
+| `GET /v1/schema/{uuid}` | The devices implementing one schema — the **reverse** lookup |
 
 **It is served at the unprefixed paths**, not under `/functions/v1/`, because a Factory+ client has
 no Supabase `apikey` and no way to acquire one. Those Kong routes are therefore exempt from
@@ -1874,6 +1875,16 @@ It **queries as the caller**, not as the service role: a Directory is a live rea
 address space, so running it privileged would hand every authenticated user a view their RLS
 policies do not grant them. Its entry in `FUNCTION_REGISTRY` grants no `SUPABASE_SERVICE_ROLE_KEY`,
 which makes that structural rather than a discipline.
+
+**The reverse lookup deliberately does not filter on status.** `/v1/schema` lists what is in use
+and returns only `active` versions; `/v1/schema/{uuid}` resolves an identifier the caller already
+holds, and the most useful case it answers is the one a filter would hide — an **archived** schema
+with devices still attached to it, which is a migration that has not finished. Answering `404`
+there would report "no such schema" about a schema whose members are the answer, so the row's
+`status` is returned instead and the caller decides. Members are read through the `device_schemas`
+**view**, not `device_submodels`, so a device provisioned through the legacy 1:1 `devices.schema_id`
+is not silently omitted — and those are exactly the devices an old schema still holds. A schema
+nothing implements is a `200` with an empty list.
 
 **What it does not claim.** Schema and service identifiers are this deployment's own UUIDs, and the
 response says so (`"namespace": "local"`). Factory+ `Schema_UUID`s are registered against the AMRC
