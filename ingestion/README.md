@@ -925,6 +925,11 @@ certificate would report a healthy TLS connection while talking to anything at a
 `GET :9108/metrics`, Prometheus text format, **no credential**. `INGESTION_METRICS_PORT=0` disables
 it. Issues #22 and #24.
 
+**The host mapping is `127.0.0.1` only.** `curl localhost:9108/metrics` works on the deployment host
+and nowhere else; the endpoint carries no credential, so who can reach the port is the whole of the
+control. Prometheus is unaffected — it targets `ingestion:9108` over the compose network. A scraper
+on another machine joins that network or comes through a tunnel.
+
 **It renders the counter registry the daemon already kept** — it is not a second instrumentation.
 Every `count()` sits at the site that already made the decision, one-to-one with an existing
 `logger.warning`, and [`metrics.py`](metrics.py) translates those flat names onto Prometheus names

@@ -398,7 +398,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 
 | Service | Container | Image | Port |
 | :--- | :--- | :--- | :--- |
-| `supabase-db` | `acs-cymru_supabase_db` | `supabase/postgres:17.6.1.160` | `54322:5432` |
+| `supabase-db` | `acs-cymru_supabase_db` | `supabase/postgres:17.6.1.160` | `127.0.0.1:54322:5432` |
 | `supabase-db-roles-init` | `acs-cymru_supabase_db_roles_init` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-db-init` | `acs-cymru_supabase_db_init` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
@@ -412,13 +412,13 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `supabase-storage-policies` | `acs-cymru_supabase_storage_policies` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-meta` | `acs-cymru_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
 | `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | — (reached through the gateway's `54323` — see below) |
-| `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `5433:5432` |
+| `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `127.0.0.1:5433:5432` |
 | `timescaledb-maintenance` | `acs-cymru_timescaledb_maintenance` | `timescale/timescaledb:2.29.2-pg17` | — |
 | `mosquitto-tls-init` | `acs-cymru_mosquitto_tls_init` | `./mosquitto/tls-init/Dockerfile` | — |
 | `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.22` | — |
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
-| `ingestion` | `acs-cymru_ingestion` | `./ingestion/Dockerfile` | `9108:9108` |
+| `ingestion` | `acs-cymru_ingestion` | `./ingestion/Dockerfile` | `127.0.0.1:9108:9108` |
 | `playback` | `acs-cymru_playback` | `./ingestion/Dockerfile` (same image as `ingestion`, different command) | — |
 | `cold-archiver` | `acs-cymru_cold_archiver` | `./ingestion/Dockerfile` (same image as `ingestion`, different command) | — |
 | `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |

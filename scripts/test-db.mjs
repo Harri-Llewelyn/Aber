@@ -144,7 +144,11 @@ console.log(`${c.bold('Starting')} throwaway ${IMAGE} on port ${PORT}…`)
 const up = run('docker', [
   'run', '-d', '--name', CONTAINER,
   '-e', `POSTGRES_PASSWORD=${PASSWORD}`,
-  '-p', `${PORT}:5432`,
+  // LOOPBACK ONLY, matching what docker-compose.yml now does with 5433 and 54322. This one is
+  // throwaway and short-lived, which changes how long the exposure lasts and not what it is:
+  // a Postgres with a known password, published on every interface. Every consumer is the
+  // suite runner on this machine.
+  '-p', `127.0.0.1:${PORT}:5432`,
   IMAGE
 ])
 if (up.status !== 0) die('could not start the container.', up.stderr)

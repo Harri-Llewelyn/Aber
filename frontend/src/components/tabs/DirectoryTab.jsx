@@ -54,6 +54,87 @@ export function isBrowsableEndpoint(url) {
   return host.includes('.') || host.includes(':')
 }
 
+/** The spellings of "this machine". `[::1]` because that is what location.hostname gives for IPv6. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
+/**
+ * Whether the browser reading this page is running ON the deployment host.
+ *
+ * WHY THE DASHBOARD'S OWN ADDRESS ANSWERS THIS. Every `http://localhost:...` row here means "port
+ * N of the machine the stack runs on", and whether that is reachable depends entirely on which
+ * machine the READER is sitting at -- a fact no column in `directory_services` can hold, because it
+ * differs per viewer rather than per service. But the browser already knows it: if this page was
+ * itself served from `localhost`, the reader is on the host and every other `localhost` address
+ * resolves to the same place. If it was served from `acs-server.factory.local`, they are not, and
+ * `localhost:9090` means their own laptop.
+ *
+ * THE ONE CASE THIS GETS WRONG is a reader who tunnelled the DASHBOARD to their own machine and
+ * nothing else: `location.hostname` is `localhost`, so a Prometheus link is offered and fails. It
+ * is the right trade anyway -- the alternative withholds a working link from everyone developing on
+ * the host, which is the common case, to protect a reader who already knows what a tunnel is.
+ */
+export function viewerIsOnDeploymentHost(hostname) {
+  return LOOPBACK_HOSTS.has(String(hostname))
+}
+
+/**
+ * Whether to offer this endpoint as a LINK, and what to say when the answer is no.
+ *
+ * TWO FACTS, AND NEITHER IS SUFFICIENT ALONE. `isBrowsableEndpoint` answers "is this a web page",
+ * which is all a URL carries. `exposure` (0084) answers "what can reach the port" -- NETWORK,
+ * HOST, INTERNAL, or UNKNOWN when nobody recorded it. A link is honest only when the string is a
+ * web page AND something at the reader's position can reach it.
+ *
+ * THE LOOPBACK-ADDRESS TEST IS SEPARATE FROM THE `HOST` EXPOSURE, and both are needed, because the
+ * two describe different things and can disagree. Studio is `NETWORK` -- envoy publishes 54323 on
+ * every interface -- while its URL still reads `http://127.0.0.1:54323`, which is the
+ * STUDIO_PUBLIC_URL default rather than a claim about the binding. A remote browser cannot use that
+ * ADDRESS however broadly the PORT is published, so the address is tested too.
+ *
+ * UNKNOWN IS TREATED AS NETWORK, deliberately, and it is the one place here that does not err
+ * towards copy. This column arrived after the rows did; anything registering into this table that
+ * has never heard of it defaults to UNKNOWN, and demoting every such row to a copy button would
+ * make adding the column a regression for services that are perfectly reachable. The loopback and
+ * container-hostname tests still apply to those rows, which is what the page could already do.
+ */
+export function endpointReach(url, exposure, viewerOnHost) {
+  let parsed
+  try {
+    parsed = new URL(String(url))
+  } catch {
+    return { open: false, note: 'Not a web address -- click to copy it' }
+  }
+
+  if (!isBrowsableEndpoint(url)) {
+    // Two different reasons land here and they deserve different sentences: a `mqtt://` or
+    // `postgres://` row is not a web page at all, while `http://node-exporter:9100` is one and is
+    // simply not addressable from outside the container network.
+    const isWeb = parsed.protocol === 'http:' || parsed.protocol === 'https:'
+    return {
+      open: false,
+      note: isWeb
+        ? 'Internal to the stack -- this hostname resolves inside the container network only'
+        : 'Not a web page -- click to copy this address'
+    }
+  }
+
+  if (exposure === 'INTERNAL') {
+    return { open: false, note: 'No host port -- reachable from inside the container network only' }
+  }
+
+  const loopbackAddress = LOOPBACK_HOSTS.has(parsed.hostname)
+  if (loopbackAddress || exposure === 'HOST') {
+    if (viewerOnHost) return { open: true, note: 'Open this endpoint in a new tab' }
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80')
+    return {
+      open: false,
+      note: `Reachable from the deployment host only. From here: ssh -L ${port}:localhost:${port} <host>`
+    }
+  }
+
+  return { open: true, note: 'Open this endpoint in a new tab' }
+}
+
 /**
  * The endpoint cell: a link when it can be opened, a copy button when it cannot.
  *
@@ -62,17 +143,18 @@ export function isBrowsableEndpoint(url) {
  * `mqtt://localhost:1883` was not a web page was to click it and get a failed tab. Giving each
  * affordance a visible shape makes "which of these can I open" answerable by looking.
  */
-function EndpointCell({ url, onNotify }) {
+function EndpointCell({ url, exposure, viewerOnHost, onNotify }) {
   const [copied, setCopied] = useState(false)
+  const reach = endpointReach(url, exposure, viewerOnHost)
 
-  if (isBrowsableEndpoint(url)) {
+  if (reach.open) {
     return (
       <a
         className="endpoint-action endpoint-open mono"
         href={url}
         target="_blank"
         rel="noreferrer"
-        title="Open this endpoint in a new tab"
+        title={reach.note}
       >
         {url} <IconExternalLink size={10} />
       </a>
@@ -97,7 +179,7 @@ function EndpointCell({ url, onNotify }) {
       type="button"
       className="endpoint-action endpoint-copy mono"
       onClick={copy}
-      title="Not a web page -- click to copy this address"
+      title={reach.note}
     >
       {url} {copied ? <IconCheck size={10} /> : <IconCopy size={10} />}
     </button>
@@ -248,7 +330,61 @@ function LivenessCell({ status, lastHeartbeat }) {
   )
 }
 
+/**
+ * Where this service can be reached FROM, which is a different question from whether it is up.
+ *
+ * A SEPARATE COLUMN RATHER THAN ONLY AN AFFORDANCE. The endpoint cell already acts on this -- a
+ * HOST row read from another machine renders as a copy button -- but acting on it silently makes
+ * the page's behaviour depend on a fact the reader cannot see, and "why is this one a button?" then
+ * has no answer on screen. It is also the column that explains a `not observed` liveness badge
+ * sitting beside a service that is definitely running.
+ *
+ * `UNKNOWN` GETS WORDS, NOT A DASH, for the reason LivenessCell gives above: a dash reads as a
+ * rendering gap, and a rendering gap invites the assumption that it is fine.
+ *
+ * AMBER ON `host only`, AND IT IS NOT SAYING THE SERVICE IS UNHEALTHY. Prometheus being bound to
+ * loopback is a decision working exactly as intended, and LivenessCell's rule -- that a neutral
+ * fact must not be dressed as good or bad news -- applies here too. `badge-warning` is used in the
+ * sense App.css gives it, "look at this": this is the one value that changes what the row's endpoint
+ * cell does, and the reader who wonders why there is no link should be drawn to the answer rather
+ * than have to hover for it. The tooltip carries the reason so the colour never has to.
+ */
+function ExposureCell({ exposure }) {
+  if (exposure === 'NETWORK') {
+    return (
+      <span className="badge badge-neutral" title="Published on every interface. Reachable from another machine, subject to the firewall and DNS -- neither of which this stack controls.">
+        network
+      </span>
+    )
+  }
+  if (exposure === 'HOST') {
+    return (
+      <span className="badge badge-warning" title="Bound to 127.0.0.1. The deployment host, or an SSH tunnel from anywhere else. The endpoint carries no authentication of its own, which is why the binding is the control.">
+        host only
+      </span>
+    )
+  }
+  if (exposure === 'INTERNAL') {
+    return (
+      <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="No host port at all. Reachable from inside the container network by service name, and from nowhere outside it.">
+        internal
+      </span>
+    )
+  }
+  return (
+    <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="Nothing recorded where this service can be reached from. Registered by something that predates the exposure column, or by something that does not set it — see migration 0084.">
+      not recorded
+    </span>
+  )
+}
+
 function ServiceTable({ rows, onNotify }) {
+  // Read once per render rather than per row. `window` is guarded because this module is imported
+  // by tests that render without a location.
+  const viewerOnHost = viewerIsOnDeploymentHost(
+    typeof window === 'undefined' ? '' : window.location?.hostname
+  )
+
   return (
     <div className="table-wrap">
       <table className="table-directory">
@@ -256,7 +392,8 @@ function ServiceTable({ rows, onNotify }) {
           <tr>
             <th title="Service name">Service Name</th>
             <th title="Architecture category">Service Type</th>
-            <th title="Web endpoints open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
+            <th title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
+            <th title="Where the service can be reached from, as a property of its port binding. Set by migration 0084 and describing the Compose deployment; a deployment that publishes differently updates it">Reach</th>
             <th title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</th>
           </tr>
         </thead>
@@ -266,7 +403,15 @@ function ServiceTable({ rows, onNotify }) {
               <td><strong>{s.service_name}</strong></td>
               <td><span className="badge badge-neutral">{s.service_type}</span></td>
               <td className="cell-endpoint">
-                <EndpointCell url={s.endpoint_url} onNotify={onNotify} />
+                <EndpointCell
+                  url={s.endpoint_url}
+                  exposure={s.exposure}
+                  viewerOnHost={viewerOnHost}
+                  onNotify={onNotify}
+                />
+              </td>
+              <td>
+                <ExposureCell exposure={s.exposure} />
               </td>
               <td>
                 <LivenessCell status={s.status} lastHeartbeat={s.last_heartbeat} />

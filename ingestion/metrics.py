@@ -22,8 +22,13 @@ more auditable half of what the library would do.
 WHAT THIS ENDPOINT MUST NOT BECOME, and the line has moved once -- deliberately, and this records
 where it now sits.
 
-IT NEEDS NO CREDENTIAL AND IS PUBLISHED TO THE HOST (`9108:9108`), so anything here is exposed to
-whatever can reach that port. Every addition is a decision, not a detail.
+IT NEEDS NO CREDENTIAL, so anything here is exposed to whatever can reach the port. Every addition
+is a decision, not a detail.
+
+The port is now bound to `127.0.0.1:9108:9108` rather than every interface, which narrows WHO can
+reach it and changes nothing about what this file may put behind it. Prometheus scrapes
+`ingestion:9108` over the compose network and never used the host mapping; the rules below were
+written for an unauthenticated endpoint and still are.
 
 IT USED TO SERVE COUNTERS AND NOTHING ELSE. It now also serves FIVE GAUGES DESCRIBING THE
 APPLIANCES THEMSELVES -- uptime, load, available memory, free disk, and when each last reported --

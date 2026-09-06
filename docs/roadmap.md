@@ -1245,21 +1245,82 @@ constraint on other decisions. **What is missing is the statement of what Compos
 expected to enforce**, so that a control present on one target and absent on the other is a recorded
 decision rather than a discovery.
 
-### The two database ports are published for a reason that does not require publishing them
+### The published-port surface has been narrowed, and this records what is left of it
 
-Compose binds `5433:5432` and `${SUPABASE_DB_PORT:-54322}:5432` on all interfaces. The reason is
+**The two database ports have landed on `127.0.0.1` and left this list on 2026-09-06.** Compose bound
+`5433:5432` and `${SUPABASE_DB_PORT:-54322}:5432` on all interfaces. The reason they were published is
 recorded in `deploy/k8s/README.md` and in CI, and it is **collision avoidance with a local Postgres**
-— the *number* is what matters, and `127.0.0.1:5433:5432` avoids the collision identically while
-taking two databases off the host's network.
+— the *number* is what mattered, and `127.0.0.1:5433:5432` avoids the collision identically while
+taking two databases off the host's network. `scripts/test-db.mjs` published its throwaway container
+the same way and now does not: short-lived changes how long the exposure lasts, not what it is.
 
-**The precedent for that is already in the same file, twice, with the argument written out.** Studio
-is bound to `127.0.0.1` because "the only way to reach it from elsewhere is an SSH tunnel, which is
-the correct amount of friction for a tool that can drop a table", and Prometheus the same way. A raw
-Postgres port is the tool that can drop a table. The comment beside the remaining published ports
-states the rule the stack means to follow — everything else is published because it **authenticates**
-(Grafana, the frontend, Node-RED) or is **a protocol endpoint that has to be reachable** (the broker)
-— and the two databases satisfy neither clause. This is the smallest change in this item and the
-largest reduction in exposed surface.
+**The ingestion metrics endpoint went with them, and its own premise had expired.** `9108` carries no
+credential — [`ingestion/metrics.py`](../ingestion/metrics.py) draws a careful line around what may
+appear there precisely because of that — and the block publishing it argued that the port had to be
+open because "this stack ships no Prometheus" to scrape it. One was added (issues #22 and #24), and
+[`prometheus/prometheus.yml`](../prometheus/prometheus.yml) targets `ingestion:9108` over the compose
+network exactly as it targets node-exporter. The host mapping was never what made the endpoint
+scrapeable, and once the scraper arrived it stopped being what made it reachable either.
+`curl localhost:9108/metrics` is unaffected.
+
+**The rule all three were measured against** is stated beside prometheus in `docker-compose.yml`: a
+port is published broadly because it either **authenticates** (Grafana, the frontend, Node-RED) or is
+**a protocol endpoint that has to be reachable** (the broker). None of the three satisfied either
+clause. Note that the precedent this item used to cite — Studio's `127.0.0.1` binding — no longer
+exists: `0081` replaced it with a login on the gateway's studio listener (§ the note at the head of
+this document), so Prometheus is now the standing example rather than one of two.
+
+### What is still published, and has not been argued either way
+
+`swagger-ui:8088` serves static documentation with no credential. `i3x-service:8090` requires a caller
+JWT and passes it to PostgREST, so RLS decides what it returns. Neither is in the class of a raw
+Postgres port, and neither is claimed here to be wrong — what is missing is that the file now records
+a decision beside every port that was narrowed and beside none of the ports that were not, which is
+the same asymmetry this item complains about between the two targets.
+
+### Compose publishes eight ports where Kubernetes publishes seven hostnames
+
+The two targets do not disagree about security here so much as about **shape**, and this is the last
+place where a Compose stack looks nothing like the chart.
+
+`templates/ingress.yaml` gives Kubernetes one entry point and routes by hostname:
+`grafana.<publicBaseDomain>`, `nodered.<…>`, `app.<…>`, `studio.<…>`, `docs.<…>`, `mqtt.<…>` and the
+gateway, every host derived from the same helper the service itself is configured from. **No port
+numbers anywhere.** Compose reaches the same services on eight published ports, and a URL carrying
+`:3002` is a URL that only works if the reader knows which machine to put in front of it.
+
+**This extends `supabase-envoy`; it does not add a proxy.** The instinct is to reach for Caddy or
+Traefik, and it is the wrong one — the stack already runs Envoy, with a gateway listener on 8000 and
+Studio's OAuth listener on 8001, and a third listener on :80 routing by `Host` to grafana, node-red,
+swagger and the gateway is ordinary virtual-host configuration in a file that already exists. A
+second proxy would be a second control plane and a second place for origin policy to be stated,
+which is the thing `envoy.yaml` is deliberately the single home for.
+
+**Subdomains, not paths, and that argument is settled** — `ingress.yaml`'s header records it:
+Grafana needs `serve_from_sub_path` plus a matching root_url, Node-RED needs both `httpAdminRoot` and
+`httpNodeRoot` moved (which changes the quarantine webhook path, and that path is registered in the
+database in `webhook_endpoints`), and Studio is a Next.js app with its own basePath assumptions.
+Whatever lands on Compose should mirror the chart rather than re-open that.
+
+**The blocker is DNS, and it is not in this repository.** `grafana.acs.plant.local` has to resolve,
+which means a wildcard record on a DNS server this project does not own. That is the whole reason
+this is a roadmap item and not a branch: the proxy is a day's work and the record is a conversation
+with whoever runs the network, and shipping the first without the second produces a stack whose
+documentation says "now ask IT", which nobody does. The chart's own dev path shows the escape hatch —
+`e2e.ingressIp` and the `127.0.0.1.nip.io` domain exist precisely because a real record was not
+available — and a Compose equivalent should be designed in from the start rather than discovered.
+
+**What it does and does not buy.** It gets one port to firewall instead of eight, one TLS
+certificate instead of none, and URLs that survive being pasted into a message. It does **not** fix
+what the Directory displays: `directory_services.endpoint_url` is a stored string, and a proxy in
+front of Node-RED does not change it. That is `0085`'s job and it is sequenced first for this reason —
+until the rows are derived from `NODERED_PUBLIC_URL` and its neighbours, a proxy would serve
+`nodered.<domain>` while the Directory kept advertising `localhost:1880`.
+
+**MQTT does not ride it.** Raw 1883/8883 is TCP and cannot be routed by `Host`; only the WebSocket
+listener on 9001 can. The chart already splits these — the Ingress carries 9001 and the
+`mosquitto-external` LoadBalancer carries the rest — and Compose would keep publishing the broker's
+ports directly for the same reason.
 
 ### Plaintext 1883 is deliberate today and should have an end state
 

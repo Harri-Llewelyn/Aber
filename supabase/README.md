@@ -2195,6 +2195,97 @@ and the trigger is the one that holds for the fourth.
 
 ---
 
+## The Directory says what can reach a service (`0084`)
+
+`directory_services` held an address and no statement of who could use it, so the page rendering
+those rows had to guess. `isBrowsableEndpoint` guesses well, and the guess is the right one for the
+question it can answer — scheme plus host tells you whether a string is a **web page**, which is all
+a URL carries. It cannot tell you whether the browser reading it can **reach** that page.
+
+That gap became visible when four ports moved to `127.0.0.1` — both databases, Prometheus and the
+ingestion metrics endpoint. Two of the four are `http://localhost:…`, so the scheme-and-host test
+says "web page", correctly, and the page rendered a link. That link works for a browser on the
+deployment host and fails for every other browser — and the dashboard is published on `:3000` for
+exactly those other browsers. **The failure looks like the service being down**, which is the same
+failure the container-hostname clause was written to avoid.
+
+`exposure` describes the **port binding**, not the URL:
+
+| | |
+| :--- | :--- |
+| `NETWORK` | published on every interface — reachable from another machine, subject to firewall and DNS |
+| `HOST` | bound to `127.0.0.1` — the deployment host, or an SSH tunnel |
+| `INTERNAL` | no host port at all — the container network only |
+| `UNKNOWN` | **not recorded** |
+
+**The port and the URL can disagree, and both are consulted.** Studio is `NETWORK` — `supabase-envoy`
+publishes 54323 on every interface and holds the console behind an OAuth flow and an `Administrator`
+check (`0081`) — while its `endpoint_url` still reads `http://127.0.0.1:54323`, which is the
+`STUDIO_PUBLIC_URL` default rather than a claim about the binding. A loopback *address* cannot work
+from a remote browser however broadly the *port* is published, so the page tests the address too.
+
+**`UNKNOWN` behaves as `NETWORK` in the UI, and it is the one place the page does not err towards a
+copy button.** This column arrived after the rows did; anything registering into this table that has
+never heard of it defaults to `UNKNOWN`, and demoting every such row would make adding the column a
+regression for services that are perfectly reachable. The loopback and container-hostname tests still
+apply to those rows, which is what the page could already do on its own.
+
+**What the table cannot hold, the browser supplies.** Whether a `localhost` address is reachable
+depends on which machine the *reader* is at — a fact that differs per viewer rather than per service.
+`viewerIsOnDeploymentHost` reads it off the dashboard's own hostname: a page served from `localhost`
+is being read on the host, so its sibling `localhost` addresses resolve; one served from
+`acs-server.factory.local` is not. The case this gets wrong is a reader who tunnelled the dashboard
+alone, and it is the right trade — the alternative withholds a working link from everyone developing
+on the host to protect a reader who already knows what a tunnel is.
+
+**This describes the Compose deployment the seed describes.** On Kubernetes these rows were wrong
+before this column was reached — `endpoint_url` said `localhost` while the chart serves
+`grafana.<publicBaseDomain>` through an Ingress — and `0084` does not fix that; `0085` below fixes
+three of them and leaves the rest. What `0084` does is make the remaining wrongness quieter: a row
+marked `HOST` offers a copy button and a tunnel hint instead of a link that was never going to work.
+
+---
+
+## The Directory reads the address the browser uses (`0085`)
+
+`endpoint_url` was a hardcoded string. `0002` seeded `http://localhost:1880`, `http://localhost:3002`
+and `http://127.0.0.1:54323`, and nothing ever moved them — while the deployment stated its own
+browser-facing addresses in `NODERED_PUBLIC_URL`, `GRAFANA_PUBLIC_URL` and `STUDIO_PUBLIC_URL`, which
+are **not cosmetic**: they build the `redirect_uris` registered in `auth.oauth_clients`, Grafana's
+`GF_SERVER_ROOT_URL`, and the `callbackURL` `settings.js` hands passport-oauth2.
+
+So a correctly configured stack had every login working at a real hostname and one page still
+advertising `localhost`. The frontend already got this right — `constants.js` reads `VITE_GRAFANA_URL`
+for every Grafana link the dashboard renders — which made the Directory row the odd one out beside
+links that followed the deployment.
+
+**Nothing was added to db-init.** Both call sites — the migration loop in `docker-compose.yml` and
+`templates/jobs/db-init.yaml` — already pass `grafana_public_url`, `studio_public_url` and
+`nodered_redirect_uri` to psql once per file, because `0002` needs them for the OAuth clients. `0085`
+reads the same three values, which is the point: a row and a `redirect_uri` computed from one input
+cannot disagree.
+
+**Three rows, not fifteen**, and the limit is what db-init passes rather than a judgement about which
+rows deserve it. Swagger, Mosquitto and the four Supabase gateway rows have no `-v` entry at either
+call site.
+
+**These three are now derived, so hand edits no longer stick.** `directory_services` carries UPDATE
+RLS for Administrator and Shopfloor_Manager, and a replay stamps over an edit to these rows on the
+next boot — the same treatment `0002` gives the OAuth rows for the same stated reason. An
+independently editable copy of a value the deployment already holds is the drift this closes; the
+place to change one of these addresses is the variable, where the login flow follows it.
+
+**A row whose variable is absent is left entirely alone.** Empty means "this deployment said nothing",
+not "this deployment wants the fallback", and stamping a fallback over an operator's edit on the
+strength of a variable nobody set would be the worst of both behaviours.
+
+On Kubernetes this is what surfaces the chart's port-free hostnames on the page. On Compose it shows
+whatever the operator configured, which is still a port — **port-free URLs there need the reverse
+proxy in roadmap §12**, sequenced after this so a proxy cannot serve `nodered.<domain>` while this
+table advertises `localhost:1880`.
+
+---
+
 ## Schema Versioning
 
 A published schema is **read-only**. Changing one means forking the next version, editing the

@@ -3181,7 +3181,25 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         service_name: { type: string, example: Supabase Studio }
         service_type: { type: string, example: GRAPHICAL_UI }
-        endpoint_url: { type: string, example: 'http://127.0.0.1:54323' }
+        endpoint_url:
+          type: string
+          example: 'http://127.0.0.1:54323'
+          description: >-
+            The address a BROWSER reaches the service on. Three rows — Grafana, Node-RED and
+            Studio — are derived by `0085` from the same `*_PUBLIC_URL` values that build their
+            OAuth `redirect_uris`, so those cannot drift from what the service advertises;
+            editing them by hand does not survive the next boot. The rest are seeded literals.
+        exposure:
+          type: string
+          enum: [NETWORK, HOST, INTERNAL, UNKNOWN]
+          example: NETWORK
+          description: >-
+            Where the service can be reached FROM, as a property of its port binding rather than of
+            `endpoint_url`: `NETWORK` published on every interface, `HOST` bound to `127.0.0.1`
+            (the deployment host or an SSH tunnel), `INTERNAL` no host port at all, `UNKNOWN` not
+            recorded. The two can disagree and both are needed — Studio is `NETWORK` while its
+            `endpoint_url` is still the loopback default, and a loopback *address* cannot be used
+            from a remote browser however broadly the *port* is published.
         status: { type: string, example: ACTIVE }
         last_heartbeat: { type: string, format: date-time, nullable: true }
         registered_schema_id: { type: string, format: uuid, nullable: true }
