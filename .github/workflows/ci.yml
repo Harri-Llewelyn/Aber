@@ -1375,23 +1375,45 @@ jobs:
         with:
           python-version: '3.10'
 
+      # THE REQUIREMENTS FILES, NOT A HAND-PICKED LIST -- and the reason is the same one this whole
+      # change is about. This step used to name four packages, chosen by reading the error messages
+      # of the suites that happened to be running at the time. Giving the newly-discovered suites a
+      # runner (#147) broke four of them on imports nobody had needed here before: `requests` (i3x),
+      # `paho` (the playback worker) and the generated `sparkplug_b_pb2`.
+      #
+      # A LIST ASSEMBLED FROM FAILURES IS THE SAME MISTAKE AS A LIST OF SUITES ASSEMBLED FROM
+      # MEMORY. The requirements files are what these packages actually declare they need; reading
+      # them cannot fall behind. e2e-validation already installs ingestion/requirements.txt for
+      # exactly this reason.
+      #
+      # jsonschema and pytest are the two genuinely not declared by either package. jsonschema
+      # validates the AAS export against the vendored official IDTA schema. pytest is for ONE suite,
+      # ingestion/test_cold_archive.py -- the only file in the tree written in its bare-function
+      # style with no `if __name__ == "__main__"` block, so run the way every other suite runs it
+      # imports, calls none of its eight functions and exits 0. Adding it to a lane without pytest
+      # would have "fixed" it into a green step over zero assertions. (pyarrow, which decides
+      # whether its eighth check runs or silently skips, IS in ingestion/requirements.txt.)
       - name: Install Python Test Dependencies
         run: |
           python -m pip install --upgrade pip
-          # jsonschema validates the AAS export against the vendored official IDTA schema.
-          #
-          # pytest AND pyarrow ARE BOTH FOR ONE SUITE, ingestion/test_cold_archive.py, and neither
-          # is optional for it. That file is the only one in the tree written in pytest's
-          # bare-function style with no `if __name__ == "__main__"` block, so running it the way
-          # every other suite runs -- `python <file>` -- imports it, calls none of its eight
-          # functions and exits 0. It was in the orphan list, and adding it to a lane without this
-          # line would have "fixed" it into a green step over zero assertions.
-          #
-          # pyarrow is the difference between seven checks and eight, and the eighth is the Parquet
-          # round trip -- half of what the suite is for. `pytest.importorskip` means its absence is
-          # a silent skip rather than a failure, which is precisely why it is installed rather than
-          # left to chance.
-          pip install psycopg2-binary jsonschema pytest pyarrow
+          pip install -r ingestion/requirements.txt -r i3x/requirements.txt
+          pip install jsonschema pytest
+
+      # THE GENERATED SPARKPLUG MODULE, WHICH IS GITIGNORED AND SO EXISTS ON EVERY DEVELOPER'S
+      # MACHINE AND IN NO FRESH CHECKOUT. `ingestion/*_pb2.py` is in .gitignore, built at image
+      # build from sparkplug_b.proto -- so test_capture_playback.py and test_capture_worker.py,
+      # which import it directly to assert on WIRE ENCODINGS, passed locally and failed here with
+      # `No module named 'sparkplug_b_pb2'` the first time they were given a runner.
+      #
+      # Same two steps as e2e-validation, which needs it for the same reason. Debian's protoc is
+      # two majors behind the pinned runtime and that is deliberate -- ingestion/requirements.txt
+      # carries the reasoning, and the end-to-end suites are what check the gencode still loads.
+      - name: Generate Sparkplug B Protobuf Module
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          protoc --python_out=. sparkplug_b.proto
+          cp sparkplug_b_pb2.py ingestion/
 
       # THE FIXTURE IS SHARED WITH THE LOCAL RUNNER, in one file applied by both this job and
       # scripts/test-db.mjs. It carries its own reasoning: which auth helpers the base image is
