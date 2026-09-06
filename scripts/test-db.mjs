@@ -75,6 +75,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { MIGRATION_VARS } from './migration-vars.mjs'
 import { suitesInLane } from './python-suites.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -103,31 +104,9 @@ function run (cmd, cmdArgs, opts = {}) {
   return spawnSync(cmd, cmdArgs, { encoding: 'utf8', ...opts })
 }
 
-// THE psql VARIABLES db-init PASSES, AND ONE OF THEM DECIDES WHETHER A SUITE CAN PASS AT ALL.
-//
-// 0002 reads these with `\if :{?name}` and falls back to empty, then warns and gives up:
-//
-//     0038: GATEWAY_REVOKE_SECRET or SUPABASE_ANON_KEY is unset; credential revocation is INERT
-//           on this stack. Archiving will not revoke, and the sweep will do nothing.
-//
-// A NOTICE, not an error -- so the chain applies, every schema check passes, and
-// test_credential_revocation.py then fails four assertions with `0 != 1`, naming a queue depth
-// rather than the unset secret three thousand lines upstream. That is what running with no
-// variables at all looked like, and it is why they are set here rather than left to default.
-//
-// The values are deliberately fake and the URL is deliberately unreachable. pg_net queues into a
-// table inside the caller's transaction and every one of these suites rolls back, so nothing is
-// ever sent -- but a throwaway container that could reach a real endpoint is a throwaway container
-// that could act on one, and localhost:9999 cannot.
-//
-// The TimescaleDB variables are NOT set: 0001 defaults them, the chain applies without a historian
-// to link to, and pointing the FDW at the live one would give a disposable database a route into
-// infrastructure that is not disposable.
-const MIGRATION_VARS = {
-  supabase_anon_key: 'test-anon-key-not-a-real-jwt',
-  gateway_revoke_secret: 'test-revoke-secret',
-  supabase_functions_url: 'http://localhost:9999/functions/v1'
-}
+// The psql variables db-init passes. They live in scripts/migration-vars.mjs because ci.yml's
+// migration loop needs the SAME ones -- it had none, and test_credential_revocation.py duly passed
+// here and failed there the first time CI ran it (#147). That module carries the reasoning.
 
 /** psql INSIDE the container, so this script needs no psql on the host -- only Docker. */
 function psql (dbArgs, { user = 'postgres' } = {}) {

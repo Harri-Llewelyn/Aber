@@ -1415,9 +1415,20 @@ jobs:
         run: |
           PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 -U postgres -d postgres \
             -c "ALTER ROLE postgres SET search_path TO auth, public, extensions;"
+          # THE psql VARIABLES `0002` READS, WITHOUT WHICH THIS DATABASE IS SUBTLY THE WRONG ONE.
+          # It takes them with `\if :{?name}`, falls back to empty and merely WARNS -- so the chain
+          # applies, every schema check passes, and `revoke_gateway_credential()` then finds an
+          # empty vault and returns false before queueing anything. test_credential_revocation.py
+          # fails four assertions with `0 != 1`, naming a pg_net queue depth rather than the unset
+          # secret three thousand lines upstream. That is exactly what happened the first time this
+          # job was given that suite to run (#147): it passed under `npm run test:db`, which set
+          # them, and failed here, which did not. They now come from ONE module that both callers
+          # read -- see scripts/migration-vars.mjs for why the values are fake and the URL is
+          # unreachable.
+          PSQL_VARS=$(node scripts/migration-vars.mjs --psql-args)
           for f in supabase/migrations/*.sql; do
             echo "Applying $f...";
-            PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 -U postgres -d postgres -f "$f";
+            PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 $PSQL_VARS -h localhost -p 54322 -U postgres -d postgres -f "$f";
           done
 
       # =========================================================================================
@@ -2531,8 +2542,23 @@ jobs:
           REQUIRE_SEEDED_ACCOUNTS: '1'
           SUPABASE_DB_HOST: localhost
           SUPABASE_DB_PORT: '54322'
+          # THE HISTORIAN IS REACHED BY ITS PUBLISHED PORT, NOT ITS COMPOSE NAME. `.env` sets
+          # DB_HOST=timescaledb, which resolves inside the compose network and nowhere else -- and
+          # these suites run on the RUNNER, outside it. Sourcing .env without this gives
+          # `could not translate host name "timescaledb" to address`, which reads like a broken
+          # stack rather than a test pointed at the wrong address. TS_TEST_HOST/TS_TEST_PORT exist
+          # in the four timescaledb suites for exactly this, and 5433 is what compose publishes.
+          TS_TEST_HOST: localhost
+          TS_TEST_PORT: '5433'
         run: |
           set -a && . ./.env && set +a
           export SUPABASE_URL=http://127.0.0.1:54321
           export SUPABASE_DB_PASSWORD="$POSTGRES_PASSWORD"
+          # ENROLMENT IS INERT WITHOUT A PUBLIC URL, and `.env.example` ships it empty on purpose:
+          # it is the address physical gateways reach the platform on, which only the deployment
+          # knows. The bundle function answers 503 "Bundle generation is not configured on this
+          # deployment" without it, so test_gateway_bundle.py and test_enroll_gateway.py cannot
+          # assert anything -- they are testing what a REAL enrolment does, and on this stack the
+          # address a gateway would use is Kong's published port.
+          export SUPABASE_PUBLIC_URL=http://127.0.0.1:54321
           node scripts/run-python-suites.mjs --lane stack

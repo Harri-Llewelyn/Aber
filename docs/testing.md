@@ -82,7 +82,13 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/gateway-bundle/test_gateway_bundle.py
 
-# Broker credential issuance — needs the stack up and the service's own bearer token
+# Broker credential issuance — needs the stack up and the service's own bearer token.
+#
+# THE ONE SUITE WITH NO AUTOMATED RUNNER, declared `manual` in scripts/python-suites.mjs rather
+# than left to fall through a gap. `setup.mjs --demo` provisions the e2e stack from .env.example
+# VERBATIM, where MQTT_CREDENTIAL_SERVICE_TOKEN is empty, so in CI all thirteen checks skip and the
+# run exits 0 -- a green step over nothing. Giving e2e a real token is a stack-provisioning change
+# and is filed on its own. Until then this is a by-hand suite, and the command below is how.
 MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 
 # Two pieces of the broker-credential machinery whose failure is silent, in isolation and with no

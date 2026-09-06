@@ -487,13 +487,19 @@ export const SUITES = {
       'reading a shipped .aasx would disagree, with both endpoints reporting success.',
   },
   'supabase/migrations/test_gateway_enrollment.py': {
-    lanes: ['db', 'stack'],
+    // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of
+    // its assertions is made AS a seeded demo account, and the db lane deliberately applies no
+    // seed.sql, so that run reported `Ran 0 tests` and exited 0. A step asserting nothing is the
+    // thing the vacuous-green note above exists to forbid, and putting a suite in a second lane
+    // "for coverage" is precisely how one gets written.
+    lanes: ['stack'],
     why:
       'Enrolment-token secrecy: that the raw token is never stored, that RLS is on with no ' +
       'policies, and that not even an Administrator can SELECT claim material. Every one of those ' +
-      'assertions is made AS a seeded demo account, so the db-lane run skips them and only the ' +
-      'e2e run -- where `REQUIRE_SEEDED_ACCOUNTS=1` turns a missing seed into a failure rather ' +
-      'than a green tick -- actually checks the secrecy boundary.',
+      'assertions needs a seeded account, which only e2e has -- and there ' +
+      '`REQUIRE_SEEDED_ACCOUNTS=1` turns a missing seed into a failure rather than a green tick, ' +
+      'on the suite covering a secrecy boundary where "not checked" and "not broken" look ' +
+      'identical from outside.',
   },
 
   // -----------------------------------------------------------------------------------------
@@ -516,10 +522,29 @@ export const SUITES = {
       'SKIPS ALL FIFTEEN CHECKS without a stack.',
   },
   'gateway-credential/test_gateway_credential.py': {
-    lanes: ['stack'],
+    // MANUAL, AND THIS IS THE ESCAPE HATCH BEING USED HONESTLY RATHER THAN AVOIDED.
+    //
+    // It was put in the `stack` lane first, on the reasonable-looking grounds that it needs a
+    // stack. e2e then ran it and it skipped ALL THIRTEEN checks -- because the token it
+    // authenticates with is empty there. `scripts/setup.mjs --demo`, which is how the e2e stack is
+    // provisioned, copies `.env.example` VERBATIM and generates no secrets, and `.env.example`
+    // ships `MQTT_CREDENTIAL_SERVICE_TOKEN=` empty by design.
+    //
+    // A fully-skipped run exits 0, so leaving it there would have been a green step over nothing
+    // -- the exact failure the lane rules above exist to prevent, and worse than the orphaning
+    // this file fixes, because it would come with a claim to have run.
+    //
+    // MAKING IT RUN IS A STACK-PROVISIONING CHANGE, not a runner one: the credential service
+    // REFUSES TO START on a token shorter than 32 characters, so the suite and the service have to
+    // be given the same real one. That is worth doing and is filed separately; it is not something
+    // to do quietly inside a change about test discovery.
+    lanes: ['manual'],
     why:
-      "Broker credential issuance -- needs the stack up and the service's own bearer token. SKIPS " +
-      'ALL THIRTEEN CHECKS without one.',
+      "Broker credential issuance -- needs the stack up AND the service's own bearer token. Not " +
+      'automated: `setup.mjs --demo` provisions e2e from `.env.example` verbatim, where ' +
+      '`MQTT_CREDENTIAL_SERVICE_TOKEN` is empty, so all thirteen checks skip and the run exits 0. ' +
+      'Run it by hand against a fully provisioned stack: ' +
+      '`MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py`.',
   },
   'timescaledb/test_historian_role_grants.py': {
     lanes: ['stack'],
