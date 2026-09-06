@@ -26,6 +26,7 @@ src/
 │   ├── tabs/                one file per tab, lazy-loaded
 │   ├── modals/              detail and edit dialogs
 │   └── common/              ActionMenu, TagList, Model3DUploader, VocabularyPanel
+├── help/                    one markdown file per page, bundled -- see Contextual help
 ├── hooks/                   usePermissions, usePolling, useRealtimeTable, useToast, …
 ├── utils/                   pure, unit-tested derivations
 └── __tests__/               Vitest suites
@@ -226,6 +227,65 @@ change: it is the `anon` role, public by construction, and already readable in a
 | `DigitalThreadTab` | Audit trail. Filtering by tag matches devices carrying it **now**; the log records what was true then, and the UI says so |
 | `DirectoryTab` | Directory service configuration and the GitOps flow push |
 | `ArchivesTab` | Soft-deleted record restoration |
+
+---
+
+## Contextual help
+
+A control in the top bar opens a drawer describing **the page you are on** — what it is for, what
+its controls do, and what its states mean ([issue #39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39):
+*"going to the GitHub to read the documentation takes a lot of time"*).
+
+**The hard part was never the button.** The documentation this repository already had is written for
+somebody changing the stack — it argues why things are built as they are, at length. A help panel
+needs the other half, in a few hundred words per page, and shipping the control before the corpus
+would have produced a help system whose honest content is a link to the README. That is what the
+request called too slow in the first place.
+
+### One file per page, resolved by filename
+
+`src/help/<tab id>.md`, bundled by an eager `import.meta.glob` in `src/help/index.js`. There is no
+manifest: a second list is the one that goes stale. `scripts/check-docs-drift.mjs` asserts the
+correspondence **in both directions** — every page in `navigation.jsx` has a file, and every file
+names a page that exists. The second direction is the one that rots silently: a help file left
+behind by a renamed page is never resolved again, and the renamed page quietly has none.
+
+**Why `src/help/` and not `docs/help/`,** which is where the roadmap entry proposed it.
+`frontend/Dockerfile`'s build context is `./frontend` — on Compose, in `release.yml` and in the
+k3d job alike — so `docs/` is not present at image build time at all, for the same reason `.git` is
+not. Bundling from there works on a developer's machine and fails in every container build. The
+properties that placement was chosen for are unaffected: these are markdown in the repository,
+reviewed in the pull request that changes the behaviour they describe, and checked by a guard. They
+are also still free in CI, which is not a `docs/` property either — `ci.yml` classifies a diff with
+`*.md|docs/*`, and a `case` glob's `*` spans directory separators, so a `.md` file anywhere skips
+the two end-to-end stacks.
+
+### A restricted renderer, on purpose
+
+`HelpMarkdown.jsx` renders headings, lists, paragraphs, bold, inline code and **absolute** links.
+That is the whole subset. It exists rather than a markdown dependency because the corpus is thirteen
+files this repository writes and ships in its own bundle — it is not untrusted input and does not
+need CommonMark — and because every branch of it builds React elements, so there is no
+`dangerouslySetInnerHTML` anywhere in the app for the next thing to be piped into.
+
+An unsupported construct does not fail at runtime; it **renders as its own source text** — a table
+arrives as a row of pipes, a repository-relative link as a dead anchor. That is a defect the reader
+sees and the author never does, so the drift check rejects it at build time instead.
+
+### The drawer is `ContextPanel`
+
+The same component the entity pages use, with `subject="help"` for its region label and close
+control. It is a sibling of `.content` rather than of a page's list, so it survives a tab switch,
+works on pages that have no drawer of their own, and cannot be unmounted by the page it describes —
+`tabId` follows the active tab, so it re-reads as you navigate. Both drawers can be open at once on
+Devices; the flex row narrows the table rather than stacking them, and below 1100px it takes the
+same dismissible overlay treatment every other drawer takes.
+
+**Its contents are mounted only while it is open**, which the per-page drawers do not need to do.
+The panel stays in the DOM so its width can transition, but a page of prose whose first line is the
+page name put a second *"Devices"* into the document on every page — a duplicate for find-in-page
+and for anything reading the document as text. `aria-hidden` kept it out of the accessibility tree;
+nothing was keeping it out of the text.
 
 ---
 

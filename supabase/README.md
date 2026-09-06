@@ -2281,7 +2281,7 @@ strength of a variable nobody set would be the worst of both behaviours.
 
 On Kubernetes this is what surfaces the chart's port-free hostnames on the page. On Compose it shows
 whatever the operator configured, which is still a port — **port-free URLs there need the reverse
-proxy in roadmap §12**, sequenced after this so a proxy cannot serve `nodered.<domain>` while this
+proxy in roadmap §11**, sequenced after this so a proxy cannot serve `nodered.<domain>` while this
 table advertises `localhost:1880`.
 
 ---

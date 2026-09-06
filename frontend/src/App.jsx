@@ -39,6 +39,7 @@ const OAUTH_CONSENT_PATH = '/oauth/consent'
 import {
   IconFactory,
   IconKeyboard,
+  IconHelp,
   IconSun,
   IconMoon,
   IconUser,
@@ -51,6 +52,7 @@ import { APP_VERSION, VERSION_IS_KNOWN, versionTitle } from './version'
 
 import { Toast } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
+import { HelpPanel } from './components/common/HelpPanel'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
 import { BugReportModal } from './components/modals/BugReportModal'
 import { ShortcutsModal } from './components/modals/ShortcutsModal'
@@ -406,6 +408,7 @@ function Dashboard({ session, onSignOut }) {
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
   const [showBugReport, setShowBugReport] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
 
   const { tab, setTab, handleNavClick } = useAppRouting(
     setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter,
@@ -637,6 +640,26 @@ function Dashboard({ session, onSignOut }) {
             <IconKeyboard size={15} />
           </button>
 
+          {/* THE FOURTH CONTROL, AND IT EARNS ITS PLACE ON THE SAME ARGUMENT AS THE THIRD. A help
+              control is as standing as the theme toggle, and it is a signpost rather than a
+              preference: the reader who needs it is by definition not going to go looking for it
+              behind the avatar. It sits between the shortcuts key and the account pill because
+              those two are the same kind of thing -- ways to find out what this application can do
+              -- and because the avatar must stay the last thing in the bar.
+
+              `aria-expanded` and not just a label: this one TOGGLES a drawer that stays open while
+              you read and navigate, unlike the shortcuts key, which opens a dialog. A control whose
+              second press closes something has to say so. */}
+          <button
+            className={`topbar-icon-button${showHelp ? ' topbar-icon-button-active' : ''}`}
+            onClick={() => setShowHelp((v) => !v)}
+            aria-label="Help for this page"
+            aria-expanded={showHelp}
+            title="Help for this page"
+          >
+            <IconHelp size={15} />
+          </button>
+
           <UserMenu
             persona={persona}
             userRole={userRole}
@@ -704,6 +727,12 @@ function Dashboard({ session, onSignOut }) {
             {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} />}
           </Suspense>
         </main>
+
+        {/* HELP IS A SIBLING OF THE PAGE, NOT PART OF IT. Rendered here so it survives every tab
+            switch -- `tabId` follows `tab`, so the drawer re-reads as you navigate rather than
+            closing and having to be reopened -- and so it is available on the pages that have no
+            drawer of their own. See HelpPanel.jsx. */}
+        <HelpPanel open={showHelp} tabId={tab} onClose={() => setShowHelp(false)} />
       </div>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={clearToast} />}

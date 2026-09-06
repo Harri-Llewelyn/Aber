@@ -465,6 +465,18 @@ export const IconCornerDownLeft = ({ size = 14, className = "", style = {} }) =>
   </svg>
 )
 
+// The help control in the top bar (issue #39). A question mark rather than a life ring or an
+// "i": the bar already carries a triangle and a circle for alert severity, and a third round glyph
+// beside them would be one more thing to tell apart at a glance. The mark is what the reader is
+// looking for.
+export const IconHelp = ({ size = 14, className = "", style = {} }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+    <path d="M12 17h.01" />
+  </svg>
+)
+
 export const IconKeyboard = ({ size = 14, className = "", style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
     <rect width="20" height="16" x="2" y="4" rx="2" />
