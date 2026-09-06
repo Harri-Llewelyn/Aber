@@ -2126,6 +2126,34 @@ jobs:
         run: |
           node scripts/setup.mjs --demo
 
+          # THE ENROLMENT ADDRESS, WHICH `--demo` LEAVES EMPTY AND THE STACK CANNOT INVENT.
+          #
+          # `.env.example` ships `SUPABASE_PUBLIC_URL=` blank on purpose: it is the address a
+          # PHYSICAL appliance dials, which only a real deployment knows. gateway-bundle checks it
+          # before minting anything and answers 503 without it, so test_gateway_bundle.py and
+          # test_enroll_gateway.py could assert nothing at all here -- 27 checks reporting a
+          # deployment fault rather than the role gating, ZIP integrity and token validity they
+          # exist for.
+          #
+          # IT MUST NOT BE LOOPBACK. The function rejects `127.0.0.1`, `localhost`, `::1` and
+          # `supabase-kong` by pattern, and is right to: a bundle carrying one of those enrols
+          # nothing, failing on the appliance at its first fetch with a plausible-looking URL. So
+          # setting it to the address the tests themselves use would be refused, and correctly.
+          #
+          # NOTHING DIALS IT. Neither suite reads this variable or fetches this host; the bundle
+          # merely has to be minted, which the guard is what prevents. A name is therefore honest
+          # here in a way an invented IP would not be -- it says "a deployment would put its own
+          # address here" rather than pretending a runner is a shopfloor. It goes in .env rather
+          # than the test step's shell because the EDGE FUNCTION reads it, from the container
+          # environment compose builds at launch -- exporting it beside the suites changes nothing
+          # the function can see.
+          # REPLACED IN PLACE, NOT APPENDED. `.env.example` already carries the key blank, so
+          # appending would leave the file defining it twice -- which compose resolves by taking
+          # the last, and check-env-drift.mjs compares key SETS against the template. A duplicate
+          # is a working stack with a file that reads like a mistake.
+          sed -i 's|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=http://api.acs-cymru.test:54321|' .env
+          grep '^SUPABASE_PUBLIC_URL=' .env
+
       # LOGS ON FAILURE, BECAUSE `up` DOES NOT PRINT THEM (#134). A one-shot dependency declared
       # `service_completed_successfully` failing takes the whole `up` down, and compose reports
       # only its own exit 1 and the service's name:
@@ -2576,11 +2604,4 @@ jobs:
           set -a && . ./.env && set +a
           export SUPABASE_URL=http://127.0.0.1:54321
           export SUPABASE_DB_PASSWORD="$POSTGRES_PASSWORD"
-          # ENROLMENT IS INERT WITHOUT A PUBLIC URL, and `.env.example` ships it empty on purpose:
-          # it is the address physical gateways reach the platform on, which only the deployment
-          # knows. The bundle function answers 503 "Bundle generation is not configured on this
-          # deployment" without it, so test_gateway_bundle.py and test_enroll_gateway.py cannot
-          # assert anything -- they are testing what a REAL enrolment does, and on this stack the
-          # address a gateway would use is Kong's published port.
-          export SUPABASE_PUBLIC_URL=http://127.0.0.1:54321
           node scripts/run-python-suites.mjs --lane stack
