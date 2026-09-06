@@ -2152,7 +2152,33 @@ jobs:
           # the last, and check-env-drift.mjs compares key SETS against the template. A duplicate
           # is a working stack with a file that reads like a mistake.
           sed -i 's|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=http://api.acs-cymru.test:54321|' .env
-          grep '^SUPABASE_PUBLIC_URL=' .env
+
+          # THE TWO ENROLMENT VALUES, for the same reason and with the same shape of guard.
+          #
+          # enroll-gateway checks its configuration BEFORE touching the one-shot token, so a
+          # misconfigured deployment cannot burn an appliance's bundle discovering it cannot
+          # finish. Without these it answers 503 naming them, and test_enroll_gateway.py's 14
+          # checks -- the token race, the replay rejections, the 503 rollback -- all report that
+          # instead of what they exist for.
+          #
+          # MQTT_PUBLIC_HOST MUST NOT BE `mosquitto`, `localhost` OR `127.0.0.1`, refused by name:
+          # its default resolves on the container network and nowhere a gateway lives, so an unset
+          # value yields a bundle that enrols perfectly and then connects to nothing. It is also
+          # folded into the broker certificate's SAN -- and safely, because mosquitto-tls-init's
+          # BASE_SANS already carry `mosquitto`, `localhost` and `127.0.0.1` unconditionally, so
+          # this ADDS a name and takes none away. Nothing in the stack starts verifying a different
+          # certificate.
+          #
+          # THE TOKEN IS GENERATED, NOT A LITERAL. The credential service refuses to start on
+          # anything shorter than 32 characters, and a fixed string in a workflow is a credential
+          # in the repository even when the stack it unlocks is thrown away an hour later.
+          sed -i 's|^MQTT_PUBLIC_HOST=.*|MQTT_PUBLIC_HOST=broker.acs-cymru.test|' .env
+          sed -i "s|^MQTT_CREDENTIAL_SERVICE_TOKEN=.*|MQTT_CREDENTIAL_SERVICE_TOKEN=$(openssl rand -hex 32)|" .env
+
+          # Echoed so a future failure can be read off this step rather than inferred from a 503
+          # three hundred lines later. The TOKEN is deliberately not printed: its value is a secret
+          # even on a throwaway stack, and workflow logs are readable by anyone who can see the run.
+          grep -E '^(SUPABASE_PUBLIC_URL|MQTT_PUBLIC_HOST)=' .env
 
       # LOGS ON FAILURE, BECAUSE `up` DOES NOT PRINT THEM (#134). A one-shot dependency declared
       # `service_completed_successfully` failing takes the whole `up` down, and compose reports

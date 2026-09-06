@@ -522,29 +522,20 @@ export const SUITES = {
       'SKIPS ALL FIFTEEN CHECKS without a stack.',
   },
   'gateway-credential/test_gateway_credential.py': {
-    // MANUAL, AND THIS IS THE ESCAPE HATCH BEING USED HONESTLY RATHER THAN AVOIDED.
-    //
-    // It was put in the `stack` lane first, on the reasonable-looking grounds that it needs a
-    // stack. e2e then ran it and it skipped ALL THIRTEEN checks -- because the token it
-    // authenticates with is empty there. `scripts/setup.mjs --demo`, which is how the e2e stack is
-    // provisioned, copies `.env.example` VERBATIM and generates no secrets, and `.env.example`
-    // ships `MQTT_CREDENTIAL_SERVICE_TOKEN=` empty by design.
-    //
-    // A fully-skipped run exits 0, so leaving it there would have been a green step over nothing
-    // -- the exact failure the lane rules above exist to prevent, and worse than the orphaning
-    // this file fixes, because it would come with a claim to have run.
-    //
-    // MAKING IT RUN IS A STACK-PROVISIONING CHANGE, not a runner one: the credential service
-    // REFUSES TO START on a token shorter than 32 characters, so the suite and the service have to
-    // be given the same real one. That is worth doing and is filed separately; it is not something
-    // to do quietly inside a change about test discovery.
-    lanes: ['manual'],
+    // BRIEFLY `manual`, AND THE REASON STOPPED BEING TRUE. It skipped all thirteen checks in e2e
+    // because `setup.mjs --demo` provisions that stack from `.env.example` verbatim, leaving
+    // MQTT_CREDENTIAL_SERVICE_TOKEN empty -- so it was declared manual rather than left as a green
+    // step over nothing. Then test_enroll_gateway.py turned out to need the SAME token, which made
+    // provisioning it in e2e necessary anyway rather than a change to avoid. The suite asserts
+    // properly once it is set (13/13 against a provisioned stack), so it comes back.
+    lanes: ['stack'],
     why:
-      "Broker credential issuance -- needs the stack up AND the service's own bearer token. Not " +
-      'automated: `setup.mjs --demo` provisions e2e from `.env.example` verbatim, where ' +
-      '`MQTT_CREDENTIAL_SERVICE_TOKEN` is empty, so all thirteen checks skip and the run exits 0. ' +
-      'Run it by hand against a fully provisioned stack: ' +
-      '`MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py`.',
+      "Broker credential issuance -- needs the stack up AND the service's own bearer token, which " +
+      'the e2e job now writes into `.env` before launch. The exposure tests are the ones that ' +
+      'matter most and are invisible anywhere else: this service can mint a Mosquitto account for ' +
+      'ANY edge node, and mosquitto.acl turns an account into the ability to publish telemetry as ' +
+      'that gateway -- so "it is not published on the host" is a security boundary, not a ' +
+      'deployment detail, and nothing else checks it.',
   },
   'timescaledb/test_historian_role_grants.py': {
     lanes: ['stack'],
