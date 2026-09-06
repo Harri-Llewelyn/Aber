@@ -1578,6 +1578,13 @@ services:
         # it, for the case where the browser reaches Grafana on a different origin from the one
         # registered as the OAuth redirect.
         VITE_GRAFANA_URL: ${VITE_GRAFANA_URL:-${GRAFANA_PUBLIC_URL:-http://localhost:3002}}
+        # Studio's door, for sign-out only. DERIVED FROM STUDIO_PUBLIC_URL for the same reason
+        # VITE_GRAFANA_URL is derived from GRAFANA_PUBLIC_URL -- one address, set once. Here the
+        # coupling is stronger than a dead link, though: that variable is also what 0081 registers
+        # as the OAuth redirect and what Envoy substitutes, and a beacon sent to a DIFFERENT HOST
+        # than the session was opened on clears nothing while answering 302. Deriving it makes the
+        # two the same string by construction rather than by everyone remembering.
+        VITE_STUDIO_URL: ${VITE_STUDIO_URL:-${STUDIO_PUBLIC_URL:-http://127.0.0.1:${STUDIO_PORT:-54323}}}
         # Only needed if a bucket was renamed; src/api.js defaults to the same names
         # storage-init.mjs does, so the two agree without either being set.
         VITE_MODEL_3D_BUCKET: ${STORAGE_BUCKET:-asset-3d-models}

@@ -7,6 +7,7 @@ import { useToast } from './hooks/useToast'
 import { useApiActivity } from './hooks/useApiActivity'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
+import { signOutOfStudio } from './utils/studioSignOut'
 import { TABS, tabIsVisible } from './navigation'
 import AmbientPipeline from './components/common/AmbientPipeline'
 import { Sidebar } from './components/common/Sidebar'
@@ -800,5 +801,17 @@ export default function App() {
     return <AuthScreen notice={authNotice} onLoginSuccess={(sess) => { setAuthNotice(null); setSession(sess) }} />
   }
 
-  return <Dashboard session={session} onSignOut={() => supabase.auth.signOut()} />
+  // TWO SESSIONS END HERE, NOT ONE. Studio sits behind a session the gateway owns and this client
+  // knows nothing about, so signOut() alone leaves the database console open on the identity that
+  // just left -- which is exactly how an operator once reached it as the previous admin.
+  //
+  // CONCURRENT, NOT SEQUENTIAL, and that is a correctness point rather than a speed one. The
+  // beacon needs no session -- it clears a cookie the gateway owns -- so neither call depends on
+  // the other, and awaiting Studio FIRST would make a slow or unreachable console delay the local
+  // sign-out that must always happen. Starting both in the same tick also keeps signOut() called
+  // synchronously on click, which is the contract navigationShell.test.jsx asserts.
+  return <Dashboard
+    session={session}
+    onSignOut={() => Promise.all([signOutOfStudio(), supabase.auth.signOut()])}
+  />
 }

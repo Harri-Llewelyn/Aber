@@ -42,6 +42,17 @@ export const RUNTIME_SETTING_NAMES = [
   'VITE_ENABLE_REALTIME',
   'VITE_GITHUB_REPO_URL',
   'VITE_GRAFANA_URL',
+  // Supabase Studio's door, and the ONLY consumer is sign-out -- there is no "open Studio" link
+  // in the dashboard for this to point at. See utils/studioSignOut.js for why the app has to
+  // reach across to another origin to end a session it did not start.
+  //
+  // THE HOST HALF OF THIS VALUE IS LOAD-BEARING, in a way VITE_GRAFANA_URL's is not. Cookies are
+  // scoped by HOST and ignore the port, so `http://localhost:54323` and `http://127.0.0.1:54323`
+  // are the same door and DIFFERENT cookie jars: beaconing the wrong one of the two returns 302,
+  // logs nothing, and clears no session. Both this and STUDIO_PUBLIC_URL must name the host the
+  // browser actually used, which is why compose derives this from that one rather than repeating
+  // a literal.
+  'VITE_STUDIO_URL',
   // THE BUCKET NAMES, and they are settings for the same reason the URLs above are.
   //
   // Both were literals in api.js while every other consumer read them from the environment --
@@ -70,6 +81,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_ENABLE_REALTIME: import.meta.env.VITE_ENABLE_REALTIME,
   VITE_GITHUB_REPO_URL: import.meta.env.VITE_GITHUB_REPO_URL,
   VITE_GRAFANA_URL: import.meta.env.VITE_GRAFANA_URL,
+  VITE_STUDIO_URL: import.meta.env.VITE_STUDIO_URL,
   VITE_MODEL_3D_BUCKET: import.meta.env.VITE_MODEL_3D_BUCKET,
   VITE_GATEWAY_BACKUP_BUCKET: import.meta.env.VITE_GATEWAY_BACKUP_BUCKET,
   VITE_CAPTURE_BUCKET: import.meta.env.VITE_CAPTURE_BUCKET,

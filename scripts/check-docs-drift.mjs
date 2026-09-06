@@ -959,6 +959,7 @@ function edgeFunctionNames() {
     'VITE_ENABLE_REALTIME',  // feature flag
     'VITE_GITHUB_REPO_URL',  // issue tracker URL
     'VITE_GRAFANA_URL',      // an endpoint, public
+    'VITE_STUDIO_URL',       // an endpoint, public -- reached only to end Studio's own session
     'VITE_MODEL_3D_BUCKET',       // a bucket name, public -- the objects in it are public-read
     'VITE_GATEWAY_BACKUP_BUCKET', // a bucket name; the bucket is PRIVATE, but its NAME is not a secret
     'VITE_APP_VERSION',      // a git describe string, shown in the UI on purpose

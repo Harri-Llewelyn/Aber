@@ -66,6 +66,11 @@ ARG VITE_GITHUB_REPO_URL
 # Where "View in Grafana" points from an active alert. Unset is survivable -- constants.js falls back
 # to localhost:3002 -- but a deployment that has moved Grafana gets a dead link.
 ARG VITE_GRAFANA_URL
+# Supabase Studio's door, used ONLY to end Studio's own session when the user signs out -- the
+# gateway holds that session, not this bundle, so nothing else here ends it. Unset is survivable:
+# constants.js falls back to 127.0.0.1:54323, which is right on Compose and simply unreachable
+# anywhere else. The HOST must match STUDIO_PUBLIC_URL's, not merely the port -- see constants.js.
+ARG VITE_STUDIO_URL
 # Storage bucket names, matching STORAGE_BUCKET / GATEWAY_BACKUP_BUCKET in scripts/storage-init.mjs.
 # Unset is the ordinary case: src/api.js defaults to the same two names those default to. They are
 # build args at all so a deployment that RENAMED a bucket can move the dashboard with everything

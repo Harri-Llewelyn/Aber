@@ -188,6 +188,20 @@ export const GRAFANA_URL = readSetting('VITE_GRAFANA_URL', 'http://localhost:300
   .replace(/\/+$/, '');
 
 /**
+ * Supabase Studio's door, as the browser reaches it.
+ *
+ * NOT A LINK. Nothing in the dashboard navigates here -- Studio is reached from the Directory,
+ * which carries its own address from `directory_services`. This constant exists for sign-out
+ * alone: see `utils/studioSignOut.js`.
+ *
+ * THE FALLBACK MATCHES STUDIO_PUBLIC_URL's, `127.0.0.1` AND NOT `localhost`, and the two must not
+ * drift. A session opened on one host cannot be ended on the other -- cookies key on host, so the
+ * beacon would answer 302 and clear nothing while looking like it had worked.
+ */
+export const STUDIO_URL = readSetting('VITE_STUDIO_URL', 'http://127.0.0.1:54323')
+  .replace(/\/+$/, '');
+
+/**
  * The Grafana alert page for one rule.
  *
  * BY RULE NAME ONLY. It also carried `label:sparkplug_id=<id>`, to land on the one device's instance

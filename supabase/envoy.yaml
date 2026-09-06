@@ -750,6 +750,44 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: studio
+                # -------------------------------------------------------------------------------
+                # WHO OPENED THE DATABASE CONSOLE. Unconditional, unlike the API listener's log
+                # above, which is filtered to one deprecation it exists to count down.
+                #
+                # THIS LISTENER HAD NO ACCESS LOG AT ALL, and the cost of that was a real
+                # investigation: an admin session that outlived its owner's logout had to be
+                # reconstructed from `rbac.allowed` counters and GoTrue's `auth.audit_log_entries`,
+                # because nothing here recorded which identity the requests carried. The counters
+                # said 49 allowed and 0 denied; they could not say for whom.
+                #
+                # `user` AND `role` COME FROM THE VERIFIED TOKEN, not from a header a client sets:
+                # `jwt_authn` writes the payload to dynamic metadata under `jwt_payload` (that is
+                # what `payload_in_metadata` below is for) and this reads it back. Both render as
+                # `-` before the door opens, which is what an unauthenticated redirect looks like.
+                # A 403 line still carries them -- rbac denies AFTER jwt_authn has populated them,
+                # so the refused identity is named rather than guessed.
+                #
+                # `%REQ_WITHOUT_QUERY(...)%`, NOT `%REQ(:PATH)%`, AND THAT IS A CREDENTIAL
+                # DECISION -- the same one the API listener's log records for the Realtime apikey.
+                # `/oauth2/callback` carries the authorization code in its QUERY STRING, so the
+                # plain path operator would write a live credential to stdout on every login.
+                # -------------------------------------------------------------------------------
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        # `%REQ_WITHOUT_QUERY%` IS AN EXTENSION, NOT A BUILT-IN, and it has to be
+                        # registered here to exist. Without this block Envoy refuses the whole
+                        # config with `Not supported field in StreamInfo: REQ_WITHOUT_QUERY` --
+                        # a boot failure of the gateway every other service sits behind, over a
+                        # log line. Found by `envoy --mode validate`, which is the cheap way.
+                        formatters:
+                          - name: envoy.formatter.req_without_query
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.extensions.formatter.req_without_query.v3.ReqWithoutQuery
+                        text_format_source:
+                          inline_string: "acs-studio method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% user=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)% role=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:app_metadata:role)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
                 # MEASURED, AND THE ANSWER IS THAT NOTHING UPGRADES HERE. Studio's client bundle
                 # opens no socket to its own origin, its server declares no upgrade handler, and an
                 # upgrade sent to it through this listener is forwarded and then RESET BY STUDIO
@@ -814,6 +852,35 @@ static_resources:
                         # this the role check below has nothing to read.
                         forward_bearer_token: true
                         use_refresh_token: true
+                        # THE SESSION CAP, AND IT IS THE WHOLE POINT OF THE TWO LINES ABOVE HAVING
+                        # A THIRD. Envoy's session is its own cookie and knows nothing about the
+                        # dashboard's. Signing out of the dashboard -- even globally, which does
+                        # revoke the token GoTrue signed -- leaves this cookie intact, because
+                        # `jwt_authn` below verifies HS256 locally and never asks GoTrue whether
+                        # the session behind it still exists. That much is bounded: the cached
+                        # token expires within GOTRUE_JWT_EXP and the refresh then fails, because
+                        # a logout kills the refresh chain too.
+                        #
+                        # WHAT WAS NOT BOUNDED is the case where nobody signs out at all -- a
+                        # console left open, a shared machine, a laptop handed over. Envoy's
+                        # default refresh-token lifetime is SEVEN DAYS, so the session renewed
+                        # itself for as long as anyone kept opening Studio. An admin's door stayed
+                        # open behind whoever sat down next, and no counter here said so.
+                        #
+                        # 3600s matches GOTRUE_JWT_EXP so the session cannot outlive one access
+                        # token. What happens at the cap is the reason this is enough on its own:
+                        # the filter bounces the browser back through /oauth/authorize, which
+                        # lands on the DASHBOARD's own consent page, which reads the CURRENT
+                        # session. So the hourly re-auth re-derives who you are now -- silent for
+                        # an admin still signed in, and an `Operator` for the person who signed in
+                        # after them, who then meets the 403 below.
+                        #
+                        # Deliberately NOT the stack-wide instrument. GoTrue's sessions carry a
+                        # timebox and an inactivity timeout that would bound this and everything
+                        # else, and everything else includes the wall-mounted shopfloor dashboards
+                        # that are supposed to sit idle. This cap is scoped to the one door that
+                        # opens on a database console.
+                        default_refresh_token_expires_in: 3600s
                         credentials:
                           client_id: c0ffee00-0000-4000-8000-000000000003
                           # TWO FILES, ONE SECRET EACH. A path config source is expected to carry
