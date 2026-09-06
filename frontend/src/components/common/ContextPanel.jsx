@@ -43,8 +43,16 @@ import { grafanaAlertUrl } from '../../constants'
  *                             after the actions, so a section of unknown height cannot push the
  *                             action list off the bottom of the drawer.
  * @param {Function} onClose   Called by the X, by Escape, and by anything else that clears selection.
+ * @param {string}   subject   What this drawer is showing, as one noun, used in the region label
+ *                             and on the close control: "details" for an entity, "help" for the
+ *                             help corpus. ONE PROP RATHER THAN TWO because the two strings must
+ *                             agree -- a drawer announcing itself as help whose X says "close
+ *                             details" is the kind of mismatch only a screen reader hears.
+ * @param {string}   className Extra classes on the <aside>. The drawer is positioned by the flex
+ *                             row it sits in, and the app-level instance sits in a different row
+ *                             from the per-page ones -- see `.context-panel-app`.
  */
-export function ContextPanel({ open, type, title, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null }) {
+export function ContextPanel({ open, type, title, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '' }) {
   const closeRef = useRef(null)
 
   // Escape closes, from anywhere on the page.
@@ -72,10 +80,10 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
       between the table and the pagination.
     */
     <aside
-      className={`context-panel${open ? ' context-panel-open' : ''}`}
+      className={`context-panel${open ? ' context-panel-open' : ''}${className ? ' ' + className : ''}`}
       aria-hidden={!open}
       /* The entity kind survives here rather than as a pill above the title -- see below. */
-      aria-label={open ? `${title} ${type ? type.toLowerCase() + ' ' : ''}details` : undefined}
+      aria-label={open ? `${title} ${type ? type.toLowerCase() + ' ' : ''}${subject}` : undefined}
     >
       <div className="context-panel-inner">
         <div className="context-panel-header">
@@ -93,8 +101,8 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
             ref={closeRef}
             className="context-panel-close"
             onClick={onClose}
-            title="Close details (Esc)"
-            aria-label="Close details"
+            title={`Close ${subject} (Esc)`}
+            aria-label={`Close ${subject}`}
             tabIndex={open ? 0 : -1}
           >
             <IconX size={15} />

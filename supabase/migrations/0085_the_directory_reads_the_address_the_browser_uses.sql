@@ -58,7 +58,7 @@
 -- protects a hand-run psql and a chart with the URLs unset.
 --
 -- WHAT THIS DOES NOT DO. It does not give Compose port-free URLs -- that needs the reverse proxy in
--- roadmap 12, which is sequenced AFTER this for the reason recorded there: a proxy serving
+-- roadmap 11, which is sequenced AFTER this for the reason recorded there: a proxy serving
 -- `nodered.<domain>` while this table advertised `localhost:1880` would have moved the problem
 -- rather than fixed it. On Kubernetes there is no such gap; the chart's hostnames are already
 -- port-free and this migration is what surfaces them.

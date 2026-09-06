@@ -171,23 +171,35 @@ describe('Merged navigation shell', () => {
    * -- its entire value is being seen by somebody who does not yet know the keyboard does anything,
    * and one that nobody discovers is a file rather than a feature.
    *
+   * THE FOURTH IS THE HELP CONTROL, AND IT ARGUES FROM THE SAME EXCEPTION AS THE THIRD rather than
+   * widening the rule. It is not a preference either: contextual help exists for the reader who is
+   * already lost, and the one place they will not think to look for it is behind the account menu
+   * they have never opened. It is also the only control here that TOGGLES something that stays open,
+   * which is why it is the only one carrying `aria-expanded` -- a button whose second press closes a
+   * drawer has to say so.
+   *
    * Asserted as an exact count rather than an upper bound, because the failure this guards against is
    * ACCRETION: the next standing indicator is added by somebody who has not read the reasoning, and
-   * naming only the survivors would not catch it. A fourth control here should have to argue for
+   * naming only the survivors would not catch it. A fifth control here should have to argue for
    * itself in this comment first.
    */
-  it('keeps the bar to the changing control, the shortcuts key and the account door', async () => {
+  it('keeps the bar to the changing control, the two signposts and the account door', async () => {
     await renderShell()
 
     const right = topbar().querySelector('.topbar-right')
     expect(right).toBeTruthy()
     const controls = [...right.querySelectorAll('button')]
-    expect(controls).toHaveLength(3)
+    expect(controls).toHaveLength(4)
 
-    // The one whose VALUE moves, the signpost, and the door to everything else.
+    // The one whose VALUE moves, the two signposts, and the door to everything else.
     expect(right.querySelector('.alert-pill')).toBeTruthy()
     expect(within(right).getByRole('button', { name: /keyboard shortcuts/i })).toBeTruthy()
+    expect(within(right).getByRole('button', { name: /help for this page/i })).toBeTruthy()
     expect(right.querySelector('.user-avatar')).toBeTruthy()
+
+    // The avatar stays LAST. It is the fixed corner people aim at, and inserting anything after it
+    // moves the target that every other control in this bar is positioned relative to.
+    expect(controls[controls.length - 1]).toBe(right.querySelector('.user-avatar'))
 
     // The Live/Polling chip is gone. It reported a build flag, not the socket's health.
     expect(document.querySelector('.topbar-status')).toBeNull()

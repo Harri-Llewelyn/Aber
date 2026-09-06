@@ -34,15 +34,29 @@ issues
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 7 and 9 were not filed. **9 is
 sequenced *after* 8 because it removes what 8 replaces, and 7 is sequenced *before* it because 8
 cannot ask an `Operator` for a proposal until 7 has given that role a way to make one** — 7 is the
-queue and the authority, 8 is one lane's payload and the edge sync that carries it. **11 is
-documentation**, and is the one item whose remaining work is mostly writing;
-it arrives from [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **12 and 13 are the
+queue and the authority, 8 is one lane's payload and the edge sync that carries it.
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **11 and 12 are the
 platform's own and sit last anyway**, because each has for its subject something that runs under or
-over every other item rather than any one chain: 12 is the transport between the services, 13 the
-record of what they did. Neither blocks the other. 12 is written first because reading it before 5
-and 8 invites starting it in the wrong order, which is the one thing it asks not to happen; 13 has
+over every other item rather than any one chain: 11 is the transport between the services, 12 the
+record of what they did. Neither blocks the other. 11 is written first because reading it before 5
+and 8 invites starting it in the wrong order, which is the one thing it asks not to happen; 12 has
 no such constraint and is last because it is the newest.
+
+**Contextual help shipped and left this list on 2026-09-06.** It was 11; 12 and 13 moved down by
+one, and the grep found two prose citations to move with it — `0085`'s header and
+`supabase/README.md`. Its substance is in
+[Contextual help](../frontend/README.md#contextual-help): a control in the top bar, a drawer per
+page, thirteen markdown files, and a bidirectional guard in `check-docs-drift.mjs`. **Three things
+it argued came out differently in the building, and each one is worth carrying forward.** The corpus
+could NOT live in `docs/help/` as the entry proposed — `frontend/Dockerfile`'s build context is
+`./frontend` on every target, so `docs/` is not present at image build time at all, and bundling
+from there works on a developer's machine and fails in every container build. The `docs/` placement
+was never what made the writing cheap either: `ci.yml` classifies a diff with `*.md|docs/*`, and a
+`case` glob's `*` spans directory separators, so a markdown file anywhere in the repository already
+skips the two end-to-end stacks. And the drawer had to mount its CONTENTS only while open, which no
+per-page drawer needs to do — a page of prose whose first line is the page name put a second
+"Devices" into the document on every page, which `aria-hidden` hides from assistive technology and
+from nothing else.
 
 **Studio behind a login shipped and left this list on 2026-09-05.** It was 2 until `0081` and
 `0082`; everything above 2 moved down by one, and the grep above found three prose citations to
@@ -1098,85 +1112,7 @@ currently prevent.
 
 ---
 
-## 11 · Contextual help, and where the documentation actually lives
-
-**Builds on:** [`frontend/src/App.jsx`](../frontend/src/App.jsx)'s top bar and
-[`frontend/src/navigation.jsx`](../frontend/src/navigation.jsx) ·
-[`README.md`](../README.md) and the six subsystem READMEs ·
-[issue #39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39)
-
-**The request, and it is a fair one:** *"There's a lot to unpack with this application and going to
-the GitHub to read the documentation takes a lot of time."* A help control in the top bar that opens
-a panel for the page you are on — Gateways explains gateways — rather than a link that drops you at
-the top of a long file.
-
-### The hard part is not the button
-
-It is that **the documentation this would surface does not exist in a form a panel can use.** What
-exists is excellent and is written for a different reader: `README.md` and the subsystem READMEs
-argue *why* the stack is built as it is, at length, for somebody changing it. A help panel needs the
-other half — what this page is for, what the controls do, what the states mean — in a few hundred
-words per page.
-
-So the work is mostly writing, and the button is the small end of it. An item that shipped the
-control first would produce a help system whose honest content is a link to the README, which is
-what the request already finds too slow.
-
-### A GitHub wiki is the wrong store, and this is the decision to make first
-
-The issue proposes one. Against it: **a wiki is not in the repository**, so it cannot be reviewed in
-a pull request, cannot be checked by `scripts/check-docs-drift.mjs`, and drifts from the code with
-nothing to catch it. This repository has spent real effort making documentation checkable — the
-service directory, the migration mentions, the roadmap numbering, the Prometheus job map — and a
-wiki opts out of all of it.
-
-**Markdown in `docs/help/<page>.md`, bundled into the frontend**, keeps every one of those
-properties: reviewed with the change that motivated it, greppable, and checkable by a guard that
-asserts every navigable page has a help file and every help file names a real page. That is the
-same bidirectional shape the service-directory check already uses.
-
-The cost is that help ships with the image rather than being editable in a browser. For a stack
-whose dashboard is versioned and deployed as one artefact, that is the right side of the trade.
-
-### Where the control goes, now that the bar has room
-
-This section used to argue about width. `navDensity()` banded the header at 10 and 12 tabs, the bar
-carried eleven, and the case being made was that a help control had to be **a button beside the
-session controls rather than a twelfth tab**, because a twelfth tab cost the brand width it did not
-have.
-
-**That constraint is gone.** Navigation moved out of the bar and into a rail
-([`Sidebar.jsx`](../frontend/src/components/common/Sidebar.jsx)); the density bands and the media
-queries that implemented them went with it. The conclusion survives its own reasoning, though, and
-for a better reason than width: **help is a thing that acts, not a place you navigate to**, so it
-belongs with Report Bug and the theme toggle rather than among the pages.
-
-Two homes are now plausible and the choice is worth making deliberately. A **button in the bar**
-puts it one click from anywhere and beside the account menu that already holds the other
-session-level escape hatches. An **item at the foot of the rail**, below a divider, reads as
-belonging to the chrome rather than to the page — but the rail is collapsed by default, so the
-control would be an unlabelled icon until hovered, which is the wrong resting state for the thing
-somebody reaches for when they are already lost.
-
-**Not a page**, either way. A page called Help that lists everything is the README again with more
-clicks; the request is specifically for *contextual* help, which means the panel opens knowing which
-page is active.
-
-**The search box is now the other half of this.** It answers "where is X" for pages, cards and asset
-ids, which is a real part of what issue #39 describes as unpacking the application — so the help
-corpus is narrower than it was when this item was written. What is left for it is what a
-destination cannot say: what a page is FOR, what its controls do, and what its states mean.
-
-### Worth deciding early
-
-- **Whether it is also the empty state.** A page with nothing on it and a page whose help explains
-  what to put there are the same moment, and "no gateways yet" is where a reader is most receptive.
-- **Whether it survives translation.** Nothing here is localised today, and a help corpus is the
-  first thing that would make that expensive.
-
----
-
-## 12 · The transport between services, and the two targets that disagree about it
+## 11 · The transport between services, and the two targets that disagree about it
 
 **Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
@@ -1385,7 +1321,7 @@ leave the stack worse than it started.
 
 ---
 
-## 13 · The other half of every drop counter, which is a log nothing keeps
+## 12 · The other half of every drop counter, which is a log nothing keeps
 
 **Builds on:** the drop counters and their paired `logger.warning` in
 [`ingestion.py`](../ingestion/ingestion.py) · [`ingestion/metrics.py`](../ingestion/metrics.py) ·

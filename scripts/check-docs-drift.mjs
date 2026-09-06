@@ -2039,6 +2039,103 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 16. Every navigable page has help, and every help file names a page that exists.
+//
+// The help corpus is thirteen markdown files bundled into the browser bundle, one per page, resolved
+// BY FILENAME at runtime (frontend/src/help/index.js). Nothing in the app fails when a file is
+// missing -- the drawer opens and says there is no help yet -- which is exactly the failure mode
+// this repository keeps writing guards against: a feature that degrades quietly into looking
+// finished. The page somebody most needs help on is the one nobody wrote it for.
+//
+// BOTH DIRECTIONS, and the second one is the half that actually rots. A page added without help is
+// noticed the first time somebody opens the drawer on it. A help file left behind by a page that was
+// RENAMED is invisible for ever: the old file is never resolved, the new page silently has none, and
+// both halves look fine in a diff.
+//
+// IT ALSO CHECKS THE MARKDOWN SUBSET. HelpMarkdown.jsx renders headings, lists, paragraphs, bold,
+// inline code and absolute links, and nothing else -- deliberately, so that the bundle carries no
+// markdown library and no HTML sink. An unsupported construct does not fail there, it RENDERS AS
+// ITSELF: a table arrives as a row of pipes, a relative link as a dead anchor. That is a
+// documentation defect a reader sees and an author never does, so it is caught here instead.
+// -------------------------------------------------------------------------------------------------
+{
+  const HELP_DIR = 'frontend/src/help';
+  const nav = read('frontend/src/navigation.jsx');
+
+  // The TABS array only. GROUPS above it carries `{ id: 'assets' }` entries that are not pages, and
+  // a naive scan of the whole file would demand help files for all four of them.
+  const tabsBlock = /export const TABS = \[([\s\S]*?)\n\]/.exec(nav);
+  if (!tabsBlock) {
+    fail('check-docs-drift: could not find the TABS array in frontend/src/navigation.jsx');
+  } else if (!existsSync(join(REPO, HELP_DIR))) {
+    fail(`${HELP_DIR} is missing, and frontend/src/help/index.js globs it for the help corpus.`);
+  } else {
+    const pages = [...tabsBlock[1].matchAll(/\{\s*id:\s*'([a-z-]+)'/g)].map((m) => m[1]);
+    const helpFiles = readdirSync(join(REPO, HELP_DIR))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => f.replace(/\.md$/, ''));
+
+    const unhelped = pages.filter((p) => !helpFiles.includes(p));
+    const orphaned = helpFiles.filter((f) => !pages.includes(f));
+
+    if (unhelped.length) {
+      fail(
+        `no help file in ${HELP_DIR} for page(s): ${unhelped.join(', ')}.\n` +
+          '      The help drawer resolves by filename, so these pages open it to a notice saying\n' +
+          '      nobody has written any -- which is the state the whole item exists to end.'
+      );
+    }
+    if (orphaned.length) {
+      fail(
+        `${HELP_DIR} has help file(s) for no such page: ${orphaned.join(', ')}.md.\n` +
+          '      A page id that was renamed leaves its help behind under the old name: the file is\n' +
+          '      never resolved again and the renamed page silently has none.'
+      );
+    }
+
+    // The subset HelpMarkdown.jsx actually implements. Each entry is what the reader would SEE if
+    // this check were not here, because none of these fails at runtime.
+    const UNSUPPORTED = [
+      [/^# /m, 'a top-level heading (the panel title is the h1; corpus headings start at ##)'],
+      [/^\s*```/m, 'a fenced code block'],
+      [/^\s*\|/m, 'a table'],
+      [/!\[[^\]]*\]\(/, 'an image'],
+      [/<[a-zA-Z/][^>]*>/, 'raw HTML (it renders as text -- there is no HTML sink in the renderer)'],
+      [/(?<!\*)\*(?!\*)[^*\n]+\*(?!\*)/, 'single-asterisk emphasis (use **bold**)'],
+      [/^\s*>/m, 'a block quote'],
+    ];
+
+    const offences = [];
+    for (const name of helpFiles.slice().sort()) {
+      const source = read(`${HELP_DIR}/${name}.md`);
+      for (const [pattern, what] of UNSUPPORTED) {
+        if (pattern.test(source)) offences.push(`${name}.md uses ${what}`);
+      }
+      // Links must be absolute: a repository-relative link is correct in the file and dead in the
+      // browser, where it resolves against the dashboard's own routes.
+      for (const m of source.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+        if (!/^https?:\/\//.test(m[1])) {
+          offences.push(`${name}.md links to \`${m[1]}\`, which is not an absolute http(s) URL`);
+        }
+      }
+    }
+
+    if (offences.length) {
+      fail(
+        `help corpus uses markdown the panel does not render:\n` +
+          offences.map((o) => `        ${o}`).join('\n') +
+          '\n      HelpMarkdown.jsx renders headings, lists, paragraphs, bold, inline code and\n' +
+          '      absolute links. Anything else reaches the reader as its own source text.'
+      );
+    }
+
+    if (!unhelped.length && !orphaned.length && !offences.length) {
+      pass(`all ${pages.length} navigable page(s) have help in ${HELP_DIR}, in the supported subset`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nDocumentation drift:\n');
