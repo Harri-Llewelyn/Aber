@@ -2474,20 +2474,32 @@ ON CONFLICT (service_name) DO NOTHING;
 -- ON CONFLICT DO NOTHING cannot express.
 --
 -- THREE ROWS, AND ONLY TWO OF THEM ARE SOMEWHERE TO GO. Prometheus serves a browsable expression
--- browser, and the ingestion endpoint answers on a published port. node_exporter does not: it is
+-- browser, and the ingestion endpoint answers on a host port. node_exporter does not: it is
 -- bound to the compose network with no host port, deliberately, because nothing outside has any
 -- business reading host metrics.
+--
+-- BOTH OF THOSE TWO ARE NOW LOOPBACK-BOUND, which they were not when this block was written. The
+-- ingestion metrics port joined Prometheus on `127.0.0.1` for the same reason Prometheus was there
+-- first: neither endpoint authenticates, so who can reach the port is the whole of the control.
+-- The paragraph below was written about Prometheus alone and now describes both.
 --
 -- `METRICS_EXPORTER` RATHER THAN `MONITORING`, so it groups with the infrastructure it describes
 -- rather than beside Grafana under "Applications & User Interfaces". Grafana and Prometheus are
 -- things an operator OPENS; an exporter is a component of the backend that happens to speak HTTP.
 -- The type is free text and DirectoryTab's SERVICE_GROUPS decides the section.
 --
--- PROMETHEUS IS PUBLISHED ON LOOPBACK ONLY, so this link resolves for a browser running ON the
--- deployment host and nowhere else. That is a stronger version of something already true of every
--- `http://localhost:...` row here -- they are written for someone browsing on the host -- but it
--- is worth saying, because for Prometheus a remote browser cannot be made to work by using the
--- right hostname. It needs an SSH tunnel, which is the point of the binding.
+-- PROMETHEUS AND THE INGESTION METRICS ENDPOINT ARE PUBLISHED ON LOOPBACK ONLY, so those two links
+-- resolve for a browser running ON the deployment host and nowhere else. That is a stronger version
+-- of something already true of every `http://localhost:...` row here -- they are written for someone
+-- browsing on the host -- but it is worth saying, because for these two a remote browser cannot be
+-- made to work by using the right hostname. It needs an SSH tunnel, which is the point of the
+-- binding.
+--
+-- THE DIRECTORY PAGE CANNOT CURRENTLY SAY THIS. `isBrowsableEndpoint` in DirectoryTab.jsx decides
+-- link-or-copy from the scheme and the host, which is the right test for "is this a web page" and
+-- cannot answer "can THIS browser reach it" -- nothing in this table records reachability. Both
+-- rows therefore render as links that work on the host and fail everywhere else, which is the same
+-- failure the container-hostname case was given a copy button to avoid.
 --
 -- It is listed anyway, at the address it actually answers on. The directory is an inventory of what
 -- is DEPLOYED -- `mqtt://localhost:1883` and `postgres://localhost:5433` are already here and

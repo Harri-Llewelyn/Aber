@@ -94,7 +94,25 @@ services:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5433:5432"
+      # LOOPBACK ONLY. The port NUMBER is what avoids a collision with a Postgres already on the
+      # host -- 5433 rather than 5432 -- and the BINDING was never part of that argument:
+      # `127.0.0.1:5433:5432` avoids the collision identically while taking the historian off the
+      # host's network entirely.
+      #
+      # THE RULE THE REST OF THIS FILE FOLLOWS is stated beside prometheus below: a port is
+      # published broadly because it either AUTHENTICATES a browser session (Grafana, the frontend,
+      # Node-RED) or is a PROTOCOL ENDPOINT that has to be reachable (the broker). A raw Postgres
+      # port is neither. It does authenticate -- but what one password stands in front of is the
+      # entire historian with no RLS anywhere in the way, which is more than Prometheus was bound
+      # down for, not less.
+      #
+      # THIS COSTS NOTHING THAT WAS BEING USED. Everything inside the stack reaches it as
+      # `timescaledb:5432` over the compose network and never saw this mapping; everything outside
+      # it -- validate.py, the backup scripts, the Python database suites -- runs ON the host,
+      # where 127.0.0.1 is the address it was already dialling. What changes is that a second
+      # machine now needs an SSH tunnel, which is the right amount of friction for a connection
+      # that can drop a table.
+      - "127.0.0.1:5433:5432"
     volumes:
       # Note: Initialization scripts in /docker-entrypoint-initdb.d only run on an empty data directory.
       # Existing pgdata volumes must be recreated (docker compose down -v) to pick up schema changes.
@@ -196,7 +214,15 @@ services:
     image: supabase/postgres:17.6.1.160
     restart: always
     ports:
-      - "${SUPABASE_DB_PORT:-54322}:5432"
+      # LOOPBACK ONLY, for the reason written out on timescaledb's port above -- and it applies
+      # harder here. This database holds auth.users, the OAuth client secrets every login in the
+      # stack is checked against, and the Vault; `postgres` on it is the role every migration runs
+      # as, and the role for whom RLS is not enforced.
+      #
+      # SUPABASE_DB_PORT still chooses the NUMBER, which is the half that avoids the collision.
+      # Host-side callers are unaffected: psql from the host, the migration suites and
+      # `npm run test:db` all dial 127.0.0.1 already.
+      - "127.0.0.1:${SUPABASE_DB_PORT:-54322}:5432"
     environment:
       POSTGRES_DB: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -1609,13 +1635,27 @@ services:
       context: .
       dockerfile: ingestion/Dockerfile
     restart: always
-    # PUBLISHED SO IT CAN BE SCRAPED, and there is nothing here to scrape it with -- this stack
-    # ships no Prometheus, and Grafana holds two Postgres datasources and no others. The port is
-    # published anyway because the endpoint is how the daemon is INSPECTED: `curl localhost:9108/
-    # metrics` answers "is it dropping anything" without reading a log, and an operator running
-    # their own Prometheus alongside can point it here. See issues #22 and #24.
+    # LOOPBACK ONLY, AND THE REASON THIS BLOCK USED TO GIVE HAS EXPIRED. It said the port was
+    # "PUBLISHED SO IT CAN BE SCRAPED, and there is nothing here to scrape it with -- this stack
+    # ships no Prometheus". A Prometheus was then added (issues #22 and #24), and it does not use
+    # this mapping: prometheus/prometheus.yml targets `ingestion:9108` over the compose network,
+    # exactly as it targets node-exporter. Publishing on every interface was never what made the
+    # endpoint scrapeable, and once the scraper arrived it stopped being what made it reachable.
+    #
+    # WHAT THE BINDING IS ACTUALLY FOR survives unchanged: `curl localhost:9108/metrics` answers
+    # "is it dropping anything" without reading a log, and 127.0.0.1 serves that identically.
+    #
+    # THE ENDPOINT NEEDS NO CREDENTIAL -- see the header of ingestion/metrics.py, which draws a
+    # careful line around what may appear here precisely because of that. It is the same shape as
+    # prometheus below: an unauthenticated read surface whose only control is who can reach the
+    # port. It exposes a narrower slice than Prometheus does, which is an argument about how much
+    # is behind the door rather than about whether it should be open on the plant network.
+    #
+    # AN OPERATOR RUNNING THEIR OWN PROMETHEUS still can, and the two cases differ: on this host it
+    # scrapes 127.0.0.1:9108 as before; from another machine it should join the compose network and
+    # target `ingestion:9108`, or scrape through a tunnel.
     ports:
-      - "${INGESTION_METRICS_PORT:-9108}:9108"
+      - "127.0.0.1:${INGESTION_METRICS_PORT:-9108}:9108"
     environment:
       DB_HOST: ${DB_HOST:-timescaledb}
       DB_PORT: ${DB_PORT:-5432}
@@ -2041,7 +2081,11 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
-      # LOOPBACK ONLY, and the only published port in this file that is. Prometheus has no
+      # LOOPBACK ONLY. It was once the only published port in this file that was; it is now one of
+      # four, alongside the two databases and the ingestion metrics endpoint, and the argument it
+      # made first is the one those three were measured against.
+      #
+      # Prometheus has no
       # authentication -- that is a deliberate decision, not an oversight -- so the control over who
       # reads it is who can reach the port. Bound to all interfaces on the deployment VM, its
       # expression browser would offer every metric here to anyone on the plant network: Kong
@@ -2053,7 +2097,9 @@ services:
       # in. That is the right shape for a debugging tool on a shopfloor host.
       #
       # Everything else here is published broadly because it either authenticates (Grafana, the
-      # frontend, Node-RED) or is a protocol endpoint that has to be reachable (the broker).
+      # frontend, Node-RED) or is a protocol endpoint that has to be reachable (the broker). That
+      # clause is the rule the rest of this file is now checked against -- see the two database
+      # ports and the ingestion metrics port, each of which satisfied neither half of it.
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     depends_on:
       ingestion:

@@ -1245,21 +1245,38 @@ constraint on other decisions. **What is missing is the statement of what Compos
 expected to enforce**, so that a control present on one target and absent on the other is a recorded
 decision rather than a discovery.
 
-### The two database ports are published for a reason that does not require publishing them
+### The published-port surface has been narrowed, and this records what is left of it
 
-Compose binds `5433:5432` and `${SUPABASE_DB_PORT:-54322}:5432` on all interfaces. The reason is
+**The two database ports have landed on `127.0.0.1` and left this list on 2026-09-06.** Compose bound
+`5433:5432` and `${SUPABASE_DB_PORT:-54322}:5432` on all interfaces. The reason they were published is
 recorded in `deploy/k8s/README.md` and in CI, and it is **collision avoidance with a local Postgres**
-— the *number* is what matters, and `127.0.0.1:5433:5432` avoids the collision identically while
-taking two databases off the host's network.
+— the *number* is what mattered, and `127.0.0.1:5433:5432` avoids the collision identically while
+taking two databases off the host's network. `scripts/test-db.mjs` published its throwaway container
+the same way and now does not: short-lived changes how long the exposure lasts, not what it is.
 
-**The precedent for that is already in the same file, twice, with the argument written out.** Studio
-is bound to `127.0.0.1` because "the only way to reach it from elsewhere is an SSH tunnel, which is
-the correct amount of friction for a tool that can drop a table", and Prometheus the same way. A raw
-Postgres port is the tool that can drop a table. The comment beside the remaining published ports
-states the rule the stack means to follow — everything else is published because it **authenticates**
-(Grafana, the frontend, Node-RED) or is **a protocol endpoint that has to be reachable** (the broker)
-— and the two databases satisfy neither clause. This is the smallest change in this item and the
-largest reduction in exposed surface.
+**The ingestion metrics endpoint went with them, and its own premise had expired.** `9108` carries no
+credential — [`ingestion/metrics.py`](../ingestion/metrics.py) draws a careful line around what may
+appear there precisely because of that — and the block publishing it argued that the port had to be
+open because "this stack ships no Prometheus" to scrape it. One was added (issues #22 and #24), and
+[`prometheus/prometheus.yml`](../prometheus/prometheus.yml) targets `ingestion:9108` over the compose
+network exactly as it targets node-exporter. The host mapping was never what made the endpoint
+scrapeable, and once the scraper arrived it stopped being what made it reachable either.
+`curl localhost:9108/metrics` is unaffected.
+
+**The rule all three were measured against** is stated beside prometheus in `docker-compose.yml`: a
+port is published broadly because it either **authenticates** (Grafana, the frontend, Node-RED) or is
+**a protocol endpoint that has to be reachable** (the broker). None of the three satisfied either
+clause. Note that the precedent this item used to cite — Studio's `127.0.0.1` binding — no longer
+exists: `0081` replaced it with a login on the gateway's studio listener (§ the note at the head of
+this document), so Prometheus is now the standing example rather than one of two.
+
+### What is still published, and has not been argued either way
+
+`swagger-ui:8088` serves static documentation with no credential. `i3x-service:8090` requires a caller
+JWT and passes it to PostgREST, so RLS decides what it returns. Neither is in the class of a raw
+Postgres port, and neither is claimed here to be wrong — what is missing is that the file now records
+a decision beside every port that was narrowed and beside none of the ports that were not, which is
+the same asymmetry this item complains about between the two targets.
 
 ### Plaintext 1883 is deliberate today and should have an end state
 
