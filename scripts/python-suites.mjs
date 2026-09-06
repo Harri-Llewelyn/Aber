@@ -322,6 +322,19 @@ export const SUITES = {
       "Node-RED's authorization: an unmapped or revoked role must yield NO `permissions` key, " +
       "because settings.js keys its refusal on the key's absence.",
   },
+  'supabase/migrations/test_change_proposals.py': {
+    lanes: ['db'],
+    why:
+      'The approvals queue (0086), and above all the claim the item rests on: `Operator` gained ' +
+      'the first write that role has ever held, and it is a write to a QUEUE rather than to an ' +
+      'asset. TestTheAssetWritePoliciesDidNotMove asserts the refusal directly, because if a ' +
+      'later change ever adds a second write path to `devices` nothing else here would notice. ' +
+      'Two more properties are load bearing and would be the first things a simplification would ' +
+      'remove: approving IS applying, so a patch violating a CHECK aborts the approval instead ' +
+      'of becoming an audit record of something that did not happen; and BOTH caps live in the ' +
+      'database, one as a partial unique index and one as a trigger, because the INSERT policy ' +
+      'admits a direct PostgREST write and a cap enforced only by a disabled button is not a cap.',
+  },
   'supabase/migrations/test_user_roles_rls.py': {
     lanes: ['db'],
     why: "The role table's RLS -- who may read and who may grant.",

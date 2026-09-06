@@ -1957,6 +1957,68 @@ It is now one `SECURITY DEFINER` RPC — atomic, granted to `service_role` only,
 authenticated `p_actor_id` explicitly and **re-checking that actor's role against
 `public.user_roles`** so authorisation does not rest solely on the caller's check.
 
+### The approvals queue, and the first write an `Operator` has ever had (`0086`)
+
+One queue for a change a person proposes but may not apply. An `Operator` inserts into
+`change_proposals`; an `Administrator` or `Shopfloor_Manager` calls `approve_proposal()`, and **the
+approval is the write**.
+
+**`Operator` held two permissions before `0086`, neither of them a write**, so this is not the
+loosening of an existing grant. It is worth being exact about what it is a write *to*: a queue, not
+an asset. The write policies on `devices`, `cells`, `gateways` and `schemas` are unchanged, and
+`test_change_proposals.py` asserts that directly rather than inferring it — an `Operator` still
+cannot update a device, insert one, or write a nameplate. **If a later change ever adds a second
+write path to an asset table, this item has failed**, however convenient that path looks.
+
+**Approving is applying, and that is the property the shape exists for.** Because the write happens
+inside the approval, every CHECK, foreign key and trigger on the target runs *then* — a patch
+setting `location_scope = 'site_wide'` while leaving `cell_id` populated fails
+`devices_site_wide_has_no_cell` and **aborts the approval**. Nothing in `0086` restates that rule.
+A queue that accepted such a change would hold an audit record of something that did not happen,
+which is worse than no record.
+
+**The patch is operator-controlled input, and no SQL is ever built from its keys.** It is merged
+onto the current row with `jsonb_populate_record` and then assigned column by column, in SQL
+written out by hand, for the columns `proposable_columns()` admits. The omissions carry the
+argument: `status`, `first_dbirth_at`, `reported_identity`, `identity_source` and `is_quarantined`
+are what ingestion *observed*, and a proposal able to edit them would let an operator assert a
+device's identity by describing it. `gateway_id` is the data path, which `0036` separated from
+location precisely so a location change need not rewire one; `schema_id` belongs to
+`publish_schema_version()`, transactionally.
+
+**Two caps, doing two different jobs, and both in the database.** A partial unique index gives one
+open proposal per asset per person — scoped to the proposer deliberately, since a cap on the asset
+alone would let one person's forgotten proposal block everybody else from proposing against that
+machine. A trigger reading `proposals.max_open_per_person` bounds total open proposals per person,
+which is the one that actually bounds reviewer load. Neither lives in a button: the INSERT policy
+admits a direct PostgREST write, and `0069`'s header already made the argument that a rule the
+frontend applies and the database does not is "a frontend flag and therefore never an access
+control".
+
+**`status` is not writable through PostgREST at all.** An UPDATE policy can say who may write a
+row; it cannot say which columns, and a proposer who could set `applied` would hold the asset write
+the design exists to withhold. So the transition functions declare themselves with a session flag —
+the same mechanism `acs_cymru.actor_id` uses — and a trigger refuses every other path. A proposer
+may edit the `patch` and `rationale` of their own open row, which the caps make necessary rather
+than convenient: told "you already have an open proposal on this device", they have to be able to
+open it and add to it.
+
+**Who the record names.** `device_nameplate.updated_by` becomes the **proposer** — the column's own
+comment says a nameplate is an assertion about an asset, so who made it is part of the record —
+while the `digital_thread` row names the **approver** in `changed_by` and carries `proposed_by` in
+its payload. Both are in the record; neither column has to hold both.
+
+**The timer is not a person.** An open proposal nobody acts on closes after
+`proposals.open_expiry_days`, whose floor is 1: zero would auto-close every proposal at the moment
+it was created — a working configuration in which the feature silently does nothing. Expiry leaves
+`decided_by` NULL and declares `actor_source = 'service'`, because a scheduled job has no session
+and is not a person. `proposals.retention_days` then prunes decided rows, so the queue arrives with
+the retention answer every other durable store here has.
+
+`0086` also adds `device_nameplate` and `change_proposals` to `audit_domain_for()`'s **asset** lane.
+Both would otherwise take the fail-closed `security` branch, which would hide a
+`Shopfloor_Manager`'s own act from that manager.
+
 ### `relocate_devices()` — one rearrangement, one causation
 
 `0033`. Takes the WHOLE batch of staged moves as a `jsonb` array and applies it in one

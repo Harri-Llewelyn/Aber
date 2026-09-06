@@ -1461,6 +1461,141 @@ paths:
         '201': { description: Created. }
         '403': { description: 'Caller lacks Administrator or Shopfloor_Manager.' }
 
+  /rest/v1/change_proposals:
+    get:
+      tags: [Registry]
+      summary: Changes proposed but not yet applied
+      description: |
+        The approvals queue. An `Operator` may **insert** here and nowhere else that writes an
+        asset: this is the first write that role has ever held, and it is a write to a queue.
+        The asset write policies on `devices`, `cells`, `gateways` and `schemas` are unchanged.
+
+        **A proposer reads their own rows; an Administrator or Shopfloor_Manager reads the whole
+        queue.** That asymmetry is what makes the cap's refusal message actionable — told "you
+        already have an open proposal on this device", a person can open it and add to it.
+
+        Deciding is not done here. `status` cannot be written through this path at all; see
+        `/rest/v1/rpc/approve_proposal`, `reject_proposal` and `withdraw_proposal`. A proposer may
+        PATCH only the `patch` and `rationale` of their own **open** row.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - { name: status, in: query, schema: { type: string }, description: 'e.g. `eq.open`' }
+        - { name: entity_id, in: query, schema: { type: string, format: uuid }, description: 'e.g. `eq.<uuid>`' }
+      responses:
+        '200':
+          description: Matching proposals.
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+    post:
+      tags: [Registry]
+      summary: Propose a change
+      description: |
+        Requires `proposal:create`. Two caps apply and **both are enforced by the database**: one
+        open proposal per asset per person (a partial unique index), and a ceiling on total open
+        proposals per person (`proposals.max_open_per_person`, a trigger).
+
+        `patch` names columns `proposable_columns(entity_type)` admits and nothing else — the
+        columns ingestion writes (`status`, `reported_identity`, `identity_source`,
+        `is_quarantined`, `first_dbirth_at`), the device's `gateway_id` data path and its
+        `schema_id` binding are all refused, by name, at insert time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entity_type, entity_id, patch]
+              properties:
+                entity_type: { type: string, enum: [devices, device_nameplate] }
+                entity_id: { type: string, format: uuid, description: 'The device. Both lanes are keyed by one.' }
+                patch: { type: object, description: 'Column -> new value. A patch, not a row snapshot.' }
+                rationale: { type: string }
+      responses:
+        '201': { description: Filed. }
+        '403': { description: 'Caller lacks `proposal:create`, or named somebody else as the proposer.' }
+        '409': { description: 'An open proposal against this asset by this person already exists.' }
+
+  /rest/v1/rpc/approve_proposal:
+    post:
+      tags: [Registry]
+      summary: Approve a proposal, which is to apply it
+      description: |
+        Administrator or Shopfloor_Manager, re-checked **server-side** rather than taken from the
+        caller. The patch is re-validated against the allowlist and applied in the same
+        transaction, so every CHECK, foreign key and trigger on the target runs now — **an invalid
+        change cannot be approved**, it aborts rather than becoming an audit record of something
+        that did not happen.
+
+        Writes one `digital_thread` row naming both parties: `changed_by` is the approver,
+        `new_data.proposed_by` is who asked. On the nameplate lane `updated_by` is set to the
+        **proposer**, because a nameplate is an assertion about an asset and who made it is part
+        of the record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_proposal_id]
+              properties:
+                p_proposal_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Applied, with the digital_thread id it wrote.
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { description: 'The patch violates a constraint on the target, or names a column that is not proposable.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/reject_proposal:
+    post:
+      tags: [Registry]
+      summary: Refuse a proposal, with a reason
+      description: |
+        Administrator or Shopfloor_Manager. The reason is required by a CHECK as well as by this
+        function: a rejected proposal frees its slot immediately and the same change may be
+        proposed again at once, so the reason — not a cooldown — is what makes the second attempt
+        different from the first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_proposal_id, p_reason]
+              properties:
+                p_proposal_id: { type: string, format: uuid }
+                p_reason: { type: string }
+      responses:
+        '200': { description: Rejected. }
+        '400': { description: No reason given. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/withdraw_proposal:
+    post:
+      tags: [Registry]
+      summary: Withdraw your own proposal
+      description: |
+        The proposer's act and nobody else's. An approver who wants an open proposal gone rejects
+        it with a reason; withdrawing on somebody's behalf would erase the refusal. The row is
+        closed rather than deleted — what survives, and for how long, is
+        `proposals.retention_days`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_proposal_id]
+              properties:
+                p_proposal_id: { type: string, format: uuid }
+      responses:
+        '200': { description: Withdrawn. }
+        '403': { description: Not the proposer. }
+
   /rest/v1/links:
     get:
       tags: [Registry]

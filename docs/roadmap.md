@@ -723,7 +723,7 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
-## 7 · An approvals queue, and the first write an `Operator` has ever had
+## 7 · The approvals queue's remaining lanes, and the page that reads them
 
 **Builds on:** [`approve_quarantined_device()`](../supabase/migrations/0001_baseline_schema.sql) and the
 role re-check inside it · `has_role()` and the write policies it gates · the `Operator` role as seeded
@@ -738,6 +738,33 @@ in [`0002`](../supabase/migrations/0002_seed_data.sql) · `device_nameplate` · 
 One queue for every change a person proposes but may not make: a gateway's flow, an asset's details,
 a schema's publication. An `Operator` proposes; a `Shopfloor_Manager` or `Administrator` approves;
 the approval is the write.
+
+**The substrate and the asset-details lane shipped on 2026-09-07 as `0086`, and have left this
+entry.** What is here now is the two lanes that remain — the schema publication and the flow — plus
+the page. The substance of what was built is in
+[The approvals queue, and the first write an `Operator` has ever had](../supabase/README.md#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-0086),
+and `test_change_proposals.py` is the suite. **Four things it argued came out differently, or
+sharper, in the building:**
+
+* **The unknown-entity-type refusal had to be written explicitly.** The `CHECK` constraint admits
+  the two lanes that exist, but the validation trigger runs *before* it, so a third entity type
+  reaches the trigger first and its allowlist is empty — which reported "proposable columns are:"
+  with nothing after the colon. That reads as a broken message rather than as a lane nobody has
+  written an allowlist for, which is the state a widened `CHECK` and a forgotten
+  `proposable_columns()` entry would actually produce.
+* **`status` cannot be withheld by a policy, only by a trigger.** An RLS `UPDATE` policy says who
+  may write a row and cannot say *which columns*; a proposer able to set `applied` would hold the
+  asset write the design exists to withhold. So the transition functions declare themselves with a
+  session flag — the mechanism `acs_cymru.actor_id` already uses — and a trigger refuses every
+  other path.
+* **`REVOKE` has to precede every `GRANT`, and the repository's own suite caught this file getting
+  it wrong.** PostgreSQL grants `EXECUTE` on a new function to `PUBLIC`, so
+  `GRANT EXECUTE … TO authenticated` alone narrows nothing. The leak heals on the second boot and
+  is therefore present on exactly one kind of installation: a new one.
+  `test_anon_privilege_baseline.py` refused the first draft.
+* **The expiry timer declares `service`**, with `changed_by` NULL. It reuses the existing
+  `actor_source` CHECK rather than minting a fifth kind, and **§8's reconciling sidecar should give
+  the same answer** — the question was always whether the two agree, not what the value is called.
 
 ### The role this is built for currently holds nothing to build on
 

@@ -693,6 +693,14 @@ function edgeFunctionNames() {
     // leaving both declared would make a seven-argument call ambiguous at the call site. The
     // baseline's copy is the one being replaced.
     'public.digital_thread_page': '0077 adds the keyset cursor; the baseline holds the unpaged form',
+    // 0086 adds two entity types to the ASSET lane: `device_nameplate`, which no trigger wrote
+    // until 0086's apply path did, and `change_proposals`, whose expiry timer is the only thing
+    // that writes an audit row against it. Both would otherwise take the fail-closed 'security'
+    // branch and be invisible to the Shopfloor_Manager whose own act they record -- which is the
+    // right default and the wrong answer for these two. Rewritten in full rather than extended,
+    // because the classifier is one CASE and a partial redeclaration would be unreadable; the
+    // last declaration winning is exactly what is wanted.
+    'public.audit_domain_for': '0086 adds device_nameplate and change_proposals to the asset lane',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
