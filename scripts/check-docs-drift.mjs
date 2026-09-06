@@ -701,6 +701,13 @@ function edgeFunctionNames() {
     // because the classifier is one CASE and a partial redeclaration would be unreadable; the
     // last declaration winning is exactly what is wanted.
     'public.audit_domain_for': '0086 adds device_nameplate and change_proposals to the asset lane',
+    // 0087 narrows both gates from has_role(Administrator, Shopfloor_Manager) to
+    // has_authority(schema:manage). Both are SECURITY DEFINER, so neither consulted the three
+    // write policies 0069 narrowed to Administrator -- which made the RPC the way AROUND that
+    // migration rather than an application of it, measured on the shipped stack. The bodies are
+    // the baseline's verbatim apart from the gate, so the last declaration winning is the point.
+    'public.fork_schema': '0087 narrows the gate to schema:manage; the baseline holds the pair',
+    'public.publish_schema_version': '0087 narrows the gate to schema:manage; the baseline holds the pair',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

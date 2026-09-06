@@ -711,7 +711,7 @@ direction. Three permissions moved:
 | Withdrawn from `Shopfloor_Manager` | What it decides | Where it is enforced |
 | :--- | :--- | :--- |
 | `authz:manage` | who has access | **nowhere yet** — see below |
-| `schema:manage` | what contract ingestion validates against | the write policies on `schemas`, `metric_catalog` and `metric_groups` |
+| `schema:manage` | what contract ingestion validates against | the write policies on `schemas`, `metric_catalog` and `metric_groups`, **and since `0087` the two schema RPCs** |
 | `gitops:manage` | what gets deployed to the edge | `PERMISSION_MAP` in [`nodered-userinfo`](functions/nodered-userinfo/index.ts) |
 
 A manager keeps devices, cells, gateways, links, quarantine approval, telemetry, archives and the
@@ -751,6 +751,47 @@ deploys flows. The repair is to make that person an `Administrator`. Roadmap §3
 authentication) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
+
+### `0069` narrowed the policies and the RPCs went around them (`0087`)
+
+**`0069` narrowed policies. `fork_schema()` and `publish_schema_version()` are `SECURITY DEFINER`,
+so they never consulted a policy in the first place** — they run as the owner — and both went on
+checking `has_role(ARRAY['Administrator', 'Shopfloor_Manager'])`. The write `0069` withdrew stayed
+reachable through the RPC the Schemas page already calls.
+
+Measured on the shipped stack, in one transaction as a `Shopfloor_Manager` holding neither
+`Administrator` nor `schema:manage`:
+
+```
+UPDATE public.schemas SET status = 'archived' …    →  UPDATE 0     (0069's policy holds)
+SELECT public.publish_schema_version(<draft>)      →  succeeded
+SELECT status FROM public.schemas WHERE id=parent  →  'archived'
+```
+
+The direct write was refused and the RPC performed it. **This is not a cosmetic status flip**:
+publishing activates a draft, archives its predecessor and repoints every `device_submodels` row
+and the legacy `devices.schema_id` onto the new version, so it changes what ingestion judges every
+attached device against.
+
+**`fork_schema()` carried the same gate**, under a comment claiming *"Same allow-list as the RLS
+write policies on `schemas`"* — true when written, false the moment `0069` moved those policies
+underneath it. This repository already has a name for that shape: an analysis that was right when
+written and wrong when read, which is why the roadmap tells a reader to sweep back over whatever
+cited a thing as settled.
+
+**`0087` gates both on `has_authority(ARRAY['schema:manage'])`** rather than on a role name. The
+seven policies `0069` narrowed name the role; these two now name the **permission**, so the gate is
+the thing that was withdrawn rather than a second spelling of it that the next role change can put
+out of step again — which is exactly how they came to disagree. Today the two resolve identically,
+because `Administrator` alone holds `schema:manage`, and `0087`'s self-check fails if that stops
+being true. It also fails closed for a machine principal, which resolves through
+`principal_permissions` where none holds it.
+
+Reading is untouched: `0069` deliberately left all three SELECT policies open because the Devices
+page resolves a device's schema through them. `TestTheRpcsDoNotGoAroundThePolicy` in
+[`test_schema_versioning.py`](migrations/test_schema_versioning.py) asserts both halves — the
+manager refused, and the administrator still able to fork and publish, because a fix that only
+broke the function would pass the first assertion alone.
 
 ### The anon sweep runs after the functions exist (`0009`, `0071`)
 

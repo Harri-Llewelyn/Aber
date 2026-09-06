@@ -39,10 +39,14 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 
 ADMIN_USER_ID = "a0000000-0000-4000-8000-000000000001"
 OPERATOR_USER_ID = "a0000000-0000-4000-8000-000000000003"
+# Added with 0087. A Shopfloor_Manager is the persona the two schema RPCs used to admit and
+# the RLS policies on `schemas` did not, which is the disagreement 0087 closes.
+MANAGER_USER_ID = "a0000000-0000-4000-8000-000000000002"
 
 # roles.id values seeded by migration 20260101000003. Matching test_user_roles_rls.py.
 ROLE_ADMINISTRATOR = 1
 ROLE_OPERATOR = 3
+ROLE_SHOPFLOOR_MANAGER = 2
 
 BASE_DEFINITION = {
     "type": "object",
@@ -129,7 +133,7 @@ class SchemaVersioningTestCase(unittest.TestCase):
         FK error naming `digital_thread`, which reads like a fault in the audit trail rather than
         a missing fixture.
         """
-        for user_id in (ADMIN_USER_ID, OPERATOR_USER_ID):
+        for user_id in (ADMIN_USER_ID, OPERATOR_USER_ID, MANAGER_USER_ID):
             # auth.users differs between GoTrue's real schema and the base image's legacy one, so
             # try the intersection (the primary key alone) first and fall back to the fuller shape.
             # Each attempt is savepointed: a failure here must not abort the whole transaction.
@@ -166,10 +170,11 @@ class SchemaVersioningTestCase(unittest.TestCase):
         self.cur.execute(
             """
             INSERT INTO public.user_roles (user_id, role_id)
-            VALUES (%s, %s), (%s, %s)
+            VALUES (%s, %s), (%s, %s), (%s, %s)
             ON CONFLICT (user_id, role_id) DO NOTHING;
             """,
-            (ADMIN_USER_ID, ROLE_ADMINISTRATOR, OPERATOR_USER_ID, ROLE_OPERATOR),
+            (ADMIN_USER_ID, ROLE_ADMINISTRATOR, OPERATOR_USER_ID, ROLE_OPERATOR,
+             MANAGER_USER_ID, ROLE_SHOPFLOOR_MANAGER),
         )
 
     def _act_as(self, user_id, role_name):
@@ -750,6 +755,73 @@ class TestPublish(SchemaVersioningTestCase):
             lambda: self._publish("00000000-0000-4000-8000-0000000000ff"),
             message_contains="not found",
         )
+
+
+class TestTheRpcsDoNotGoAroundThePolicy(SchemaVersioningTestCase):
+    """
+    0087. `0069` withdrew `schema:manage` from Shopfloor_Manager and narrowed the three write
+    policies on `public.schemas` to Administrator -- but both RPCs are SECURITY DEFINER, so they
+    never consulted those policies, and both went on admitting the pair.
+
+    Measured before the fix, in one transaction as a Manager: the direct `UPDATE public.schemas`
+    was refused (0 rows) and `publish_schema_version()` then archived the parent anyway. That is
+    not a status flip -- publishing repoints every `device_submodels` row and the legacy
+    `devices.schema_id` onto the new version, so it changes what ingestion judges each attached
+    device against.
+
+    THE PAIR OF ASSERTIONS IS THE POINT. Refusing the Manager proves the hole is closed; letting
+    the Administrator through proves the fix is not merely a broken function.
+    """
+
+    def test_a_manager_cannot_publish(self):
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Gate_Publish")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        draft = self._fork(v1_id, "drafted by an administrator")
+
+        self._act_as(MANAGER_USER_ID, "Shopfloor_Manager")
+        err = self.assertRaisesInStatement(
+            lambda: self._publish(draft["id"]),
+            message_contains="insufficient privileges",
+        )
+        self.assertEqual(err.pgcode, "42501")
+
+    def test_a_manager_cannot_fork(self):
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Gate_Fork")
+        self._act_as(MANAGER_USER_ID, "Shopfloor_Manager")
+        err = self.assertRaisesInStatement(
+            lambda: self._fork(v1_id, "no"),
+            message_contains="insufficient privileges",
+        )
+        self.assertEqual(err.pgcode, "42501")
+
+    def test_an_administrator_still_publishes(self):
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Gate_Admin_Publish")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        draft = self._fork(v1_id, "still allowed")
+        self.assertIsNotNone(self._publish(draft["id"]))
+
+    def test_an_administrator_still_forks(self):
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Gate_Admin_Fork")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        self.assertIsNotNone(self._fork(v1_id, "still allowed"))
+
+    def test_the_gate_names_the_permission_rather_than_the_role(self):
+        # The two functions came to disagree with the policies they were written to match BECAUSE
+        # they named roles. Naming the permission is what stops the next role change doing it
+        # again, so the spelling is asserted rather than left to review.
+        self._act_as_owner()
+        self.cur.execute(
+            "SELECT p.proname, pg_get_functiondef(p.oid) FROM pg_proc p "
+            "  JOIN pg_namespace n ON n.oid = p.pronamespace "
+            " WHERE n.nspname = 'public' "
+            "   AND p.proname IN ('fork_schema', 'publish_schema_version');"
+        )
+        rows = self.cur.fetchall()
+        self.assertEqual(len(rows), 2)
+        for name, definition in rows:
+            with self.subTest(function=name):
+                self.assertIn("schema:manage", definition)
+                self.assertNotIn("Shopfloor_Manager", definition)
 
 
 class TestBootReconciliation(SchemaVersioningTestCase):
