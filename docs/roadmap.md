@@ -1278,6 +1278,50 @@ Postgres port, and neither is claimed here to be wrong — what is missing is th
 a decision beside every port that was narrowed and beside none of the ports that were not, which is
 the same asymmetry this item complains about between the two targets.
 
+### Compose publishes eight ports where Kubernetes publishes seven hostnames
+
+The two targets do not disagree about security here so much as about **shape**, and this is the last
+place where a Compose stack looks nothing like the chart.
+
+`templates/ingress.yaml` gives Kubernetes one entry point and routes by hostname:
+`grafana.<publicBaseDomain>`, `nodered.<…>`, `app.<…>`, `studio.<…>`, `docs.<…>`, `mqtt.<…>` and the
+gateway, every host derived from the same helper the service itself is configured from. **No port
+numbers anywhere.** Compose reaches the same services on eight published ports, and a URL carrying
+`:3002` is a URL that only works if the reader knows which machine to put in front of it.
+
+**This extends `supabase-envoy`; it does not add a proxy.** The instinct is to reach for Caddy or
+Traefik, and it is the wrong one — the stack already runs Envoy, with a gateway listener on 8000 and
+Studio's OAuth listener on 8001, and a third listener on :80 routing by `Host` to grafana, node-red,
+swagger and the gateway is ordinary virtual-host configuration in a file that already exists. A
+second proxy would be a second control plane and a second place for origin policy to be stated,
+which is the thing `envoy.yaml` is deliberately the single home for.
+
+**Subdomains, not paths, and that argument is settled** — `ingress.yaml`'s header records it:
+Grafana needs `serve_from_sub_path` plus a matching root_url, Node-RED needs both `httpAdminRoot` and
+`httpNodeRoot` moved (which changes the quarantine webhook path, and that path is registered in the
+database in `webhook_endpoints`), and Studio is a Next.js app with its own basePath assumptions.
+Whatever lands on Compose should mirror the chart rather than re-open that.
+
+**The blocker is DNS, and it is not in this repository.** `grafana.acs.plant.local` has to resolve,
+which means a wildcard record on a DNS server this project does not own. That is the whole reason
+this is a roadmap item and not a branch: the proxy is a day's work and the record is a conversation
+with whoever runs the network, and shipping the first without the second produces a stack whose
+documentation says "now ask IT", which nobody does. The chart's own dev path shows the escape hatch —
+`e2e.ingressIp` and the `127.0.0.1.nip.io` domain exist precisely because a real record was not
+available — and a Compose equivalent should be designed in from the start rather than discovered.
+
+**What it does and does not buy.** It gets one port to firewall instead of eight, one TLS
+certificate instead of none, and URLs that survive being pasted into a message. It does **not** fix
+what the Directory displays: `directory_services.endpoint_url` is a stored string, and a proxy in
+front of Node-RED does not change it. That is `0085`'s job and it is sequenced first for this reason —
+until the rows are derived from `NODERED_PUBLIC_URL` and its neighbours, a proxy would serve
+`nodered.<domain>` while the Directory kept advertising `localhost:1880`.
+
+**MQTT does not ride it.** Raw 1883/8883 is TCP and cannot be routed by `Host`; only the WebSocket
+listener on 9001 can. The chart already splits these — the Ingress carries 9001 and the
+`mosquitto-external` LoadBalancer carries the rest — and Compose would keep publishing the broker's
+ports directly for the same reason.
+
 ### Plaintext 1883 is deliberate today and should have an end state
 
 The listener stays open because in-network services speak to the broker over the Docker network, and

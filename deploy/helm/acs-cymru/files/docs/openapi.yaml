@@ -3181,7 +3181,14 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         service_name: { type: string, example: Supabase Studio }
         service_type: { type: string, example: GRAPHICAL_UI }
-        endpoint_url: { type: string, example: 'http://127.0.0.1:54323' }
+        endpoint_url:
+          type: string
+          example: 'http://127.0.0.1:54323'
+          description: >-
+            The address a BROWSER reaches the service on. Three rows — Grafana, Node-RED and
+            Studio — are derived by `0085` from the same `*_PUBLIC_URL` values that build their
+            OAuth `redirect_uris`, so those cannot drift from what the service advertises;
+            editing them by hand does not survive the next boot. The rest are seeded literals.
         exposure:
           type: string
           enum: [NETWORK, HOST, INTERNAL, UNKNOWN]

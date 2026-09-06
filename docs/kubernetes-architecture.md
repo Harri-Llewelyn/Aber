@@ -579,9 +579,13 @@ The check is therefore scoped to `value:` / `port:` / `containerPort:` / `target
 was confirmed against a deliberate regression. **A check that reports a known-benign hit is worse
 than no check**, because the next real hit is dismissed with it.
 
-*Left deliberately unfixed:* those seed rows still read `localhost:5433` and `localhost:54322`,
-which is wrong on a cluster. They are display-only demo data and correcting them means
-parameterising more of the seed.
+*Still unfixed, and now deliberately narrower:* those two rows still read `localhost:5433` and
+`localhost:54322`, which is wrong on a cluster. `0085` has since parameterised the three rows it
+could — Grafana, Node-RED and Studio, from the `*_public_url` values `db-init.yaml` already passes
+psql — so on a configured cluster those three now advertise the ingress hostnames rather than
+`localhost`. The two database rows are not among them because no `-v` entry carries their address,
+and adding one means editing both db-init call sites. They remain display-only metadata, and `0084`'s
+`exposure` column now marks them `HOST` so the page stops offering them as links.
 
 ---
 

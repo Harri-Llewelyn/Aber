@@ -2238,11 +2238,51 @@ is being read on the host, so its sibling `localhost` addresses resolve; one ser
 alone, and it is the right trade — the alternative withholds a working link from everyone developing
 on the host to protect a reader who already knows what a tunnel is.
 
-**This describes the Compose deployment the seed describes.** On Kubernetes these rows are wrong
-before this column is reached — `endpoint_url` says `localhost` while the chart serves
-`grafana.<publicBaseDomain>` through an Ingress — and `0084` does not pretend to fix that. What it
-does is make the wrongness quieter: a row marked `HOST` offers a copy button and a tunnel hint
-instead of a link that was never going to work.
+**This describes the Compose deployment the seed describes.** On Kubernetes these rows were wrong
+before this column was reached — `endpoint_url` said `localhost` while the chart serves
+`grafana.<publicBaseDomain>` through an Ingress — and `0084` does not fix that; `0085` below fixes
+three of them and leaves the rest. What `0084` does is make the remaining wrongness quieter: a row
+marked `HOST` offers a copy button and a tunnel hint instead of a link that was never going to work.
+
+---
+
+## The Directory reads the address the browser uses (`0085`)
+
+`endpoint_url` was a hardcoded string. `0002` seeded `http://localhost:1880`, `http://localhost:3002`
+and `http://127.0.0.1:54323`, and nothing ever moved them — while the deployment stated its own
+browser-facing addresses in `NODERED_PUBLIC_URL`, `GRAFANA_PUBLIC_URL` and `STUDIO_PUBLIC_URL`, which
+are **not cosmetic**: they build the `redirect_uris` registered in `auth.oauth_clients`, Grafana's
+`GF_SERVER_ROOT_URL`, and the `callbackURL` `settings.js` hands passport-oauth2.
+
+So a correctly configured stack had every login working at a real hostname and one page still
+advertising `localhost`. The frontend already got this right — `constants.js` reads `VITE_GRAFANA_URL`
+for every Grafana link the dashboard renders — which made the Directory row the odd one out beside
+links that followed the deployment.
+
+**Nothing was added to db-init.** Both call sites — the migration loop in `docker-compose.yml` and
+`templates/jobs/db-init.yaml` — already pass `grafana_public_url`, `studio_public_url` and
+`nodered_redirect_uri` to psql once per file, because `0002` needs them for the OAuth clients. `0085`
+reads the same three values, which is the point: a row and a `redirect_uri` computed from one input
+cannot disagree.
+
+**Three rows, not fifteen**, and the limit is what db-init passes rather than a judgement about which
+rows deserve it. Swagger, Mosquitto and the four Supabase gateway rows have no `-v` entry at either
+call site.
+
+**These three are now derived, so hand edits no longer stick.** `directory_services` carries UPDATE
+RLS for Administrator and Shopfloor_Manager, and a replay stamps over an edit to these rows on the
+next boot — the same treatment `0002` gives the OAuth rows for the same stated reason. An
+independently editable copy of a value the deployment already holds is the drift this closes; the
+place to change one of these addresses is the variable, where the login flow follows it.
+
+**A row whose variable is absent is left entirely alone.** Empty means "this deployment said nothing",
+not "this deployment wants the fallback", and stamping a fallback over an operator's edit on the
+strength of a variable nobody set would be the worst of both behaviours.
+
+On Kubernetes this is what surfaces the chart's port-free hostnames on the page. On Compose it shows
+whatever the operator configured, which is still a port — **port-free URLs there need the reverse
+proxy in roadmap §12**, sequenced after this so a proxy cannot serve `nodered.<domain>` while this
+table advertises `localhost:1880`.
 
 ---
 
