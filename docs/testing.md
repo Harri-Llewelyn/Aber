@@ -4,6 +4,21 @@
 # Frontend — 1,600+ tests
 cd frontend && npm test
 
+# ---------------------------------------------------------------------------------------------
+# EVERY Python suite, by LANE. This is what CI runs and what you should reach for.
+# ---------------------------------------------------------------------------------------------
+# The suites are DISCOVERED from the tree, not listed. scripts/python-suites.mjs says which lane
+# each one is in and why, and the runner refuses to start if a test_*.py in the tree has no lane --
+# which is what stopped twenty of them running in no job anywhere (issue 147). Each suite is still
+# spawned as its own `python <file>`, exactly as the individual commands below do.
+npm run test:py          # lane: unit  — needs nothing at all
+npm run test:py:db       # lane: db    — needs a migrated Postgres (see `npm run test:db` below,
+                         #               which starts a throwaway one and runs this same lane)
+npm run test:py:stack    # lane: stack — needs the composed stack up
+
+# The individual commands below still work and are the reference for WHAT each suite covers. They
+# are not the list CI runs from; there is no such list any more.
+
 # Python unit suites — no stack required
 python ingestion/test_gateway_binding.py
 python ingestion/test_gateway_health_metrics.py
@@ -67,7 +82,13 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/gateway-bundle/test_gateway_bundle.py
 
-# Broker credential issuance — needs the stack up and the service's own bearer token
+# Broker credential issuance — needs the stack up and the service's own bearer token, which the
+# e2e job writes into .env before launch (`setup.mjs --demo` copies .env.example verbatim and
+# leaves it empty, which used to make all thirteen checks skip while the run still exited 0).
+#
+# The exposure tests are the ones that matter and are invisible anywhere else: this service can
+# mint a Mosquitto account for ANY edge node, and mosquitto.acl turns an account into the ability
+# to publish telemetry as that gateway. "Not published on the host" is a security boundary.
 MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 
 # Two pieces of the broker-credential machinery whose failure is silent, in isolation and with no
@@ -154,6 +175,15 @@ python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
 python supabase/migrations/test_relocate_devices.py
+# A device cannot be posted onto the replay lane by hand (0083, issue 144). The dashboard used to
+# offer the Playback gateway in three device pickers; choosing it produced a shadow device with no
+# `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid
+# creating", in the words of the migration that refuses to mint one. THE TEST THAT EARNS ITS PLACE
+# IS NOT THE REFUSAL, it is that deleting a replayed machine still works: shadow_of is ON DELETE SET
+# NULL, so the delete UPDATEs the lane into exactly the shape the gate rejects on arrival, and a
+# gate written against the STATE rather than the ACT would break every such deletion with an error
+# about playback.
+python supabase/migrations/test_shadow_lane_is_not_assignable.py
 python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.

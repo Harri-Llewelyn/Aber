@@ -28,6 +28,8 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, normalize, posix } from 'node:path';
 
+import { LANES, SUITES, auditSuites, suitesInLane } from './python-suites.mjs';
+
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const verbose = process.argv.includes('--verbose');
 const read = (p) => readFileSync(join(REPO, p), 'utf8');
@@ -288,6 +290,67 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
   const missing = suites.filter((s) => !corpus.includes(s));
   if (missing.length) fail(`no testing document lists suite(s): ${missing.join(', ')}`);
   else pass(`all ${suites.length} Python test suites are listed in the testing documentation`);
+}
+
+// -------------------------------------------------------------------------------------------------
+// 4b. Every Python test suite has a RUNNER, and every declared runner has a suite. BOTH DIRECTIONS.
+//
+// Check 4 above proves a suite is DOCUMENTED. That is a different claim from "it runs", and the gap
+// between them is where twenty suites lived: 47 in the three directories anybody looked at, 21 named
+// in the workflows, and every one of the missing ones dutifully listed in docs/testing.md with what
+// it needs. The documentation was correct and nothing executed them (#147).
+//
+// `ci.yml` used to name each suite in its own `run:` step. A hand-maintained list cannot be wrong,
+// only incomplete -- silently, because there is nothing to compare it against. The suites are now
+// discovered from the tree and placed by scripts/python-suites.mjs, and this is the comparison.
+//
+// BOTH DIRECTIONS, for the reason check 2b gives: a one-way check certifies the half somebody
+// remembered to write down. An entry naming a deleted suite makes the orphan count read low, which
+// is the same failure wearing the other hat.
+//
+// THIS DUPLICATES A CHECK THE RUNNER ALREADY MAKES, deliberately. run-python-suites.mjs refuses to
+// run a tree it cannot account for, which is the stronger guard because it cannot be bypassed. But
+// it only fires in a job that runs Python, and the point of a drift check is to fail early and
+// cheaply, naming the file, before eighteen minutes of stack validation. Both read the same
+// manifest, so they cannot disagree about what the answer is.
+// -------------------------------------------------------------------------------------------------
+{
+  const { orphans, phantoms, badLanes, badRunners, unexplained } = auditSuites(allFiles);
+
+  if (orphans.length) {
+    fail(
+      `${orphans.length} Python suite(s) have no lane in scripts/python-suites.mjs, so they run ` +
+        `nowhere: ${orphans.join(', ')}. Give each one a lane -- unit (needs nothing), db (needs ` +
+        `the migrated Postgres), stack (needs the composed stack) -- or 'manual' with a reason.`
+    );
+  }
+  if (phantoms.length) {
+    fail(
+      `scripts/python-suites.mjs names ${phantoms.length} suite(s) that no longer exist: ` +
+        `${phantoms.join(', ')}. A stale entry makes the orphan count above read low.`
+    );
+  }
+  if (badLanes.length) {
+    fail(`scripts/python-suites.mjs declares no lane or an unknown one for: ${badLanes.join(', ')}`);
+  }
+  if (badRunners.length) {
+    fail(
+      `scripts/python-suites.mjs declares an unknown runner for: ${badRunners.join(', ')}. An ` +
+        `unrecognised value falls back to \`python <file>\`, which for a pytest-style suite means ` +
+        `running nothing and reporting success.`
+    );
+  }
+  if (unexplained.length) {
+    fail(
+      `scripts/python-suites.mjs carries no reason for: ${unexplained.join(', ')}. The reason is ` +
+        `the part a reader cannot reconstruct -- why the suite is worth a job's time, and what a ` +
+        `regression in it would look like from outside.`
+    );
+  }
+  if (!orphans.length && !phantoms.length && !badLanes.length && !badRunners.length && !unexplained.length) {
+    const counts = LANES.map((l) => `${suitesInLane(l).length} ${l}`).filter((c) => !c.startsWith('0 '));
+    pass(`all ${Object.keys(SUITES).length} Python suites have a runner (${counts.join(', ')})`);
+  }
 }
 
 /**

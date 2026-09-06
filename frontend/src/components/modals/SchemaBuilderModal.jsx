@@ -8,6 +8,7 @@ import {
   STANDARD_OPTIONS, SEMANTIC_ID_TYPES, inferSemanticIdType, LOCAL_EXTENSION_LABEL
 } from '../../utils/standards'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { gatewayAcceptsDevices } from '../../utils/gatewayType'
 
 /** Sentinel for the standard filter's default. Not a `standard` value -- '' means local extension. */
 const ANY_STANDARD = '__any__'
@@ -227,8 +228,11 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
               <label className="form-label">Assigned Edge Gateway</label>
               <select className="form-control" value={gatewayId} onChange={e => setGatewayId(e.target.value)}>
                 <option value="">— Unassigned Gateway —</option>
+                {/* Disabled rather than absent (#144); see DevicesTab's picker. */}
                 {(gateways || []).filter(g => !g.is_archived).map(g => (
-                  <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>
+                  <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
+                    {g.gateway_name}{gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
+                  </option>
                 ))}
               </select>
             </div>

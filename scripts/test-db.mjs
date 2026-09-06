@@ -75,6 +75,9 @@ import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { MIGRATION_VARS } from './migration-vars.mjs'
+import { suitesInLane } from './python-suites.mjs'
+
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 // PINNED TO THE SAME TAG THE STACK RUNS. The bootstrap above is a list of things that are true of
@@ -101,31 +104,9 @@ function run (cmd, cmdArgs, opts = {}) {
   return spawnSync(cmd, cmdArgs, { encoding: 'utf8', ...opts })
 }
 
-// THE psql VARIABLES db-init PASSES, AND ONE OF THEM DECIDES WHETHER A SUITE CAN PASS AT ALL.
-//
-// 0002 reads these with `\if :{?name}` and falls back to empty, then warns and gives up:
-//
-//     0038: GATEWAY_REVOKE_SECRET or SUPABASE_ANON_KEY is unset; credential revocation is INERT
-//           on this stack. Archiving will not revoke, and the sweep will do nothing.
-//
-// A NOTICE, not an error -- so the chain applies, every schema check passes, and
-// test_credential_revocation.py then fails four assertions with `0 != 1`, naming a queue depth
-// rather than the unset secret three thousand lines upstream. That is what running with no
-// variables at all looked like, and it is why they are set here rather than left to default.
-//
-// The values are deliberately fake and the URL is deliberately unreachable. pg_net queues into a
-// table inside the caller's transaction and every one of these suites rolls back, so nothing is
-// ever sent -- but a throwaway container that could reach a real endpoint is a throwaway container
-// that could act on one, and localhost:9999 cannot.
-//
-// The TimescaleDB variables are NOT set: 0001 defaults them, the chain applies without a historian
-// to link to, and pointing the FDW at the live one would give a disposable database a route into
-// infrastructure that is not disposable.
-const MIGRATION_VARS = {
-  supabase_anon_key: 'test-anon-key-not-a-real-jwt',
-  gateway_revoke_secret: 'test-revoke-secret',
-  supabase_functions_url: 'http://localhost:9999/functions/v1'
-}
+// The psql variables db-init passes. They live in scripts/migration-vars.mjs because ci.yml's
+// migration loop needs the SAME ones -- it had none, and test_credential_revocation.py duly passed
+// here and failed there the first time CI ran it (#147). That module carries the reasoning.
 
 /** psql INSIDE the container, so this script needs no psql on the host -- only Docker. */
 function psql (dbArgs, { user = 'postgres' } = {}) {
@@ -229,12 +210,18 @@ if (noRun) {
 // -------------------------------------------------------------------------------------------
 // Run the suites
 // -------------------------------------------------------------------------------------------
-// EVERY suite in the directory, discovered rather than listed. A hand-maintained list is how
-// seven of these came to run in no CI job at all -- edge-function-auth-test names eight by hand
-// and the directory holds sixteen.
-let suites = readdirSync(migrationsDir)
-  .filter(f => f.startsWith('test_') && f.endsWith('.py'))
-  .sort()
+// THE `db` LANE, FROM scripts/python-suites.mjs -- not a second discovery of its own.
+//
+// This used to readdirSync `supabase/migrations` and run whatever it found, which was right about
+// discovery and wrong about scope: three suites needing exactly this database live under
+// `supabase/functions/`, and a rule shaped like "the migrations directory" could never reach them.
+// They ran in CI and not here, so `npm run test:db` passing locally did not mean the db-lane job
+// would pass -- which is the specific way a local runner stops being trusted.
+//
+// The manifest is now the one place that answers "which suites need a migrated Postgres", and both
+// callers read it. It is also checked against the tree in both directions, so a new suite added to
+// this directory and forgotten fails the runner by name instead of silently not running.
+let suites = suitesInLane('db')
 if (filter) suites = suites.filter(f => f.includes(filter))
 if (suites.length === 0) die(`no suites matched ${filter}.`)
 
@@ -262,9 +249,7 @@ console.log(`\n${c.bold(`Running ${suites.length} database suites`)} against loc
 const failed = []
 for (const suite of suites) {
   console.log(c.bold(`── ${suite}`))
-  const result = spawnSync(python, [path.join('supabase', 'migrations', suite)], {
-    cwd: REPO, env, stdio: 'inherit'
-  })
+  const result = spawnSync(python, [suite], { cwd: REPO, env, stdio: 'inherit' })
   if (result.status !== 0) failed.push(suite)
 }
 
