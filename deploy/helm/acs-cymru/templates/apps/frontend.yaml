@@ -27,6 +27,24 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // blank as "not supplied" and constants.js then falls back to localhost:3002, which is a wrong link
   // on a cluster but is exactly as wrong as the alternative and does not throw.
   VITE_GRAFANA_URL: %q,
+  // Studio's door, and the dashboard uses it for ONE thing: ending Studio's own gateway-held
+  // session at sign-out. The same helper the studio Ingress host is built from, so the address the
+  // beacon uses is the address the session was opened on -- which matters more here than for the
+  // link above, because a host mismatch answers 302 and clears nothing.
+  //
+  // NO BACKTICKS ANYWHERE IN THIS BLOCK. The whole config above is one printf template delimited by
+  // backticks, so a quoted identifier in a COMMENT ends the string and Helm fails to parse the file.
+  //
+  // IT DOES NOT TRACK routes.studio, and deliberately not. The helper answers the address Studio
+  // WOULD have, so with publicBaseDomain set this renders studio.<domain> even on the default
+  // install where that route is off and nothing answers there. That is harmless and is the honest
+  // shape: whether a host resolves is a fact about the cluster at sign-out time, not one the chart
+  // can settle at render time, and the beacon already treats unreachable and absent identically.
+  // It renders empty only where no browser-facing address exists at all -- a data-tier install with
+  // neither publicUrls.studio nor publicBaseDomain -- and src/config.js reads blank as "not
+  // supplied", falling back to a localhost address no cluster can reach. Every one of those paths
+  // ends the same way: the beacon times out and the local sign-out proceeds.
+  VITE_STUDIO_URL: %q,
   // Storage buckets, from the same values scripts/storage-init.mjs creates them with -- so a
   // rename moves the dashboard with the bucket instead of leaving it on the old name.
   VITE_MODEL_3D_BUCKET: %q,
@@ -40,6 +58,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   (.Values.frontend.enableRealtime | toString)
   .Values.frontend.githubRepoUrl
   (include "acs-cymru.grafanaUrl" .)
+  (include "acs-cymru.studioUrl" .)
   .Values.supabaseStorage.bucket
   .Values.supabaseStorage.gatewayBackupBucket
   .Values.supabaseStorage.captureBucket -}}
