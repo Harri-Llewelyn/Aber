@@ -666,15 +666,16 @@ does not currently have.
 
 ---
 
-## 6 · The Directory's MQTT half, and the one lookup it still lacks
+## 6 · The Directory's MQTT half, and the trust decision underneath it
 
 **Builds on:** [`supabase/functions/fplus-directory/index.ts`](../supabase/functions/fplus-directory/index.ts) ·
 `directory_services` (`0001`) · `gateways.sparkplug_group` (`0008`) · `relocate_devices()` (`0033`) ·
 [issue #64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64)
 
-**The issue calls `fplus-directory` "a stubbed Edge Function", and it is not.** It serves six routes
-— `/ping`, `/v1/device`, `/v1/device/{uuid}`, `/v1/address/{group}/{node}`, `/v1/schema` and
-`/v1/service` — including two of the three the issue proposes to add. It reads as the **caller**
+**The issue calls `fplus-directory` "a stubbed Edge Function", and it is not.** It serves seven
+routes — `/ping`, `/v1/device`, `/v1/device/{uuid}`, `/v1/address/{group}/{node}`, `/v1/schema`,
+`/v1/schema/{uuid}` and `/v1/service` — which is every REST route the issue proposes, the last of
+them added by this entry. It reads as the **caller**
 rather than the service role, deliberately and with no `SUPABASE_SERVICE_ROLE_KEY` in its registry
 entry, because a Directory is a live read across the whole address space and the service key would
 hand every authenticated user a view their RLS policies do not grant. That property is the thing any
