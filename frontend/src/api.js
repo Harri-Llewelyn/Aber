@@ -2061,6 +2061,10 @@ const apiMethods = {
         service_name: s.service_name,
         service_type: s.service_type,
         endpoint_url: s.endpoint_url,
+        // Where the service can be reached FROM (0084). Passed through rather than defaulted here:
+        // a row that predates the column reads UNKNOWN, and the Directory page says so in words
+        // instead of guessing on its behalf.
+        exposure: s.exposure,
         status: s.status,
         last_heartbeat: s.last_heartbeat
       }));

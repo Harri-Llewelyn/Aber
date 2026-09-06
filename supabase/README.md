@@ -2195,6 +2195,57 @@ and the trigger is the one that holds for the fourth.
 
 ---
 
+## The Directory says what can reach a service (`0084`)
+
+`directory_services` held an address and no statement of who could use it, so the page rendering
+those rows had to guess. `isBrowsableEndpoint` guesses well, and the guess is the right one for the
+question it can answer — scheme plus host tells you whether a string is a **web page**, which is all
+a URL carries. It cannot tell you whether the browser reading it can **reach** that page.
+
+That gap became visible when four ports moved to `127.0.0.1` — both databases, Prometheus and the
+ingestion metrics endpoint. Two of the four are `http://localhost:…`, so the scheme-and-host test
+says "web page", correctly, and the page rendered a link. That link works for a browser on the
+deployment host and fails for every other browser — and the dashboard is published on `:3000` for
+exactly those other browsers. **The failure looks like the service being down**, which is the same
+failure the container-hostname clause was written to avoid.
+
+`exposure` describes the **port binding**, not the URL:
+
+| | |
+| :--- | :--- |
+| `NETWORK` | published on every interface — reachable from another machine, subject to firewall and DNS |
+| `HOST` | bound to `127.0.0.1` — the deployment host, or an SSH tunnel |
+| `INTERNAL` | no host port at all — the container network only |
+| `UNKNOWN` | **not recorded** |
+
+**The port and the URL can disagree, and both are consulted.** Studio is `NETWORK` — `supabase-envoy`
+publishes 54323 on every interface and holds the console behind an OAuth flow and an `Administrator`
+check (`0081`) — while its `endpoint_url` still reads `http://127.0.0.1:54323`, which is the
+`STUDIO_PUBLIC_URL` default rather than a claim about the binding. A loopback *address* cannot work
+from a remote browser however broadly the *port* is published, so the page tests the address too.
+
+**`UNKNOWN` behaves as `NETWORK` in the UI, and it is the one place the page does not err towards a
+copy button.** This column arrived after the rows did; anything registering into this table that has
+never heard of it defaults to `UNKNOWN`, and demoting every such row would make adding the column a
+regression for services that are perfectly reachable. The loopback and container-hostname tests still
+apply to those rows, which is what the page could already do on its own.
+
+**What the table cannot hold, the browser supplies.** Whether a `localhost` address is reachable
+depends on which machine the *reader* is at — a fact that differs per viewer rather than per service.
+`viewerIsOnDeploymentHost` reads it off the dashboard's own hostname: a page served from `localhost`
+is being read on the host, so its sibling `localhost` addresses resolve; one served from
+`acs-server.factory.local` is not. The case this gets wrong is a reader who tunnelled the dashboard
+alone, and it is the right trade — the alternative withholds a working link from everyone developing
+on the host to protect a reader who already knows what a tunnel is.
+
+**This describes the Compose deployment the seed describes.** On Kubernetes these rows are wrong
+before this column is reached — `endpoint_url` says `localhost` while the chart serves
+`grafana.<publicBaseDomain>` through an Ingress — and `0084` does not pretend to fix that. What it
+does is make the wrongness quieter: a row marked `HOST` offers a copy button and a tunnel hint
+instead of a link that was never going to work.
+
+---
+
 ## Schema Versioning
 
 A published schema is **read-only**. Changing one means forking the next version, editing the

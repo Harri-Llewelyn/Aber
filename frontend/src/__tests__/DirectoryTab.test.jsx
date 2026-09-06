@@ -1,7 +1,12 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, act, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { DirectoryTab, isBrowsableEndpoint } from '../components/tabs/DirectoryTab'
+import {
+  DirectoryTab,
+  isBrowsableEndpoint,
+  endpointReach,
+  viewerIsOnDeploymentHost
+} from '../components/tabs/DirectoryTab'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
@@ -425,5 +430,121 @@ describe('DirectoryTab refresh', () => {
 
     expect(api.get.mock.calls.length).toBeGreaterThan(1)
     expect(await screen.findByText(moved)).toBeInTheDocument()
+  })
+})
+
+/**
+ * WHAT THIS SUITE GUARDS, and why the ones above did not catch it.
+ *
+ * Every fixture in SERVICES carries a `localhost` or `127.0.0.1` address, and jsdom serves tests
+ * from `http://localhost:3000` -- so `viewerIsOnDeploymentHost` is true for all of them and every
+ * row renders exactly as it did before 0084. That is the correct behaviour and it is also the
+ * REASON those tests kept passing: the case the exposure column exists for is the one jsdom's
+ * default location hides. It has to be asked for explicitly.
+ */
+describe('Directory reachability (migration 0084)', () => {
+  describe('viewerIsOnDeploymentHost', () => {
+    it('recognises every spelling of this machine, including the bracketed IPv6 form', () => {
+      for (const h of ['localhost', '127.0.0.1', '::1', '[::1]']) {
+        expect(viewerIsOnDeploymentHost(h)).toBe(true)
+      }
+    })
+
+    it('treats a real hostname as somewhere else', () => {
+      for (const h of ['acs-server.factory.local', '10.4.1.9', 'app.plant.example', '']) {
+        expect(viewerIsOnDeploymentHost(h)).toBe(false)
+      }
+    })
+  })
+
+  describe('endpointReach', () => {
+    it('offers a link for a NETWORK service on a real hostname, wherever the reader is', () => {
+      expect(endpointReach('http://grafana.plant.local:3002', 'NETWORK', false).open).toBe(true)
+      expect(endpointReach('http://grafana.plant.local:3002', 'NETWORK', true).open).toBe(true)
+    })
+
+    it('withholds the link for a HOST service read from another machine, and names the tunnel', () => {
+      const away = endpointReach('http://localhost:9090', 'HOST', false)
+      expect(away.open).toBe(false)
+      // The PORT is the part an operator has to get right, so the hint carries it rather than
+      // describing the shape of an ssh command in the abstract.
+      expect(away.note).toContain('ssh -L 9090:localhost:9090')
+    })
+
+    it('offers that same HOST service to a reader who is on the host', () => {
+      expect(endpointReach('http://localhost:9090', 'HOST', true).open).toBe(true)
+    })
+
+    /*
+     * THE CASE THE TWO FACTS DISAGREE ON, and the reason the address is tested as well as the
+     * column. Studio's port is published on every interface -- exposure NETWORK -- while its URL
+     * is still the STUDIO_PUBLIC_URL default. A remote browser cannot use that ADDRESS however
+     * broadly the PORT is published.
+     */
+    it('withholds a loopback ADDRESS from a remote reader even when the PORT is NETWORK', () => {
+      expect(endpointReach('http://127.0.0.1:54323', 'NETWORK', false).open).toBe(false)
+      expect(endpointReach('http://127.0.0.1:54323', 'NETWORK', true).open).toBe(true)
+    })
+
+    it('never offers an INTERNAL service, on the host or off it', () => {
+      expect(endpointReach('http://localhost:9100/metrics', 'INTERNAL', true).open).toBe(false)
+      expect(endpointReach('http://localhost:9100/metrics', 'INTERNAL', false).open).toBe(false)
+    })
+
+    /*
+     * UNKNOWN BEHAVES AS NETWORK, deliberately. Anything registering into `directory_services`
+     * that predates this column reads UNKNOWN, and demoting those rows to copy buttons would make
+     * adding the column a regression for services that are perfectly reachable.
+     */
+    it('does not demote a row that predates the column', () => {
+      expect(endpointReach('http://grafana.plant.local:3002', undefined, false).open).toBe(true)
+      expect(endpointReach('http://grafana.plant.local:3002', 'UNKNOWN', false).open).toBe(true)
+    })
+
+    it('still refuses a container hostname, and says why rather than calling it "not a web page"', () => {
+      const r = endpointReach('http://node-exporter:9100/metrics', 'INTERNAL', true)
+      expect(r.open).toBe(false)
+      expect(r.note).toMatch(/container network/)
+    })
+
+    it('still refuses a non-web scheme, and says THAT rather than talking about networks', () => {
+      const r = endpointReach('postgres://localhost:5433', 'HOST', true)
+      expect(r.open).toBe(false)
+      expect(r.note).toMatch(/Not a web page/)
+    })
+
+    it('treats an unparseable address as copyable rather than throwing', () => {
+      expect(endpointReach('not a url', 'NETWORK', true).open).toBe(false)
+    })
+  })
+
+  describe('the Reach column', () => {
+    beforeEach(() => {
+      api.get.mockResolvedValue([
+        { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'), exposure: 'NETWORK' },
+        { ...svc('Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090'), exposure: 'HOST' },
+        { ...svc('Host Metrics Exporter', 'METRICS_EXPORTER', 'http://node-exporter:9100/metrics'), exposure: 'INTERNAL' },
+        { ...svc('Something Newly Registered', 'GRAPHICAL_UI', 'http://elsewhere.plant.local') }
+      ])
+    })
+
+    it('states each exposure in words, and says "not recorded" rather than drawing a dash', async () => {
+      await renderTab()
+      expect(screen.getByText('network')).toBeInTheDocument()
+      expect(screen.getByText('host only')).toBeInTheDocument()
+      expect(screen.getByText('internal')).toBeInTheDocument()
+      // The row with no exposure at all. A dash here would read as a rendering gap, and a
+      // rendering gap invites the assumption that it is fine -- the same argument LivenessCell
+      // makes for `not observed`.
+      expect(screen.getByText('not recorded')).toBeInTheDocument()
+    })
+
+    it('keeps the loopback links clickable for a reader who is on the host', async () => {
+      // jsdom serves from localhost, which IS the deployment host. Both rows are openable and
+      // this asserts the common development case did not regress.
+      await renderTab()
+      expect(screen.getByText('http://localhost:3002').closest('a')).toBeTruthy()
+      expect(screen.getByText('http://localhost:9090').closest('a')).toBeTruthy()
+    })
   })
 })
