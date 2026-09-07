@@ -708,6 +708,15 @@ function edgeFunctionNames() {
     // the baseline's verbatim apart from the gate, so the last declaration winning is the point.
     'public.fork_schema': '0087 narrows the gate to schema:manage; the baseline holds the pair',
     'public.publish_schema_version': '0087 narrows the gate to schema:manage; the baseline holds the pair',
+    // 0088 adds the queue's SECOND LANE, and four of 0086's functions have to learn about it in the
+    // same file that admits it -- a lane whose allowlist, validation, gate and apply path arrived
+    // one migration apart would be admitted by the CHECK and rejected by everything else. The last
+    // declaration winning is the mechanism: 0086 holds the one-lane forms as the record of what
+    // shipped first, exactly as 0074 does for auth_pre_request.
+    'public.proposable_columns': '0088 adds the schema lane; 0086 holds the asset-only form',
+    'public.validate_change_proposal': '0088 branches the target check by lane; 0086 holds the device-only form',
+    'public.reject_proposal': '0088 gates on may_decide_proposal(); 0086 holds the single-gate form',
+    'public.approve_proposal': '0088 adds the publish branch and the per-lane gate; 0086 holds the asset-only form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

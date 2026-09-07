@@ -2060,6 +2060,45 @@ the retention answer every other durable store here has.
 Both would otherwise take the fail-closed `security` branch, which would hide a
 `Shopfloor_Manager`'s own act from that manager.
 
+### The schema lane, and the second approval gate (`0088`)
+
+`0088` adds the queue's second lane: an `Operator` proposes that a **draft schema be published**,
+and an `Administrator` approves — at which point the approval calls `publish_schema_version()`.
+
+**One inbox, two approval gates, and the asymmetry is the substance.** A `Shopfloor_Manager` may
+approve a nameplate edit and may **not** approve a schema publication, because `0069` withdrew
+`schema:manage` from that role and [`0087`](#0069-narrowed-the-policies-and-the-rpcs-went-around-them-0087)
+made the RPC enforce it. `may_decide_proposal()` is the one function naming who decides each lane,
+read by both `approve_proposal()` and `reject_proposal()` so the two cannot drift apart — which is
+the failure `0087` had just finished repairing between an RPC and the policies it was written to
+match. It is fail-closed for a lane nobody has classified.
+
+**Rejecting is gated identically to approving.** Rejection looks like the lesser act, but a manager
+able to refuse a schema publication could block an Administrator-only decision indefinitely, and the
+operator would read that refusal as the platform's answer.
+
+**The lane proposes an act, not a column edit.** Publishing activates the draft, archives its
+parent, repoints every `device_submodels` row and the legacy `devices.schema_id`, and drops the
+duplicate links that would collide — one transaction. A patch of `{"status": "active"}` would name
+one column write while the apply path did six other things, so the patch is `{"publish": true}` and
+`proposable_columns()` returns `publish` for this lane. Its contract is *the keys a patch may name*:
+columns for the asset lanes, the act for this one. Anything else — `{"publish": false}` above all —
+is refused, because there is no such act to perform.
+
+**A second table was the alternative and was rejected**: it would give the queue two shapes, two
+caps, two retention answers and two pages, to model a difference that is one key in a JSONB column.
+
+**The draft check runs twice, and both are needed.** At proposal time so an operator learns
+immediately rather than after a week in a queue; at approval time inside `publish_schema_version()`
+because the draft can be published by somebody else in between, and the approval is what has to be
+right. `test_change_proposals.py` asserts that a draft published underneath an open proposal aborts
+its approval.
+
+**The audit row lands in the `security` domain**, because `audit_domain_for('schemas')` says so and
+`0070`'s rule is who may perform the act. So the proposing `Operator` cannot read it — what they can
+read is their own proposal row, carrying `status`, `decided_by` and `applied_thread_id`. The queue
+is the proposer's record; the thread is the platform's.
+
 ### `relocate_devices()` — one rearrangement, one causation
 
 `0033`. Takes the WHOLE batch of staged moves as a `jsonb` array and applies it in one

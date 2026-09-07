@@ -1496,10 +1496,15 @@ paths:
         open proposal per asset per person (a partial unique index), and a ceiling on total open
         proposals per person (`proposals.max_open_per_person`, a trigger).
 
-        `patch` names columns `proposable_columns(entity_type)` admits and nothing else — the
+        `patch` names keys `proposable_columns(entity_type)` admits and nothing else — the
         columns ingestion writes (`status`, `reported_identity`, `identity_source`,
         `is_quarantined`, `first_dbirth_at`), the device's `gateway_id` data path and its
         `schema_id` binding are all refused, by name, at insert time.
+
+        **The `schemas` lane proposes an act rather than a column edit.** Its `entity_id` is a
+        **draft** schema and its patch is exactly `{"publish": true}`; approving calls
+        `publish_schema_version()`, which archives the predecessor and repoints every attached
+        device in the same transaction.
       requestBody:
         required: true
         content:
@@ -1508,7 +1513,7 @@ paths:
               type: object
               required: [entity_type, entity_id, patch]
               properties:
-                entity_type: { type: string, enum: [devices, device_nameplate] }
+                entity_type: { type: string, enum: [devices, device_nameplate, schemas] }
                 entity_id: { type: string, format: uuid, description: 'The device. Both lanes are keyed by one.' }
                 patch: { type: object, description: 'Column -> new value. A patch, not a row snapshot.' }
                 rationale: { type: string }
@@ -1522,8 +1527,10 @@ paths:
       tags: [Registry]
       summary: Approve a proposal, which is to apply it
       description: |
-        Administrator or Shopfloor_Manager, re-checked **server-side** rather than taken from the
-        caller. The patch is re-validated against the allowlist and applied in the same
+        **The lane names the approver.** `may_decide_proposal()` admits an Administrator or a
+        Shopfloor_Manager to the asset lanes, and an Administrator alone to the `schemas` lane —
+        `0069` withdrew `schema:manage` from that role. Re-checked **server-side** rather than
+        taken from the caller. The patch is re-validated against the allowlist and applied in the same
         transaction, so every CHECK, foreign key and trigger on the target runs now — **an invalid
         change cannot be approved**, it aborts rather than becoming an audit record of something
         that did not happen.
@@ -1555,8 +1562,9 @@ paths:
       tags: [Registry]
       summary: Refuse a proposal, with a reason
       description: |
-        Administrator or Shopfloor_Manager. The reason is required by a CHECK as well as by this
-        function: a rejected proposal frees its slot immediately and the same change may be
+        Gated by `may_decide_proposal()` exactly as approving is: a role able to refuse an act it
+        cannot authorise could block it indefinitely. The reason is required by a CHECK as well as
+        by this function: a rejected proposal frees its slot immediately and the same change may be
         proposed again at once, so the reason — not a cooldown — is what makes the second attempt
         different from the first.
       requestBody:

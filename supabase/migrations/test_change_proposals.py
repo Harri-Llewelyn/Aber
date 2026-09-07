@@ -49,6 +49,17 @@ DEVICE = "7b000000-0000-4000-8000-000000000001"
 # sparkplug_id, and `ON CONFLICT (id)` does not help because the collision is on the other index.
 DEVICE_TWO = "7bf00000-0000-4000-8000-000000000001"
 CELL = "7c000000-0000-4000-8000-000000000001"
+# The schema lane (0088). An active parent and a draft forked from it, so a publication has
+# something to archive and something to rebind -- the half that makes publishing more than a
+# status flip.
+SCHEMA_PARENT = "7d000000-0000-4000-8000-000000000001"
+SCHEMA_DRAFT = "7df00000-0000-4000-8000-000000000001"
+# An Administrator, who alone may decide the schema lane since 0069 withdrew schema:manage
+# from Shopfloor_Manager and 0087 made the RPC enforce it.
+ADMIN = "7a000000-0000-4000-8000-000000000005"
+# Nothing has this id. A proposal against it must be refused for the reason it is actually
+# wrong -- a missing target -- rather than by whatever fails first downstream.
+ABSENT_UUID = "7fffffff-0000-4000-8000-00000000dead"
 
 
 def connect():
@@ -94,7 +105,8 @@ class ProposalCase(unittest.TestCase):
             # and the INSERT policy resolves through has_authority(), which routes a machine
             # through principal_permissions -- where these hold nothing. Seeded bare, every
             # proposing test would fail with a permission error that looked like a policy bug.
-            for actor, role in ((OPERATOR, 3), (OPERATOR_TWO, 3), (MANAGER, 2), (AUDITOR, 4)):
+            for actor, role in ((OPERATOR, 3), (OPERATOR_TWO, 3), (MANAGER, 2),
+                                (AUDITOR, 4), (ADMIN, 1)):
                 cur.execute(
                     "INSERT INTO auth.users (id, email) VALUES (%s, %s) "
                     "ON CONFLICT (id) DO NOTHING;",
@@ -117,6 +129,19 @@ class ProposalCase(unittest.TestCase):
                     "ON CONFLICT (id) DO NOTHING;",
                     (device_id, name, CELL),
                 )
+
+            # The schema lane's subject. Seeded directly as the owner rather than through
+            # fork_schema(), which would need an Administrator session inside a fixture -- the
+            # provenance trigger exempts the owner precisely so fixtures can do this.
+            cur.execute(
+                "INSERT INTO public.schemas (id, schema_name, schema_definition, status, version) "
+                "VALUES (%s, 'Proposal_Test_Schema', '{}'::jsonb, 'active', 1) "
+                "ON CONFLICT (id) DO NOTHING;", (SCHEMA_PARENT,))
+            cur.execute(
+                "INSERT INTO public.schemas "
+                "  (id, schema_name, schema_definition, status, version, parent_schema_id) "
+                "VALUES (%s, 'Proposal_Test_Schema_v2', '{}'::jsonb, 'draft', 2, %s) "
+                "ON CONFLICT (id) DO NOTHING;", (SCHEMA_DRAFT, SCHEMA_PARENT))
             conn.commit()
         finally:
             conn.close()
@@ -131,9 +156,13 @@ class ProposalCase(unittest.TestCase):
             cur.execute("DELETE FROM public.device_nameplate WHERE device_id IN (%s,%s);",
                         (DEVICE, DEVICE_TWO))
             cur.execute("DELETE FROM public.devices WHERE id IN (%s,%s);", (DEVICE, DEVICE_TWO))
+            cur.execute("DELETE FROM public.change_proposals WHERE entity_id IN (%s,%s);",
+                        (SCHEMA_PARENT, SCHEMA_DRAFT))
+            cur.execute("DELETE FROM public.schemas WHERE id IN (%s,%s);",
+                        (SCHEMA_DRAFT, SCHEMA_PARENT))
             cur.execute("DELETE FROM public.cells WHERE id = %s;", (CELL,))
-            cur.execute("DELETE FROM public.user_roles WHERE user_id IN (%s,%s,%s,%s);",
-                        (OPERATOR, OPERATOR_TWO, MANAGER, AUDITOR))
+            cur.execute("DELETE FROM public.user_roles WHERE user_id IN (%s,%s,%s,%s,%s);",
+                        (OPERATOR, OPERATOR_TWO, MANAGER, AUDITOR, ADMIN))
             conn.commit()
 
             # THE auth.users ROWS ARE LEFT BEHIND WHEN AN AUDIT ROW NAMES ONE, and that is the
@@ -141,8 +170,8 @@ class ProposalCase(unittest.TestCase):
             # foreign key, so a person an audit row names cannot be deleted. Attempted, then
             # tolerated -- the ids are pinned, so a later run reuses them rather than accumulating.
             try:
-                cur.execute("DELETE FROM auth.users WHERE id IN (%s,%s,%s,%s);",
-                            (OPERATOR, OPERATOR_TWO, MANAGER, AUDITOR))
+                cur.execute("DELETE FROM auth.users WHERE id IN (%s,%s,%s,%s,%s);",
+                            (OPERATOR, OPERATOR_TWO, MANAGER, AUDITOR, ADMIN))
                 conn.commit()
             except psycopg2.Error:
                 conn.rollback()
@@ -550,6 +579,128 @@ class TestTheNameplateLane(ProposalCase):
         proposal = self.propose({"year_of_construction": "the nineties"},
                                 entity_type="device_nameplate")
         as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.CheckViolation):
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+
+
+class TestTheSchemaLane(ProposalCase):
+    """
+    0088. The second lane, and the second approval gate.
+
+    ONE INBOX, TWO GATES is the property worth protecting: a Shopfloor_Manager may approve a
+    nameplate edit and may NOT approve a schema publication, because 0069 withdrew `schema:manage`
+    from that role and 0087 made the RPC this lane calls enforce it. A change that collapsed the
+    two gates into one would restore exactly the bypass 0087 closed, one layer up.
+    """
+
+    def test_an_operator_may_propose_a_publication(self):
+        self.assertIsNotNone(
+            self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT))
+
+    def test_the_patch_is_the_act_and_nothing_else(self):
+        # A publication takes no arguments, so there is exactly one well-formed patch.
+        for patch in ({"publish": False}, {"publish": True, "name": "x"}, {"status": "active"}):
+            with self.subTest(patch=patch):
+                self.conn.rollback()
+                with self.assertRaises(psycopg2.errors.InvalidParameterValue):
+                    self.propose(patch, entity_type="schemas", entity_id=SCHEMA_DRAFT)
+
+    def test_only_a_draft_can_be_proposed_for_publication(self):
+        # Learned at proposal time rather than after a week in a queue.
+        with self.assertRaises(psycopg2.errors.CheckViolation):
+            self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_PARENT)
+
+    def test_a_missing_schema_is_refused(self):
+        with self.assertRaises(psycopg2.errors.ForeignKeyViolation):
+            self.propose({"publish": True}, entity_type="schemas", entity_id=ABSENT_UUID)
+
+    def test_a_manager_cannot_approve_a_publication(self):
+        # THE ASYMMETRY. The same person approves nameplate edits all day.
+        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+
+    def test_a_manager_cannot_reject_one_either(self):
+        # Rejecting looks like the lesser act. A Manager able to refuse an Administrator-only
+        # decision could block it indefinitely, and the operator would read that as the answer.
+        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.cur.execute("SELECT public.reject_proposal(%s, 'no');", (proposal,))
+
+    def test_a_manager_still_decides_the_asset_lanes(self):
+        # The other half of the asymmetry: narrowing the schema lane must not narrow the rest.
+        proposal = self.propose({"name": "Renamed By Approval"})
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT name FROM public.devices WHERE id = %s;", (DEVICE,))
+        self.assertEqual(self.cur.fetchone()[0], "Renamed By Approval")
+
+    def test_an_administrator_approving_publishes_the_draft(self):
+        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
+        as_user(self.cur, ADMIN)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT id::text, status FROM public.schemas WHERE id IN (%s,%s);",
+                         (SCHEMA_PARENT, SCHEMA_DRAFT))
+        by_id = dict(self.cur.fetchall())
+        # The whole point: not a status flip on one row. The predecessor is archived in the same
+        # transaction, which is what publish_schema_version() exists to keep atomic.
+        self.assertEqual(by_id[SCHEMA_DRAFT], "active")
+        self.assertEqual(by_id[SCHEMA_PARENT], "archived")
+
+    def test_the_approval_goes_through_the_function_not_a_column_write(self):
+        # A device bound to the parent must be repointed by the approval. A patch that merely set
+        # `status` would leave it judged against an archived version, reporting the new version's
+        # metrics as Unmodelled -- which is the failure this lane must not reintroduce.
+        as_owner(self.cur)
+        self.cur.execute("UPDATE public.devices SET schema_id = %s WHERE id = %s;",
+                         (SCHEMA_PARENT, DEVICE))
+        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
+        as_user(self.cur, ADMIN)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (DEVICE,))
+        self.assertEqual(self.cur.fetchone()[0], SCHEMA_DRAFT)
+
+    def test_the_audit_row_lands_in_the_security_domain(self):
+        # 0070's rule is WHO MAY PERFORM the act, and publishing is Administrator-only -- so this
+        # row is deliberately one the proposing Operator cannot read. Their own proposal row is
+        # what tells them it was applied.
+        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
+        as_user(self.cur, ADMIN)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute(
+            "SELECT audit_domain, new_data->>'proposed_by' FROM public.digital_thread "
+            " WHERE action = 'PROPOSAL_APPLIED' AND new_data->>'proposal_id' = %s;", (str(proposal),))
+        domain, proposed_by = self.cur.fetchone()
+        self.assertEqual(domain, "security")
+        self.assertEqual(proposed_by, OPERATOR)
+
+    def test_the_proposal_still_tells_the_proposer_what_happened(self):
+        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
+        as_user(self.cur, ADMIN)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_user(self.cur, OPERATOR)
+        self.cur.execute(
+            "SELECT status, decided_by::text, applied_thread_id IS NOT NULL "
+            "  FROM public.change_proposals WHERE id = %s;", (proposal,))
+        status, decided_by, has_thread = self.cur.fetchone()
+        self.assertEqual(status, "applied")
+        self.assertEqual(decided_by, ADMIN)
+        self.assertTrue(has_thread)
+
+    def test_a_draft_published_underneath_the_proposal_aborts_the_approval(self):
+        # The reason the draft check runs again at apply: the state can move between proposing and
+        # deciding, and the approval is what has to be right.
+        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
+        as_owner(self.cur)
+        self.cur.execute("UPDATE public.schemas SET status = 'active' WHERE id = %s;",
+                         (SCHEMA_DRAFT,))
+        as_user(self.cur, ADMIN)
         with self.assertRaises(psycopg2.errors.CheckViolation):
             self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
 

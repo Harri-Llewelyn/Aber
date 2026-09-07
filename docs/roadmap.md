@@ -723,7 +723,7 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
-## 7 · The approvals queue's remaining lanes, and the page that reads them
+## 7 · The approvals page, and the lane that is waiting on §8
 
 **Builds on:** [`approve_quarantined_device()`](../supabase/migrations/0001_baseline_schema.sql) and the
 role re-check inside it · `has_role()` and the write policies it gates · the `Operator` role as seeded
@@ -739,9 +739,10 @@ One queue for every change a person proposes but may not make: a gateway's flow,
 a schema's publication. An `Operator` proposes; a `Shopfloor_Manager` or `Administrator` approves;
 the approval is the write.
 
-**The substrate and the asset-details lane shipped on 2026-09-07 as `0086`, and have left this
-entry.** What is here now is the two lanes that remain — the schema publication and the flow — plus
-the page. The substance of what was built is in
+**The substrate and the asset-details lane shipped on 2026-09-07 as `0086`, and the schema
+publication lane followed as `0088`.** What is here now is **the flow lane, which belongs with §8,
+and the page**. The schema lane's substance is in
+[The schema lane, and the second approval gate](../supabase/README.md#the-schema-lane-and-the-second-approval-gate-0088). The substance of what was built is in
 [The approvals queue, and the first write an `Operator` has ever had](../supabase/README.md#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-0086),
 and `test_change_proposals.py` is the suite. **Four things it argued came out differently, or
 sharper, in the building:**
@@ -827,6 +828,16 @@ approval calls that function; it does not model versions beside the ones `schema
 **Its approver is narrower than the other lanes', and that should be stated rather than smoothed
 over:** `schema:manage` became Administrator-only in `0069`, so a `Shopfloor_Manager` who can approve
 a nameplate edit cannot approve a schema publication. One inbox, two approval gates.
+
+**This shipped as `0088`, and building it found that the narrower gate did not exist yet.**
+`0069` narrowed *policies*; `fork_schema()` and `publish_schema_version()` are `SECURITY DEFINER`,
+so they never consulted one, and both went on admitting the pair — measured on the shipped stack, a
+`Shopfloor_Manager` was refused the direct `UPDATE` and published through the RPC anyway. `0087`
+closed that first, because the lane's whole premise is a narrower approver and a manager refused at
+the queue could otherwise call the RPC. **Two things the entry did not anticipate:** rejecting had
+to be gated exactly as approving is, since a role able to refuse an act it cannot authorise can
+block it indefinitely; and the patch had to name the ACT (`{"publish": true}`) rather than a column,
+because `{"status": "active"}` describes one write while the apply path performs six.
 
 ### Two caps, doing two different jobs, and both in the database
 
