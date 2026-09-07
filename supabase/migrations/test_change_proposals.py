@@ -49,6 +49,10 @@ DEVICE = "7b000000-0000-4000-8000-000000000001"
 # sparkplug_id, and `ON CONFLICT (id)` does not help because the collision is on the other index.
 DEVICE_TWO = "7bf00000-0000-4000-8000-000000000001"
 CELL = "7c000000-0000-4000-8000-000000000001"
+# 0090's two new asset lanes. The gateway's id differs EARLY for the same reason DEVICE_TWO's does:
+# `gateways.sparkplug_id` is generated from the first 21 hex characters under a unique index.
+GATEWAY = "7e000000-0000-4000-8000-000000000001"
+CELL_TWO = "7cf00000-0000-4000-8000-000000000001"
 # The schema lane (0088). An active parent and a draft forked from it, so a publication has
 # something to archive and something to rebind -- the half that makes publishing more than a
 # status flip.
@@ -70,10 +74,16 @@ def connect():
 
 
 def as_user(cur, user_id):
-    """Become `authenticated` carrying this person's claims, which is what auth.uid() reads."""
+    """
+    Become `authenticated` carrying this person's claims.
+
+    THE EMAIL CLAIM IS PART OF THE SESSION, not decoration: `auth.email()` reads it, and 0089's
+    trigger stamps `proposed_by_email` from it. Seeded here so the fixture resembles a real GoTrue
+    token rather than the narrowest one that satisfies auth.uid().
+    """
     cur.execute("SET ROLE authenticated;")
     cur.execute("SELECT set_config('request.jwt.claims', %s, true);",
-                (json.dumps({"sub": user_id}),))
+                (json.dumps({"sub": user_id, "email": f"{user_id}@change-proposals.test"}),))
 
 
 def as_owner(cur):
@@ -117,10 +127,20 @@ class ProposalCase(unittest.TestCase):
                     "ON CONFLICT (user_id, role_id) DO NOTHING;",
                     (actor, role),
                 )
+            for cell_id, cell_name in ((CELL, "Proposal Test Cell"),
+                                       (CELL_TWO, "Proposal Test Cell Two")):
+                cur.execute(
+                    "INSERT INTO public.cells (id, name) VALUES (%s, %s) "
+                    "ON CONFLICT (id) DO NOTHING;",
+                    (cell_id, cell_name),
+                )
+            # `deployment` is NOT NULL with no default, and the four CHECKs on this table are what
+            # make the gateway lane worth testing at all -- see TestTheGatewayLane.
             cur.execute(
-                "INSERT INTO public.cells (id, name) VALUES (%s, 'Proposal Test Cell') "
+                "INSERT INTO public.gateways (id, name, cell_id, deployment) "
+                "VALUES (%s, 'Proposal_Test_Gateway', %s, 'host') "
                 "ON CONFLICT (id) DO NOTHING;",
-                (CELL,),
+                (GATEWAY, CELL),
             )
             for device_id, name in ((DEVICE, "Proposal_Test_Device"),
                                     (DEVICE_TWO, "Proposal_Test_Device_Two")):
@@ -160,7 +180,12 @@ class ProposalCase(unittest.TestCase):
                         (SCHEMA_PARENT, SCHEMA_DRAFT))
             cur.execute("DELETE FROM public.schemas WHERE id IN (%s,%s);",
                         (SCHEMA_DRAFT, SCHEMA_PARENT))
-            cur.execute("DELETE FROM public.cells WHERE id = %s;", (CELL,))
+            cur.execute("DELETE FROM public.change_proposals WHERE entity_id IN (%s,%s,%s);",
+                        (CELL, CELL_TWO, GATEWAY))
+            cur.execute("DELETE FROM public.links WHERE entity_id IN (%s,%s,%s,%s);",
+                        (DEVICE, DEVICE_TWO, CELL, GATEWAY))
+            cur.execute("DELETE FROM public.gateways WHERE id = %s;", (GATEWAY,))
+            cur.execute("DELETE FROM public.cells WHERE id IN (%s,%s);", (CELL, CELL_TWO))
             cur.execute("DELETE FROM public.user_roles WHERE user_id IN (%s,%s,%s,%s,%s);",
                         (OPERATOR, OPERATOR_TWO, MANAGER, AUDITOR, ADMIN))
             conn.commit()
@@ -315,15 +340,19 @@ class TestWhatMayBeProposed(ProposalCase):
         self.assertIsNotNone(self.propose({"description": "the one by the door"}))
 
     def test_a_proposal_against_an_unknown_entity_type_is_refused(self):
-        # The CHECK constraint admits two entity types, but the validation trigger runs BEFORE it,
+        # The CHECK constraint admits the known lanes, but the validation trigger runs BEFORE it,
         # so this is the trigger's refusal rather than the constraint's -- and it must name the
         # real problem. "Proposable columns are:" with nothing after the colon would read as a
         # broken message rather than as a lane nobody has written an allowlist for.
+        #
+        # THE STAND-IN USED TO BE `gateways`, AND 0090 MADE THAT A REAL LANE. The test kept
+        # passing on a foreign-key error from a device id being looked up in `public.gateways` --
+        # a refusal, but not this one. A lane nothing will ever add is the only safe fixture.
         try:
-            self.propose({"name": "x"}, entity_type="gateways")
+            self.propose({"name": "x"}, entity_type="not_a_table_anybody_will_add")
             self.fail("expected the proposal to be refused")
         except psycopg2.errors.InvalidParameterValue as err:
-            self.assertIn("gateways", str(err))
+            self.assertIn("not_a_table_anybody_will_add", str(err))
             self.assertIn("no allowlist", str(err))
 
     def test_a_proposal_against_an_archived_device_is_refused(self):
@@ -583,126 +612,436 @@ class TestTheNameplateLane(ProposalCase):
             self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
 
 
-class TestTheSchemaLane(ProposalCase):
+class TestWhoAsked(ProposalCase):
     """
-    0088. The second lane, and the second approval gate.
+    0089. `proposed_by` is a uuid and nothing in the stack resolves one into a person, so the queue
+    could not answer the first question anybody asks about a request.
 
-    ONE INBOX, TWO GATES is the property worth protecting: a Shopfloor_Manager may approve a
-    nameplate edit and may NOT approve a schema publication, because 0069 withdrew `schema:manage`
-    from that role and 0087 made the RPC this lane calls enforce it. A change that collapsed the
-    two gates into one would restore exactly the bypass 0087 closed, one layer up.
+    THE REPAIR IS NOT A FORM FIELD, and that is the part worth guarding. A typed name is the shape
+    this repository refuses elsewhere -- a self-declared marker is not evidence -- so the email
+    comes out of the signed token and the client's own value is discarded.
     """
 
-    def test_an_operator_may_propose_a_publication(self):
-        self.assertIsNotNone(
-            self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT))
-
-    def test_the_patch_is_the_act_and_nothing_else(self):
-        # A publication takes no arguments, so there is exactly one well-formed patch.
-        for patch in ({"publish": False}, {"publish": True, "name": "x"}, {"status": "active"}):
-            with self.subTest(patch=patch):
-                self.conn.rollback()
-                with self.assertRaises(psycopg2.errors.InvalidParameterValue):
-                    self.propose(patch, entity_type="schemas", entity_id=SCHEMA_DRAFT)
-
-    def test_only_a_draft_can_be_proposed_for_publication(self):
-        # Learned at proposal time rather than after a week in a queue.
-        with self.assertRaises(psycopg2.errors.CheckViolation):
-            self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_PARENT)
-
-    def test_a_missing_schema_is_refused(self):
-        with self.assertRaises(psycopg2.errors.ForeignKeyViolation):
-            self.propose({"publish": True}, entity_type="schemas", entity_id=ABSENT_UUID)
-
-    def test_a_manager_cannot_approve_a_publication(self):
-        # THE ASYMMETRY. The same person approves nameplate edits all day.
-        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
-        as_user(self.cur, MANAGER)
-        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
-            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
-
-    def test_a_manager_cannot_reject_one_either(self):
-        # Rejecting looks like the lesser act. A Manager able to refuse an Administrator-only
-        # decision could block it indefinitely, and the operator would read that as the answer.
-        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
-        as_user(self.cur, MANAGER)
-        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
-            self.cur.execute("SELECT public.reject_proposal(%s, 'no');", (proposal,))
-
-    def test_a_manager_still_decides_the_asset_lanes(self):
-        # The other half of the asymmetry: narrowing the schema lane must not narrow the rest.
-        proposal = self.propose({"name": "Renamed By Approval"})
-        as_user(self.cur, MANAGER)
-        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+    def test_the_email_is_taken_from_the_token(self):
+        proposal = self.propose({"name": "named"})
         as_owner(self.cur)
-        self.cur.execute("SELECT name FROM public.devices WHERE id = %s;", (DEVICE,))
-        self.assertEqual(self.cur.fetchone()[0], "Renamed By Approval")
+        self.cur.execute("SELECT proposed_by_email FROM public.change_proposals WHERE id = %s;",
+                         (proposal,))
+        self.assertEqual(self.cur.fetchone()[0], f"{OPERATOR}@change-proposals.test")
 
-    def test_an_administrator_approving_publishes_the_draft(self):
-        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
-        as_user(self.cur, ADMIN)
-        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
-        as_owner(self.cur)
-        self.cur.execute("SELECT id::text, status FROM public.schemas WHERE id IN (%s,%s);",
-                         (SCHEMA_PARENT, SCHEMA_DRAFT))
-        by_id = dict(self.cur.fetchall())
-        # The whole point: not a status flip on one row. The predecessor is archived in the same
-        # transaction, which is what publish_schema_version() exists to keep atomic.
-        self.assertEqual(by_id[SCHEMA_DRAFT], "active")
-        self.assertEqual(by_id[SCHEMA_PARENT], "archived")
-
-    def test_the_approval_goes_through_the_function_not_a_column_write(self):
-        # A device bound to the parent must be repointed by the approval. A patch that merely set
-        # `status` would leave it judged against an archived version, reporting the new version's
-        # metrics as Unmodelled -- which is the failure this lane must not reintroduce.
-        as_owner(self.cur)
-        self.cur.execute("UPDATE public.devices SET schema_id = %s WHERE id = %s;",
-                         (SCHEMA_PARENT, DEVICE))
-        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
-        as_user(self.cur, ADMIN)
-        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
-        as_owner(self.cur)
-        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (DEVICE,))
-        self.assertEqual(self.cur.fetchone()[0], SCHEMA_DRAFT)
-
-    def test_the_audit_row_lands_in_the_security_domain(self):
-        # 0070's rule is WHO MAY PERFORM the act, and publishing is Administrator-only -- so this
-        # row is deliberately one the proposing Operator cannot read. Their own proposal row is
-        # what tells them it was applied.
-        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
-        as_user(self.cur, ADMIN)
-        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
-        as_owner(self.cur)
-        self.cur.execute(
-            "SELECT audit_domain, new_data->>'proposed_by' FROM public.digital_thread "
-            " WHERE action = 'PROPOSAL_APPLIED' AND new_data->>'proposal_id' = %s;", (str(proposal),))
-        domain, proposed_by = self.cur.fetchone()
-        self.assertEqual(domain, "security")
-        self.assertEqual(proposed_by, OPERATOR)
-
-    def test_the_proposal_still_tells_the_proposer_what_happened(self):
-        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
-        as_user(self.cur, ADMIN)
-        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+    def test_a_client_cannot_name_somebody_else(self):
+        # THE TEST THIS MIGRATION EXISTS FOR. A DEFAULT would have let this value survive, and the
+        # column would quietly have become the self-declared field 0089 declined to build.
         as_user(self.cur, OPERATOR)
         self.cur.execute(
-            "SELECT status, decided_by::text, applied_thread_id IS NOT NULL "
-            "  FROM public.change_proposals WHERE id = %s;", (proposal,))
-        status, decided_by, has_thread = self.cur.fetchone()
-        self.assertEqual(status, "applied")
-        self.assertEqual(decided_by, ADMIN)
-        self.assertTrue(has_thread)
+            "INSERT INTO public.change_proposals "
+            "  (entity_type, entity_id, patch, proposed_by_email) "
+            "VALUES ('devices', %s, '{\"name\":\"x\"}'::jsonb, 'ceo@example.com') "
+            "RETURNING proposed_by_email;", (DEVICE,))
+        self.assertEqual(self.cur.fetchone()[0], f"{OPERATOR}@change-proposals.test")
 
-    def test_a_draft_published_underneath_the_proposal_aborts_the_approval(self):
-        # The reason the draft check runs again at apply: the state can move between proposing and
-        # deciding, and the approval is what has to be right.
-        proposal = self.propose({"publish": True}, entity_type="schemas", entity_id=SCHEMA_DRAFT)
+    def test_the_column_carries_no_default(self):
+        # The mechanism, asserted directly: a DEFAULT applies only when the column is OMITTED, so
+        # it would leave a supplied value in place and the check above would start passing by luck.
         as_owner(self.cur)
-        self.cur.execute("UPDATE public.schemas SET status = 'active' WHERE id = %s;",
-                         (SCHEMA_DRAFT,))
-        as_user(self.cur, ADMIN)
+        self.cur.execute(
+            "SELECT column_default FROM information_schema.columns "
+            " WHERE table_schema='public' AND table_name='change_proposals' "
+            "   AND column_name='proposed_by_email';")
+        self.assertIsNone(self.cur.fetchone()[0])
+
+    def test_the_author_cannot_be_rewritten_afterwards(self):
+        # An UPDATE could otherwise re-attribute a proposal an approver is already reading.
+        proposal = self.propose({"name": "named"})
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.cur.execute(
+                "UPDATE public.change_proposals SET proposed_by_email = %s WHERE id = %s;",
+                ("someone.else@example.com", proposal))
+
+    def test_the_audit_row_carries_it_beside_the_uuid(self):
+        proposal = self.propose({"name": "Named In The Thread"})
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute(
+            "SELECT new_data->>'proposed_by_email', new_data->>'proposed_by' "
+            "  FROM public.digital_thread "
+            " WHERE action = 'PROPOSAL_APPLIED' AND new_data->>'proposal_id' = %s;", (str(proposal),))
+        email, uuid_value = self.cur.fetchone()
+        # Both: the uuid is what everything resolves through, the email is what a person reads.
+        self.assertEqual(email, f"{OPERATOR}@change-proposals.test")
+        self.assertEqual(uuid_value, OPERATOR)
+
+
+class TestTheSchemaLaneIsWithdrawn(ProposalCase):
+    """
+    0090 withdrew the lane 0088 built, and the reason is worth keeping in front of whoever reads
+    this next: a draft can only be created by `fork_schema()`, which needs `schema:manage` -- held
+    by Administrator alone since 0069, and enforced at the RPC since 0087. So the only person who
+    could create the draft was the only person who could publish it, and an Operator "proposing" a
+    publication was endorsing somebody else's work rather than asking for a change they could not
+    make. That is a different feature; this queue is for the second thing.
+
+    THE HISTORY IS NOT RETRACTED WITH THE LANE. The CHECK constraint still admits the string, so
+    every schema proposal ever applied or rejected survives -- a constraint that refused it would
+    have refused rows already in the table and failed the migration on any stack that used it.
+    """
+
+    def test_a_publication_can_no_longer_be_proposed(self):
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.InvalidParameterValue) as caught:
+            self.cur.execute(
+                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                "VALUES ('schemas', %s, '{\"publish\": true}'::jsonb);", (SCHEMA_DRAFT,))
+        # NAMED, not merely refused: the fail-closed branch says the lane has no allowlist, which
+        # is the true sentence rather than "invalid patch".
+        self.assertIn("nothing is proposable on schemas", str(caught.exception))
+
+    def test_the_allowlist_is_empty_which_is_how_the_lane_is_closed(self):
+        as_owner(self.cur)
+        self.cur.execute("SELECT public.proposable_columns('schemas');")
+        self.assertEqual(self.cur.fetchone()[0], [])
+
+    def test_nobody_can_decide_one(self):
+        # Including an Administrator. A lane closed for filing but open for deciding would leave
+        # whoever holds schema:manage as the only person who could still act in it.
+        for actor in (ADMIN, MANAGER, OPERATOR):
+            as_user(self.cur, actor)
+            self.cur.execute("SELECT public.may_decide_proposal('schemas');")
+            self.assertFalse(self.cur.fetchone()[0], f"{actor} can still decide the schema lane")
+
+    def test_no_open_schema_proposal_survives_the_migration(self):
+        # The migration withdraws them with a reason. One left open would sit in a queue nobody
+        # can decide, which is the worst of the three states -- worse than either keeping the lane
+        # or deleting the rows.
+        as_owner(self.cur)
+        self.cur.execute(
+            "SELECT count(*) FROM public.change_proposals "
+            " WHERE entity_type = 'schemas' AND status = 'open';")
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_the_constraint_still_admits_the_string_so_history_survives(self):
+        """
+        THE CONSTRAINT IS READ, NOT EXERCISED, and that is forced rather than lazy: the validation
+        trigger is a BEFORE trigger, so it refuses a new schema-lane row before the CHECK is ever
+        consulted -- including one written by the owner. There is no INSERT that can reach the
+        constraint any more, which is exactly the state 0090 intends.
+
+        What still matters is that the constraint would ADMIT the string, because it applies to
+        every row already in the table: a migration that dropped 'schemas' from it would fail to
+        apply on any stack that had used the lane, taking the whole boot with it.
+        """
+        as_owner(self.cur)
+        self.cur.execute(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            " WHERE conname = 'change_proposals_entity_type_known';")
+        definition = self.cur.fetchone()[0]
+        self.assertIn("'schemas'", definition)
+        # And the live lanes are in it too, or nothing could be filed at all.
+        for lane in ('devices', 'device_nameplate', 'cells', 'gateways',
+                     'cell_links', 'gateway_links', 'device_links'):
+            self.assertIn(f"'{lane}'", definition)
+
+    def test_0087_is_not_reverted(self):
+        # The RPC narrowing stands entirely on its own: it closed a live hole through which a
+        # Shopfloor_Manager could publish a schema despite 0069 withdrawing the permission.
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.cur.execute("SELECT public.publish_schema_version(%s);", (SCHEMA_DRAFT,))
+
+
+class TestTheCellLane(ProposalCase):
+    """0090. The first subject an Operator looks at all day and cannot edit."""
+
+    def test_an_operator_may_propose_a_cell_change(self):
+        proposal = self.propose({"name": "Finishing Cell"}, entity_type="cells", entity_id=CELL)
+        self.assertIsNotNone(proposal)
+
+    def test_approving_renames_the_cell(self):
+        proposal = self.propose({"name": "Finishing Cell"}, entity_type="cells", entity_id=CELL)
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT name FROM public.cells WHERE id = %s;", (CELL,))
+        self.assertEqual(self.cur.fetchone()[0], "Finishing Cell")
+
+    def test_an_icon_nobody_drew_aborts_the_approval(self):
+        # APPROVING IS APPLYING, so `cells_icon_valid` runs inside the approver's transaction. A
+        # queue that accepted this would record an approval of something that did not happen.
+        proposal = self.propose({"icon": "Banana"}, entity_type="cells", entity_id=CELL)
+        as_user(self.cur, MANAGER)
         with self.assertRaises(psycopg2.errors.CheckViolation):
             self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+
+    def test_a_column_outside_the_allowlist_is_refused(self):
+        # `is_archived` is a lifecycle act with a retention promise attached, not a field.
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.InvalidParameterValue):
+            self.cur.execute(
+                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                "VALUES ('cells', %s, '{\"is_archived\": true}'::jsonb);", (CELL,))
+
+    def test_the_lane_resolves_the_permission_not_a_role_name(self):
+        # 0087's lesson. An Operator holds no `cell:manage`, so the lane refuses them -- and it
+        # would refuse a Manager too, the day the grant were withdrawn.
+        as_user(self.cur, OPERATOR)
+        self.cur.execute("SELECT public.may_decide_proposal('cells');")
+        self.assertFalse(self.cur.fetchone()[0])
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.may_decide_proposal('cells');")
+        self.assertTrue(self.cur.fetchone()[0])
+
+    def test_an_operator_still_cannot_write_a_cell_directly(self):
+        as_user(self.cur, OPERATOR)
+        self.cur.execute("UPDATE public.cells SET name = 'renamed' WHERE id = %s;", (CELL,))
+        self.assertEqual(self.cur.rowcount, 0)
+
+
+class TestTheGatewayLane(ProposalCase):
+    """
+    0090. The lane whose target carries the most constraints, which is why it is the best test of
+    "approving is applying".
+    """
+
+    def test_approving_renames_the_gateway(self):
+        proposal = self.propose({"name": "Line_B_Gateway"}, entity_type="gateways",
+                                entity_id=GATEWAY)
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT name FROM public.gateways WHERE id = %s;", (GATEWAY,))
+        self.assertEqual(self.cur.fetchone()[0], "Line_B_Gateway")
+
+    def test_a_relocation_moves_it_between_cells(self):
+        proposal = self.propose({"cell_id": CELL_TWO}, entity_type="gateways", entity_id=GATEWAY)
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT cell_id FROM public.gateways WHERE id = %s;", (GATEWAY,))
+        self.assertEqual(str(self.cur.fetchone()[0]), CELL_TWO)
+
+    def test_site_wide_while_still_in_a_cell_aborts_the_approval(self):
+        # `gateways_site_wide_has_no_cell`. The pair is proposable together precisely so this can
+        # be asked as ONE proposal; asking for half of it is refused by the table, at approval.
+        proposal = self.propose({"location_scope": "site_wide"}, entity_type="gateways",
+                                entity_id=GATEWAY)
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.CheckViolation):
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+
+    def test_both_halves_of_a_relocation_in_one_proposal_are_accepted(self):
+        proposal = self.propose({"location_scope": "site_wide", "cell_id": None},
+                                entity_type="gateways", entity_id=GATEWAY)
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT location_scope, cell_id FROM public.gateways WHERE id = %s;",
+                         (GATEWAY,))
+        scope, cell = self.cur.fetchone()
+        self.assertEqual(scope, "site_wide")
+        self.assertIsNone(cell)
+
+    def test_what_the_platform_observed_is_not_proposable(self):
+        # The security half of the design, restated for a new table: a proposal able to edit
+        # `status` would let somebody assert a gateway is online by describing it.
+        for column in ("status", "last_heartbeat", "deployment", "sparkplug_group"):
+            as_user(self.cur, OPERATOR)
+            with self.assertRaises(psycopg2.errors.InvalidParameterValue, msg=column):
+                self.cur.execute(
+                    "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                    "VALUES ('gateways', %s, %s::jsonb);",
+                    (GATEWAY, json.dumps({column: "host"})))
+            self.conn.rollback()
+
+
+class TestTheDocumentLanes(ProposalCase):
+    """
+    0090's new SHAPE: the patch is a row to create, not columns to change.
+
+    Every lane before this one is a patch, where an absent key means "leave this alone". A new
+    `links` row has no "as it was" to fall back on, so its identifying fields are required.
+    """
+
+    def a_document(self, **overrides):
+        patch = {"display_name": "RAMS", "url": "https://docs.example/rams.pdf",
+                 "link_tag": "health_and_safety"}
+        patch.update(overrides)
+        return patch
+
+    def test_an_operator_may_propose_a_document_on_a_device(self):
+        proposal = self.propose(self.a_document(), entity_type="device_links", entity_id=DEVICE)
+        self.assertIsNotNone(proposal)
+
+    def test_approving_creates_the_link_row(self):
+        proposal = self.propose(self.a_document(), entity_type="device_links", entity_id=DEVICE)
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute(
+            "SELECT entity_type, display_name, url, link_tag FROM public.links "
+            " WHERE entity_id = %s;", (DEVICE,))
+        row = self.cur.fetchone()
+        # `links.entity_type` is the SINGULAR noun the rest of the app writes, derived from the
+        # lane rather than copied across.
+        self.assertEqual(row[0], "device")
+        self.assertEqual(row[1], "RAMS")
+        self.assertEqual(row[2], "https://docs.example/rams.pdf")
+        self.assertEqual(row[3], "health_and_safety")
+
+    def test_each_lane_writes_its_own_singular_noun(self):
+        for lane, entity, noun in (("cell_links", CELL, "cell"),
+                                   ("gateway_links", GATEWAY, "gateway")):
+            proposal = self.propose(self.a_document(url=f"https://docs.example/{noun}.pdf"),
+                                    entity_type=lane, entity_id=entity)
+            as_user(self.cur, MANAGER)
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+            as_owner(self.cur)
+            self.cur.execute("SELECT entity_type FROM public.links WHERE entity_id = %s;", (entity,))
+            self.assertEqual(self.cur.fetchone()[0], noun)
+
+    def test_a_document_with_no_url_is_refused(self):
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.InvalidParameterValue) as caught:
+            self.cur.execute(
+                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                "VALUES ('device_links', %s, %s::jsonb);",
+                (DEVICE, json.dumps({"display_name": "RAMS"})))
+        self.assertIn("needs a url", str(caught.exception))
+
+    def test_a_document_with_no_name_is_refused(self):
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.InvalidParameterValue):
+            self.cur.execute(
+                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                "VALUES ('device_links', %s, %s::jsonb);",
+                (DEVICE, json.dumps({"url": "https://docs.example/x.pdf"})))
+
+    def test_a_relative_url_is_refused(self):
+        # It would resolve against this app's own origin and become a link into the platform that
+        # goes nowhere -- silently, which is what makes it worth a constraint.
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.InvalidParameterValue) as caught:
+            self.cur.execute(
+                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                "VALUES ('device_links', %s, %s::jsonb);",
+                (DEVICE, json.dumps({"display_name": "RAMS", "url": "documents/rams.pdf"})))
+        self.assertIn("must be absolute", str(caught.exception))
+
+    def test_a_tag_nobody_offers_is_refused(self):
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.InvalidParameterValue):
+            self.cur.execute(
+                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                "VALUES ('device_links', %s, %s::jsonb);",
+                (DEVICE, json.dumps(self.a_document(link_tag="banana"))))
+
+    def test_a_document_with_no_tag_lands_as_other(self):
+        patch = {"display_name": "RAMS", "url": "https://docs.example/rams.pdf"}
+        proposal = self.propose(patch, entity_type="device_links", entity_id=DEVICE)
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT link_tag FROM public.links WHERE entity_id = %s;", (DEVICE,))
+        self.assertEqual(self.cur.fetchone()[0], "other")
+
+    def test_an_operator_still_cannot_write_a_link_directly(self):
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.cur.execute(
+                "INSERT INTO public.links (entity_type, entity_id, display_name, url) "
+                "VALUES ('device', %s, 'RAMS', 'https://docs.example/rams.pdf');", (DEVICE,))
+
+    def test_a_proposal_against_an_archived_device_is_refused(self):
+        as_owner(self.cur)
+        self.cur.execute("UPDATE public.devices SET is_archived = true WHERE id = %s;", (DEVICE_TWO,))
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.ForeignKeyViolation):
+            self.cur.execute(
+                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                "VALUES ('device_links', %s, %s::jsonb);",
+                (DEVICE_TWO, json.dumps(self.a_document())))
+
+
+class TestAProposalThatCameTrueOnItsOwn(ProposalCase):
+    """
+    0090. Nothing stops a Manager editing an asset while a proposal sits open against it, and
+    nothing should -- the queue is a way to ASK, not a lock. But it means a proposal can be
+    OVERTAKEN, and approving one then writes a PROPOSAL_APPLIED row naming an approver and a patch
+    for a change that did not happen in that transaction.
+
+    The repair is to reject it with that as the reason, which records what actually happened.
+    """
+
+    def test_a_patch_already_in_place_cannot_be_approved(self):
+        proposal = self.propose({"name": "Renamed_By_Hand"})
+        # The Manager makes the change directly, which they are entitled to do.
+        as_user(self.cur, MANAGER)
+        self.cur.execute("UPDATE public.devices SET name = 'Renamed_By_Hand' WHERE id = %s;",
+                         (DEVICE,))
+        with self.assertRaises(psycopg2.errors.CheckViolation) as caught:
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        self.assertIn("already in place", str(caught.exception))
+
+    def test_it_can_still_be_rejected_which_is_the_repair(self):
+        proposal = self.propose({"name": "Renamed_By_Hand"})
+        as_user(self.cur, MANAGER)
+        self.cur.execute("UPDATE public.devices SET name = 'Renamed_By_Hand' WHERE id = %s;",
+                         (DEVICE,))
+        self.cur.execute("SELECT public.reject_proposal(%s, %s);",
+                         (proposal, "already done by hand"))
+        as_owner(self.cur)
+        self.cur.execute("SELECT status, decision_reason FROM public.change_proposals WHERE id = %s;",
+                         (proposal,))
+        self.assertEqual(self.cur.fetchone(), ("rejected", "already done by hand"))
+
+    def test_a_partly_overtaken_proposal_is_still_approvable(self):
+        # CONTAINMENT, NOT EQUALITY. One of the two fields was done by hand; the other was not, so
+        # there is still a change to make and refusing it would strand a live request.
+        proposal = self.propose({"name": "Renamed_By_Hand", "description": "and a new description"})
+        as_user(self.cur, MANAGER)
+        self.cur.execute("UPDATE public.devices SET name = 'Renamed_By_Hand' WHERE id = %s;",
+                         (DEVICE,))
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT description FROM public.devices WHERE id = %s;", (DEVICE,))
+        self.assertEqual(self.cur.fetchone()[0], "and a new description")
+
+    def test_the_queue_can_ask_before_anybody_clicks(self):
+        # Exposed to the browser so the page can WARN rather than only refusing afterwards.
+        proposal = self.propose({"name": "Renamed_By_Hand"})
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.proposal_is_already_true(%s);", (proposal,))
+        self.assertFalse(self.cur.fetchone()[0])
+        self.cur.execute("UPDATE public.devices SET name = 'Renamed_By_Hand' WHERE id = %s;",
+                         (DEVICE,))
+        self.cur.execute("SELECT public.proposal_is_already_true(%s);", (proposal,))
+        self.assertTrue(self.cur.fetchone()[0])
+
+    def test_a_nameplate_with_no_row_yet_is_never_a_no_op(self):
+        # The approval CREATES that row, so a missing one means everything is still to do. A naive
+        # "no current row means nothing to change" would refuse every first nameplate.
+        proposal = self.propose({"serial_number": "SN-1"}, entity_type="device_nameplate")
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.proposal_is_already_true(%s);", (proposal,))
+        self.assertFalse(self.cur.fetchone()[0])
+
+    def test_a_document_already_at_that_address_is_a_no_op(self):
+        # A link has no row to contain the patch, so "already true" is: does this asset already
+        # carry a document at that URL? The address is the identity of a link.
+        as_owner(self.cur)
+        self.cur.execute(
+            "INSERT INTO public.links (entity_type, entity_id, display_name, url) "
+            "VALUES ('device', %s, 'RAMS (already here)', 'https://docs.example/rams.pdf');",
+            (DEVICE,))
+        proposal = self.propose(
+            {"display_name": "RAMS", "url": "https://docs.example/rams.pdf"},
+            entity_type="device_links", entity_id=DEVICE)
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.CheckViolation):
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+
+
 
 
 class TestTheTimer(ProposalCase):
