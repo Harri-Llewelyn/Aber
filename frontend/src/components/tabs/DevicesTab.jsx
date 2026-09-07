@@ -926,7 +926,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
          ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th title="Human-readable device name">Name</th><th title="Sparkplug B id this device publishes under">Sparkplug ID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
+              <thead><tr><th title="Human-readable device name">Name</th><th title="The device's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug id is derived from this, so nothing is lost by showing it here.">Device UUID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
               <tbody>
                 {filteredAssets.map(a => {
                   return (
@@ -959,7 +959,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                           )}
                         </td>
                         <td>
-                          <CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} />
+                          <CopyableId value={a.asset_id} label="Device UUID" onNotify={showToast} />
                           {a.identity_source === 'legacy_name' && (
                             <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
                               <IconAlertTriangle size={10} /> Legacy name matching

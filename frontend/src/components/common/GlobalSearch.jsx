@@ -29,11 +29,18 @@ import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, I
  * hyphenated hex string is unambiguous -- nothing in the static index can look like one -- and a mode
  * switch would be a control to find before you can use the thing you came here to use.
  *
- * IT SEARCHES THE INDEX, NOT THE ESTATE. Devices are not matched by NAME here, and that is a
- * boundary rather than an omission: each asset page already has a search box that filters its own
- * table with the filters and columns of that page beside it, and a second, shallower name search in
- * the chrome would return a worse answer to the same question. What this adds is the two questions
- * no page-level box can answer -- one about pages, one about an id whose page is unknown.
+ * IT SEARCHES THE ESTATE BY NAME TOO, and that is a change from how this file was first written.
+ * The original argument was that each asset page already has a search box over its own table, so a
+ * shallower one in the chrome would answer the same question worse. What that missed is that the
+ * page-level box can only be used by somebody who already knows WHICH PAGE the thing is on --
+ * which is the same gap the id lookup exists to close, arrived at from the other direction. A
+ * person holding the name of a machine and not knowing whether it was provisioned as a device or
+ * as a gateway had nowhere to type it.
+ *
+ * SO THE DIVISION IS BY DEPTH RATHER THAN BY SUBJECT. This finds the thing and takes you to it;
+ * the page's own box, with that page's filters and columns beside it, is where you work with a SET
+ * of them. The estate lookup is capped per kind for exactly that reason -- see `searchAssets` --
+ * so it stays a way of finding one row rather than a bad table.
  */
 
 const ENTITY_LABEL = {
@@ -86,7 +93,14 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
    * the second and leave the palette showing the asset for an id no longer in the box.
    */
   useEffect(() => {
-    if (!looksLikeId) {
+    // TWO LOOKUPS BEHIND ONE EFFECT, because from here they are the same question -- "which asset
+    // is this?" -- asked with the two things a person might be holding. Which one runs is decided
+    // by the shape of what was typed, not by a mode the user has to pick.
+    //
+    // THE NAME SEARCH NEEDS TWO CHARACTERS. One letter matches most of an estate, and a palette
+    // that fills with everything on the first keystroke is one people stop typing into.
+    const searchable = looksLikeId || trimmed.length >= 2
+    if (!searchable) {
       setEntities([])
       setResolving(false)
       return
@@ -95,7 +109,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
     setResolving(true)
     const timer = setTimeout(async () => {
       try {
-        const hits = await api.resolveId(trimmed)
+        const hits = looksLikeId ? await api.resolveId(trimmed) : await api.searchAssets(trimmed)
         if (!stale) setEntities(hits)
       } catch {
         // A failed lookup is reported as "not found" rather than as an error toast. There is
@@ -111,24 +125,31 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
   }, [trimmed, looksLikeId])
 
   const results = useMemo(() => {
-    if (looksLikeId) {
-      return entities.map(e => ({
-        key: `entity:${e.kind}:${e.id}`,
-        kind: 'entity',
-        label: e.name || '(unnamed)',
-        detail: ENTITY_LABEL[e.kind] || e.kind,
-        icon: ENTITY_ICON[e.kind],
-        entity: e
-      }))
-    }
-    return matches.map(m => ({
+    const assetHits = entities.map(e => ({
+      key: `entity:${e.kind}:${e.id}`,
+      kind: 'entity',
+      label: e.name || '(unnamed)',
+      detail: ENTITY_LABEL[e.kind] || e.kind,
+      icon: ENTITY_ICON[e.kind],
+      entity: e
+    }))
+
+    // An id can only be an asset: no page or card contains a hex string, so there is nothing to
+    // merge and a "nothing found" flash while the lookup runs would be the only effect.
+    if (looksLikeId) return assetHits
+
+    // PAGES AND CARDS FIRST, ASSETS AFTER. The static index answers instantly and the estate
+    // lookup arrives 180ms later, so putting assets on top would push a result the user was
+    // already reaching for out from under the cursor. Navigation is also the commoner intent --
+    // somebody typing "dev" almost always wants the Devices page, not a machine called Dev.
+    return [...matches.map(m => ({
       key: m.key,
       kind: m.kind,
       label: m.label,
       detail: m.kind === 'card' ? m.page : null,
       icon: m.icon,
       target: m
-    }))
+    })), ...assetHits]
   }, [looksLikeId, entities, matches])
 
   // The highlight is clamped rather than reset, so it survives a keystroke that only shortens the
@@ -219,7 +240,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
           aria-controls="global-search-results"
           aria-activedescendant={showPanel ? activeId : undefined}
           aria-autocomplete="list"
-          aria-label="Search pages, cards and asset ids"
+          aria-label="Search pages, cards and assets by name or id"
           autoComplete="off"
           spellCheck="false"
         />

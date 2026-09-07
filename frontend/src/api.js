@@ -2870,6 +2870,59 @@ const apiMethods = {
     ])).filter(Boolean);
   },
 
+  /**
+   * The four asset kinds, matched by NAME.
+   *
+   * THE COMPANION TO `resolveId`, and deliberately a separate call rather than a mode of it. An id
+   * lookup is an equality probe on a primary key that hits at most one row in one of four tables; a
+   * name search is a pattern over four tables that can hit many. They fail differently too -- a
+   * missing id means "nothing has that id", a missing name means "nothing is called that yet" --
+   * and collapsing them would make one message do for both.
+   *
+   * `ilike` WITH THE TERM ESCAPED. `%` and `_` are wildcards in LIKE, so a device called `100%_OK`
+   * typed verbatim would otherwise match far more than itself -- and, worse, a bare `%` would match
+   * the entire estate and read as the search being broken.
+   *
+   * CAPPED PER KIND, NOT OVERALL. A plant with four hundred devices and three cells would otherwise
+   * return four hundred devices and no cells at all, which is the shape that makes people conclude
+   * the search cannot find cells. Ten of each is enough to recognise the one you meant, and the
+   * page-level box is where an exhaustive list belongs.
+   *
+   * RLS DECIDES WHAT COMES BACK, as everywhere else. Nothing here filters by role.
+   */
+  searchAssets: async (term) => {
+    const needle = String(term || '').trim();
+    if (needle.length < 2) return [];
+
+    const escaped = needle.replace(/([%_\\])/g, '\\$1');
+    const probe = (table, kind, nameColumn) =>
+      supabase
+        .from(table)
+        .select(`id, ${nameColumn}`)
+        .ilike(nameColumn, `%${escaped}%`)
+        .limit(10)
+        .then(({ data, error }) => (error ? [] : (data || []).map(r => ({
+          kind, id: r.id, name: r[nameColumn]
+        }))));
+
+    const found = await Promise.all([
+      probe('devices', 'device', 'name'),
+      probe('gateways', 'gateway', 'name'),
+      probe('cells', 'cell', 'name'),
+      probe('schemas', 'schema', 'schema_name')
+    ]);
+
+    // AN EXACT MATCH FIRST, then alphabetical. Somebody who typed a full name wants that row, and
+    // it would otherwise sit wherever its table happened to fall among the four.
+    const lowered = needle.toLowerCase();
+    return found.flat().sort((a, b) => {
+      const aExact = String(a.name || '').toLowerCase() === lowered;
+      const bExact = String(b.name || '').toLowerCase() === lowered;
+      if (aExact !== bExact) return aExact ? -1 : 1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+  },
+
   delete: async (path, options = {}) => {
     if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];

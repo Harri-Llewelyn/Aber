@@ -22,7 +22,7 @@ import { TABS, tabIsVisible } from '../navigation'
  */
 
 vi.mock('../api', () => ({
-  api: { resolveId: vi.fn() }
+  api: { resolveId: vi.fn(), searchAssets: vi.fn() }
 }))
 
 import { api } from '../api'
@@ -165,6 +165,7 @@ describe('the palette', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.resolveId.mockResolvedValue([])
+    api.searchAssets.mockResolvedValue([])
   })
 
   it('shows nothing until something is typed, so the bar is not a permanent dropdown', () => {
@@ -280,12 +281,17 @@ describe('the palette', () => {
       expect(screen.queryByText(/Nothing matches/i)).toBeNull()
     })
 
-    it('does not query on a partial id', async () => {
+    it('does not run the ID lookup on a partial id', async () => {
       render(<GlobalSearch {...props()} />)
       type(UUID.slice(0, 20))
 
       await waitFor(() => expect(screen.queryByRole('listbox')).toBeTruthy())
+      // `isUuid` passes only a COMPLETE id, so the primary-key probe does not run. What does run
+      // is the name search -- a partial id is a perfectly well-formed thing to type, and it simply
+      // matches nothing. Asserted rather than left implied, because "no lookup at all" was true
+      // before the estate could be searched by name and quietly stopped being so.
       expect(api.resolveId).not.toHaveBeenCalled()
+      await waitFor(() => expect(api.searchAssets).toHaveBeenCalled())
     })
 
     /**
@@ -321,9 +327,68 @@ describe('the palette', () => {
       expect(await screen.findByText(/visible to you/i)).toBeTruthy()
     })
   })
+
+  describe('an asset name typed into the box', () => {
+    const hit = (kind, name, id) => ({ kind, id, name })
+
+    beforeEach(() => {
+      api.resolveId.mockResolvedValue([])
+      api.searchAssets.mockResolvedValue([])
+    })
+
+    it('finds all four kinds by name', async () => {
+      api.searchAssets.mockResolvedValue([
+        hit('device', 'Haas VF-2', '11111111-1111-4111-8111-111111111111'),
+        hit('gateway', 'Haas Cell Gateway', '22222222-2222-4222-8222-222222222222'),
+        hit('cell', 'Haas Bay', '33333333-3333-4333-8333-333333333333'),
+        hit('schema', 'Haas Mill Schema', '44444444-4444-4444-8444-444444444444')
+      ])
+      render(<GlobalSearch {...props()} />)
+      type('Haas')
+
+      await waitFor(() => expect(screen.getByText('Haas VF-2')).toBeInTheDocument())
+      expect(screen.getByText('Haas Cell Gateway')).toBeInTheDocument()
+      expect(screen.getByText('Haas Bay')).toBeInTheDocument()
+      expect(screen.getByText('Haas Mill Schema')).toBeInTheDocument()
+    })
+
+    it('waits for a second character', async () => {
+      // One letter matches most of an estate, and a palette that fills on the first keystroke is one
+      // people stop typing into.
+      render(<GlobalSearch {...props()} />)
+      type('H')
+      await waitFor(() => expect(screen.queryByRole('listbox')).toBeTruthy())
+      expect(api.searchAssets).not.toHaveBeenCalled()
+    })
+
+    it('puts pages and cards above assets', async () => {
+      // The static index answers instantly and the estate lookup arrives after a debounce, so
+      // assets on top would push a result the user was already reaching for out from under the
+      // cursor. Navigation is also the commoner intent.
+      api.searchAssets.mockResolvedValue([hit('device', 'Devices Rig', '55555555-5555-4555-8555-555555555555')])
+      render(<GlobalSearch {...props()} />)
+      type('device')
+
+      await waitFor(() => expect(screen.getByText('Devices Rig')).toBeInTheDocument())
+      const labels = screen.getAllByRole('option').map(o => o.textContent)
+      expect(labels[0]).toMatch(/Devices/)
+      expect(labels[labels.length - 1]).toMatch(/Devices Rig/)
+    })
+
+    it('reports a name that matches nothing without an error', async () => {
+      api.searchAssets.mockRejectedValue(new Error('PostgREST unreachable'))
+      render(<GlobalSearch {...props()} />)
+      type('nothing-called-this')
+      await waitFor(() => expect(api.searchAssets).toHaveBeenCalled())
+      // Same reasoning as the id lookup: the box somebody is typing in is not where they should
+      // learn the backend is down.
+      await waitFor(() => expect(screen.queryByText(/Nothing matches/i)).toBeTruthy())
+    })
+  })
 })
 
 // =================================================================================================
+
 describe('the card index', () => {
 
   /**

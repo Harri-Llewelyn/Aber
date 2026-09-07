@@ -435,7 +435,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                <thead>
                  <tr>
                    <th title="Human-readable gateway name">Gateway Name</th>
-                   <th title="Sparkplug B edge node id this gateway publishes under">Sparkplug ID</th>
+                   <th title="The gateway's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug edge node id is derived from this, so nothing is lost by showing it here.">Gateway UUID</th>
                    <th title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Shadow (republishes recorded captures)">Type</th>
                    <th title="Shopfloor cell zone this gateway serves">Cell Zone</th>
                    <th title="Network connectivity status">Gateway Status</th>
@@ -477,7 +477,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                              </span>
                            )}
                          </td>
-                         <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
+                         <td><CopyableId value={g.gateway_id} label="Gateway UUID" onNotify={showToast} /></td>
                          <td>
                            <span
                              className={`badge badge-${gatewayTypeTone(gatewayType(g))}`}
