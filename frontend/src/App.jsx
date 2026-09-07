@@ -714,7 +714,12 @@ function Dashboard({ session, onSignOut }) {
                 proposer's own rows. It is a courtesy: the transition guard and the RLS policy
                 both re-derive the proposer from `auth.uid()`, so a wrong value here produces a
                 refused call rather than somebody else's proposal being editable. */}
-            {tab === 'approvals'      && <ApprovalsTab showToast={showToast} hasPermission={hasPermission} userRole={userRole} currentUserId={session?.user?.id} />}
+            {tab === 'approvals'      && <ApprovalsTab showToast={showToast} hasPermission={hasPermission} userRole={userRole} currentUserId={session?.user?.id}
+              /* The proposal's TARGET, not the proposal: what a reader wants after an approval is
+                 the machine's or the schema's history, with the approval in it beside everything
+                 else that happened to it. `device_nameplate` resolves to its device for the same
+                 reason -- those rows are keyed by the device id. */
+              onViewThread={p => viewThreadFor(p.entity_id, p.entity_type === 'schemas' ? 'SCHEMA' : 'DEVICE')} />}
             {/* The role is re-checked here for the same reason Access Control's is: routing can put
                 `tab` on a value the nav never offered. `userRole` is passed on rather than a boolean,
                 because the page distinguishes read-only Auditor from the two roles that can record. */}

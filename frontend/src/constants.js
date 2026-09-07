@@ -64,6 +64,17 @@ export const DIGITAL_THREAD_ACTIONS = {
   // without "and when was it taken away" -- and until 0074 there was no second half to record,
   // because a signed token could not be withdrawn at all.
   TOKEN_REVOKED:     'Token revoked',
+  // 0086/0088. An approval writes ONE row naming both parties -- who asked, and who authorised --
+  // which is the only place that pair appears together. Filterable because "what has been approved
+  // lately, and by whom" is a question this page is the answer to, and a row nobody can filter for
+  // is one nobody finds.
+  //
+  // REJECTED AND WITHDRAWN PROPOSALS ARE ABSENT ON PURPOSE. Neither changed anything, and this is
+  // the record of what happened to the plant rather than of what was asked. The proposal row on the
+  // Approvals page carries the refusal and its reason.
+  PROPOSAL_APPLIED:  'Proposal applied',
+  // Written by the expiry timer, with `changed_by` NULL because a timer is not a person.
+  PROPOSAL_EXPIRED:  'Proposal expired',
   // WRITTEN BY `log_role_assignment()` (0070), not by the generic audit trigger -- `user_roles`
   // has no `id` column for it to read. Named rather than INSERT/DELETE because the raw verb would
   // say a row appeared in a join table, where what happened is that somebody became an
@@ -111,6 +122,13 @@ export const DIGITAL_THREAD_ENTITY_TYPES = [
   { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Service identities' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas' },
   { kind: 'SETTING',          table: 'system_settings',    label: 'Settings' },
+  // 0086/0088 write against these two, and without them a row lands with no kind at all -- it
+  // renders unlabelled and cannot be filtered for, which is the shape of a record nobody can find.
+  //
+  // `device_nameplate` is keyed by the DEVICE id, so a nameplate approval belongs to that device's
+  // own history as much as to this list -- see the entity thread in api.js, which unions the two.
+  { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates' },
+  { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals' },
 ];
 
 /** Stored `entity_type` -> the UI's spelling. What the timeline reads rows through. */

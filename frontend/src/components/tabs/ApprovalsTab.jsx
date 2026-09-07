@@ -4,7 +4,7 @@ import { POLL_INTERVAL_MS, PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconPlus, IconPencil, IconCheck, IconX, IconArchive } from '../common/Icons'
+import { IconPlus, IconPencil, IconCheck, IconX, IconArchive, IconHistory } from '../common/Icons'
 
 /**
  * ==================================================================================================
@@ -329,8 +329,20 @@ function Composer({ devices, drafts, editing, onCancel, onSubmit, busy, refusal,
     onSubmit({ entity_type: lane, entity_id: target, patch, rationale })
   }
 
+  // Escape closes it, through the shared stack -- the same treatment every other dialog gets, so a
+  // confirmation opened over this one cannot take the form down with it.
+  useEscapeKey(onCancel)
+
   return (
-    <div className="card-body">
+    <div className="modal-overlay" onClick={onCancel}>
+      {/* `modal-md`, and the scrolling is `.modal`'s own: it caps at the viewport and scrolls
+          inside itself, which is what the device nameplate lane needs -- eleven fields is taller
+          than a laptop once the lane picker, the target picker and the rationale are above them. */}
+      <div className="modal modal-md" onClick={e => e.stopPropagation()}>
+        <div className="modal-header-row">
+          <h3 className="modal-title">{editing ? 'Edit your proposal' : 'Propose a change'}</h3>
+        </div>
+        <div className="card-body">
       {refusal && (
         <div className="empty-state" role="alert">
           <div className="empty-text">{refusal.message}</div>
@@ -404,18 +416,30 @@ function Composer({ devices, drafts, editing, onCancel, onSubmit, busy, refusal,
       </div>
 
       <div className="approvals-composer-actions">
+        {/* AN ERROR, NOT A HINT, and it says so in weight and colour. The first cut greyed the
+            button out and explained itself in muted 12px beside it, which is only marginally
+            better than saying nothing: the eye goes to the button, finds it dead, and does not
+            look left. The button turns with it so the two read as one state rather than as a
+            disabled control and an unrelated sentence.
+
+            `role="alert"` rather than `status`: this is the answer to an action the person just
+            attempted, and it should be announced when it appears rather than waiting for the next
+            quiet moment. */}
         {missing.length > 0 && (
-          <span className="approvals-hint" role="status">
+          <span className="approvals-blocked" role="alert">
             Choose {missing.join(' and ')} before proposing.
           </span>
         )}
         <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn btn-primary"
+        <button type="button"
+                className={`btn ${missing.length > 0 ? 'btn-danger btn-disabled' : 'btn-primary'}`}
                 disabled={busy || missing.length > 0}
                 title={missing.length ? `Choose ${missing.join(' and ')} first` : undefined}
                 onClick={submit}>
           {editing ? 'Save changes' : 'Propose'}
         </button>
+      </div>
+        </div>
       </div>
     </div>
   )
@@ -488,7 +512,7 @@ function ProposalTable({ rows, selectedId, onSelect, currentUserId, emptyText })
   )
 }
 
-export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId }) {
+export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId, onViewThread }) {
   const [proposals, setProposals] = useState([])
   const [devices, setDevices]     = useState([])
   const [drafts, setDrafts]       = useState([])
@@ -623,6 +647,15 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
         onClick: () => setRejecting(selected)
       }
     ] : []),
+    // ONLY WHEN THERE IS A ROW TO OPEN. `applied_thread_id` is set by the approval and by nothing
+    // else, so a rejected, withdrawn or still-open proposal offers nothing here -- none of them
+    // changed anything, and this record is of what happened to the plant rather than what was
+    // asked for. Offering a dead button on those three would teach the reader the control lies.
+    ...(selected.applied_thread_id && onViewThread ? [{
+      label: 'View in Digital Thread', icon: <IconHistory size={13} />,
+      title: 'The audit row this approval wrote, naming both the proposer and the approver',
+      onClick: () => onViewThread(selected)
+    }] : []),
     ...(mine && selected.status === 'open' ? [
       {
         label: 'Edit', icon: <IconPencil size={13} />,
@@ -650,15 +683,15 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
         {/* ONE CARD PER SUBJECT, each with a title and a description, which is how every other page
             in this app is composed. The primary action sits in the header beside the title, where
             "create a thing" belongs -- not loose above the page. */}
-        <div className="card">
+        <div className="card approvals-card">
           <div className="card-header">
             {/* THE HEADING SAYS WHICH IT IS. Editing an existing proposal and starting a new one
                 are the same form with the lane and target locked, and a card that said "Propose a
                 change" in both states left the one difference that matters -- that this will add
                 to a proposal somebody may already be reading -- to be inferred from a button
                 label at the far end of the form. */}
-            <h3 className="section-title">{editing ? 'Edit your proposal' : 'Propose a change'}</h3>
-            {canPropose && !composing && !editing && (
+            <h3 className="section-title">Propose a change</h3>
+            {canPropose && (
               <button
                 className="btn btn-primary btn-sm"
                 style={{ marginLeft: 'auto' }}
@@ -669,38 +702,17 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
               </button>
             )}
           </div>
-          {(composing || editing) ? (
-            <Composer
-              devices={devices}
-              drafts={drafts}
-              editing={editing}
-              busy={busyId === 'composer'}
-              refusal={refusal}
-              onOpenExisting={() => {
-                // THE CAP IS ONLY LIVABLE IF THIS IS ONE CLICK. Told "you already have an open
-                // proposal on this device", a person has to be able to open that one and add to
-                // it -- otherwise the constraint reads as a wall and they propose against a
-                // neighbouring asset instead, or stop proposing.
-                setEditing(refusal.existing)
-                setComposing(false)
-                setRefusal(null)
-              }}
-              onCancel={() => { setComposing(false); setEditing(null); setRefusal(null) }}
-              onSubmit={submitProposal}
-            />
-          ) : (
-            <div className="card-body">
-              <p className="approvals-blurb">
-                A proposal is a request, not a change: nothing is written until somebody who may
-                make it approves. {canPropose
-                  ? 'Fill in only the fields you want changed — anything left alone stays as it is.'
-                  : 'Your role can decide proposals but not file them.'}
-              </p>
-            </div>
-          )}
+          <div className="card-body">
+            <p className="approvals-blurb">
+              A proposal is a request, not a change: nothing is written until somebody who may
+              make it approves. {canPropose
+                ? 'Fill in only the fields you want changed — anything left alone stays as it is.'
+                : 'Your role can decide proposals but not file them.'}
+            </p>
+          </div>
         </div>
 
-        <div className="card">
+        <div className="card approvals-card">
           <div className="card-header">
             <h3 className="section-title">
               Awaiting a decision <span className="section-count">{open.length}</span>
@@ -723,7 +735,7 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
           />
         </div>
 
-        <div className="card">
+        <div className="card approvals-card">
           <div className="card-header">
             <h3 className="section-title">
               Decided <span className="section-count">{decidedFiltered.length}</span>
@@ -830,6 +842,27 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
         )}
         actions={panelActions}
       />
+
+      {(composing || editing) && (
+        <Composer
+          devices={devices}
+          drafts={drafts}
+          editing={editing}
+          busy={busyId === 'composer'}
+          refusal={refusal}
+          onOpenExisting={() => {
+            // THE CAP IS ONLY LIVABLE IF THIS IS ONE CLICK. Told "you already have an open
+            // proposal on this device", a person has to be able to open that one and add to it --
+            // otherwise the constraint reads as a wall and they propose against a neighbouring
+            // asset instead, or stop proposing.
+            setEditing(refusal.existing)
+            setComposing(false)
+            setRefusal(null)
+          }}
+          onCancel={() => { setComposing(false); setEditing(null); setRefusal(null) }}
+          onSubmit={submitProposal}
+        />
+      )}
 
       {rejecting && (
         <RejectDialog

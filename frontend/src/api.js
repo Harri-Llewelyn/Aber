@@ -1482,6 +1482,17 @@ const apiMethods = {
       const SINGULAR_MAP = { cells: 'cell', gateways: 'gateway', devices: 'device', assets: 'device' };
       const singularType = SINGULAR_MAP[rawEntityType] || rawEntityType.replace(/s$/, '');
 
+      /**
+       * The entity types that belong to THIS entity's history as well as their own.
+       *
+       * `device_nameplate` rows are keyed by the DEVICE id -- an approved nameplate change is a
+       * thing that happened to that machine, and filing it only under a table name would leave the
+       * device's own timeline silent about it. This is the one place the union is expressed, so a
+       * reader opening a device sees what was asserted about it beside what was configured on it.
+       */
+      const ALSO_ABOUT = { device: ['device_nameplate'], devices: ['device_nameplate'] };
+      const alsoAbout = new Set(ALSO_ABOUT[singularType] || []);
+
       let query = supabase.from('digital_thread').select('*').eq('entity_id', entityId);
       const { data, error } = await query.order('recorded_at', { ascending: false });
       if (error) throw error;
@@ -1489,7 +1500,8 @@ const apiMethods = {
       const filtered = (data || []).filter(t => {
         if (!t.entity_type) return true;
         const et = t.entity_type.toLowerCase();
-        return et === singularType || et === rawEntityType || et === `${singularType}s`;
+        return et === singularType || et === rawEntityType || et === `${singularType}s`
+          || alsoAbout.has(et);
       });
 
       return filtered.map(mapDigitalThreadRow);

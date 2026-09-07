@@ -522,6 +522,61 @@ describe('finding a decision again', () => {
   })
 })
 
+describe('following an approval into the Digital Thread', () => {
+  it('offers the hand-over on a proposal that was applied', async () => {
+    const onViewThread = vi.fn()
+    mockLoad([deviceProposal({
+      status: 'applied', decided_by: MANAGER_ID, decided_at: '2026-09-06T00:00:00Z',
+      applied_thread_id: 4321
+    })])
+    renderTab({ onViewThread })
+    await selectRow()
+
+    fireEvent.click(screen.getByRole('button', { name: /view in digital thread/i }))
+    // THE TARGET, NOT THE PROPOSAL. What a reader wants after an approval is the machine's history
+    // with the approval in it, beside everything else that happened to it.
+    expect(onViewThread).toHaveBeenCalledWith(expect.objectContaining({ entity_id: 'dev-1' }))
+  })
+
+  it('does not offer it on a rejection, which changed nothing', async () => {
+    // `applied_thread_id` is set by the approval and by nothing else. A dead button on the three
+    // outcomes that wrote no row would teach the reader the control lies.
+    const onViewThread = vi.fn()
+    mockLoad([deviceProposal({
+      status: 'rejected', decided_by: MANAGER_ID, decided_at: '2026-09-06T00:00:00Z',
+      decision_reason: 'no', applied_thread_id: null
+    })])
+    renderTab({ onViewThread })
+    await selectRow()
+    expect(screen.queryByRole('button', { name: /view in digital thread/i })).toBeNull()
+  })
+
+  it('does not offer it while the proposal is still open', async () => {
+    const onViewThread = vi.fn()
+    mockLoad([deviceProposal()])
+    renderTab({ onViewThread })
+    await selectRow()
+    expect(screen.queryByRole('button', { name: /view in digital thread/i })).toBeNull()
+  })
+})
+
+describe('the composer is a dialog', () => {
+  it('opens over the page and closes on Escape', async () => {
+    mockLoad([])
+    renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
+    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: /propose a change/i }))
+    const heading = await screen.findByText('Propose a change', { selector: '.modal-title' })
+    // `.modal` caps at the viewport and scrolls inside itself, which the nameplate lane needs:
+    // eleven fields is taller than a laptop once the pickers and the rationale are above them.
+    expect(heading.closest('.modal')).toBeTruthy()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByText('Propose a change', { selector: '.modal-title' })).toBeNull())
+  })
+})
+
 describe('ageLabel', () => {
   const base = new Date('2026-09-07T12:00:00Z').getTime()
   it('reads in the coarsest unit that is still true', () => {

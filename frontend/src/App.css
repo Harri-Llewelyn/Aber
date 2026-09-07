@@ -4409,3 +4409,18 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .approvals-composer-actions .approvals-hint {
   margin: 0 auto 0 0;
 }
+
+/* Between the approvals cards. Deliberately not `.card + .card`, for the reason the directory
+   groups give: several pages stack cards that are meant to sit tight against each other. */
+.approvals-card + .approvals-card { margin-top: var(--stack); }
+
+/* The composer's refusal. An error rather than a hint: the first cut greyed the button out and
+   explained itself in muted 12px beside it, which the eye never reaches -- it goes to the button,
+   finds it dead, and stops. Weight and colour are what make the sentence arrive at the same moment
+   the disabled control does. */
+.approvals-blocked {
+  color: var(--danger-text);
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 auto 0 0;
+}
