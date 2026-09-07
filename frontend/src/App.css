@@ -4373,3 +4373,39 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   color: var(--text-muted);
   line-height: 1.45;
 }
+
+/* ===== Approvals =====
+   A card's own prose, and the hint under a control that explains itself. Both are `--text-muted`
+   at 13px, which is what every other card description on the app already is -- named here rather
+   than repeated as an inline style on six elements, because the next page that needs one should
+   inherit the decision instead of copying the numbers. */
+.approvals-blurb {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+.approvals-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+/* The composer's footer. `.modal-actions` is the right ROW -- right-aligned, 10px gap -- and the
+   wrong box here: inside a card it inherits no horizontal padding, so the buttons sat flush
+   against the card's edge while every other control in the form was inset. This keeps the row and
+   gives it the inset, and holds the "what is still missing" hint at the left of the same line so
+   the explanation is beside the disabled button rather than above the form. */
+.approvals-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.approvals-composer-actions .approvals-hint {
+  margin: 0 auto 0 0;
+}

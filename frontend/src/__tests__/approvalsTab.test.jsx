@@ -82,6 +82,20 @@ function mockLoad(proposals) {
   })
 }
 
+/**
+ * Select a row, which is what opens the drawer the actions live in.
+ *
+ * THE ACTIONS ARE NOT ON THE ROW, and that is the app's own convention rather than this page's
+ * invention: Cells, Gateways and Devices all moved their actions into the context drawer, because
+ * a card per row put three proposals in a viewport and made the list unscannable at the size a
+ * queue actually reaches.
+ */
+async function selectRow(index = 0) {
+  const rows = await screen.findAllByTestId('proposal-row')
+  fireEvent.click(rows[index])
+  return rows[index]
+}
+
 const renderTab = (props = {}) => render(
   <ApprovalsTab
     showToast={vi.fn()}
@@ -126,14 +140,14 @@ describe('the page draws the gate it was given', () => {
   it('offers a manager Approve on a device proposal', async () => {
     mockLoad([deviceProposal()])
     renderTab()
-    await screen.findByTestId('proposal-card')
+    await selectRow()
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
   })
 
   it('offers a manager NO Approve on a schema proposal', async () => {
     mockLoad([schemaProposal()])
     renderTab()
-    await waitFor(() => expect(screen.getByText('CNC_Mill v2')).toBeInTheDocument())
+    await selectRow()
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull()
   })
@@ -141,14 +155,14 @@ describe('the page draws the gate it was given', () => {
   it('offers an administrator Approve on a schema proposal', async () => {
     mockLoad([schemaProposal()])
     renderTab({ userRole: 'Administrator' })
-    await waitFor(() => expect(screen.getByText('CNC_Mill v2')).toBeInTheDocument())
+    await selectRow()
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
   })
 
   it('offers a proposer Edit and Withdraw on their own open proposal, and no decision', async () => {
     mockLoad([deviceProposal()])
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
-    await screen.findByTestId('proposal-card')
+    await selectRow()
     expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Withdraw' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
@@ -159,7 +173,7 @@ describe('the page draws the gate it was given', () => {
       status: 'applied', decided_by: MANAGER_ID, decided_at: new Date().toISOString()
     })])
     renderTab()
-    await screen.findByTestId('proposal-card')
+    await selectRow()
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull()
   })
@@ -185,7 +199,7 @@ describe('what a proposal says it would change', () => {
   it('describes the schema lane in words instead', async () => {
     mockLoad([schemaProposal()])
     renderTab({ userRole: 'Administrator' })
-    await waitFor(() => expect(screen.getByText('CNC_Mill v2')).toBeInTheDocument())
+    await selectRow()
     expect(screen.getByText(/archives its predecessor/i)).toBeInTheDocument()
   })
 
@@ -229,9 +243,9 @@ describe('the cap is one click from its repair', () => {
     api.post.mockRejectedValueOnce({ code: '23505', message: 'duplicate key' })
 
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
-    await screen.findByTestId('proposal-card')
+    await screen.findAllByTestId('proposal-row')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Propose a change' }))
+    fireEvent.click(screen.getByRole('button', { name: /propose a change/i }))
     await waitFor(() => expect(screen.getByLabelText('Device')).toBeInTheDocument())
 
     fireEvent.change(screen.getByLabelText('Device'), { target: { value: 'dev-1' } })
@@ -253,7 +267,7 @@ describe('rejecting', () => {
   it('will not send without a reason', async () => {
     mockLoad([deviceProposal()])
     renderTab()
-    await screen.findByTestId('proposal-card')
+    await selectRow()
 
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
     const heading = await screen.findByText('Reject this proposal')
@@ -271,7 +285,7 @@ describe('rejecting', () => {
   it('sends the reason it was given', async () => {
     mockLoad([deviceProposal()])
     renderTab()
-    await screen.findByTestId('proposal-card')
+    await selectRow()
 
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
     const heading = await screen.findByText('Reject this proposal')
@@ -296,8 +310,8 @@ describe('the queue is worked from the front', () => {
     mockLoad([newer, older])
     renderTab()
 
-    await screen.findAllByTestId('proposal-card')
-    const cards = screen.getAllByTestId('proposal-card')
+    await screen.findAllByTestId('proposal-row')
+    const cards = screen.getAllByTestId('proposal-row')
     expect(within(cards[0]).getByText('Older')).toBeInTheDocument()
   })
 
@@ -311,8 +325,15 @@ describe('the queue is worked from the front', () => {
       })
     ])
     renderTab()
-    await screen.findAllByTestId('proposal-card')
+    const rows = await screen.findAllByTestId('proposal-row')
+    // One row in each table, under its own card.
+    expect(rows).toHaveLength(2)
+    expect(screen.getByText('Awaiting a decision')).toBeInTheDocument()
     expect(screen.getByText('Decided')).toBeInTheDocument()
+
+    // The reason lives in the drawer now, not on the row -- which is what lets a long list of
+    // decisions stay scannable.
+    fireEvent.click(rows[1])
     expect(screen.getByText(/not this quarter/)).toBeInTheDocument()
   })
 })
@@ -324,8 +345,8 @@ describe('an expired proposal names nobody', () => {
       status: 'expired', decided_by: null, decided_at: '2026-09-05T00:00:00Z'
     })])
     renderTab()
-    await screen.findByTestId('proposal-card')
-    expect(screen.getByText('the expiry timer')).toBeInTheDocument()
+    await selectRow()
+    expect(screen.getByText(/the expiry timer, which is not a person/)).toBeInTheDocument()
   })
 })
 
@@ -334,14 +355,14 @@ describe('proposing', () => {
     mockLoad([])
     renderTab({ hasPermission: (p) => p !== PERMISSION_UUIDS.PROPOSAL_CREATE })
     await waitFor(() => expect(screen.getByText(/nothing is waiting/i)).toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: 'Propose a change' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /propose a change/i })).toBeNull()
   })
 
   it('asks the database which fields a lane admits', async () => {
     mockLoad([])
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Propose a change' })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: 'Propose a change' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /propose a change/i }))
 
     // proposable_columns() is the only place that answer exists; a list hardcoded in the component
     // would be a second allowlist to keep in step.
@@ -351,8 +372,8 @@ describe('proposing', () => {
   it('sends only the fields somebody actually filled in', async () => {
     mockLoad([])
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Propose a change' })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: 'Propose a change' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /propose a change/i }))
 
     await waitFor(() => expect(screen.getByLabelText('Device')).toBeInTheDocument())
     fireEvent.change(screen.getByLabelText('Device'), { target: { value: 'dev-1' } })
@@ -368,6 +389,136 @@ describe('proposing', () => {
       patch: { name: 'Cell 4 Lathe' },
       rationale: ''
     }))
+  })
+})
+
+describe('the composer says why it will not send', () => {
+  it('names what is still missing, and disables Propose until it is not', async () => {
+    // A control that is greyed out with no explanation is one somebody presses twice and then
+    // reports as broken -- which is exactly what happened: Propose with no device chosen did
+    // nothing at all, correctly, and said nothing about why.
+    mockLoad([])
+    renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
+    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /propose a change/i }))
+
+    await waitFor(() => expect(screen.getByLabelText('Device')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeDisabled()
+    expect(screen.getByText(/choose a device and at least one field to change/i)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Device'), { target: { value: 'dev-1' } })
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeInTheDocument())
+    // Still short of a field to change, and it now says only that.
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeDisabled()
+    expect(screen.getByText(/choose at least one field to change/i)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Cell 4 Lathe' } })
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled()
+  })
+
+  it('asks a schema proposal only for its draft', async () => {
+    // The schema lane's patch is the act and takes no arguments, so there is no field to fill in
+    // and the only thing outstanding is which draft.
+    api.get.mockImplementation((path) => {
+      if (path === '/api/v1/proposals') return Promise.resolve([])
+      if (path === '/api/v1/assets') return Promise.resolve([])
+      if (path === '/api/v1/proposals/publishable-schemas') {
+        return Promise.resolve([{ id: 'sch-2', schema_name: 'CNC_Mill', version: 2 }])
+      }
+      if (path.startsWith('/api/v1/proposals/allowed-keys/')) return Promise.resolve(['publish'])
+      return Promise.resolve([])
+    })
+    renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
+    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /propose a change/i }))
+
+    await waitFor(() => expect(screen.getByLabelText('What kind of change')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('What kind of change'), { target: { value: 'schemas' } })
+
+    await waitFor(() => expect(screen.getByLabelText('Draft to publish')).toBeInTheDocument())
+    expect(screen.getByText(/choose a draft to publish/i)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Draft to publish'), { target: { value: 'sch-2' } })
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled()
+  })
+})
+
+describe('finding a decision again', () => {
+  const decidedSet = () => [
+    deviceProposal({
+      id: 'd1', target_label: 'Lathe_01', status: 'rejected', entity_type: 'devices',
+      decided_by: MANAGER_ID, decided_at: '2026-09-05T00:00:00Z', decision_reason: 'being retired'
+    }),
+    deviceProposal({
+      id: 'd2', target_label: 'Press_02', status: 'applied', entity_type: 'device_nameplate',
+      patch: { serial_number: 'SN-9' }, current: {},
+      decided_by: MANAGER_ID, decided_at: '2026-09-06T00:00:00Z'
+    }),
+    schemaProposal({
+      id: 'd3', target_label: 'CNC_Mill v2', status: 'applied',
+      decided_by: MANAGER_ID, decided_at: '2026-09-06T12:00:00Z'
+    })
+  ]
+
+  it('filters by the kind of change', async () => {
+    mockLoad(decidedSet())
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+
+    fireEvent.change(screen.getByTitle('Filter by the kind of change'), {
+      target: { value: 'device_nameplate' }
+    })
+    const rows = screen.getAllByTestId('proposal-row')
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0]).getByText('Press_02')).toBeInTheDocument()
+  })
+
+  it('searches the subject and the reason a decision was given', async () => {
+    // The three things somebody remembers about a decision they are trying to find again.
+    mockLoad(decidedSet())
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+
+    const box = screen.getByTitle(/filter decided proposals/i)
+    fireEvent.change(box, { target: { value: 'retired' } })
+    let rows = screen.getAllByTestId('proposal-row')
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0]).getByText('Lathe_01')).toBeInTheDocument()
+
+    fireEvent.change(box, { target: { value: 'CNC' } })
+    rows = screen.getAllByTestId('proposal-row')
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0]).getByText('CNC_Mill v2')).toBeInTheDocument()
+  })
+
+  it('says when a filter is what emptied the list, not the absence of decisions', async () => {
+    mockLoad(decidedSet())
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+
+    fireEvent.change(screen.getByTitle(/filter decided proposals/i), {
+      target: { value: 'nothing matches this' }
+    })
+    expect(screen.getByText(/no decided proposal matches the selected filter/i)).toBeInTheDocument()
+  })
+
+  it('does not filter the queue that is still waiting', async () => {
+    // The filters belong to the record, not to the work. A filter that also narrowed the queue
+    // would hide something waiting for a decision behind a control somebody set and forgot.
+    mockLoad([
+      deviceProposal({ id: 'open-1', target_label: 'Waiting_Device' }),
+      schemaProposal({
+        id: 'd3', target_label: 'CNC_Mill v2', status: 'applied',
+        decided_by: MANAGER_ID, decided_at: '2026-09-06T12:00:00Z'
+      })
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+
+    fireEvent.change(screen.getByTitle('Filter by the kind of change'), { target: { value: 'schemas' } })
+    const rows = screen.getAllByTestId('proposal-row')
+    // The open device proposal survives; only the decided table narrowed.
+    expect(rows.some(r => within(r).queryByText('Waiting_Device'))).toBe(true)
   })
 })
 
