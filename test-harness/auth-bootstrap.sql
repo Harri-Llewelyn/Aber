@@ -49,6 +49,20 @@ CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$
   )::jsonb
 $$;
 
+-- `auth.email()` has the SAME legacy shape as `auth.uid()` above -- it reads the singular
+-- `request.jwt.claim.email` GUC and returns NULL for a session that set the modern claims JSON.
+-- Hosted Supabase defines it as `auth.jwt() ->> 'email'`, which is what this restores.
+--
+-- Nothing in the schema calls it today: 0089 reads the claim through `auth.jwt()` precisely so a
+-- stamp it depends on cannot vary with the image. It is fixed here anyway, because the next suite
+-- to reach for the obvious helper would meet a NULL and have no reason to suspect the fixture.
+CREATE OR REPLACE FUNCTION auth.email() RETURNS text LANGUAGE sql STABLE AS $$
+  SELECT coalesce(
+    nullif(current_setting('request.jwt.claim.email', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'email')
+  )
+$$;
+
 -- `auth.identities` is GoTrue's, and there is no GoTrue here. The base image ships auth.users and
 -- not this table, so the chain aborted at archived migration 0042 with `relation "auth.identities"
 -- does not exist` -- taking every migration after it, and every suite, with it.
