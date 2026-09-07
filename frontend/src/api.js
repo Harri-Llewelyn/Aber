@@ -2114,10 +2114,161 @@ const apiMethods = {
       });
     }
 
+    /**
+     * The approvals queue (0086, 0088), with each proposal's target resolved beside it.
+     *
+     * THE WHOLE QUEUE IN ONE CALL, and the caps are what make that honest rather than lazy:
+     * `proposals.max_open_per_person` bounds the open set per person and a partial unique index
+     * bounds it per asset, so this is tens of rows on a plant with hundreds of machines. Filtering
+     * happens in the component because every filter it offers -- mine, open, decided -- is a
+     * question about rows it already holds.
+     *
+     * RLS DECIDES WHAT COMES BACK, not a parameter. A proposer reads their own; an Administrator or
+     * Shopfloor_Manager reads the queue. Asking for `?mine=true` would be a second place that
+     * question is answered, and the database's answer is the one that counts.
+     *
+     * THE TARGETS ARE FETCHED SEPARATELY, and there is no embed that could replace it: `entity_id`
+     * addresses `devices`, `device_nameplate` or `schemas` depending on `entity_type`, and
+     * PostgREST cannot join on a column whose table varies per row. Three queries keyed by the ids
+     * actually referenced, rather than one per proposal.
+     */
+    if (path === '/api/v1/proposals') {
+      const { data, error } = await supabase
+        .from('change_proposals')
+        .select('*')
+        .order('proposed_at', { ascending: false });
+      if (error) throw error;
+
+      const rows = data || [];
+      if (rows.length === 0) return [];
+
+      const deviceIds = [...new Set(rows
+        .filter(r => r.entity_type === 'devices' || r.entity_type === 'device_nameplate')
+        .map(r => r.entity_id))];
+      const schemaIds = [...new Set(rows
+        .filter(r => r.entity_type === 'schemas')
+        .map(r => r.entity_id))];
+
+      const [devicesRes, nameplatesRes, schemasRes] = await Promise.all([
+        deviceIds.length
+          ? supabase.from('devices')
+              .select('id,name,description,asset_type,connection_method,cell_id,location_scope,model_3d_path,is_archived')
+              .in('id', deviceIds)
+          : Promise.resolve({ data: [] }),
+        deviceIds.length
+          ? supabase.from('device_nameplate').select('*').in('device_id', deviceIds)
+          : Promise.resolve({ data: [] }),
+        schemaIds.length
+          ? supabase.from('schemas').select('id,schema_name,version,status,parent_schema_id')
+              .in('id', schemaIds)
+          : Promise.resolve({ data: [] })
+      ]);
+
+      const devices = new Map((devicesRes.data || []).map(d => [d.id, d]));
+      const nameplates = new Map((nameplatesRes.data || []).map(n => [n.device_id, n]));
+      const schemas = new Map((schemasRes.data || []).map(s => [s.id, s]));
+
+      return rows.map(r => {
+        // `current` is what the patch would change FROM, so the page can show a diff rather than
+        // only what was asked for. A nameplate with no row yet is `{}` and not an error: the row is
+        // created by whoever first asserts something about the asset.
+        let current = null;
+        let targetLabel = r.entity_id;
+        let targetMissing = false;
+
+        if (r.entity_type === 'devices') {
+          const d = devices.get(r.entity_id);
+          current = d || null;
+          targetLabel = d?.name || r.entity_id;
+          targetMissing = !d;
+        } else if (r.entity_type === 'device_nameplate') {
+          const d = devices.get(r.entity_id);
+          current = nameplates.get(r.entity_id) || {};
+          targetLabel = d?.name || r.entity_id;
+          targetMissing = !d;
+        } else if (r.entity_type === 'schemas') {
+          const sc = schemas.get(r.entity_id);
+          current = sc || null;
+          targetLabel = sc ? `${sc.schema_name} v${sc.version}` : r.entity_id;
+          targetMissing = !sc;
+        }
+
+        return { ...r, target_label: targetLabel, target_missing: targetMissing, current };
+      });
+    }
+
+    /**
+     * Which keys a lane admits, asked of the DATABASE rather than mirrored here.
+     *
+     * `proposable_columns()` is the only place that answer exists -- the validation trigger and the
+     * apply path both read it -- so a copy in this file would be a second list to keep in step, and
+     * the failure would be a form offering a field every proposal is then refused for. It is
+     * granted to `authenticated` precisely so the form can ask.
+     */
+    if (/^\/api\/v1\/proposals\/allowed-keys\/[^/]+$/.test(path)) {
+      const entityType = decodeURIComponent(path.split('/')[5]);
+      const { data, error } = await supabase.rpc('proposable_columns', { p_entity_type: entityType });
+      if (error) throw error;
+      return data || [];
+    }
+
+    /** The draft schemas a publication can be proposed for. Drafts only -- nothing else is publishable. */
+    if (path === '/api/v1/proposals/publishable-schemas') {
+      const { data, error } = await supabase
+        .from('schemas')
+        .select('id,schema_name,version,status,parent_schema_id')
+        .eq('status', 'draft')
+        .order('schema_name');
+      if (error) throw error;
+      return data || [];
+    }
+
     throw new Error('Unhandled API path: ' + path);
   },
 
   post: async (path, body, options = {}) => {
+    /**
+     * File a proposal. A plain INSERT, deliberately: `0086` gives `Operator` an INSERT policy on
+     * this one table, and routing it through an RPC would put the grant somewhere the RLS policy
+     * is not -- which is the shape the caps are written to survive rather than to depend on.
+     *
+     * THE ERRORS ARE NOT FLATTENED. A unique violation is the per-asset cap and a check violation
+     * is the per-person one; they need different repairs -- open the proposal you already have, or
+     * decide one of the others -- so the codes ride back for the component to tell apart.
+     */
+    if (path === '/api/v1/proposals') {
+      const { data, error } = await supabase
+        .from('change_proposals')
+        .insert({
+          entity_type: body.entity_type,
+          entity_id: body.entity_id,
+          patch: body.patch,
+          rationale: emptyToNull(body.rationale)
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    }
+
+    if (/^\/api\/v1\/proposals\/[^/]+\/(approve|reject|withdraw)$/.test(path)) {
+      const parts = path.split('/');
+      const proposalId = parts[4];
+      const action = parts[5];
+
+      // THREE RPCs, NOT ONE WITH A MODE. Each re-checks authority server-side for itself and they
+      // do not admit the same people: rejecting is gated exactly as approving is, and withdrawing
+      // is the proposer's own act and nobody else's.
+      const rpc = { approve: 'approve_proposal', reject: 'reject_proposal', withdraw: 'withdraw_proposal' }[action];
+      const args = action === 'reject'
+        ? { p_proposal_id: proposalId, p_reason: body?.reason }
+        : { p_proposal_id: proposalId };
+
+      const { data, error } = await supabase.rpc(rpc, args);
+      if (error) throw error;
+      return data;
+    }
+
     if (path.includes('/archive')) {
       const parts = path.split('/');
       const entityType = parts[3];
@@ -2406,6 +2557,28 @@ const apiMethods = {
   },
 
   put: async (path, body, options = {}) => {
+    /**
+     * Edit an open proposal -- the patch and the rationale, which are the only two columns the
+     * transition guard lets a proposer move.
+     *
+     * THIS IS WHAT MAKES THE PER-ASSET CAP LIVABLE. Told "you already have an open proposal on this
+     * device", a person has to be able to open that one and add to it; without this the constraint
+     * reads as a wall and people route around it by proposing against a neighbouring asset, or stop
+     * proposing. The database refuses anything else this could try to write, so the narrow shape
+     * here agrees with the guard rather than being trusted in place of it.
+     */
+    if (/^\/api\/v1\/proposals\/[^/]+$/.test(path)) {
+      const proposalId = path.split('/')[4];
+      const { data, error } = await supabase
+        .from('change_proposals')
+        .update({ patch: body.patch, rationale: emptyToNull(body.rationale) })
+        .eq('id', proposalId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    }
+
     if (path.includes('/archive')) {
       const parts = path.split('/');
       const entityType = parts[3];

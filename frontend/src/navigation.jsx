@@ -13,7 +13,8 @@ import {
   IconRecord,
   IconDatabase,
   IconLock,
-  IconSettings
+  IconSettings,
+  IconShieldCheck
 } from './components/common/Icons'
 
 /*
@@ -77,6 +78,18 @@ import {
  */
 export const NAV_GROUPS = [
   { id: 'home' },
+  // Added with the Approvals page. It holds one entry, which the note above argues against for
+  // Overview -- and the argument does not transfer, because the two are different shapes. Overview
+  // is the LANDING page and a separator above the first item would be a line under nothing.
+  // Approvals is a WORK QUEUE: it answers "what is waiting for me", which is the one question none
+  // of the four subject groups asks, and the rows behind it are devices, nameplates and schemas at
+  // once -- so filing it under any subject would be a claim about which subject it belongs to.
+  //
+  // It is not in `admin`, which was the other candidate. That group is Administrator-only, and this
+  // is the one page an OPERATOR has something to do on: it would be the sole entry that role could
+  // open in a group it can otherwise never see, and the group would stop meaning "how the platform
+  // is configured".
+  { id: 'work' },
   { id: 'assets' },
   { id: 'model' },
   { id: 'history' },
@@ -85,6 +98,11 @@ export const NAV_GROUPS = [
 
 export const TABS = [
   { id: 'overview',       label: 'Overview',       group: 'home',    icon: <IconLayoutDashboard size={16} /> },
+  // GATED ON `proposal:create`, WHICH IS THE PERMISSION TO HAVE A REASON TO BE HERE. An Auditor
+  // holds neither it nor a decision gate, and the RLS policy returns them their own proposals --
+  // of which they can have none. The page would be permanently empty, which reads as a broken
+  // page rather than as one that is not theirs.
+  { id: 'approvals',      label: 'Approvals',      group: 'work',    icon: <IconShieldCheck size={16} />, permission: PERMISSION_UUIDS.PROPOSAL_CREATE },
 
   { id: 'cells',          label: 'Cells',          group: 'assets',  icon: <IconFactory size={16} /> },
   { id: 'gateways',       label: 'Gateways',       group: 'assets',  icon: <IconRadio size={16} /> },

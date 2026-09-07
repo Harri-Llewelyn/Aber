@@ -73,6 +73,7 @@ const CaptureTab       = lazy(() => import('./components/tabs/CaptureTab').then(
 const ColdStorageTab   = lazy(() => import('./components/tabs/ColdStorageTab').then(m => ({ default: m.ColdStorageTab })))
 const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then(m => ({ default: m.SettingsTab })))
 const AccessControlTab = lazy(() => import('./components/tabs/AccessControlTab').then(m => ({ default: m.AccessControlTab })))
+const ApprovalsTab     = lazy(() => import('./components/tabs/ApprovalsTab').then(m => ({ default: m.ApprovalsTab })))
 
 /*
  * THE PAGE LIST MOVED TO `navigation.jsx`, AND IS RE-EXPORTED FROM HERE UNCHANGED.
@@ -709,6 +710,11 @@ function Dashboard({ session, onSignOut }) {
             {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
             {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('schemas') }} />}
             {tab === 'directory'      && <DirectoryTab showToast={showToast} />}
+            {/* `currentUserId` is what lets the page say "you" and offer Edit and Withdraw on a
+                proposer's own rows. It is a courtesy: the transition guard and the RLS policy
+                both re-derive the proposer from `auth.uid()`, so a wrong value here produces a
+                refused call rather than somebody else's proposal being editable. */}
+            {tab === 'approvals'      && <ApprovalsTab showToast={showToast} hasPermission={hasPermission} userRole={userRole} currentUserId={session?.user?.id} />}
             {/* The role is re-checked here for the same reason Access Control's is: routing can put
                 `tab` on a value the nav never offered. `userRole` is passed on rather than a boolean,
                 because the page distinguishes read-only Auditor from the two roles that can record. */}

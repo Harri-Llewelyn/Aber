@@ -32,6 +32,10 @@
  */
 export const PAGE_KEYWORDS = {
   'overview':       ['dashboard', 'home', 'shopfloor', 'map', 'kpi', 'status'],
+  // Every word somebody would reach for while holding the thing rather than its name: an
+  // operator searches "request" or "ask", an approver searches "approve" or "pending".
+  'approvals':      ['proposal', 'proposals', 'approve', 'reject', 'pending', 'queue', 'request',
+                     'change', 'review', 'publish'],
   'cells':          ['zone', 'area', 'shopfloor', 'location'],
   'gateways':       ['edge', 'node', 'mqtt', 'sparkplug', 'broker', 'bundle', 'enrolment', 'enrollment'],
   'devices':        ['asset', 'machine', 'equipment', 'sensor', 'robot', 'quarantine', 'nameplate'],

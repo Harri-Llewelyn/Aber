@@ -136,7 +136,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  * has no other symptom.
  */
 export const VALID_TABS = [
-  'overview', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'vocabulary', 'directory',
+  'overview', 'approvals', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'vocabulary', 'directory',
   'capture', 'archives', 'cold-storage', 'access-control', 'settings'
 ];
 
