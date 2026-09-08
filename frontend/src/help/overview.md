@@ -1,3 +1,5 @@
+## Summary
+
 The front page of the stack: how many cells, gateways and devices exist, how many of them are reporting right now, and anything Grafana is currently alerting on. It is the page to open when the question is "is the floor up", and the page to leave as soon as the answer is no -- every count and every card here is a way into the page that can actually do something about it.
 
 ## What the controls do
