@@ -147,3 +147,59 @@ datasources:
       # graph drawn against this datasource.
       timeInterval: 15s
       httpMethod: POST
+
+  # ===============================================================================================
+  # Loki -- the log store, and the drill-down half of every drop counter (roadmap 13).
+  #
+  # NO CREDENTIAL AND NOTHING TO SUBSTITUTE BUT THE URL, exactly like Prometheus above and for the
+  # same reason: Loki is reachable on the compose network and serves reads to anything that can
+  # connect. `auth_enabled: false` in loki/loki.yaml is a MULTI-TENANCY switch, not a password --
+  # there is no password to configure -- so no `X-Scope-OrgID` header is needed here either.
+  #
+  # WHICH IS THE WHOLE COST ARGUMENT FOR THE STORE, EXPRESSED AS A FILE. Rendering archived
+  # telemetry in Grafana was refused because it would add "a container, a gateway route and an
+  # auth surface over raw plant history". This is the third of those three: a fourth datasource
+  # beside three that already exist, behind the Grafana login that already exists, with no new
+  # principal and no second place to manage access. The store is not published and has no route.
+  #
+  # THE URL IS A PLACEHOLDER FOR THE REASON PROMETHEUS' IS. The two targets reach different Loki
+  # instances: Compose runs its own and substitutes the compose service name; Kubernetes defers to
+  # whatever the cluster already runs and substitutes `grafana.lokiUrl`. The chart deploys no Loki,
+  # for the same reason it deploys no Prometheus -- a second one would duplicate every line the
+  # cluster's collector already ships and give an operator two places to configure retention.
+  #
+  # A CLUSTER WITH NO LOKI gets a datasource whose health check fails. That is the same honest
+  # failure the Supabase datasource makes with no BI_READER_PASSWORD, and it is preferable to a
+  # panel that renders empty and reads as "nothing was logged".
+  #
+  # WHAT A QUERY LOOKS LIKE, because the label set is deliberately small and this is not obvious.
+  # alloy/config.alloy labels streams by `service` and `container` only; `reason`, `device` and
+  # `edge_node` are FIELDS inside the JSON line, not labels, because labelling by device would be
+  # unbounded -- the same rule metrics.py states for Prometheus. So the drill-down from a spike on
+  # acs_ingestion_messages_dropped_total{reason="gateway_binding"} is:
+  #
+  #     {service="ingestion"} | json | reason = "gateway_binding"
+  #
+  # and it resolves to the same events because test_structured_logging.py asserts the Prometheus
+  # label and the logged field carry the same string.
+  # ===============================================================================================
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: __LOKI_URL__
+    # NOT default. The historian stays default so an existing panel, and any dashboard imported
+    # without an explicit datasource, keeps resolving to the telemetry it was written against.
+    isDefault: false
+    version: 1
+    jsonData:
+      # A CAP ON RETURNED LINES, AND NOTHING TO DO WITH THE TIME WINDOW. This bounds how many
+      # entries one query brings back, so a panel pointed at a busy hour renders instead of trying
+      # to draw a million rows into a browser.
+      #
+      # IT IS NOT A RETENTION SETTING and does not constrain the range a query may ask for --
+      # earlier wording here claimed both, which would have sent someone looking for the wrong
+      # cause when a long range came back empty. The window is bounded by
+      # `limits_config.retention_period` in loki/loki.yaml, at the store, and asking beyond it
+      # returns nothing rather than an error.
+      maxLines: 5000

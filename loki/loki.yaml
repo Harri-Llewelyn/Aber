@@ -1,0 +1,163 @@
+# =============================================================================================
+# Loki -- the log store, and the other half of every drop counter (roadmap §13).
+#
+# WHAT THIS IS FOR, because "we should keep logs" is not the argument. The ingestion daemon's
+# diagnostics were built as a PAIR: every `drop("<reason>")` in ingestion.py increments a counter
+# AND writes a warning, from one string, so the two cannot disagree. Prometheus holds the half
+# that says a drop happened and how many. The half naming WHICH device, under WHICH edge node,
+# lives in the line -- and until this file existed, that half survived until the container was
+# recreated on Compose and vanished at reschedule on Kubernetes.
+#
+# SINGLE BINARY, FILESYSTEM BACKEND, NO OBJECT STORE. This is one shopfloor host, not a cluster.
+# The microservices topology and an S3 backend would add moving parts to answer a scale question
+# nobody here is asking, and `common.replication_factor: 1` with an in-memory ring is the honest
+# expression of "there is one of these".
+#
+# NOT PUBLISHED, AND NO AUTHENTICATION. `auth_enabled: false` below is not a decision to skip
+# security -- it is Loki's multi-TENANCY switch, and off means "one tenant", not "no password".
+# Loki has no password to configure in any case. The control over who reads these logs is the
+# same control Prometheus has: who can reach the port. Grafana reaches it over the compose
+# network, and docker-compose.yml binds the host mapping to 127.0.0.1.
+# =============================================================================================
+
+# ONE TENANT. Every request is attributed to `fake`, Loki's built-in single-tenant id, and no
+# X-Scope-OrgID header is needed anywhere -- which is why the Grafana datasource carries no
+# credential and no custom header. Turning this on later means every existing chunk belongs to a
+# tenant nothing queries.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  # WARN, NOT INFO. At info Loki narrates its own compaction and flushing several times a minute,
+  # into the same `docker logs` this exists to make unnecessary -- and Alloy ships Loki's own
+  # output back into Loki, so a chatty default is a feedback loop that fills the disk it is
+  # supposed to be bounding.
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    # TSDB AND v13, which is the current schema. A `from` date in the past is correct and is not a
+    # mistake: it is the date this schema becomes effective for data written after it, not a claim
+    # that logs exist from then. Changing a schema means APPENDING a new entry with a future
+    # `from`, never editing this one -- Loki reads old chunks with the schema they were written
+    # under, and rewriting history here makes existing data unreadable.
+    - from: 2024-04-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # -------------------------------------------------------------------------------------------
+  # THIRTY DAYS, MATCHING PROMETHEUS DELIBERATELY.
+  #
+  # prometheus's `--storage.tsdb.retention.time=30d` carries the reasoning and this is the same
+  # host: "long enough that a weekly pattern is visible and a Monday-morning question about last
+  # Tuesday can be answered". A log window SHORTER than the metric window would be the worse of
+  # the two mistakes -- the drill-down from a 30-day panel would dead-end on a 7-day store, which
+  # is exactly the pairing §13 exists to complete.
+  #
+  # THIS DOES NOTHING WITHOUT `compactor.retention_enabled: true` BELOW. That is Loki's sharpest
+  # configuration trap: retention_period here reads as the setting that deletes old logs, and on
+  # its own it deletes nothing at all. The disk fills, the setting looks right, and the fault is
+  # invisible until someone checks free space.
+  # -------------------------------------------------------------------------------------------
+  retention_period: 720h
+
+  # -------------------------------------------------------------------------------------------
+  # THE SIZE CEILING, WHICH IS THREE SETTINGS HERE AND WAS ONE FLAG ON PROMETHEUS.
+  #
+  # prometheus pairs its time bound with `--storage.tsdb.retention.size=8GB`, because "retention
+  # by time alone is unbounded in BYTES". That argument transfers exactly and the mechanism does
+  # not: Loki has no byte ceiling on the store. What it has is a bound on the RATE at which bytes
+  # can arrive, which reaches the same place from the other end -- 4 MB/s sustained cannot fill a
+  # disk inside a 30-day window without first tripping the alert on volume free space.
+  #
+  # AND LOG VOLUME SCALES WITH FAULT RATE, NOT WITH PLANT SIZE. That is what makes this the
+  # setting most worth having: the burst arrives when a gateway fleet starts flapping, which is
+  # exactly when nobody has time to look at disk. Over the limit, Loki returns 429 and Alloy
+  # retries with backoff -- lines are delayed, and dropped only if the burst outlasts its buffer.
+  # Losing the tail of a flood is the correct failure; taking the host down with it is not.
+  # -------------------------------------------------------------------------------------------
+  ingestion_rate_mb: 4
+  ingestion_burst_size_mb: 8
+
+  # STREAMS ARE LABEL COMBINATIONS, and this is the cardinality bound. alloy/config.alloy keeps
+  # labels to `service` and `container`, which are 1:1 and one per compose service -- so the real
+  # number is a dozen or so and this ceiling is two orders of magnitude above it. It is here to
+  # catch the mistake, not the workload: promoting `device` to a label would produce one stream
+  # per machine on the plant and this is what would refuse it, loudly, instead of the index
+  # quietly becoming useless.
+  max_streams_per_user: 5000
+  max_global_streams_per_user: 5000
+
+  # A LINE OLDER THAN A WEEK IS A REPLAY OR A CLOCK FAULT, not history worth accepting. §14 is
+  # about appliances whose clocks are wrong; this refuses their backdated lines rather than
+  # filing them under a timestamp that never happened, which is the same judgement
+  # `_timestamp_is_sane()` makes about telemetry.
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+  # WHAT THIS LOOKS LIKE ON THE FIRST START AGAINST AN ALREADY-RUNNING STACK, because it alarms
+  # and should not. Alloy reads each container's log from the beginning, so attaching it to
+  # containers that have been up for days ships days of history at once -- and Loki refuses the
+  # parts that are older than the newest entry it has already accepted for that stream, with
+  # "entry too far behind". Those 400s are correct: they are the store declining to file history
+  # from before it existed in a way that would fragment its index, and they stop by themselves
+  # once each stream catches up to the present. A stack started from cold never sees them.
+
+  # Enables the volume endpoint Grafana's Logs Drilldown uses to show which streams cost what.
+  # Worth having on precisely because retention is the open question this store arrives with.
+  volume_enabled: true
+
+  # -------------------------------------------------------------------------------------------
+  # OFF, AND FOUND BY RUNNING THIS RATHER THAN BY READING THE CONFIG REFERENCE.
+  #
+  # Loki 3 derives a `service_name` label of its own from whatever it can find, and the first live
+  # run produced FOUR labels where alloy/config.alloy documents two -- `service`, `container`, an
+  # injected `service_name` duplicating `service` exactly, and Loki's own `__stream_shard__`.
+  #
+  # The duplicate costs nothing in cardinality, being 1:1 with a label we already set, and that is
+  # not the reason to turn it off. The reason is that a label set which does not match the file
+  # documenting it is how the next person learns to distrust the documentation. Alloy decides the
+  # labels here; the store does not add its own.
+  #
+  # `discover_log_levels` STAYS ON. It attaches `detected_level` as STRUCTURED METADATA rather than
+  # as a label -- verified against the series endpoint, which lists it nowhere -- so it multiplies
+  # no streams and makes `| detected_level = "error"` work across the plain-text services that
+  # have no JSON `level` field of their own.
+  # -------------------------------------------------------------------------------------------
+  discover_service_name: []
+
+compactor:
+  working_directory: /loki/compactor
+  # THE SWITCH THAT MAKES `retention_period` REAL. See the note above it. Without this line Loki
+  # accepts the retention setting, reports no error, and never deletes anything.
+  retention_enabled: true
+  delete_request_store: filesystem
+  compaction_interval: 10m
+  # A DELETION GRACE PERIOD, not a delay to tune away. Chunks are marked then swept, so a
+  # retention setting shortened by mistake can be corrected inside this window before the data is
+  # actually gone.
+  retention_delete_delay: 2h
+
+# OFF. Loki reports usage statistics to grafana.com by default, from a host that sits on a plant
+# network and whose egress is not assumed. This is the same judgement the rest of the stack makes
+# by pinning images and building the gateway bundle on the appliance: nothing here phones home.
+analytics:
+  reporting_enabled: false

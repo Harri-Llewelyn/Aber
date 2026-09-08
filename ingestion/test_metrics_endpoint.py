@@ -60,15 +60,22 @@ class ExpositionTestCase(unittest.TestCase):
         """
         THE CHECK THAT KEEPS THIS FILE HONEST, and the acceptance criterion from #22: "counters
         cover every existing drop path". Read out of the source rather than restated, so a new
-        `count("dropped_...")` fails here instead of quietly never being exported.
+        drop reason fails here instead of quietly never being exported.
+
+        IT READS `drop("<reason>")`, NOT `count("dropped_<reason>")`. The two statements were
+        merged into one helper so the counter name and the logged `reason` field are derived from
+        a single string; the counter is still `dropped_<reason>` and this reconstructs it, which
+        is why the assertion below is unchanged. A bare `count("dropped_...")` outside the helper
+        is ALSO matched, so a site that opts out of `drop()` is not thereby exempt from export.
         """
         import re
         source = open(
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "ingestion.py"),
             encoding="utf-8",
         ).read()
-        dropped = set(re.findall(r'count\("(dropped_[a-z_]+)"', source))
-        self.assertTrue(dropped, "found no dropped_* counters -- the regex has gone stale")
+        dropped = {f"dropped_{r}" for r in re.findall(r'\bdrop\(\s*\n?\s*"([a-z_]+)"', source)}
+        dropped |= set(re.findall(r'count\("(dropped_[a-z_]+)"', source))
+        self.assertTrue(dropped, "found no drop reasons -- the regex has gone stale")
         for name in dropped:
             self.assertIn(
                 name, metrics.COUNTER_MAP,
@@ -118,15 +125,19 @@ class ExpositionTestCase(unittest.TestCase):
         )
 
         for handler in handlers:
+            # `drop()` COUNTS, so it satisfies this exactly as `count()` does -- it wraps the
+            # same registry. Both spellings are accepted rather than only the helper: the point
+            # of this check is that the arm increments SOMETHING, and narrowing it to one
+            # spelling would start failing arms that are correct.
             counted = any(
-                isinstance(call, ast.Call) and getattr(call.func, "id", None) == "count"
+                isinstance(call, ast.Call) and getattr(call.func, "id", None) in ("count", "drop")
                 for call in ast.walk(handler)
             )
             self.assertTrue(
                 counted,
                 f"ingestion.py:{handler.lineno} catches DirectoryUnavailable and drops the "
-                f"message without calling count(). The drop is then visible only as a WARNING in "
-                f"a log nobody is tailing, and Prometheus reports nothing (#126).",
+                f"message without calling drop() or count(). The drop is then visible only as a "
+                f"WARNING in a log nobody is tailing, and Prometheus reports nothing (#126).",
             )
 
     def test_a_dropped_birth_is_a_different_series_from_a_dropped_sample(self):

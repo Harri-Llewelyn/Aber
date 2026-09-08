@@ -1657,6 +1657,21 @@ services:
     ports:
       - "127.0.0.1:${INGESTION_METRICS_PORT:-9108}:9108"
     environment:
+      # -------------------------------------------------------------------------------------------
+      # JSON LOGS, AND THIS IS THE LINE THAT CONNECTS THE TWO HALVES OF ROADMAP 13.
+      #
+      # The daemon writes `reason`, `device` and `edge_node` as structured fields. In text mode
+      # they are appended as `[reason=... device=...]`, which reads well and is not queryable; in
+      # json mode they are top-level keys, which is what makes the drill-down from the drop panel
+      # -- `{service="ingestion"} | json | reason = "gateway_binding"` -- resolve to actual events.
+      # Without this, that query parses nothing and returns nothing.
+      #
+      # SET HERE RATHER THAN CHANGED IN logging_config.py, so the CODE default stays `text`. A
+      # developer running `python ingestion.py` against a local stack gets readable lines; a
+      # deployed daemon writing into a store gets fields. The chart sets the same variable, so the
+      # two targets do not diverge and no divergence row is owed.
+      # -------------------------------------------------------------------------------------------
+      LOG_FORMAT: json
       DB_HOST: ${DB_HOST:-timescaledb}
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-postgres}
@@ -1841,6 +1856,21 @@ services:
     command: ["python", "playback_worker.py"]
     restart: always
     environment:
+      # -------------------------------------------------------------------------------------------
+      # JSON LOGS, AND THIS IS THE LINE THAT CONNECTS THE TWO HALVES OF ROADMAP 13.
+      #
+      # The daemon writes `reason`, `device` and `edge_node` as structured fields. In text mode
+      # they are appended as `[reason=... device=...]`, which reads well and is not queryable; in
+      # json mode they are top-level keys, which is what makes the drill-down from the drop panel
+      # -- `{service="ingestion"} | json | reason = "gateway_binding"` -- resolve to actual events.
+      # Without this, that query parses nothing and returns nothing.
+      #
+      # SET HERE RATHER THAN CHANGED IN logging_config.py, so the CODE default stays `text`. A
+      # developer running `python ingestion.py` against a local stack gets readable lines; a
+      # deployed daemon writing into a store gets fields. The chart sets the same variable, so the
+      # two targets do not diverge and no divergence row is owed.
+      # -------------------------------------------------------------------------------------------
+      LOG_FORMAT: json
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       # ONE PASSWORD PER TARGET GATEWAY, as a JSON object keyed by sparkplug_id:
@@ -2142,6 +2172,155 @@ services:
     # NOT PUBLISHED. Nothing outside the compose network has any business reading host metrics, and
     # unlike the ingestion endpoint there is no inspection case that justifies the exposure.
 
+  # ===============================================================================================
+  # THE LOG STORE, AND THE TWO CONTAINERS IT NEEDS TO BE USEFUL (roadmap 13).
+  #
+  # WHY THIS EXISTS. The ingestion daemon's diagnostics are a PAIR: every `drop("<reason>")` in
+  # ingestion.py increments a counter AND writes a warning, derived from one string so the two
+  # cannot disagree. Prometheus above holds the half that says a drop happened and how many. The
+  # half naming WHICH device, under WHICH edge node, is in the line -- and before this it survived
+  # only until the container was recreated.
+  #
+  # THE SECOND ARGUMENT IS docs/incidents.md. Its first entry is a broker password file truncated
+  # by a re-entered one-shot: invisible when it happens, because Mosquitto keeps authenticated
+  # accounts in memory, and only visible at the next reload hours later. Connecting two events
+  # across two containers from evidence written at the time is the one thing this does and nothing
+  # else in this stack does at all.
+  #
+  # THREE CONTAINERS, NOT ONE, AND THE ROADMAP SAID ONE. Correcting that here rather than leaving
+  # it to be discovered: the store, a collector, and a socket proxy the collector needs because it
+  # is not being given the Docker socket. What the roadmap got right is the rest of the sentence --
+  # NO GATEWAY ROUTE and NO AUTH SURFACE. Grafana reaches Loki over this network as a fourth
+  # datasource behind the login that already exists, with no new principal and no second place to
+  # manage access.
+  #
+  # THESE LOGS ARE NOT THE AUDIT TRAIL, and the distinction has to survive contact with people who
+  # would rather it did not. `digital_thread` is append-only, immutable by trigger, attributed to
+  # an actor and split into two lanes. This has none of those properties. Anything that matters for
+  # audit belongs in a row, and "we have the logs" is not an answer to a question the thread
+  # answers.
+  # ===============================================================================================
+  loki:
+    container_name: acs-cymru_loki
+    image: grafana/loki:3.5.7
+    restart: always
+    command:
+      - '-config.file=/etc/loki/loki.yaml'
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki_data:/loki
+    ports:
+      # LOOPBACK ONLY, and the argument is the one prometheus above makes at length. Loki has no
+      # authentication of its own -- `auth_enabled` is a multi-tenancy switch, not a password --
+      # so the control over who reads these lines is who can reach the port. Bound to every
+      # interface on the deployment VM, this would offer every gateway's wire id, every client id
+      # the broker has seen and the plant's edge topology to anyone on the plant network.
+      #
+      # Grafana reaches it over the compose network rather than through this mapping, so the
+      # datasource is unaffected; what changes is that a human wanting LogCLI tunnels in.
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
+    healthcheck:
+      # /ready answers 200 only once the ingester has joined the ring and is accepting writes.
+      # /metrics would answer sooner and mean less -- alloy depends on this, and starting it
+      # against a Loki that cannot yet accept a push produces a minute of retries in the logs of
+      # the thing that collects logs.
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # -----------------------------------------------------------------------------------------------
+  # THE DOCKER API, NARROWED TO ONE VERB AND ONE NOUN.
+  #
+  # Alloy discovers containers and reads their logs through the Docker API. The usual way to give
+  # it that is `- /var/run/docker.sock:/var/run/docker.sock:ro`, and NOTHING ELSE IN THIS FILE DOES
+  # THAT -- deliberately. The `:ro` on a socket mount is theatre: it makes the SOCKET FILE
+  # read-only and grants the full API behind it, which includes creating a container that bind
+  # mounts the host's root filesystem. It is the largest privilege in the stack, and it would be
+  # granted here to put readable names on log lines.
+  #
+  # So the socket is mounted HERE, in a container that does nothing but refuse most of it. Every
+  # variable below is an API path group, and the defaults are deny -- `CONTAINERS: 1` is the only
+  # thing turned on, and `POST: 0` refuses every write verb, so create, start, exec and kill are
+  # not reachable through this even for the paths that are.
+  #
+  # NO PUBLISHED PORT. It is reachable from the compose network and from nowhere else, which is
+  # the other half of what makes this defensible.
+  # -----------------------------------------------------------------------------------------------
+  docker-socket-proxy:
+    container_name: acs-cymru_docker_socket_proxy
+    image: tecnativa/docker-socket-proxy:0.3.0
+    restart: always
+    environment:
+      # THE ONLY GRANT. /containers/json to discover them, /containers/<id>/logs to read them.
+      CONTAINERS: 1
+      # EVERY WRITE VERB REFUSED. This is the line that makes the socket mount below survivable:
+      # without it, `CONTAINERS: 1` would also permit POST /containers/create.
+      POST: 0
+      # Named rather than left to the default deny, because a reader checking this should see the
+      # dangerous ones addressed rather than absent. EXEC is a shell in any container; VOLUMES and
+      # IMAGES are how a compromise persists; SWARM and SERVICES are cluster control.
+      EXEC: 0
+      VOLUMES: 0
+      IMAGES: 0
+      # THE SECOND GRANT, AND IT WAS FOUND BY RUNNING THIS RATHER THAN BY READING. `discovery.docker`
+      # computes network labels for every target it finds, so it calls GET /networks immediately
+      # after GET /containers/json. With this at 0 the proxy answered 403 and Alloy logged "Unable
+      # to refresh target groups" -- discovery failed WHOLESALE, so nothing was collected at all,
+      # and neither `alloy validate` nor `docker compose config` can see it.
+      #
+      # Still a read: `POST: 0` above means the network endpoints are listable and nothing more.
+      # What it discloses is this stack's own compose network name and subnet, to a container that
+      # is already attached to it.
+      NETWORKS: 1
+      SERVICES: 0
+      SWARM: 0
+      NODES: 0
+      TASKS: 0
+      SECRETS: 0
+      CONFIGS: 0
+      PLUGINS: 0
+      SYSTEM: 0
+      INFO: 0
+      AUTH: 0
+      BUILD: 0
+      COMMIT: 0
+      DISTRIBUTION: 0
+      SESSION: 0
+    volumes:
+      # The one socket mount in this repository. Everything above is what makes it narrower than
+      # the API it fronts.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # -----------------------------------------------------------------------------------------------
+  # THE COLLECTOR. Configuration and the label decision are in alloy/config.alloy, which is where
+  # the cardinality argument lives -- `device` stays a FIELD and is queried with `| json`, for the
+  # same reason metrics.py refuses to label by device.
+  # -----------------------------------------------------------------------------------------------
+  alloy:
+    container_name: acs-cymru_alloy
+    image: grafana/alloy:v1.11.2
+    restart: always
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+    ports:
+      # LOOPBACK ONLY, same argument as prometheus and loki. Alloy's UI renders the live pipeline
+      # and the last lines through it, which is the only practical way to debug a relabel rule --
+      # and is therefore also a window onto the log content itself.
+      - "127.0.0.1:${ALLOY_PORT:-12345}:12345"
+    depends_on:
+      loki:
+        condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
+
   grafana:
     container_name: acs-cymru_grafana
     image: grafana/grafana:13.2.0
@@ -2206,6 +2385,7 @@ services:
         # Operator-managed Prometheus. See the template's header.
         sed -e "s|__BI_READER_PASSWORD__|$$BI_READER_PASSWORD|g" \
             -e "s|__PROMETHEUS_URL__|http://prometheus:9090|g" \
+            -e "s|__LOKI_URL__|http://loki:3100|g" \
             /tmp/datasources-template/datasources.template.yml \
             > /etc/grafana/provisioning/datasources/datasources.yml
         # Comment lines excluded for the same reason as in supabase-envoy-init: the template's own
@@ -2263,6 +2443,15 @@ volumes:
   # exactly why `--storage.tsdb.retention.time` below is set rather than left at the 15-day
   # default nobody remembers.
   prometheus_data:
+  # Loki's chunks, index and compactor working directory. A named volume for the same reason
+  # prometheus_data is one -- it is a database, not configuration -- and it shares the disk with
+  # that TSDB and two Postgres data directories, which is why loki.yaml bounds BOTH the retention
+  # window and the ingest rate rather than only the window.
+  loki_data:
+  # Alloy's write-ahead log and positions file. THE POSITIONS FILE IS THE POINT: it records how far
+  # into each container's log the collector has read, so a restart resumes rather than re-shipping
+  # every line it can still see. Deleting this volume duplicates recent history in the store.
+  alloy_data:
   # Holds the RENDERED alerting provisioning -- the copied rules and policy plus the contact point
   # with its bearer secret substituted in. A volume rather than a bind mount for the same reason as
   # grafana_provisioning_datasources: the rendered file carries a credential and must not be written
