@@ -2489,6 +2489,31 @@ const apiMethods = {
       return { schema_uuid: data?.id || '', ...(data || {}) };
     }
 
+    /**
+     * Discard a draft, returning the lineage to the state before the fork.
+     *
+     * THROUGH THE RPC, NOT A DELETE. `schemas_delete_privileged` has admitted an Administrator
+     * since the baseline, and a plain DELETE is exactly the mistake `0091` exists to prevent:
+     * `devices.schema_id` is ON DELETE SET NULL and `device_submodels.schema_id` is ON DELETE
+     * CASCADE, so deleting an ACTIVE schema silently detaches every device bound to it. The
+     * function refuses anything that is not a draft and reports what the cascade removed.
+     */
+    if (/^\/api\/v1\/schemas\/[^/]+\/discard$/.test(path)) {
+      const draftId = path.split('/')[4];
+      const { data, error } = await supabase.rpc('discard_schema_draft', {
+        p_schema_id: draftId
+      });
+      if (error) throw error;
+      return {
+        discarded_schema_name: data?.discarded_schema_name || '',
+        version: data?.version ?? null,
+        parent_schema_id: data?.parent_schema_id ?? null,
+        // Counted before the delete, because the CASCADE reports nothing -- and a draft attached
+        // to a machine to try it out is a real state, so this is not always zero.
+        devices_detached: data?.devices_detached ?? 0
+      };
+    }
+
     if (/^\/api\/v1\/schemas\/[^/]+\/publish$/.test(path)) {
       const draftId = path.split('/')[4];
       const { data, error } = await supabase.rpc('publish_schema_version', {

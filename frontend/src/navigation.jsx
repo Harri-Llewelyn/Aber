@@ -119,7 +119,16 @@ export const TABS = [
   { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} /> },
   { id: 'directory',      label: 'Directory',      group: 'model',   icon: <IconBookOpen size={16} /> },
 
-  { id: 'digital-thread', label: 'Digital Thread', group: 'history', icon: <IconHistory size={16} /> },
+  /* GATED ON THE PERMISSION, NOT ON A LIST OF ROLE NAMES, and the distinction is the one 0087 was
+     about: the `digital_thread` SELECT policies resolve `digital_thread:read`, so naming the
+     permission here means ONE predicate decides visibility and access rather than two that can
+     drift apart.
+
+     WITHOUT IT THE PAGE WAS A DEAD END. An Operator holds no `digital_thread:read`, so RLS
+     returned no rows -- not an error -- and the page rendered an empty table with no explanation,
+     which reads as "nothing has ever happened here" rather than "this is not yours to read". That
+     is exactly the reasoning Capture below was already gated on. */
+  { id: 'digital-thread', label: 'Digital Thread', group: 'history', icon: <IconHistory size={16} />, permission: PERMISSION_UUIDS.DIGITAL_THREAD_READ },
   // THE THREE ROLES THE DATABASE ADMITS, named here rather than reduced to one. Archived migration
   // 0055 grants SELECT on `captures` and `capture_jobs` to Administrator, Shopfloor_Manager and
   // Auditor; the first two can also record and delete. Operator is absent from both, which is why

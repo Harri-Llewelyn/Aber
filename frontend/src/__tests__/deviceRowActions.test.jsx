@@ -128,12 +128,18 @@ describe('device row actions', () => {
     const btn = (name) => panel.getByText(name).closest('button')
     expect(btn(/Archive Device/i).disabled).toBe(true)
     expect(btn('Edit Details').disabled).toBe(true)
-    // Reads are not gated: an export is a read, and so is the audit trace -- and so, now that
-    // the 3D uploader has moved out of it, is Configuration Parameters. It shows what the
-    // device declared at birth, which is not a privileged fact.
-    expect(btn(/Digital Thread/i).disabled).toBe(false)
+    // These reads are not gated: an export is a read, and so -- now that the 3D uploader has
+    // moved out of it -- is Configuration Parameters. It shows what the device declared at birth,
+    // which is not a privileged fact.
     expect(btn(/Export AAS JSON/i).disabled).toBe(false)
     expect(btn(/Configuration Parameters/i).disabled).toBe(false)
+
+    // THE AUDIT TRACE IS NOT ONE OF THEM, and this line used to claim it was. `digital_thread`
+    // has its own RLS, and without `digital_thread:read` it returns NO ROWS rather than an error
+    // -- so the button led to a page that renders an empty table and explains nothing. It is
+    // withdrawn rather than disabled, because the nav hides the page from this reader entirely
+    // and a disabled button would advertise a destination that no longer exists for them.
+    expect(panel.queryByText(/Digital Thread/i)).toBeNull()
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {

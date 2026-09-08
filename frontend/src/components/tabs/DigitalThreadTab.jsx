@@ -874,6 +874,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
   const [devices, setDevices]         = useState([])
   const [gateways, setGateways]       = useState([])
   const [cells, setCells]             = useState([])
+  const [schemas, setSchemas] = useState([])
   const [selectedEventId, setSelectedEventId] = useState(null)
   const [showAllLanes, setShowAllLanes] = useState(false)
 
@@ -893,23 +894,42 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
     // operator knows an asset by. The log itself stores only entity_id -- names live on the
     // entity, and deliberately carry no identity of their own (they are editable), so resolving
     // one is a client-side join rather than something the audit row could have recorded.
+    //
+    // SCHEMAS ARE THE FOURTH, AND THEY WERE MISSING. 0070 added `schemas` to the audit trigger
+    // and this lookup was never widened to match, so every schema event in the log rendered as a
+    // bare uuid -- unsearchable by the name the person who created it knows, and indistinguishable
+    // from the next one. Worse, absence from this map is what the page uses to mean PURGED, so
+    // schema rows were also being classified as events about deleted assets.
     Promise.all([
       api.get('/api/v1/devices'),
       api.get('/api/v1/gateways'),
-      api.get('/api/v1/cells')
+      api.get('/api/v1/cells'),
+      // Tolerated rather than required: this page must not fail to load because one lookup did,
+      // and the uuid fallback below is exactly the behaviour that was there before.
+      api.get('/api/v1/schemas').catch(() => [])
     ])
-      .then(([d, g, c]) => { setDevices(d); setGateways(g); setCells(c); setLookupsLoaded(true) })
+      .then(([d, g, c, sc]) => {
+        setDevices(d); setGateways(g); setCells(c); setSchemas(sc || []); setLookupsLoaded(true)
+      })
       .catch(() => {})
   }, [])
 
-  /** entity_id -> display name, across all three audited tables. */
+  /** entity_id -> display name, across all four audited tables. */
   const entityNames = useMemo(() => {
     const m = new Map()
     for (const c of cells)    m.set(c.cell_id, c.cell_name)
     for (const g of gateways) m.set(g.gateway_id, g.gateway_name)
     for (const d of devices)  m.set(d.asset_id, d.asset_name)
+    // THE VERSION IS PART OF THE NAME. A schema's lineage is a chain of rows that all share a
+    // `schema_name` and differ only in `version`, so the name alone would give three rows the same
+    // label -- and the whole point of the audit trail on a schema is which VERSION something
+    // happened to.
+    for (const sc of schemas) {
+      const id = sc.id || sc.schema_uuid
+      if (id) m.set(id, sc.version ? `${sc.schema_name} v${sc.version}` : sc.schema_name)
+    }
     return m
-  }, [cells, gateways, devices])
+  }, [cells, gateways, devices, schemas])
 
   /**
    * Events whose asset has been PURGED -- the row is in the audit log, the asset is not in any of
