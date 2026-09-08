@@ -58,12 +58,58 @@
 -- DROP-then-ADD rather than a second constraint, so a replay lands on exactly one definition. A
 -- bare ADD would fail on the second boot, which is the property `0001`'s header calls the thing the
 -- whole schema model rests on.
-ALTER TABLE public.change_proposals
-    DROP CONSTRAINT IF EXISTS change_proposals_entity_type_known;
+--
+-- AND THE DROP-then-ADD ALONE WAS NOT ENOUGH, WHICH IS WHAT THE GUARD BELOW IS FOR. It is
+-- idempotent against its OWN replay and not against a LATER migration's. `0090` widens this same
+-- constraint to eight lanes; every migration here is replayed on every boot, so on any database
+-- that has reached `0090` and holds a `cells` proposal, this file's three-lane definition is
+-- re-applied against a row `0090` legitimately admits and the whole boot stops here:
+--
+--     ERROR: check constraint "change_proposals_entity_type_known" of relation
+--            "change_proposals" is violated by some row
+--
+-- THE RULE THIS RECORDS: an idempotent migration may WIDEN a domain freely, and may NARROW one
+-- only until something later widens it again. A replayed narrowing is not a no-op, it is a
+-- retraction -- and it fails against exactly the rows the later migration was written to allow.
+-- The failure needs data to appear, so a fresh boot and `npm run test:db` both pass on it.
+--
+-- SO THE TEST IS THE LANE AND NOT THE DEFINITION, and it is in two halves because the fault has
+-- two shapes. What this migration exists to do is admit `schemas`. It should do nothing when:
+--
+--   THE LANE IS ALREADY ADMITTED -- by something newer than this file, which is then the only
+--   definition that should stand. Checking the lane rather than comparing definitions keeps this
+--   right for the NEXT widening, which will not have been written when this is read.
+--
+--   THE TABLE HOLDS A ROW THIS FILE'S LANE SET DOES NOT NAME -- the recovery case, and it is not
+--   hypothetical. `ALTER TABLE` autocommits per statement, so the boot that first hit this left
+--   the DROP applied and the ADD rolled back: NO constraint on the table at all, and a `cells`
+--   row still there. The first half alone then says "not admitted, install mine" and fails again
+--   on exactly the row that broke it. A migration that cannot install its definition without
+--   RETRACTING a row must leave the definition to whichever later migration admits that row --
+--   here `0090`, three statements' worth of boot away, installing a strict superset of this.
+--
+-- Both halves are the same rule seen from two sides: never narrow.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conrelid = 'public.change_proposals'::regclass
+           AND conname  = 'change_proposals_entity_type_known'
+           AND pg_get_constraintdef(oid) LIKE '%''schemas''%'
+    ) AND NOT EXISTS (
+        SELECT 1
+          FROM public.change_proposals
+         WHERE entity_type <> ALL (ARRAY['devices'::text, 'device_nameplate'::text, 'schemas'::text])
+    ) THEN
+        ALTER TABLE public.change_proposals
+            DROP CONSTRAINT IF EXISTS change_proposals_entity_type_known;
 
-ALTER TABLE public.change_proposals
-    ADD CONSTRAINT change_proposals_entity_type_known
-    CHECK (entity_type = ANY (ARRAY['devices'::text, 'device_nameplate'::text, 'schemas'::text]));
+        ALTER TABLE public.change_proposals
+            ADD CONSTRAINT change_proposals_entity_type_known
+            CHECK (entity_type = ANY (ARRAY['devices'::text, 'device_nameplate'::text, 'schemas'::text]));
+    END IF;
+END $$;
 
 
 -- -------------------------------------------------------------------------------------------------
