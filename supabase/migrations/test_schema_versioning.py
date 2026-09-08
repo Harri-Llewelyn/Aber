@@ -824,6 +824,115 @@ class TestTheRpcsDoNotGoAroundThePolicy(SchemaVersioningTestCase):
                 self.assertNotIn("Shopfloor_Manager", definition)
 
 
+class TestDiscardingADraft(SchemaVersioningTestCase):
+    """
+    0091. The Schemas page had been telling operators for some time that a draft can be "published
+    or discarded", and there was no way to discard one.
+
+    That made the state a trap. One draft may exist per lineage at a time -- forking is refused
+    while one is open -- so the only exit from a draft nobody wanted was to PUBLISH it, which
+    archives the parent and repoints every attached device.
+
+    THE TEST THAT MATTERS MOST is test_an_active_schema_cannot_be_discarded. `schemas_delete_
+    privileged` has admitted an Administrator since the baseline, so a plain DELETE was always
+    possible -- and `devices.schema_id` is ON DELETE SET NULL while `device_submodels.schema_id` is
+    ON DELETE CASCADE, so deleting an ACTIVE schema silently detaches every device bound to it. The
+    function is the narrow door that cannot make that mistake.
+    """
+
+    def _discard(self, schema_id):
+        self.cur.execute("SELECT public.discard_schema_draft(%s);", (schema_id,))
+        return self.cur.fetchone()[0]
+
+    def test_a_draft_is_deleted_and_its_parent_left_alone(self):
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Discard_Basic")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        draft = self._fork(v1_id, "to be discarded")
+
+        result = self._discard(draft["id"])
+        self.assertEqual(result["version"], 2)
+
+        self.cur.execute("SELECT count(*) FROM public.schemas WHERE id = %s;", (draft["id"],))
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+        # THE WHOLE POINT: the lineage returns to the state it was in before the fork.
+        self.cur.execute("SELECT status FROM public.schemas WHERE id = %s;", (v1_id,))
+        self.assertEqual(self.cur.fetchone()[0], "active")
+
+    def test_an_active_schema_cannot_be_discarded(self):
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Discard_Active")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        err = self.assertRaisesInStatement(
+            lambda: self._discard(v1_id),
+            message_contains="not a draft",
+        )
+        self.assertEqual(err.pgcode, "23514")
+
+    def test_an_archived_schema_cannot_be_discarded_either(self):
+        # It is part of the record of what devices were judged against, and there is no lineage
+        # state in which removing it is the right answer.
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Discard_Archived")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        draft = self._fork(v1_id, "publishing this archives v1")
+        self._publish(draft["id"])
+
+        err = self.assertRaisesInStatement(
+            lambda: self._discard(v1_id),
+            message_contains="not a draft",
+        )
+        self.assertEqual(err.pgcode, "23514")
+
+    def test_a_manager_cannot_discard(self):
+        # The same gate 0087 put on fork and publish, and for the same reason: a SECURITY DEFINER
+        # function bypasses RLS entirely, so its own check is the only one there is.
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Discard_Gate")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        draft = self._fork(v1_id, "not yours to discard")
+
+        self._act_as(MANAGER_USER_ID, "Shopfloor_Manager")
+        err = self.assertRaisesInStatement(
+            lambda: self._discard(draft["id"]),
+            message_contains="insufficient privileges",
+        )
+        self.assertEqual(err.pgcode, "42501")
+
+    def test_an_operator_cannot_discard(self):
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Discard_Operator")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        draft = self._fork(v1_id, "not yours either")
+
+        self._act_as(OPERATOR_USER_ID, "Operator")
+        err = self.assertRaisesInStatement(
+            lambda: self._discard(draft["id"]),
+            message_contains="insufficient privileges",
+        )
+        self.assertEqual(err.pgcode, "42501")
+
+    def test_a_missing_schema_is_refused_for_the_reason_it_is_wrong(self):
+        # P0002, not the SQL-standard 02000: `RAISE ... USING ERRCODE = 'no_data_found'` resolves
+        # the PL/pgSQL condition name, which carries its own SQLSTATE. The same code comes back
+        # from every other "row is not there" raise in this codebase, so a client that special-
+        # cases one of them handles all of them.
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        err = self.assertRaisesInStatement(
+            lambda: self._discard("00000000-0000-4000-8000-0000000000ff"),
+            message_contains="not found",
+        )
+        self.assertEqual(err.pgcode, "P0002")
+
+    def test_discarding_frees_the_lineage_for_a_new_fork(self):
+        # The state the missing action created: forking is refused while a draft is open, so a
+        # draft nobody wanted blocked the lineage until somebody published it.
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Discard_Refork")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        first = self._fork(v1_id, "the wrong direction")
+        self._discard(first["id"])
+
+        second = self._fork(v1_id, "the right one")
+        self.assertEqual(second["version"], 2)
+        self.assertNotEqual(second["id"], first["id"])
+
+
 class TestBootReconciliation(SchemaVersioningTestCase):
     """
     `active_schema_version()` and the reconciliation built on it.
