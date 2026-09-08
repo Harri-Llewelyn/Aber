@@ -163,20 +163,59 @@ DECLARE
   v_wide         text;
   v_open_read    int;
 BEGIN
-  SELECT count(*) INTO v_admin_grants FROM public.role_permissions WHERE role_id = 1;
-  IF v_admin_grants <> 13 THEN
+  -- ===============================================================================================
+  -- THESE WERE ABSOLUTE COUNTS (13 AND 10) AND THAT WAS A LANDMINE, not a stricter check.
+  --
+  -- This file's subject is a WITHDRAWAL: three permissions leave Shopfloor_Manager and stay with
+  -- Administrator. Neither of those facts is a total. Asserting totals made this self-check a
+  -- tripwire under every FUTURE migration that grants anything to anybody -- and one duly stood
+  -- on it: 0086 granted `proposal:create` to roles 1, 2 and 3, taking Administrator to 14.
+  --
+  -- THE FAILURE MODE IS THE WORST AVAILABLE, and it is worth naming so it is not re-introduced.
+  -- Migrations replay on every boot in filename order with no ledger, and 0069 runs long before
+  -- 0086. So on the boot where 0086 FIRST ran, 0069 counted 13 and passed. On every boot after
+  -- that it counted 14 and aborted -- taking the whole chain with it, including every migration
+  -- numbered above 0069. The stack silently stopped being able to apply new migrations at all,
+  -- while continuing to run perfectly on the schema it already had.
+  --
+  -- AND THE TEST LANE CANNOT SEE IT. `npm run test:db` builds a database from nothing, so 0069
+  -- always runs before 0086 grants and always counts 13. A second boot is the only thing that
+  -- reproduces it, which is why this shipped green.
+  --
+  -- What replaces them are the two claims this migration is actually making, both of which stay
+  -- true no matter what is granted later.
+  -- ===============================================================================================
+
+  -- 1. Administrator KEEPS all three. "The role the withdrawn capabilities move TO" is the claim;
+  --    this is it, stated directly instead of inferred from a total.
+  SELECT count(*) INTO v_admin_grants
+    FROM public.role_permissions rp
+    JOIN public.permissions p ON p.id = rp.permission_id
+   WHERE rp.role_id = 1
+     AND p.name IN ('authz:manage', 'schema:manage', 'gitops:manage');
+  IF v_admin_grants <> 3 THEN
     RAISE EXCEPTION
-      '0069 self-check: Administrator holds % permission(s), expected 13. This migration withdraws '
-      'from Shopfloor_Manager only; Administrator is the role the withdrawn capabilities move TO.',
+      '0069 self-check: Administrator holds % of the three withdrawn permissions, expected 3. '
+      'This migration withdraws from Shopfloor_Manager only; Administrator is the role the '
+      'withdrawn capabilities move TO, so removing one from Administrator empties it entirely.',
       v_admin_grants;
   END IF;
 
-  SELECT count(*) INTO v_mgr_grants FROM public.role_permissions WHERE role_id = 2;
-  IF v_mgr_grants <> 10 THEN
+  -- 2. Administrator's grants remain a strict SUPERSET of Shopfloor_Manager's. This is the
+  --    structural half of "the two roles stop being the same" -- the Manager is a narrowing of the
+  --    Administrator, not a different set -- and it survives any later grant that goes to both.
+  SELECT count(*) INTO v_mgr_grants
+    FROM public.role_permissions mgr
+   WHERE mgr.role_id = 2
+     AND NOT EXISTS (
+       SELECT 1 FROM public.role_permissions adm
+        WHERE adm.role_id = 1 AND adm.permission_id = mgr.permission_id
+     );
+  IF v_mgr_grants <> 0 THEN
     RAISE EXCEPTION
-      '0069 self-check: Shopfloor_Manager holds % permission(s), expected 10 (13 less authz, '
-      'schema and gitops). DEFAULT_ROLE_PERMISSIONS_MAP in frontend/src/hooks/usePermissions.js '
-      'mirrors this set and check-mirror-drift.mjs compares the two.',
+      '0069 self-check: Shopfloor_Manager holds % permission(s) Administrator does not. The '
+      'Manager is a narrowing of the Administrator, so a grant to one without the other means a '
+      'later migration granted a role a capability its supervisor cannot exercise.',
       v_mgr_grants;
   END IF;
 
@@ -221,7 +260,8 @@ BEGIN
   END IF;
 
   RAISE NOTICE
-    '0069 self-check passed: Administrator holds 13 permissions, Shopfloor_Manager 10, and the '
-    'seven schema-management write policies admit Administrator alone with all three reads open.';
+    '0069 self-check passed: the three withdrawn permissions are Administrator''s alone, '
+    'Shopfloor_Manager holds nothing Administrator does not, and the seven schema-management '
+    'write policies admit Administrator alone with all three reads open.';
 END;
 $selfcheck$;

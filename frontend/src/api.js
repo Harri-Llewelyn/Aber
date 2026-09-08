@@ -1482,6 +1482,17 @@ const apiMethods = {
       const SINGULAR_MAP = { cells: 'cell', gateways: 'gateway', devices: 'device', assets: 'device' };
       const singularType = SINGULAR_MAP[rawEntityType] || rawEntityType.replace(/s$/, '');
 
+      /**
+       * The entity types that belong to THIS entity's history as well as their own.
+       *
+       * `device_nameplate` rows are keyed by the DEVICE id -- an approved nameplate change is a
+       * thing that happened to that machine, and filing it only under a table name would leave the
+       * device's own timeline silent about it. This is the one place the union is expressed, so a
+       * reader opening a device sees what was asserted about it beside what was configured on it.
+       */
+      const ALSO_ABOUT = { device: ['device_nameplate'], devices: ['device_nameplate'] };
+      const alsoAbout = new Set(ALSO_ABOUT[singularType] || []);
+
       let query = supabase.from('digital_thread').select('*').eq('entity_id', entityId);
       const { data, error } = await query.order('recorded_at', { ascending: false });
       if (error) throw error;
@@ -1489,7 +1500,8 @@ const apiMethods = {
       const filtered = (data || []).filter(t => {
         if (!t.entity_type) return true;
         const et = t.entity_type.toLowerCase();
-        return et === singularType || et === rawEntityType || et === `${singularType}s`;
+        return et === singularType || et === rawEntityType || et === `${singularType}s`
+          || alsoAbout.has(et);
       });
 
       return filtered.map(mapDigitalThreadRow);
@@ -2114,10 +2126,161 @@ const apiMethods = {
       });
     }
 
+    /**
+     * The approvals queue (0086, 0088), with each proposal's target resolved beside it.
+     *
+     * THE WHOLE QUEUE IN ONE CALL, and the caps are what make that honest rather than lazy:
+     * `proposals.max_open_per_person` bounds the open set per person and a partial unique index
+     * bounds it per asset, so this is tens of rows on a plant with hundreds of machines. Filtering
+     * happens in the component because every filter it offers -- mine, open, decided -- is a
+     * question about rows it already holds.
+     *
+     * RLS DECIDES WHAT COMES BACK, not a parameter. A proposer reads their own; an Administrator or
+     * Shopfloor_Manager reads the queue. Asking for `?mine=true` would be a second place that
+     * question is answered, and the database's answer is the one that counts.
+     *
+     * THE TARGETS ARE FETCHED SEPARATELY, and there is no embed that could replace it: `entity_id`
+     * addresses `devices`, `device_nameplate` or `schemas` depending on `entity_type`, and
+     * PostgREST cannot join on a column whose table varies per row. Three queries keyed by the ids
+     * actually referenced, rather than one per proposal.
+     */
+    if (path === '/api/v1/proposals') {
+      const { data, error } = await supabase
+        .from('change_proposals')
+        .select('*')
+        .order('proposed_at', { ascending: false });
+      if (error) throw error;
+
+      const rows = data || [];
+      if (rows.length === 0) return [];
+
+      const deviceIds = [...new Set(rows
+        .filter(r => r.entity_type === 'devices' || r.entity_type === 'device_nameplate')
+        .map(r => r.entity_id))];
+      const schemaIds = [...new Set(rows
+        .filter(r => r.entity_type === 'schemas')
+        .map(r => r.entity_id))];
+
+      const [devicesRes, nameplatesRes, schemasRes] = await Promise.all([
+        deviceIds.length
+          ? supabase.from('devices')
+              .select('id,name,description,asset_type,connection_method,cell_id,location_scope,model_3d_path,is_archived')
+              .in('id', deviceIds)
+          : Promise.resolve({ data: [] }),
+        deviceIds.length
+          ? supabase.from('device_nameplate').select('*').in('device_id', deviceIds)
+          : Promise.resolve({ data: [] }),
+        schemaIds.length
+          ? supabase.from('schemas').select('id,schema_name,version,status,parent_schema_id')
+              .in('id', schemaIds)
+          : Promise.resolve({ data: [] })
+      ]);
+
+      const devices = new Map((devicesRes.data || []).map(d => [d.id, d]));
+      const nameplates = new Map((nameplatesRes.data || []).map(n => [n.device_id, n]));
+      const schemas = new Map((schemasRes.data || []).map(s => [s.id, s]));
+
+      return rows.map(r => {
+        // `current` is what the patch would change FROM, so the page can show a diff rather than
+        // only what was asked for. A nameplate with no row yet is `{}` and not an error: the row is
+        // created by whoever first asserts something about the asset.
+        let current = null;
+        let targetLabel = r.entity_id;
+        let targetMissing = false;
+
+        if (r.entity_type === 'devices') {
+          const d = devices.get(r.entity_id);
+          current = d || null;
+          targetLabel = d?.name || r.entity_id;
+          targetMissing = !d;
+        } else if (r.entity_type === 'device_nameplate') {
+          const d = devices.get(r.entity_id);
+          current = nameplates.get(r.entity_id) || {};
+          targetLabel = d?.name || r.entity_id;
+          targetMissing = !d;
+        } else if (r.entity_type === 'schemas') {
+          const sc = schemas.get(r.entity_id);
+          current = sc || null;
+          targetLabel = sc ? `${sc.schema_name} v${sc.version}` : r.entity_id;
+          targetMissing = !sc;
+        }
+
+        return { ...r, target_label: targetLabel, target_missing: targetMissing, current };
+      });
+    }
+
+    /**
+     * Which keys a lane admits, asked of the DATABASE rather than mirrored here.
+     *
+     * `proposable_columns()` is the only place that answer exists -- the validation trigger and the
+     * apply path both read it -- so a copy in this file would be a second list to keep in step, and
+     * the failure would be a form offering a field every proposal is then refused for. It is
+     * granted to `authenticated` precisely so the form can ask.
+     */
+    if (/^\/api\/v1\/proposals\/allowed-keys\/[^/]+$/.test(path)) {
+      const entityType = decodeURIComponent(path.split('/')[5]);
+      const { data, error } = await supabase.rpc('proposable_columns', { p_entity_type: entityType });
+      if (error) throw error;
+      return data || [];
+    }
+
+    /** The draft schemas a publication can be proposed for. Drafts only -- nothing else is publishable. */
+    if (path === '/api/v1/proposals/publishable-schemas') {
+      const { data, error } = await supabase
+        .from('schemas')
+        .select('id,schema_name,version,status,parent_schema_id')
+        .eq('status', 'draft')
+        .order('schema_name');
+      if (error) throw error;
+      return data || [];
+    }
+
     throw new Error('Unhandled API path: ' + path);
   },
 
   post: async (path, body, options = {}) => {
+    /**
+     * File a proposal. A plain INSERT, deliberately: `0086` gives `Operator` an INSERT policy on
+     * this one table, and routing it through an RPC would put the grant somewhere the RLS policy
+     * is not -- which is the shape the caps are written to survive rather than to depend on.
+     *
+     * THE ERRORS ARE NOT FLATTENED. A unique violation is the per-asset cap and a check violation
+     * is the per-person one; they need different repairs -- open the proposal you already have, or
+     * decide one of the others -- so the codes ride back for the component to tell apart.
+     */
+    if (path === '/api/v1/proposals') {
+      const { data, error } = await supabase
+        .from('change_proposals')
+        .insert({
+          entity_type: body.entity_type,
+          entity_id: body.entity_id,
+          patch: body.patch,
+          rationale: emptyToNull(body.rationale)
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    }
+
+    if (/^\/api\/v1\/proposals\/[^/]+\/(approve|reject|withdraw)$/.test(path)) {
+      const parts = path.split('/');
+      const proposalId = parts[4];
+      const action = parts[5];
+
+      // THREE RPCs, NOT ONE WITH A MODE. Each re-checks authority server-side for itself and they
+      // do not admit the same people: rejecting is gated exactly as approving is, and withdrawing
+      // is the proposer's own act and nobody else's.
+      const rpc = { approve: 'approve_proposal', reject: 'reject_proposal', withdraw: 'withdraw_proposal' }[action];
+      const args = action === 'reject'
+        ? { p_proposal_id: proposalId, p_reason: body?.reason }
+        : { p_proposal_id: proposalId };
+
+      const { data, error } = await supabase.rpc(rpc, args);
+      if (error) throw error;
+      return data;
+    }
+
     if (path.includes('/archive')) {
       const parts = path.split('/');
       const entityType = parts[3];
@@ -2326,6 +2489,31 @@ const apiMethods = {
       return { schema_uuid: data?.id || '', ...(data || {}) };
     }
 
+    /**
+     * Discard a draft, returning the lineage to the state before the fork.
+     *
+     * THROUGH THE RPC, NOT A DELETE. `schemas_delete_privileged` has admitted an Administrator
+     * since the baseline, and a plain DELETE is exactly the mistake `0091` exists to prevent:
+     * `devices.schema_id` is ON DELETE SET NULL and `device_submodels.schema_id` is ON DELETE
+     * CASCADE, so deleting an ACTIVE schema silently detaches every device bound to it. The
+     * function refuses anything that is not a draft and reports what the cascade removed.
+     */
+    if (/^\/api\/v1\/schemas\/[^/]+\/discard$/.test(path)) {
+      const draftId = path.split('/')[4];
+      const { data, error } = await supabase.rpc('discard_schema_draft', {
+        p_schema_id: draftId
+      });
+      if (error) throw error;
+      return {
+        discarded_schema_name: data?.discarded_schema_name || '',
+        version: data?.version ?? null,
+        parent_schema_id: data?.parent_schema_id ?? null,
+        // Counted before the delete, because the CASCADE reports nothing -- and a draft attached
+        // to a machine to try it out is a real state, so this is not always zero.
+        devices_detached: data?.devices_detached ?? 0
+      };
+    }
+
     if (/^\/api\/v1\/schemas\/[^/]+\/publish$/.test(path)) {
       const draftId = path.split('/')[4];
       const { data, error } = await supabase.rpc('publish_schema_version', {
@@ -2406,6 +2594,28 @@ const apiMethods = {
   },
 
   put: async (path, body, options = {}) => {
+    /**
+     * Edit an open proposal -- the patch and the rationale, which are the only two columns the
+     * transition guard lets a proposer move.
+     *
+     * THIS IS WHAT MAKES THE PER-ASSET CAP LIVABLE. Told "you already have an open proposal on this
+     * device", a person has to be able to open that one and add to it; without this the constraint
+     * reads as a wall and people route around it by proposing against a neighbouring asset, or stop
+     * proposing. The database refuses anything else this could try to write, so the narrow shape
+     * here agrees with the guard rather than being trusted in place of it.
+     */
+    if (/^\/api\/v1\/proposals\/[^/]+$/.test(path)) {
+      const proposalId = path.split('/')[4];
+      const { data, error } = await supabase
+        .from('change_proposals')
+        .update({ patch: body.patch, rationale: emptyToNull(body.rationale) })
+        .eq('id', proposalId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    }
+
     if (path.includes('/archive')) {
       const parts = path.split('/');
       const entityType = parts[3];
@@ -2695,6 +2905,59 @@ const apiMethods = {
       probe('cells', 'cell', 'name'),
       probe('schemas', 'schema', 'schema_name')
     ])).filter(Boolean);
+  },
+
+  /**
+   * The four asset kinds, matched by NAME.
+   *
+   * THE COMPANION TO `resolveId`, and deliberately a separate call rather than a mode of it. An id
+   * lookup is an equality probe on a primary key that hits at most one row in one of four tables; a
+   * name search is a pattern over four tables that can hit many. They fail differently too -- a
+   * missing id means "nothing has that id", a missing name means "nothing is called that yet" --
+   * and collapsing them would make one message do for both.
+   *
+   * `ilike` WITH THE TERM ESCAPED. `%` and `_` are wildcards in LIKE, so a device called `100%_OK`
+   * typed verbatim would otherwise match far more than itself -- and, worse, a bare `%` would match
+   * the entire estate and read as the search being broken.
+   *
+   * CAPPED PER KIND, NOT OVERALL. A plant with four hundred devices and three cells would otherwise
+   * return four hundred devices and no cells at all, which is the shape that makes people conclude
+   * the search cannot find cells. Ten of each is enough to recognise the one you meant, and the
+   * page-level box is where an exhaustive list belongs.
+   *
+   * RLS DECIDES WHAT COMES BACK, as everywhere else. Nothing here filters by role.
+   */
+  searchAssets: async (term) => {
+    const needle = String(term || '').trim();
+    if (needle.length < 2) return [];
+
+    const escaped = needle.replace(/([%_\\])/g, '\\$1');
+    const probe = (table, kind, nameColumn) =>
+      supabase
+        .from(table)
+        .select(`id, ${nameColumn}`)
+        .ilike(nameColumn, `%${escaped}%`)
+        .limit(10)
+        .then(({ data, error }) => (error ? [] : (data || []).map(r => ({
+          kind, id: r.id, name: r[nameColumn]
+        }))));
+
+    const found = await Promise.all([
+      probe('devices', 'device', 'name'),
+      probe('gateways', 'gateway', 'name'),
+      probe('cells', 'cell', 'name'),
+      probe('schemas', 'schema', 'schema_name')
+    ]);
+
+    // AN EXACT MATCH FIRST, then alphabetical. Somebody who typed a full name wants that row, and
+    // it would otherwise sit wherever its table happened to fall among the four.
+    const lowered = needle.toLowerCase();
+    return found.flat().sort((a, b) => {
+      const aExact = String(a.name || '').toLowerCase() === lowered;
+      const bExact = String(b.name || '').toLowerCase() === lowered;
+      if (aExact !== bExact) return aExact ? -1 : 1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
   },
 
   delete: async (path, options = {}) => {

@@ -416,6 +416,39 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// -------------------------------------------------------------------------------------------------
+// 5. The tags a proposed document may carry.
+//
+// `proposable_link_tags()` (0090) is what validate_change_proposal() refuses an unknown tag
+// against; `TAG_LABELS` is what the form OFFERS. The failure is the quiet one and it only bites
+// the proposer: a tag added to the form and not to the function is a dropdown option that every
+// proposal naming it is refused for, which reads as the form being broken rather than as the value
+// being unknown. The reverse -- a tag in SQL and not in the form -- is a value nothing can produce
+// through the UI but which an approval would happily store, leaving a badge with no label.
+//
+// ORDER IS NOT COMPARED, because one is an ordered dropdown and the other is a set; only
+// membership is a shared claim.
+// -------------------------------------------------------------------------------------------------
+{
+  const js = read('frontend/src/components/modals/EntityLinksModal.jsx');
+  const fn = lastDefinition(
+    'CREATE OR REPLACE FUNCTION public.proposable_link_tags()',
+    '$$;',
+    'public.proposable_link_tags()'
+  );
+
+  if (fn) {
+    const sqlBlock = need(fn.body, /SELECT ARRAY\[([\s\S]*?)\]/, 'the array in proposable_link_tags()');
+    const jsBlock = need(js, /const TAG_LABELS = \{([\s\S]*?)\}/, 'TAG_LABELS in EntityLinksModal.jsx');
+
+    if (sqlBlock && jsBlock) {
+      const sqlTags = [...sqlBlock[1].matchAll(/'([a-z_]+)'/g)].map(m => m[1]).sort();
+      const jsTags = [...jsBlock[1].matchAll(/^\s*([a-z_]+)\s*:/gm)].map(m => m[1]).sort();
+      compare('linkTags', 'the tags a document may carry', jsTags.join(','), sqlTags.join(','));
+    }
+  }
+}
+
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nSQL-to-JavaScript mirror drift:');

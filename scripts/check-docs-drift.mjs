@@ -693,6 +693,36 @@ function edgeFunctionNames() {
     // leaving both declared would make a seven-argument call ambiguous at the call site. The
     // baseline's copy is the one being replaced.
     'public.digital_thread_page': '0077 adds the keyset cursor; the baseline holds the unpaged form',
+    // 0086 adds two entity types to the ASSET lane: `device_nameplate`, which no trigger wrote
+    // until 0086's apply path did, and `change_proposals`, whose expiry timer is the only thing
+    // that writes an audit row against it. Both would otherwise take the fail-closed 'security'
+    // branch and be invisible to the Shopfloor_Manager whose own act they record -- which is the
+    // right default and the wrong answer for these two. Rewritten in full rather than extended,
+    // because the classifier is one CASE and a partial redeclaration would be unreadable; the
+    // last declaration winning is exactly what is wanted.
+    'public.platform_health_rows': '0092 narrows expected_publishers to devices behind a gateway that has reported at least once; 0001 holds the bound-to-a-gateway form that alerted on edge nodes nobody had deployed',
+    'public.audit_domain_for': '0086 adds device_nameplate and change_proposals to the asset lane; 0090 adds the three *_links lanes',
+    // 0087 narrows both gates from has_role(Administrator, Shopfloor_Manager) to
+    // has_authority(schema:manage). Both are SECURITY DEFINER, so neither consulted the three
+    // write policies 0069 narrowed to Administrator -- which made the RPC the way AROUND that
+    // migration rather than an application of it, measured on the shipped stack. The bodies are
+    // the baseline's verbatim apart from the gate, so the last declaration winning is the point.
+    'public.fork_schema': '0087 narrows the gate to schema:manage; the baseline holds the pair',
+    'public.publish_schema_version': '0087 narrows the gate to schema:manage; the baseline holds the pair',
+    // 0088 adds the queue's SECOND LANE, and four of 0086's functions have to learn about it in the
+    // same file that admits it -- a lane whose allowlist, validation, gate and apply path arrived
+    // one migration apart would be admitted by the CHECK and rejected by everything else. The last
+    // declaration winning is the mechanism: 0086 holds the one-lane forms as the record of what
+    // shipped first, exactly as 0074 does for auth_pre_request.
+    'public.may_decide_proposal': '0090 replaces the withdrawn schema lane with cells, gateways and the three *_links lanes, all resolving authority rather than role names; 0088 holds the form that introduced it',
+    'public.proposable_columns': '0090 adds cells, gateways and the three *_links lanes and empties the schema lane to withdraw it; 0088 added that lane; 0086 holds the asset-only form',
+    'public.validate_change_proposal': '0090 resolves the target table per lane and adds the create-shaped link checks; 0088 branched it by lane; 0086 holds the device-only form',
+    'public.reject_proposal': '0090 widens the outer gate to the lanes that replaced schemas; 0088 gates on may_decide_proposal(); 0086 holds the single-gate form',
+    'public.approve_proposal': '0090 adds the cell, gateway and link branches, drops the withdrawn publish branch and refuses a proposal already in place; 0088 added the per-lane gate and 0089 the author stamp; 0086 holds the asset-only form',
+    // 0089 adds proposed_by_email to the columns a proposer may NOT move. The guard names every
+    // immutable column explicitly, so a new one has to join the list or an UPDATE could
+    // re-attribute a proposal an approver is already reading.
+    'public.guard_change_proposal_transition': '0089 makes the author stamp immutable too; 0086 holds the pre-stamp form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

@@ -1328,10 +1328,47 @@ describe('Digital Thread — removed tag filter', () => {
     })
   })
 
-  it('no longer fetches schemas, which it needed only to derive tags', async () => {
+  it('fetches schemas to NAME them, not to derive tags from them', async () => {
+    // THE FETCH IS BACK, FOR A DIFFERENT REASON, and the distinction is the point of this test.
+    // It was removed with the tag filter, which was the only thing deriving anything from a
+    // schema's definition. It returned when the audit log needed to say WHICH schema an event was
+    // about: 0070 put `schemas` in the audit trigger and this page's name lookup was never
+    // widened, so every schema event rendered as a bare uuid -- and, because absence from that
+    // lookup is how this page recognises a PURGED asset, was also being counted as an event about
+    // something deleted.
     await show()
 
-    expect(api.get.mock.calls.map(c => c[0]).some(u => u.startsWith('/api/v1/schemas'))).toBe(false)
+    const urls = api.get.mock.calls.map(c => c[0])
+    expect(urls.some(u => u.startsWith('/api/v1/schemas'))).toBe(true)
+    // The tag filter itself stays gone: nothing here reads a schema_definition.
+    expect(screen.queryByLabelText(/tag/i)).toBeNull()
+  })
+
+  it('names a schema event by its schema and version, not by a uuid', async () => {
+    const SCHEMA_ID = 'sch-77'
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/digital-thread')) {
+        return Promise.resolve([{
+          id: 9001, entity_type: 'schemas', entity_id: SCHEMA_ID, action: 'UPDATE',
+          recorded_at: '2026-09-06T10:00:00Z', changed_by: null,
+          old_data: { status: 'draft' }, new_data: { status: 'active' }
+        }])
+      }
+      if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
+      if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+      if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
+      if (path.startsWith('/api/v1/schemas')) {
+        return Promise.resolve([{ schema_uuid: SCHEMA_ID, schema_name: 'Test-Schema', version: 2 }])
+      }
+      return Promise.resolve([])
+    })
+    render(<DigitalThreadTab />)
+
+    // THE VERSION IS PART OF THE NAME. A lineage is a chain of rows sharing one `schema_name` and
+    // differing only in `version`, so the name alone would label three rows identically -- and
+    // which version something happened to is the whole point of a schema's audit trail.
+    await waitFor(() => expect(screen.getByText('Test-Schema v2')).toBeInTheDocument())
+    expect(screen.queryByText(SCHEMA_ID)).toBeNull()
   })
 
   it('still filters by name, which was sharing the id-restriction path with tags', async () => {

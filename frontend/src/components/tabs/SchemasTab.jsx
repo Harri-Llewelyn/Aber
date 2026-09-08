@@ -5,6 +5,7 @@ import { ValidatePayloadModal } from '../modals/ValidatePayloadModal'
 import { SchemaBuilderModal } from '../modals/SchemaBuilderModal'
 import { SchemaDetailModal } from '../modals/SchemaDetailModal'
 import { SchemaForkModal } from '../modals/SchemaForkModal'
+import { ConfirmModal } from '../modals/ConfirmModal'
 import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
 import { downloadJSON } from '../../utils/downloadJSON'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
@@ -117,6 +118,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   const [selectedId, setSelectedId] = useState(null)
   const [detailSchema, setDetailSchema] = useState(null)
   const [forkTarget, setForkTarget] = useState(null)
+  // The draft awaiting a discard confirmation. Held as the OBJECT so the dialog can name the
+  // version it is about -- "discard the draft" is not a sentence somebody should have to trust.
+  const [discardTarget, setDiscardTarget] = useState(null)
   /**
    * The registry's two filters (issue #60).
    *
@@ -518,6 +522,39 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       showToast(
         `v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
         (moved > 0 ? ` — ${moved} device binding${moved === 1 ? '' : 's'} moved across` : ''),
+        'success'
+      )
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }
+
+  /**
+   * Discard the open draft.
+   *
+   * THE EXIT THAT WAS MISSING. One draft may exist per lineage at a time -- forking is refused
+   * while one is open, because two drafts off one parent would create a second head -- so until
+   * `0091` the only way out of a draft nobody wanted was to PUBLISH it, which archives the parent
+   * and repoints every attached device. That is a considerable act to be pushed into by the
+   * absence of a Cancel button, and the tooltip on the disabled Fork control had been telling
+   * people to "publish or discard it" the whole time.
+   */
+  const handleDiscardDraft = async () => {
+    if (!discardTarget) return
+    try {
+      const result = await api.post(`/api/v1/schemas/${discardTarget.schema_uuid}/discard`, {})
+      setDiscardTarget(null)
+      setDetailSchema(null)
+      // The lineage moved and so may device bindings, so both lists are stale.
+      load()
+      const detached = result.devices_detached || 0
+      showToast(
+        `Draft v${result.version} discarded` +
+        (detached > 0
+          // Said out loud rather than left to be discovered: a draft can be attached to a machine
+          // to try it out, and those attachments go with it.
+          ? ` — ${detached} device attachment${detached === 1 ? '' : 's'} removed with it`
+          : ''),
         'success'
       )
     } catch (e) {
@@ -1508,7 +1545,32 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           onDownload={() => handleDownloadSchema(detailSchema)}
           onSaveDraft={handleSaveDraft}
           onPublish={handlePublish}
+          onDiscard={() => setDiscardTarget(detailSchema)}
           onClose={() => setDetailSchema(null)}
+        />
+      )}
+
+      {/* TYPED CONFIRMATION, because this DESTROYS WORK and nothing brings it back. A draft is
+          somebody's editing session -- metric selections, a change description -- and the delete
+          cascades to any device attachments made to try it out. `requireTyped` is the same guard
+          the archive flows use for the same reason: an act whose cost is invisible until after it
+          has happened. */}
+      {discardTarget && (
+        <ConfirmModal
+          message={
+            <>
+              Discard draft <strong>{discardTarget.schema_name}</strong> (v{discardTarget.version})?
+              {' '}Its predecessor stays exactly as it is — active, attached, unarchived — so the
+              lineage returns to the state it was in before the fork. Any device attachments made
+              to try this draft out are removed with it. This cannot be undone.
+            </>
+          }
+          requireTyped={discardTarget.schema_name}
+          requireTypedLabel="schema name"
+          confirmLabel="Discard Draft"
+          pendingLabel="Discarding…"
+          onConfirm={handleDiscardDraft}
+          onCancel={() => setDiscardTarget(null)}
         />
       )}
 

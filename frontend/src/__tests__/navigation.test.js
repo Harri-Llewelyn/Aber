@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { NAV_GROUPS, TABS, tabIsVisible, groupedNav } from '../navigation'
-import { VALID_TABS } from '../constants'
+import { VALID_TABS, PERMISSION_UUIDS } from '../constants'
 import { CARDS, PAGE_KEYWORDS } from '../searchIndex'
 
 /**
@@ -158,5 +158,32 @@ describe('the page id lists agree', () => {
   it('gives every card a unique id', () => {
     const ids = CARDS.map(c => c.id)
     expect(new Set(ids).size, 'two cards share an id, so one is unreachable by key').toBe(ids.length)
+  })
+
+  describe('a page nobody may read is not offered', () => {
+    const tab = (id) => TABS.find(t => t.id === id)
+    const holding = (...ids) => (uuid) => ids.includes(uuid)
+
+    it('hides the Digital Thread from a role without digital_thread:read', () => {
+      // THE OPERATOR DEAD END. `digital_thread` has its own RLS, and a role without the permission
+      // gets NO ROWS rather than an error -- so the page rendered an empty table, which reads as
+      // "nothing has ever happened here" rather than "this is not yours to read".
+      expect(tabIsVisible(tab('digital-thread'), holding(PERMISSION_UUIDS.PROPOSAL_CREATE), 'Operator')).toBe(false)
+    })
+
+    it('shows it to the three roles the policy admits', () => {
+      const canRead = holding(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+      for (const role of ['Administrator', 'Shopfloor_Manager', 'Auditor']) {
+        expect(tabIsVisible(tab('digital-thread'), canRead, role), role).toBe(true)
+      }
+    })
+
+    it('gates it on the permission rather than on a list of role names', () => {
+      // One predicate deciding visibility AND access. A role list here would be a second opinion
+      // standing beside the RLS policy, and the day they disagree the page is visible and every
+      // query returns nothing.
+      expect(tab('digital-thread').permission).toBe(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+      expect(tab('digital-thread').role).toBeUndefined()
+    })
   })
 })

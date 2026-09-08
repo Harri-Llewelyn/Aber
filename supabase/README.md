@@ -711,7 +711,7 @@ direction. Three permissions moved:
 | Withdrawn from `Shopfloor_Manager` | What it decides | Where it is enforced |
 | :--- | :--- | :--- |
 | `authz:manage` | who has access | **nowhere yet** — see below |
-| `schema:manage` | what contract ingestion validates against | the write policies on `schemas`, `metric_catalog` and `metric_groups` |
+| `schema:manage` | what contract ingestion validates against | the write policies on `schemas`, `metric_catalog` and `metric_groups`, **and since `0087` the two schema RPCs** |
 | `gitops:manage` | what gets deployed to the edge | `PERMISSION_MAP` in [`nodered-userinfo`](functions/nodered-userinfo/index.ts) |
 
 A manager keeps devices, cells, gateways, links, quarantine approval, telemetry, archives and the
@@ -751,6 +751,47 @@ deploys flows. The repair is to make that person an `Administrator`. Roadmap §3
 authentication) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
+
+### `0069` narrowed the policies and the RPCs went around them (`0087`)
+
+**`0069` narrowed policies. `fork_schema()` and `publish_schema_version()` are `SECURITY DEFINER`,
+so they never consulted a policy in the first place** — they run as the owner — and both went on
+checking `has_role(ARRAY['Administrator', 'Shopfloor_Manager'])`. The write `0069` withdrew stayed
+reachable through the RPC the Schemas page already calls.
+
+Measured on the shipped stack, in one transaction as a `Shopfloor_Manager` holding neither
+`Administrator` nor `schema:manage`:
+
+```
+UPDATE public.schemas SET status = 'archived' …    →  UPDATE 0     (0069's policy holds)
+SELECT public.publish_schema_version(<draft>)      →  succeeded
+SELECT status FROM public.schemas WHERE id=parent  →  'archived'
+```
+
+The direct write was refused and the RPC performed it. **This is not a cosmetic status flip**:
+publishing activates a draft, archives its predecessor and repoints every `device_submodels` row
+and the legacy `devices.schema_id` onto the new version, so it changes what ingestion judges every
+attached device against.
+
+**`fork_schema()` carried the same gate**, under a comment claiming *"Same allow-list as the RLS
+write policies on `schemas`"* — true when written, false the moment `0069` moved those policies
+underneath it. This repository already has a name for that shape: an analysis that was right when
+written and wrong when read, which is why the roadmap tells a reader to sweep back over whatever
+cited a thing as settled.
+
+**`0087` gates both on `has_authority(ARRAY['schema:manage'])`** rather than on a role name. The
+seven policies `0069` narrowed name the role; these two now name the **permission**, so the gate is
+the thing that was withdrawn rather than a second spelling of it that the next role change can put
+out of step again — which is exactly how they came to disagree. Today the two resolve identically,
+because `Administrator` alone holds `schema:manage`, and `0087`'s self-check fails if that stops
+being true. It also fails closed for a machine principal, which resolves through
+`principal_permissions` where none holds it.
+
+Reading is untouched: `0069` deliberately left all three SELECT policies open because the Devices
+page resolves a device's schema through them. `TestTheRpcsDoNotGoAroundThePolicy` in
+[`test_schema_versioning.py`](migrations/test_schema_versioning.py) asserts both halves — the
+manager refused, and the administrator still able to fork and publish, because a fix that only
+broke the function would pass the first assertion alone.
 
 ### The anon sweep runs after the functions exist (`0009`, `0071`)
 
@@ -1863,6 +1904,7 @@ rather than an adopted format.
 | `GET /v1/device/{uuid}` | One device's Sparkplug address, status and schemas |
 | `GET /v1/address/{group}/{node}` | The edge node at that address and the devices behind it |
 | `GET /v1/schema` · `GET /v1/service` | Locally minted schema / service identifiers |
+| `GET /v1/schema/{uuid}` | The devices implementing one schema — the **reverse** lookup |
 
 **It is served at the unprefixed paths**, not under `/functions/v1/`, because a Factory+ client has
 no Supabase `apikey` and no way to acquire one. Those Kong routes are therefore exempt from
@@ -1874,6 +1916,16 @@ It **queries as the caller**, not as the service role: a Directory is a live rea
 address space, so running it privileged would hand every authenticated user a view their RLS
 policies do not grant them. Its entry in `FUNCTION_REGISTRY` grants no `SUPABASE_SERVICE_ROLE_KEY`,
 which makes that structural rather than a discipline.
+
+**The reverse lookup deliberately does not filter on status.** `/v1/schema` lists what is in use
+and returns only `active` versions; `/v1/schema/{uuid}` resolves an identifier the caller already
+holds, and the most useful case it answers is the one a filter would hide — an **archived** schema
+with devices still attached to it, which is a migration that has not finished. Answering `404`
+there would report "no such schema" about a schema whose members are the answer, so the row's
+`status` is returned instead and the caller decides. Members are read through the `device_schemas`
+**view**, not `device_submodels`, so a device provisioned through the legacy 1:1 `devices.schema_id`
+is not silently omitted — and those are exactly the devices an old schema still holds. A schema
+nothing implements is a `200` with an empty list.
 
 **What it does not claim.** Schema and service identifiers are this deployment's own UUIDs, and the
 response says so (`"namespace": "local"`). Factory+ `Schema_UUID`s are registered against the AMRC
@@ -1945,6 +1997,277 @@ claiming one physical asset.
 It is now one `SECURITY DEFINER` RPC — atomic, granted to `service_role` only, taking the
 authenticated `p_actor_id` explicitly and **re-checking that actor's role against
 `public.user_roles`** so authorisation does not rest solely on the caller's check.
+
+### The approvals queue, and the first write an `Operator` has ever had (`0086`)
+
+One queue for a change a person proposes but may not apply. An `Operator` inserts into
+`change_proposals`; an `Administrator` or `Shopfloor_Manager` calls `approve_proposal()`, and **the
+approval is the write**.
+
+**`Operator` held two permissions before `0086`, neither of them a write**, so this is not the
+loosening of an existing grant. It is worth being exact about what it is a write *to*: a queue, not
+an asset. The write policies on `devices`, `cells`, `gateways` and `schemas` are unchanged, and
+`test_change_proposals.py` asserts that directly rather than inferring it — an `Operator` still
+cannot update a device, insert one, or write a nameplate. **If a later change ever adds a second
+write path to an asset table, this item has failed**, however convenient that path looks.
+
+**Approving is applying, and that is the property the shape exists for.** Because the write happens
+inside the approval, every CHECK, foreign key and trigger on the target runs *then* — a patch
+setting `location_scope = 'site_wide'` while leaving `cell_id` populated fails
+`devices_site_wide_has_no_cell` and **aborts the approval**. Nothing in `0086` restates that rule.
+A queue that accepted such a change would hold an audit record of something that did not happen,
+which is worse than no record.
+
+**The patch is operator-controlled input, and no SQL is ever built from its keys.** It is merged
+onto the current row with `jsonb_populate_record` and then assigned column by column, in SQL
+written out by hand, for the columns `proposable_columns()` admits. The omissions carry the
+argument: `status`, `first_dbirth_at`, `reported_identity`, `identity_source` and `is_quarantined`
+are what ingestion *observed*, and a proposal able to edit them would let an operator assert a
+device's identity by describing it. `gateway_id` is the data path, which `0036` separated from
+location precisely so a location change need not rewire one; `schema_id` belongs to
+`publish_schema_version()`, transactionally.
+
+**Two caps, doing two different jobs, and both in the database.** A partial unique index gives one
+open proposal per asset per person — scoped to the proposer deliberately, since a cap on the asset
+alone would let one person's forgotten proposal block everybody else from proposing against that
+machine. A trigger reading `proposals.max_open_per_person` bounds total open proposals per person,
+which is the one that actually bounds reviewer load. Neither lives in a button: the INSERT policy
+admits a direct PostgREST write, and `0069`'s header already made the argument that a rule the
+frontend applies and the database does not is "a frontend flag and therefore never an access
+control".
+
+**`status` is not writable through PostgREST at all.** An UPDATE policy can say who may write a
+row; it cannot say which columns, and a proposer who could set `applied` would hold the asset write
+the design exists to withhold. So the transition functions declare themselves with a session flag —
+the same mechanism `acs_cymru.actor_id` uses — and a trigger refuses every other path. A proposer
+may edit the `patch` and `rationale` of their own open row, which the caps make necessary rather
+than convenient: told "you already have an open proposal on this device", they have to be able to
+open it and add to it.
+
+**Who the record names.** `device_nameplate.updated_by` becomes the **proposer** — the column's own
+comment says a nameplate is an assertion about an asset, so who made it is part of the record —
+while the `digital_thread` row names the **approver** in `changed_by` and carries `proposed_by` in
+its payload. Both are in the record; neither column has to hold both.
+
+**The timer is not a person.** An open proposal nobody acts on closes after
+`proposals.open_expiry_days`, whose floor is 1: zero would auto-close every proposal at the moment
+it was created — a working configuration in which the feature silently does nothing. Expiry leaves
+`decided_by` NULL and declares `actor_source = 'service'`, because a scheduled job has no session
+and is not a person. `proposals.retention_days` then prunes decided rows, so the queue arrives with
+the retention answer every other durable store here has.
+
+`0086` also adds `device_nameplate` and `change_proposals` to `audit_domain_for()`'s **asset** lane.
+Both would otherwise take the fail-closed `security` branch, which would hide a
+`Shopfloor_Manager`'s own act from that manager.
+
+### A proposal says who asked, in something a person can read (`0089`)
+
+`change_proposals.proposed_by` is a uuid and is the right thing to key on — it is what the policy
+compares, what the per-person cap counts, and what `digital_thread.changed_by` carries. **It is also
+unreadable.** An approver sees `a0000000` and there is nowhere in this stack to resolve it:
+`auth.users` is not exposed to the browser and `list_machine_principals()` returns machines with no
+email at all. So the queue could not answer the first question anybody asks about a request — who is
+asking.
+
+**The email comes out of the token, not out of a form.** The obvious repair is a "your name" box,
+and `0089` deliberately does not build one: a typed name is exactly the shape this repository
+already refuses elsewhere — [a self-declared marker is not
+evidence](../ingestion/README.md#schema-conformance) — it is unverified, it can name somebody else,
+and it would sit in the record of a change looking like an attribution. The signed access token
+already carries the proposer's email, so `auth.email()` answers the question for nothing and cannot
+be wrong.
+
+**Stamped by a trigger, not by a `DEFAULT`, and that difference is the whole security of it.** A
+default applies only when the column is omitted, so a client that *sends* `proposed_by_email` would
+keep its own value — and this table takes a direct PostgREST INSERT from any `Operator` by design.
+The trigger overwrites unconditionally, which is what `system_settings_stamp()` does to `updated_by`
+for the same reason. Measured on the shipped stack: a client sending `ceo@example.com` alongside a
+token for `stamp.probe@acs-cymru.test` stores the second. `0089`'s self-check fails if a `DEFAULT`
+is ever added, because that would quietly turn the column back into a form field.
+
+**It is a label, not an identity.** Nothing authorises on it, `proposed_by` remains the key, and an
+email that changes in GoTrue does not retro-fit onto proposals already filed — the record says who
+asked at the time. It joined the columns `0086`'s transition guard forbids a proposer to move, so it
+cannot be rewritten under an approver who is already reading it, and `approve_proposal()` carries it
+into the audit row beside the uuid.
+
+### The schema lane, and the second approval gate (`0088`, withdrawn by `0090`)
+
+> **This lane no longer exists.** [`0090`](#the-queue-moves-to-the-assets-an-operator-can-see-0090)
+> withdrew it. The section is kept because the reasoning below — one function naming who decides
+> each lane, rejection gated identically to approval, an act-shaped patch — is what the lanes that
+> replaced it are built on. What `0088` could not supply was a reason for an `Operator` to be in
+> this lane at all: a draft is created by `fork_schema()`, which needs `schema:manage`, so the only
+> person who could create the draft was the only person who could publish it.
+
+`0088` added the queue's second lane: an `Operator` proposed that a **draft schema be published**,
+and an `Administrator` approved — at which point the approval called `publish_schema_version()`.
+
+**One inbox, two approval gates, and the asymmetry is the substance.** A `Shopfloor_Manager` may
+approve a nameplate edit and may **not** approve a schema publication, because `0069` withdrew
+`schema:manage` from that role and [`0087`](#0069-narrowed-the-policies-and-the-rpcs-went-around-them-0087)
+made the RPC enforce it. `may_decide_proposal()` is the one function naming who decides each lane,
+read by both `approve_proposal()` and `reject_proposal()` so the two cannot drift apart — which is
+the failure `0087` had just finished repairing between an RPC and the policies it was written to
+match. It is fail-closed for a lane nobody has classified.
+
+**Rejecting is gated identically to approving.** Rejection looks like the lesser act, but a manager
+able to refuse a schema publication could block an Administrator-only decision indefinitely, and the
+operator would read that refusal as the platform's answer.
+
+**The lane proposes an act, not a column edit.** Publishing activates the draft, archives its
+parent, repoints every `device_submodels` row and the legacy `devices.schema_id`, and drops the
+duplicate links that would collide — one transaction. A patch of `{"status": "active"}` would name
+one column write while the apply path did six other things, so the patch is `{"publish": true}` and
+`proposable_columns()` returns `publish` for this lane. Its contract is *the keys a patch may name*:
+columns for the asset lanes, the act for this one. Anything else — `{"publish": false}` above all —
+is refused, because there is no such act to perform.
+
+**A second table was the alternative and was rejected**: it would give the queue two shapes, two
+caps, two retention answers and two pages, to model a difference that is one key in a JSONB column.
+
+**The draft check runs twice, and both are needed.** At proposal time so an operator learns
+immediately rather than after a week in a queue; at approval time inside `publish_schema_version()`
+because the draft can be published by somebody else in between, and the approval is what has to be
+right. `test_change_proposals.py` asserts that a draft published underneath an open proposal aborts
+its approval.
+
+**The audit row lands in the `security` domain**, because `audit_domain_for('schemas')` says so and
+`0070`'s rule is who may perform the act. So the proposing `Operator` cannot read it — what they can
+read is their own proposal row, carrying `status`, `decided_by` and `applied_thread_id`. The queue
+is the proposer's record; the thread is the platform's.
+
+### The queue moves to the assets an Operator can see (`0090`)
+
+`0090` does three things: it **withdraws the schema lane**, adds **five lanes** in its place, and
+refuses to approve a proposal that **has already come true**.
+
+**The withdrawal is about ingress, not about the lane's design.** `0088`'s lane worked exactly as
+written. What it lacked was a reason for an `Operator` to be there: `fork_schema()` requires
+`schema:manage`, withdrawn from every role but `Administrator` by `0069` and enforced at the RPC by
+`0087` — so the only person who could create a draft was the only person who could publish it. An
+`Operator` "proposing" a publication was endorsing somebody else's work rather than asking for a
+change they could not make. That is a different feature, and this queue is for the second thing.
+[`0087`](#0069-narrowed-the-policies-and-the-rpcs-went-around-them-0087) is **not** reverted: it
+closed a live hole and stands on its own.
+
+**The history is not retracted with the lane.** The `CHECK` constraint still admits the string, so
+every schema proposal ever applied or rejected survives — a constraint that refused it would have
+refused rows already in the table and failed the migration on any stack that had used the lane. The
+lane is closed by `proposable_columns()` returning the empty array (so the validator's fail-closed
+branch refuses a new one, and *names* the reason) and by `may_decide_proposal()` returning false.
+Anything still open was withdrawn with a reason, because a row in a lane nobody can decide is worse
+than either keeping the lane or deleting the row.
+
+**Five lanes in two shapes.** `cells` and `gateways` take the same shape as `devices`: a patch of
+allowlisted columns over an existing row. `cell_links`, `gateway_links` and `device_links` take a
+**new** shape — the patch is a row to *create* in `links`, so `display_name` and `url` are
+**required** rather than optional, which is the opposite of every lane before them, where an absent
+key means *leave this alone*. They are three lanes rather than one because `entity_id` is a bare
+uuid whose table is decided by `entity_type`, and the validator has to know which table to look the
+target up in; one `links` lane would have had to carry the asset kind inside the patch, where the
+`CHECK` cannot see it and the per-asset unique index cannot scope it.
+
+**The new lanes resolve authority, not role names**, and `0087` is why: it found two predicates
+deciding one question and disagreeing silently, with the wider one winning. A lane gated on
+`cell:manage` cannot drift from the policy on `public.cells` in that way. The effective answer is
+the same today — `Administrator` and `Shopfloor_Manager` hold all three grants — and the point is
+what happens the day one is withdrawn: the lane closes with it rather than outliving it. The two
+device lanes keep their role pair, because `device:manage` is held by exactly those two roles and
+rewriting them would be a no-op with a migration's blast radius.
+
+**What a gateway proposal may not name** is the security half, restated for a new table: not
+`deployment`, `is_virtual`, `is_simulated`, `is_shadow` or `sparkplug_group` — those describe what
+the gateway *is* and what it publishes under, and moving one re-points a broker topic namespace —
+and not `status`, `last_heartbeat`, `agent_version`, `cert_expires_at` or any health column, which
+are what the platform **observed**. A proposal able to edit those would let somebody assert a
+gateway is healthy by describing it.
+
+**A proposal that has already come true cannot be approved.** Nothing stops a `Shopfloor_Manager`
+editing an asset while a proposal sits open against it, and nothing should — the queue is a way to
+*ask*, not a lock. But it means a proposal can be overtaken, and approving it would write a
+`PROPOSAL_APPLIED` row naming an approver and a patch for a change that did not happen in that
+transaction: an act with no effect, attributed to somebody who did not perform it, while the real
+change sits in an earlier row by somebody else. `proposal_is_already_true()` answers the question
+and `approve_proposal()` refuses. The repair is to **reject** it — "already done, by hand, on
+Tuesday" — which records what actually happened.
+
+The test is `to_jsonb(current_row) @> patch`: **containment, not equality**. It asks whether the row
+already holds every value the patch proposes and ignores the columns the patch says nothing about,
+which is what a patch means. A partly-overtaken proposal is still approvable. A type mismatch
+between a form's string and a typed column makes containment false — so the failure mode is
+"approval proceeds", never "a real change is refused as a no-op". The function is granted to
+`authenticated` so the queue can *warn* before somebody clicks rather than only refusing afterwards.
+
+**`proposable_link_tags()` is mirrored by `TAG_LABELS`** in
+`frontend/src/components/modals/EntityLinksModal.jsx`, and `scripts/check-mirror-drift.mjs` compares
+them. A tag added to the form and not to the function is a dropdown option that every proposal
+naming it is refused for, which reads as the form being broken rather than as the value being
+unknown. `links.link_tag` itself still carries no `CHECK`; retro-fitting one to a table with rows in
+it is a different migration with a different risk, and what `0090` does is refuse to create new junk
+through the path it opens.
+
+### A draft can be discarded (`0091`)
+
+The Schemas page had been telling operators for some time that a draft can be *"published or
+discarded"* — it is the tooltip on the disabled Fork control — and there was no way to discard one.
+
+**That made the state a trap.** One draft may exist per lineage at a time, because forking is
+refused while one is open (two drafts off one parent would create a second head). So the only exit
+from a draft nobody wanted was to **publish** it — which activates it, archives the parent and
+repoints every attached device. That is a considerable act to be pushed into by the absence of a
+Cancel button.
+
+**It is an RPC, and not the `DELETE` policy that already existed.** `schemas_delete_privileged` has
+admitted an Administrator since the baseline, and that is precisely the problem:
+`devices.schema_id` is `ON DELETE SET NULL` and `device_submodels.schema_id` is `ON DELETE CASCADE`,
+so deleting an **active** schema silently detaches every device bound to it — no error, no warning,
+and the next conformance run reports every metric as unmodelled. `discard_schema_draft()` refuses
+anything whose status is not `draft`, and returns the number of device attachments the cascade
+removed rather than letting them disappear out of sight. The policy is unchanged; what the UI calls
+is now a door that cannot make that mistake.
+
+**A draft may legitimately have devices attached** — `publish_schema_version()` depends on that
+being possible, since somebody can attach a draft to a machine to try it out before publishing.
+Those rows are what the cascade removes, and the count is surfaced so the toast can say so.
+
+**The parent is untouched**, which is the whole point: discarding v2 leaves v1 active, attached and
+unarchived, and the lineage returns to the state it was in before the fork. The `DELETE` writes its
+own `digital_thread` row, because `schemas` has been in the audit trigger since `0070`. The gate is
+`schema:manage`, matching what [`0087`](#0069-narrowed-the-policies-and-the-rpcs-went-around-them-0087)
+put on `fork_schema()` and `publish_schema_version()` — a `SECURITY DEFINER` function bypasses RLS
+entirely, so its own check is the only one there is.
+
+### A device behind a gateway that never arrived is not late (`0092`)
+
+"Ingestion Consuming Nothing" is gated on `expected_publishers > 0`, because *"no traffic"* and *"no
+traffic from a fleet that should be publishing"* are different conditions and only the second is a
+fault. **The gate was still too wide.** It counted a device on the strength of
+`gateway_id IS NOT NULL` — being *bound* to a gateway, regardless of whether that gateway had ever
+existed anywhere but in the database.
+
+Register a device, point it at a gateway whose bundle nobody has deployed yet, and ten minutes later
+the platform raises a **critical** alert reading *"Telemetry is not reaching the historian. Check the
+broker connection."* Nothing is wrong with the broker, the daemon or the historian — the edge node
+was never set up. The alert names the wrong subsystem, at the highest severity, during the exact
+task where somebody is least equipped to tell a real fault from a false one.
+
+**A path has to have existed at least once**, and a device now qualifies on either piece of evidence
+for that: its own `first_dbirth_at IS NOT NULL`, or its gateway's `last_heartbeat IS NOT NULL`.
+`0001`'s comment on that column is the contract this leans on — *"NULL means no heartbeat has ever
+arrived"* — and nothing clears it once set, so it is a record of first contact rather than a
+liveness reading. **A gateway that was publishing and has died still counts**, which is correct:
+that is the case the alert exists for. Only the gateway that has *never* arrived is excluded, and
+that distinction is available precisely because the column is never cleared.
+
+`enrolled_at` was rejected as the signal because enrolment issues a credential and does not prove
+anything was deployed with it; `status = 'ONLINE'` because it is a liveness reading, and gating on
+it would disable the alert in the one state it exists for.
+
+**The file was generated from `0001`'s own text rather than retyped.** `platform_health_rows()` is
+one SQL body, so changing one clause means redeclaring all four conditions — and a dropped condition
+is silent, because the rule reading it goes to NoData and several of these treat NoData as OK. The
+self-check asserts that the two conditions reported even at zero still come back.
 
 ### `relocate_devices()` — one rearrangement, one causation
 
@@ -2281,7 +2604,7 @@ strength of a variable nobody set would be the worst of both behaviours.
 
 On Kubernetes this is what surfaces the chart's port-free hostnames on the page. On Compose it shows
 whatever the operator configured, which is still a port — **port-free URLs there need the reverse
-proxy in roadmap §11**, sequenced after this so a proxy cannot serve `nodered.<domain>` while this
+proxy in roadmap §12**, sequenced after this so a proxy cannot serve `nodered.<domain>` while this
 table advertises `localhost:1880`.
 
 ---

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import {
-  IconGitBranch, IconLock, IconHistory, IconAlertTriangle, IconCheck, IconDownload
+  IconGitBranch, IconLock, IconHistory, IconAlertTriangle, IconCheck, IconDownload, IconTrash
 } from '../common/Icons'
 import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
@@ -34,7 +34,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
  */
 export function SchemaDetailModal({
   schema, schemas = [], catalog = [], deviceCount = 0, canManage = false,
-  onFork, onPublish, onSaveDraft, onDownload, onClose, showToast
+  onFork, onPublish, onDiscard, onSaveDraft, onDownload, onClose, showToast
 }) {
   // Escape closes. Via the shared stack rather than a listener of this component's own,
   // because a ConfirmModal can open on top of this one and a bare document listener on each
@@ -403,6 +403,28 @@ export function SchemaDetailModal({
             >
               <IconCheck size={13} /> {`Publish Version v${schemaVersion(schema)}`}
             </ActionButton>
+          )}
+
+          {/* THE OTHER WAY OUT OF A DRAFT, and until 0091 there wasn't one. The tooltip on the
+              disabled Fork control has been saying "publish or discard it first" the whole time --
+              and discarding was the half that did not exist, so the only exit from a draft nobody
+              wanted was to PUBLISH it: archive the parent, repoint every attached device. That is
+              a considerable act to be pushed into by the absence of a Cancel button.
+
+              DANGER, NOT PRIMARY, and to the left of Publish: it destroys work, and the two must
+              not read as a pair of equals. */}
+          {editable && onDiscard && (
+            <button
+              type="button"
+              className="btn btn-danger"
+              disabled={!canManage || busy}
+              onClick={onDiscard}
+              title={!canManage
+                ? 'Requires Admin permissions'
+                : `Delete draft v${schemaVersion(schema)} and leave its predecessor exactly as it is`}
+            >
+              <IconTrash size={13} /> Discard Draft
+            </button>
           )}
 
           {/* The single primary action on a read-only version. Rendered only when the schema is

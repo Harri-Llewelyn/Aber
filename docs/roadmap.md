@@ -27,19 +27,22 @@ anything else, which is exactly what 7 goes on to do. **5 is the only item here 
 BROKER credential plane** rather than the database one; it sits at the end of the chain because the
 database plane's own credential work has now shipped and explicitly scoped that plane out, and
 because its strongest argument is a gap (a revoked gateway that is already connected keeps
-publishing) rather than a feature. **6-10 arrive from feature requests** — 6, 8 and 10 from GitHub
+publishing) rather than a feature. **6-11 arrive from feature requests** — 6, 8 and 11 from GitHub
 issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
-[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 7 and 9 were not filed. **9 is
+[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 7, 9 and 10 were not filed. **10 is
 sequenced *after* 8 because it removes what 8 replaces, and 7 is sequenced *before* it because 8
 cannot ask an `Operator` for a proposal until 7 has given that role a way to make one** — 7 is the
 queue and the authority, 8 is one lane's payload and the edge sync that carries it.
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **11 and 12 are the
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **9 sits between them because
+it is the same appliance seen from underneath**: 8 makes a gateway's flow reviewable, 9 makes the
+machine the flow runs on a managed artefact, and the two share one puller — which is why 8 now names
+`ansible-pull` and 9 argues it. **12 and 13 are the
 platform's own and sit last anyway**, because each has for its subject something that runs under or
-over every other item rather than any one chain: 11 is the transport between the services, 12 the
-record of what they did. Neither blocks the other. 11 is written first because reading it before 5
-and 8 invites starting it in the wrong order, which is the one thing it asks not to happen; 12 has
+over every other item rather than any one chain: 12 is the transport between the services, 13 the
+record of what they did. Neither blocks the other. 12 is written first because reading it before 5
+and 8 invites starting it in the wrong order, which is the one thing it asks not to happen; 13 has
 no such constraint and is last because it is the newest.
 
 **Contextual help shipped and left this list on 2026-09-06.** It was 11; 12 and 13 moved down by
@@ -666,29 +669,44 @@ does not currently have.
 
 ---
 
-## 6 · The Directory's MQTT half, and the one lookup it still lacks
+## 6 · The Directory's MQTT half, and the trust decision underneath it
 
 **Builds on:** [`supabase/functions/fplus-directory/index.ts`](../supabase/functions/fplus-directory/index.ts) ·
 `directory_services` (`0001`) · `gateways.sparkplug_group` (`0008`) · `relocate_devices()` (`0033`) ·
 [issue #64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64)
 
-**The issue calls `fplus-directory` "a stubbed Edge Function", and it is not.** It serves six routes
-— `/ping`, `/v1/device`, `/v1/device/{uuid}`, `/v1/address/{group}/{node}`, `/v1/schema` and
-`/v1/service` — including two of the three the issue proposes to add. It reads as the **caller**
+**The issue calls `fplus-directory` "a stubbed Edge Function", and it is not.** It serves seven
+routes — `/ping`, `/v1/device`, `/v1/device/{uuid}`, `/v1/address/{group}/{node}`, `/v1/schema`,
+`/v1/schema/{uuid}` and `/v1/service` — which is every REST route the issue proposes, the last of
+them added by this entry. It reads as the **caller**
 rather than the service role, deliberately and with no `SUPABASE_SERVICE_ROLE_KEY` in its registry
 entry, because a Directory is a live read across the whole address space and the service key would
 hand every authenticated user a view their RLS policies do not grant. That property is the thing any
 expansion must not quietly drop.
 
-**What is genuinely missing is smaller, and worth naming exactly.** `GET /v1/schema` lists the schema
-UUIDs in use, but there is **no `/v1/schema/{uuid}`** — the reverse lookup, *which devices implement
-this schema*, is the one route in the issue that does not exist. UUID-to-topic resolution already
-works, and already survives relocation, because the address is composed from
-`(sparkplug_group, sparkplug_id)` at read time rather than stored: `relocate_devices()` moves a device
-between cells without touching either, so continuity is a property of the schema rather than something
-the Directory has to maintain.
+**The reverse lookup shipped on 2026-09-06 and has left this entry**, which is what remains of the
+REST half. `GET /v1/schema/{uuid}` — *which devices implement this schema* — was the one route in
+the issue that did not exist; its substance is now in
+[The Factory+ Directory adapter](../supabase/README.md#the-factory-directory-adapter), and
+`test_fplus_directory.py` is the suite. UUID-to-topic resolution already worked, and already
+survived relocation, because the address is composed from `(sparkplug_group, sparkplug_id)` at read
+time rather than stored: `relocate_devices()` moves a device between cells without touching either,
+so continuity is a property of the schema rather than something the Directory has to maintain.
 
-**The MQTT interface is the real new surface, and the file already argues with itself about it.** Its
+**Three things that route argued came out differently in the building.** It deliberately does NOT
+filter on `status` the way the collection does — `/v1/schema` lists what is in use and returns only
+`active` versions, but an identifier a caller already holds resolves to whatever it names, and the
+most useful case a filter would have hidden is an **archived** schema with devices still attached,
+which is a migration that has not finished. It reads `device_schemas` rather than
+`device_submodels`, because the view unions the join table with the legacy 1:1 `devices.schema_id`
+and the join table alone would silently omit exactly the devices an old schema still holds — the
+suite provisions one of each rather than trusting that. And the forward and reverse answers are
+composed by **different queries over the same view**, so a disagreement between them is a `200` at
+both endpoints; the suite asserts the round trip rather than either half, which is the same
+reasoning `TestExportAgreement` follows for the two AAS surfaces.
+
+**What is left of this item is the MQTT interface, which is the real new surface, and the file
+already argues with itself about it.** Its
 header states what this deliberately is not: *"It does not consume Sparkplug births to build its own
 registry, it has no change-notify metrics, and it does not register itself with a Configuration Store,
 because there is no ConfigDB here to register with."* The issue's first implementation step — have the
@@ -698,15 +716,17 @@ from what devices claim about themselves. Given the rule that a self-declared ma
 -- see [Schema Conformance](../ingestion/README.md#schema-conformance) -- that is a trust decision, not
 a plumbing one.
 
-**And the local-namespace caveats are load bearing.** Both `/v1/schema` and `/v1/service` return
-`namespace: "local"` with a note that these are not registered Factory+ UUIDs. Publishing the same
+**And the local-namespace caveats are load bearing.** All three of `/v1/schema`,
+`/v1/schema/{uuid}` and `/v1/service` return `namespace: "local"` with a note that these are not
+registered Factory+ UUIDs — from one shared constant, since the qualification is the thing a second
+route is most likely to be written without. Publishing the same
 values to a well-known MQTT topic strips that note off them — a headless subscriber receives bare
 UUIDs with no way to know they were locally minted. Whatever the topic payload looks like, it has to
 carry the qualification, or the interoperability claim becomes false the moment it leaves HTTP.
 
 ---
 
-## 7 · An approvals queue, and the first write an `Operator` has ever had
+## 7 · The approvals queue, and the flow lane that is waiting on §8
 
 **Builds on:** [`approve_quarantined_device()`](../supabase/migrations/0001_baseline_schema.sql) and the
 role re-check inside it · `has_role()` and the write policies it gates · the `Operator` role as seeded
@@ -721,6 +741,49 @@ in [`0002`](../supabase/migrations/0002_seed_data.sql) · `device_nameplate` · 
 One queue for every change a person proposes but may not make: a gateway's flow, an asset's details,
 a schema's publication. An `Operator` proposes; a `Shopfloor_Manager` or `Administrator` approves;
 the approval is the write.
+
+**Everything but the flow lane shipped on 2026-09-07.** The substrate and the asset-details lane
+as [`0086`](../supabase/migrations/0086_a_change_can_be_proposed_before_it_is_made.sql), the
+proposer's name as [`0089`](../supabase/migrations/0089_a_proposal_says_who_asked_in_words.sql), and
+cells, gateways and document links as
+[`0090`](../supabase/migrations/0090_the_queue_moves_to_the_assets_operators_can_see.sql).
+**What remains is the flow lane alone, and it belongs with §8** — nothing else here is outstanding.
+
+**The schema lane shipped as `0088` and was withdrawn by `0090`.** It was built correctly and had
+no ingress: a draft is created by `fork_schema()`, which needs `schema:manage` — Administrator-only
+since `0069` and enforced at the RPC by `0087` — so the only person who could create the draft was
+the only person who could publish it. An `Operator` "proposing" a publication was endorsing
+somebody else's work rather than asking for a change they could not make, which is a different
+feature. Cells and gateways took its place: assets an `Operator` looks at all day and cannot edit,
+which is the condition this queue was built for and the one the schema lane never met.
+
+The substance is in
+[The approvals queue, and the first write an `Operator` has ever had](../supabase/README.md#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-0086)
+and [The queue moves to the assets an Operator can see](../supabase/README.md#the-queue-moves-to-the-assets-an-operator-can-see-0090);
+`test_change_proposals.py` is the suite. **Four things the entry argued came out differently, or
+sharper, in the building:**
+
+* **The unknown-entity-type refusal had to be written explicitly.** The `CHECK` constraint admits
+  the lanes that exist, but the validation trigger runs *before* it, so an unlisted entity type
+  reaches the trigger first and its allowlist is empty — which reported "proposable columns are:"
+  with nothing after the colon. That reads as a broken message rather than as a lane nobody has
+  written an allowlist for, which is the state a widened `CHECK` and a forgotten
+  `proposable_columns()` entry would actually produce. **`0090` then made that branch load-bearing
+  for a second reason**: it is how the withdrawn schema lane is closed, since the constraint still
+  admits the string for the rows already in the table.
+* **`status` cannot be withheld by a policy, only by a trigger.** An RLS `UPDATE` policy says who
+  may write a row and cannot say *which columns*; a proposer able to set `applied` would hold the
+  asset write the design exists to withhold. So the transition functions declare themselves with a
+  session flag — the mechanism `acs_cymru.actor_id` already uses — and a trigger refuses every
+  other path.
+* **`REVOKE` has to precede every `GRANT`, and the repository's own suite caught this file getting
+  it wrong.** PostgreSQL grants `EXECUTE` on a new function to `PUBLIC`, so
+  `GRANT EXECUTE … TO authenticated` alone narrows nothing. The leak heals on the second boot and
+  is therefore present on exactly one kind of installation: a new one.
+  `test_anon_privilege_baseline.py` refused the first draft.
+* **The expiry timer declares `service`**, with `changed_by` NULL. It reuses the existing
+  `actor_source` CHECK rather than minting a fifth kind, and **§8's reconciling sidecar should give
+  the same answer** — the question was always whether the two agree, not what the value is called.
 
 ### The role this is built for currently holds nothing to build on
 
@@ -772,7 +835,12 @@ person authored, and approving it mints identity and binds a device to a gateway
 `quarantine:approve` and `quarantine:reject` stay where `0002` put them, and no `Operator` gains an
 approval here or anywhere.
 
-### Schemas already version themselves, and this must not fork that
+### Schemas already version themselves, and this must not fork that — *lane withdrawn by `0090`*
+
+> **The lane described below no longer exists.** The reasoning is kept because it is what `0087`
+> came out of and because the "one function naming who decides each lane" shape is what every lane
+> since is built on. What `0088` could not supply was a reason for an `Operator` to be in it — see
+> the status note at the top of this item.
 
 `publish_schema_version()` archives the parent, atomically repoints every `device_submodels` row and
 the legacy `devices.schema_id` pointer, and drops the duplicate links that would otherwise collide —
@@ -783,6 +851,69 @@ approval calls that function; it does not model versions beside the ones `schema
 **Its approver is narrower than the other lanes', and that should be stated rather than smoothed
 over:** `schema:manage` became Administrator-only in `0069`, so a `Shopfloor_Manager` who can approve
 a nameplate edit cannot approve a schema publication. One inbox, two approval gates.
+
+**This shipped as `0088`, and building it found that the narrower gate did not exist yet.**
+`0069` narrowed *policies*; `fork_schema()` and `publish_schema_version()` are `SECURITY DEFINER`,
+so they never consulted one, and both went on admitting the pair — measured on the shipped stack, a
+`Shopfloor_Manager` was refused the direct `UPDATE` and published through the RPC anyway. `0087`
+closed that first, because the lane's whole premise is a narrower approver and a manager refused at
+the queue could otherwise call the RPC. **Two things the entry did not anticipate:** rejecting had
+to be gated exactly as approving is, since a role able to refuse an act it cannot authorise can
+block it indefinitely; and the patch had to name the ACT (`{"publish": true}`) rather than a column,
+because `{"status": "active"}` describes one write while the apply path performs six.
+
+### One form per asset, because two forms drift
+
+**The page's own composer was built and then removed.** It listed the columns
+`proposable_columns()` returns, one text input each — which meant proposing a relocation asked for
+a `cell_id` **as a typed uuid**, where the asset's own Edit Details dialog has a dropdown. Two
+forms describing one device is a drift generator and the drift is silent: the day a field, a hint
+or a validation rule is added to one, the two quietly start disagreeing about what a device is.
+
+So there is one form per asset — the one that was already there — and the footer button is the only
+thing that differs: `Save` for somebody who may make the change, `Propose a change` for somebody
+who may not. [`proposeFromForm.js`](../frontend/src/utils/proposeFromForm.js) is the translation
+layer, and it is deliberately **not** derived from `proposable_columns()`: that function answers
+*which columns may be named*, and this answers *which box on this form is that column*. Only the
+form knows the second, and `asset_name → name`, `cell_name → name` and `access_url → grafana_url`
+are three pairs a string-matching mapping gets silently wrong.
+
+**A field that is not proposable is disabled with its reason printed, not hidden.** Hiding it would
+make two dialogs out of one — the drift again — and would conceal that a device's gateway
+assignment exists at all.
+
+### A proposal can be overtaken, and approving it then records a lie
+
+Nothing stops a `Shopfloor_Manager` editing an asset while a proposal sits open against it, and
+nothing should — the queue is a way to **ask**, not a lock. But approving a request whose values are
+already in place writes a `PROPOSAL_APPLIED` row naming an approver and a patch for a change that
+did not happen in that transaction: an act with no effect, attributed to somebody who did not
+perform it, while the real change sits in an earlier row by somebody else.
+
+`0090` refuses it. The test is `to_jsonb(current_row) @> patch` — **containment, not equality** — so
+a partly-overtaken proposal is still approvable, and a type mismatch between a form's string and a
+typed column fails toward *"approval proceeds"* rather than refusing a real change. The repair is to
+**reject** it with that as the reason, which records what actually happened.
+
+### A self-check that counts totals is a landmine under every later migration
+
+**`0069`'s self-check asserted that `Administrator` holds exactly 13 permissions.** `0086` granted
+`proposal:create` to three roles, taking it to 14 — and because migrations replay on every boot in
+filename order with no ledger, and `0069` runs long before `0086`, the chain **aborted at `0069` on
+every boot after the one where `0086` first ran**. The stack silently lost the ability to apply any
+new migration while continuing to run perfectly on the schema it already had. It surfaced as
+`0090` and `0091` appearing not to exist.
+
+**The test lane cannot catch this.** `npm run test:db` builds a database from nothing, so `0069`
+always runs before `0086` grants and always counts 13. Only a *second* boot reproduces it, which is
+why it shipped green.
+
+**A self-check must assert what its own migration did, not the state of the world.** `0069`'s
+subject is a withdrawal, so it now asserts that `Administrator` holds all three withdrawn
+permissions and that `Shopfloor_Manager` holds nothing `Administrator` does not — both stable under
+any later grant, and the second is a stronger claim than the count ever was.
+[`0049`](../supabase/migrations/0049_documents_become_links.sql) had the right shape all along: it
+asserts `>= 2`, a floor rather than an equality.
 
 ### Two caps, doing two different jobs, and both in the database
 
@@ -919,6 +1050,17 @@ proposal to place a general-purpose orchestrator or job runner in the plant: a c
 whatever the centre queues for it is a strictly larger surface than the `deploy-nodered` endpoint that
 was refused for exactly that reason, and it earns nothing the puller does not already have.
 
+**That refusal is about PROVENANCE, not about capability, and §9 turns on the distinction.** What is
+refused is an appliance taking instructions from a live queue — no artefact, nothing to diff, nothing
+to review. An appliance that converges to a commit somebody approved is the opposite object, however
+much it ends up running. `deploy-nodered`'s contract said it in one line, and it generalises past
+flows: **deploy only what is committed.**
+
+**The puller should be `ansible-pull`**, which is that sidecar with its reconciliation already
+written. §9 argues the choice and owns the appliance half; what matters here is that the flow lane
+gets a converger it does not have to build, and one that is idempotent by construction rather than by
+care — the property §5 identifies as the hard part of any boot-time reconcile.
+
 **Drift detection is the same mechanism read backwards, and half of it is already built.** The
 heartbeat already reports a **flow hash** — recorded by `bootstrap` at enrolment and carried in the
 same 30-second message as uptime and load. Comparing that against the committed head of the gateway's
@@ -927,7 +1069,7 @@ connection into it.
 
 ### The approval gate is the missing thing, and Git already is one
 
-**The gap §9 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
+**The gap §10 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
 no diff. That is the real complaint, and it is worth stating that Git answers it directly rather than
 being merely the transport: *pending approval* is an open pull request, *approved* is a merge, and
 *undo* is a revert commit. Anything that models those three states in the database beside a stored
@@ -938,7 +1080,7 @@ systems that will disagree.
 and already refuses `flows_cred.json` **by shape rather than by filename**; what changes is its
 destination — a branch and a pull request in the gateway's source repository instead of an object in
 a private bucket. The upload is then the backup and the proposed deployment in one artefact, which
-also removes the awkward sequencing between this item and §9: the bucket stops being load-bearing at
+also removes the awkward sequencing between this item and §10: the bucket stops being load-bearing at
 the moment the first flow lands in a repository, not before.
 
 **`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
@@ -1002,22 +1144,34 @@ The enrolment token's single-use semantics and the once-only guard in `bootstrap
 ACL's `%u` confinement, which is what stops one gateway forging another's telemetry and is enforced
 independently of anything here; `flows_cred.json`, which must not leave the appliance in a backup, a
 commit or a diff; and the `gateway-backups` bucket's privacy setting, which stays exactly as it is
-until §9 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
+until §10 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
 dead weight until the pull half replaces what it does.
 
 ### Worth deciding early
 
-**The forge.** Self-hosted or hosted, and for an on-premises deployment on a private domain that is
-the same question `deploy/k8s/internal-ca.yaml` already answers for certificates. Commit signature
-verification makes it a smaller question than it looks. **What it is not is an identity store:** §7
-puts the queue in Postgres and reaches the forge through one machine account, so no `Operator` needs
-a forge login and the forge never has to learn what `gitops:manage` means.
+**The forge is decided: self-hosted Gitea**, on the private domain, with TLS from the internal CA —
+which is the same answer `deploy/k8s/internal-ca.yaml` already gives for every other on-premises
+certificate, arrived at for the same reason. A hosted forge would put the plant's edge topology on
+somebody else's infrastructure and make the deploy path depend on the site's internet link, which an
+appliance in a machine shop cannot assume. Commit signature verification makes the *transport* a
+smaller question than it looks, and it does not make that one smaller.
+
+**What it is not is an identity store**, and choosing a forge with a full user model makes that
+easier to violate rather than harder. §7 puts the queue in Postgres and reaches the forge through
+**one machine account**; Gitea's own users, organisations and teams stay empty of shopfloor people,
+no `Operator` holds a login, and the forge never learns what `gitops:manage` means. Per-gateway
+**read-only** deploy keys are the only other principal it needs.
+
+**Two costs that arrive with it and are not otherwise recorded.** Gitea is a durable store with
+state, so it lands inside §4's backup scope before §4 is built — and it would be the second store in
+the repository with no retention answer, which is §13's complaint arriving a second time. Neither is
+a reason to choose differently; both are reasons to decide them in the change that adds it.
 
 **One repository or one per gateway.** A repository per gateway gives clean per-appliance deploy keys
 and independent history; one repository with a branch per gateway gives a fleet-wide diff and one
 place to review. The deploy key granularity is the deciding constraint, not the ergonomics.
 
-**Where `target_branch` lives** — deferred to §9, which owns the links-store question, but this item
+**Where `target_branch` lives** — deferred to §10, which owns the links-store question, but this item
 is what makes it load-bearing rather than cosmetic.
 
 **The actor kind for the audit row.** Logging the revision hash into `digital_thread` needs one: rows
@@ -1029,7 +1183,307 @@ for both.
 
 ---
 
-## 9 · Retiring the flow-backup bucket, and pointing at repositories instead
+## 9 · The appliance itself, and the code somebody wants to run on it
+
+**Builds on:** [`supabase/functions/gateway-bundle/index.ts`](../supabase/functions/gateway-bundle/index.ts),
+which is BUILT · [`gateway-bundle-template/docker-compose.yml`](../gateway-bundle-template/docker-compose.yml)
+and its `node-exporter` block · [`bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs)'s once-only
+guard · [`docs/physical-gateways.md`](physical-gateways.md) · the `apikey` gate and its four
+deliberate exemptions in [`supabase/envoy.yaml`](../supabase/envoy.yaml) ·
+[`scripts/check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) ·
+[`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) · **§8, which owns the forge and the
+puller this reuses, and is a prerequisite for the second half rather than a neighbour** ·
+**arrives from a request to run custom data-gathering software on gateways, for legacy machinery,
+and is not filed as an issue**
+
+**Two subjects that are one appliance.** Commissioning a gateway should be a command somebody pastes,
+and the machine it lands on should be a managed artefact afterwards rather than a box nobody touches
+again until it fails. §8 makes a gateway's *flow* reviewable; nothing makes the *appliance* anything.
+
+**The second subject grows a third thing that is not on the appliance at all** — a build plane and a
+registry at the centre, because the custom lane's premise is that an engineer pushes a repository and
+an appliance ends up running a container. That is new infrastructure with its own trust properties
+and it is argued below rather than assumed into the puller.
+
+**THE FIRST HALF IS BLOCKED AND THE SECOND IS NOT, which is why they are written as two.** The
+one-liner cannot be designed until somebody decides how a fresh appliance comes to trust this
+platform's certificate — the first entry under *Worth deciding early*, and a question about a
+deployment's network rather than about this repository. The OS baseline, the puller and the custom
+lane depend on none of that. **Nothing here should be started as one piece of work.**
+
+### What is already built, so that it is not re-argued
+
+`gateway-bundle` mints a single-use enrolment token through a `SECURITY DEFINER` RPC and streams a
+ZIP, holding no service-role key and refusing every role but Administrator and Shopfloor_Manager.
+The bundle already carries Node-RED **and** `node_exporter`, with the argument for collecting
+locally and never scraping from the centre written out beside it. `bootstrap.mjs` enrols once,
+guarded by `/data/.enrolled.json`, retries only a 503 that says the claim was released, and prints
+an editor password that exists nowhere else in plaintext.
+
+So the new content here is the **transport** of that bundle, the **operating system** underneath it,
+and a **second workload** beside Node-RED. Not the enrolment model, which works.
+
+### The install is a download; the request is a command
+
+Today's path is: generate a bundle in the dashboard, move a ZIP to the appliance, unzip,
+`docker compose up -d`, then read the editor password out of the bootstrap logs. Every step is
+defensible and the sequence is still a file transfer onto a machine in a machine shop.
+
+The asked-for shape is one line:
+
+```
+curl -sSL -H "X-Enrolment-Token: <token>" https://api.<domain>/functions/v1/gateway-bundle | bash
+```
+
+**That is the same authorisation model as `enroll-gateway`, not the one `gateway-bundle` has
+today.** `gateway-bundle` is a `POST` authorised by a *role*, resolved from a caller's JWT. An
+appliance has no user, which is the reason `enroll-gateway` is the one function in the registry that
+does not call `resolveUserRole()`. The split to build is therefore: **the dashboard mints
+(role-gated), the appliance fetches (token-gated)** — which is a cleaner separation than the current
+function's, where minting and packaging are one act.
+
+### Three things the one-liner has to answer, and none of them is the shell script
+
+**THE TOKEN MUST NOT TRAVEL IN THE QUERY STRING.** This repository has already paid for that lesson
+once: the Realtime route carries its `apikey` as a query parameter, and `envoy.yaml`'s access log
+format records `%ROUTE_NAME%` rather than the path *specifically so the key is not written to disk*.
+A `?token=` in a pasted command lands in the operator's shell history, in every proxy between, and in
+the gateway's own log unless that trick is repeated. A header costs nothing and is the same decision
+already made next door.
+
+**`/functions/v1/` IS GATED ON `apikey`, so the command as written answers 401 before the function
+runs.** Opening it is a **fifth** deliberate exemption beside the four `check-gateway-surface.mjs`
+already enumerates, and it should arrive as a row in that inventory in the same change — the whole
+value of that script is that a route opened and argued for is distinguishable from a route opened by
+accident. The alternative is to carry the publishable key in the pasted command too, which makes the
+line longer, leaks nothing, and is the cheaper first version.
+
+**THE CA IS A CHICKEN AND AN EGG, AND IT IS THE PART TO DESIGN FIRST.** `internal-ca.yaml` exists
+because the target is an on-premises private domain that ACME cannot serve. A fresh Ubuntu install
+does not trust that root, so `curl -sSL https://api.<domain>/...` fails verification — and the honest
+next line in the documentation becomes `curl -k`, which is the one setting §12 and `envoy.yaml` both
+state does not exist anywhere in this stack. **A one-liner that teaches operators to skip
+verification is worse than the ZIP it replaces.** The current path evades this by downloading through
+a browser session that already trusts the root and installing the CA at step 2 of bootstrap; a pipe
+runs before there is a CA. **The three candidate answers and what each costs are the first entry
+under Worth deciding early below**, because choosing between them decides whether this item is small
+or not, and none of them is a change to this repository.
+
+### The fetch must not spend the token
+
+The token is single-use and short-lived, and `bootstrap.mjs` is built around the fact that a failed
+first boot cannot be retried. If **downloading** consumes it, a dropped connection on a shopfloor
+Wi-Fi link burns a gateway's enrolment before anything has been installed. Fetching validates;
+enrolling consumes. The bundle also generates `NODERED_CREDENTIAL_SECRET` per bundle, so the script
+is a secret-bearing artefact: not cacheable, not re-fetchable, and not left in `/tmp` after it runs.
+
+### Ubuntu Server as a requirement, and the seam it closes
+
+Naming one distribution is what makes everything below this line possible: `unattended-upgrades`, a
+package set, and a playbook that can assume `apt` and `systemd`. It is worth it. What it costs should
+be recorded rather than discovered: the bundle's compose file currently argues that a Windows gateway
+*"differs only in which collector is installed and this flow does not change at all"*, because
+`windows_exporter` serves the same exposition format. **That seam closes.** Nothing in the repository
+depends on it today, but it was a deliberate property and its removal is a decision.
+
+**`unattended-upgrades` must not reboot.** A gateway that restarts mid-shift is an outage on the plant
+floor, and the appliance is the one component whose downtime is visible to a machine operator rather
+than to an engineer. Security updates without `Unattended-Upgrade::Automatic-Reboot`, and reboots on
+somebody's schedule — which is a `system_settings` question if the dashboard is ever to state it.
+
+### `ansible-pull`, not Ansible
+
+**Push is the shape §8 already refuses**, and the refusal transfers exactly: playbooks driven over
+SSH from the centre need an inbound path per appliance and a static inventory, and gateways enrol
+dynamically so no static inventory can address them. That is the same pair of reasons `node_exporter`
+is polled locally instead of scraped.
+
+**`ansible-pull` is §8's sidecar, better specified.** The appliance clones its own repository on a
+timer and converges itself: outbound only, no inventory, no inbound SSH, self-healing on a timer
+rather than on attention. It also supplies for free the property §5 identifies as the hard part of any
+boot-time convergence — **reconcile idempotently rather than rewrite** — which a hand-rolled
+`git pull` and reload would have to earn.
+
+**Two playbooks, and the split is the security boundary.** A *platform* playbook owns Node-RED,
+`node_exporter`, the CA and the upgrade configuration, and comes from a repository the platform
+writes. A *custom* playbook comes from a repository the plant's own engineers write. They are not the
+same trust level and must not be the same repository.
+
+### Custom code is a provenance question, not a capability one
+
+**§8's refusal of "a general-purpose orchestrator or job runner in the plant" is about where the code
+comes from, and it is easy to misread as being about what the appliance may run.** The thing refused
+is *"a component that executes whatever the centre queues for it"* — an appliance taking instructions
+from a live queue, with no artefact to review and nothing to diff. Running an engineer's container
+from a commit somebody approved is a different object with a different failure mode, and this
+platform already states the rule that separates them. `deploy-nodered`'s contract was **deploy only
+what is committed**, and it refused an inline flow in a request body for exactly this reason.
+
+So the requirement is admissible on those terms and on no others: **a container built from a commit
+in a repository, pulled by the appliance, never a payload handed to it.** The forge is then doing the
+work it is good at, the review step is §8's, and there is no second execution path to secure.
+
+**THE REQUIREMENT IS LEGACY MACHINERY, and stating it that way changes what the lane is for.** The
+motivating case is not an engineer who wants a scratch container — it is a machine tool from 1994
+that speaks a serial protocol, a proprietary file drop, Modbus, or OPC-DA, and that no amount of
+Node-RED contrib nodes will reach. Every plant has a different one, the adapter for it is worth
+nothing to anybody else, and it is exactly the kind of code that has no business being merged into
+this repository. **A lane for bespoke adapters is what makes the platform reach the machines a plant
+actually has**, rather than the ones that were bought recently — and it is the strongest argument in
+this item, stronger than the onboarding half.
+
+It also sets the bar: an adapter for a legacy machine is long-lived, it is written once by somebody
+who then leaves, and it runs unattended for years. That is an argument for the forge and the build
+being mandatory rather than convenient — an adapter whose source nobody can find is a machine that
+silently stops being observable.
+
+### Nobody builds these images by hand, and that is a third plane
+
+**"Push a repository and get a container" means a BUILD, and a build means a runner and a
+REGISTRY.** Gitea supplies both — Actions, and its own package registry — which is a real argument
+for it over a bare Git server and should be recorded as one rather than discovered halfway through.
+Three consequences, none cosmetic:
+
+**A build runner executes arbitrary code out of a repository.** That is the general-purpose job
+runner this item refuses in the plant, sited at the centre instead — where it is a defensible thing
+to own and not a free one. It should not share a host with the database: a runner is compromised by
+whatever it builds, and the blast radius belongs to a build machine rather than to the platform.
+
+**The registry is a fourth credential plane**, after the broker (§5), the database, and the forge
+(§8). The thing that stops it being genuinely new is that Gitea's registry takes the same tokens as
+its Git side, so §8's per-gateway **read-only deploy key** can be the pull credential too, revoked in
+one place. **That should be measured rather than assumed** — if the two are separate, the appliance
+holds two secrets and revocation acquires a second home, which is the shape §5 exists to complain
+about.
+
+**"Deploy only what is committed" weakens to "deploy only what was BUILT from a commit"** unless
+something carries the claim across the runner. The appliance pulls an image, not a source tree.
+Pinning by **digest rather than by tag** is the cheap half — a tag is a mutable pointer, and this
+repository already refuses `:latest` everywhere for that reason. Signing the image is the other half,
+and it does for the registry exactly what §8 argues commit signature verification does for the forge:
+makes the transport and the host untrusted-safe rather than something else to secure.
+
+**ARCHITECTURE IS WHERE THIS FAILS FIRST AND MOST CONFUSINGLY.** Gateways are whatever hardware a
+plant already had — arm64 single-board computers and amd64 industrial PCs both, often in the same
+plant. An image built for one and pulled by the other fails at `docker run`, on the appliance, after
+enrolment, in front of whoever is commissioning it. Multi-arch builds or a declared architecture per
+gateway; either is fine, neither is free, and finding out on a shopfloor is the expensive way.
+
+### An adapter exists to produce telemetry, so the boundary has to say how it leaves
+
+**The container is the boundary and it must be a narrow one.** The custom workload gets no broker
+credential, no access to `flows_cred.json` or the Node-RED data volume, no Docker socket, and no root
+on the host.
+
+**Left there, that boundary contradicts the purpose.** An adapter for a legacy machine exists
+precisely to emit data, and a rule that it cannot reach the broker is a rule that it cannot work. The
+resolution is not to relax it.
+
+**It publishes locally, and Node-RED forwards.** The custom container speaks to Node-RED over the
+appliance's own network — an HTTP endpoint, or a local topic — and Node-RED republishes on the
+Sparkplug connection it already holds. Three properties come free. The gateway keeps **exactly one**
+broker credential, so `mosquitto.acl`'s `%u` confinement still means what it says, and a compromised
+adapter cannot forge another appliance's telemetry. The adapter holds **no platform credential at
+all**, so a custom repository can never leak one. And the data arrives having passed through the
+flow, which is where schema conformance and the quarantine queue already apply — **an adapter
+publishing straight to the broker would bypass all three**, and that it is more convenient is not an
+argument.
+
+**The case where that is the wrong answer is worth naming, because it is real.** If a machine's
+adapter has its own identity, its own lifecycle and its own address space, it is not a workload on a
+gateway — it is a gateway, and it should enrol as one. **One appliance, one identity; a workload that
+needs a second identity is a second gateway.**
+
+### Two things this is deliberately not
+
+**Not Portainer.** It is an agent that executes what a central console tells it to, which is the
+refused shape above with a good UI on it — and the community edition's limits are the smaller
+objection, not the reason.
+
+**Not a k3s agent on gateways.** The connection is outbound, which is the half people check, but the
+effect is that the centre schedules arbitrary workloads on plant hardware and the API server dials
+back through that tunnel for logs, exec and port-forward. Three further costs, in descending order:
+it puts shopfloor machines inside the cluster's flat pod network, which is the trust domain the broker
+ACL deliberately does not rely on; it is a **second** reconciler beside the puller, and the two will
+disagree; and it makes the edge Kubernetes-only, widening the Compose/chart divergence §12 spends its
+length complaining about. A k3s *server* per site is the defensible version of this if fleet-wide
+orchestration is ever genuinely wanted, and it earns little over Compose on one appliance.
+
+### What this must not touch
+
+The enrolment token's single-use semantics and the once-only guard in `bootstrap.mjs`. The editor
+password's generation *on the appliance* — anything that needs it centrally has re-created the
+fleet-wide credential store the current design refuses. `flows_cred.json`, which must not leave the
+appliance in a backup, a commit, a diff or a custom container's bind mount. The broker ACL's `%u`
+confinement. `node_exporter` staying unscraped from the centre. And the absence of a
+skip-verification setting anywhere, which the CA question above puts under more pressure than any
+other change in this file.
+
+### Worth deciding early
+
+- **HOW THE APPLIANCE COMES TO TRUST THE PLATFORM BEFORE IT HAS FETCHED ANYTHING. This is the
+  gating question and it is unanswered.** Nothing else in this item can be designed around it,
+  because every version of the one-liner either verifies a certificate or teaches an operator not
+  to. Three candidates, none of them free:
+
+  **1. The root travels ahead of the command, and is pasted rather than fetched.** The dashboard
+  prints two blocks: a heredoc writing the PEM to `/usr/local/share/ca-certificates/`, then the
+  installer line. It costs the *one*-line property this item is named for, and it is the only
+  candidate with no circularity — a root that is fetched has to be verified by something, and a root
+  that is pasted is verified by the operator's already-authenticated dashboard session. Two commands
+  that are both honest beat one that is not.
+
+  **2. Enrolment alone is served on a publicly-trusted name.** One real DNS record and one real
+  certificate, for the enrolment endpoint only; everything after it uses the internal CA the bundle
+  installs. It preserves the single line exactly. It costs the same conversation with whoever runs
+  the network that §12 names as *its* blocker — so if it is taken, take it once for both — and it
+  assumes the appliance can reach a public CA's issuance and revocation infrastructure at
+  commissioning time, which an air-gapped plant cannot.
+
+  **3. A checksum the operator verifies.** Weakest of the three and recorded so it is not
+  re-proposed: it moves the trust problem to the channel the checksum arrives on rather than solving
+  it, and an operator who is pasting a command will not compare a hash by eye. It is a supplement to
+  1 or 2, never an alternative.
+
+  **What decides it is not a preference.** Two facts settle it, and both belong to the deployment
+  rather than to this repository: whether an appliance has public internet at commissioning, and
+  whether the CA root can be treated as something that travels with the hardware — an image, a
+  runbook, a USB stick — rather than something the network hands out. **Until one of those is known,
+  the honest state of this item is that the ZIP is still the supported path**, and writing a
+  one-liner that ends in `curl -k` would be a regression dressed as an improvement.
+
+- **Whether the one-liner and the OS baseline ship together.** They should not. The install transport
+  is blocked on the trust question above; the baseline is a playbook and is blocked on nothing.
+  Bundling them means the blocked half gates the free half — the same argument §12 makes about
+  `internalClients` and the loopback bindings.
+- **Whether the custom lane is one repository per gateway or one per plant.** §8 asks the same
+  question for flows and answers it on deploy-key granularity. Custom code has a different answer
+  available — engineers think in projects, not in appliances — and a project deployed to four
+  gateways should not be four repositories.
+- **Whether the platform builds custom images at all, or only pulls them.** A plant that already has
+  a registry and a pipeline may want to point a gateway at an image it builds itself. Supporting only
+  "Gitea builds it" is simpler and forecloses that; supporting both makes the provenance claim
+  conditional on somebody else's pipeline, which is a claim worth being honest about rather than
+  quietly weakening. **Digest pinning is what makes either version defensible**, so decide that
+  first and the rest is policy.
+- **Whether the deploy key is also the pull credential.** Gitea's registry accepting its Git tokens
+  is the assumption holding the credential count at three planes rather than four, and it is one
+  command to verify. Measure it before the enrolment path is designed around it, for the reason §5
+  gives about a revocation with two homes.
+- **What happens to a gateway whose custom container is failing.** Nothing in the heartbeat reports it
+  today, and a converging puller will restart it forever. The flow hash is already carried; a
+  workload's state and its image digest are two more fields, and the dashboard has nowhere to show
+  either. **A legacy-machine adapter that has silently stopped is a machine that has silently stopped
+  being observable**, which is the failure this lane is most likely to produce and least likely to
+  notice.
+- **Whether the platform playbook can roll back.** `ansible-pull` converges to a head. A bad platform
+  commit converges the whole fleet to it, on a timer, with no operator involved — which is the one way
+  this design is more dangerous than the ZIP. Pinning appliances to a tag rather than to a branch is
+  the cheap answer and it should be the default, not the advanced option.
+
+---
+
+## 10 · Retiring the flow-backup bucket, and pointing at repositories instead
 
 **Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
 the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
@@ -1074,7 +1528,7 @@ against the same column.
 
 ---
 
-## 10 · An ISA-95 Unified Namespace bridge
+## 11 · An ISA-95 Unified Namespace bridge
 
 **Builds on:** the DDATA path in [`ingestion/ingestion.py`](../ingestion/ingestion.py) ·
 `public.device_locations` (`0001`) · `cells` (`0001`, `0021`) · `devices.location_scope` ·
@@ -1112,7 +1566,7 @@ currently prevent.
 
 ---
 
-## 11 · The transport between services, and the two targets that disagree about it
+## 12 · The transport between services, and the two targets that disagree about it
 
 **Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
@@ -1321,7 +1775,7 @@ leave the stack worse than it started.
 
 ---
 
-## 12 · The other half of every drop counter, which is a log nothing keeps
+## 13 · The other half of every drop counter, which is a log nothing keeps
 
 **Builds on:** the drop counters and their paired `logger.warning` in
 [`ingestion.py`](../ingestion/ingestion.py) · [`ingestion/metrics.py`](../ingestion/metrics.py) ·

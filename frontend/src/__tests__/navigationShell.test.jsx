@@ -56,11 +56,14 @@ import { supabase } from '../lib/supabaseClient'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
-// Every page reachable from the bar. Archives is permission-gated; the mocked session has no
-// permission rows, so it is deliberately absent from the always-visible set.
+// Every page reachable from the bar. The mocked session has no permission rows, so every
+// permission-gated page is deliberately absent from this set: Archives (`archive:manage`),
+// Approvals (`proposal:create`) and -- since the Operator dead-end was closed -- Digital Thread
+// (`digital_thread:read`). Capture stays visible because it is gated on ROLE, and the mocked
+// session is an Administrator.
 const ALWAYS_VISIBLE = [
   'Overview', 'Cells', 'Gateways', 'Devices',
-  'Digital Thread', 'Schemas', 'Vocabulary', 'Directory'
+  'Schemas', 'Vocabulary', 'Directory'
 ]
 
 const topbar = () => document.querySelector('.topbar')
@@ -111,6 +114,11 @@ describe('Merged navigation shell', () => {
    */
   it('separates the rail into groups, with one fewer divider than groups', async () => {
     await renderShell()
+    // WAIT FOR THE PERMISSIONS, not just for the shell. `usePermissions` resolves after the first
+    // paint -- it falls back to the built-in map for the session's role -- and until it does, every
+    // permission-gated page is correctly hidden. Asserting before then counts a half-built rail,
+    // which is how this test used to pass on a Digital Thread item that had no gate at all.
+    await waitFor(() => expect(screen.getByText('Archives')).toBeInTheDocument())
 
     const groups = [...document.querySelectorAll('.sidebar-group')]
     const dividers = [...document.querySelectorAll('.sidebar-divider')]

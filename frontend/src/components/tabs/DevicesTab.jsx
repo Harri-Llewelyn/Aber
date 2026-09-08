@@ -43,8 +43,10 @@ import {
   unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
 } from '../../utils/deviceTags'
 import { suggestMatches } from '../../utils/quarantineMatching'
+import { patchFromForm, formFromPatch, submitProposal, nonProposableFields } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
 import {
+  IconShieldCheck,
   IconCpu,
   IconDrive,
   IconMap,
@@ -74,7 +76,7 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
-export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelectCell, onSelectSchema, onViewThread, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
+export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelectCell, onSelectSchema, onViewThread, onPropose, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
   /**
    * Firing alerts, indexed by the two keys a device can be matched on.
    *
@@ -118,6 +120,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [configAsset, setConfigAsset] = useState(null)
   const [nameplateFor, setNameplateFor] = useState(null)
+  const [openProposals, setOpenProposals] = useState([])
   // An ID, not the device object -- this page polls, so a captured object would freeze while the
   // row beside it kept updating. Resolved against `assets` every render.
   const [selectedId, setSelectedId] = useState(null)
@@ -308,6 +311,19 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           setQuarantine([])
         }
       }
+
+      /* WHAT IS WAITING ON THESE MACHINES, so a device can say so on its own page rather than
+         only on the Approvals page. RLS decides what comes back and this code does not
+         second-guess it: a proposer sees their own requests, an approver sees the ones they may
+         decide, and an empty list is a truthful answer for somebody entitled to neither. It is
+         tolerated rather than required -- the devices page must not fail to load because the
+         proposals endpoint did. */
+      try {
+        const proposals = await api.get('/api/v1/proposals', { signal })
+        setOpenProposals((proposals || []).filter(pr => pr.status === 'open'))
+      } catch (pErr) {
+        if (pErr.name !== 'AbortError') setOpenProposals([])
+      }
       setLoading(false)
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -343,6 +359,27 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
       // default. Sending it on create would write 'audit' explicitly, which is the same value by
       // a longer route and makes the form look like it decided something it did not.
       if (editing) payload.conformance_policy = form.conformance_policy || 'audit'
+
+      /* THE FORK IS HERE AND NOWHERE ELSE. Everything above -- the fields, their validation, the
+         null handling -- is shared, which is the whole point: a second form for proposing was what
+         drifted. Only the last step differs, and it differs by who is asking. */
+      if (proposeMode) {
+        if (!editing) throw new Error('A device can only be registered by an Administrator.')
+        const patch = patchFromForm('device', editFormFor(editing), form)
+        await submitProposal({
+          kind: 'device',
+          entityId: editing.asset_id,
+          patch,
+          rationale: form.__rationale,
+          proposalId: editingProposal?.id
+        })
+        setShowForm(false); setEditingProposal(null); loadAll()
+        showToast(editingProposal
+          ? 'Your proposal was updated. An approver decides from here.'
+          : 'Proposed. An approver applies it, or says why not.', 'success')
+        return
+      }
+
       if (editing) {
         await api.put(`/api/v1/devices/${editing.asset_id}`, payload)
       } else {
@@ -391,7 +428,13 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
       const unmapped = stats.unmapped_semantic_ids || 0
       const label = format === 'aasx' ? 'AASX package' : 'AAS JSON'
       const summary = `${stats.submodels || 0} submodels, ${stats.telemetry_metrics || 0} metrics`
-      if (unmapped > 0) {
+      // AN UNREACHABLE MODEL URL OUTRANKS AN UNMAPPED METRIC, so it is reported first when both
+      // are true. An unmapped semantic id degrades what a consumer can INFER from the shell; a
+      // loopback 3D reference is a link that resolves to the exporter's own machine and nowhere
+      // else -- discoverable otherwise only by opening the shell somewhere it does not work.
+      if (result.warning) {
+        showToast(`${label} exported for '${asset.asset_name}' — ${result.warning}`, 'warning')
+      } else if (unmapped > 0) {
         showToast(
           `${label} exported for '${asset.asset_name}' (${summary}) — ${unmapped} metric${unmapped === 1 ? '' : 's'} carried no semantic id`,
           'warning'
@@ -514,6 +557,35 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const canReject  = hasPermission(PERMISSION_UUIDS.QUARANTINE_REJECT)
   const canManage  = hasPermission(PERMISSION_UUIDS.DEVICE_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+  const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
+
+  /* THE FORM ENDS IN A PROPOSAL RATHER THAN A WRITE, for somebody who may not make the change.
+     Derived, never stored: a second piece of state saying "this dialog is in propose mode" could
+     disagree with the permission that decides whether the write would be accepted, and the form
+     would offer Save to somebody the database then refuses.
+
+     `editingProposal` is the open proposal this form is ADDING TO, if any. 0086 allows one open
+     proposal per asset per person, so somebody changing a second field on the same machine has to
+     extend the request they already have -- and this form, seeded with their earlier patch, is the
+     only sane place to do it. */
+  const proposeMode = !canManage && canPropose
+
+  /**
+   * The note under a field a proposal may not name.
+   *
+   * WITHHELD, NOT HIDDEN. Hiding these would make two different dialogs out of one -- the drift
+   * this whole restructure removes -- and would conceal that a gateway assignment exists at all.
+   * The control is disabled and the reason is printed, so the reader learns where the boundary is
+   * instead of wondering why their change did not stick.
+   */
+  const Withheld = ({ field }) => (
+    proposeMode && withheldFields[field]
+      ? <div className="form-hint-locked">{withheldFields[field]}</div>
+      : null
+  )
+  const [editingProposal, setEditingProposal] = useState(null)
+  const withheldFields = nonProposableFields('device')
+  const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
 
   // Metrics the device declared at its last birth that its schema does not account for.
   // Derived, not stored: adding the metric to the schema clears this on the next poll rather
@@ -690,6 +762,18 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   // Resolved fresh every render -- see the note on selectedId. A device that is archived out of
   // the current filter, or deleted, resolves to null and the drawer closes itself.
   const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
+
+  /* BOTH DEVICE LANES COUNT. `devices` and `device_nameplate` are two kinds of change to one
+     machine, and both are keyed by the device's id -- so a nameplate request waiting on this
+     device is a request waiting on this device, and hiding it here because it is filed under a
+     different lane would be an accounting distinction, not a useful one. */
+  const openForSelected = useMemo(
+    () => (selectedDevice
+      ? openProposals.filter(p => p.entity_id === selectedDevice.asset_id
+          && (p.entity_type === 'devices' || p.entity_type === 'device_nameplate'))
+      : []),
+    [openProposals, selectedDevice]
+  )
   const selectedGateway = selectedDevice
     ? gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id) || null
     : null
@@ -926,7 +1010,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
          ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th title="Human-readable device name">Name</th><th title="Sparkplug B id this device publishes under">Sparkplug ID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
+              <thead><tr><th title="Human-readable device name">Name</th><th title="The device's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug id is derived from this, so nothing is lost by showing it here.">Device UUID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
               <tbody>
                 {filteredAssets.map(a => {
                   return (
@@ -959,7 +1043,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                           )}
                         </td>
                         <td>
-                          <CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} />
+                          <CopyableId value={a.asset_id} label="Device UUID" onNotify={showToast} />
                           {a.identity_source === 'legacy_name' && (
                             <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
                               <IconAlertTriangle size={10} /> Legacy name matching
@@ -1174,7 +1258,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
 
             <div className="form-group">
               <label className="form-label">Assigned Edge Gateway</label>
-              <select className="form-control" value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))} title="Select edge gateway serving this device">
+              <Withheld field="active_gateway_id" />
+              <select className="form-control" disabled={proposeMode} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))} title={proposeMode ? withheldFields.active_gateway_id : "Select edge gateway serving this device"}>
                 <option value="">— Unassigned Gateway —</option>
                 {/* A REPLAY LANE IS LISTED BUT DISABLED, not filtered out. Issue 144.
                     Filtering would be a quieter control and a worse one: a device that IS a
@@ -1305,7 +1390,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
 
             <div className="form-group">
               <label className="form-label">Schema (optional)</label>
-              <select className="form-control" value={form.schema_id || ''} onChange={e => setForm(f => ({ ...f, schema_id: e.target.value }))} title="Expected metric schema, from the Schemas registry">
+              <Withheld field="schema_id" />
+              <select className="form-control" disabled={proposeMode} value={form.schema_id || ''} onChange={e => setForm(f => ({ ...f, schema_id: e.target.value }))} title={proposeMode ? withheldFields.schema_id : "Expected metric schema, from the Schemas registry"}>
                 <option value="">— No schema assigned —</option>
                 {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
               </select>
@@ -1338,6 +1424,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                 <label className="form-label">Schema Conformance</label>
                 <select
                   className="form-control"
+                  disabled={proposeMode}
                   value={form.conformance_policy || 'audit'}
                   onChange={e => setForm(f => ({ ...f, conformance_policy: e.target.value }))}
                   title="What happens when a metric contradicts this device's bound schema"
@@ -1389,15 +1476,36 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                 Adding a second transport means adding an ingestion path for it. The picker can come
                 back then, and it will mean something. */}
 
+            {/* THE RATIONALE, ONLY WHEN THERE IS SOMEBODY TO READ IT. A person saving their own
+                change has nobody to explain it to; a person proposing one is writing to an
+                approver who has to decide without having stood in front of the machine. */}
+            {proposeMode && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="propose-rationale">Why (optional)</label>
+                <textarea
+                  id="propose-rationale"
+                  className="form-control"
+                  rows={2}
+                  value={form.__rationale || ''}
+                  onChange={e => setForm(f => ({ ...f, __rationale: e.target.value }))}
+                  placeholder="e.g. the label on the machine says SPINDLE-4, not SPINDLE-A"
+                />
+              </div>
+            )}
+
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setShowForm(false)} disabled={saving} title="Cancel edits">Cancel</button>
+              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving} title="Cancel edits">Cancel</button>
               <ActionButton
                 pending={saving}
-                pendingLabel={editing ? 'Saving…' : 'Creating…'}
+                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                title="Save device configuration and gateway assignment"
+                title={proposeMode
+                  ? 'Ask for these changes — an approver applies them, or says why not'
+                  : 'Save device configuration and gateway assignment'}
               >
-                Save Configuration
+                {proposeMode
+                  ? (editingProposal ? 'Update your proposal' : 'Propose a change')
+                  : 'Save Configuration'}
               </ActionButton>
             </div>
           </div>
@@ -1431,6 +1539,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           canManage={canManage}
           showToast={showToast}
           onClose={() => setNameplateFor(null)}
+          /* THE DIALOG FILES ITS OWN PROPOSAL NOW, rather than routing to a composer that listed
+             these same eleven columns a second time. It needs the permission, not a destination. */
+          canPropose={canPropose}
         />
       )}
       {docsForDevice && (
@@ -1630,23 +1741,58 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             primary: true,
             title: !canArchive ? 'Requires Admin permissions' : 'Restore device back to active service'
           } : {
-            label: 'Edit Details', icon: <IconPencil size={13} />,
+            icon: <IconPencil size={13} />,
             // THE FORM IS SEEDED WITH THE RESOLVED SCHEMA, not with the raw row. `setForm(device)`
             // copied `schema_id` straight across, which is null for every device whose schema
             // arrives through `device_submodels` -- so the dropdown read "No schema assigned" for a
             // device the rest of the page correctly showed as schema'd, and saving that form
             // silently confirmed the wrong answer.
-            onClick: () => { setEditing(selectedDevice); setForm(editFormFor(selectedDevice)); setShowForm(true) },
-            disabled: !canManage || selectedDevice.status === 'OFFLINE',
+            label: proposeMode ? 'Propose a Change' : 'Edit Details',
+            onClick: () => {
+              setEditing(selectedDevice)
+              // SEEDED WITH THE OPEN PROPOSAL'S PATCH ALREADY APPLIED, when there is one. Otherwise
+              // adding a second field to a request would silently drop the first -- the new
+              // proposal would replace it, and the per-asset cap would refuse it anyway.
+              const mine = proposeMode ? openForSelected.find(pr => pr.entity_type === 'devices') : null
+              setEditingProposal(mine || null)
+              setForm({ ...editFormFor(selectedDevice), ...formFromPatch('device', mine?.patch) })
+              setShowForm(true)
+            },
+            disabled: (!canManage && !canPropose) || selectedDevice.status === 'OFFLINE',
             // NOT `primary`, which is the change. It was the one filled button in a drawer whose
             // other five actions are ghosts, which read as a recommendation -- and "edit this" is not
             // what anybody opens a device panel to do. The Gateways and Cells drawers already style
             // their edit action as a secondary; this matches them.
-            title: !canManage
-              ? 'Requires Admin permissions'
-              : selectedDevice.status === 'OFFLINE'
-                ? 'Device is offline (DDEATH received)'
-                : 'Edit device parameters'
+            title: selectedDevice.status === 'OFFLINE'
+              ? 'Device is offline (DDEATH received)'
+              : proposeMode
+                ? 'Ask for a change to this device — an approver applies it, or says why not'
+                : !canManage && !canPropose
+                  ? 'Requires Admin permissions'
+                  : 'Edit device parameters'
+          },
+          /* NO SEPARATE "PROPOSE A CHANGE" ACTION, and its absence is the point of the whole
+             restructure. It used to sit here and route to a composer on the Approvals page -- a
+             SECOND form listing the same columns as the dialog directly above it, as bare text
+             inputs, with no idea that `cell_id` had a dropdown behind it. Two forms describing one
+             device is a drift generator, and the drift is silent.
+
+             The dialog above is now the only form. For somebody who may not save it, it opens
+             under the label "Propose a Change" and its footer files a proposal instead of writing
+             -- see `proposeMode`. One form, one set of fields, one place to change them. */
+          /* WHAT IS ALREADY WAITING ON THIS MACHINE, and only when something is.
+             A device with an open request is the one case where the queue is part of this
+             device's state rather than a separate page, and both readers need it: a proposer
+             about to file a second request that the per-asset cap will refuse, and an approver
+             who arrived here from an alert. The count comes from RLS, so it is what THIS person
+             may see rather than a number they cannot act on. */
+          openForSelected.length > 0 && {
+            label: openForSelected.length === 1
+              ? '1 change awaiting decision'
+              : `${openForSelected.length} changes awaiting decision`,
+            icon: <IconShieldCheck size={13} />,
+            onClick: () => onViewApprovals?.(selectedDevice),
+            title: 'Open the approvals queue, filtered to this device'
           },
           {
             // Opens the modal rather than a section of this panel. The inspector is a four-column
@@ -1711,7 +1857,11 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             onClick: () => setDocsForDevice(selectedDevice),
             title: 'Attach or edit links for this device — documents, an asset register, a file repository, any URL'
           },
-          {
+          /* WITHHELD FROM A READER WHO MAY NOT OPEN THE PAGE. The nav hides Digital Thread
+             without `digital_thread:read`; a drawer button that navigated there anyway would be
+             the one route into a page the app has decided not to show, landing them on an empty
+             table that explains nothing. `.filter(Boolean)` below drops it. */
+          canReadThread && {
             label: 'View Digital Thread', icon: <IconHistory size={13} />,
             onClick: () => onViewThread?.(selectedDevice),
             title: 'Open the immutable audit trace for this device'

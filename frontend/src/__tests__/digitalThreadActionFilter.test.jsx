@@ -75,13 +75,16 @@ describe('the action filter offers every action the database can record', () => 
    * The test below already proves the list cannot drift from the enum, and a check that only
    * compared them to each other would pass while both were wrong.
    */
-  it('lists every action, including the five the generic trigger does not write', async () => {
+  it('lists every action, including the seven the generic trigger does not write', async () => {
     await show()
     const values = [...filter().querySelectorAll('option')].map(o => o.value)
 
+    // PROPOSAL_APPLIED and PROPOSAL_EXPIRED joined with 0086/0088. Pinned in ORDER as well as by
+    // membership, because this select is what a reader scans -- an action appended in the wrong
+    // place reads as a different kind of event from the ones it belongs beside.
     expect(values).toEqual([
       '', 'INSERT', 'UPDATE', 'DELETE', 'SCHEMA_REJECTION', 'CREDENTIAL_ISSUED', 'TOKEN_MINTED',
-      'TOKEN_REVOKED', 'ROLE_GRANTED', 'ROLE_REVOKED'
+      'TOKEN_REVOKED', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'ROLE_GRANTED', 'ROLE_REVOKED'
     ])
   })
 

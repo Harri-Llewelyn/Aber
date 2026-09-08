@@ -45,7 +45,7 @@ export function HelpPanel({ open, tabId, onClose }) {
       /* The subtitle says what KIND of thing the panel is showing, which the title cannot: the
          title is the page name, and a drawer headed "Gateways" beside a page headed "Gateways"
          has said nothing. */
-      subtitle="What this page is for"
+      subtitle="Documentation and Guide"
       subject="help"
       className="context-panel-app"
       onClose={onClose}

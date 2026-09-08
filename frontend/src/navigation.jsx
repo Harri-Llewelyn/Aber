@@ -13,7 +13,8 @@ import {
   IconRecord,
   IconDatabase,
   IconLock,
-  IconSettings
+  IconSettings,
+  IconShieldCheck
 } from './components/common/Icons'
 
 /*
@@ -77,6 +78,18 @@ import {
  */
 export const NAV_GROUPS = [
   { id: 'home' },
+  // Added with the Approvals page. It holds one entry, which the note above argues against for
+  // Overview -- and the argument does not transfer, because the two are different shapes. Overview
+  // is the LANDING page and a separator above the first item would be a line under nothing.
+  // Approvals is a WORK QUEUE: it answers "what is waiting for me", which is the one question none
+  // of the four subject groups asks, and the rows behind it are devices, nameplates and schemas at
+  // once -- so filing it under any subject would be a claim about which subject it belongs to.
+  //
+  // It is not in `admin`, which was the other candidate. That group is Administrator-only, and this
+  // is the one page an OPERATOR has something to do on: it would be the sole entry that role could
+  // open in a group it can otherwise never see, and the group would stop meaning "how the platform
+  // is configured".
+  { id: 'work' },
   { id: 'assets' },
   { id: 'model' },
   { id: 'history' },
@@ -85,6 +98,11 @@ export const NAV_GROUPS = [
 
 export const TABS = [
   { id: 'overview',       label: 'Overview',       group: 'home',    icon: <IconLayoutDashboard size={16} /> },
+  // GATED ON `proposal:create`, WHICH IS THE PERMISSION TO HAVE A REASON TO BE HERE. An Auditor
+  // holds neither it nor a decision gate, and the RLS policy returns them their own proposals --
+  // of which they can have none. The page would be permanently empty, which reads as a broken
+  // page rather than as one that is not theirs.
+  { id: 'approvals',      label: 'Approvals',      group: 'work',    icon: <IconShieldCheck size={16} />, permission: PERMISSION_UUIDS.PROPOSAL_CREATE },
 
   { id: 'cells',          label: 'Cells',          group: 'assets',  icon: <IconFactory size={16} /> },
   { id: 'gateways',       label: 'Gateways',       group: 'assets',  icon: <IconRadio size={16} /> },
@@ -101,7 +119,16 @@ export const TABS = [
   { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} /> },
   { id: 'directory',      label: 'Directory',      group: 'model',   icon: <IconBookOpen size={16} /> },
 
-  { id: 'digital-thread', label: 'Digital Thread', group: 'history', icon: <IconHistory size={16} /> },
+  /* GATED ON THE PERMISSION, NOT ON A LIST OF ROLE NAMES, and the distinction is the one 0087 was
+     about: the `digital_thread` SELECT policies resolve `digital_thread:read`, so naming the
+     permission here means ONE predicate decides visibility and access rather than two that can
+     drift apart.
+
+     WITHOUT IT THE PAGE WAS A DEAD END. An Operator holds no `digital_thread:read`, so RLS
+     returned no rows -- not an error -- and the page rendered an empty table with no explanation,
+     which reads as "nothing has ever happened here" rather than "this is not yours to read". That
+     is exactly the reasoning Capture below was already gated on. */
+  { id: 'digital-thread', label: 'Digital Thread', group: 'history', icon: <IconHistory size={16} />, permission: PERMISSION_UUIDS.DIGITAL_THREAD_READ },
   // THE THREE ROLES THE DATABASE ADMITS, named here rather than reduced to one. Archived migration
   // 0055 grants SELECT on `captures` and `capture_jobs` to Administrator, Shopfloor_Manager and
   // Auditor; the first two can also record and delete. Operator is absent from both, which is why

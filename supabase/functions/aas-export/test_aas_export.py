@@ -923,6 +923,32 @@ class TestVisualRepresentation(unittest.TestCase):
     def test_reports_the_model_in_stats(self):
         self.assertTrue(self.body["stats"]["has_3d_model"])
 
+    def test_a_loopback_model_url_is_warned_about_rather_than_shipped_silently(self):
+        """
+        The JSON export WARNS where the AASX export REFUSES, and the asymmetry is deliberate.
+
+        Self-containment is the entire reason to produce an AASX, so a package whose one File
+        element resolves nowhere is worse than no package. A JSON environment is a document that
+        references things by URL, and one unreachable reference does not make the rest of it wrong
+        -- so it is still emitted.
+
+        WHAT WAS WRONG WAS THE SILENCE. The export succeeded, the file downloaded, and the model
+        reference pointed at the exporter's own machine -- discoverable only by opening the shell
+        somewhere else and finding a dead link. The person who ran the export is the one best
+        placed to fix it and was the last to find out.
+        """
+        base = os.getenv("AAS_MODEL_PUBLIC_BASE", "")
+        loopback = any(h in base for h in ("localhost", "127.0.0.1", "0.0.0.0", "[::1]"))
+        if not loopback:
+            self.skipTest(f"AAS_MODEL_PUBLIC_BASE is {base!r}, which is not loopback")
+
+        warning = self.body.get("warning")
+        self.assertIsNotNone(warning, "a loopback model reference was shipped with no warning")
+        # It names the variable AND what to set it to: "configure the public base" is advice
+        # nobody can action without knowing it means the address other machines use.
+        self.assertIn("AAS_MODEL_PUBLIC_BASE", warning)
+
+
     @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema not installed")
     def test_json_export_still_validates_against_the_official_schema(self):
         schema = json.loads(AAS_SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -1015,6 +1041,12 @@ class TestNoVisualRepresentationWithoutAModel(unittest.TestCase):
         # Guards the premise: if the fixture left a model attached this test would pass vacuously.
         self.assertFalse(body["stats"]["has_3d_model"], "fixture left a 3D model attached")
         self.assertNotIn("VisualRepresentation", shorts)
+
+        # AND NO LOOPBACK WARNING EITHER. That warning fires on the URL actually emitted, not on
+        # configuration in the abstract -- a shell with no VisualRepresentation has no reference
+        # that could be unreachable. Without this, an unset AAS_MODEL_PUBLIC_BASE would warn on
+        # every export from every device on the stack, which is how a real warning gets ignored.
+        self.assertIsNone(body.get("warning"), body.get("warning"))
 
 
 if __name__ == "__main__":

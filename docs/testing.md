@@ -70,6 +70,12 @@ python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
 python supabase/functions/aas-export/test_aas_export.py
 python supabase/functions/aas-api/test_aas_api.py
 python supabase/functions/grafana-alert-webhook/test_grafana_alert_webhook.py
+# The Factory+ Directory adapter. Six checks run with nothing up -- that its registry entry still
+# grants no service-role key, and that the bearer check still precedes routing, which is the whole
+# boundary in front of routes the gateway deliberately exempts from key-auth. The rest need the
+# stack and centre on the reverse schema lookup: /v1/device and /v1/schema/{uuid} answer the same
+# question from opposite ends and nothing else compares them, so a disagreement is a 200 at both.
+python supabase/functions/fplus-directory/test_fplus_directory.py
 
 # Physical gateway enrolment — signs in as Administrator to mint tokens (issuing is a USER's act,
 # gated on has_role, so the service key cannot do it), then redeems them the way an appliance does:
@@ -139,6 +145,12 @@ npm run test:db
 # The individual suites, for when one is being worked on. Point them at the throwaway with
 # `npm run test:db -- --keep --no-run` and SUPABASE_DB_PORT=54329 rather than running them bare.
 python supabase/migrations/test_user_roles_rls.py
+# The approvals queue (0086). The one that matters asserts what this item must NOT have done: an
+# Operator gained a write to the QUEUE and still cannot update a device, insert one, or write a
+# nameplate. The rest cover the two properties a simplification would remove first -- that an
+# invalid patch aborts its own approval rather than becoming a record of something that did not
+# happen, and that both caps are in the database rather than in a disabled button.
+python supabase/migrations/test_change_proposals.py
 # The Administrator / Shopfloor_Manager split (0069), in both halves: the grants diverged, AND the
 # withdrawal reaches Postgres. The second half is the one worth having -- no RLS policy reads
 # `role_permissions`, so a revoked grant on its own only hides a button. Note the asymmetry it

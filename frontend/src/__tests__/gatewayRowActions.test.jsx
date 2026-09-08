@@ -133,8 +133,11 @@ describe('gateway row actions', () => {
     const panel = openPanel()
     expect(panel.getByText('Edit Details').closest('button').disabled).toBe(true)
     expect(panel.getByText(/Archive Gateway/i).closest('button').disabled).toBe(true)
-    // Reads stay open, as on Devices.
-    expect(panel.getByText(/View Digital Thread/i).closest('button').disabled).toBe(false)
+    // THE AUDIT TRACE IS WITHDRAWN, NOT MERELY DISABLED, as on Devices. `digital_thread` has its
+    // own RLS and returns no rows without `digital_thread:read`, so the button led to a page that
+    // renders an empty table and explains nothing -- and the nav now hides that page from this
+    // reader, so a disabled button would advertise a destination that no longer exists for them.
+    expect(panel.queryByText(/View Digital Thread/i)).toBeNull()
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {
