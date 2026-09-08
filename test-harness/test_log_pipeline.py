@@ -30,7 +30,10 @@ import os
 import sys
 import json
 import time
+import shlex
+import shutil
 import secrets
+import subprocess
 import unittest
 import urllib.error
 import urllib.parse
@@ -323,11 +326,23 @@ class DropPairTestCase(unittest.TestCase):
         self.assertIn(REASON, labels,
                       f"Prometheus exports no reason={REASON}; exported: {sorted(labels)}")
 
-        fields = {
-            json.loads(v[1])["reason"]
-            for s in loki_query(f'{{service="ingestion"}} | json | reason != ""', limit=200)
-            for v in s["values"]
-        }
+        # POLLED, FOR THE REASON THE SIBLING ABOVE IS. This used to query once, and it runs
+        # BEFORE the polling test alphabetically -- so on a stack where the drop had happened but
+        # the line had not yet travelled daemon -> Docker -> Alloy -> Loki, this failed with "no
+        # logged drop reasons", which reads as a broken drill-down contract rather than as a race.
+        # Observed doing exactly that: the line was in the store, correct, seconds later.
+        expr = f'{{service="ingestion"}} | json | reason != ""'
+        deadline = time.time() + PROPAGATION_TIMEOUT
+        fields = set()
+        while time.time() < deadline:
+            fields = {
+                json.loads(v[1])["reason"]
+                for s in loki_query(expr, limit=200) for v in s["values"]
+            }
+            if fields:
+                break
+            time.sleep(5)
+
         self.assertTrue(fields, "no logged drop reasons found in the store to compare against")
         self.assertTrue(
             fields <= labels,
@@ -387,6 +402,126 @@ class MultilineTestCase(unittest.TestCase):
             "alloy/config.alloy; if that selector no longer covers these services, this is what "
             "notices.",
         )
+
+
+    def test_an_uncaught_traceback_is_rejoined_into_one_entry(self):
+        """
+        THE REJOINING, PROVOKED RATHER THAN WAITED FOR -- roadmap 13's first remaining item.
+
+        The test above asserts against whatever tracebacks the stack happens to hold and skips
+        when it has been healthy. That skip is the good outcome, and it is also why the stage was
+        never actually proven: on a healthy stack nothing ever exercised it.
+
+        HOW THIS AVOIDS BOTH COSTS THE ROADMAP REFUSED. The entry said closing this meant either a
+        fault-injection path in the daemon or restarting a service mid-suite. It needs neither.
+        Alloy discovers containers through the Docker API and derives `service` from the compose
+        LABEL, so a throwaway container carrying `com.docker.compose.service=ingestion` is
+        collected by the same pipeline, matches the same `stage.match` selector and is subject to
+        the same `stage.multiline`. Nothing in the daemon changes and no running service is
+        touched.
+
+        AND IT IS THE DAEMON'S OWN IMAGE, running the daemon's own `logging_config.get_logger`, so
+        the first line comes out of `JSONFormatter` rather than being typed out here. A test that
+        wrote that line by hand would be asserting the collector against a restatement of the
+        format instead of the format.
+
+        THE SHAPE IS A CRASH, WHICH IS NOT THE `exc_info=True` CASE. Under `LOG_FORMAT=json` --
+        what both targets set -- a HANDLED exception is not multi-line at all: `JSONFormatter` puts
+        it in the `exc` field and `json.dumps` escapes the newlines. The stage earns its place on
+        the UNHANDLED case, where Python writes a raw traceback straight to stderr with no
+        formatter in the path. That is a daemon dying, which is when the log is worth most, and it
+        is the only shape that reaches the stage.
+
+        WHAT THE FIRST LINE OF A RAW TRACEBACK DOES, asserted because it is the counter-intuitive
+        half: `Traceback (most recent call last):` matches neither `{` nor an ISO timestamp, so it
+        does not OPEN a block -- it is appended to the record above it. The crash therefore arrives
+        glued to the last line the service logged before it died, under that line's timestamp.
+        """
+        image = os.getenv("PROBE_IMAGE", "acs-cymru-ingestion")
+        if not shutil.which("docker"):
+            skip_or_fail(self, "docker is not on PATH, so the probe container cannot be started")
+        if subprocess.run(["docker", "image", "inspect", image],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+            skip_or_fail(self, "the image " + image + " is not built, so the probe cannot run the "
+                               "daemon's own formatter: docker compose build ingestion")
+
+        token = "multiline-probe-" + secrets.token_hex(6)
+
+        # A FIXED CONTAINER NAME, WITH THE UNIQUENESS IN THE LINE INSTEAD. `container` is a label,
+        # so a per-run name would mint a new Loki stream on every run -- the unbounded cardinality
+        # alloy/config.alloy refuses for `device`, arriving through the back door of a test. One
+        # name means one stream however often this runs; the token separates the runs inside it.
+        name = "acs-cymru_multiline_probe"
+
+        # THE SLEEP IS DISCOVERY, NOT PADDING. `discovery.docker` refreshes every 15s, so a
+        # container that starts and dies inside one interval is never seen and collects nothing.
+        # The probe waits to BE FOUND, then logs, then crashes.
+        inner = "\n".join([
+            "import time",
+            "from logging_config import get_logger",
+            "log = get_logger('" + token + "')",
+            "log.info('" + token + " about to crash')",
+            "time.sleep(0.5)",
+            "raise RuntimeError('" + token + " uncaught')",
+        ])
+        script = "sleep 25; python -c " + shlex.quote(inner) + "; sleep 10"
+
+        subprocess.run(["docker", "rm", "-f", name],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        started = subprocess.run(
+            ["docker", "run", "-d", "--name", name,
+             "--label", "com.docker.compose.project=acs-cymru",
+             # THE LABEL IS THE WHOLE TRICK. discovery.relabel maps it to `service`, which is what
+             # the stage.match selector reads. Narrow that selector in alloy/config.alloy and this
+             # container stops matching -- which is a thing worth having noticed.
+             "--label", "com.docker.compose.service=ingestion",
+             "-e", "LOG_FORMAT=json", "-e", "PYTHONUNBUFFERED=1",
+             "--entrypoint", "sh", image, "-c", script],
+            capture_output=True, text=True)
+        self.assertEqual(started.returncode, 0,
+                         "could not start the probe container: " + started.stderr.strip())
+
+        try:
+            deadline = time.time() + 25 + PROPAGATION_TIMEOUT
+            entries = []
+            while time.time() < deadline:
+                rows = loki_query('{service="ingestion"} |= "' + token + '"',
+                                  since_seconds=600, limit=20)
+                entries = [v[1] for s in rows for v in s["values"]]
+                if any("Traceback (most recent call last)" in e for e in entries):
+                    break
+                time.sleep(3)
+
+            self.assertTrue(
+                entries,
+                "nothing carrying " + token + " reached the store in time. The probe container "
+                "ran, so this is collection rather than the daemon: check that discovery.docker "
+                "still resolves targets through the socket proxy, which is what failed wholesale "
+                "on the first live run.",
+            )
+
+            rejoined = [e for e in entries
+                        if "Traceback (most recent call last)" in e and 'File "' in e]
+            self.assertTrue(
+                rejoined,
+                "the traceback reached the store SPLIT ACROSS ENTRIES -- no single entry carries "
+                "both its header and a stack frame. stage.multiline is not rejoining it, which "
+                "turns every crash in the store into a heap of unrelated-looking records, the "
+                "line naming the error separated from the line naming the code. Check the "
+                "`firstline` regex in alloy/config.alloy against what logging_config.py emits, "
+                "and that the stage.match selector still covers `ingestion`.\n"
+                "entries seen: " + repr(entries),
+            )
+
+            self.assertTrue(
+                any(e.lstrip().startswith("{") for e in rejoined),
+                "the traceback was rejoined but not onto the JSON record that preceded it, so a "
+                "crash is no longer attached to the last thing the service logged before dying.\n"
+                "entries seen: " + repr(entries),
+            )
+        finally:
+            subprocess.run(["docker", "rm", "-f", name],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 if __name__ == "__main__":

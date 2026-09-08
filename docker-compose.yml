@@ -2447,6 +2447,24 @@ volumes:
   # prometheus_data is one -- it is a database, not configuration -- and it shares the disk with
   # that TSDB and two Postgres data directories, which is why loki.yaml bounds BOTH the retention
   # window and the ingest rate rather than only the window.
+  #
+  # NOT BACKED UP, AND THAT IS THE DECISION RATHER THAN AN OVERSIGHT. `docker volume rm
+  # <project>_loki_data` loses up to thirty days of logs and nothing else; the stack comes back
+  # with an empty store and works. Read that against mosquitto_certs below, where the same command
+  # is a fleet-wide re-enrolment -- the two volumes sit in the same list and are not the same kind
+  # of thing, which is exactly why this says so here rather than leaving it to be inferred.
+  #
+  # THE REASON IS WHAT LOGS ARE FOR HERE. This store exists to answer a question somebody is asking
+  # NOW -- which device, under which edge node, and why -- during or shortly after a fault. A
+  # restored copy of last week's logs answers a question nobody is still asking, and anything from
+  # them that matters beyond the incident is already kept as a ROW: digital_thread is the audit
+  # trail and also carries the conformance record, as the SCHEMA_REJECTION rows
+  # record_ingestion_rejection() writes; platform_alerts is the alert history. Both are in the
+  # tier 1 dump. Backing up logs as well would be a second, weaker copy of records already
+  # captured properly, plus a great deal of noise that is deliberately allowed to expire.
+  #
+  # A TIER 2 SNAPSHOT CAPTURES IT ANYWAY, incidentally, because it captures the machine. That is a
+  # side effect and not a promise -- do not build a retention story on it.
   loki_data:
   # Alloy's write-ahead log and positions file. THE POSITIONS FILE IS THE POINT: it records how far
   # into each container's log the collector has read, so a restart resumes rather than re-shipping
