@@ -1964,7 +1964,11 @@ Rendering archived ranges in a dashboard was declined on the grounds that it wou
 a gateway route and an auth surface over raw plant history"*, for a resolution nothing charts. That
 reasoning was right and it should not be quietly reused here in either direction.
 
-This pays **one** of those three costs. The container, yes. No gateway route — the store is reached
+This pays **one** of those three costs — though it turned out to be **three containers, not
+one**, and the correction is recorded here rather than left to be found in the compose file. The
+store needs a collector (the daemon pushing its own logs would miss Mosquitto's, which is exactly
+what the incident above turns on), and the collector needs a socket proxy because it is not being
+handed the Docker socket. The rest of the sentence held. No gateway route — the store is reached
 by Grafana over the container network, not published. No auth surface — it is a datasource beside the
 three `datasources.template.yml` already provisions, behind the Grafana login that already exists,
 with no new principal and no second place to manage access. And unlike archived telemetry, there is
@@ -2006,11 +2010,266 @@ assumed.
   failure is legible, and they are also on hardware outside the cluster, on a link that is not
   assumed to be up. Almost certainly out of scope for a first version, and worth saying so rather than
   leaving the boundary to be discovered.
-- **Whether structured logging comes first.** `logging_config.py` is 33 lines of plain formatting.
-  Shipping unstructured lines into a label-based store means parsing them at query time forever, and
-  the drop paths are the ones whose fields — reason, device, edge node — would most benefit from being
-  fields. That is a smaller change than the store and it is the one that decides how useful the store
-  is.
+- **Whether structured logging comes first.** ~~`logging_config.py` is 33 lines of plain
+  formatting.~~ **DECIDED, AND DONE — see *What has landed* below.** It was the smaller change and
+  the one that decided how useful the store will be, so it went first and the store now has fields
+  to land on rather than prose to parse forever.
+
+### What has landed: the store itself, on Compose
+
+**Grafana Loki, single binary, filesystem backend**, with Grafana Alloy collecting and a read-only
+socket proxy in front of the Docker API. Configuration and the reasoning are in
+[`loki/loki.yaml`](../loki/loki.yaml) and [`alloy/config.alloy`](../alloy/config.alloy); the three
+services and the argument for each are in `docker-compose.yml`.
+
+**The store choice came down to one property.** Loki's Grafana datasource is a **core** type, so it
+joins the three already in `datasources.template.yml` with no plugin, no boot-time fetch and no new
+failure mode. VictoriaLogs is lighter and worth revisiting if the footprint hurts on the shopfloor
+host, but its datasource is a plugin. OpenSearch is JVM heap on a machine `node-exporter`'s own
+comment says can be taken down by filling one disk.
+
+**A Postgres table was the tempting zero-container answer, and it cannot work.**
+`dropped_db_unavailable` is one of the ten drop reasons. A log store inside the database cannot
+record the database being unreachable, so the line most worth keeping is the one guaranteed to be
+lost — and it collects nothing from Mosquitto, Envoy or Node-RED without a shipper anyway, so it
+does not even save the collector.
+
+**The four decisions, answered:**
+
+* **Retention and the ceiling shipped in the same change**, as the item required, and as
+  DEPLOYMENT CONFIG rather than `system_settings` — which is what `prometheus` already does one
+  service up, with the reasoning spelled out beside both of its flags. A `system_settings` row
+  with no consumer able to honour it would be the setting the schema's own comment forbids: *"a
+  value the table accepts and the consumer then ignores is a setting that lies."*
+* **The window is 30 days, matching Prometheus deliberately.** A log window shorter than the metric
+  window is the worse of the two errors — the drill-down from a 30-day panel would dead-end.
+* **The ceiling is three settings here and was one flag on Prometheus.** Loki has no byte bound on
+  the store; `ingestion_rate_mb` bounds the rate at which bytes can arrive, which reaches the same
+  place from the other end. That asymmetry is why it had to ship in this change: it is more
+  fiddly than Prometheus's and therefore more likely to be the thing left for later.
+* **Enabled by default on Compose, absent from the chart**, with the divergence row written in the
+  same commit — and the honest reason recorded, because the naive version is backwards. The
+  KUBERNETES case is the stronger one, since `kubectl logs` dies at reschedule. The chart declines
+  anyway for the reason it declines to deploy a Prometheus: a cluster is assumed to have one, and a
+  second store would duplicate every line and give an operator two places to configure retention.
+  The **datasource** is provisioned on both targets, pointed at `grafana.lokiUrl`.
+* **Edge collection stays out of scope**, and the boundary is now stated rather than left to be
+  discovered. The structural reason is worth keeping: a gateway that never enrolled holds no
+  credential, so it has no channel to ship logs over — the most valuable gateway log is the least
+  reachable one, and enrolment-time logging is a different problem from steady-state logging.
+
+**THE DOCKER SOCKET IS THE DECISION MOST WORTH REVIEWING.** Alloy discovers containers through the
+Docker API, and the usual way to grant that is a socket mount. Nothing in this repository mounts
+that socket, and `:ro` on a socket mount is theatre — it makes the socket FILE read-only and grants
+the full API behind it, including creating a container that bind mounts the host's root filesystem.
+A stack that removed `--web.enable-lifecycle` from Prometheus because it exposed a remote shutdown
+does not then hand out the socket to label log lines. So the mount lives in
+`docker-socket-proxy`, which allowlists by API path group: `CONTAINERS: 1`, `POST: 0`, and every
+other group named and refused. The socketless alternative — reading the container log files
+directly — needs no proxy at all, and was rejected because the only identity in those paths is the
+container ID, which changes on every recreate and names nothing a human recognises.
+
+**What is NOT done: Kubernetes.** The chart deploys no log workload by decision, but the DaemonSet
+side of that decision — what a cluster operator is expected to run, and what the divergence row
+promises the datasource will find — is documented rather than exercised. Nothing in CI stands up a
+Loki behind the chart's datasource.
+
+**The pins and both configs were verified against the images themselves**, not against
+documentation — which is the lesson `servicemonitors.yaml` records at length, having had a metric
+name *"wrong in both directions"* by reading changelogs. All three tags resolve
+(`docker manifest inspect`), `loki -verify-config` accepts `loki/loki.yaml` on `3.5.7`, and both
+`alloy fmt` and `alloy validate` accept `alloy/config.alloy` on `v1.11.2` — the latter resolving
+every component reference in the pipeline, so a misspelled block or a dangling `forward_to` would
+have failed there. The file is stored in `alloy fmt`'s canonical form so a future format check
+finds nothing to change.
+
+**It has since been run against the live stack**, which is where the two real defects were, and
+neither was visible to any static check.
+
+* **The socket proxy's allowlist was too narrow, and the failure was total rather than partial.**
+  `discovery.docker` computes network labels for every target it finds, so it calls `GET /networks`
+  immediately after `GET /containers/json`. With `NETWORKS: 0` the proxy answered 403, Alloy logged
+  *"Unable to refresh target groups"*, and **discovery failed wholesale — nothing was collected at
+  all**. `alloy validate`, `docker compose config` and `loki -verify-config` all pass on that
+  configuration, because none of them can know what an allowlist will refuse at run time. Now
+  `NETWORKS: 1`, which with `POST: 0` is still read-only and discloses this stack's own network
+  name to a container already attached to it.
+* **Loki added a label the design did not ask for.** Loki 3 derives its own `service_name`, so the
+  first run produced four labels where `alloy/config.alloy` documents two. It costs nothing in
+  cardinality, being 1:1 with `service`, and it was turned off anyway (`discover_service_name: []`):
+  a label set that does not match the file documenting it is how the next reader learns to
+  distrust the documentation. Confirmed against the live index, where the same container splits
+  into two streams either side of the restart.
+
+**What the live run confirmed, rather than assumed:** 25 compose services discovered and labelled
+correctly through the proxy; `detected_level` attached as STRUCTURED METADATA and not as a label,
+so it multiplies no streams; twelve streams total against a 5000 ceiling; and the drill-down query
+itself —
+
+    {service="ingestion"} | json | reason = "gateway_binding"
+
+— resolving against a line produced by the real `JSONFormatter`, with a negative control on a
+reason that did not occur returning nothing. The delete API was exercised in passing to remove the
+test stream.
+
+**One first-start behaviour that alarms and should not.** Attaching a collector to containers that
+have been running for days ships days of history at once, and Loki refuses the parts older than
+what it has already accepted for that stream — *"entry too far behind"*, HTTP 400. Those refusals
+are correct, they stop by themselves once each stream catches up, and a stack started cold never
+sees them. Recorded in `loki/loki.yaml` beside the setting rather than left for someone to
+diagnose at the worst moment.
+
+### What has landed: the pipeline is connected, and monitored
+
+**`LOG_FORMAT=json` is now set on `ingestion` and `playback` on BOTH targets**, in
+`docker-compose.yml` and in the chart. The code default stays `text`, which is a different claim
+and a deliberate one: someone running the daemon by hand is reading with their eyes, and a daemon
+writing into a store is being read by a query. Setting it on both targets rather than only on the
+one with a store means the daemon behaves identically on each, so no divergence row is owed — the
+store is the divergence, the log format is not.
+
+Verified end to end on the live stack: the daemon emits JSON, Alloy ships it, and
+`{service="ingestion"} | json | level = "INFO"` parses real lines back out with `level`, `logger`
+and `msg` extracted as fields. Grafana's Loki datasource reports *"Data source successfully
+connected"*.
+
+**A rebuild is required, not a recreate.** `docker compose up --force-recreate ingestion` picks up
+the new environment variable and the OLD code, because `logging_config.py` lives in the image — the
+container came up with `LOG_FORMAT=json` set and went on writing text. `docker compose build
+ingestion playback` first.
+
+**The drop panel exists now, and §13's claim about it was ahead of the repository.** The item said
+the log is *"the drill-down from a panel that exists"*. It was not: `acs_ingestion_messages_dropped_total`
+appeared in `alert-rules.yaml` and in no dashboard at all. **Messages Dropped by Reason** is now on
+*Stack & Ingestion Health*, in the Ingestion row, stacked so the first question it answers is "are
+we losing anything", with a data link that opens the log store filtered to whichever reason was
+clicked. That link is the drill-down the whole item is arguing for, and it works because the label
+and the field carry the same string.
+
+**Three alert rules, because there are three distinct failures and one is invisible.**
+`up{job="alloy"}` catches a dead collector. A rate on `loki_write_sent_entries_total` catches the
+collector that is UP and shipping nothing — the failure that looks exactly like a quiet plant, and
+the one the first live run actually had. `loki_write_dropped_entries_total{reason=~"rate_limited|stream_limited"}`
+catches a configured ceiling biting, which is what stops the rate bound silently eating evidence
+during the fault it was sized for. `ingester_error` is excluded on purpose: it is the benign
+first-attach backfill, and alerting on it would train people to ignore the group.
+
+Prometheus scrapes both `loki` and `alloy` — the pair whose own failure would otherwise destroy the
+record of itself. Both targets confirmed `up`.
+
+### What has landed: the fault path, under test
+
+**`test-harness/test_log_pipeline.py` drives a real drop and asserts both halves of it**, in the
+`stack` lane against a running stack. It publishes a DDATA for a randomly generated unregistered
+device, then requires BOTH that
+`acs_ingestion_messages_dropped_total{reason="quarantined_or_unregistered"}` increased AND that a
+line carrying that same reason **and that device id** arrived in Loki. Prometheus cannot name the
+device — its endpoint is unauthenticated and carries no device data by design — so this is the
+assertion that the half this item exists to keep is actually being kept. Verified live: 8 passing,
+1 skipped.
+
+**The random id is load bearing.** The daemon caches negative resolutions, so a fixed id is
+answered from cache on the second run of the day and drops nothing — the suite would pass while
+testing nothing at all.
+
+**Two couplings are now guarded statically, because both fail silently.**
+
+* **The multiline regex is a restatement of the formatters**, in another language and another
+  directory. `alloy/config.alloy` rejoins Docker's one-entry-per-line output by matching what
+  starts a record — a `{` or this repository's ISO 8601 timestamp. Change `UTCFormatter`'s format
+  and the collector goes on matching the old shape: every line becomes a continuation of the one
+  before, records merge, and nothing fails. The test reads the regex out of the collector config
+  and applies it to what the formatters actually emit.
+* **The drill-down link crosses three files in three languages.** The collector must label
+  `service`, the daemon must log `reason`, and the panel must select and filter on both. Any one
+  can change alone, reviewed by people with no cause to open the other two, and the failure is
+  silent — Explore opens, the query is valid, and it returns nothing. "No logs" and "wrong label"
+  are indistinguishable from the browser.
+
+**AND THAT SECOND GUARD FOUND A REAL DEFECT IN WHAT HAD ALREADY SHIPPED.** The panel's link
+selects `{service="ingestion"}`. Compose's collector sets that label; **a stock Kubernetes log
+stack does not** — it labels streams `namespace`/`pod`/`container` and sets no `service` at all.
+The dashboard is mirrored into the chart, so it was shipping to clusters with a drill-down that
+connects, validates, and resolves to nothing. That is now a stated **label contract**: a cluster
+feeding `grafana.lokiUrl` must relabel `service` to the workload name. It is one rule in whatever
+collector the cluster runs, and it is written in the divergence table, in `values.yaml` beside
+`lokiUrl`, and in the panel's own description — so the person who clicks a dead link finds out why
+from the thing they clicked.
+
+### What remains, and where to pick each one up
+
+Four things, none of them blocking the store being useful, each written with its entry point so it
+can be started cold. **They are listed smallest first, which is also roughly least valuable first.**
+
+**1 · The multiline stage has never met a real traceback. (Small.)**
+`ingestion/test_structured_logging.py` asserts the `firstline` regex against what the formatters
+emit, so a format change cannot silently break it. What is unproven is the REJOINING: that Alloy
+actually stitches an eight-line Python traceback back into one record. `test_log_pipeline.py`
+checks it opportunistically and skips when the stack has been healthy -- the good outcome, and an
+awkward one to test against. Closing it means provoking a traceback deliberately, which means
+either a fault-injection path in the daemon or restarting a service mid-suite, and both are worse
+than the gap. **Revisit only if a real incident shows tracebacks arriving fragmented.**
+
+**2 · Nothing scrapes the collector's own parsing errors. (Small.)**
+`loki_source_docker_target_parsing_errors_total` exists on the Alloy target and no rule reads it.
+It is the metric that would say the collector is reading containers it cannot decode -- distinct
+from both "shipped nothing" and "the store refused it", and therefore not covered by any of the
+three rules in the `Log Pipeline` group.
+
+**3 · The Kubernetes side is contract-checked but not EXERCISED. (Medium.)**
+The chart ships the datasource pointed at `grafana.lokiUrl` and deploys no log workload, which is
+the decision. What follows from it is untested: nothing stands a Loki up behind that datasource,
+and the `service` label contract -- which a stock cluster log stack does NOT satisfy -- is asserted
+in prose and in the divergence table rather than by anything that runs. The k3d job in CI is the
+place this would live. **Note the failure it would catch is the one already found once by hand: a
+datasource that connects, a health check that passes, and every query returning nothing.**
+
+**4 · The store is not in the backup or restore story. (Medium, and the one most likely to bite.)**
+`loki_data` is a named volume holding a database, and `scripts/backup-databases.sh` does not know
+about it -- reasonably, since it backs up databases of record and this is not one. But the
+retention decision says thirty days, and nothing states whether a `docker volume rm` or a host
+rebuild is expected to lose those thirty days. **Every other store in this stack has an answer to
+that question and this one arrived without one**, which is the same shape of omission §13 opens by
+warning about for retention. The answer may well be "logs are not backed up, and that is
+deliberate" -- but it should be written down beside `mosquitto_certs`, whose volume comment
+explains precisely why IT must survive.
+
+### What has landed: the fields, so the store has something to index
+
+**The pair was enforced by habit, and is now enforced by structure.** Every drop was two adjacent
+statements — `count("dropped_<reason>")` and a `logger.warning` — at ten sites, each of which had to
+remember to name the same reason. They are now one `drop("<reason>", …)` call that derives both from
+a single string, so the counter and the line cannot disagree about what happened: the property
+`metrics.py`'s header always claimed, now held by the code rather than by care.
+
+* **`logging_config.py` gained a `JSONFormatter`**, selected by `LOG_FORMAT=json`, promoting
+  `extra=` fields to top level. `reason` is the key every drop query starts from, so it is not
+  nested under a `fields` object.
+* **The text formatter carries the same fields**, appended as `[reason=… device=…]` before any
+  traceback. If it did not, a developer reading `docker logs` would be looking at a different
+  record from the one the store kept.
+* **`LOG_FORMAT` defaults to `text` on both targets, deliberately.** Nothing reads the JSON yet, and
+  flipping the default now would change what every operator sees to buy a property nothing consumes.
+  **The flip belongs in the change that ships the store** — one visible change with a reason on it.
+* **The fields are on the log and not on the counter**, and that boundary is the disclosure argument
+  this item asked for, answered rather than assumed. `metrics.py` is served without a credential and
+  carries no device data of any kind; `edge_node` appears there only because it is already public on
+  the broker. `device` goes on the authenticated half — behind the Grafana login, never published —
+  and must not migrate onto the other one.
+* **`emit_log=False` suppresses the line and never the counter.** Two sites throttle their warning
+  because the traffic arrives every 30s; the counter must still fire per message, or the metric
+  reports one drop per throttle window. That asymmetry now lives in the helper's signature instead of
+  being re-derived at each site, and a test refuses a constant `emit_log`.
+
+**The assertion that earns its place in CI** is that the logged `reason` field and the Prometheus
+`reason` label are the same string, for every reason a site can emit — read out of `ingestion.py`'s
+source rather than restated. That is the drill-down contract: a spike on a panel is a link into the
+logs only if both halves spell the reason identically, and nothing else in the stack would notice
+them diverging, because each half stays internally consistent while meaning different things.
+
+**What this does NOT do is ship a store**, and the four decisions above are still the gate. Two are
+now answered by what landed (the disclosure question, and structured-logging-first); retention, the
+size ceiling and the default-per-target remain open, and the store choice is bound up with them.
 
 ---
 

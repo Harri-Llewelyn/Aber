@@ -798,6 +798,40 @@ def counter_snapshot() -> dict:
         return dict(_counters)
 
 
+# ---------------------------------------------------------------------------------------------
+# THE DROP PAIR, IN ONE PLACE.
+#
+# Every drop is a counter AND a log line, and metrics.py's header states the property they exist
+# to hold: "the counters and the log cannot disagree about what happened". That was enforced by
+# habit -- two adjacent statements, at nineteen sites, each of which had to remember to name the
+# same reason. This makes it structural: `reason` is written ONCE and produces both the flat
+# counter name `dropped_<reason>` and the `reason` field on the line.
+#
+# WHICH IS ALSO WHY THE FIELDS GO IN THE LOG AND NOT ON THE COUNTER. metrics.py bounds label
+# cardinality deliberately -- `edge_node` is one per gateway, and labelling by DEVICE would be
+# unbounded -- and its endpoint carries NO DEVICE DATA OF ANY KIND because it is served without a
+# credential. A log store is the other side of that line: reached over the container network,
+# behind the Grafana login, never published. So `device` belongs here, on the half that is
+# authenticated, and must not migrate onto the half that is not.
+#
+# `emit_log=False` SUPPRESSES THE LINE AND NEVER THE COUNTER. Two sites throttle their warning
+# because the traffic that triggers it arrives every 30s and the log would be unreadable. The
+# counter must not be throttled with it, or the metric would report one drop per throttle window
+# instead of one per message -- so the asymmetry lives here, in the signature, rather than being
+# re-derived at each call site.
+# ---------------------------------------------------------------------------------------------
+def drop(reason: str, message: str, *args, emit_log: bool = True, **fields):
+    """Count a dropped message and warn about it, from one `reason`.
+
+    `reason` is the Prometheus label value; the flat counter is `dropped_<reason>` and must have
+    a mapping in metrics.py's COUNTER_MAP -- test_structured_logging.py asserts that every reason
+    reachable here does, and that the label and the logged field carry the same string.
+    """
+    count(f"dropped_{reason}")
+    if emit_log:
+        logger.warning(message, *args, extra={"reason": reason, **fields})
+
+
 # LABELLED COUNTERS, kept beside the flat ones rather than replacing them.
 #
 # The flat registry is a name -> int dict, which cannot express "gaps, by edge node" without
@@ -1410,15 +1444,16 @@ def resolve_gateway(wire_id: str, group_id: str = None, include_archived: bool =
     # NAMED SEPARATELY FROM "unregistered", which is the whole reason this is not simply a filter
     # in the query. "Received NDATA from unregistered edge node" sends an operator hunting a
     # provisioning fault; the truth is that somebody archived it, and that is a different fix.
-    count("dropped_gateway_archived")
-    if _throttled(_archived_gateway_warned, wire_id, ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS):
-        logger.warning(
-            "Dropping traffic from edge node '%s' (%s): the gateway is ARCHIVED. Its broker "
-            "credential should have been revoked when it was archived (archived migration 0038) -- that it "
-            "can still publish means revocation has not landed, or GATEWAY_REVOKE_SECRET is unset "
-            "on this deployment. Un-archive the gateway to accept it again.",
-            wire_id, row.get("name")
-        )
+    drop(
+        "gateway_archived",
+        "Dropping traffic from edge node '%s' (%s): the gateway is ARCHIVED. Its broker "
+        "credential should have been revoked when it was archived (archived migration 0038) -- that it "
+        "can still publish means revocation has not landed, or GATEWAY_REVOKE_SECRET is unset "
+        "on this deployment. Un-archive the gateway to accept it again.",
+        wire_id, row.get("name"),
+        emit_log=_throttled(_archived_gateway_warned, wire_id, ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS),
+        edge_node=wire_id,
+    )
     return None
 
 
@@ -1868,12 +1903,13 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
             # invisible. A birth certificate carries the alias table, so losing one leaves every
             # later alias-only DDATA from this node unresolvable until the next rebirth -- a
             # dropped DDATA costs one sample, this costs a device until it speaks again.
-            count("dropped_dbirth_directory_unavailable")
-            logger.warning(
+            drop(
+                "dbirth_directory_unavailable",
                 "DIRECTORY UNAVAILABLE: dropping DBIRTH for '%s' without registering it (%s). "
                 "The device is NOT quarantined -- this is a transport fault, not an identity "
                 "one. The next birth certificate will resolve normally.",
-                wire_id, e
+                wire_id, e,
+                device=wire_id,
             )
             return
 
@@ -1979,10 +2015,11 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         # The same counter as the arm above: both lose a birth certificate, and an operator
         # asking "are we losing births" wants one number, not two to add together. Where it
         # failed is a question for the log line, which distinguishes them.
-        count("dropped_dbirth_directory_unavailable")
-        logger.warning(
+        drop(
+            "dbirth_directory_unavailable",
             "DIRECTORY UNAVAILABLE part way through DBIRTH for '%s' (%s). No device state was "
-            "changed; the next birth certificate will complete it.", wire_id, e
+            "changed; the next birth certificate will complete it.", wire_id, e,
+            device=wire_id,
         )
     except Exception as e:
         logger.error("Error checking/updating Supabase devices for DBIRTH: %s", e, exc_info=True)
@@ -2008,10 +2045,11 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
         # Separate from the birth counter because the consequence is different and bounded: the
         # watchdog corrects a missed death after DEVICE_OFFLINE_TIMEOUT_SECONDS, so this is a
         # delayed status, not lost telemetry. Summing it with births would overstate the harm.
-        count("dropped_ddeath_directory_unavailable")
-        logger.warning(
+        drop(
+            "ddeath_directory_unavailable",
             "DIRECTORY UNAVAILABLE: dropping DDEATH for '%s' (%s). The watchdog will mark it "
-            "OFFLINE if it stays silent.", wire_id, e
+            "OFFLINE if it stays silent.", wire_id, e,
+            device=wire_id,
         )
         return
 
@@ -2425,13 +2463,14 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
         # arrives every 30s and the log would be unreadable; the counter must not be, or the
         # metric would report one drop per throttle window instead of one per message. This is
         # the one site where the counter and the log legitimately disagree, and this is why.
-        count("dropped_node_message_directory_unavailable")
-        if _throttled(_unknown_gateway_warned, edge_node_id, UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS):
-            logger.warning(
-                "DIRECTORY UNAVAILABLE: dropping %s from edge node '%s' (%s). This is NOT the "
-                "unregistered-node path -- nothing is written and the next heartbeat retries.",
-                msg_type, edge_node_id, e
-            )
+        drop(
+            "node_message_directory_unavailable",
+            "DIRECTORY UNAVAILABLE: dropping %s from edge node '%s' (%s). This is NOT the "
+            "unregistered-node path -- nothing is written and the next heartbeat retries.",
+            msg_type, edge_node_id, e,
+            emit_log=_throttled(_unknown_gateway_warned, edge_node_id, UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS),
+            edge_node=edge_node_id, msg_type=msg_type,
+        )
         return
 
     if gateway is None:
@@ -3002,16 +3041,20 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # difference from the old behaviour is only that nothing is written about the DEVICE
         # either: the message is dropped and the stream resumes on its own, instead of the device
         # being pinned to "unregistered" for CACHE_TTL_SECONDS or quarantined by its next DBIRTH.
-        count("dropped_directory_unavailable")
-        logger.warning(
+        drop(
+            "directory_unavailable",
             "DIRECTORY UNAVAILABLE: dropping DDATA for '%s' (%s). Not quarantined; the stream "
-            "resumes when the directory returns.", wire_id, e
+            "resumes when the directory returns.", wire_id, e,
+            device=wire_id,
         )
         return
 
     if device is None or device.get("is_quarantined"):
-        count("dropped_quarantined_or_unregistered")
-        logger.warning("Dropping DDATA for quarantined/unregistered device '%s'", wire_id)
+        drop(
+            "quarantined_or_unregistered",
+            "Dropping DDATA for quarantined/unregistered device '%s'", wire_id,
+            device=wire_id,
+        )
         return
 
     # The telemetry half of the spoofing fix. Dropped rather than quarantined here: a DDATA
@@ -3025,18 +3068,20 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # The binding could not be CHECKED, so the row must not be written -- an unverifiable
         # attribution is exactly what this check exists to refuse. Dropped, not quarantined, for
         # the reason stated above: a DDATA stream must never be able to quarantine a device.
-        count("dropped_directory_unavailable")
-        logger.warning(
+        drop(
+            "directory_unavailable",
             "DIRECTORY UNAVAILABLE: cannot verify gateway binding for '%s' (%s); dropping DDATA "
-            "rather than attributing it unverified.", wire_id, e
+            "rather than attributing it unverified.", wire_id, e,
+            device=wire_id, edge_node=gateway_wire_id,
         )
         return
 
     if binding_fault:
-        count("dropped_gateway_binding")
-        logger.warning(
+        drop(
+            "gateway_binding",
             "Dropping DDATA for device '%s' published via edge node '%s': %s",
-            wire_id, gateway_wire_id, binding_fault
+            wire_id, gateway_wire_id, binding_fault,
+            device=wire_id, edge_node=gateway_wire_id,
         )
         return
 
@@ -3056,8 +3101,11 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 
     db_conn = get_timescaledb_connection()
     if not db_conn:
-        count("dropped_db_unavailable")
-        logger.warning("TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'", wire_id)
+        drop(
+            "db_unavailable",
+            "TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'", wire_id,
+            device=wire_id,
+        )
         return
 
     payload_ts = payload.timestamp if hasattr(payload, 'timestamp') and payload.timestamp > 0 else int(time.time() * 1000)

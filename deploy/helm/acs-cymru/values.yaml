@@ -1224,6 +1224,33 @@ grafana:
   # rules report DatasourceError -- the same honest failure the Supabase datasource makes with no
   # BI_READER_PASSWORD, and better than a rule that cannot reach its data evaluating to OK.
   prometheusUrl: http://prometheus-operated.monitoring.svc:9090
+  # WHERE THE CLUSTER'S LOKI LIVES, and the same arrangement one store along. Substituted into the
+  # shared datasource template; Compose points it at the Loki it runs itself, this points it at the
+  # one the cluster already has.
+  #
+  # THIS CHART DOES NOT DEPLOY A LOKI, AND THAT IS ROADMAP 13'S DECISION RATHER THAN AN OMISSION.
+  # Compose runs its own log store for the same reason it runs its own Prometheus -- it owns its
+  # whole observability stack. A cluster is assumed to have one already, and a second store plus a
+  # second DaemonSet collector would duplicate every line and give an operator two places to
+  # configure retention. The Kubernetes case for keeping logs is if anything the STRONGER one --
+  # `kubectl logs` dies at reschedule, which is the moment an operator is most likely to be
+  # looking -- so this default says "not a second one", not "not worth having".
+  #
+  # The default is the grafana/loki chart's conventional gateway service. On a cluster with no
+  # Loki, or one installed elsewhere, the datasource fails its health check -- the same honest
+  # failure `prometheusUrl` makes above.
+  #
+  # AND THERE IS A LABEL CONTRACT, WHICH IS THE HALF THAT IS EASY TO MISS. Pointing this at a
+  # working Loki is necessary and not sufficient: every log query this repository ships selects on
+  # `{service="<name>"}`, because that is what Compose's collector applies. A stock Kubernetes log
+  # stack labels streams `namespace`/`pod`/`container` and sets no `service` at all -- so the
+  # datasource connects, the health check passes, and the drop panel's drill-down returns nothing,
+  # which reads as "no logs" rather than as "wrong label".
+  #
+  # So a cluster feeding this datasource must relabel `service` to the workload name -- one rule in
+  # whatever collector it runs. Stated here because roadmap 13 asked for the boundary to be written
+  # down rather than discovered.
+  lokiUrl: http://loki-gateway.monitoring.svc:80
   image:
     repository: grafana/grafana
     # Pinned, AND PINNED TO THE SAME TAG COMPOSE USES -- check-image-tag-parity.mjs fails the build
