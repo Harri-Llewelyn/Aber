@@ -1098,3 +1098,317 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+
+      # -------------------------------------------------------------------------------------------
+      # 6. APPLIANCE CLOCK SKEW -- the fault that passes every other check in this file.
+      #
+      # WHY THIS IS NOT COVERED BY ANYTHING ABOVE. A gateway with a wrong clock is ONLINE, is not
+      # stale, drops no messages, skips no sequence numbers and verifies its certificate perfectly:
+      # TLS validity is measured in months and this is measured in minutes, so the appliance passes
+      # every check the platform makes and files every reading at a time that never happened. Rule 4
+      # catches a clock that is wrong by YEARS, because that one breaks the certificate. Nothing
+      # caught the minutes until this metric existed.
+      #
+      # THE MEASUREMENT COSTS NOTHING ON THE APPLIANCE. ingestion.py subtracts the timestamp the node
+      # put on its own heartbeat from the time the heartbeat arrived. No bundle change, no new metric
+      # on the wire, no configuration -- both numbers were already in the payload path.
+      #
+      # THE STALENESS GATE IS THE SECOND HALF OF THE EXPRESSION AND IT IS NOT OPTIONAL. A Prometheus
+      # gauge holds its last value forever, so without it an appliance powered down mid-fault would
+      # go on alerting on whatever its clock said the day it left -- for as long as the daemon runs.
+      # 300s is ten missed heartbeats, comfortably past the 90s the dashboard calls STALE, so a
+      # gateway that is merely OFFLINE stops alerting here and is reported by rule 1 instead.
+      #
+      # 60 SECONDS IS DELIBERATELY WELL INSIDE THE DAEMON'S SANITY WINDOW (-24h/+5m), and matches
+      # GATEWAY_CLOCK_OFFSET_WARN_SECONDS in ingestion.py. Past +5m the telemetry is discarded and
+      # counted by acs_ingestion_timestamps_rejected_total{edge_node}; this is meant to fire long
+      # before that, while the data is still being accepted and silently misfiled.
+      #
+      # `for: 15m` MATTERS MORE HERE THAN ELSEWHERE. A broker or network stall delays a heartbeat
+      # rather than the clock that stamped it, which reads as a NEGATIVE offset of however long the
+      # stall lasted. Fifteen minutes of continuous evaluation separates a genuinely wrong clock
+      # from a slow minute -- and a stall that does outlast it is an incident of its own.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-gateway-clock-skew
+        title: Gateway Clock Skew
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: gateway
+        annotations:
+          summary: >-
+            Edge node {{ $labels.edge_node }} has a clock that disagrees with the platform by more
+            than a minute, so every reading it sends is being filed at the wrong time. Nothing
+            corrects this centrally -- devices are trusted for their own timestamps. Fix time
+            synchronisation on the appliance; see docs/physical-gateways.md.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                abs(acs_ingestion_gateway_clock_offset_seconds)
+                and on(edge_node)
+                (time() - acs_ingestion_gateway_clock_measured_timestamp_seconds < 300)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [60]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+  # ===============================================================================================
+  # THE LOG PIPELINE (roadmap 13).
+  #
+  # WHY THIS GROUP EXISTS, and it is the same argument the store itself rests on rather than a
+  # reflexive "monitor the monitoring". Loki and Alloy hold the evidence for every other fault
+  # here. They are therefore the one pair whose own failure destroys the record of itself: nothing
+  # else in the stack notices that the thing which would have noticed has stopped.
+  #
+  # THREE RULES, BECAUSE THERE ARE THREE DISTINCT FAILURES AND ONE OF THEM IS INVISIBLE.
+  #
+  #   Collector Down      the container is gone. Loud, and the easy one.
+  #   Collection Stalled  the container is UP and shipping nothing. This is the failure that looks
+  #                       exactly like a quiet plant, and it is not hypothetical -- it happened on
+  #                       the first live run, when the socket proxy refused GET /networks and
+  #                       discovery failed wholesale while the container stayed healthy and the
+  #                       healthcheck stayed green.
+  #   Store Refusing      a ceiling in loki/loki.yaml is biting. Lines are being lost NOW.
+  #
+  # THE FIRST TWO ARE A PAIR AND NEITHER COVERS THE OTHER. `up == 0` cannot see a broken collector
+  # that is still answering its scrape; a rate on shipped entries cannot distinguish a dead
+  # collector from a cluster that never had one, because both are NoData. Together they do. This
+  # is the same division of labour `Telemetry Being Dropped` already relies on when it defers the
+  # broken-scrape case to `Ingestion Consuming Nothing`.
+  # ===============================================================================================
+  - orgId: 1
+    name: Log Pipeline
+    folder: ACS-Cymru - Platform Infrastructure
+    interval: 1m
+    rules:
+
+      # -------------------------------------------------------------------------------------------
+      # 1. THE COLLECTOR IS GONE. `up` rather than a rate, because this is the one collector failure
+      # Prometheus can state directly: it knows the target and cannot reach it.
+      #
+      # WARNING AND NOT CRITICAL, deliberately. No telemetry is lost and no device is affected --
+      # what is lost is the RECORD, and only for as long as this lasts. Waking someone at 03:00 for
+      # it would be the wrong trade, and would teach them to route the whole group to nowhere.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-log-collector-down
+        title: Log Collector Down
+        condition: C
+        for: 5m
+        # OK, NOT ALERTING, AND THE REASON IS THE DIVERGENCE TABLE. The chart deploys no log
+        # workload, so on Kubernetes this series does not exist at all. NoData there is the
+        # CORRECT state, not a fault -- and a rule that fires forever on every cluster is a rule
+        # operators silence, taking the Compose signal with it.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The log collector is not answering its scrape. Container logs are still being written by
+            Docker and are still readable with `docker logs`, but nothing is being kept -- so the
+            evidence for anything that fails while this is down will not be in the store afterwards.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: up{job="alloy"}
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+
+      # -------------------------------------------------------------------------------------------
+      # 2. THE COLLECTOR IS UP AND COLLECTING NOTHING. The rule that would have caught the first
+      # live defect, and the reason this group has three rules rather than two.
+      #
+      # FIFTEEN MINUTES, NOT FIVE. A stack can be genuinely quiet -- but not for a quarter of an
+      # hour, because this stack logs about ITSELF: the ingestion daemon writes a STATS line every
+      # 60s by default, so a truly silent ten-minute window already means something is wrong.
+      # That is also why the threshold is a rate rather than an absence: `lt 0.001` distinguishes
+      # "nothing at all" from "very little", where a `== 0` on a counter cannot.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-log-collection-stalled
+        title: Log Collection Stalled
+        condition: C
+        for: 15m
+        # OK, NOT ALERTING, AND THE REASON IS THE DIVERGENCE TABLE. The chart deploys no log
+        # workload, so on Kubernetes this series does not exist at all. NoData there is the
+        # CORRECT state, not a fault -- and a rule that fires forever on every cluster is a rule
+        # operators silence, taking the Compose signal with it.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The log collector is running and has shipped nothing for fifteen minutes. On a stack with
+            any traffic this means collection is broken rather than idle -- check that discovery is
+            resolving targets, which is what fails when the socket proxy refuses an API path.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: sum(rate(loki_write_sent_entries_total[10m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [0.001]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+
+      # -------------------------------------------------------------------------------------------
+      # 3. A CEILING IS BITING, which is the rule that makes the size bound honest.
+      #
+      # loki.yaml bounds the store by ingest RATE because Loki has no byte ceiling, and a bound
+      # nobody is told about is a bound that silently eats evidence during exactly the fault it was
+      # sized for -- log volume scales with fault rate. This is what says so.
+      #
+      # THE `reason` FILTER IS LOAD BEARING AND EXCLUDES `ingester_error` ON PURPOSE. That value
+      # counts the "entry too far behind" refusals a collector produces when it first attaches to
+      # containers that have been running for days -- correct behaviour, self-limiting, and
+      # documented in loki/loki.yaml. Alerting on it would fire on every first start and train
+      # people to ignore this rule before it ever said anything true.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-log-store-refusing
+        title: Log Store Refusing Lines
+        condition: C
+        for: 10m
+        # OK, NOT ALERTING, AND THE REASON IS THE DIVERGENCE TABLE. The chart deploys no log
+        # workload, so on Kubernetes this series does not exist at all. NoData there is the
+        # CORRECT state, not a fault -- and a rule that fires forever on every cluster is a rule
+        # operators silence, taking the Compose signal with it.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The log store is refusing lines ({{ $labels.reason }}) and they are being lost. This is a
+            ceiling in loki/loki.yaml doing its job: `rate_limited` is ingestion_rate_mb, and
+            `stream_limited` is max_streams_per_user -- which usually means a label was promoted
+            that should have stayed a field. Raise the bound or fix the cause; do not ignore it.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: sum by (reason) (rate(loki_write_dropped_entries_total{reason=~"rate_limited|stream_limited"}[10m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__

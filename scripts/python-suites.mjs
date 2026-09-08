@@ -119,6 +119,17 @@ export const SUITES = {
       'stubs protobuf/MQTT/psycopg2 before importing ingestion.py, so a pure-logic test does not ' +
       'depend on `protoc` being installed or on Docker being up.',
   },
+  'ingestion/test_structured_logging.py': {
+    lanes: ['unit'],
+    why:
+      'The JSON log formatter and the drop pair (roadmap 13). THE ASSERTION THAT EARNS ITS ' +
+      "PLACE IN CI IS test_the_logged_field_and_the_prometheus_label_are_the_same_string: it " +
+      'reads every `drop("<reason>")` out of ingestion.py and requires the logged `reason` ' +
+      "field to equal the `reason` LABEL metrics.py exports for it. That is the drill-down " +
+      'contract -- a spike on a dashboard panel is only a link into the logs if both halves ' +
+      'spell the reason identically -- and nothing else in the stack would notice them ' +
+      'diverging, because each half stays internally consistent while meaning different things.',
+  },
   'ingestion/test_metrics_endpoint.py': {
     lanes: ['unit'],
     why:
@@ -239,6 +250,16 @@ export const SUITES = {
     why:
       'The per-gateway health gauges. These are what the alert rules read, so a gauge that stops ' +
       'being exported does not fire an alert about itself -- it silently removes the alert.',
+  },
+  'ingestion/test_gateway_clock_offset.py': {
+    lanes: ['unit'],
+    why:
+      'The appliance clock offset, and the edge_node label on the timestamp rejection counter. ' +
+      'THE FAULT THIS GUARDS PASSES EVERY OTHER CHECK IN THE STACK: a gateway a few minutes fast ' +
+      'is ONLINE, drops nothing, skips no sequence numbers and verifies its certificate ' +
+      'perfectly, because TLS validity is measured in months and this is measured in minutes. So ' +
+      'a regression here does not break a test elsewhere -- it silently returns the platform to ' +
+      'filing telemetry at times that never happened, with every number on the page plausible.',
   },
   'ingestion/test_capture_worker.py': {
     lanes: ['unit'],
@@ -577,6 +598,26 @@ export const SUITES = {
     why:
       'The read-only BI role. Four of its five checks skip without a historian; the point of it ' +
       'is that a reporting credential cannot write, which only means anything against a real one.',
+  },
+  'test-harness/test_log_pipeline.py': {
+    // STACK ONLY, AND IT CANNOT BE ANYTHING ELSE. Every assertion here is about four processes
+    // and two independent stores agreeing at run time -- broker, daemon, collector, store. The
+    // static half is already covered by ingestion/test_structured_logging.py in the unit lane,
+    // and duplicating it here would only make this suite slower to fail.
+    lanes: ['stack'],
+    why:
+      'THE ONLY CHECK THAT A DROP IS COUNTABLE AND READABLE AT THE SAME TIME. It publishes a ' +
+      'DDATA for a randomly generated unregistered device, then asserts BOTH that ' +
+      'acs_ingestion_messages_dropped_total{reason="quarantined_or_unregistered"} increased AND ' +
+      'that a line carrying that same reason and THAT device id arrived in Loki. Prometheus ' +
+      'cannot name the device -- its endpoint is unauthenticated and carries no device data by ' +
+      'design -- so this is the assertion that the other half of the instrument exists at all. ' +
+      'THE RANDOM ID IS LOAD BEARING: the daemon caches negative resolutions, so a fixed id is ' +
+      'answered from cache on a second run and drops nothing, and the suite would pass while ' +
+      'testing nothing. WHY IT IS NOT COVERED BY THE STATIC SUITE: the first live run of this ' +
+      'pipeline had the socket proxy refuse one API path, discovery fail WHOLESALE and nothing ' +
+      'collected at all -- while the container stayed healthy, `alloy validate` passed and every ' +
+      'static check in this repository reported PASS.',
   },
   'timescaledb/test_worker_pool.py': {
     lanes: ['stack'],

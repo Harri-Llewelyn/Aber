@@ -71,6 +71,19 @@ spec:
           command: ["python", "playback_worker.py"]
           env:
             {{- /*
+              JSON LOGS, matching docker-compose.yml so the targets do not diverge -- see roadmap
+              13. The daemon's `reason`, `device` and `edge_node` become top-level keys rather
+              than an appended `[reason=...]`, which is what makes a log query filter on them.
+
+              SET ON BOTH TARGETS EVEN THOUGH THIS CHART DEPLOYS NO LOKI. A cluster's own log
+              stack parses JSON better than prose too, and leaving this unset here to mirror the
+              absent store would be a silent behavioural difference in the daemon itself -- which
+              is exactly what the divergence table exists to prevent. The store is the divergence;
+              the log FORMAT is not.
+            */}}
+            - name: LOG_FORMAT
+              value: "json"
+            {{- /*
               NO MQTT_HOST OR MQTT_PORT, matching ingestion.yaml: `mosquitto` on 1883 is
               playback_worker.py's default and is the in-cluster Service name, so setting them
               would only create a second place for the two targets to disagree.

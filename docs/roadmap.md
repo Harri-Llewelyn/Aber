@@ -14,7 +14,7 @@ addresses: source comments cited them, so deleting an entry and closing the gap 
 every citation without erroring, and the list was therefore left gapped as the record of what
 shipped. Moving the roadmap out of `README.md` ended that — the comments state what the code does
 instead — and `scripts/check-docs-drift.mjs` dropped the four invariants that enforced it. The
-numbers are labels for reading order, they run 1-13 with no gaps, and **a renumber costs one grep**
+numbers are labels for reading order, they run 1-14 with no gaps, and **a renumber costs one grep**
 (`§[0-9]`, `roadmap item [0-9]`) across the repository for the prose that still cites them.
 
 **Ordered by subject rather than by age**, in four groups. **1-5 are the platform's own**, led by
@@ -43,7 +43,10 @@ platform's own and sit last anyway**, because each has for its subject something
 over every other item rather than any one chain: 12 is the transport between the services, 13 the
 record of what they did. Neither blocks the other. 12 is written first because reading it before 5
 and 8 invites starting it in the wrong order, which is the one thing it asks not to happen; 13 has
-no such constraint and is last because it is the newest.
+no such constraint. **14 joins that group and is last because it is the newest**: its subject is the
+clock every other item's timestamps are read against, it is reachable from 9 (the OS baseline that
+would set it) and from 13 (the log that would name the appliance whose clock is wrong), and it
+belongs to neither.
 
 **Contextual help shipped and left this list on 2026-09-06.** It was 11; 12 and 13 moved down by
 one, and the grep found two prose citations to move with it — `0085`'s header and
@@ -1205,11 +1208,12 @@ registry at the centre, because the custom lane's premise is that an engineer pu
 an appliance ends up running a container. That is new infrastructure with its own trust properties
 and it is argued below rather than assumed into the puller.
 
-**THE FIRST HALF IS BLOCKED AND THE SECOND IS NOT, which is why they are written as two.** The
-one-liner cannot be designed until somebody decides how a fresh appliance comes to trust this
-platform's certificate — the first entry under *Worth deciding early*, and a question about a
-deployment's network rather than about this repository. The OS baseline, the puller and the custom
-lane depend on none of that. **Nothing here should be started as one piece of work.**
+**THE FIRST HALF WAS BLOCKED AND NO LONGER IS, which is why they are still written as two.** The
+one-liner could not be designed until somebody decided how a fresh appliance comes to trust this
+platform's certificate; the first entry under *Worth deciding early* now recommends an answer that
+needs nothing from a deployment's network, so the transport is a design question again rather than a
+waiting one. The OS baseline, the puller and the custom lane depended on none of that in the first
+place. **Nothing here should be started as one piece of work.**
 
 ### What is already built, so that it is not re-argued
 
@@ -1265,9 +1269,10 @@ next line in the documentation becomes `curl -k`, which is the one setting §12 
 state does not exist anywhere in this stack. **A one-liner that teaches operators to skip
 verification is worse than the ZIP it replaces.** The current path evades this by downloading through
 a browser session that already trusts the root and installing the CA at step 2 of bootstrap; a pipe
-runs before there is a CA. **The three candidate answers and what each costs are the first entry
-under Worth deciding early below**, because choosing between them decides whether this item is small
-or not, and none of them is a change to this repository.
+runs before there is a CA. **The four candidate answers and what each costs are the first entry
+under Worth deciding early below**, and the recommended one resolves the circularity the way
+[RFC 7030](https://www.rfc-editor.org/rfc/rfc7030#section-4.1.1) does rather than by inventing
+anything: a fingerprint minted beside the token, checked by the script and never by the operator.
 
 ### The fetch must not spend the token
 
@@ -1422,35 +1427,166 @@ other change in this file.
 ### Worth deciding early
 
 - **HOW THE APPLIANCE COMES TO TRUST THE PLATFORM BEFORE IT HAS FETCHED ANYTHING. This is the
-  gating question and it is unanswered.** Nothing else in this item can be designed around it,
-  because every version of the one-liner either verifies a certificate or teaches an operator not
-  to. Three candidates, none of them free:
+  gating question, and there is now a fourth candidate worth building.** Nothing else in this item
+  can be designed around it, because every version of the one-liner either verifies a certificate or
+  teaches an operator not to.
+
+  **FIRST, THE PREMISE THAT THERE IS "THE" CA IS WRONG, AND THE DESIGN FAILS QUIETLY IF IT IS
+  ASSUMED.** This deployment has up to four roots and two of them are on an appliance's path:
+
+  | Root | Where it comes from | Who receives it |
+  | :--- | :--- | :--- |
+  | **Broker (MQTTS)** | `mosquitto.tls.clusterIssuer`, default `acs-cymru-ca` · in Compose an **independent** root minted by [`mosquitto-tls-init.mjs`](../scripts/mosquitto-tls-init.mjs), unrelated to cert-manager | every appliance, from `enroll-gateway`; plus ingestion, i3x and playback via `MQTT_TLS_CA_FILE` |
+  | **Ingress (HTTPS)** | `ingress.tls.certManager.clusterIssuer`, default `""` — the values comment offers `letsencrypt-prod` | browsers, and the appliance's own enrolment call |
+  | Kubernetes cluster | `kube-root-ca.crt`, projected beside the credential service's SA token | in-cluster only, never distributed |
+  | The forge | whatever fronts Gitea, once §8 lands | appliances, for the puller |
+
+  `internal-ca.yaml`'s header points the first two at the same `acs-cymru-ca`, and in that
+  arrangement they collapse to one root. **The chart does not enforce it and should not** — a public
+  ACME certificate on the ingress with an internal root on the broker is a sensible deployment and
+  the values file already suggests it. So an enrolment design that pins "the CA" is correct in the
+  documented arrangement and silently wrong in the supported one. **Two pins, or one pin that is
+  explicitly the broker's.**
+
+  Note also that `deploy/k8s/README.md`'s *"nothing server-side needs the root … the TLS edge is
+  browser-only"* is true of the HTTP hops and not of the MQTTS one: the broker root already has
+  three in-cluster consumers before any appliance is counted.
 
   **1. The root travels ahead of the command, and is pasted rather than fetched.** The dashboard
   prints two blocks: a heredoc writing the PEM to `/usr/local/share/ca-certificates/`, then the
-  installer line. It costs the *one*-line property this item is named for, and it is the only
-  candidate with no circularity — a root that is fetched has to be verified by something, and a root
-  that is pasted is verified by the operator's already-authenticated dashboard session. Two commands
-  that are both honest beat one that is not.
+  installer line. It costs the *one*-line property this item is named for, and it has no
+  circularity — a root that is fetched has to be verified by something, and a root that is pasted is
+  verified by the operator's already-authenticated dashboard session. Two commands that are both
+  honest beat one that is not.
 
   **2. Enrolment alone is served on a publicly-trusted name.** One real DNS record and one real
   certificate, for the enrolment endpoint only; everything after it uses the internal CA the bundle
-  installs. It preserves the single line exactly. It costs the same conversation with whoever runs
-  the network that §12 names as *its* blocker — so if it is taken, take it once for both — and it
-  assumes the appliance can reach a public CA's issuance and revocation infrastructure at
-  commissioning time, which an air-gapped plant cannot.
+  installs. It preserves the single line exactly, and it is what makes the `curl … | sh` installers
+  people cite as precedent honest — `https://ollama.com/install.sh` verifies because `ollama.com`
+  has a real certificate, and copying the shape without the publicly-trusted name is the whole trap.
+  It costs the same conversation with whoever runs the network that §12 names as *its* blocker — so
+  if it is taken, take it once for both — and it assumes the appliance can reach a public CA's
+  issuance and revocation infrastructure at commissioning time, which an air-gapped plant cannot.
 
-  **3. A checksum the operator verifies.** Weakest of the three and recorded so it is not
-  re-proposed: it moves the trust problem to the channel the checksum arrives on rather than solving
-  it, and an operator who is pasting a command will not compare a hash by eye. It is a supplement to
-  1 or 2, never an alternative.
+  **3. A checksum the operator verifies. WITHDRAWN, superseded by 4.** Recorded so the distinction
+  is not lost rather than because it is still a candidate: it moved the trust problem to the channel
+  the checksum arrived on, and an operator who is pasting a command will not compare a hash by eye.
+  **The eye is the part that was wrong, not the hash.**
 
-  **What decides it is not a preference.** Two facts settle it, and both belong to the deployment
-  rather than to this repository: whether an appliance has public internet at commissioning, and
-  whether the CA root can be treated as something that travels with the hardware — an image, a
-  runbook, a USB stick — rather than something the network hands out. **Until one of those is known,
-  the honest state of this item is that the ZIP is still the supported path**, and writing a
-  one-liner that ends in `curl -k` would be a regression dressed as an improvement.
+  **4. The pin rides in the token and the SCRIPT checks it. RECOMMENDED, and it is a standard rather
+  than an invention.** The dashboard already mints a token against an authenticated session; it
+  mints a fingerprint beside it, and the pasted line carries both as one opaque blob. Stage 0 fetches
+  the root as inert bytes, hashes it, and refuses if it does not match; every stage after that is
+  ordinary verified TLS. The operator copies and does not compare. **This is
+  [RFC 7030](https://www.rfc-editor.org/rfc/rfc7030#section-4.1.1) §4.1.1 — EST's own answer to its
+  own bootstrap problem — and adopting a shape a standard already specifies is half of why it is
+  recommended.** Five details decide whether it is sound:
+
+  - **PIN THE PUBLIC KEY, NOT THE CERTIFICATE.** `internal-ca.yaml` sets `renewBefore: 8760h`, so
+    cert-manager re-issues the root a year before it expires and every certificate fingerprint ever
+    minted into a token becomes wrong on that day. It also sets `rotationPolicy: Never`, so the
+    private key survives the re-issue — **an SPKI hash is stable across exactly the event that breaks
+    a DER hash.** The cost is three pipes instead of one `sha256sum`:
+    `openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | sha256sum`.
+  - **SERVE THE PEM OVER PLAIN HTTP, NOT `https` WITH `-k`.** They are equally secure, because the
+    pin is doing all of the work in both, and only one of them puts a skip-verification flag in a
+    runbook — which *What this must not touch* forbids for reasons that do not stop applying because
+    this instance is defensible. The rule to hold instead: **nothing unverified is ever executed or
+    trusted.** One inert certificate, hash-checked before use; everything secret-bearing over TLS
+    afterwards.
+  - **SERVE IT FROM THE INGRESS AS A STATIC FILE, NOT FROM A FUNCTION.** The `apikey` gate is on
+    `/functions/v1/`, so a static path costs no fifth exemption in `check-gateway-surface.mjs` and
+    nothing has to be argued into that inventory for a file that is public by construction.
+  - **THE APPLIANCE MUST CHECK THE CA IT ENROLS WITH AGAINST THE PIN IT WAS GIVEN.**
+    [`bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs) writes `enrolment.ca_cert` blind. In
+    the one-root arrangement that check is free and always passes; in the two-root one it is the only
+    thing standing between an appliance and a broker root substituted in the enrolment response.
+  - **THE PIN HAS A LIFECYCLE AND SOMETHING HAS TO OWN IT.** A root re-issue invalidates every
+    unspent token, so the dashboard mints the fingerprint by reading the live root at mint time and
+    never from a stored constant. Getting that wrong produces appliances that refuse to install with
+    a hash mismatch, which is the correct failure and still one somebody has to diagnose.
+
+  **What decides it is no longer whether this item can start.** Candidate 4 works air-gapped, needs
+  no DNS conversation and keeps the single line, so the two deployment facts — public internet at
+  commissioning, and whether the root can travel with the hardware — now decide only whether 2 is
+  *also* available and whether 1 is preferable for a plant that images its own appliances. **A
+  cloud-init or Ubuntu autoinstall seed that plants the root is the zero-circularity answer for
+  anyone doing that**, and since this item makes Ubuntu Server a requirement anyway it is nearly
+  free. What has not changed: a one-liner that ends in `curl -k` would be a regression dressed as an
+  improvement.
+
+- **The script the one-liner pipes into a shell, and the two things that are not design decisions.**
+  Recorded here so they are not discovered in review. **`curl -sSL` as written above is missing
+  `-f`**: without it curl prints a 4xx or 5xx response *body* to stdout and the shell executes it,
+  which is why every installer worth copying — Ollama, rustup, Homebrew — uses `-fsSL`. And **a pipe
+  to a shell executes a truncated download**, so the installer wraps its whole body in a function
+  invoked on the last line: a short read then defines something and runs nothing. Neither costs
+  anything; both are invisible until the day they are not.
+
+- **What the one-liner fetches, and from where — the installer is static and the secrets are not.**
+  This item states the fetched artefact is secret-bearing, because the bundle generates
+  `NODERED_CREDENTIAL_SECRET` per gateway. That rules out serving one file from the forge, and the
+  split it forces is a better shape than the ZIP had: a **static installer**, tagged in Gitea, public
+  to read and freely cacheable; and a **per-gateway secret fetch** from `enroll-gateway`, token-gated
+  and single-use. The installer then gets §8's own property — *deploy only what is committed* — which
+  the ZIP never had, and the token never appears on the cacheable path. **Pin the installer to a tag
+  the dashboard renders, not to a branch**: this item's own worry about `ansible-pull` converging the
+  fleet to a bad head applies to the installer first and with no timer to wait for.
+
+- **THE PLATFORM SIDE OF THE CERTIFICATE FACT THE FLEET ALREADY REPORTS, which is one value and
+  closes the only way this ends badly.** Every appliance reports the expiry of the root *it holds*,
+  and the `Gateway CA Expiring` rule alerts on it per gateway — a good design, and half a picture.
+  Nothing anywhere reports the root the platform is currently **issuing from**, so the one state that
+  matters during a rotation — the fleet trusts a root the broker no longer chains to — is invisible
+  until the fleet goes quiet. The credential service already reads `/mosquitto/certs/ca.crt` to
+  return it at enrolment; reporting its `notAfter` alongside is a field, not a subsystem. **It must
+  not be read from the Kubernetes API.** Asking cert-manager directly would hand the dashboard a
+  credential plane it does not have, for a read, and would answer nothing on Compose — where there is
+  no cert-manager and the root is a file. The appliance-reports-what-it-holds pattern already spans
+  both targets; extend it rather than building beside it.
+- **cert-manager belongs nowhere in the dashboard, and the reason is worth writing down before
+  somebody proposes it.** Viewing `Certificate` resources needs Kubernetes API access from the
+  frontend and is Compose-blind. *Managing* them is worse: a button that mints a root is the most
+  destructive control this platform could offer — it succeeds silently and takes the whole fleet
+  down, which is precisely the failure the CA-expiry alert exists to catch. The root is a
+  cluster-scoped, ten-year, GitOps-managed artefact and `internal-ca.yaml`'s header already argues
+  that it must outlive the chart. **What an administrator needs is not a control but a comparison**,
+  and that is the bullet above.
+- **`trust-manager` is worth adopting for one job and not for the one it is usually adopted for.**
+  In-cluster distribution is already solved and solved narrowly:
+  `acs-cymru.brokerClientCaVolume` projects **only** `ca.crt` out of the broker's `kubernetes.io/tls`
+  Secret, so ingestion, i3x and playback never receive `tls.key`. `trust-manager` would not improve
+  on that. Where it earns its place is the static-file half of candidate 4 above: something has to
+  publish the root PEM where the ingress can serve it, and a `Bundle` writing a ConfigMap does that
+  off-the-shelf without giving the serving pod access to a Secret holding the broker's private key.
+  **Adopt it for that, and record that it is for that** — a trust-distribution component adopted for
+  general reasons will accumulate general uses.
+- **THE APPLIANCE'S CLOCK IS PART OF CERTIFICATE VERIFICATION AND NOTHING IN THIS REPOSITORY MENTIONS
+  IT.** A certificate is valid between two dates, so a fresh Ubuntu install whose NTP is blocked by
+  the plant firewall — which is the ordinary condition of the networks this platform targets — cannot
+  verify a perfectly good certificate. It presents as a TLS failure during commissioning or as MQTTS
+  that worked in the workshop and does not on the line, and neither reads as a clock. **This belongs
+  in the OS baseline**, which is the unblocked half of this item: a time source in the package set,
+  pointed at something the plant can actually reach. It also puts a floor under the enrolment token's
+  30-minute TTL, which is compared server-side and therefore survives a wrong appliance clock — the
+  certificate check does not.
+- **There is no CRL and no OCSP anywhere in this stack, and the absence should be a recorded decision
+  rather than an omission.** For a fleet of this size it is the right trade; the consequence is that
+  **a compromised root private key has no remedy short of re-minting the root and re-walking the
+  fleet**, on a ten-year artefact. What keeps that acceptable is containment that already holds — the
+  key never leaves its Secret, is never mounted into an application pod, and never reaches an
+  appliance, which receives `ca.crt` alone. Worth stating in the same breath: **broker credentials
+  are revocable and immediate** (archiving rotates the account), so the thing with no revocation path
+  is the trust anchor and nothing else. `docs/physical-gateways.md` §8 now carries the operator half
+  of this; what is missing here is whether the containment is ever *verified* rather than asserted.
+- **TLS IS OPT-IN EVERYWHERE IN THIS STACK, AND ONE LEG REFUSES TO RUN WITHOUT IT.** Any review of
+  the network posture starts here rather than at the appliance: `ingress.tls.enabled` and
+  `mosquitto.tls.enabled` both default `false`, `ingress.tls.certManager.clusterIssuer` defaults to
+  `""`, and Compose's `SUPABASE_URL` defaults to plain `http`. The exception is the physical-gateway
+  path — `enroll-gateway` **refuses to enrol** an appliance when the credential service returns no
+  CA, so that one leg cannot silently come up unencrypted. **There is no equivalent refusal on the
+  HTTPS side**, and the one-liner would be fetched over whatever the ingress happens to be serving.
+  Whether that asymmetry is deliberate is worth answering before a transport is built on it.
 
 - **Whether the one-liner and the OS baseline ship together.** They should not. The install transport
   is blocked on the trust question above; the baseline is a playbook and is blocked on nothing.
@@ -1828,7 +1964,11 @@ Rendering archived ranges in a dashboard was declined on the grounds that it wou
 a gateway route and an auth surface over raw plant history"*, for a resolution nothing charts. That
 reasoning was right and it should not be quietly reused here in either direction.
 
-This pays **one** of those three costs. The container, yes. No gateway route — the store is reached
+This pays **one** of those three costs — though it turned out to be **three containers, not
+one**, and the correction is recorded here rather than left to be found in the compose file. The
+store needs a collector (the daemon pushing its own logs would miss Mosquitto's, which is exactly
+what the incident above turns on), and the collector needs a socket proxy because it is not being
+handed the Docker socket. The rest of the sentence held. No gateway route — the store is reached
 by Grafana over the container network, not published. No auth surface — it is a datasource beside the
 three `datasources.template.yml` already provisions, behind the Grafana login that already exists,
 with no new principal and no second place to manage access. And unlike archived telemetry, there is
@@ -1870,8 +2010,402 @@ assumed.
   failure is legible, and they are also on hardware outside the cluster, on a link that is not
   assumed to be up. Almost certainly out of scope for a first version, and worth saying so rather than
   leaving the boundary to be discovered.
-- **Whether structured logging comes first.** `logging_config.py` is 33 lines of plain formatting.
-  Shipping unstructured lines into a label-based store means parsing them at query time forever, and
-  the drop paths are the ones whose fields — reason, device, edge node — would most benefit from being
-  fields. That is a smaller change than the store and it is the one that decides how useful the store
-  is.
+- **Whether structured logging comes first.** ~~`logging_config.py` is 33 lines of plain
+  formatting.~~ **DECIDED, AND DONE — see *What has landed* below.** It was the smaller change and
+  the one that decided how useful the store will be, so it went first and the store now has fields
+  to land on rather than prose to parse forever.
+
+### What has landed: the store itself, on Compose
+
+**Grafana Loki, single binary, filesystem backend**, with Grafana Alloy collecting and a read-only
+socket proxy in front of the Docker API. Configuration and the reasoning are in
+[`loki/loki.yaml`](../loki/loki.yaml) and [`alloy/config.alloy`](../alloy/config.alloy); the three
+services and the argument for each are in `docker-compose.yml`.
+
+**The store choice came down to one property.** Loki's Grafana datasource is a **core** type, so it
+joins the three already in `datasources.template.yml` with no plugin, no boot-time fetch and no new
+failure mode. VictoriaLogs is lighter and worth revisiting if the footprint hurts on the shopfloor
+host, but its datasource is a plugin. OpenSearch is JVM heap on a machine `node-exporter`'s own
+comment says can be taken down by filling one disk.
+
+**A Postgres table was the tempting zero-container answer, and it cannot work.**
+`dropped_db_unavailable` is one of the ten drop reasons. A log store inside the database cannot
+record the database being unreachable, so the line most worth keeping is the one guaranteed to be
+lost — and it collects nothing from Mosquitto, Envoy or Node-RED without a shipper anyway, so it
+does not even save the collector.
+
+**The four decisions, answered:**
+
+* **Retention and the ceiling shipped in the same change**, as the item required, and as
+  DEPLOYMENT CONFIG rather than `system_settings` — which is what `prometheus` already does one
+  service up, with the reasoning spelled out beside both of its flags. A `system_settings` row
+  with no consumer able to honour it would be the setting the schema's own comment forbids: *"a
+  value the table accepts and the consumer then ignores is a setting that lies."*
+* **The window is 30 days, matching Prometheus deliberately.** A log window shorter than the metric
+  window is the worse of the two errors — the drill-down from a 30-day panel would dead-end.
+* **The ceiling is three settings here and was one flag on Prometheus.** Loki has no byte bound on
+  the store; `ingestion_rate_mb` bounds the rate at which bytes can arrive, which reaches the same
+  place from the other end. That asymmetry is why it had to ship in this change: it is more
+  fiddly than Prometheus's and therefore more likely to be the thing left for later.
+* **Enabled by default on Compose, absent from the chart**, with the divergence row written in the
+  same commit — and the honest reason recorded, because the naive version is backwards. The
+  KUBERNETES case is the stronger one, since `kubectl logs` dies at reschedule. The chart declines
+  anyway for the reason it declines to deploy a Prometheus: a cluster is assumed to have one, and a
+  second store would duplicate every line and give an operator two places to configure retention.
+  The **datasource** is provisioned on both targets, pointed at `grafana.lokiUrl`.
+* **Edge collection stays out of scope**, and the boundary is now stated rather than left to be
+  discovered. The structural reason is worth keeping: a gateway that never enrolled holds no
+  credential, so it has no channel to ship logs over — the most valuable gateway log is the least
+  reachable one, and enrolment-time logging is a different problem from steady-state logging.
+
+**THE DOCKER SOCKET IS THE DECISION MOST WORTH REVIEWING.** Alloy discovers containers through the
+Docker API, and the usual way to grant that is a socket mount. Nothing in this repository mounts
+that socket, and `:ro` on a socket mount is theatre — it makes the socket FILE read-only and grants
+the full API behind it, including creating a container that bind mounts the host's root filesystem.
+A stack that removed `--web.enable-lifecycle` from Prometheus because it exposed a remote shutdown
+does not then hand out the socket to label log lines. So the mount lives in
+`docker-socket-proxy`, which allowlists by API path group: `CONTAINERS: 1`, `POST: 0`, and every
+other group named and refused. The socketless alternative — reading the container log files
+directly — needs no proxy at all, and was rejected because the only identity in those paths is the
+container ID, which changes on every recreate and names nothing a human recognises.
+
+**What is NOT done: Kubernetes.** The chart deploys no log workload by decision, but the DaemonSet
+side of that decision — what a cluster operator is expected to run, and what the divergence row
+promises the datasource will find — is documented rather than exercised. Nothing in CI stands up a
+Loki behind the chart's datasource.
+
+**The pins and both configs were verified against the images themselves**, not against
+documentation — which is the lesson `servicemonitors.yaml` records at length, having had a metric
+name *"wrong in both directions"* by reading changelogs. All three tags resolve
+(`docker manifest inspect`), `loki -verify-config` accepts `loki/loki.yaml` on `3.5.7`, and both
+`alloy fmt` and `alloy validate` accept `alloy/config.alloy` on `v1.11.2` — the latter resolving
+every component reference in the pipeline, so a misspelled block or a dangling `forward_to` would
+have failed there. The file is stored in `alloy fmt`'s canonical form so a future format check
+finds nothing to change.
+
+**It has since been run against the live stack**, which is where the two real defects were, and
+neither was visible to any static check.
+
+* **The socket proxy's allowlist was too narrow, and the failure was total rather than partial.**
+  `discovery.docker` computes network labels for every target it finds, so it calls `GET /networks`
+  immediately after `GET /containers/json`. With `NETWORKS: 0` the proxy answered 403, Alloy logged
+  *"Unable to refresh target groups"*, and **discovery failed wholesale — nothing was collected at
+  all**. `alloy validate`, `docker compose config` and `loki -verify-config` all pass on that
+  configuration, because none of them can know what an allowlist will refuse at run time. Now
+  `NETWORKS: 1`, which with `POST: 0` is still read-only and discloses this stack's own network
+  name to a container already attached to it.
+* **Loki added a label the design did not ask for.** Loki 3 derives its own `service_name`, so the
+  first run produced four labels where `alloy/config.alloy` documents two. It costs nothing in
+  cardinality, being 1:1 with `service`, and it was turned off anyway (`discover_service_name: []`):
+  a label set that does not match the file documenting it is how the next reader learns to
+  distrust the documentation. Confirmed against the live index, where the same container splits
+  into two streams either side of the restart.
+
+**What the live run confirmed, rather than assumed:** 25 compose services discovered and labelled
+correctly through the proxy; `detected_level` attached as STRUCTURED METADATA and not as a label,
+so it multiplies no streams; twelve streams total against a 5000 ceiling; and the drill-down query
+itself —
+
+    {service="ingestion"} | json | reason = "gateway_binding"
+
+— resolving against a line produced by the real `JSONFormatter`, with a negative control on a
+reason that did not occur returning nothing. The delete API was exercised in passing to remove the
+test stream.
+
+**One first-start behaviour that alarms and should not.** Attaching a collector to containers that
+have been running for days ships days of history at once, and Loki refuses the parts older than
+what it has already accepted for that stream — *"entry too far behind"*, HTTP 400. Those refusals
+are correct, they stop by themselves once each stream catches up, and a stack started cold never
+sees them. Recorded in `loki/loki.yaml` beside the setting rather than left for someone to
+diagnose at the worst moment.
+
+### What has landed: the pipeline is connected, and monitored
+
+**`LOG_FORMAT=json` is now set on `ingestion` and `playback` on BOTH targets**, in
+`docker-compose.yml` and in the chart. The code default stays `text`, which is a different claim
+and a deliberate one: someone running the daemon by hand is reading with their eyes, and a daemon
+writing into a store is being read by a query. Setting it on both targets rather than only on the
+one with a store means the daemon behaves identically on each, so no divergence row is owed — the
+store is the divergence, the log format is not.
+
+Verified end to end on the live stack: the daemon emits JSON, Alloy ships it, and
+`{service="ingestion"} | json | level = "INFO"` parses real lines back out with `level`, `logger`
+and `msg` extracted as fields. Grafana's Loki datasource reports *"Data source successfully
+connected"*.
+
+**A rebuild is required, not a recreate.** `docker compose up --force-recreate ingestion` picks up
+the new environment variable and the OLD code, because `logging_config.py` lives in the image — the
+container came up with `LOG_FORMAT=json` set and went on writing text. `docker compose build
+ingestion playback` first.
+
+**The drop panel exists now, and §13's claim about it was ahead of the repository.** The item said
+the log is *"the drill-down from a panel that exists"*. It was not: `acs_ingestion_messages_dropped_total`
+appeared in `alert-rules.yaml` and in no dashboard at all. **Messages Dropped by Reason** is now on
+*Stack & Ingestion Health*, in the Ingestion row, stacked so the first question it answers is "are
+we losing anything", with a data link that opens the log store filtered to whichever reason was
+clicked. That link is the drill-down the whole item is arguing for, and it works because the label
+and the field carry the same string.
+
+**Three alert rules, because there are three distinct failures and one is invisible.**
+`up{job="alloy"}` catches a dead collector. A rate on `loki_write_sent_entries_total` catches the
+collector that is UP and shipping nothing — the failure that looks exactly like a quiet plant, and
+the one the first live run actually had. `loki_write_dropped_entries_total{reason=~"rate_limited|stream_limited"}`
+catches a configured ceiling biting, which is what stops the rate bound silently eating evidence
+during the fault it was sized for. `ingester_error` is excluded on purpose: it is the benign
+first-attach backfill, and alerting on it would train people to ignore the group.
+
+Prometheus scrapes both `loki` and `alloy` — the pair whose own failure would otherwise destroy the
+record of itself. Both targets confirmed `up`.
+
+### What has landed: the fault path, under test
+
+**`test-harness/test_log_pipeline.py` drives a real drop and asserts both halves of it**, in the
+`stack` lane against a running stack. It publishes a DDATA for a randomly generated unregistered
+device, then requires BOTH that
+`acs_ingestion_messages_dropped_total{reason="quarantined_or_unregistered"}` increased AND that a
+line carrying that same reason **and that device id** arrived in Loki. Prometheus cannot name the
+device — its endpoint is unauthenticated and carries no device data by design — so this is the
+assertion that the half this item exists to keep is actually being kept. Verified live: 8 passing,
+1 skipped.
+
+**The random id is load bearing.** The daemon caches negative resolutions, so a fixed id is
+answered from cache on the second run of the day and drops nothing — the suite would pass while
+testing nothing at all.
+
+**Two couplings are now guarded statically, because both fail silently.**
+
+* **The multiline regex is a restatement of the formatters**, in another language and another
+  directory. `alloy/config.alloy` rejoins Docker's one-entry-per-line output by matching what
+  starts a record — a `{` or this repository's ISO 8601 timestamp. Change `UTCFormatter`'s format
+  and the collector goes on matching the old shape: every line becomes a continuation of the one
+  before, records merge, and nothing fails. The test reads the regex out of the collector config
+  and applies it to what the formatters actually emit.
+* **The drill-down link crosses three files in three languages.** The collector must label
+  `service`, the daemon must log `reason`, and the panel must select and filter on both. Any one
+  can change alone, reviewed by people with no cause to open the other two, and the failure is
+  silent — Explore opens, the query is valid, and it returns nothing. "No logs" and "wrong label"
+  are indistinguishable from the browser.
+
+**AND THAT SECOND GUARD FOUND A REAL DEFECT IN WHAT HAD ALREADY SHIPPED.** The panel's link
+selects `{service="ingestion"}`. Compose's collector sets that label; **a stock Kubernetes log
+stack does not** — it labels streams `namespace`/`pod`/`container` and sets no `service` at all.
+The dashboard is mirrored into the chart, so it was shipping to clusters with a drill-down that
+connects, validates, and resolves to nothing. That is now a stated **label contract**: a cluster
+feeding `grafana.lokiUrl` must relabel `service` to the workload name. It is one rule in whatever
+collector the cluster runs, and it is written in the divergence table, in `values.yaml` beside
+`lokiUrl`, and in the panel's own description — so the person who clicks a dead link finds out why
+from the thing they clicked.
+
+### What remains, and where to pick each one up
+
+Four things, none of them blocking the store being useful, each written with its entry point so it
+can be started cold. **They are listed smallest first, which is also roughly least valuable first.**
+
+**1 · The multiline stage has never met a real traceback. (Small.)**
+`ingestion/test_structured_logging.py` asserts the `firstline` regex against what the formatters
+emit, so a format change cannot silently break it. What is unproven is the REJOINING: that Alloy
+actually stitches an eight-line Python traceback back into one record. `test_log_pipeline.py`
+checks it opportunistically and skips when the stack has been healthy -- the good outcome, and an
+awkward one to test against. Closing it means provoking a traceback deliberately, which means
+either a fault-injection path in the daemon or restarting a service mid-suite, and both are worse
+than the gap. **Revisit only if a real incident shows tracebacks arriving fragmented.**
+
+**2 · Nothing scrapes the collector's own parsing errors. (Small.)**
+`loki_source_docker_target_parsing_errors_total` exists on the Alloy target and no rule reads it.
+It is the metric that would say the collector is reading containers it cannot decode -- distinct
+from both "shipped nothing" and "the store refused it", and therefore not covered by any of the
+three rules in the `Log Pipeline` group.
+
+**3 · The Kubernetes side is contract-checked but not EXERCISED. (Medium.)**
+The chart ships the datasource pointed at `grafana.lokiUrl` and deploys no log workload, which is
+the decision. What follows from it is untested: nothing stands a Loki up behind that datasource,
+and the `service` label contract -- which a stock cluster log stack does NOT satisfy -- is asserted
+in prose and in the divergence table rather than by anything that runs. The k3d job in CI is the
+place this would live. **Note the failure it would catch is the one already found once by hand: a
+datasource that connects, a health check that passes, and every query returning nothing.**
+
+**4 · The store is not in the backup or restore story. (Medium, and the one most likely to bite.)**
+`loki_data` is a named volume holding a database, and `scripts/backup-databases.sh` does not know
+about it -- reasonably, since it backs up databases of record and this is not one. But the
+retention decision says thirty days, and nothing states whether a `docker volume rm` or a host
+rebuild is expected to lose those thirty days. **Every other store in this stack has an answer to
+that question and this one arrived without one**, which is the same shape of omission §13 opens by
+warning about for retention. The answer may well be "logs are not backed up, and that is
+deliberate" -- but it should be written down beside `mosquitto_certs`, whose volume comment
+explains precisely why IT must survive.
+
+### What has landed: the fields, so the store has something to index
+
+**The pair was enforced by habit, and is now enforced by structure.** Every drop was two adjacent
+statements — `count("dropped_<reason>")` and a `logger.warning` — at ten sites, each of which had to
+remember to name the same reason. They are now one `drop("<reason>", …)` call that derives both from
+a single string, so the counter and the line cannot disagree about what happened: the property
+`metrics.py`'s header always claimed, now held by the code rather than by care.
+
+* **`logging_config.py` gained a `JSONFormatter`**, selected by `LOG_FORMAT=json`, promoting
+  `extra=` fields to top level. `reason` is the key every drop query starts from, so it is not
+  nested under a `fields` object.
+* **The text formatter carries the same fields**, appended as `[reason=… device=…]` before any
+  traceback. If it did not, a developer reading `docker logs` would be looking at a different
+  record from the one the store kept.
+* **`LOG_FORMAT` defaults to `text` on both targets, deliberately.** Nothing reads the JSON yet, and
+  flipping the default now would change what every operator sees to buy a property nothing consumes.
+  **The flip belongs in the change that ships the store** — one visible change with a reason on it.
+* **The fields are on the log and not on the counter**, and that boundary is the disclosure argument
+  this item asked for, answered rather than assumed. `metrics.py` is served without a credential and
+  carries no device data of any kind; `edge_node` appears there only because it is already public on
+  the broker. `device` goes on the authenticated half — behind the Grafana login, never published —
+  and must not migrate onto the other one.
+* **`emit_log=False` suppresses the line and never the counter.** Two sites throttle their warning
+  because the traffic arrives every 30s; the counter must still fire per message, or the metric
+  reports one drop per throttle window. That asymmetry now lives in the helper's signature instead of
+  being re-derived at each site, and a test refuses a constant `emit_log`.
+
+**The assertion that earns its place in CI** is that the logged `reason` field and the Prometheus
+`reason` label are the same string, for every reason a site can emit — read out of `ingestion.py`'s
+source rather than restated. That is the drill-down contract: a spike on a panel is a link into the
+logs only if both halves spell the reason identically, and nothing else in the stack would notice
+them diverging, because each half stays internally consistent while meaning different things.
+
+**What this does NOT do is ship a store**, and the four decisions above are still the gate. Two are
+now answered by what landed (the disclosure question, and structured-logging-first); retention, the
+size ceiling and the default-per-target remain open, and the store choice is bound up with them.
+
+---
+
+## 14 · The appliance clock, and the two failures it causes that look nothing alike
+
+**Builds on:** `TELEMETRY_MAX_AGE_SECONDS` / `TELEMETRY_MAX_FUTURE_SECONDS` and
+`_timestamp_is_sane()` in [`ingestion/ingestion.py`](../ingestion/ingestion.py) ·
+`metrics_rejected_timestamp` → `acs_ingestion_timestamps_rejected_total` in
+[`ingestion/metrics.py`](../ingestion/metrics.py) · the heartbeat's deliberate use of receipt time ·
+[`docs/physical-gateways.md`](physical-gateways.md) §8 · **§9's OS baseline, which is where the fix
+for half of this lives** · **§13, which already owns the half of the counter that would name the
+appliance** · **arrives from the 2026-09-08 review of the enrolment transport, and is not filed as an
+issue**
+
+**Nothing in this repository SETS an appliance's clock.** No `chrony`, no `systemd-timesyncd`,
+no NTP configuration, and nothing in the enrolment path that would put a time source on a machine
+that has none. That is an omission rather than a decision, and it produces two failures that share
+a cause and nothing else.
+
+**The platform now MEASURES one, which is the half that was cheapest and is done.** The offset per
+gateway, the alert, the dashboard panel and the edge node on the rejection counter all shipped
+together — see *What has landed* below. What remains is everything on the appliance side, which is
+why this item stays open: a fault that is now visible is not a fault that is fixed.
+
+### The loud failure is the safe one, which is why this item exists
+
+**A badly wrong clock breaks TLS, and that is fine.** Certificate validity is a date comparison, so
+an appliance whose clock is out by months cannot verify the broker and cannot connect. It fails at
+commissioning, in front of whoever is holding it, and `docs/physical-gateways.md` §8 now tells them
+where to look.
+
+**A slightly wrong clock breaks the historian, silently, forever.** The broker's leaf is valid for
+ninety days and the root for ten years, so **TLS tolerates precisely the skew the telemetry path does
+not.** A gateway three minutes fast verifies every certificate perfectly, connects, authenticates,
+and writes every sample three minutes into the future for as long as it runs. Nothing refuses it,
+nothing counts it, and nothing anywhere says so.
+
+**That inversion is the whole item.** The failure that announces itself needs no work; the failure
+that does not is the one carrying the plant's data.
+
+### The sanity window already encodes the assumption, and the assumption is the thing that is missing
+
+`ingestion.py` is explicit that device timestamps are trusted for ordering and bounded for safety:
+−24 hours to +5 minutes, asymmetric because *"late data is normal … data from the future is never
+legitimate; it is always a clock fault, so the forward tolerance covers ordinary NTP skew and nothing
+more."*
+
+**That is correct, and it assumes NTP is working** — on the class of network this platform is built
+for, which is the class that blocks it. Read the two together and the window is not a guard against a
+broken clock at all: it is a guard against a *catastrophically* broken one, sized to the residual of
+a mechanism nobody has installed.
+
+Two consequences, in the order they will be met:
+
+- **Inside the window, a wrong timestamp is accepted in silence.** Up to five minutes of forward
+  error is written as observation. Two gateways on one line cannot then be correlated, and no
+  dashboard, alert or export can tell that anything is wrong — the numbers are all plausible.
+- **Outside it, data is dropped and the drop is anonymous.**
+  `acs_ingestion_timestamps_rejected_total` carries **no labels**, so it says the fleet lost samples
+  and not which appliance lost them. The line that names the gateway — *"Check the gateway's
+  clock"* — goes to a log nothing keeps, which is **§13 exactly**, arrived at from the other end.
+
+### The hardware makes this likely rather than theoretical
+
+§9 records that gateways are *"whatever hardware a plant already had — arm64 single-board computers
+and amd64 industrial PCs."* **A Raspberry Pi has no battery-backed real-time clock.** Powered off and
+back on with no reachable time source, it comes up at whatever the filesystem last recorded or at the
+epoch — so the most likely appliance in this fleet is also the one that cannot keep time across a
+power cut, and a plant power cut restarts every appliance at once.
+
+### What has landed: the measurement, which was already in the payload
+
+**The daemon held both halves of the answer on every heartbeat and compared neither.** It has the
+payload's own timestamp and it has receipt time — it already chose receipt time deliberately,
+*"because edge node clocks drift (or, for a replayed payload, are plain wrong)."* The difference
+between those two numbers **is** the appliance's clock offset, per gateway, on a 30-second cadence,
+with no change to a single appliance and no new field on the wire. Network latency is milliseconds
+and the error that matters is minutes, so the subtraction needs no round-trip correction to be
+worth acting on.
+
+It is now taken, and it follows the move `Cert_Expires_At` already made for the trust anchor — the
+fleet reports the condition, the dashboard shows it, one rule alerts on it:
+
+* `acs_ingestion_gateway_clock_offset_seconds{edge_node}`, **positive meaning the appliance is
+  ahead**, beside `acs_ingestion_gateway_clock_measured_timestamp_seconds` — which is not
+  decoration: a gauge holds its last value forever, so without it an appliance powered down
+  mid-fault reports the clock it had on the day it left, indefinitely.
+* A **Gateway Clock Skew** rule at 60s for 15m, gated on the measurement being under 300s old.
+  Sixty seconds is deliberately well inside the sanity window: past +5 minutes the telemetry is
+  discarded rather than misfiled, and this is meant to fire long before that.
+* A **Clock offset** panel on the fleet-health dashboard.
+* **`acs_ingestion_timestamps_rejected_total` now carries `edge_node`** — which is §13 discharged
+  for this one counter, arrived at from the other end. The rejection is almost always a clock
+  rather than a device, so the two belong on the same page.
+
+**NDEATH is excluded from the measurement and that is not a detail.** It is the broker's Last Will,
+built by the appliance at connect time and held until the connection drops, so its timestamp is the
+clock reading of an arbitrarily earlier moment. Measuring it would report every perfectly
+synchronised gateway in the fleet as hours slow, once, at the instant it went offline — the same
+exclusion `check_message_sequence()` already makes, for the same reason.
+
+**What this does not do is fix anything**, and the remaining bullets are where that lives. It also
+answers the question those bullets cannot be decided without: *how bad is this already, on the
+fleet that exists*. That was the argument for doing it first, and it is the reason it is done
+first.
+
+### What this must not touch
+
+The sanity window's **asymmetry**, which is right: a gateway buffering through an outage and flushing
+on reconnect is legitimate late data, and data from the future never is. The heartbeat's use of
+**receipt time** for staleness. And above all, **do not "correct" device timestamps at ingest.** A
+device supplying its own timestamps is Sparkplug's model and the ordering guarantee rests on it;
+rewriting them at the centre would replace a visible clock fault with an invisible one and destroy
+the only evidence that the appliance is wrong.
+
+### Worth deciding early
+
+- **Whether an appliance with a bad clock should publish at all.** Fail-closed protects the historian
+  and takes a line's telemetry off for a clock; fail-open keeps the data flowing and files bad rows.
+  The current behaviour is neither — it is fail-open inside five minutes and fail-closed outside,
+  chosen for storage safety rather than as a data-quality policy. **Whichever is picked, it should be
+  picked deliberately**, and the offset measurement above is what makes either defensible.
+- **Whether the platform is itself a time source.** A plant that blocks public NTP still has this
+  stack reachable, and a cluster that already serves the broker, the API and the forge could serve
+  time. It is a real answer to the air-gapped case and it is another service to run — and unlike the
+  others it has no fallback, because an appliance cannot ask what time it is over a connection whose
+  certificate it cannot yet check.
+- **Whether an RTC module becomes a hardware requirement for single-board appliances.** A few pounds
+  per gateway removes the power-cut case entirely, and it is the kind of requirement that is free to
+  state before a fleet is bought and impossible afterwards.
+- **~~Whether this ships with §9's OS baseline or before it.~~ ANSWERED: before, and it has.** The
+  measurement was independent of every appliance and is the only one of these that could be
+  evaluated against a fleet that exists, so it went first. **The time source itself still belongs
+  in §9's OS baseline**, which is the natural home for it and is blocked on nothing.
+- **What the offset actually reads across the fleet, before any of the decisions above are made.**
+  This is now answerable and was not. A fleet that is uniformly within a second needs a time source
+  for robustness; a fleet with one appliance an hour out needs it before anything else in §9. The
+  same numbers say whether `TELEMETRY_MAX_FUTURE_SECONDS` at five minutes is generous or tight —
+  that value has never been checked against a real appliance, only reasoned about.

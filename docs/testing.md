@@ -22,6 +22,10 @@ npm run test:py:stack    # lane: stack — needs the composed stack up
 # Python unit suites — no stack required
 python ingestion/test_gateway_binding.py
 python ingestion/test_gateway_health_metrics.py
+# The appliance clock offset, measured from the heartbeat's own timestamp against receipt time,
+# and the edge_node label on the rejection counter. Guards the one gateway fault that passes every
+# other check: minutes of skew verify every certificate and corrupt every reading.
+python ingestion/test_gateway_clock_offset.py
 python ingestion/test_archived_gateway.py
 python ingestion/test_declared_metrics.py
 python ingestion/test_modelled_metrics_contract.py
@@ -33,6 +37,20 @@ python ingestion/test_audit_write_dedup.py
 python ingestion/test_payload_conformance.py
 # The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker
 python ingestion/test_metrics_endpoint.py
+# The JSON log formatter, and the drop pair. Every drop is a counter AND a warning, and the two
+# halves must name the reason with the SAME STRING or a dashboard panel is not a drill-down into
+# the logs. Both halves stay internally consistent while meaning different things, so nothing else
+# in the stack notices them diverge -- which is why it is asserted here, against ingestion.py's
+# own source rather than against a list restated in the test.
+python ingestion/test_structured_logging.py
+# The log pipeline END TO END, and the only check that a drop is countable and readable at the
+# same time. Needs the stack up. It publishes a DDATA for a randomly generated unregistered device
+# and then asserts BOTH halves of the instrument: that the Prometheus counter for
+# reason="quarantined_or_unregistered" increased, and that a line carrying that same reason AND
+# that device id arrived in the log store. Prometheus cannot name the device -- its endpoint is
+# unauthenticated and carries no device data by design -- so this is the assertion that the half
+# §13 exists to keep is actually being kept.
+python test-harness/test_log_pipeline.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 # Broker capture and playback -- identity rewriting, timestamp rebasing, wire encodings

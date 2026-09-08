@@ -197,8 +197,17 @@ spec:
                 duplicate every series the Operator already collects through the ServiceMonitors
                 in obs/servicemonitors.yaml.
               */}}
+              {{- /*
+                __LOKI_URL__ is the same arrangement, one store along. The chart deploys no Loki
+                either -- roadmap 13's decision was that Compose runs its own log store because it
+                already runs its own Prometheus and owns its whole observability stack, while a
+                cluster is assumed to have one and a second collector would duplicate every line.
+                A cluster with no Loki gets a datasource whose health check fails, which is the
+                honest failure rather than a Logs panel that renders empty.
+              */}}
               sed -e "s|__BI_READER_PASSWORD__|$BI_READER_PASSWORD|g" \
                   -e "s|__PROMETHEUS_URL__|{{ .Values.grafana.prometheusUrl }}|g" \
+                  -e "s|__LOKI_URL__|{{ .Values.grafana.lokiUrl }}|g" \
                   /config/datasources.template.yml > /datasources/datasources.yml
               # Comment lines excluded: the template's own header documents the placeholder
               # convention BY NAME, so a whole-file scan flags the documentation of the rule as a

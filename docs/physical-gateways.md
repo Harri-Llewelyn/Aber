@@ -225,7 +225,151 @@ is silently off.
 
 ---
 
-## 8. The editor login is local, and why
+## 8. Certificates, and the two clocks they run on
+
+**Almost every question about certificates here answers itself once the two are separated.** There
+are two, they have nothing in common but a name, and only one of them is your problem.
+
+| | **The root (CA)** | **The leaf** |
+| :--- | :--- | :--- |
+| What it is | the trust anchor every appliance holds | the certificate the broker presents on 8883 |
+| Lifetime | **10 years** (`duration: 87600h`) | **90 days** (`duration: 2160h`) |
+| Renewed | a year early (`renewBefore: 8760h`) | 30 days early (`renewBefore: 720h`) |
+| Who holds a copy | every gateway, every browser, and three in-cluster clients | only the broker |
+| How it is distributed | **by hand, one machine at a time** | it is not distributed at all |
+| Automated? | no | completely |
+
+**You distribute the root and you rotate the leaf, and that asymmetry is the entire reason a
+certificate hierarchy exists.** A gateway never verifies the leaf against a copy it holds — it
+verifies that the root it already trusts signed it. So the certificate that changes four times a
+year never has to travel, and the one that has to travel changes once a decade.
+
+### What already happens without you
+
+The leaf renews on its own. cert-manager re-issues at `renewBefore`, the reload sidecar sends the
+broker a `SIGHUP`, and Mosquitto re-reads the certificate **in place without dropping a connected
+gateway**. No appliance notices, nothing is redistributed, and there is nothing to do. On Compose the
+equivalent is `node scripts/mosquitto-tls-init.mjs --force-leaf`, which reissues the leaf and leaves
+the root alone.
+
+### What the fleet tells you, and why it is the right question
+
+Every appliance reports the expiry of **the certificate it is actually holding**, captured at
+enrolment and published on the heartbeat:
+
+* the **Gateways page** shows `CA Expires`, in red inside the window;
+* `gateway_health.cert_expires_in_days` backs both the fleet dashboard and the
+  **Gateway CA Expiring** alert, which fires per gateway at **30 days** and keeps firing once the
+  number goes negative.
+
+A check against the broker's own certificate would tell you what the **server** presents. This tells
+you what each **client** will accept, and the fleet-wide outage happens on the day those two stop
+agreeing — so this is the version worth alerting on.
+
+**The reported date is fixed at enrolment.** Replacing `/data/certs/ca.crt` by hand without
+re-enrolling leaves the appliance reporting the old date forever. Until the platform playbook owns
+the CA (roadmap §9), re-enrolment is the only path that updates both the file and the number.
+
+### Rotating the root, in the order that matters
+
+Re-minting the root does not fail loudly. It succeeds, and every gateway in the plant drops off
+together — which looks exactly like a broker outage and gets diagnosed as one. **The overlap is the
+whole design; there is never a moment when one answer is the only correct one.**
+
+1. **Issue the new root alongside the old.** Both valid. The overlap window opens here.
+2. **Distribute the new root *in addition to* the old.** A trust store holds many roots — this is an
+   addition, never a swap. On an appliance that means a second file in
+   `/usr/local/share/ca-certificates/` and `update-ca-certificates`.
+3. **Wait until the fleet reports it.** This is what the health telemetry is for. Do not proceed on
+   the assumption that a distribution step reached every machine.
+4. **Only now switch the broker's leaf** to be issued by the new root.
+5. **Remove the old root** once nothing reports it.
+
+Doing 4 before 3 is a flag day, and a flag day is the fleet going dark.
+
+**The overlap window has to be longer than your longest expected outage.** An appliance powered down
+across the rotation comes back holding only the old root and cannot be told anything, because it
+cannot connect. A year is generous for a plant that runs continuously and is not obviously enough for
+seasonal or mothballed lines — that is a question about the site, not about this platform.
+
+> **A note on why this is gentler than it looks.** `internal-ca.yaml` sets `rotationPolicy: Never`,
+> so when cert-manager re-issues the root it keeps the **same private key**. A chain signed by the
+> re-issued root still verifies against the old copy in an appliance's trust store, because
+> verification matches on subject and public key and neither changed. The appliance keeps working
+> until *its own copy* expires, which is what the year of `renewBefore` is there to cover. Worth
+> confirming against your own fleet before relying on it.
+
+### The clock is part of certificate verification
+
+**A certificate is only valid between two dates, so an appliance with a wrong clock cannot verify
+anything.** A fresh Ubuntu install whose NTP is blocked by the plant firewall — common, and the whole
+point of an air-gapped network — can sit far enough out to reject a perfectly good certificate. It
+presents as a TLS failure at enrolment, or as MQTTS that works in the workshop and not on the line.
+
+Check it first when verification fails for no visible reason:
+
+```bash
+timedatectl                       # "System clock synchronized: yes" is the line that matters
+openssl s_client -connect <broker>:8883 -showcerts </dev/null | openssl x509 -noout -dates
+```
+
+If the plant blocks public NTP, it needs an internal time source and the appliances need to be
+pointed at it. That is a conversation with whoever runs the network, and it is worth having before
+commissioning rather than during.
+
+**And the wrong clock that does not fail is the one to worry about.** A clock out by months breaks
+TLS and stops the appliance dead, in front of whoever is holding it. A clock out by *minutes*
+verifies every certificate perfectly, connects, authenticates — and then files every reading at a
+time that never happened, because devices supply their own metric timestamps and are trusted for
+ordering. Nothing about that appliance looks wrong: it is ONLINE, it drops nothing, and every
+number it reports is plausible.
+
+The platform measures this without the appliance doing anything, by comparing the timestamp on each
+heartbeat against the time it arrived:
+
+* **Clock offset** on the gateway fleet-health dashboard, **positive meaning the appliance is
+  ahead**, which is the direction that corrupts;
+* the **Gateway Clock Skew** alert, at a minute of drift sustained for fifteen;
+* and past **+5 minutes** the telemetry stops being written at all — refused rather than clamped,
+  and counted per gateway by `acs_ingestion_timestamps_rejected_total{edge_node}`. The backward
+  tolerance is a full day, because an appliance flushing a buffered outage is legitimate late data.
+
+**Nothing on the platform corrects it, deliberately.** Rewriting a device's timestamps centrally
+would swap a visible clock fault for an invisible one and destroy the only evidence the appliance
+is wrong. The fix is time synchronisation on the appliance, every time.
+
+### There is no revocation list, and that is a decision
+
+Nothing in this stack publishes a CRL or answers OCSP, and no client here checks for one. For a fleet
+of this size that is the right trade — a revocation infrastructure is a service to run, keep
+available and distribute in its own right — but it has a consequence worth stating plainly:
+
+**If the root's private key were ever exposed, the only remedy is to mint a new root and repeat the
+distribution above for the entire fleet.** There is no faster path. What keeps that acceptable is
+that the key never leaves cert-manager's `acs-cymru-ca-key-pair` Secret (or `/mosquitto/certs/ca.key`
+on Compose), is never mounted into an application pod, and is never copied to an appliance —
+appliances receive `ca.crt` and only `ca.crt`. Treat that Secret as the most sensitive object in the
+deployment, because it is the one thing here with no revocation story.
+
+Broker **credentials** are a different matter and are revocable immediately — see below.
+
+### An appliance that is lost, stolen or scrapped
+
+The broker password is on the appliance in plaintext, in `/data/gateway.env`. That is unavoidable —
+something has to connect — and the blast radius is deliberately small: `mosquitto.acl` pins the
+topic's edge-node segment to the connecting username, so a stolen appliance can publish as **itself**
+and as nothing else. It cannot forge another gateway's telemetry and it cannot read the fleet's.
+
+**Archiving the gateway is the revocation.** It rotates the broker account to a password nobody
+records, and the appliance stops connecting. Do it the moment hardware goes missing rather than as
+part of a later tidy-up.
+
+What archiving does **not** do is retrieve the CA copy on that appliance — but that certificate is
+public by nature and worth nothing to whoever has the box.
+
+---
+
+## 9. The editor login is local, and why
 
 The appliance's Node-RED uses a **local bcrypt account**, not Supabase SSO. That is a deliberate
 divergence from the platform's own Node-RED:
@@ -248,7 +392,7 @@ what makes the substitution safe.
 
 ---
 
-## 9. Adding devices — nothing is pre-registered
+## 10. Adding devices — nothing is pre-registered
 
 The sample flow includes an **▶ ADD YOUR OWN DEVICE** inject. Click it and the device publishes a
 Sparkplug `DBIRTH`; it then appears in the dashboard's **quarantine queue** as `UNKNOWN_DEVICE`, and
@@ -263,7 +407,7 @@ telemetry.
 
 ---
 
-## 10. Flow backups
+## 11. Flow backups
 
 The appliance's flow lives on a Docker volume on hardware in a plant. It is the only copy, and
 `docker compose down -v` or a failed SD card takes the plant's edge logic with it.
@@ -288,7 +432,7 @@ one is an easy mistake.
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 **`docker compose logs bootstrap` says the token was refused (`401`).**
 Unknown, expired or already redeemed. Re-issue from the dashboard.
@@ -314,7 +458,7 @@ The appliance holds a credential but is not publishing. Check `docker compose lo
 (`depends_on: service_completed_successfully`). Its logs carry the reason.
 
 **The gateway is `ONLINE` but its devices are not.**
-They are in the quarantine queue awaiting approval (§9). That is the design, not a fault.
+They are in the quarantine queue awaiting approval (§10). That is the design, not a fault.
 
 ---
 

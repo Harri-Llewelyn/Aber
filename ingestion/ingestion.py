@@ -798,6 +798,40 @@ def counter_snapshot() -> dict:
         return dict(_counters)
 
 
+# ---------------------------------------------------------------------------------------------
+# THE DROP PAIR, IN ONE PLACE.
+#
+# Every drop is a counter AND a log line, and metrics.py's header states the property they exist
+# to hold: "the counters and the log cannot disagree about what happened". That was enforced by
+# habit -- two adjacent statements, at nineteen sites, each of which had to remember to name the
+# same reason. This makes it structural: `reason` is written ONCE and produces both the flat
+# counter name `dropped_<reason>` and the `reason` field on the line.
+#
+# WHICH IS ALSO WHY THE FIELDS GO IN THE LOG AND NOT ON THE COUNTER. metrics.py bounds label
+# cardinality deliberately -- `edge_node` is one per gateway, and labelling by DEVICE would be
+# unbounded -- and its endpoint carries NO DEVICE DATA OF ANY KIND because it is served without a
+# credential. A log store is the other side of that line: reached over the container network,
+# behind the Grafana login, never published. So `device` belongs here, on the half that is
+# authenticated, and must not migrate onto the half that is not.
+#
+# `emit_log=False` SUPPRESSES THE LINE AND NEVER THE COUNTER. Two sites throttle their warning
+# because the traffic that triggers it arrives every 30s and the log would be unreadable. The
+# counter must not be throttled with it, or the metric would report one drop per throttle window
+# instead of one per message -- so the asymmetry lives here, in the signature, rather than being
+# re-derived at each call site.
+# ---------------------------------------------------------------------------------------------
+def drop(reason: str, message: str, *args, emit_log: bool = True, **fields):
+    """Count a dropped message and warn about it, from one `reason`.
+
+    `reason` is the Prometheus label value; the flat counter is `dropped_<reason>` and must have
+    a mapping in metrics.py's COUNTER_MAP -- test_structured_logging.py asserts that every reason
+    reachable here does, and that the label and the logged field carry the same string.
+    """
+    count(f"dropped_{reason}")
+    if emit_log:
+        logger.warning(message, *args, extra={"reason": reason, **fields})
+
+
 # LABELLED COUNTERS, kept beside the flat ones rather than replacing them.
 #
 # The flat registry is a name -> int dict, which cannot express "gaps, by edge node" without
@@ -1410,15 +1444,16 @@ def resolve_gateway(wire_id: str, group_id: str = None, include_archived: bool =
     # NAMED SEPARATELY FROM "unregistered", which is the whole reason this is not simply a filter
     # in the query. "Received NDATA from unregistered edge node" sends an operator hunting a
     # provisioning fault; the truth is that somebody archived it, and that is a different fix.
-    count("dropped_gateway_archived")
-    if _throttled(_archived_gateway_warned, wire_id, ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS):
-        logger.warning(
-            "Dropping traffic from edge node '%s' (%s): the gateway is ARCHIVED. Its broker "
-            "credential should have been revoked when it was archived (archived migration 0038) -- that it "
-            "can still publish means revocation has not landed, or GATEWAY_REVOKE_SECRET is unset "
-            "on this deployment. Un-archive the gateway to accept it again.",
-            wire_id, row.get("name")
-        )
+    drop(
+        "gateway_archived",
+        "Dropping traffic from edge node '%s' (%s): the gateway is ARCHIVED. Its broker "
+        "credential should have been revoked when it was archived (archived migration 0038) -- that it "
+        "can still publish means revocation has not landed, or GATEWAY_REVOKE_SECRET is unset "
+        "on this deployment. Un-archive the gateway to accept it again.",
+        wire_id, row.get("name"),
+        emit_log=_throttled(_archived_gateway_warned, wire_id, ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS),
+        edge_node=wire_id,
+    )
     return None
 
 
@@ -1868,12 +1903,13 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
             # invisible. A birth certificate carries the alias table, so losing one leaves every
             # later alias-only DDATA from this node unresolvable until the next rebirth -- a
             # dropped DDATA costs one sample, this costs a device until it speaks again.
-            count("dropped_dbirth_directory_unavailable")
-            logger.warning(
+            drop(
+                "dbirth_directory_unavailable",
                 "DIRECTORY UNAVAILABLE: dropping DBIRTH for '%s' without registering it (%s). "
                 "The device is NOT quarantined -- this is a transport fault, not an identity "
                 "one. The next birth certificate will resolve normally.",
-                wire_id, e
+                wire_id, e,
+                device=wire_id,
             )
             return
 
@@ -1979,10 +2015,11 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         # The same counter as the arm above: both lose a birth certificate, and an operator
         # asking "are we losing births" wants one number, not two to add together. Where it
         # failed is a question for the log line, which distinguishes them.
-        count("dropped_dbirth_directory_unavailable")
-        logger.warning(
+        drop(
+            "dbirth_directory_unavailable",
             "DIRECTORY UNAVAILABLE part way through DBIRTH for '%s' (%s). No device state was "
-            "changed; the next birth certificate will complete it.", wire_id, e
+            "changed; the next birth certificate will complete it.", wire_id, e,
+            device=wire_id,
         )
     except Exception as e:
         logger.error("Error checking/updating Supabase devices for DBIRTH: %s", e, exc_info=True)
@@ -2008,10 +2045,11 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
         # Separate from the birth counter because the consequence is different and bounded: the
         # watchdog corrects a missed death after DEVICE_OFFLINE_TIMEOUT_SECONDS, so this is a
         # delayed status, not lost telemetry. Summing it with births would overstate the harm.
-        count("dropped_ddeath_directory_unavailable")
-        logger.warning(
+        drop(
+            "ddeath_directory_unavailable",
             "DIRECTORY UNAVAILABLE: dropping DDEATH for '%s' (%s). The watchdog will mark it "
-            "OFFLINE if it stays silent.", wire_id, e
+            "OFFLINE if it stays silent.", wire_id, e,
+            device=wire_id,
         )
         return
 
@@ -2252,6 +2290,118 @@ def gateway_health_gauge_snapshot() -> dict:
         return {node: dict(values) for node, values in _gateway_health_gauges.items()}
 
 
+# -----------------------------------------------------------------------------
+# The appliance clock, measured from the heartbeat that is already arriving
+# -----------------------------------------------------------------------------
+# NOTHING IS ADDED TO THE WIRE AND NOTHING CHANGES ON THE APPLIANCE. Every node-level message
+# already carries the publisher's own clock in `payload.timestamp`, and process_node_message()
+# already stamps receipt time to judge staleness by. The difference between those two numbers IS
+# the appliance's clock offset. Both halves were always here; nothing was subtracting them.
+#
+# WHY THE MEASUREMENT IS WORTH TAKING, which is not obvious from the failure it catches. TLS
+# tolerates precisely the skew this daemon does not. The broker's leaf is valid for ninety days
+# and the root for ten years, so an appliance a few MINUTES fast verifies every certificate,
+# connects, authenticates, and then writes every sample a few minutes into the future for as long
+# as it runs. Inside TELEMETRY_MAX_FUTURE_SECONDS nothing refuses it and nothing counts it -- the
+# readings are all plausible and every one is filed at a time that never happened. Beyond it they
+# are dropped instead. A badly wrong clock announces itself by failing TLS at commissioning, in
+# front of whoever is holding the appliance; a slightly wrong one is silent and permanent, and it
+# is the one this exists for.
+#
+# SIGN CONVENTION: POSITIVE MEANS THE APPLIANCE IS AHEAD OF THIS SERVER, which is the direction
+# that corrupts soonest, because the sanity window is asymmetric. Negative is an appliance running
+# behind: equally unable to be correlated against another gateway on the same line, and far slower
+# to cost anything, since the window allows a full day of it.
+#
+# NOTHING IS REJECTED FOR BEING IMPLAUSIBLE, unlike Cert_Expires_At above, and the difference is
+# deliberate. An appliance reporting 1970 is not a garbled parse to be discarded -- it is a
+# single-board computer with no battery-backed real-time clock that came back after a plant power
+# cut with no reachable time source, which is the most likely instance of this fault in the fleet
+# this platform targets. Refusing to record the extreme values would blind the measurement to its
+# own worst case.
+GATEWAY_CLOCK_OFFSET_GAUGE = "acs_ingestion_gateway_clock_offset_seconds"
+GATEWAY_CLOCK_MEASURED_GAUGE = "acs_ingestion_gateway_clock_measured_timestamp_seconds"
+
+# DELIBERATELY BELOW TELEMETRY_MAX_FUTURE_SECONDS, so the warning arrives while telemetry is still
+# being accepted rather than once it has already started being discarded. A minute of skew is
+# enough to break correlation between two appliances on one line; by the time an appliance reaches
+# the window edge it has been quietly misfiling readings for some while.
+GATEWAY_CLOCK_OFFSET_WARN_SECONDS = 60
+
+# Throttle for the skew warning, keyed by edge node id. Same arrangement as the refused-health and
+# refused-status throttles above: a wrong clock is wrong on all 119 heartbeats an hour, and this
+# has to be legible without being the whole log. Longer than those, because a clock fault is not
+# something anyone fixes between one beat and the next.
+GATEWAY_CLOCK_WARN_INTERVAL_SECONDS = 900
+_gateway_clock_warned = {}
+
+# Last measured offset per edge node, with the time it was measured.
+#
+# SEPARATE FROM THE HEALTH GAUGES ABOVE, because the write condition is the whole point. Health is
+# recorded only when an appliance reports some; this is recorded on every node-level message from
+# every registered gateway, INCLUDING appliances on a bundle that reports no health at all. Folding
+# the two together would make the measurement depend on the one thing it must not depend on --
+# what the appliance chose to send. It inherits the same bound for free: written only after
+# resolve_gateway() has matched a registered gateway, so an unknown or forged edge node id cannot
+# add an entry.
+_gateway_clock_gauges = {}
+_gateway_clock_gauges_lock = threading.Lock()
+
+
+def record_gateway_clock_offset(edge_node_id, payload, at):
+    """
+    Measure one appliance's clock offset in seconds and keep it for the next scrape.
+
+    NDEATH MUST NOT REACH HERE, and the caller is what enforces that -- the same exclusion
+    check_message_sequence() makes, for the same reason. An NDEATH is the broker's Last Will,
+    built by the appliance at CONNECT time and held until its connection drops, so the timestamp
+    on it is the clock reading of an arbitrarily earlier moment. Measuring it would report every
+    perfectly synchronised gateway in the fleet as hours slow, once, at the instant it went
+    offline.
+
+    A payload carrying no usable timestamp is not measured and no series is written. Sparkplug
+    makes the field optional, and parse_sparkplug_payload()'s JSON branch substitutes receipt time
+    when it is absent -- which would read as a flawless clock. No series is the honest answer for
+    an appliance that reported nothing to compare.
+    """
+    raw = getattr(payload, "timestamp", 0)
+    if not raw or raw <= 0:
+        return
+
+    # SECONDS THROUGHOUT, WITH NO DATETIME CONVERSION ANYWHERE. `timestamp` is a uint64 chosen by
+    # the appliance, and datetime.fromtimestamp() RAISES on values a genuinely wrong clock does
+    # produce -- a year outside datetime's range would take the whole heartbeat down an exception
+    # path over a diagnostic. Float arithmetic answers for every one of them, and the extreme
+    # readings are the ones worth having.
+    offset = (raw / 1000.0) - at.timestamp()
+
+    with _gateway_clock_gauges_lock:
+        _gateway_clock_gauges[edge_node_id] = {
+            GATEWAY_CLOCK_OFFSET_GAUGE: offset,
+            GATEWAY_CLOCK_MEASURED_GAUGE: at.timestamp(),
+        }
+
+    if abs(offset) >= GATEWAY_CLOCK_OFFSET_WARN_SECONDS and _throttled(
+        _gateway_clock_warned, edge_node_id or "", GATEWAY_CLOCK_WARN_INTERVAL_SECONDS
+    ):
+        logger.warning(
+            "CLOCK SKEW: edge node '%s' is %.0fs %s this server, measured against the timestamp on "
+            "its own heartbeat. Every device timestamp it sends is being filed %.0fs %s, silently, "
+            "and cannot be correlated with any other appliance. Nothing on the platform corrects "
+            "this -- device timestamps are trusted for ordering. Fix time synchronisation on the "
+            "appliance; telemetry is discarded outright beyond +%ds / -%ds.",
+            edge_node_id, abs(offset), "ahead of" if offset > 0 else "behind",
+            abs(offset), "early" if offset > 0 else "late",
+            TELEMETRY_MAX_FUTURE_SECONDS, TELEMETRY_MAX_AGE_SECONDS,
+        )
+
+
+def gateway_clock_gauge_snapshot() -> dict:
+    """A copy, safe to read while the paho callback thread is writing."""
+    with _gateway_clock_gauges_lock:
+        return {node: dict(values) for node, values in _gateway_clock_gauges.items()}
+
+
 def _reject_health(edge_node_id, metric_name, reason):
     """Drop one health metric, loudly enough to find and quietly enough to live with."""
     count("gateway_health_metrics_rejected")
@@ -2313,13 +2463,14 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
         # arrives every 30s and the log would be unreadable; the counter must not be, or the
         # metric would report one drop per throttle window instead of one per message. This is
         # the one site where the counter and the log legitimately disagree, and this is why.
-        count("dropped_node_message_directory_unavailable")
-        if _throttled(_unknown_gateway_warned, edge_node_id, UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS):
-            logger.warning(
-                "DIRECTORY UNAVAILABLE: dropping %s from edge node '%s' (%s). This is NOT the "
-                "unregistered-node path -- nothing is written and the next heartbeat retries.",
-                msg_type, edge_node_id, e
-            )
+        drop(
+            "node_message_directory_unavailable",
+            "DIRECTORY UNAVAILABLE: dropping %s from edge node '%s' (%s). This is NOT the "
+            "unregistered-node path -- nothing is written and the next heartbeat retries.",
+            msg_type, edge_node_id, e,
+            emit_log=_throttled(_unknown_gateway_warned, edge_node_id, UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS),
+            edge_node=edge_node_id, msg_type=msg_type,
+        )
         return
 
     if gateway is None:
@@ -2345,6 +2496,16 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # event worth finding later; the other 119 heartbeats an hour are not.
     previous_status = gateway.get("status")
     transitioned = previous_status is not None and previous_status != status
+
+    # THE APPLIANCE'S CLOCK, from the two numbers this function is already holding: the timestamp
+    # the node put on this payload and the receipt time stamped above. NDEATH is excluded HERE
+    # rather than inside, so the exclusion sits beside the msg_type the rest of this function
+    # branches on -- see record_gateway_clock_offset() for why a Last Will cannot be measured.
+    #
+    # AFTER the registration check for the same reason the health block below is, and before it
+    # because this one does not depend on the appliance reporting anything.
+    if msg_type != "NDEATH":
+        record_gateway_clock_offset(edge_node_id, payload, heartbeat_dt)
 
     # AFTER the registration check, not before: an unregistered node is dropped either way, and
     # validating its metrics first would log rejections for a gateway nothing is going to write.
@@ -2880,16 +3041,20 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # difference from the old behaviour is only that nothing is written about the DEVICE
         # either: the message is dropped and the stream resumes on its own, instead of the device
         # being pinned to "unregistered" for CACHE_TTL_SECONDS or quarantined by its next DBIRTH.
-        count("dropped_directory_unavailable")
-        logger.warning(
+        drop(
+            "directory_unavailable",
             "DIRECTORY UNAVAILABLE: dropping DDATA for '%s' (%s). Not quarantined; the stream "
-            "resumes when the directory returns.", wire_id, e
+            "resumes when the directory returns.", wire_id, e,
+            device=wire_id,
         )
         return
 
     if device is None or device.get("is_quarantined"):
-        count("dropped_quarantined_or_unregistered")
-        logger.warning("Dropping DDATA for quarantined/unregistered device '%s'", wire_id)
+        drop(
+            "quarantined_or_unregistered",
+            "Dropping DDATA for quarantined/unregistered device '%s'", wire_id,
+            device=wire_id,
+        )
         return
 
     # The telemetry half of the spoofing fix. Dropped rather than quarantined here: a DDATA
@@ -2903,18 +3068,20 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # The binding could not be CHECKED, so the row must not be written -- an unverifiable
         # attribution is exactly what this check exists to refuse. Dropped, not quarantined, for
         # the reason stated above: a DDATA stream must never be able to quarantine a device.
-        count("dropped_directory_unavailable")
-        logger.warning(
+        drop(
+            "directory_unavailable",
             "DIRECTORY UNAVAILABLE: cannot verify gateway binding for '%s' (%s); dropping DDATA "
-            "rather than attributing it unverified.", wire_id, e
+            "rather than attributing it unverified.", wire_id, e,
+            device=wire_id, edge_node=gateway_wire_id,
         )
         return
 
     if binding_fault:
-        count("dropped_gateway_binding")
-        logger.warning(
+        drop(
+            "gateway_binding",
             "Dropping DDATA for device '%s' published via edge node '%s': %s",
-            wire_id, gateway_wire_id, binding_fault
+            wire_id, gateway_wire_id, binding_fault,
+            device=wire_id, edge_node=gateway_wire_id,
         )
         return
 
@@ -2934,8 +3101,11 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 
     db_conn = get_timescaledb_connection()
     if not db_conn:
-        count("dropped_db_unavailable")
-        logger.warning("TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'", wire_id)
+        drop(
+            "db_unavailable",
+            "TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'", wire_id,
+            device=wire_id,
+        )
         return
 
     payload_ts = payload.timestamp if hasattr(payload, 'timestamp') and payload.timestamp > 0 else int(time.time() * 1000)
@@ -3176,6 +3346,16 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                 # skips this, keeping the counter honest rather than optimistic.
                 count("metrics_written", metric_count)
                 count("metrics_rejected_timestamp", rejected_timestamps)
+                # AND THE SAME EVENT WITH THE EDGE NODE ON IT, which is the half that makes the
+                # counter actionable. Unlabelled, it says the fleet lost samples and not which
+                # appliance lost them -- and the log line below, the only place the gateway is
+                # named, goes nowhere that is kept. This is the series metrics.py exports;
+                # `metrics_rejected_timestamp` stays in the flat registry so the counter and the
+                # warning cannot drift apart, and is deliberately not exported twice.
+                count_labelled(
+                    "acs_ingestion_timestamps_rejected_total",
+                    {"edge_node": gateway_wire_id}, rejected_timestamps
+                )
                 count("metrics_unresolved_alias", unresolved_aliases)
                 count("metrics_rejected_schema", rejected_schema)
 
@@ -3968,6 +4148,14 @@ def start_metrics_endpoint():
         # are -- a gauge holds its last value indefinitely, so without that timestamp a dead
         # collector and a steady disk are the same picture.
         for edge_node, values in gateway_health_gauge_snapshot().items():
+            for metric, value in values.items():
+                labelled[(metric, (("edge_node", edge_node),))] = value
+
+        # THE APPLIANCE CLOCK, same shape and the same reason: an offset is a state, not an event.
+        # Read the offset BESIDE its measured-at gauge -- a gauge holds its last value forever, so
+        # a gateway that has been powered down for a month otherwise still reports whatever its
+        # clock said on the day it left.
+        for edge_node, values in gateway_clock_gauge_snapshot().items():
             for metric, value in values.items():
                 labelled[(metric, (("edge_node", edge_node),))] = value
 

@@ -922,6 +922,74 @@
           "sort": "none"
         }
       }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Clock offset",
+      "description": "How far this appliance's own clock is from the platform's, in seconds. **Positive means the appliance is ahead**, which is the direction that corrupts.\n\n**This is the fault that passes every other panel on this page.** Devices supply their own metric timestamps and are trusted for ordering, so a gateway a minute fast is ONLINE, drops nothing, and files every reading a minute early -- silently and permanently. Certificate validity is measured in months, so TLS tolerates exactly the skew the historian does not.\n\nThe measurement costs the appliance nothing: ingestion subtracts the timestamp the node put on its own heartbeat from the time that heartbeat arrived. Beyond **+5 minutes** the telemetry is discarded outright rather than misfiled; the backward tolerance is a full day, because a gateway flushing a buffered outage is legitimate late data.\n\nNothing here corrects it. It is fixed on the appliance -- see docs/physical-gateways.md.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "acs_ingestion_gateway_clock_offset_seconds{edge_node=\"$gateway\"}",
+          "legendFormat": "{{edge_node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
     }
   ]
 }

@@ -429,6 +429,9 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.32.14` | `8088:8080` |
 | `prometheus` | `acs-cymru_prometheus` | `prom/prometheus:v3.14.0` | `127.0.0.1:9090:9090` |
 | `node-exporter` | `acs-cymru_node_exporter` | `prom/node-exporter:v1.12.1` | — |
+| `loki` | `acs-cymru_loki` | `grafana/loki:3.5.7` | `127.0.0.1:3100:3100` |
+| `alloy` | `acs-cymru_alloy` | `grafana/alloy:v1.11.2` | `127.0.0.1:12345:12345` |
+| `docker-socket-proxy` | `acs-cymru_docker_socket_proxy` | `tecnativa/docker-socket-proxy:0.3.0` | — |
 
 ---
 

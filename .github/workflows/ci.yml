@@ -2616,6 +2616,13 @@ jobs:
       - name: Run Stack-Dependent Python Suites
         env:
           REQUIRE_SEEDED_ACCOUNTS: '1'
+          # SAME ARGUMENT, ONE SUITE ALONG. test_log_pipeline.py skips when the stores are
+          # unreachable or the broker credential is absent -- both correct for someone running it
+          # by hand, and both impossible here, where the stack is up by construction and `.env` is
+          # sourced below. Without this its three most valuable assertions (that a real drop is
+          # counted in Prometheus AND readable in Loki naming the device) would vanish from a
+          # green run, which is the vacuous-green failure the note above is about.
+          REQUIRE_LOG_PIPELINE: '1'
           SUPABASE_DB_HOST: localhost
           SUPABASE_DB_PORT: '54322'
           # THE HISTORIAN IS REACHED BY ITS PUBLISHED PORT, NOT ITS COMPOSE NAME. `.env` sets

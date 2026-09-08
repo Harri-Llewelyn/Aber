@@ -32,7 +32,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Telemetry Rows Ingested (per second)",
-      "description": "Rows landing in the `telemetry` hypertable, bucketed at one minute. This is the historian-side view of ingestion throughput. The daemon's own STATS counters (messages consumed, drops by reason) are LOG LINES and are not queryable from here -- exposing them needs the Prometheus endpoint tracked as issue #22.",
+      "description": "Rows landing in the `telemetry` hypertable, bucketed at one minute. This is the historian-side view of ingestion throughput. The daemon's own drop counters are NOT here and are a different question: this counts what was WRITTEN, and `Messages Dropped by Reason` below counts what was refused. A fall here with no rise there is a quiet plant; a fall here WITH a rise there is a fault.",
       "datasource": {
         "type": "postgres",
         "uid": "timescaledb"
@@ -302,6 +302,70 @@
       }
     },
     {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Messages Dropped by Reason",
+      "description": "Messages the daemon REFUSED, by reason, from `acs_ingestion_messages_dropped_total`. This is telemetry that was not recorded and will not be restated.\n\nTHIS PANEL IS HALF AN INSTRUMENT. The counter says a drop happened and how many; it cannot say WHICH DEVICE, under which edge node, because the metrics endpoint is served without a credential and carries no device data of any kind by design. That half is in the log store -- click any series to open it filtered to the same reason.\n\nThe two halves cannot disagree: `drop(\"<reason>\")` in ingestion.py derives the Prometheus label and the logged field from one string, and ingestion/test_structured_logging.py asserts they stay identical.\n\nTHE LINK SELECTS ON `service=\"ingestion\"`. On Compose the collector applies that label. On Kubernetes the cluster's own log stack must relabel `service` to the workload name or this link returns nothing -- see the divergence table in deploy/k8s/README.md.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(acs_ingestion_messages_dropped_total[$__rate_interval]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "links": [
+            {
+              "title": "Which devices? Open the logs for this reason",
+              "url": "/explore?left={\"datasource\":\"loki\",\"queries\":[{\"refId\":\"A\",\"datasource\":{\"type\":\"loki\",\"uid\":\"loki\"},\"expr\":\"{service=\\\"ingestion\\\"} | json | reason = \\\"${__field.labels.reason}\\\"\"}],\"range\":{\"from\":\"${__from}\",\"to\":\"${__to}\"}}",
+              "targetBlank": false
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Continuous Aggregates",
       "id": 7,
@@ -309,7 +373,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 23
       },
       "collapsed": false,
       "panels": []
@@ -327,7 +391,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 15
+        "y": 24
       },
       "targets": [
         {
@@ -380,7 +444,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 15
+        "y": 24
       },
       "targets": [
         {
@@ -406,7 +470,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 32
       }
     },
     {
@@ -422,7 +486,7 @@
         "h": 5,
         "w": 6,
         "x": 0,
-        "y": 24
+        "y": 33
       },
       "targets": [
         {
@@ -472,7 +536,7 @@
         "h": 5,
         "w": 6,
         "x": 6,
-        "y": 24
+        "y": 33
       },
       "targets": [
         {
@@ -522,7 +586,7 @@
         "h": 5,
         "w": 6,
         "x": 12,
-        "y": 24
+        "y": 33
       },
       "targets": [
         {
@@ -575,7 +639,7 @@
         "h": 5,
         "w": 6,
         "x": 18,
-        "y": 24
+        "y": 33
       },
       "targets": [
         {
@@ -626,7 +690,7 @@
         "h": 9,
         "w": 10,
         "x": 0,
-        "y": 29
+        "y": 38
       },
       "targets": [
         {
@@ -676,7 +740,7 @@
         "h": 9,
         "w": 14,
         "x": 10,
-        "y": 29
+        "y": 38
       },
       "targets": [
         {
