@@ -2204,10 +2204,13 @@ from the thing they clicked.
 Two things, neither blocking the store being useful, each written with its entry point so it can be
 started cold. **They are listed smallest first, which is also roughly least valuable first.**
 
-**There were four.** The collector's own parsing errors were item 2 and are now the fourth rule in
-the `Log Pipeline` group, recorded above. The backup question was item 4 and has been ANSWERED
-rather than built — see below. The remainder are renumbered to close the gap, which is safe here
-for the same reason it is safe for the items themselves: nothing cites them.
+**There were four, and all four are now accounted for.** The collector's own parsing errors were
+item 2 and are the fourth rule in the `Log Pipeline` group. The backup question was item 4 and has
+been ANSWERED rather than built. The multiline stage was item 1 and is now under test — the
+paragraph after next says how, because the entry said it could not be done cheaply and it was
+wrong. **One of the two below is new**, arriving from that work. The remainder are renumbered to
+close the gap, which is safe here for the same reason it is safe for the items themselves: nothing
+cites them.
 
 **The backup answer, because a decision recorded only as a deletion is a decision nobody can find
 later.** It is the one this entry guessed at — logs are not backed up, deliberately — and the
@@ -2227,14 +2230,20 @@ rm` means something very different to each. And a tier 2 snapshot captures `loki
 side effect of capturing the machine — recorded as a side effect and not a promise, so no retention
 story gets built on it.
 
-**1 · The multiline stage has never met a real traceback. (Small.)**
-`ingestion/test_structured_logging.py` asserts the `firstline` regex against what the formatters
-emit, so a format change cannot silently break it. What is unproven is the REJOINING: that Alloy
-actually stitches an eight-line Python traceback back into one record. `test_log_pipeline.py`
-checks it opportunistically and skips when the stack has been healthy -- the good outcome, and an
-awkward one to test against. Closing it means provoking a traceback deliberately, which means
-either a fault-injection path in the daemon or restarting a service mid-suite, and both are worse
-than the gap. **Revisit only if a real incident shows tracebacks arriving fragmented.**
+**1 · A container discovered after the collector starts has its first lines stored TWICE. (Small,
+and new.)**
+Found by building the multiline test below, and it is the one thing that work turned up which is
+not yet explained. A probe container started while Alloy was already running produced four lines in
+`docker logs` and **seven** in Loki: the traceback arrived once correctly rejoined onto the JSON
+record before it, and once again as an orphaned three-line entry carrying the same timestamp.
+Reproduced twice, and it is not the stdout/stderr split -- merging the two with `2>&1` inside the
+container changes nothing. **The blast radius is small and was measured rather than assumed**: the
+real `ingestion` container holds 38 entries over thirty minutes with ZERO duplicates, so a
+long-running service is unaffected. What is affected is a container in its first seconds, which is
+a service that has just been restarted or has just crash-looped -- when its log is worth most. The
+15s `refresh_interval` on both `discovery.docker` and `loki.source.docker` is the first place to
+look: the duplicate window lines up with a target being re-synced mid-stream. **Entry point:** the
+probe in `test_log_pipeline.py` reproduces it on demand, which is the hard part already done.
 
 **2 · The Kubernetes side is contract-checked but not EXERCISED. (Medium.)**
 The chart ships the datasource pointed at `grafana.lokiUrl` and deploys no log workload, which is
@@ -2243,6 +2252,43 @@ and the `service` label contract -- which a stock cluster log stack does NOT sat
 in prose and in the divergence table rather than by anything that runs. The k3d job in CI is the
 place this would live. **Note the failure it would catch is the one already found once by hand: a
 datasource that connects, a health check that passes, and every query returning nothing.**
+
+### What has landed: the multiline stage, proven rather than waited for
+
+**The entry said this could not be closed cheaply and that was wrong, which is worth recording
+because the reasoning was sound and the premise was incomplete.** It argued that provoking a
+traceback meant either a fault-injection path in the daemon or restarting a service mid-suite. It
+needs neither. Alloy derives `service` from the compose LABEL, so a THROWAWAY CONTAINER carrying
+`com.docker.compose.service=ingestion` is collected by the same pipeline, matches the same
+`stage.match` selector and passes through the same `stage.multiline`. Nothing in the daemon changes
+and no running service is touched. The probe runs the DAEMON'S OWN IMAGE and calls
+`logging_config.get_logger`, so the first line comes out of `JSONFormatter` rather than being typed
+into the test — a test that wrote that line by hand would assert the collector against a
+restatement of the format instead of the format.
+
+**And the shape being tested is not the one the entry assumed.** Under `LOG_FORMAT=json`, which
+both targets set, a HANDLED exception is not multi-line at all: `JSONFormatter` puts it in the `exc`
+field and `json.dumps` escapes the newlines. So `exc_info=True` never reaches the stage. The stage
+earns its place on the UNHANDLED case, where Python writes a raw traceback straight to stderr with
+no formatter in the path — a daemon dying, which is when the log matters most and is the only shape
+that gets there. An item written around `exc_info` would have tested a path that no longer exists.
+
+**The counter-intuitive half is now asserted rather than assumed.** `Traceback (most recent call
+last):` matches neither `{` nor an ISO timestamp, so it does not OPEN a block — it is appended to
+the record above it. A crash therefore arrives glued to the last line the service logged before it
+died, under that line's timestamp. That is correct for this configuration and it is what the test
+requires, rather than the tidier thing a reader might expect.
+
+**The test was verified by BREAKING the thing it watches**, which is the only way to know an
+assertion can fail. Narrowing the `stage.match` selector to `playback` alone and restarting the
+collector makes it fail with the damage visible in the output: the `RuntimeError` line arriving as
+its own entry, severed from the `Traceback` header. Restored, it passes. Ten of ten in the suite.
+
+**It also exposed a race in a sibling test, which is now fixed.** The drill-down-contract assertion
+queried the store ONCE, and it runs before the polling test alphabetically — so on a stack where
+the drop had happened but the line had not yet travelled daemon → Docker → Alloy → Loki, it failed
+with *"no logged drop reasons"*. That reads as a broken drill-down rather than as a race, which is
+the worst way for a flake to present. It polls now, like its sibling.
 
 ### What has landed: the fields, so the store has something to index
 
