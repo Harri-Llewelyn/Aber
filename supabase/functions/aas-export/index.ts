@@ -310,6 +310,23 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
+    /*
+     * A JSON SHELL CARRYING A LOOPBACK MODEL URL IS STILL A VALID SHELL, so this warns rather than
+     * refuses -- which is the opposite of the AASX branch above, and deliberately so. Self-
+     * containment is the entire reason to produce an AASX, so a package that is not self-contained
+     * is worse than none; a JSON environment is a document that REFERENCES things by URL, and one
+     * unreachable reference does not make the rest of it wrong.
+     *
+     * BUT SILENCE WAS THE WRONG ANSWER TOO. The export succeeded, the file downloaded, and the one
+     * File element in it resolved to the exporter's own laptop -- discoverable only by opening the
+     * shell somewhere else and finding a dead link. The operator who ran the export is the person
+     * best placed to fix it and the last person who would find out.
+     *
+     * It fires on the URL actually emitted, not on configuration in the abstract: a device with no
+     * model has no reference to be unreachable.
+     */
+    const modelUrlIsUnreachable = Boolean(device.model_3d_path) && MODEL_BASE_IS_LOOPBACK;
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -317,6 +334,14 @@ export default async function handler(req: Request): Promise<Response> {
         // Surfaced rather than hidden: an unmapped metric is a real gap in the export's usefulness,
         // and the caller should be able to see it without diffing the payload.
         stats,
+        // Present only when there is something to warn about, so a caller can test for the key.
+        ...(modelUrlIsUnreachable
+          ? {
+            warning:
+              "This shell's 3D model reference points at this host and will not resolve for " +
+              "anyone else. " + MODEL_BASE_ADVICE,
+          }
+          : {}),
         aas: environment,
       }),
       { status: 200, headers: jsonHeaders },
