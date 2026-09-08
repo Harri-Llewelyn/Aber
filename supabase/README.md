@@ -2768,6 +2768,23 @@ Four things about these dumps are not obvious and each has bitten someone:
 **This is not PITR.** Recovery is to the last run and no finer. A real RPO wants WAL archiving or
 pgBackRest.
 
+**The log store is deliberately not in tier 1.** `loki_data` holds thirty days of container logs
+and is not a database of record, so `backup-databases.sh` does not touch it and is not expected to.
+The distinction the decision rests on is what a log is FOR here: the store answers a question
+somebody is asking during or shortly after a fault — which device, under which edge node, and why —
+and a restored copy of last month's logs answers a question nobody is still asking. Everything from
+those lines that matters beyond the incident is already kept as a row and already in the dump:
+`digital_thread` is the audit trail and carries the conformance record as well, and
+`platform_alerts` is the alert history. Backing up the logs too would be a second, weaker copy of
+records that are captured properly, plus a great deal of noise the retention window exists to
+expire.
+
+So `docker volume rm <project>_loki_data` costs up to thirty days of logs and nothing else — the
+stack returns with an empty store and works. That is worth stating next to `mosquitto_certs`, where
+the same command is a fleet-wide re-enrolment: the two sit in the same volume list and are not the
+same kind of thing. A tier 2 snapshot does capture `loki_data`, because it captures the machine,
+but that is a side effect rather than a promise and no retention story should be built on it.
+
 ### Tier 2: infrastructure snapshots
 
 For the Kubernetes target — CSI `VolumeSnapshot`, Velero, and the storage-PVC gap — see

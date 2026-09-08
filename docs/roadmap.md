@@ -2201,11 +2201,31 @@ from the thing they clicked.
 
 ### What remains, and where to pick each one up
 
-Three things, none of them blocking the store being useful, each written with its entry point so it
-can be started cold. **They are listed smallest first, which is also roughly least valuable first.**
-There were four; the collector's own parsing errors were item 2 and are now the fourth rule in the
-`Log Pipeline` group, recorded above. The three below have been renumbered to close the gap, which
-is safe here for the same reason it is safe for the items themselves — nothing cites them.
+Two things, neither blocking the store being useful, each written with its entry point so it can be
+started cold. **They are listed smallest first, which is also roughly least valuable first.**
+
+**There were four.** The collector's own parsing errors were item 2 and are now the fourth rule in
+the `Log Pipeline` group, recorded above. The backup question was item 4 and has been ANSWERED
+rather than built — see below. The remainder are renumbered to close the gap, which is safe here
+for the same reason it is safe for the items themselves: nothing cites them.
+
+**The backup answer, because a decision recorded only as a deletion is a decision nobody can find
+later.** It is the one this entry guessed at — logs are not backed up, deliberately — and the
+reasoning is what makes it more than a shrug. This store exists to answer a question somebody is
+asking during or shortly after a fault; a restored copy of last month's logs answers a question
+nobody is still asking. Everything from those lines that matters beyond the incident is already
+kept as a ROW and already in the tier 1 dump: `digital_thread` is the audit trail and carries the
+conformance record as `SCHEMA_REJECTION`, and `platform_alerts` is the alert history. Backing the
+logs up as well would be a second, weaker copy of records captured properly, plus the noise the
+thirty-day window exists to expire. **So the omission that item flagged was the write-up and not
+the policy**, and it is now written in the three places someone meets the question: the `loki_data`
+volume comment in `docker-compose.yml`, the *WHAT THIS DOES NOT DO* header of
+`scripts/backup-databases.sh`, and
+[Backup and Recovery](../supabase/README.md#backup-and-recovery). The contrast with
+`mosquitto_certs` is stated at the volume, because the two sit in the same list and `docker volume
+rm` means something very different to each. And a tier 2 snapshot captures `loki_data` anyway, as a
+side effect of capturing the machine — recorded as a side effect and not a promise, so no retention
+story gets built on it.
 
 **1 · The multiline stage has never met a real traceback. (Small.)**
 `ingestion/test_structured_logging.py` asserts the `firstline` regex against what the formatters
@@ -2223,16 +2243,6 @@ and the `service` label contract -- which a stock cluster log stack does NOT sat
 in prose and in the divergence table rather than by anything that runs. The k3d job in CI is the
 place this would live. **Note the failure it would catch is the one already found once by hand: a
 datasource that connects, a health check that passes, and every query returning nothing.**
-
-**3 · The store is not in the backup or restore story. (Medium, and the one most likely to bite.)**
-`loki_data` is a named volume holding a database, and `scripts/backup-databases.sh` does not know
-about it -- reasonably, since it backs up databases of record and this is not one. But the
-retention decision says thirty days, and nothing states whether a `docker volume rm` or a host
-rebuild is expected to lose those thirty days. **Every other store in this stack has an answer to
-that question and this one arrived without one**, which is the same shape of omission §13 opens by
-warning about for retention. The answer may well be "logs are not backed up, and that is
-deliberate" -- but it should be written down beside `mosquitto_certs`, whose volume comment
-explains precisely why IT must survive.
 
 ### What has landed: the fields, so the store has something to index
 

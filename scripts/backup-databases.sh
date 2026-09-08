@@ -10,6 +10,13 @@
 # It also does not capture roles -- `supabase_auth_admin`, `authenticator` and
 # `supabase_storage_admin` are recreated by db-roles-init, which must have run before a restore.
 #
+# NOR DOES IT CAPTURE THE LOG STORE, which is a decision and is recorded so that its absence from
+# this list reads as one. `loki_data` holds thirty days of container logs and is not a database of
+# record: the durable half of everything that matters is already in the dump as rows --
+# digital_thread, which is the audit trail and the conformance record both, and platform_alerts --
+# while the logs are the volatile half, there to be queried during an incident rather than
+# restored after one. See the volume's own comment in docker-compose.yml for the full argument.
+#
 # Full runbook, including the two-tier strategy this is tier 1 of:
 #   supabase/README.md -> "Backup and Recovery"
 #
