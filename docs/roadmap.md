@@ -2146,13 +2146,16 @@ we losing anything", with a data link that opens the log store filtered to which
 clicked. That link is the drill-down the whole item is arguing for, and it works because the label
 and the field carry the same string.
 
-**Three alert rules, because there are three distinct failures and one is invisible.**
+**Four alert rules, because there are four distinct failures and two are invisible.**
 `up{job="alloy"}` catches a dead collector. A rate on `loki_write_sent_entries_total` catches the
 collector that is UP and shipping nothing — the failure that looks exactly like a quiet plant, and
 the one the first live run actually had. `loki_write_dropped_entries_total{reason=~"rate_limited|stream_limited"}`
 catches a configured ceiling biting, which is what stops the rate bound silently eating evidence
 during the fault it was sized for. `ingester_error` is excluded on purpose: it is the benign
-first-attach backfill, and alerting on it would train people to ignore the group.
+first-attach backfill, and alerting on it would train people to ignore the group. **The fourth was
+added after the other three and is the reason the count changed**: a rate on
+`loki_source_docker_target_parsing_errors_total` catches the collector that is reading a container
+and failing to decode it — see *What remains* below, where this was item 2.
 
 Prometheus scrapes both `loki` and `alloy` — the pair whose own failure would otherwise destroy the
 record of itself. Both targets confirmed `up`.
@@ -2198,8 +2201,11 @@ from the thing they clicked.
 
 ### What remains, and where to pick each one up
 
-Four things, none of them blocking the store being useful, each written with its entry point so it
+Three things, none of them blocking the store being useful, each written with its entry point so it
 can be started cold. **They are listed smallest first, which is also roughly least valuable first.**
+There were four; the collector's own parsing errors were item 2 and are now the fourth rule in the
+`Log Pipeline` group, recorded above. The three below have been renumbered to close the gap, which
+is safe here for the same reason it is safe for the items themselves — nothing cites them.
 
 **1 · The multiline stage has never met a real traceback. (Small.)**
 `ingestion/test_structured_logging.py` asserts the `firstline` regex against what the formatters
@@ -2210,13 +2216,7 @@ awkward one to test against. Closing it means provoking a traceback deliberately
 either a fault-injection path in the daemon or restarting a service mid-suite, and both are worse
 than the gap. **Revisit only if a real incident shows tracebacks arriving fragmented.**
 
-**2 · Nothing scrapes the collector's own parsing errors. (Small.)**
-`loki_source_docker_target_parsing_errors_total` exists on the Alloy target and no rule reads it.
-It is the metric that would say the collector is reading containers it cannot decode -- distinct
-from both "shipped nothing" and "the store refused it", and therefore not covered by any of the
-three rules in the `Log Pipeline` group.
-
-**3 · The Kubernetes side is contract-checked but not EXERCISED. (Medium.)**
+**2 · The Kubernetes side is contract-checked but not EXERCISED. (Medium.)**
 The chart ships the datasource pointed at `grafana.lokiUrl` and deploys no log workload, which is
 the decision. What follows from it is untested: nothing stands a Loki up behind that datasource,
 and the `service` label contract -- which a stock cluster log stack does NOT satisfy -- is asserted
@@ -2224,7 +2224,7 @@ in prose and in the divergence table rather than by anything that runs. The k3d 
 place this would live. **Note the failure it would catch is the one already found once by hand: a
 datasource that connects, a health check that passes, and every query returning nothing.**
 
-**4 · The store is not in the backup or restore story. (Medium, and the one most likely to bite.)**
+**3 · The store is not in the backup or restore story. (Medium, and the one most likely to bite.)**
 `loki_data` is a named volume holding a database, and `scripts/backup-databases.sh` does not know
 about it -- reasonably, since it backs up databases of record and this is not one. But the
 retention decision says thirty days, and nothing states whether a `docker volume rm` or a host

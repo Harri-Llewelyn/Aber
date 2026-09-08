@@ -1192,7 +1192,7 @@ groups:
   # here. They are therefore the one pair whose own failure destroys the record of itself: nothing
   # else in the stack notices that the thing which would have noticed has stopped.
   #
-  # THREE RULES, BECAUSE THERE ARE THREE DISTINCT FAILURES AND ONE OF THEM IS INVISIBLE.
+  # FOUR RULES, BECAUSE THERE ARE FOUR DISTINCT FAILURES AND TWO OF THEM ARE INVISIBLE.
   #
   #   Collector Down      the container is gone. Loud, and the easy one.
   #   Collection Stalled  the container is UP and shipping nothing. This is the failure that looks
@@ -1201,6 +1201,9 @@ groups:
   #                       discovery failed wholesale while the container stayed healthy and the
   #                       healthcheck stayed green.
   #   Store Refusing      a ceiling in loki/loki.yaml is biting. Lines are being lost NOW.
+  #   Cannot Decode       the collector is reading a container and failing to parse it. Every other
+  #                       signal here is green while this happens, because the rest of the pipeline
+  #                       genuinely is: the loss is per-target and upstream of the batch.
   #
   # THE FIRST TWO ARE A PAIR AND NEITHER COVERS THE OTHER. `up == 0` cannot see a broken collector
   # that is still answering its scrape; a rate on shipped entries cannot distinguish a dead
@@ -1388,6 +1391,85 @@ groups:
                 type: prometheus
                 uid: prometheus
               expr: sum by (reason) (rate(loki_write_dropped_entries_total{reason=~"rate_limited|stream_limited"}[10m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+
+      # -------------------------------------------------------------------------------------------
+      # 4. THE COLLECTOR IS READING SOMETHING IT CANNOT DECODE, which is the failure the other three
+      # cannot see between them.
+      #
+      # `loki.source.docker` counts a parsing error when a frame off the Docker API does not decode
+      # into a record. Nothing else here reports that. `up` is 1, because the collector is running
+      # and answering. `loki_write_sent_entries_total` climbs, because the OTHER targets are fine --
+      # so Collection Stalled stays quiet, and it would stay quiet even if the failing target were
+      # the only interesting one. And nothing reaches the store, so Store Refusing has nothing to
+      # count. The line is lost between the container and the batch, which is the one stretch of the
+      # pipeline the other three rules do not watch.
+      #
+      # THRESHOLD ZERO, FOR THE SAME REASON AS RULE 3 ABOVE: a parsing error is a line that was
+      # written and will not be kept, and this store exists to keep those lines. There is no benign
+      # source of this the way `ingester_error` is a benign source of a refusal -- a healthy stack
+      # reads 0, confirmed against the live collector rather than against the documentation.
+      #
+      # SUM BY `component_id` SO THE ALERT NAMES THE PIPELINE, not just the collector. One Alloy can
+      # run several `loki.source.docker` components; this stack runs one, and an annotation that
+      # would still be right if it ran two costs nothing to write now.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-log-collector-parse-errors
+        title: Log Collector Cannot Decode
+        condition: C
+        for: 10m
+        # OK, NOT ALERTING, AND THE REASON IS THE DIVERGENCE TABLE. The chart deploys no log
+        # workload, so on Kubernetes this series does not exist at all. NoData there is the
+        # CORRECT state, not a fault -- and a rule that fires forever on every cluster is a rule
+        # operators silence, taking the Compose signal with it.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The log collector ({{ $labels.component_id }}) is failing to decode messages off the
+            Docker API, so those lines are being lost before they reach the store. Collection looks
+            healthy from every other angle -- the collector is up and other targets are still
+            shipping -- which is why this has its own rule. Check the collector's own logs for the
+            container it cannot read.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: sum by (component_id) (rate(loki_source_docker_target_parsing_errors_total[10m]))
               instant: true
           - refId: B
             datasourceUid: __expr__
