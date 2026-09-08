@@ -240,6 +240,16 @@ export const SUITES = {
       'The per-gateway health gauges. These are what the alert rules read, so a gauge that stops ' +
       'being exported does not fire an alert about itself -- it silently removes the alert.',
   },
+  'ingestion/test_gateway_clock_offset.py': {
+    lanes: ['unit'],
+    why:
+      'The appliance clock offset, and the edge_node label on the timestamp rejection counter. ' +
+      'THE FAULT THIS GUARDS PASSES EVERY OTHER CHECK IN THE STACK: a gateway a few minutes fast ' +
+      'is ONLINE, drops nothing, skips no sequence numbers and verifies its certificate ' +
+      'perfectly, because TLS validity is measured in months and this is measured in minutes. So ' +
+      'a regression here does not break a test elsewhere -- it silently returns the platform to ' +
+      'filing telemetry at times that never happened, with every number on the page plausible.',
+  },
   'ingestion/test_capture_worker.py': {
     lanes: ['unit'],
     why:

@@ -22,6 +22,10 @@ npm run test:py:stack    # lane: stack — needs the composed stack up
 # Python unit suites — no stack required
 python ingestion/test_gateway_binding.py
 python ingestion/test_gateway_health_metrics.py
+# The appliance clock offset, measured from the heartbeat's own timestamp against receipt time,
+# and the edge_node label on the rejection counter. Guards the one gateway fault that passes every
+# other check: minutes of skew verify every certificate and corrupt every reading.
+python ingestion/test_gateway_clock_offset.py
 python ingestion/test_archived_gateway.py
 python ingestion/test_declared_metrics.py
 python ingestion/test_modelled_metrics_contract.py

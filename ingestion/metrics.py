@@ -30,12 +30,21 @@ reach it and changes nothing about what this file may put behind it. Prometheus 
 `ingestion:9108` over the compose network and never used the host mapping; the rules below were
 written for an unauthenticated endpoint and still are.
 
-IT USED TO SERVE COUNTERS AND NOTHING ELSE. It now also serves FIVE GAUGES DESCRIBING THE
-APPLIANCES THEMSELVES -- uptime, load, available memory, free disk, and when each last reported --
-labelled by `edge_node`. The reason is that `gateways.disk_free_bytes` and its neighbours hold a
-LATEST VALUE AND NO HISTORY (archived migration 0035 says so in its own header), so "is that appliance's
-disk filling" is answerable here and nowhere else in the stack. A dashboard reading the database
-can only ever draw a flat line at `now`.
+IT USED TO SERVE COUNTERS AND NOTHING ELSE. It now also serves SEVEN GAUGES DESCRIBING THE
+APPLIANCES THEMSELVES -- uptime, load, available memory, free disk, and when each last reported,
+plus each appliance's CLOCK OFFSET and when that was measured -- all labelled by `edge_node`. The
+reason for the first five is that `gateways.disk_free_bytes` and its neighbours hold a LATEST VALUE
+AND NO HISTORY (archived migration 0035 says so in its own header), so "is that appliance's disk
+filling" is answerable here and nowhere else in the stack. A dashboard reading the database can
+only ever draw a flat line at `now`.
+
+THE CLOCK PAIR IS HERE FOR A DIFFERENT REASON AND IT IS WORTH SEPARATING. It corresponds to no
+database column at all: ingestion.py derives it by subtracting the timestamp an appliance put on
+its own heartbeat from the time this daemon received it, and stores it nowhere else. Drift is the
+question -- an appliance that gains a second a day is a different fault from one that jumped an
+hour at a reboot -- and only a time series can be asked it. What it exposes is that a named
+appliance's clock disagrees with the platform's, which is neither an asset reading nor a secret,
+and `edge_node` is already public on the broker.
 
 WHAT IS DELIBERATELY NOT HERE, because the exposure is unauthenticated:
 
@@ -92,7 +101,8 @@ COUNTER_MAP = {
         "acs_ingestion_messages_dropped_total", {"reason": "db_unavailable"}),
     # Per-metric rejections, which are NOT message drops -- the message was accepted and some of
     # its metrics were not. Kept as separate series so a query cannot conflate them.
-    "metrics_rejected_timestamp": ("acs_ingestion_timestamps_rejected_total", {}),
+    # `metrics_rejected_timestamp` is absent DELIBERATELY: it leaves labelled by edge node, and
+    # EXPORTED_LABELLED_INSTEAD below is where that is recorded.
     "metrics_unresolved_alias": ("acs_ingestion_alias_unresolved_total", {}),
     "metrics_rejected_schema": ("acs_ingestion_schema_rejected_total", {}),
     # The historian write path.
@@ -118,6 +128,23 @@ COUNTER_MAP = {
         "acs_ingestion_gateway_health_rejected_total", {}),
 }
 
+# FLAT COUNTERS THAT ARE DELIBERATELY NOT EXPORTED FROM THIS TABLE, each because the same event
+# already leaves through a LABELLED series and a scraper summing both would count it twice.
+#
+# THIS IS A STATEMENT ABOUT THE EXPOSITION AND NOT ABOUT THE COUNTER. Every name here is still kept
+# in ingestion.py's flat registry, which is what holds each counter one-to-one with the log line
+# beside it -- the property this module's header exists to protect. Removing a name from the
+# registry to stop it being exported would break that; leaving it unmapped would surface it under
+# the `acs_ingestion_unmapped_counter_total` catch-all, which means the opposite of what is meant
+# here. So the third answer is to say so explicitly, with the reason attached to the name.
+EXPORTED_LABELLED_INSTEAD = {
+    "messages_total":
+        "the sum of acs_ingestion_messages_total{msg_type=...}; sum() those instead",
+    "metrics_rejected_timestamp":
+        "exported as acs_ingestion_timestamps_rejected_total{edge_node=...}, so a rejected "
+        "timestamp names the appliance whose clock caused it",
+}
+
 HELP = {
     "acs_ingestion_messages_total":
         "Sparkplug messages the daemon acted on, after parsing and the command-topic filter.",
@@ -126,7 +153,11 @@ HELP = {
     "acs_ingestion_messages_dropped_total":
         "Messages refused, by reason. Any non-zero value is telemetry that was NOT recorded.",
     "acs_ingestion_timestamps_rejected_total":
-        "Metrics whose timestamp failed validation; the message itself was still processed.",
+        "Metrics whose timestamp fell outside the sanity window, BY EDGE NODE; the message itself "
+        "was still processed. This telemetry was refused rather than clamped and cannot be "
+        "recovered. Read it beside acs_ingestion_gateway_clock_offset_seconds for the same "
+        "appliance: a rising count there is almost always a clock that has drifted past the "
+        "window rather than anything about the device.",
     "acs_ingestion_alias_unresolved_total":
         "Metrics carrying an alias with no known name, pending a rebirth.",
     "acs_ingestion_schema_rejected_total":
@@ -214,6 +245,19 @@ HELP = {
         "gauges above BESIDE this one: they hold their last value indefinitely, so a stale "
         "timestamp is the only thing that distinguishes a steady disk figure from a dead "
         "collector.",
+    "acs_ingestion_gateway_clock_offset_seconds":
+        "How far each appliance's own clock is from this server's, in seconds, from the timestamp "
+        "on its heartbeat against the time that heartbeat arrived. POSITIVE MEANS THE APPLIANCE IS "
+        "AHEAD, which is the direction that corrupts: devices supply their own metric timestamps "
+        "and are trusted for ordering, so a gateway a minute fast files every reading a minute "
+        "early, silently and permanently. Nothing corrects this centrally -- it is fixed on the "
+        "appliance. Beyond the sanity window the telemetry is dropped instead and counted by "
+        "acs_ingestion_timestamps_rejected_total. NDEATH is excluded from the measurement: it is "
+        "the broker's Last Will and carries the clock reading of connect time.",
+    "acs_ingestion_gateway_clock_measured_timestamp_seconds":
+        "When each appliance's clock offset was last measured, as unix seconds. READ THE OFFSET "
+        "BESIDE THIS ONE: a gauge holds its last value indefinitely, so an appliance powered down "
+        "for a month still reports whatever its clock said on the day it left.",
 }
 
 TYPES = {
@@ -232,6 +276,10 @@ TYPES = {
     "acs_ingestion_gateway_mem_available_bytes": "gauge",
     "acs_ingestion_gateway_disk_free_bytes": "gauge",
     "acs_ingestion_gateway_health_reported_timestamp_seconds": "gauge",
+    # The clock pair. A gauge and not a counter: an offset goes both ways and can shrink, which is
+    # exactly what a clock being corrected looks like.
+    "acs_ingestion_gateway_clock_offset_seconds": "gauge",
+    "acs_ingestion_gateway_clock_measured_timestamp_seconds": "gauge",
 }
 
 
@@ -328,9 +376,9 @@ def render_exposition(counters, labelled=None, gauges=None, histograms=None):
         if flat.startswith("messages_") and flat != "messages_total":
             add("acs_ingestion_messages_total", {"msg_type": flat[len("messages_"):]}, total)
             continue
-        if flat == "messages_total":
-            # Deliberately NOT exported: it is the sum of the labelled series above, and a scraper
-            # summing them would double-count. `sum(acs_ingestion_messages_total)` is the total.
+        if flat in EXPORTED_LABELLED_INSTEAD:
+            # Not exported here because it is exported labelled elsewhere; see the table for the
+            # per-name reason. NOT the same as being unmapped, which is reported below.
             continue
         mapped = COUNTER_MAP.get(flat)
         if mapped:

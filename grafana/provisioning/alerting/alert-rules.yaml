@@ -1098,3 +1098,88 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+
+      # -------------------------------------------------------------------------------------------
+      # 6. APPLIANCE CLOCK SKEW -- the fault that passes every other check in this file.
+      #
+      # WHY THIS IS NOT COVERED BY ANYTHING ABOVE. A gateway with a wrong clock is ONLINE, is not
+      # stale, drops no messages, skips no sequence numbers and verifies its certificate perfectly:
+      # TLS validity is measured in months and this is measured in minutes, so the appliance passes
+      # every check the platform makes and files every reading at a time that never happened. Rule 4
+      # catches a clock that is wrong by YEARS, because that one breaks the certificate. Nothing
+      # caught the minutes until this metric existed.
+      #
+      # THE MEASUREMENT COSTS NOTHING ON THE APPLIANCE. ingestion.py subtracts the timestamp the node
+      # put on its own heartbeat from the time the heartbeat arrived. No bundle change, no new metric
+      # on the wire, no configuration -- both numbers were already in the payload path.
+      #
+      # THE STALENESS GATE IS THE SECOND HALF OF THE EXPRESSION AND IT IS NOT OPTIONAL. A Prometheus
+      # gauge holds its last value forever, so without it an appliance powered down mid-fault would
+      # go on alerting on whatever its clock said the day it left -- for as long as the daemon runs.
+      # 300s is ten missed heartbeats, comfortably past the 90s the dashboard calls STALE, so a
+      # gateway that is merely OFFLINE stops alerting here and is reported by rule 1 instead.
+      #
+      # 60 SECONDS IS DELIBERATELY WELL INSIDE THE DAEMON'S SANITY WINDOW (-24h/+5m), and matches
+      # GATEWAY_CLOCK_OFFSET_WARN_SECONDS in ingestion.py. Past +5m the telemetry is discarded and
+      # counted by acs_ingestion_timestamps_rejected_total{edge_node}; this is meant to fire long
+      # before that, while the data is still being accepted and silently misfiled.
+      #
+      # `for: 15m` MATTERS MORE HERE THAN ELSEWHERE. A broker or network stall delays a heartbeat
+      # rather than the clock that stamped it, which reads as a NEGATIVE offset of however long the
+      # stall lasted. Fifteen minutes of continuous evaluation separates a genuinely wrong clock
+      # from a slow minute -- and a stall that does outlast it is an incident of its own.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-gateway-clock-skew
+        title: Gateway Clock Skew
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: gateway
+        annotations:
+          summary: >-
+            Edge node {{ $labels.edge_node }} has a clock that disagrees with the platform by more
+            than a minute, so every reading it sends is being filed at the wrong time. Nothing
+            corrects this centrally -- devices are trusted for their own timestamps. Fix time
+            synchronisation on the appliance; see docs/physical-gateways.md.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                abs(acs_ingestion_gateway_clock_offset_seconds)
+                and on(edge_node)
+                (time() - acs_ingestion_gateway_clock_measured_timestamp_seconds < 300)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [60]
+              datasource:
+                type: __expr__
+                uid: __expr__

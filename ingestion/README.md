@@ -946,7 +946,7 @@ Prometheus, the log line is for whoever is reading `docker logs` at 3am with no 
 | `acs_ingestion_messages_total` | `msg_type` | Messages acted on, after parsing and the command-topic filter. **Flat is the signal**: a running daemon consuming nothing. |
 | `acs_ingestion_metrics_written_total` | — | Metric samples written to the historian. |
 | `acs_ingestion_messages_dropped_total` | `reason` | **Telemetry that was NOT recorded.** Under report-by-exception nothing restates it. See the reasons below. |
-| `acs_ingestion_timestamps_rejected_total` | — | A metric's timestamp failed validation. The message was still processed; that metric was not. |
+| `acs_ingestion_timestamps_rejected_total` | `edge_node` | A metric's timestamp fell outside the sanity window. The message was still processed; that metric was **refused rather than clamped** and cannot be recovered. The label names the appliance, which is almost always a clock rather than a device — read it beside the gauge below. |
 | `acs_ingestion_alias_unresolved_total` | — | An alias arrived with no known name. Normal briefly after a restart, pending a rebirth; sustained means a node is not re-birthing. |
 | `acs_ingestion_sequence_gaps_total` | `edge_node` | **A message was lost between the edge node and the historian.** The only loss signal RBE offers. |
 | `acs_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
@@ -957,6 +957,8 @@ Prometheus, the log line is for whoever is reading `docker logs` at 3am with no 
 | `acs_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
 | `acs_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by `MAX_ENTITIES_PER_CACHE`. |
 | `acs_ingestion_cache_evictions_total` | `cache` | **Non-zero is the interesting case.** The cap was reached, so either the fleet exceeds it or something is publishing ids that churn. |
+| `acs_ingestion_gateway_clock_offset_seconds` | `edge_node` | Gauge. How far that appliance's clock is from this server's, **positive meaning it is ahead**. Derived from the timestamp on its own heartbeat against the time that heartbeat arrived — no appliance change, nothing added to the wire. See below. |
+| `acs_ingestion_gateway_clock_measured_timestamp_seconds` | `edge_node` | Gauge. When that offset was last measured. **Read the offset only beside this**: a gauge holds its last value indefinitely, so an appliance powered down mid-fault reports it forever. |
 | `acs_ingestion_unmapped_counter_total` | `counter` | A counter exists in `ingestion.py` with no mapping in `metrics.py`. Not a data fault — a monitoring one. |
 
 `reason` on the drop counter: `gateway_binding` (a device published under a gateway that does not
@@ -1006,7 +1008,7 @@ That is worth knowing rather than smoothing away.
 
 ### Alert rules — shipped
 
-**All five are provisioned**, in the `Ingestion Pipeline` group of
+**All six are provisioned**, in the `Ingestion Pipeline` group of
 [`grafana/provisioning/alerting/alert-rules.yaml`](../grafana/provisioning/alerting/alert-rules.yaml),
 reading the `prometheus` datasource the Compose stack now provides.
 
@@ -1021,6 +1023,7 @@ looks wrong.
 | Binding rejections rising | `rate(acs_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
 | Historian unreachable | `acs_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
 | Message loss | `increase(acs_ingestion_sequence_gaps_total[15m]) > 0` | — | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
+| Gateway clock skew | `abs(acs_ingestion_gateway_clock_offset_seconds) > 60`, gated on the measurement being under 300s old | 15m | **Well inside the sanity window on purpose.** Past +5m the telemetry is discarded; this fires while it is still being accepted and silently misfiled, which is the failure worth catching. The staleness gate is what stops a powered-down appliance alerting forever on the clock it had when it left. |
 
 **Binding rejections rising is the one to read first.** It was the last outstanding rule of the
 platform alerting work: the other three platform rules — Gateway Stale, Enrolment Stuck, Quarantine
