@@ -147,17 +147,56 @@ END $$;
 -- and removing the string would refuse every schema proposal in the history of the stack. The lane
 -- is closed by proposable_columns() and may_decide_proposal(), which govern what can be FILED and
 -- DECIDED rather than what may be remembered.
-ALTER TABLE public.change_proposals
-    DROP CONSTRAINT IF EXISTS change_proposals_entity_type_known;
+--
+-- GUARDED FOR THE SAME REASON `0088` IS, AND THIS IS THE FILE THAT BROKE IT. `0088` narrowed this
+-- constraint to three lanes; it is replayed on every boot like every migration here, so the day a
+-- `cells` proposal existed it re-applied a definition that row violates and the boot stopped. The
+-- widening is not what fails -- the earlier, NARROWER copy is. That makes this block the next one
+-- to fail, on the day something after it admits a ninth lane and somebody files on it.
+--
+-- THE RULE, stated here as well as in `0088` because whoever adds that ninth lane will be reading
+-- THIS file to copy the shape: a migration may WIDEN a domain on replay freely and may NARROW one
+-- only until something later widens it again. Guard on the LANE the migration exists to admit, not
+-- on the definition, so the test stays right for a widening not yet written. A fresh boot and
+-- `npm run test:db` both pass either way -- the fault needs a row of the newer lane to exist, and
+-- neither of those has one.
+--
+-- THE SECOND HALF IS THE RECOVERY CASE, and `0088` records how the database gets into it: an
+-- `ALTER TABLE` pair autocommits, so a boot that fails on the ADD leaves the DROP applied and the
+-- table with no constraint at all. Refusing to install a definition that would RETRACT a row the
+-- table already holds is what lets that database be repaired by the migration that admits the row
+-- instead of stopping the boot for ever.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conrelid = 'public.change_proposals'::regclass
+           AND conname  = 'change_proposals_entity_type_known'
+           AND pg_get_constraintdef(oid) LIKE '%''cells''%'
+    ) AND NOT EXISTS (
+        SELECT 1
+          FROM public.change_proposals
+         WHERE entity_type <> ALL (ARRAY[
+             'devices'::text, 'device_nameplate'::text,
+             'cells'::text, 'gateways'::text,
+             'cell_links'::text, 'gateway_links'::text, 'device_links'::text,
+             'schemas'::text
+         ])
+    ) THEN
+        ALTER TABLE public.change_proposals
+            DROP CONSTRAINT IF EXISTS change_proposals_entity_type_known;
 
-ALTER TABLE public.change_proposals
-    ADD CONSTRAINT change_proposals_entity_type_known
-    CHECK (entity_type = ANY (ARRAY[
-        'devices'::text, 'device_nameplate'::text,
-        'cells'::text, 'gateways'::text,
-        'cell_links'::text, 'gateway_links'::text, 'device_links'::text,
-        'schemas'::text
-    ]));
+        ALTER TABLE public.change_proposals
+            ADD CONSTRAINT change_proposals_entity_type_known
+            CHECK (entity_type = ANY (ARRAY[
+                'devices'::text, 'device_nameplate'::text,
+                'cells'::text, 'gateways'::text,
+                'cell_links'::text, 'gateway_links'::text, 'device_links'::text,
+                'schemas'::text
+            ]));
+    END IF;
+END $$;
 
 
 -- -------------------------------------------------------------------------------------------------
