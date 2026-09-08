@@ -4424,3 +4424,35 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   font-weight: 600;
   margin: 0 auto 0 0;
 }
+
+/* The "you are reading this" banner at the top of a dialog somebody may not save.
+   NEUTRAL, NOT A WARNING. Nothing has gone wrong -- the reader is doing the thing this dialog
+   supports for their role -- so it takes the muted surface every other explanatory strip in the
+   app takes, rather than the amber that means "something needs your attention". The button is
+   pushed to the far end by the span's own flex, so the sentence and the way out read as one
+   line rather than as a notice with an unrelated control beside it. */
+.readonly-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-glass);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* The note under a form field a proposal may not name. Muted rather than amber: nothing has gone
+   wrong, and the field is legitimately out of reach for this reader rather than in an error state. */
+.form-hint-locked {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-style: italic;
+}
+
+.readonly-notice > span { flex: 1; min-width: 0; }
+.readonly-notice > svg { flex-shrink: 0; }

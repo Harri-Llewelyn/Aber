@@ -10,6 +10,7 @@ import { TagList } from '../common/TagList'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
@@ -101,6 +102,17 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         api.get('/api/v1/devices', { signal }),
       ])
       setCells(c); setAssets(a)
+
+      /* WHAT THIS PERSON HAS ALREADY ASKED FOR. Needed so the edit dialog can seed itself with an
+         open proposal's patch rather than silently replacing it -- 0086 allows one open proposal
+         per asset per person. RLS decides what comes back; tolerated rather than required, because
+         the cells page must not fail to load because the proposals endpoint did. */
+      try {
+        const proposals = await api.get('/api/v1/proposals', { signal })
+        setOpenProposals((proposals || []).filter(pr => pr.status === 'open'))
+      } catch (pErr) {
+        if (pErr.name !== 'AbortError') setOpenProposals([])
+      }
       setLoading(false)
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -124,6 +136,22 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
 
   const save = async () => {
     try {
+      /* THE FORK IS AT THE END, not at the beginning: the fields, their validation and their null
+         handling are shared, and only the last step differs -- by who is asking. */
+      if (proposeMode) {
+        if (!editing) throw new Error('A cell can only be created by an Administrator.')
+        const patch = patchFromForm('cell', editing, formVal)
+        await submitProposal({
+          kind: 'cell', entityId: editing.cell_id, patch,
+          rationale: formVal.__rationale, proposalId: editingProposal?.id
+        })
+        setShowForm(false); setEditingProposal(null); loadAll()
+        showToast(editingProposal
+          ? 'Your proposal was updated. An approver decides from here.'
+          : 'Proposed. An approver applies it, or says why not.', 'success')
+        return
+      }
+
       if (editing) await api.put(`/api/v1/cells/${editing.cell_id}`, formVal)
       else         await api.post('/api/v1/cells', formVal)
       setShowForm(false); loadAll(); showToast(editing ? 'Cell saved' : 'Cell created', 'success')
@@ -154,6 +182,17 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
 
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+  const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
+
+  /* ONE FORM, TWO ENDINGS. See frontend/src/utils/proposeFromForm.js: the approvals page used to
+     carry a second form listing these same columns as bare text inputs, and two forms describing
+     one cell is a drift generator. This dialog is now the only one; for somebody who may not save
+     it, its footer files a proposal instead of writing. Derived rather than stored, so it cannot
+     disagree with the permission that decides whether the write would be accepted. */
+  const proposeMode = !canManage && canPropose
+  const [editingProposal, setEditingProposal] = useState(null)
+  const [openProposals, setOpenProposals] = useState([])
 
   // A device that resolves to no cell appears on no cell card, so surface it rather than letting
   // it silently vanish -- but ONLY when that is an unanswered question.
@@ -514,17 +553,36 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
               <label className="form-label">Dashboard / UI URL (Optional)</label>
               <input className="form-control" value={formVal.access_url || ''} onChange={e => setFormVal(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:3002/d/cell-1" title="Enter Grafana dashboard or UI management URL" />
             </div>
+            {/* THE RATIONALE, ONLY WHERE THERE IS SOMEBODY TO READ IT. Saving your own change
+                explains itself; proposing one is writing to an approver who has not stood in the
+                cell. */}
+            {proposeMode && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="cell-propose-rationale">Why (optional)</label>
+                <textarea
+                  id="cell-propose-rationale"
+                  className="form-control"
+                  rows={2}
+                  value={formVal.__rationale || ''}
+                  onChange={e => setFormVal(f => ({ ...f, __rationale: e.target.value }))}
+                  placeholder="e.g. the cell was renamed on the floor plan last month"
+                />
+              </div>
+            )}
+
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setShowForm(false)} disabled={saving} title="Cancel">Cancel</button>
+              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving} title="Cancel">Cancel</button>
               <ActionButton
                 pending={saving}
                 // Named for the act, not for the button: creating a cell and editing one are
                 // different waits and the operator knows which they asked for.
-                pendingLabel={editing ? 'Saving…' : 'Creating…'}
+                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                title="Save cell zone"
+                title={proposeMode
+                  ? 'Ask for these changes — an approver applies them, or says why not'
+                  : 'Save cell zone'}
               >
-                Save
+                {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
             </div>
           </div>
@@ -636,12 +694,33 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             title: 'Open Cell Dashboard / Grafana UI'
           },
           {
-            label: 'Edit Details', icon: <IconPencil size={13} />,
-            onClick: () => { setEditing(selectedCell); setFormVal(selectedCell); setShowForm(true) },
-            disabled: !canManage || selectedCell.is_archived,
-            title: !canManage ? 'Requires Admin permissions' : selectedCell.is_archived ? 'Restore this cell before editing it' : 'Edit cell configuration'
+            label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
+            onClick: () => {
+              setEditing(selectedCell)
+              // SEEDED WITH THE OPEN PROPOSAL'S PATCH, when there is one: 0086 allows one open
+              // proposal per asset per person, so a second field extends the request that exists
+              // rather than silently replacing it.
+              const mine = proposeMode
+                ? openProposals.find(pr => pr.entity_type === 'cells' && pr.entity_id === selectedCell.cell_id)
+                : null
+              setEditingProposal(mine || null)
+              setFormVal({ ...selectedCell, ...formFromPatch('cell', mine?.patch) })
+              setShowForm(true)
+            },
+            disabled: (!canManage && !canPropose) || selectedCell.is_archived,
+            title: selectedCell.is_archived
+              ? 'Restore this cell before editing it'
+              : proposeMode
+                ? 'Ask for a change to this cell — an approver applies it, or says why not'
+                : !canManage && !canPropose
+                  ? 'Requires Admin permissions'
+                  : 'Edit cell configuration'
           },
-          {
+          /* WITHHELD FROM A READER WHO MAY NOT OPEN THE PAGE. The nav hides Digital Thread
+             without `digital_thread:read`; a drawer button that navigated there anyway would be
+             the one route into a page the app has decided not to show, landing them on an empty
+             table that explains nothing. `.filter(Boolean)` below drops it. */
+          canReadThread && {
             label: 'View Digital Thread', icon: <IconHistory size={13} />,
             onClick: () => onViewThread?.(selectedCell),
             title: 'Open the immutable audit trace for this cell'

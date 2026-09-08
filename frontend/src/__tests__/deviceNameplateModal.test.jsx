@@ -8,7 +8,7 @@ import { api } from '../api';
 // resolution rule this file is really about (device-published beats stored) lives in api.js and in
 // the exporter; here the question is whether the FORM honours it, which is a rendering question.
 vi.mock('../api', () => ({
-  api: { get: vi.fn(), put: vi.fn() }
+  api: { get: vi.fn(), put: vi.fn(), post: vi.fn() }
 }));
 
 const asset = { asset_id: 'dev-123', asset_name: 'Simulated_CNC_01' };
@@ -30,6 +30,7 @@ describe('DeviceNameplateModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.put.mockResolvedValue({});
+    api.post.mockResolvedValue({});
   });
 
   it('renders an empty form for a device with no nameplate row', async () => {
@@ -112,6 +113,83 @@ describe('DeviceNameplateModal', () => {
     await waitFor(() => expect(fieldFor('Manufacturer').value).toBe('DMG Mori'));
 
     expect(fieldFor('Manufacturer')).toBeDisabled();
-    expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
+  });
+
+  it('offers one primary control, and it says what it will actually do', async () => {
+    // THE FOOTER NEVER LIES AND IS NEVER DEAD. A disabled Save is right for a TEMPORARY refusal --
+    // an invalid year, a save in flight -- because the button becomes yours once you fix the
+    // thing. For a permanent one it leaves the dialog's primary action sitting there dead, and
+    // the reader's conclusion is that the app is broken. (It never even LOOKED disabled: nothing
+    // styles `.btn:disabled`.) Swapping the label is what makes the control honest.
+    respond({ stored: { device_id: 'dev-123' } });
+    render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument());
+
+    expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+  });
+
+  it('gives somebody who may save the Save button and nothing else', async () => {
+    respond({ stored: { device_id: 'dev-123', manufacturer_name: 'DMG Mori' } });
+    render(<DeviceNameplateModal asset={asset} canManage canPropose onClose={vi.fn()} />);
+    await waitFor(() => expect(fieldFor('Manufacturer').value).toBe('DMG Mori'));
+
+    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    // Somebody who can simply make the change has no reason to ask permission for it, and
+    // offering both would spend an approver's attention for nothing.
+    expect(screen.queryByRole('button', { name: /propose a change/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/you are reading this nameplate/i)).not.toBeInTheDocument();
+  });
+
+  it('says nothing extra above the form when the footer already carries it', async () => {
+    // The first cut explained the read-only state in a strip above the form AND offered the route
+    // there, while a dead Save sat below -- three pieces of furniture for one fact.
+    respond({ stored: { device_id: 'dev-123' } });
+    render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument());
+
+    expect(screen.queryByText(/you are reading this nameplate/i)).not.toBeInTheDocument();
+  });
+
+  it('files the proposal itself, as a patch of what moved', async () => {
+    // THIS DIALOG IS THE FORM NOW. It used to hand over to a composer on the Approvals page that
+    // listed these same eleven columns as bare text inputs -- a second form for one nameplate.
+    respond({ stored: { device_id: 'dev-123', manufacturer_name: 'DMG Mori' } });
+    const onClose = vi.fn();
+    render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={onClose} showToast={vi.fn()} />);
+    await waitFor(() => expect(fieldFor('Manufacturer').value).toBe('DMG Mori'));
+
+    fireEvent.change(fieldFor('Serial number'), { target: { value: 'SN-4471' } });
+    fireEvent.click(screen.getByRole('button', { name: /propose a change/i }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/proposals', expect.objectContaining({
+      entity_type: 'device_nameplate',
+      entity_id: 'dev-123',
+      // ONE KEY. The manufacturer was seeded from the row and never touched, so it is not part of
+      // what is being asked for -- an approver reading the diff sees the one field that moved.
+      patch: { serial_number: 'SN-4471' }
+    })));
+    expect(onClose).toHaveBeenCalledWith(false);
+  });
+
+  it('lets a proposer type into the fields, which a pure reader cannot', async () => {
+    // The whole point: they are filling in a request, not browsing. Without this the form would
+    // be disabled and its own Propose button would have nothing to send.
+    respond({ stored: { device_id: 'dev-123' } });
+    render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument());
+    expect(fieldFor('Serial number')).not.toBeDisabled();
+  });
+
+  it('explains itself when there is no route to offer at all', async () => {
+    // A role holding neither `device:manage` nor `proposal:create` -- an Auditor. The footer has
+    // nothing to say for them, and a form whose only control is Cancel has to explain itself
+    // somewhere.
+    respond({ stored: { device_id: 'dev-123' } });
+    render(<DeviceNameplateModal asset={asset} canManage={false} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(/you are reading this nameplate/i)).toBeInTheDocument());
+
+    expect(screen.queryByRole('button', { name: /propose a change/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/ask one of them to make the change/i)).toBeInTheDocument();
   });
 });

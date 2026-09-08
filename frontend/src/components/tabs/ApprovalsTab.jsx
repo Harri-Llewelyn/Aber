@@ -29,24 +29,55 @@ import { IconPlus, IconPencil, IconCheck, IconX, IconArchive, IconHistory } from
  * `audit_domain_for()` already speak. Nobody should have to read that in a heading, so the label
  * lives here -- presentation only, and the id is what every call carries.
  */
+/**
+ * The lanes the queue admits, mirroring 0090's CHECK constraint and `proposable_columns()`.
+ *
+ * NO SCHEMA LANE. 0088 built one and 0090 withdrew it: a draft is created by `fork_schema()`,
+ * which needs `schema:manage` -- so the only person who could create the draft was the only person
+ * who could publish it, and an Operator "proposing" a publication was endorsing somebody else's
+ * work rather than asking for a change they could not make. Historical rows in that lane still
+ * render, through the `entity_type` fallback below.
+ *
+ * THE LABELS ARE READ BY THE FILTERS AND THE TABLE, not by a form: the form for each of these is
+ * the asset's own Edit Details dialog. See the block comment above ProposalTable.
+ */
 export const LANES = [
   {
     id: 'devices',
     label: 'Device details',
-    blurb: 'Name, description, type, connection and location. Not the gateway it reports through, '
-      + 'and not what ingestion observed about it.'
+    blurb: 'Name, description, type, connection and location.'
   },
   {
     id: 'device_nameplate',
     label: 'Device nameplate',
     blurb: 'The IDTA Digital Nameplate a person asserts about a machine — manufacturer, serial, '
-      + 'versions. Where the device publishes its own answer, the exporter prefers that one.'
+      + 'versions.'
   },
   {
-    id: 'schemas',
-    label: 'Schema publication',
-    blurb: 'Publish a draft schema version. Approving archives its predecessor and repoints every '
-      + 'attached device in the same transaction — and only an Administrator may approve it.'
+    id: 'cells',
+    label: 'Cell details',
+    blurb: 'A cell’s name, its Grafana dashboard and its icon.'
+  },
+  {
+    id: 'gateways',
+    label: 'Gateway details',
+    blurb: 'Name, description, access URL and where the gateway sits. Not what it IS, and not what '
+      + 'the platform observed about its health.'
+  },
+  {
+    id: 'device_links',
+    label: 'Device document',
+    blurb: 'A document to attach to a machine — a risk assessment, a schematic, an asset register.'
+  },
+  {
+    id: 'cell_links',
+    label: 'Cell document',
+    blurb: 'A document to attach to a cell.'
+  },
+  {
+    id: 'gateway_links',
+    label: 'Gateway document',
+    blurb: 'A document to attach to a gateway.'
   }
 ]
 
@@ -90,9 +121,13 @@ export function keyLabel(key) {
 /**
  * Whether this session may decide this lane, mirroring `may_decide_proposal()`.
  *
- * ONE INBOX, TWO GATES: a `Shopfloor_Manager` decides the asset lanes and an `Administrator` alone
- * decides a schema publication, because `0069` withdrew `schema:manage` from that role and `0087`
- * made the RPC enforce it.
+ * 0090 gates the five lanes it added on `cell:manage`, `gateway:manage` and `link:manage` rather
+ * than on role names -- so a lane closes when a grant is withdrawn rather than outliving it. All
+ * three are held by exactly these two roles today, which is why one line answers for every live
+ * lane; the day that stops being true, the database is still the one that decides.
+ *
+ * THE WITHDRAWN SCHEMA LANE IS FALSE FOR EVERYBODY, matching 0090: nothing new can be filed in it
+ * and nothing left in it can be decided.
  *
  * THIS IS A MIRROR AND IT IS ALLOWED TO BE WRONG. The database is asked again on every call, so the
  * cost of a divergence here is a button that returns a refusal -- not an approval that should not
@@ -100,7 +135,7 @@ export function keyLabel(key) {
  * session carries; the permission is what the database resolves.
  */
 export function canDecide(entityType, userRole) {
-  if (entityType === 'schemas') return userRole === 'Administrator'
+  if (entityType === 'schemas') return false
   return userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 }
 
@@ -184,13 +219,33 @@ function StatusBadge({ status }) {
   return <span className={`badge ${cls}`}>{status}</span>
 }
 
-/** The proposer, named as far as this page honestly can. */
-function ActorLabel({ id, currentUserId }) {
+/**
+ * The proposer, named as far as this page honestly can.
+ *
+ * THE EMAIL FIRST, AND IT IS NOT SELF-DECLARED. `0089` stamps `proposed_by_email` from the signed
+ * access token on INSERT, discarding anything the client sent -- so it is evidence rather than a
+ * name somebody typed. The uuid stays the fallback, because a token carrying no email is a real
+ * state and a blank cell would read as a missing proposer.
+ */
+function ActorLabel({ id, email, currentUserId }) {
   if (!id) return <span className="context-field-empty">—</span>
   if (id === currentUserId) return <strong>you</strong>
-  // The same shape the Digital Thread uses. `auth.users` is not readable from the browser, so a
-  // display name would have to come from somewhere that does not exist yet.
+  if (email) return <span title={id}>{email}</span>
   return <span className="mono" title={id}>{String(id).slice(0, 8)}</span>
+}
+
+/**
+ * An absolute timestamp, in the viewer's own locale and zone.
+ *
+ * BESIDE THE RELATIVE ONE RATHER THAN INSTEAD OF IT. "31m ago" is what triage reads and is useless
+ * in a ticket or a conversation with a night shift; a wall-clock time is the opposite. The column
+ * carries the exact time and the drawer carries both, so neither reader has to do arithmetic.
+ */
+export function absoluteTime(iso) {
+  if (!iso) return ''
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  return at.toLocaleString()
 }
 
 /** The before/after table, shared by the drawer and by nothing else -- see `diffRows`. */
@@ -272,178 +327,29 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
   )
 }
 
-/**
- * The composer.
+/*
+ * ==================================================================================================
+ * THERE IS NO COMPOSER HERE ANY MORE, AND ITS ABSENCE IS THE DESIGN.
+ * ==================================================================================================
  *
- * ITS FIELD LIST COMES FROM THE DATABASE, through `proposable_columns()`. A hardcoded list here
- * would be a second allowlist, and the failure would be a form offering a field every proposal is
- * then refused for -- or worse, quietly omitting one the database would have accepted.
+ * This page used to carry a form of its own: a lane picker, a subject picker, and one text input
+ * per key returned by `proposable_columns()`. It worked, and it was a drift generator. It listed
+ * the same columns as the Edit Details dialog for the same asset, as BARE TEXT INPUTS -- so
+ * proposing a relocation meant typing a uuid that the real dialog offers in a dropdown, and the day
+ * somebody added a field, a hint or a validation rule to Edit Details, the two dialogs started
+ * quietly disagreeing about what a device is.
+ *
+ * There is one form per asset now, and it is the one that was always there. For somebody who may
+ * not save it, its footer button files a proposal instead of writing -- see
+ * `frontend/src/utils/proposeFromForm.js`, and `proposeMode` in DevicesTab, CellsTab and
+ * GatewaysTab.
+ *
+ * SO THIS PAGE IS A QUEUE AND NOTHING ELSE: what is waiting, what was decided, and the drawer that
+ * decides one. Editing your own open proposal is a hand-over back to the asset's page, because
+ * that is where the form lives -- the drawer's Edit action opens the asset there, and its
+ * "Propose a Change" dialog seeds itself from the proposal you already have.
  */
-function Composer({ devices, drafts, editing, onCancel, onSubmit, busy, refusal, onOpenExisting }) {
-  const [lane, setLane] = useState(editing?.entity_type || 'devices')
-  const [target, setTarget] = useState(editing?.entity_id || '')
-  const [values, setValues] = useState(() => {
-    if (!editing) return {}
-    const seed = {}
-    for (const [k, v] of Object.entries(editing.patch || {})) seed[k] = v === null ? '' : String(v)
-    return seed
-  })
-  const [rationale, setRationale] = useState(editing?.rationale || '')
-  const [allowed, setAllowed] = useState([])
 
-  React.useEffect(() => {
-    let cancelled = false
-    api.get(`/api/v1/proposals/allowed-keys/${encodeURIComponent(lane)}`)
-      .then(keys => { if (!cancelled) setAllowed(keys) })
-      .catch(() => { if (!cancelled) setAllowed([]) })
-    return () => { cancelled = true }
-  }, [lane])
-
-  const laneDef = LANE_BY_ID.get(lane)
-  const nothingToPropose = lane !== 'schemas' && Object.keys(values).length === 0
-
-  /**
-   * WHY THE BUTTON IS DISABLED, IN WORDS.
-   *
-   * A control that is greyed out with no explanation is one a person tries twice and then reports
-   * as broken -- which is exactly what happened here: pressing Propose with no device chosen did
-   * nothing at all, correctly, and said nothing about why. The button stays disabled because the
-   * proposal would be refused; this is the part that was missing.
-   */
-  const missing = []
-  if (!target) missing.push(lane === 'schemas' ? 'a draft to publish' : 'a device')
-  if (nothingToPropose) missing.push('at least one field to change')
-
-  const submit = () => {
-    // The schema lane's patch is the ACT and takes no arguments, so the form does not collect one.
-    const patch = lane === 'schemas'
-      ? { publish: true }
-      : Object.fromEntries(
-          Object.entries(values)
-            .filter(([, v]) => v !== undefined)
-            // An empty box means "clear this field", which is a real proposal -- so it is sent as
-            // null rather than dropped. Dropping it would silently turn "clear the serial number"
-            // into a proposal that changes nothing.
-            .map(([k, v]) => [k, v === '' ? null : v])
-        )
-    onSubmit({ entity_type: lane, entity_id: target, patch, rationale })
-  }
-
-  // Escape closes it, through the shared stack -- the same treatment every other dialog gets, so a
-  // confirmation opened over this one cannot take the form down with it.
-  useEscapeKey(onCancel)
-
-  return (
-    <div className="modal-overlay" onClick={onCancel}>
-      {/* `modal-md`, and the scrolling is `.modal`'s own: it caps at the viewport and scrolls
-          inside itself, which is what the device nameplate lane needs -- eleven fields is taller
-          than a laptop once the lane picker, the target picker and the rationale are above them. */}
-      <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-        <div className="modal-header-row">
-          <h3 className="modal-title">{editing ? 'Edit your proposal' : 'Propose a change'}</h3>
-        </div>
-        <div className="card-body">
-      {refusal && (
-        <div className="empty-state" role="alert">
-          <div className="empty-text">{refusal.message}</div>
-          {refusal.openExisting && (
-            <button type="button" className="btn btn-sm" onClick={onOpenExisting}>
-              Open the proposal you already have
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* THE LANE AND TARGET ARE FIXED WHILE EDITING. The transition guard refuses a change to
-          either, so offering them would be a control the database declines. */}
-      <div className="form-group">
-        <label className="form-label" htmlFor="lane">What kind of change</label>
-        <select id="lane" className="form-control" value={lane} disabled={Boolean(editing)}
-                onChange={e => { setLane(e.target.value); setTarget(''); setValues({}) }}>
-          {LANES.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
-        </select>
-        {laneDef && <p className="approvals-hint">{laneDef.blurb}</p>}
-      </div>
-
-      <div className="form-group">
-        <label className="form-label" htmlFor="target">
-          {lane === 'schemas' ? 'Draft to publish' : 'Device'}
-        </label>
-        <select id="target" className="form-control" value={target} disabled={Boolean(editing)}
-                onChange={e => setTarget(e.target.value)}>
-          <option value="">Choose…</option>
-          {lane === 'schemas'
-            ? drafts.map(d => (
-                <option key={d.id} value={d.id}>{d.schema_name} v{d.version}</option>
-              ))
-            : devices.map(d => (
-                <option key={d.device_id || d.id} value={d.device_id || d.id}>{d.name}</option>
-              ))}
-        </select>
-        {lane === 'schemas' && drafts.length === 0 && (
-          <p className="approvals-hint">
-            There are no draft schemas. A draft is created by forking an active schema on the
-            Schemas page, which an Administrator does.
-          </p>
-        )}
-      </div>
-
-      {lane !== 'schemas' && allowed.map(key => (
-        <div className="form-group" key={key}>
-          <label className="form-label" htmlFor={`field-${key}`}>{keyLabel(key)}</label>
-          <input
-            id={`field-${key}`}
-            className="form-control"
-            value={values[key] ?? ''}
-            placeholder="Leave blank to propose no change to this field"
-            onChange={e => {
-              const next = { ...values }
-              // A box the user never touched is NOT part of the patch. Only a box they typed in
-              // -- including one they cleared -- becomes a proposed value, which is what keeps
-              // this a patch rather than a whole-row snapshot.
-              if (e.target.value === '' && !(key in next)) delete next[key]
-              else next[key] = e.target.value
-              setValues(next)
-            }}
-          />
-        </div>
-      ))}
-
-      <div className="form-group">
-        <label className="form-label" htmlFor="rationale">Why (optional)</label>
-        <textarea id="rationale" className="form-control" rows={2} value={rationale}
-                  onChange={e => setRationale(e.target.value)} />
-      </div>
-
-      <div className="approvals-composer-actions">
-        {/* AN ERROR, NOT A HINT, and it says so in weight and colour. The first cut greyed the
-            button out and explained itself in muted 12px beside it, which is only marginally
-            better than saying nothing: the eye goes to the button, finds it dead, and does not
-            look left. The button turns with it so the two read as one state rather than as a
-            disabled control and an unrelated sentence.
-
-            `role="alert"` rather than `status`: this is the answer to an action the person just
-            attempted, and it should be announced when it appears rather than waiting for the next
-            quiet moment. */}
-        {missing.length > 0 && (
-          <span className="approvals-blocked" role="alert">
-            Choose {missing.join(' and ')} before proposing.
-          </span>
-        )}
-        <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-        <button type="button"
-                className={`btn ${missing.length > 0 ? 'btn-danger btn-disabled' : 'btn-primary'}`}
-                disabled={busy || missing.length > 0}
-                title={missing.length ? `Choose ${missing.join(' and ')} first` : undefined}
-                onClick={submit}>
-          {editing ? 'Save changes' : 'Propose'}
-        </button>
-      </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 /**
  * One list of proposals, as a table.
@@ -454,7 +360,7 @@ function Composer({ devices, drafts, editing, onCancel, onSubmit, busy, refusal,
  * what you triage on -- what, which asset, who, how long -- and the drawer carries the diff and
  * every action.
  */
-function ProposalTable({ rows, selectedId, onSelect, currentUserId, emptyText }) {
+function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
   if (rows.length === 0) {
     return <div className="empty-state"><div className="empty-text">{emptyText}</div></div>
   }
@@ -462,12 +368,20 @@ function ProposalTable({ rows, selectedId, onSelect, currentUserId, emptyText })
     <div className="table-wrap">
       <table>
         <thead>
+          {/* NO "PROPOSED BY" COLUMN. It held a truncated uuid, which nothing in this stack can
+              resolve into a person -- so it cost a column and answered nothing. The drawer names
+              the proposer properly, by the email 0089 stamps from the token, and "you" on your own
+              rows is the part that was ever readable at a glance.
+
+              STATUS AND TIME ARE TWO COLUMNS, because they were one doing two jobs: a state that
+              takes a badge and a moment that takes a clock, sharing a heading that described only
+              the first. */}
           <tr>
             <th title="The asset or schema this proposal is about">Subject</th>
             <th title="Which lane, and therefore who may decide it">Change</th>
-            <th title="What the proposal would change">Summary</th>
-            <th title="Who filed it">Proposed by</th>
-            <th title="Its state, and when it was last moved">Status</th>
+            <th title="The fields this proposal would change">Field(s) changed</th>
+            <th title="Its current state">Status</th>
+            <th title="When it was filed, or when it was decided">When</th>
           </tr>
         </thead>
         <tbody>
@@ -498,10 +412,9 @@ function ProposalTable({ rows, selectedId, onSelect, currentUserId, emptyText })
                 </td>
                 <td><span className="badge badge-neutral">{lane?.label || p.entity_type}</span></td>
                 <td className="text-muted">{summary}</td>
-                <td><ActorLabel id={p.proposed_by} currentUserId={currentUserId} /></td>
-                <td>
-                  <StatusBadge status={p.status} />{' '}
-                  <span className="text-muted">{ageLabel(p.decided_at || p.proposed_at)}</span>
+                <td><StatusBadge status={p.status} /></td>
+                <td className="text-muted" title={absoluteTime(p.decided_at || p.proposed_at)}>
+                  {ageLabel(p.decided_at || p.proposed_at)}
                 </td>
               </tr>
             )
@@ -512,19 +425,91 @@ function ProposalTable({ rows, selectedId, onSelect, currentUserId, emptyText })
   )
 }
 
-export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId, onViewThread }) {
+/**
+ * The filter both queues share.
+ *
+ * `entity_id` IS SEARCHABLE and that is not padding: it is how a route from somewhere else in the
+ * app arrives pointed at one subject. The device drawer sends the machine's uuid, which matches
+ * nothing a person would type but matches exactly the rows that drawer was talking about.
+ */
+export function filterProposals(rows, lane, query) {
+  const needle = String(query || '').trim().toLowerCase()
+  return rows.filter(p => {
+    if (lane !== 'all' && p.entity_type !== lane) return false
+    if (!needle) return true
+    // The subject, the reason, the rationale, who asked, and the id underneath: the things
+    // somebody remembers about a request they are trying to find again. The proposer joined the
+    // list the moment there was a readable name to search for -- a uuid nobody can resolve is not
+    // one, which is why `proposed_by_email` is here and `proposed_by` is not.
+    return [p.target_label, p.decision_reason, p.rationale, p.proposed_by_email, p.entity_id]
+      .some(v => String(v || '').toLowerCase().includes(needle))
+  })
+}
+
+/** The kind-and-text filter bar, identical over both queues because the queues are one shape. */
+function ProposalFilters({ rows, lane, onLane, query, onQuery, placeholder, label }) {
+  return (
+    <div className="filter-bar">
+      <select
+        className="form-control"
+        style={{ width: '190px' }}
+        value={lane}
+        onChange={e => onLane(e.target.value)}
+        title="Filter by the kind of change"
+        aria-label={`Filter ${label} by kind`}
+      >
+        <option value="all">All kinds ({rows.length})</option>
+        {LANES.map(l => (
+          <option key={l.id} value={l.id}>
+            {l.label} ({rows.filter(p => p.entity_type === l.id).length})
+          </option>
+        ))}
+      </select>
+      <input
+        className="form-control"
+        style={{ width: '260px' }}
+        value={query}
+        onChange={e => onQuery(e.target.value)}
+        placeholder={placeholder}
+        title={`Filter ${label} by what they are about`}
+      />
+      {(lane !== 'all' || query) && (
+        <button type="button" className="btn btn-sm btn-ghost"
+                onClick={() => { onLane('all'); onQuery('') }}>
+          Clear filters
+        </button>
+      )}
+    </div>
+  )
+}
+
+export function ApprovalsTab({
+  showToast, hasPermission, userRole, currentUserId, onViewThread,
+  // ARRIVES FROM ANOTHER PAGE, and is one-shot: `initialSubject` points the working queue at one
+  // asset, so a drawer's "N changes awaiting decision" lands on that asset's requests rather than
+  // on every open request on the site. Cleared through `onClearFocus`, so returning to this tab
+  // later does not silently reapply a filter the person has moved on from.
+  //
+  // THERE IS NO `initialCompose` ANY MORE. It used to open the composer on a device handed over
+  // from its drawer; the composer is gone and the asset's own dialog does that job in place.
+  initialSubject = '', onClearFocus,
+  // Hand back to the asset's page, which is where the form that edits a proposal now lives.
+  onOpenSubject
+}) {
   const [proposals, setProposals] = useState([])
   const [devices, setDevices]     = useState([])
-  const [drafts, setDrafts]       = useState([])
+
   const [loading, setLoading]     = useState(true)
-  const [composing, setComposing] = useState(false)
-  const [editing, setEditing]     = useState(null)
+
   const [rejecting, setRejecting] = useState(null)
   const [busyId, setBusyId]       = useState(null)
-  const [refusal, setRefusal]     = useState(null)
   const [selectedId, setSelectedId] = useState(null)
   const [decidedLane, setDecidedLane] = useState('all')
   const [decidedQuery, setDecidedQuery] = useState('')
+  const [openLane, setOpenLane] = useState('all')
+  // Set by the route effect below when the hand-over arrives, and freely editable afterwards --
+  // a filter somebody cannot clear is a trap, not a shortcut.
+  const [openQuery, setOpenQuery] = useState('')
 
   const loadAll = useCallback(async (signal) => {
     try {
@@ -545,6 +530,23 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
 
   usePolling(loadAll, POLL_INTERVAL_MS)
 
+  /*
+   * AN EFFECT, NOT AN INITIAL STATE, and that distinction is the bug it exists to avoid: every tab
+   * in this app stays mounted across navigation, so `useState(initialSubject)` runs exactly once --
+   * on the first visit to this page, which for most people is not the visit that arrived from a
+   * device. The second and every later hand-over would have set the prop and changed nothing.
+   */
+  React.useEffect(() => {
+    if (!initialSubject) return
+    setOpenQuery(initialSubject)
+    // Nothing is hidden by accident: a subject filter that narrowed only the open queue would
+    // leave a decided proposal about the same device sitting unfiltered below it, which reads as
+    // the filter having missed something.
+    setDecidedQuery(initialSubject)
+    setSelectedId(null)
+    onClearFocus?.()
+  }, [initialSubject, onClearFocus])
+
   const refresh = useCallback(async () => {
     try { await loadAll() } catch { /* the poller reports a failing backend */ }
   }, [loadAll])
@@ -559,17 +561,14 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
 
   const decided = useMemo(() => proposals.filter(p => p.status !== 'open'), [proposals])
 
-  const decidedFiltered = useMemo(() => {
-    const needle = decidedQuery.trim().toLowerCase()
-    return decided.filter(p => {
-      if (decidedLane !== 'all' && p.entity_type !== decidedLane) return false
-      if (!needle) return true
-      // The subject, the reason and the rationale: the three things somebody remembers about a
-      // decision they are trying to find again.
-      return [p.target_label, p.decision_reason, p.rationale]
-        .some(v => String(v || '').toLowerCase().includes(needle))
-    })
-  }, [decided, decidedLane, decidedQuery])
+  const decidedFiltered = useMemo(
+    () => filterProposals(decided, decidedLane, decidedQuery), [decided, decidedLane, decidedQuery])
+
+  // THE WORKING QUEUE FILTERS TOO, and not only for symmetry: the device drawer routes here with
+  // the machine's id as the query, so an approver arrives looking at that device's requests rather
+  // than at every open request on the site.
+  const openFiltered = useMemo(
+    () => filterProposals(open, openLane, openQuery), [open, openLane, openQuery])
 
   // Resolved fresh every render, so a proposal that is decided out from under the drawer -- by the
   // poller, or by somebody else -- closes it rather than leaving a stale row on screen.
@@ -605,29 +604,6 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
     }
   }
 
-  const submitProposal = async (payload) => {
-    setBusyId('composer')
-    setRefusal(null)
-    try {
-      if (editing) await api.put(`/api/v1/proposals/${editing.id}`, payload)
-      else await api.post('/api/v1/proposals', payload)
-      showToast?.(editing ? 'Proposal updated.' : 'Proposed. An approver decides from here.', 'success')
-      setComposing(false)
-      setEditing(null)
-      await refresh()
-    } catch (e) {
-      // The row the per-asset cap is complaining about, so the refusal can offer to open it.
-      const existing = proposals.find(p =>
-        p.status === 'open'
-        && p.entity_type === payload.entity_type
-        && p.entity_id === payload.entity_id
-        && p.proposed_by === currentUserId)
-      setRefusal({ ...refusalFor(e, existing), existing })
-    } finally {
-      setBusyId(null)
-    }
-  }
-
   const canPropose = hasPermission?.(PERMISSION_UUIDS.PROPOSAL_CREATE)
   const mine = selected && selected.proposed_by === currentUserId
   const decidable = selected && selected.status === 'open' && canDecide(selected.entity_type, userRole)
@@ -657,11 +633,19 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
       onClick: () => onViewThread(selected)
     }] : []),
     ...(mine && selected.status === 'open' ? [
-      {
-        label: 'Edit', icon: <IconPencil size={13} />,
-        title: 'Add to this proposal rather than opening a second one',
-        onClick: () => { setEditing(selected); setComposing(false) }
-      },
+      /* EDIT IS A HAND-OVER, NOT A DIALOG. The form that writes a proposal is the asset's own
+         Edit Details dialog -- one form per asset, which is the whole point of removing the
+         composer -- so this opens the asset on its page, where "Propose a Change" seeds itself
+         from the open proposal it finds. One extra click, and no second form to keep in step.
+
+         The per-asset cap is what makes this matter: 0086 allows one open proposal per asset per
+         person, so adding a second field means EXTENDING this request rather than filing another,
+         and the seeded dialog is the only place that can be done. */
+      ...(onOpenSubject ? [{
+        label: 'Add to this proposal', icon: <IconPencil size={13} />,
+        title: 'Open this asset, where the same dialog that edits it will extend your request',
+        onClick: () => onOpenSubject(selected)
+      }] : []),
       {
         label: 'Withdraw', icon: <IconArchive size={13} />,
         pending: busyId === selected.id,
@@ -680,33 +664,19 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
     <div className="page-layout">
       <div className="page-main">
 
-        {/* ONE CARD PER SUBJECT, each with a title and a description, which is how every other page
-            in this app is composed. The primary action sits in the header beside the title, where
-            "create a thing" belongs -- not loose above the page. */}
+        {/* NO "PROPOSE A CHANGE" CARD. The act starts on the asset's own page now -- see the
+            block comment above -- so a button here would be a second entrance to a form this page
+            no longer owns. What is left is the queue itself, which is what an approver opens this
+            page for. */}
         <div className="card approvals-card">
           <div className="card-header">
-            {/* THE HEADING SAYS WHICH IT IS. Editing an existing proposal and starting a new one
-                are the same form with the lane and target locked, and a card that said "Propose a
-                change" in both states left the one difference that matters -- that this will add
-                to a proposal somebody may already be reading -- to be inferred from a button
-                label at the far end of the form. */}
-            <h3 className="section-title">Propose a change</h3>
-            {canPropose && (
-              <button
-                className="btn btn-primary btn-sm"
-                style={{ marginLeft: 'auto' }}
-                onClick={() => { setComposing(true); setRefusal(null) }}
-                title="Ask for a change to a device, a nameplate or a schema"
-              >
-                <IconPlus size={14} /> Propose a change
-              </button>
-            )}
+            <h3 className="section-title">Approvals</h3>
           </div>
           <div className="card-body">
             <p className="approvals-blurb">
-              A proposal is a request, not a change: nothing is written until somebody who may
-              make it approves. {canPropose
-                ? 'Fill in only the fields you want changed — anything left alone stays as it is.'
+              A proposal is a request, not a change: nothing is written until somebody who may make
+              it approves. {canPropose
+                ? 'To ask for one, open the asset on its own page and use Propose a Change — the same dialog that edits it.'
                 : 'Your role can decide proposals but not file them.'}
             </p>
           </div>
@@ -725,13 +695,20 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
               immediately, in one transaction — so a proposal that would break a rule fails here
               rather than being accepted and going wrong later.
             </p>
+            <ProposalFilters
+              rows={open} lane={openLane} onLane={setOpenLane}
+              query={openQuery} onQuery={setOpenQuery}
+              label="open proposals"
+              placeholder="Search subject, proposer or rationale…"
+            />
           </div>
           <ProposalTable
-            rows={open}
+            rows={openFiltered}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            currentUserId={currentUserId}
-            emptyText="Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves."
+            emptyText={openLane !== 'all' || openQuery
+              ? 'Nothing open matches that filter.'
+              : 'Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves.'}
           />
         </div>
 
@@ -748,44 +725,17 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
               the Digital Thread under its own policy, so pruning here destroys no record of what
               happened.
             </p>
-            <div className="filter-bar">
-              <select
-                className="form-control"
-                style={{ width: '190px' }}
-                value={decidedLane}
-                onChange={e => setDecidedLane(e.target.value)}
-                title="Filter by the kind of change"
-              >
-                <option value="all">All kinds ({decided.length})</option>
-                {LANES.map(l => (
-                  <option key={l.id} value={l.id}>
-                    {l.label} ({decided.filter(p => p.entity_type === l.id).length})
-                  </option>
-                ))}
-              </select>
-              <input
-                className="form-control"
-                style={{ width: '260px' }}
-                value={decidedQuery}
-                onChange={e => setDecidedQuery(e.target.value)}
-                placeholder="Search subject, reason or rationale…"
-                title="Filter decided proposals by what they were about or why they were decided"
-              />
-              {(decidedLane !== 'all' || decidedQuery) && (
-                <button
-                  className="btn btn-sm btn-ghost"
-                  onClick={() => { setDecidedLane('all'); setDecidedQuery('') }}
-                >
-                  Clear filters
-                </button>
-              )}
-            </div>
+            <ProposalFilters
+              rows={decided} lane={decidedLane} onLane={setDecidedLane}
+              query={decidedQuery} onQuery={setDecidedQuery}
+              label="decided proposals"
+              placeholder="Search subject, proposer, reason or rationale…"
+            />
           </div>
           <ProposalTable
             rows={decidedFiltered}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            currentUserId={currentUserId}
             emptyText={decided.length === 0
               ? 'Nothing has been decided yet.'
               : 'No decided proposal matches the selected filter.'}
@@ -809,8 +759,19 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
           </>
         )}
         fields={selected ? [
-          { label: 'Proposed by', value: <ActorLabel id={selected.proposed_by} currentUserId={currentUserId} /> },
-          { label: 'Proposed', value: ageLabel(selected.proposed_at), title: selected.proposed_at },
+          {
+            label: 'Proposed by',
+            value: <ActorLabel id={selected.proposed_by} email={selected.proposed_by_email}
+                               currentUserId={currentUserId} />,
+            title: 'Taken from the signed access token when the proposal was filed, not from a form.'
+          },
+          {
+            // BOTH READINGS, and the relative one is the parenthetical: this panel is where
+            // somebody goes to quote a time into a ticket, and "31m ago" cannot be quoted.
+            label: 'Proposed at',
+            value: `${absoluteTime(selected.proposed_at)} (${ageLabel(selected.proposed_at)})`,
+            title: selected.proposed_at
+          },
           ...(selected.decided_at ? [{
             label: selected.status === 'expired' ? 'Expired' : `${selected.status} by`,
             // AN EXPIRED PROPOSAL NAMES NOBODY, and that is deliberate rather than missing data:
@@ -818,6 +779,10 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
             value: selected.decided_by
               ? <ActorLabel id={selected.decided_by} currentUserId={currentUserId} />
               : 'the expiry timer, which is not a person',
+            title: selected.decided_at
+          }, {
+            label: 'Decided at',
+            value: `${absoluteTime(selected.decided_at)} (${ageLabel(selected.decided_at)})`,
             title: selected.decided_at
           }] : []),
           ...(selected.decision_reason
@@ -842,27 +807,6 @@ export function ApprovalsTab({ showToast, hasPermission, userRole, currentUserId
         )}
         actions={panelActions}
       />
-
-      {(composing || editing) && (
-        <Composer
-          devices={devices}
-          drafts={drafts}
-          editing={editing}
-          busy={busyId === 'composer'}
-          refusal={refusal}
-          onOpenExisting={() => {
-            // THE CAP IS ONLY LIVABLE IF THIS IS ONE CLICK. Told "you already have an open
-            // proposal on this device", a person has to be able to open that one and add to it --
-            // otherwise the constraint reads as a wall and they propose against a neighbouring
-            // asset instead, or stop proposing.
-            setEditing(refusal.existing)
-            setComposing(false)
-            setRefusal(null)
-          }}
-          onCancel={() => { setComposing(false); setEditing(null); setRefusal(null) }}
-          onSubmit={submitProposal}
-        />
-      )}
 
       {rejecting && (
         <RejectDialog

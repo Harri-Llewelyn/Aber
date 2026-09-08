@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
-import { IconClipboardList, IconCheck, IconAlertTriangle } from '../common/Icons'
+import { IconLock, IconClipboardList, IconCheck, IconAlertTriangle } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { patchFromForm, submitProposal } from '../../utils/proposeFromForm'
 
 /**
  * Edit a device's IDTA 02006 Digital Nameplate (archived migration 0011).
@@ -36,7 +37,7 @@ const FIELDS = [
 
 const blankForm = () => Object.fromEntries(FIELDS.map(f => [f.column, '']))
 
-export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
+export function DeviceNameplateModal({ asset, onClose, showToast, canManage, canPropose }) {
   // Escape closes. Via the shared stack rather than a listener of this component's own,
   // because a ConfirmModal can open on top of this one and a bare document listener on each
   // would let one keypress dismiss both.
@@ -48,6 +49,15 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  // What was on the row when this dialog opened, so the proposal can be a PATCH of what moved
+  // rather than a snapshot of all eleven fields.
+  const [stored, setStored] = useState({})
+  const [rationale, setRationale] = useState('')
+
+  /* THIS DIALOG FILES ITS OWN PROPOSAL. It used to hand over to a composer on the Approvals page,
+     which listed these same eleven columns as bare text inputs -- a second form for one nameplate.
+     The composer is gone; the footer button below changes what this form DOES instead. */
+  const proposeMode = !canManage && canPropose
 
   useEffect(() => {
     let cancelled = false
@@ -56,6 +66,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
         if (cancelled) return
         setTemplate(elements || [])
         setPublished(fromDevice || {})
+        setStored(stored || {})
         // A device with no nameplate data has NO ROW, so an absent `stored` is the normal case for
         // a device nobody has filled in yet -- not an error and not an empty state worth flagging.
         setForm({
@@ -78,6 +89,25 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
   // broken xs:anyURI that no consumer reports and every consumer mis-renders.
   const uriIsValid = !form.uri_of_the_product || /^[a-z][a-z0-9+.-]*:/i.test(form.uri_of_the_product)
   const canSave = canManage && !saving && yearIsValid && uriIsValid
+  // The same two rules gate a proposal: a year the column would refuse is refused here rather
+  // than a week later, in front of an approver who cannot fix it.
+  const canSend = proposeMode && !saving && yearIsValid && uriIsValid
+
+  const propose = async () => {
+    setSaving(true)
+    try {
+      const patch = patchFromForm('device_nameplate', stored, form)
+      await submitProposal({
+        kind: 'device_nameplate', entityId: asset.asset_id, patch, rationale
+      })
+      showToast?.('Proposed. An approver applies it, or says why not.', 'success')
+      onClose(false)
+    } catch (e) {
+      showToast?.(e.message, 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const save = async () => {
     setSaving(true)
@@ -108,6 +138,26 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
           Administration Shell, each carrying the identifier IDTA publishes for it. Every field is
           optional — a nameplate is filled in as it is discovered.
         </p>
+
+        {/* NO BANNER FOR A READER WHO CAN PROPOSE.
+            The first cut explained the read-only state in a strip above the form AND offered the
+            route there, while a dead Save button sat at the bottom -- three pieces of furniture
+            for one fact. The footer button below now carries the whole of it: it says "Propose a
+            change" instead of "Save", which states what this dialog will do for this reader in
+            the one place they were already going to look.
+
+            THE STRIP SURVIVES ONLY WHERE THERE IS NOTHING TO OFFER. Without `onPropose` -- a role
+            that holds neither `device:manage` nor `proposal:create` -- the footer has nothing to
+            say, and a form whose only control is Cancel needs to explain itself somewhere. */}
+        {!loading && !canManage && !proposeMode && (
+          <div className="readonly-notice" role="status">
+            <IconLock size={13} />
+            <span>
+              You are reading this nameplate. Changing it needs Administrator or Shopfloor_Manager
+              — ask one of them to make the change.
+            </span>
+          </div>
+        )}
 
         {loading && <div style={{ padding: '20px 0', color: 'var(--text-muted)' }}>Loading…</div>}
 
@@ -180,7 +230,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
                         inputMode={field.inputMode}
                         placeholder={field.placeholder || ''}
                         value={form[field.column]}
-                        disabled={!canManage}
+                        disabled={!canManage && !proposeMode}
                         onChange={e => set(field.column, e.target.value)}
                       />
                     )}
@@ -203,6 +253,22 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
           </>
         )}
 
+        {/* Only where there is somebody to read it: saving your own change explains itself, and
+            proposing one is writing to an approver who has not stood in front of the machine. */}
+        {proposeMode && !loading && (
+          <div className="form-group" style={{ marginTop: '12px' }}>
+            <label className="form-label" htmlFor="nameplate-rationale">Why (optional)</label>
+            <textarea
+              id="nameplate-rationale"
+              className="form-control"
+              rows={2}
+              value={rationale}
+              onChange={e => setRationale(e.target.value)}
+              placeholder="e.g. read off the plate on the back of the cabinet"
+            />
+          </div>
+        )}
+
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={() => onClose(false)} disabled={saving}>
             Cancel
@@ -210,15 +276,38 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
           {/* Was a bare text swap to 'Saving…' with no spinner and no busy state. The label was
               already right; this puts it on the same standardized control as every other
               submission in the app, which is where the spinner and aria-busy come from. */}
-          <ActionButton
-            pending={saving}
-            pendingLabel="Saving…"
-            onClick={save}
-            disabled={!canSave || loading}
-            title={canManage ? 'Save this nameplate' : 'Requires Administrator or Shopfloor_Manager'}
-          >
-            Save
-          </ActionButton>
+          {/* ONE PRIMARY CONTROL, SAYING WHAT IT WILL ACTUALLY DO.
+              A disabled Save is the right answer to a TEMPORARY refusal -- an invalid year, a save
+              already in flight -- because it tells you the button becomes yours once you fix the
+              thing. It is the wrong answer to a permanent one: it leaves the dialog's primary
+              action sitting there dead, and the reader's own conclusion is that the app is broken.
+              (It also never LOOKED disabled here, because `.btn:disabled` is not styled -- so the
+              greyed-out state this was relying on was greyed out in name only.)
+
+              Swapping the label instead means the footer is never dead and never lies. The
+              proposer's route keeps the same shape as the manager's: fill nothing in here, press
+              the button, and say what you want changed on the form it opens. */}
+          {canManage ? (
+            <ActionButton
+              pending={saving}
+              pendingLabel="Saving…"
+              onClick={save}
+              disabled={!canSave || loading}
+              title="Save this nameplate"
+            >
+              Save
+            </ActionButton>
+          ) : proposeMode ? (
+            <ActionButton
+              pending={saving}
+              pendingLabel="Proposing…"
+              onClick={propose}
+              disabled={!canSend || loading}
+              title="Ask for these changes — an approver applies them, or says why not"
+            >
+              Propose a change
+            </ActionButton>
+          ) : null}
         </div>
       </div>
     </div>

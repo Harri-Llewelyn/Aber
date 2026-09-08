@@ -22,6 +22,7 @@ import { StatusBadge } from '../common/StatusBadge'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { patchFromForm, formFromPatch, submitProposal, nonProposableFields } from '../../utils/proposeFromForm'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
@@ -145,6 +146,16 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         api.get('/api/v1/cells', { signal })
       ])
       setGateways(g); setAssets(a); setCells(c)
+
+      /* WHAT THIS PERSON HAS ALREADY ASKED FOR, so the edit dialog can seed itself with an open
+         proposal's patch rather than silently replacing it. Tolerated rather than required: this
+         page must not fail to load because the proposals endpoint did. */
+      try {
+        const proposals = await api.get('/api/v1/proposals', { signal })
+        setOpenProposals((proposals || []).filter(pr => pr.status === 'open'))
+      } catch (pErr) {
+        if (pErr.name !== 'AbortError') setOpenProposals([])
+      }
       setLoading(false)
     } catch (e) {
       if (e.name !== 'AbortError') {
@@ -177,6 +188,23 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
   const save = async () => {
     try {
+      /* THE FORK IS AT THE END. Everything above is shared; only the last step differs, and it
+         differs by who is asking. A gateway can only be REGISTERED by an Administrator -- the
+         remote branch below mints a bundle, which is not a thing to queue. */
+      if (proposeMode) {
+        if (!editing) throw new Error('A gateway can only be registered by an Administrator.')
+        const patch = patchFromForm('gateway', editing, form)
+        await submitProposal({
+          kind: 'gateway', entityId: editing.gateway_id, patch,
+          rationale: form.__rationale, proposalId: editingProposal?.id
+        })
+        setShowForm(false); setEditingProposal(null); load()
+        showToast(editingProposal
+          ? 'Your proposal was updated. An approver decides from here.'
+          : 'Proposed. An approver applies it, or says why not.', 'success')
+        return
+      }
+
       if (editing) {
         await api.put(`/api/v1/gateways/${editing.gateway_id}`, form)
         setShowForm(false); load(); showToast('Gateway saved', 'success')
@@ -231,6 +259,30 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
   const canManage = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+  const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
+
+  /* ONE FORM, TWO ENDINGS -- see frontend/src/utils/proposeFromForm.js. Derived rather than
+     stored, so it cannot disagree with the permission that decides whether the write would be
+     accepted. */
+  const proposeMode = !canManage && canPropose
+  const [editingProposal, setEditingProposal] = useState(null)
+  const [openProposals, setOpenProposals] = useState([])
+  const withheldFields = nonProposableFields('gateway')
+
+  /**
+   * The note under a field a proposal may not name.
+   *
+   * WITHHELD, NOT HIDDEN. `deployment` says where this gateway's connector RUNS and `is_simulated`
+   * is what it IS -- neither is a label, and moving one re-points a broker topic namespace. Hiding
+   * the controls would make two different dialogs out of one, which is the drift this restructure
+   * removes.
+   */
+  const Withheld = ({ field }) => (
+    proposeMode && withheldFields[field]
+      ? <div className="form-hint-locked">{withheldFields[field]}</div>
+      : null
+  )
   /**
    * Flow-backup authority, mirroring supabase/storage-policies.sql rather than reimplementing it.
    *
@@ -715,15 +767,31 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               <label className="form-label">Gateway Access URL (Optional UI Console)</label>
               <input className="form-control" value={form.access_url || ''} onChange={e => setForm(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:1880" title="Web Console / Management URL for this gateway" />
             </div>
+            {proposeMode && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="gw-propose-rationale">Why (optional)</label>
+                <textarea
+                  id="gw-propose-rationale"
+                  className="form-control"
+                  rows={2}
+                  value={form.__rationale || ''}
+                  onChange={e => setForm(f => ({ ...f, __rationale: e.target.value }))}
+                  placeholder="e.g. this gateway moved to the finishing cell in March"
+                />
+              </div>
+            )}
+
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setShowForm(false)} disabled={saving} title="Cancel">Cancel</button>
+              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving} title="Cancel">Cancel</button>
               <ActionButton
                 pending={saving}
-                pendingLabel={editing ? 'Saving…' : 'Creating…'}
+                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                title="Save gateway configuration"
+                title={proposeMode
+                  ? 'Ask for these changes — an approver applies them, or says why not'
+                  : 'Save gateway configuration'}
               >
-                Save
+                {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
             </div>
           </div>
@@ -1024,12 +1092,28 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
                Renaming is still possible from the database for anyone who genuinely needs it, which
                is the right amount of friction for a row the platform depends on by flag. */
-            label: 'Edit Details', icon: <IconPencil size={13} />,
-            onClick: () => { setEditing(selected); setForm(selected); setShowForm(true) },
-            disabled: !canManage,
-            title: !canManage ? 'Requires Admin permissions' : 'Edit gateway configuration'
+            label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
+            onClick: () => {
+              setEditing(selected)
+              const mine = proposeMode
+                ? openProposals.find(pr => pr.entity_type === 'gateways' && pr.entity_id === selected.gateway_id)
+                : null
+              setEditingProposal(mine || null)
+              setForm({ ...selected, ...formFromPatch('gateway', mine?.patch) })
+              setShowForm(true)
+            },
+            disabled: !canManage && !canPropose,
+            title: proposeMode
+              ? 'Ask for a change to this gateway — an approver applies it, or says why not'
+              : !canManage && !canPropose
+                ? 'Requires Admin permissions'
+                : 'Edit gateway configuration'
           },
-          {
+          /* WITHHELD FROM A READER WHO MAY NOT OPEN THE PAGE. The nav hides Digital Thread
+             without `digital_thread:read`; a drawer button that navigated there anyway would be
+             the one route into a page the app has decided not to show, landing them on an empty
+             table that explains nothing. `.filter(Boolean)` below drops it. */
+          canReadThread && {
             label: 'View Digital Thread', icon: <IconHistory size={13} />,
             onClick: () => onViewThread?.(selected),
             title: 'Open the immutable audit trace for this gateway'

@@ -9,6 +9,7 @@ import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { signOutOfStudio } from './utils/studioSignOut'
 import { TABS, tabIsVisible } from './navigation'
+import { PERMISSION_UUIDS } from './constants'
 import AmbientPipeline from './components/common/AmbientPipeline'
 import { Sidebar } from './components/common/Sidebar'
 import { GlobalSearch } from './components/common/GlobalSearch'
@@ -389,6 +390,11 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
 }
 
 function Dashboard({ session, onSignOut }) {
+  /* ONE-SHOT, and cleared by the page that consumes it -- see ApprovalsTab's onClearFocus. Held
+     here rather than in a query parameter because it is an INTENT ("show me what is waiting on
+     this asset"), not a location: replaying it on a reload would reapply a filter somebody has
+     since cleared. */
+  const [proposalFocus, setProposalFocus] = useState(null)
   const [selectedDeviceFilter, setSelectedDeviceFilter] = useState('')
   const [selectedGatewayFilter, setSelectedGatewayFilter] = useState('')
   // Set when a schema's device count is clicked on the Schemas page; consumed by DevicesTab.
@@ -445,6 +451,26 @@ function Dashboard({ session, onSignOut }) {
   const showDevicesForSchema = (uuid) => {
     setSelectedSchemaFilter(uuid)
     setTab('devices', { schema: uuid })
+  }
+
+  /** What is already waiting on this asset, with the queue filtered to it. */
+  const showApprovalsFor = (device) => {
+    setProposalFocus({ subject: device.asset_id })
+    setTab('approvals')
+  }
+
+  /**
+   * The way back: open the asset a proposal is about, on the page that owns the form for it.
+   *
+   * THIS REPLACES AN "EDIT PROPOSAL" DIALOG. Extending your own open request means changing the
+   * same fields the asset's Edit Details dialog owns, and a second form for that was exactly the
+   * drift this restructure removed -- so the queue hands back to the asset, whose Propose a Change
+   * dialog seeds itself from the proposal it finds.
+   */
+  const openProposalSubject = (proposal) => {
+    if (proposal.entity_type.startsWith('cell')) return showCell(proposal.entity_id)
+    if (proposal.entity_type.startsWith('gateway')) return showGateway(proposal.entity_id)
+    return showDevice(proposal.entity_id)
   }
   const { theme, toggleTheme } = useTheme()
   const { toast, showToast, clearToast } = useToast()
@@ -699,8 +725,12 @@ function Dashboard({ session, onSignOut }) {
             {tab === 'overview'       && <OverviewTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
             {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
             {tab === 'gateways'       && <GatewaysTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
-            {tab === 'digital-thread' && (
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
+            {/* RE-CHECKED HERE, for the same reason Capture's role is below: `tab` arrives from the
+                URL as well as from the nav, so hiding the item is not the same as closing the
+                page. Without this an Operator could still reach an empty table by typing the
+                route. */}
+            {tab === 'digital-thread' && hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ) && (
               <DigitalThreadTab
                 initialEntity={selectedThreadEntity}
                 onClearEntity={() => setSelectedThreadEntity(null)}
@@ -715,6 +745,9 @@ function Dashboard({ session, onSignOut }) {
                 both re-derive the proposer from `auth.uid()`, so a wrong value here produces a
                 refused call rather than somebody else's proposal being editable. */}
             {tab === 'approvals'      && <ApprovalsTab showToast={showToast} hasPermission={hasPermission} userRole={userRole} currentUserId={session?.user?.id}
+              initialSubject={proposalFocus?.subject || ''}
+              onClearFocus={() => setProposalFocus(null)}
+              onOpenSubject={openProposalSubject}
               /* The proposal's TARGET, not the proposal: what a reader wants after an approval is
                  the machine's or the schema's history, with the approval in it beside everything
                  else that happened to it. `device_nameplate` resolves to its device for the same
