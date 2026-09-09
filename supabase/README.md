@@ -1936,6 +1936,13 @@ Two identity mappings need no new columns, which is why this is an adapter and n
 `Instance_UUID` is `devices.id` (already RFC4122), and the Sparkplug address is
 `(gateways.sparkplug_group, gateways.sparkplug_id)`.
 
+**The Directory also has an MQTT half**, and it is off by default:
+[The Directory on MQTT](../ingestion/README.md#the-directory-on-mqtt) publishes the same projection
+as four retained documents. It is a separate decision from this one for a single reason — the
+read-as-the-caller property above does not survive the move. RLS decides what each HTTP caller sees;
+a retained topic has one copy for every subscriber, so on MQTT the broker ACL is the whole of the
+access control. Everything else about it follows from that.
+
 ### Getting a shell into a third-party AAS server
 
 Two routes to the same destination, and it is worth having both before you need either.
@@ -2237,6 +2244,45 @@ own `digital_thread` row, because `schemas` has been in the audit trigger since 
 `schema:manage`, matching what [`0087`](#0069-narrowed-the-policies-and-the-rpcs-went-around-them-0087)
 put on `fork_schema()` and `publish_schema_version()` — a `SECURITY DEFINER` function bypasses RLS
 entirely, so its own check is the only one there is.
+
+### An archived schema stops taking new devices (`0093`)
+
+[Issue #167](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/167). Publishing v2 archives v1 and
+repoints every attached device in one transaction, so no machine is judged against a contract the
+platform has moved past. The Edit Details dropdown then offered v1 back — one device at a time, with
+nothing that would ever sweep it forward again. On a device set to `enforce`, being judged against
+the superseded version means the daemon **drops readings from a healthy machine**, which is what made
+an untidy dropdown critical.
+
+**The guard forbids the MOVE, not the STATE.** A device already sitting on an archived schema is an
+unfinished migration — the case `/v1/schema/{uuid}` above deliberately refuses to hide — and it has
+to stay editable, or every rename, relocation and policy change on a device a publish could not reach
+would freeze. So `reject_archived_schema_assignment()` returns early on an `UPDATE` that leaves
+`schema_id` unchanged, and on a detach to `NULL`. What it refuses is an `INSERT` or an `UPDATE` that
+*arrives at* an archived schema.
+
+**Both arms, because a guard on one column is not a guard.** `device_schemas` unions
+`device_submodels` with the legacy 1:1 `devices.schema_id`; the trigger is on both tables, one
+function body switching on `TG_TABLE_NAME`.
+
+**A draft is still assignable**, deliberately — attaching a draft to a real machine is how a version
+is tried before publishing, and `publish_schema_version()` already merges that state rather than
+treating it as a fault. **A shadow device is exempt**: `ensure_shadow_devices()` copies the origin's
+schema so a replay is judged against the contract it was recorded under, and if the origin is
+mid-migration the shadow has to be able to say so.
+
+**Publishing still works because of an ordering it does not state.**
+`publish_schema_version()` repoints the devices *before* it archives the parent. That was always
+true; it is now load-bearing, and `test_publishing_still_works_with_the_guard_in_force` is what would
+catch a reordering.
+
+**The refusal names the successor**, looked up through `parent_schema_id`, because the operator who
+reached it picked the wrong row out of a version history and needs to be told which row was right.
+
+**It is in the database as well as the UI** because the dropdown is not the only writer: PostgREST is
+a public write surface, and the approvals queue applies a patch on somebody else's behalf. A `CHECK`
+cannot see another table and an RLS policy is bypassed by every `SECURITY DEFINER` path, which is why
+this is a trigger and why the test suite runs it as the **owner** — this guard exempts nobody.
 
 ### A device behind a gateway that never arrived is not late (`0092`)
 
@@ -2604,7 +2650,7 @@ strength of a variable nobody set would be the worst of both behaviours.
 
 On Kubernetes this is what surfaces the chart's port-free hostnames on the page. On Compose it shows
 whatever the operator configured, which is still a port — **port-free URLs there need the reverse
-proxy in roadmap §12**, sequenced after this so a proxy cannot serve `nodered.<domain>` while this
+proxy in roadmap §11**, sequenced after this so a proxy cannot serve `nodered.<domain>` while this
 table advertises `localhost:1880`.
 
 ---

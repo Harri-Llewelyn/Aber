@@ -131,3 +131,37 @@ export const lineageOf = (schemas, schema) => {
  * is work in progress that has to stay reachable, because opening it is the only way to finish it.
  */
 export const isCurrentSchema = (schema) => schemaStatus(schema) !== SCHEMA_STATUS.ARCHIVED
+
+/**
+ * Whether a schema may be attached to a device that does not already carry it.
+ *
+ * An archived version is HISTORY, not a choice. It is the version a lineage has moved past, and
+ * `publish_schema_version()` exists precisely so that every device pointing at it is repointed at
+ * the successor in the same transaction -- so offering it in a picker offers the operator a way to
+ * put a device BACK onto the version the platform has just migrated off, one device at a time and
+ * with nothing to sweep it forward again. That is issue #167, and it was reachable from Edit
+ * Details on any device.
+ *
+ * A DRAFT IS DELIBERATELY STILL ASSIGNABLE, which is the asymmetry worth stating rather than
+ * looking like an oversight. Attaching a draft to one device is how a new version gets tried
+ * against a real machine before it is published, and `publish_schema_version()` reads that as a
+ * state it has to merge rather than as a mistake -- see the duplicate-submodel DELETE in its body.
+ * The two statuses are not in force for opposite reasons: a draft is not in force YET.
+ */
+export const isAssignableSchema = (schema) => schemaStatus(schema) !== SCHEMA_STATUS.ARCHIVED
+
+/**
+ * The schemas a picker may offer, given what the device is already carrying.
+ *
+ * `currentId` IS KEPT EVEN WHEN IT IS ARCHIVED, and that is the half a status filter alone gets
+ * wrong. An archived schema with devices still attached is a real state -- a migration that has
+ * not finished, which is the same case `/v1/schema/{uuid}` refuses to hide -- so a device sitting
+ * on one has to render as what it is. Filtering the option out would make the select fall back to
+ * its first entry, so the dialog would SHOW a schema the device does not have, and pressing Save
+ * for an unrelated reason (a rename, a cell change) would silently reassign it. A picker that
+ * cannot state the current value is worse than one that offers too much.
+ *
+ * Order is preserved from the input, so the caller's sort survives.
+ */
+export const assignableSchemas = (schemas, currentId) =>
+  (schemas || []).filter(s => isAssignableSchema(s) || (s.schema_uuid || s.id) === currentId)
