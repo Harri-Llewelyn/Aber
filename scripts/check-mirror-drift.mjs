@@ -449,6 +449,43 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// -------------------------------------------------------------------------------------------------
+// 6. The Directory's local-namespace qualification -- TypeScript to Python, not SQL to JavaScript.
+//
+// THE ONLY MIRROR HERE THAT IS NOT ABOUT A DATABASE, and it earns its place for the same reason the
+// others do: two surfaces answer the same question, and a divergence is silent on both.
+//
+// `schemas.id` and `directory_services.id` are LOCALLY MINTED. Factory+ Schema_UUIDs are registered
+// against the AMRC repository; handing these back unqualified asserts an interoperability that does
+// not exist. The edge function attaches that qualification to every response; `directory_publish.py`
+// attaches it to every retained MQTT document -- and the MQTT half is where it matters MOST, because
+// a subscriber has the payload and nothing else: no status code, no route, no documentation page
+// beside the bytes.
+//
+// SO THE FAILURE MODE IS NOT "the check fails". It is that the two halves word the qualification
+// differently, a consumer reconciling them treats them as two different claims, and the note stops
+// being a qualification and becomes noise. Comparing the STRINGS is the whole point -- a check that
+// only asserted both files mention "locally minted" would pass on two different sentences.
+// -------------------------------------------------------------------------------------------------
+{
+  const ts = read('supabase/functions/fplus-directory/index.ts');
+  const py = read('ingestion/directory_publish.py');
+  const tsNote = need(ts, /const LOCAL_SCHEMA_NOTE = "([^"]+)"/, 'LOCAL_SCHEMA_NOTE in fplus-directory/index.ts');
+  const pyNote = need(py, /^LOCAL_SCHEMA_NOTE = "([^"]+)"/m, 'LOCAL_SCHEMA_NOTE in directory_publish.py');
+  if (tsNote && pyNote) {
+    compare('directoryNamespaceNote', 'the local-schema qualification', pyNote[1], tsNote[1]);
+  }
+
+  // The service note is a string literal inline in the /v1/service handler rather than a named
+  // constant -- which is exactly the shape the schema note was given a constant to escape. Checked
+  // in the same pair so the second qualification cannot drift while the first is held.
+  const tsService = need(ts, /note: "(Stack service endpoints[^"]+)"/, 'the /v1/service note in fplus-directory/index.ts');
+  const pyService = need(py, /^LOCAL_SERVICE_NOTE = "([^"]+)"/m, 'LOCAL_SERVICE_NOTE in directory_publish.py');
+  if (tsService && pyService) {
+    compare('directoryServiceNote', 'the local-service qualification', pyService[1], tsService[1]);
+  }
+}
+
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nSQL-to-JavaScript mirror drift:');

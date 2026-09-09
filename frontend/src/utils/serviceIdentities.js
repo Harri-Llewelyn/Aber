@@ -44,16 +44,25 @@ export const BROKER_PRINCIPALS = [
     username: 'factoryplus_ingestion',
     purpose: 'The ingestion daemon. Reads every Sparkplug topic and is the only principal that may '
       + 'publish a command.',
-    topics: ['read  spBv1.0/#', 'write spBv1.0/+/NCMD/+'],
-    // The one principal here that can WRITE, and the write is narrow on purpose: NCMD is how a
-    // rebirth is requested, which is the only thing the platform tells a device to do.
+    topics: [
+      'read  spBv1.0/#',
+      'write spBv1.0/+/NCMD/+',
+      'write ACS-Cymru/Directory/#',
+      'read  ACS-Cymru/Directory/#',
+    ],
+    // The one principal here that can WRITE, and both writes are narrow on purpose: NCMD is how a
+    // rebirth is requested, which is the only thing the platform tells a device to do, and
+    // `ACS-Cymru/Directory/#` is the Directory's MQTT half -- retained documents projected from the
+    // enrolment records, off unless DIRECTORY_MQTT_ENABLED says otherwise. Read is granted only to
+    // the principals that already hold `spBv1.0/#`, and to no gateway: a gateway is confined to its
+    // own edge node precisely so it cannot enumerate the site.
     writes: true,
   },
   {
     username: 'factoryplus_i3x',
     purpose: 'The i3X server. Reads the whole namespace to assemble its address space and publishes '
       + 'nothing.',
-    topics: ['read spBv1.0/#'],
+    topics: ['read spBv1.0/#', 'read ACS-Cymru/Directory/#'],
     writes: false,
   },
   {

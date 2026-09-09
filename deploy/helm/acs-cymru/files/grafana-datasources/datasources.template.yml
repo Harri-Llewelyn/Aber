@@ -149,7 +149,7 @@ datasources:
       httpMethod: POST
 
   # ===============================================================================================
-  # Loki -- the log store, and the drill-down half of every drop counter (roadmap 13).
+  # Loki -- the log store, and the drill-down half of every drop counter (roadmap 12).
   #
   # NO CREDENTIAL AND NOTHING TO SUBSTITUTE BUT THE URL, exactly like Prometheus above and for the
   # same reason: Loki is reachable on the compose network and serves reads to anything that can

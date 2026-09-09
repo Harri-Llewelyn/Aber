@@ -1076,6 +1076,22 @@ ingestion:
   # in-memory alias table after a restart; the limit is what stops a gateway that reboots on
   # rebirth being held in a loop by the mechanism meant to recover it.
   rebirthRequestIntervalSeconds: 300
+  # THE DIRECTORY'S MQTT HALF. `fplus-directory` answers the same questions over HTTP reading AS
+  # THE CALLER, so every lookup is bounded by that caller's RLS policies. A topic has no caller:
+  # every subscriber the broker admits reads the same bytes, so switching this on puts the whole
+  # address space behind `mosquitto.acl` and nothing else.
+  #
+  # OFF BY DEFAULT for the same reason `ingress.routes.studio` is -- publishing is an exposure
+  # decision that belongs to a deployment. The ACL already grants the write, and grants READ to the
+  # two principals that hold `spBv1.0/#` and to no gateway; a headless Directory consumer needs an
+  # account and a rule adding for it, deliberately.
+  #
+  # `directoryMqttTopicPrefix` MUST MATCH the `topic write ACS-Cymru/Directory/#` rule in
+  # mosquitto.acl. A prefix outside that rule publishes into a subtree the broker drops in silence
+  # -- silence because at QoS 0 there is no PUBACK to carry a refusal back to the publisher.
+  directoryMqttEnabled: false
+  directoryMqttTopicPrefix: ACS-Cymru/Directory/v1
+  directoryMqttIntervalSeconds: 60
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { memory: 512Mi }
@@ -1248,7 +1264,7 @@ grafana:
   # which reads as "no logs" rather than as "wrong label".
   #
   # So a cluster feeding this datasource must relabel `service` to the workload name -- one rule in
-  # whatever collector it runs. Stated here because roadmap 13 asked for the boundary to be written
+  # whatever collector it runs. Stated here because roadmap 12 asked for the boundary to be written
   # down rather than discovered.
   lokiUrl: http://loki-gateway.monitoring.svc:80
   image:

@@ -122,7 +122,7 @@ export const SUITES = {
   'ingestion/test_structured_logging.py': {
     lanes: ['unit'],
     why:
-      'The JSON log formatter and the drop pair (roadmap 13). THE ASSERTION THAT EARNS ITS ' +
+      'The JSON log formatter and the drop pair (roadmap 12). THE ASSERTION THAT EARNS ITS ' +
       "PLACE IN CI IS test_the_logged_field_and_the_prometheus_label_are_the_same_string: it " +
       'reads every `drop("<reason>")` out of ingestion.py and requires the logged `reason` ' +
       "field to equal the `reason` LABEL metrics.py exports for it. That is the drill-down " +
@@ -282,6 +282,17 @@ export const SUITES = {
     why:
       'The archived-gateway path, which #102 found broken in production. Nothing else looks at ' +
       'it: an archived gateway is by definition one nobody is watching.',
+  },
+  'ingestion/test_directory_publish.py': {
+    lanes: ['unit'],
+    why:
+      "The Directory's MQTT half. THE PROPERTY IT GUARDS IS AN ABSENCE, which is why a suite is " +
+      'needed at all: the Directory is DERIVED from the enrolment records, and issue #64 proposed ' +
+      'accumulating it from NBIRTH/DBIRTH instead -- which would make a device that has never ' +
+      'been enrolled resolvable by publishing one. Nothing enforces an absence, so the suite ' +
+      'reads the source and fails if a birth ever appears in it. It also holds the placement of ' +
+      'the local-namespace qualification on all four documents (check-mirror-drift.mjs holds the ' +
+      'wording), and the off-by-default, which is an exposure decision rather than a setting.',
   },
   'ingestion/test_mqtt_tls.py': {
     lanes: ['unit'],

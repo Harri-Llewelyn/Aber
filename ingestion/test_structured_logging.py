@@ -1,10 +1,10 @@
 """
-Structured logging, and the drop pair it exists to make queryable (roadmap §13).
+Structured logging, and the drop pair it exists to make queryable (roadmap §12).
 
 WHAT THIS FILE IS ACTUALLY GUARDING. metrics.py's header states a property the daemon was built
 around: "the counters and the log cannot disagree about what happened". Prometheus holds one half
 of every drop -- that one happened, and how many. The half naming WHICH device, under WHICH edge
-node, exists only in the warning beside it. Roadmap §13 is about keeping that half; this suite is
+node, exists only in the warning beside it. Roadmap §12 is about keeping that half; this suite is
 about making it a FIELD rather than a sentence, so a store can be asked "which devices dropped on
 gateway_binding last night" without a regex over prose.
 
@@ -205,7 +205,7 @@ class DropPairTestCase(unittest.TestCase):
 
     def test_the_logged_field_and_the_prometheus_label_are_the_same_string(self):
         """
-        THE WHOLE POINT OF §13, AS AN ASSERTION. A panel showing a spike in
+        THE WHOLE POINT OF §12, AS AN ASSERTION. A panel showing a spike in
         `acs_ingestion_messages_dropped_total{reason="gateway_binding"}` is a drill-down into a
         log store only if the LINES carry that same string. If the label and the field could
         differ, the drill-down would be a second guess at what to search for.
@@ -221,7 +221,7 @@ class DropPairTestCase(unittest.TestCase):
     def test_no_drop_site_counts_without_logging_its_reason(self):
         """
         The regression this forecloses is a `count("dropped_...")` creeping back in beside a bare
-        `logger.warning`. That is the shape §13 exists to retire: the counter says a drop
+        `logger.warning`. That is the shape §12 exists to retire: the counter says a drop
         happened, and nothing durable says which device it happened to.
         """
         stragglers = re.findall(r'count\("(dropped_[a-z_]+)"', self.source())

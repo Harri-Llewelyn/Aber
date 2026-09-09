@@ -841,6 +841,72 @@ On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
 - **The demo Node-RED simulator does not answer a rebirth** — it publishes on a timer and
   subscribes to no command topic. That is a simulator limitation, not a daemon one.
 
+## The Directory on MQTT
+
+The Factory+ Directory's REST half is
+[`fplus-directory`](../supabase/README.md#the-factory-directory-adapter). This is its MQTT half:
+`directory_publish.py`, a thread in the ingestion daemon that publishes four **retained** documents
+and reads nothing back.
+
+| Topic | Document |
+| :--- | :--- |
+| `<prefix>/ping` | Service identity and version |
+| `<prefix>/device` | Every enrolled device — address, status, schemas, quarantine flag |
+| `<prefix>/schema` | Locally minted schema identifiers |
+| `<prefix>/service` | Stack service endpoints |
+
+**It is off by default.** `DIRECTORY_MQTT_ENABLED` is unset on both targets, and the daemon logs
+which state it is in at startup rather than staying silent — an unconfigured deployment should be
+able to tell that the tree is empty on purpose.
+
+**The reason it is off is the one property the REST half has that a topic cannot keep.**
+`fplus-directory` queries **as the caller**, so RLS decides what each caller sees, and that is what
+makes exposing the whole address space safe there. A retained topic has one copy for every
+subscriber. Publishing the Directory therefore moves the access decision out of the database and
+into the broker, and turning it on is an exposure decision that belongs to a deployment, not a
+default.
+
+**The broker ACL is the whole of that access control**, and it is deliberately narrow:
+
+```
+user factoryplus_ingestion     topic write ACS-Cymru/Directory/#   topic read ACS-Cymru/Directory/#
+user factoryplus_i3x                                               topic read ACS-Cymru/Directory/#
+```
+
+**No gateway may read it.** A gateway is otherwise confined to `spBv1.0/+/+/%u/#` — its own edge
+node and nothing else — so it cannot enumerate the site today, and a read is silent. Granting it
+here would undo that confinement through the back door.
+`scripts/check-broker-config.mjs` asserts both halves: that ingestion may publish
+`ACS-Cymru/Directory/v1/device`, and that a gateway may not read it.
+
+**The source is the enrolment record, never a birth.** This is the point on which
+[issue #64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64)'s design was refused. A registry
+built by writing a topic binding on each NBIRTH/DBIRTH would make the Directory a record of what
+devices *claim*, and a self-declared marker is not evidence: an address that answers is not an
+address that is authorised, and nothing would ever remove a device that stopped birthing. The
+publisher reads `devices`, `gateways` and the `device_schemas` view — the same projection
+`fplus-directory` serves — so an unenrolled node publishing a well-formed birth appears in neither
+half. `test_directory_publish.py` asserts this against the module's own **source**, not its
+behaviour, because the failure it guards against is somebody adding a birth handler later.
+
+**Whole documents per collection, not a topic per entity.** A retained message outlives the thing it
+describes; a per-device topic tree would leave a retained document behind for every device ever
+deleted, with nothing sweeping them. Republishing the whole collection on an interval means a
+removal is visible in the next document.
+
+**The qualification travels.** `/v1/schema` and `/v1/service` return locally minted identifiers, not
+registered Factory+ `Schema_UUID`s, and the REST responses say so. The MQTT documents carry the same
+note verbatim — `scripts/check-mirror-drift.mjs` compares the two languages' copies — because the
+interoperability claim would become false the moment the payload left HTTP.
+
+### Configuration
+
+| Variable | Default | |
+| :--- | :--- | :--- |
+| `DIRECTORY_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
+| `DIRECTORY_MQTT_TOPIC_PREFIX` | `ACS-Cymru/Directory/v1` | Deliberately **not** under `spBv1.0/`: these are not Sparkplug payloads and must not be parsed as any |
+| `DIRECTORY_MQTT_INTERVAL_SECONDS` | `60` | Republish interval |
+
 ## Device Liveness Watchdog
 
 A device that stops publishing writes nothing and emits no DDEATH, so before this it stayed
