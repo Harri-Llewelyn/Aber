@@ -209,6 +209,18 @@ spec:
               value: {{ .Values.ingestion.deviceWatchdogIntervalSeconds | quote }}
             - name: REBIRTH_REQUEST_INTERVAL_SECONDS
               value: {{ .Values.ingestion.rebirthRequestIntervalSeconds | quote }}
+            {{/*
+              The Directory's MQTT half. Passed unconditionally rather than behind an `if`, so that
+              the daemon logs which of the two states it is in on every boot -- a publisher that is
+              off and silent is indistinguishable from one that is on and failing, and only the
+              second is a fault. See values.yaml for why the default is false.
+            */}}
+            - name: DIRECTORY_MQTT_ENABLED
+              value: {{ .Values.ingestion.directoryMqttEnabled | quote }}
+            - name: DIRECTORY_MQTT_TOPIC_PREFIX
+              value: {{ .Values.ingestion.directoryMqttTopicPrefix | quote }}
+            - name: DIRECTORY_MQTT_INTERVAL_SECONDS
+              value: {{ .Values.ingestion.directoryMqttIntervalSeconds | quote }}
           {{/*
             LIVENESS ON A HEARTBEAT FILE'S AGE.
 

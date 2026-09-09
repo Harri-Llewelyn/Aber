@@ -328,6 +328,29 @@ try {
         false
       );
 
+      // -----------------------------------------------------------------------------------
+      // The Directory topic (ingestion/directory_publish.py)
+      // -----------------------------------------------------------------------------------
+      // ONE DOCUMENT HOLDING THE WHOLE ADDRESS SPACE, published outside `spBv1.0/`. Over HTTP the
+      // Directory reads as the CALLER and is bounded by that caller's RLS policies; a topic has no
+      // caller, so the ACL is the entire access control and these two assertions are what it says.
+      //
+      // The negative one is the load-bearing half. A gateway is confined to its own edge node so it
+      // cannot enumerate the site, and reading is SILENT -- if this rule were ever widened, nothing
+      // downstream would report it and no log would carry it. This is the only place that looks.
+      expect(
+        'the ingestion principal MAY publish the Directory (it is the only writer)',
+        (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
+          'factoryplus_ingestion', 'ACS-Cymru/Directory/#')),
+        true
+      );
+      expect(
+        'a gateway may NOT read the Directory (it would enumerate every asset on the site)',
+        (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
+          GATEWAY_A, 'ACS-Cymru/Directory/#')),
+        false
+      );
+
       // $SYS is reachable only by the monitoring account, and it is load-bearing: the broker's own
       // probes authenticate as it, so losing this rule leaves the pod permanently NotReady.
       const sysRead = (user) => docker(['exec', r.name, 'mosquitto_sub', '-u', user,

@@ -40,6 +40,13 @@ COPY ingestion/capture.py .
 # a second tag to keep in step, and a second entry in check-image-tag-parity.mjs.
 COPY ingestion/playback_worker.py .
 
+# The Directory's MQTT half. SAME RULE AS metrics.py AND capture_worker.py ABOVE, and this file is
+# the reason that rule is stated three times: ingestion.py imports it at module scope deliberately,
+# so a missing COPY is a crash loop on start rather than a Directory that quietly never publishes.
+# It was missing here for exactly one test cycle, and the daemon said so on the first boot --
+# `ModuleNotFoundError: No module named 'directory_publish'` -- which is the failure worth having.
+COPY ingestion/directory_publish.py .
+
 # Cold telemetry archival. IN THIS IMAGE RATHER THAN ITS OWN, for the reason the
 # playback worker is: it needs the historian connection, the daemon's storage identity and the
 # settings reader that already live here, and a second image would be this one minus two files plus

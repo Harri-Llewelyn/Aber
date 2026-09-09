@@ -1083,5 +1083,183 @@ class TestBackfill(SchemaVersioningTestCase):
                 )
 
 
+
+class TestArchivedSchemasAreNotAssignable(SchemaVersioningTestCase):
+    """
+    0093. An archived version stops taking NEW devices -- issue #167.
+
+    THE THING BEING ASSERTED IS THE MOVE, NOT THE STATE. A device already sitting on an archived
+    schema is an unfinished migration and has to stay editable, so most of these tests are about
+    what the guard must NOT refuse. Getting that half wrong is the more expensive failure: it would
+    freeze every rename, relocation and policy change on any device a publish left behind.
+
+    RUN AS THE OWNER, DELIBERATELY, which is the opposite of TestImmutability's arrangement above.
+    The versioning freeze exempts non-app roles because migrations rewrite seeded schemas on every
+    boot; this guard exempts nobody, because the paths that assign a schema include SECURITY
+    DEFINER functions and an approvals queue that applies a patch on somebody else's behalf. A
+    suite that only proved it under `authenticated` would not have tested the routes that matter.
+    """
+
+    def _seed_gateway(self, suffix):
+        self.cur.execute(
+            "INSERT INTO public.gateways (name) VALUES (%s) RETURNING id::text;",
+            ("TESTVER_ARCH_GW_" + suffix,),
+        )
+        return self.cur.fetchone()[0]
+
+    def _seed_device(self, suffix, schema_id=None, shadow_of=None):
+        self.cur.execute(
+            "INSERT INTO public.devices (name, gateway_id, schema_id, shadow_of) "
+            "VALUES (%s, %s, %s, %s) RETURNING id::text;",
+            ("TESTVER_ARCH_DEV_" + suffix, self._seed_gateway(suffix), schema_id, shadow_of),
+        )
+        return self.cur.fetchone()[0]
+
+    # ------------------------------------------------------------------ what it refuses
+
+    def test_creating_a_device_on_an_archived_schema_raises(self):
+        archived_id, _, _, _ = self._seed_schema("TESTVER_Arch_Insert", status="archived")
+        exc = self.assertRaisesInStatement(
+            lambda: self._seed_device("INSERT", schema_id=archived_id),
+            message_contains="is archived and cannot be assigned",
+        )
+        self.assertEqual(exc.pgcode, "23514")  # check_violation, the code 0093 raises with
+
+    def test_moving_a_device_onto_an_archived_schema_raises(self):
+        """The literal report on #167: a device is edited and an archived version is picked."""
+        active_id, _, _, _ = self._seed_schema("TESTVER_Arch_Move_Active")
+        archived_id, _, _, _ = self._seed_schema("TESTVER_Arch_Move_Old", status="archived")
+        device_id = self._seed_device("MOVE", schema_id=active_id)
+
+        exc = self.assertRaisesInStatement(
+            lambda: self.cur.execute(
+                "UPDATE public.devices SET schema_id = %s WHERE id = %s;",
+                (archived_id, device_id),
+            ),
+            message_contains="is archived and cannot be assigned",
+        )
+        self.assertEqual(exc.pgcode, "23514")  # check_violation, the code 0093 raises with
+
+    def test_attaching_an_archived_submodel_raises(self):
+        """The other arm of `device_schemas`. A guard on one column is not a guard."""
+        archived_id, _, _, _ = self._seed_schema("TESTVER_Arch_Submodel", status="archived")
+        device_id = self._seed_device("SUBMODEL")
+
+        exc = self.assertRaisesInStatement(
+            lambda: self.cur.execute(
+                "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
+                (device_id, archived_id),
+            ),
+            message_contains="is archived and cannot be assigned",
+        )
+        self.assertEqual(exc.pgcode, "23514")  # check_violation, the code 0093 raises with
+
+    def test_the_refusal_names_the_successor(self):
+        """
+        The operator reaching this picked the wrong row out of a version history, so the message
+        has to say which row was right. Asserted because a hint nobody maintains rots into a lie.
+        """
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Arch_Hint", change_description="Initial release")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        v2 = self._fork(v1_id, "widened")
+        self._publish(v2["id"])
+        self._act_as_owner()
+
+        exc = self.assertRaisesInStatement(
+            lambda: self._seed_device("HINT", schema_id=v1_id),
+            message_contains="archived",
+        )
+        self.assertIn(
+            v2["schema_name"], str(exc),
+            "the refusal should name the version that replaced the archived one",
+        )
+
+    # ------------------------------------------------------------------ what it must allow
+
+    def test_a_device_already_on_an_archived_schema_stays_editable(self):
+        """
+        The unfinished-migration case, and the one a naive guard breaks. The device is put on the
+        schema while it is still active and the schema is archived underneath it -- exactly what a
+        publish does to any device the rebinding could not reach.
+        """
+        schema_id, _, _, _ = self._seed_schema("TESTVER_Arch_Stays")
+        device_id = self._seed_device("STAYS", schema_id=schema_id)
+        self.cur.execute("UPDATE public.schemas SET status = 'archived' WHERE id = %s;", (schema_id,))
+
+        self.cur.execute(
+            "UPDATE public.devices SET name = %s WHERE id = %s;",
+            ("TESTVER_ARCH_RENAMED", device_id),
+        )
+        self.cur.execute("SELECT name, schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
+        name, still_bound = self.cur.fetchone()
+        self.assertEqual(name, "TESTVER_ARCH_RENAMED")
+        self.assertEqual(still_bound, schema_id, "the existing binding must survive an unrelated edit")
+
+    def test_detaching_from_an_archived_schema_is_allowed(self):
+        """Finishing the migration by hand must not be the one move that is refused."""
+        schema_id, _, _, _ = self._seed_schema("TESTVER_Arch_Detach")
+        device_id = self._seed_device("DETACH", schema_id=schema_id)
+        self.cur.execute("UPDATE public.schemas SET status = 'archived' WHERE id = %s;", (schema_id,))
+
+        self.cur.execute("UPDATE public.devices SET schema_id = NULL WHERE id = %s;", (device_id,))
+        self.cur.execute("SELECT schema_id FROM public.devices WHERE id = %s;", (device_id,))
+        self.assertIsNone(self.cur.fetchone()[0])
+
+    def test_a_draft_is_still_assignable(self):
+        """
+        Trying a version against a real machine before publishing it is how a draft gets tested,
+        and publish_schema_version() already merges that state rather than treating it as a fault.
+        """
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Arch_Draft")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        v2 = self._fork(v1_id, "not published yet")
+        self._act_as_owner()
+
+        device_id = self._seed_device("DRAFT", schema_id=v2["id"])
+        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
+        self.assertEqual(self.cur.fetchone()[0], v2["id"])
+
+    def test_a_shadow_device_may_copy_an_archived_contract(self):
+        """
+        ensure_shadow_devices() copies the origin device's schema so a replay is judged against the
+        same contract it was recorded under. If the origin is mid-migration, the shadow has to be
+        able to say so -- refusing it would break playback for the exact fleet this guard protects.
+        """
+        schema_id, _, _, _ = self._seed_schema("TESTVER_Arch_Shadow")
+        origin_id = self._seed_device("SHADOW_ORIGIN", schema_id=schema_id)
+        self.cur.execute("UPDATE public.schemas SET status = 'archived' WHERE id = %s;", (schema_id,))
+
+        shadow_id = self._seed_device("SHADOW", schema_id=schema_id, shadow_of=origin_id)
+        self.cur.execute(
+            "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
+            (shadow_id, schema_id),
+        )
+        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (shadow_id,))
+        self.assertEqual(self.cur.fetchone()[0], schema_id)
+
+    def test_publishing_still_works_with_the_guard_in_force(self):
+        """
+        The regression the guard could most easily cause. publish_schema_version() repoints every
+        device onto the draft and only then archives the parent -- so the ordering inside that
+        function is what keeps it past this trigger, and a reordering would be caught here.
+        """
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Arch_Publish")
+        device_id = self._seed_device("PUBLISH", schema_id=v1_id)
+        self.cur.execute(
+            "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
+            (device_id, v1_id),
+        )
+
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        v2 = self._fork(v1_id, "widened")
+        result = self._publish(v2["id"])
+        self._act_as_owner()
+
+        self.assertEqual(result["devices_rebound"], 2)
+        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
+        self.assertEqual(self.cur.fetchone()[0], v2["id"])
+        self.assertEqual(self._fetch(v1_id)["status"], "archived")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

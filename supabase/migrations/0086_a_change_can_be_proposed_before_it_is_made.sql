@@ -780,7 +780,7 @@ COMMENT ON FUNCTION public.approve_proposal(uuid) IS 'Approving IS applying: the
 -- IT DECLARES `service`. `digital_thread.actor_source` admits user | ingestion | migration |
 -- service, and only the last three can be DECLARED -- 'user' is derived from auth.uid() rather than
 -- claimed. A timer has no session and is not a person, so 'service' is what it is: a machine acting
--- on its own schedule, which is what that value already means for the other scheduled jobs. §8's
+-- on its own schedule, which is what that value already means for the other scheduled jobs. §7's
 -- reconciling sidecar asks the identical question and should give the identical answer rather than
 -- minting a second kind for the same shape of actor.
 CREATE OR REPLACE FUNCTION public.expire_open_proposals() RETURNS integer

@@ -1185,7 +1185,7 @@ groups:
                 uid: __expr__
 
   # ===============================================================================================
-  # THE LOG PIPELINE (roadmap 13).
+  # THE LOG PIPELINE (roadmap 12).
   #
   # WHY THIS GROUP EXISTS, and it is the same argument the store itself rests on rather than a
   # reflexive "monitor the monitoring". Loki and Alloy hold the evidence for every other fault

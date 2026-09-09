@@ -18,6 +18,10 @@ from metrics import start_metrics_server
 # capture files that differ -- and so the encoding-preservation that cost a debugging session to
 # discover is shared rather than reimplemented.
 import capture_worker
+# The Directory's MQTT half. Imported here rather than reached for inside main(), so a
+# syntax error in it is a startup failure rather than something the daemon discovers at the
+# moment it would otherwise have started publishing.
+import directory_publish
 
 logger = get_logger("ingestion")
 
@@ -4297,6 +4301,15 @@ def main():
         rebirth=lambda group_id, edge_node_id: request_node_rebirth(
             client, group_id, edge_node_id, force=True),
     )
+
+    # AFTER the client exists, because it publishes; after capture_worker for no reason beyond
+    # reading order. OFF unless DIRECTORY_MQTT_ENABLED is set, and it logs which of the two it is --
+    # a publisher that is off and silent looks exactly like one that is on and failing.
+    #
+    # THE BIRTH STREAM THIS DAEMON IS SITTING ON IS NOT THE SOURCE, which is the decision the module
+    # header argues at length: the Directory is DERIVED from the enrolment records, so a device that
+    # has never been enrolled does not become a resolvable address by publishing a DBIRTH.
+    directory_publish.start(client, supabase_client)
 
     # LAST OF THE BACKGROUND THREADS, because it needs to know what the ones above did not manage.
     # Both flags are the outcome of a startup step that a dependency which was not up yet could

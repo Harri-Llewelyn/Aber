@@ -33,6 +33,11 @@ python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
 python ingestion/test_mqtt_tls.py
+# The Directory's MQTT half. Mostly assertions about what it does NOT do: the publisher is
+# fed from the enrolment record, so one test reads directory_publish.py's own source and
+# fails if NBIRTH, DBIRTH or an on_message handler ever appears in it. That is the design
+# issue #64 proposed and this refused -- a registry accumulated from what devices claim.
+python ingestion/test_directory_publish.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_payload_conformance.py
 # The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker
@@ -49,7 +54,7 @@ python ingestion/test_structured_logging.py
 # reason="quarantined_or_unregistered" increased, and that a line carrying that same reason AND
 # that device id arrived in the log store. Prometheus cannot name the device -- its endpoint is
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
-# §13 exists to keep is actually being kept.
+# §12 exists to keep is actually being kept.
 python test-harness/test_log_pipeline.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py

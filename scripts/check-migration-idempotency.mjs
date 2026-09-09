@@ -177,9 +177,43 @@ note(`before: schema ${before.schema.digest.slice(0, 12)}, ` +
 
 console.log(`\nReplaying ${DB_INIT_SERVICE}...\n`);
 const replay = compose(['up', '--force-recreate', DB_INIT_SERVICE], { stdio: 'inherit' });
-if (replay.status !== 0) {
-  fail(`${DB_INIT_SERVICE} exited ${replay.status}. The chain does not replay cleanly, which is a ` +
-       `larger problem than idempotency: db-init runs on every boot.`);
+
+// -------------------------------------------------------------------------------------------------
+// THE CONTAINER'S EXIT CODE, NOT `up`'s -- AND THIS CHECK REPORTED GREEN THROUGH A BROKEN CHAIN
+//
+// `docker compose up <one-shot service>` exits 0 when it successfully STARTED the containers. The
+// service itself exiting 1 is not a failure of `up`, so `replay.status` was 0 while db-init was
+// aborting on `0088` and every migration after it -- `0089` through `0093` -- was not running at
+// all. Everything downstream then agreed: the schema digest was unchanged (a chain that dies
+// changes nothing), no audit rows were written, no data was lost, and this printed
+//
+//     The migration chain replays cleanly: same schema, no new audit rows, no data lost.
+//
+// which is the one sentence a reader takes as proof of the opposite. A guard that cannot fail is
+// worse than no guard, because it is also an excuse not to look.
+//
+// `--abort-on-container-exit --exit-code-from` is the documented way to propagate it and is NOT
+// usable here: it stops every container in the `up` set, and that set includes db-init's
+// dependencies -- the live database this check is pointed at. Reading the exit code back off the
+// container afterwards costs one `docker inspect` and takes nothing down.
+// -------------------------------------------------------------------------------------------------
+const containerId = (compose(['ps', '-aq', DB_INIT_SERVICE]).stdout || '').trim().split(/[\r\n]+/)[0];
+const inspected = containerId
+  ? spawnSync('docker', ['inspect', '-f', '{{.State.ExitCode}}', containerId], { encoding: 'utf8' })
+  : null;
+// A container that cannot be found or inspected is reported rather than assumed healthy: the whole
+// point of this block is that "no evidence of failure" was being read as "evidence of success".
+const replayExit = inspected && inspected.status === 0
+  ? Number.parseInt(inspected.stdout.trim(), 10)
+  : NaN;
+
+if (replay.status !== 0 || replayExit !== 0) {
+  fail(`${DB_INIT_SERVICE} exited ${Number.isNaN(replayExit) ? `unknown (up: ${replay.status})` : replayExit}. ` +
+       `The chain does not replay cleanly, which is a larger problem than idempotency: db-init ` +
+       `runs on every boot.`);
+  note('Scroll up: the last "Executing migration ..." line above the ERROR names the file.');
+  note('Nothing below this point is meaningful -- a chain that aborts changes nothing, so the');
+  note('schema, audit and data comparisons would all agree and all be vacuous.');
   process.exit(1);
 }
 

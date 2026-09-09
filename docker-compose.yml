@@ -1733,6 +1733,23 @@ services:
       # per edge node, because a gateway that reboots on rebirth would otherwise be held in a
       # loop by the mechanism meant to recover it.
       REBIRTH_REQUEST_INTERVAL_SECONDS: ${REBIRTH_REQUEST_INTERVAL_SECONDS:-300}
+      # THE DIRECTORY'S MQTT HALF, OFF BY DEFAULT -- and the default is the decision, not the
+      # absence of one. `fplus-directory` serves the same answers over HTTP reading AS THE CALLER,
+      # so a Directory lookup is bounded by that caller's RLS policies. A topic has no caller:
+      # whatever is published is read identically by every subscriber the broker admits, so turning
+      # this on puts the whole address space behind `mosquitto.acl` alone. That is an exposure
+      # decision belonging to a deployment, the same answer `ingress.routes.studio` gives.
+      #
+      # Passed through rather than omitted so that an operator who does want it edits `.env` rather
+      # than this file. `mosquitto.acl` already grants the write and grants READ to the two
+      # principals that hold `spBv1.0/#` and to no gateway -- a headless Factory+ consumer needs a
+      # rule adding for it, deliberately.
+      DIRECTORY_MQTT_ENABLED: ${DIRECTORY_MQTT_ENABLED:-}
+      # Kept in step with the `topic write ACS-Cymru/Directory/#` rule in mosquitto.acl. Changing
+      # the prefix without changing that rule publishes into a subtree the broker silently drops --
+      # silently because a denied publish at QoS 0 has no PUBACK to carry the refusal back.
+      DIRECTORY_MQTT_TOPIC_PREFIX: ${DIRECTORY_MQTT_TOPIC_PREFIX:-ACS-Cymru/Directory/v1}
+      DIRECTORY_MQTT_INTERVAL_SECONDS: ${DIRECTORY_MQTT_INTERVAL_SECONDS:-60}
       PYTHONUNBUFFERED: "1"
     # THE CA, READ-ONLY. Mounted unconditionally so that MQTT_TLS_ENABLED is the ONLY thing an
     # operator changes -- the note in .env.example used to list "the CA has to be mounted into both
@@ -2173,7 +2190,7 @@ services:
     # unlike the ingestion endpoint there is no inspection case that justifies the exposure.
 
   # ===============================================================================================
-  # THE LOG STORE, AND THE TWO CONTAINERS IT NEEDS TO BE USEFUL (roadmap 13).
+  # THE LOG STORE, AND THE TWO CONTAINERS IT NEEDS TO BE USEFUL (roadmap 12).
   #
   # WHY THIS EXISTS. The ingestion daemon's diagnostics are a PAIR: every `drop("<reason>")` in
   # ingestion.py increments a counter AND writes a warning, derived from one string so the two

@@ -297,6 +297,17 @@ jobs:
       - name: Verify Documentation Matches The Repository
         run: node scripts/check-docs-drift.mjs
 
+      # THE GAP EVERY OTHER CHECK IN THIS JOB LOOKS STRAIGHT PAST: what is actually INSIDE an image.
+      # The Python suites import from the working tree, where every module exists; this compares the
+      # Dockerfile's file-by-file COPY list against what those sources import at column 0.
+      #
+      # Found by `ingestion/directory_publish.py` shipping with 20 passing tests, a broker ACL rule,
+      # a guard of its own, and no COPY -- ModuleNotFoundError on the first boot that ran it. A
+      # module-scope import is a crash loop rather than a quiet no-op, which is why the Dockerfiles
+      # say so in prose beside three separate COPY lines. This is that prose, checkable.
+      - name: Verify Each Image Carries The Sources It Imports
+        run: node scripts/check-image-sources.mjs
+
       # THE HALF OF THIS THAT CI CAN ACTUALLY SEE. The script's other check compares a developer's
       # working `.env` against the template in both directions, and it CANNOT run here: `.env` is
       # gitignored because it holds real credentials, so there is nothing to compare. That check

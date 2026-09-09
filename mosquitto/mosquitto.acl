@@ -111,18 +111,51 @@ topic read spBv1.0/STATE/#
 # The daemon subscribes to the whole `spBv1.0/#` tree; that is its job. It is otherwise NOT a
 # publisher of asset data, and this split is what says so in a way the broker enforces.
 #
-# Its one write is the rebirth request: when it meets a DDATA metric carrying an alias it cannot
-# resolve (its alias table is in memory and empty after a restart) it publishes
-# `Node Control/Rebirth` to spBv1.0/<group>/NCMD/<edge_node>. That is the ONLY publish() call in
-# ingestion.py, which is what makes this narrow rule sufficient rather than optimistic.
+# Its one write INSIDE SPARKPLUG is the rebirth request: when it meets a DDATA metric carrying an
+# alias it cannot resolve (its alias table is in memory and empty after a restart) it publishes
+# `Node Control/Rebirth` to spBv1.0/<group>/NCMD/<edge_node>.
 #
 # `spBv1.0/+/NCMD/+` and not `.../#`: an NCMD topic has exactly four segments, so the trailing
 # `#` would grant a subtree that does not exist.
 user factoryplus_ingestion
 topic read  spBv1.0/#
 topic write spBv1.0/+/NCMD/+
+# The Directory's MQTT half (ingestion/directory_publish.py). OUTSIDE `spBv1.0/` deliberately: a
+# Directory document is not a Sparkplug message and must not arrive looking like one, and a
+# separate root means the broker's default-deny covers it until a rule says otherwise instead of
+# the per-gateway pattern above reaching it by accident.
+#
+# THE DAEMON IS THE ONLY WRITER, and this is what says so. The publisher does not consume births to
+# build a registry -- it projects the enrolment records, on a timer -- so nothing else on this stack
+# has any reason to write here, and a second writer would be a second answer to the same question.
+topic write ACS-Cymru/Directory/#
+# And reads it back, so the daemon can verify its own retained documents without a second
+# account. See "The Directory topic, and who may read it" below for why that list is short.
+topic read  ACS-Cymru/Directory/#
 
 
+# ---------------------------------------------------------------------------------------------
+# The Directory topic, and who may read it
+# ---------------------------------------------------------------------------------------------
+# THIS SUBTREE IS THE WHOLE ADDRESS SPACE IN ONE DOCUMENT, so read access to it is an exposure
+# decision rather than a convenience. Over HTTP the Directory reads AS THE CALLER, under that
+# caller's RLS policies, precisely so that a live read across every asset does not become a way
+# around them. A topic has no caller: every subscriber the broker admits reads the same bytes.
+#
+# SO READ IS GRANTED ONLY TO THE TWO PRINCIPALS THAT ALREADY HOLD `spBv1.0/#`, and the grants sit
+# in each one's own block above and below rather than in a block of their own here. Both of them already
+# see the entire fleet's traffic, so the Directory tells them nothing they could not observe -- the
+# grant widens no principal's view. Neither of them subscribes here today; the rules exist so that
+# turning the publisher on does not also require an ACL edit, and so that the DEFAULT set of readers
+# is written down rather than implied.
+#
+# NO GATEWAY IS IN THIS LIST, AND THAT IS THE POINT. A gateway is confined to its own edge node's
+# subtree so it cannot enumerate the site. Granting it the Directory would undo that in one line and
+# would be invisible -- reading is silent, and nothing downstream would ever report it.
+#
+# A deployment wanting a headless Directory consumer adds its account and a rule here, deliberately.
+# The publisher is off by default (DIRECTORY_MQTT_ENABLED), so on a stack that has not made that
+# decision this subtree is empty and these rules grant access to nothing.
 # ---------------------------------------------------------------------------------------------
 # i3X server -- read only, no write of any kind
 # ---------------------------------------------------------------------------------------------
@@ -137,6 +170,9 @@ topic write spBv1.0/+/NCMD/+
 # to make too, not just the code.
 user factoryplus_i3x
 topic read spBv1.0/#
+# The Directory, under the section above: i3X already sees the whole fleet's traffic, so this
+# grant widens nothing. It does not subscribe here today.
+topic read ACS-Cymru/Directory/#
 
 
 # ---------------------------------------------------------------------------------------------

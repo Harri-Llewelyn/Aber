@@ -268,7 +268,7 @@ agreeing — so this is the version worth alerting on.
 
 **The reported date is fixed at enrolment.** Replacing `/data/certs/ca.crt` by hand without
 re-enrolling leaves the appliance reporting the old date forever. Until the platform playbook owns
-the CA (roadmap §9), re-enrolment is the only path that updates both the file and the number.
+the CA (roadmap §8), re-enrolment is the only path that updates both the file and the number.
 
 ### Rotating the root, in the order that matters
 

@@ -42,6 +42,7 @@ import {
 import {
   unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
 } from '../../utils/deviceTags'
+import { assignableSchemas, isAssignableSchema, schemaStatus, statusLabel } from '../../utils/schemaVersion'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
@@ -1391,13 +1392,45 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             <div className="form-group">
               <label className="form-label">Schema (optional)</label>
               <Withheld field="schema_id" />
-              <select className="form-control" disabled={proposeMode} value={form.schema_id || ''} onChange={e => setForm(f => ({ ...f, schema_id: e.target.value }))} title={proposeMode ? withheldFields.schema_id : "Expected metric schema, from the Schemas registry"}>
+              {/* ARCHIVED VERSIONS ARE NOT OFFERED (issue #167). assignableSchemas() keeps the one
+                  this device already carries so an unfinished migration still renders as itself;
+                  everything else archived is gone from the list. The label carries the status for
+                  the kept one, because an option reading `Test_Schema` beside `Test_Schema_v2`
+                  gives no reason not to pick it -- which is exactly how the bug was reported.
+                  The database refuses the write as well (0093); this is the half that stops an
+                  operator being offered the mistake in the first place. */}
+              <select className="form-control" disabled={proposeMode} value={form.schema_id || ''} onChange={e => setForm(f => ({ ...f, schema_id: e.target.value }))} title={proposeMode ? withheldFields.schema_id : "Expected metric schema, from the Schemas registry. Archived versions are not offered — publish a version instead of reattaching the one it replaced."}>
                 <option value="">— No schema assigned —</option>
-                {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
+                {assignableSchemas(schemas, form.schema_id).map(s => (
+                  <option key={s.schema_uuid} value={s.schema_uuid}>
+                    {isAssignableSchema(s) ? s.schema_name : `${s.schema_name} · ${statusLabel(schemaStatus(s))}`}
+                  </option>
+                ))}
               </select>
+              {/* WHAT THIS FIELD IS FOR, IN THE ORDER IT MATTERS. This read "Used to suggest a
+                  match if a differently-named device shows up in quarantine..." and named ONLY
+                  that -- which is true, and is the smaller of the two things a schema does. It
+                  is the contract every DDATA value from this device is judged against, and under
+                  Schema Conformance = Enforce that judgement DROPS readings. Describing the
+                  quarantine hint and not the drop let somebody attach a schema believing it was a
+                  labelling aid. The quarantine sentence stays, second, because suggestMatches()
+                  really does weight a required-metric overlap above a name similarity. */}
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Used to suggest a match if a differently-named device shows up in quarantine reporting metrics that overlap this schema's required fields.
+                The contract this device's metrics are judged against — see Schema Conformance below,
+                which decides whether a violation is recorded or the reading is dropped. Optional:
+                with none attached nothing is judged. It also helps identify this device if it turns
+                up in quarantine under another name, by matching the metrics it reports against the
+                schema's required fields.
               </div>
+              {/* Said only when it applies, and it says what to do rather than what happened.
+                  Reaching this means the device is on a version its lineage has moved past, which
+                  is a migration to finish rather than a setting to change here. */}
+              {form.schema_id && !isAssignableSchema(schemas.find(s => s.schema_uuid === form.schema_id)) && (
+                <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
+                  This device is still on an archived version. It is kept selectable so saving does not
+                  silently detach it — move it forward by publishing from the Schemas page, not from here.
+                </div>
+              )}
               {/* THE ONE CASE A SINGLE-SELECT CANNOT STATE. A device may carry several submodels
                   (device_submodels, archived migration 0034) and this control writes the 1:1 devices.schema_id.
                   Selecting the first and saying nothing would let somebody press Save believing they
