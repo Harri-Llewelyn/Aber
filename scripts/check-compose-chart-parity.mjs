@@ -89,6 +89,7 @@ const SHAPED_DIFFERENTLY = {
   'supabase-envoy-init': 'the chart substitutes envoy.yaml in an initContainer on the supabase-envoy pod rather than in a separate one-shot service',
   'mosquitto-tls-init': 'an initContainer on the mosquitto pod; the chart also has cert-manager available, which Compose does not',
   'mosquitto-init': 'an initContainer on the mosquitto pod, so the password file is written into the same volume that pod mounts',
+  'gitea-init': 'an initContainer on the gitea pod, so the administrator is created against the same volume that pod mounts -- the same arrangement as mosquitto-init',
   'node-red-init': 'an initContainer on the node-red pod -- see sync-helm-chart-files.mjs, which mirrors node-red-init.mjs for exactly that use',
   'prometheus': 'Kubernetes uses the Prometheus Operator: the chart ships ServiceMonitors and expects a cluster Prometheus rather than running its own',
   'node-exporter': 'node metrics are the cluster operator\'s concern on Kubernetes, and a DaemonSet here would collide with whatever is already scraping nodes'

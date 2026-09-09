@@ -95,6 +95,9 @@ secrets:
   # neither this value nor the container that refused to start.
   mqttCredentialServiceToken: acs-cymru-dev-credential-service-token-not-a-secret
 
+  # Matches .env.example, so the Compose and k3d stacks bring the forge up on the same account.
+  giteaAdminPassword: gitea-admin
+
   grafanaAdminUser: admin
   grafanaAdminPassword: admin
   grafanaOAuthClientSecret: change-me-grafana-oauth-client-secret

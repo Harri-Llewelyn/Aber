@@ -203,6 +203,11 @@ const generated = {
   // already exists, from the dashboard or by the enrolment bundle, which is the only order in which
   // the username can be known: it is the row's GENERATED sparkplug_id.
   GRAFANA_ADMIN_PASSWORD: hex(12),
+  // Gitea's administrator, and the ONLY account the forge is meant to have. Generated for the same
+  // reason Grafana's is: a development default that survives into a deployment is a login on a
+  // service that will hold every gateway's edge flow. No shopfloor user gets an account here --
+  // roles stay in Postgres, and the forge is reached through one machine account (roadmap 7).
+  GITEA_ADMIN_PASSWORD: hex(12),
   GRAFANA_OAUTH_CLIENT_SECRET: hex(32),
   NODERED_CREDENTIAL_SECRET: hex(32),
   NODERED_OAUTH_CLIENT_SECRET: hex(32),

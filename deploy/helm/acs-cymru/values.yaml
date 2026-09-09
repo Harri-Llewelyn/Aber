@@ -211,6 +211,11 @@ secrets:
   # will not withdraw its broker credential.
   gatewayRevokeSecret: ""
 
+  # The forge administrator (roadmap 7-9). Empty means the initContainer refuses to run rather
+  # than creating an account with a blank password -- a forge that will hold every gateway edge
+  # flow is the last place in this file for a default credential.
+  giteaAdminPassword: ""
+
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
   grafanaOAuthClientSecret: ""
@@ -468,6 +473,10 @@ publicUrls:
   nodered: ""
   studio: ""
   docs: ""
+  # The forge (roadmap 7-9). Defaults to git.<publicBaseDomain>. Feeds the Ingress rule AND the
+  # ROOT_URL Gitea prints as a clone command -- one value, so the address an engineer copies off a
+  # repository page cannot disagree with the address that actually routes.
+  gitea: ""
   # MQTT over WebSockets (9001). Raw MQTT on 1883 is TCP and is exposed by the
   # mosquitto-external LoadBalancer instead -- an HTTP Ingress cannot carry it.
   mqtt: ""
@@ -1295,6 +1304,72 @@ grafana:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { memory: 512Mi }
 
+# =================================================================================================
+# GITEA -- the forge roadmap 7-9 are built on.
+#
+# The argument for self-hosting it, and for keeping it OFF the identity plane, is in
+# docker-compose.yml beside the same settings. What is here is what a cluster has to choose.
+# =================================================================================================
+gitea:
+  enabled: true
+  image:
+    repository: gitea/gitea
+    # Pinned, and pinned to the SAME tag Compose uses -- check-image-tag-parity.mjs fails the build
+    # if the two disagree.
+    tag: "1.27.3"
+    pullPolicy: IfNotPresent
+  # THE ONLY ACCOUNT THE FORGE IS MEANT TO HAVE. Roles live in Postgres and this is reached through
+  # one machine account; no shopfloor user gets a login here. The PASSWORD is not in this file --
+  # it is `secrets.giteaAdminPassword`, so an externally-managed Secret can supply it.
+  adminUser: gitea_admin
+  adminEmail: gitea-admin@acs-cymru.invalid
+  logLevel: info
+  # OFF, AND ROADMAP 8 IS WHERE THEY ARE ARGUED ON. Actions is a build runner that executes whatever
+  # a repository tells it to -- the general-purpose job runner roadmap 7 refuses to put in a plant,
+  # sited at the centre instead, which is defensible to own and not free. The registry that goes
+  # with it is a fourth credential plane after the broker, the database and the forge itself.
+  actions:
+    enabled: false
+  packages:
+    enabled: false
+  ssh:
+    # The hostname a clone URL advertises. Empty means the forge's own ingress hostname, which is
+    # right whenever HTTP and SSH arrive at the same address and wrong the moment the LoadBalancer
+    # below has an address of its own -- which is why it is separable rather than derived.
+    domain: ""
+    external:
+      # THE FLEET'S ONLY WAY IN, and an appliance cannot clone without it. Git over SSH is TCP, so
+      # no Ingress can carry it; this is the same second-Service arrangement mosquitto.external
+      # makes for raw MQTT, for the same reason and with the same default.
+      enabled: true
+      # LoadBalancer suits k3s (Klipper allocates one) and any cloud provider. NodePort is the
+      # fallback where no controller exists -- with the cost that the port is then in the 30000+
+      # range and `ssh.domain`/`external.port` have to say so, or every clone URL names a port
+      # nothing is listening on.
+      type: LoadBalancer
+      # What clients dial, and what Gitea prints in clone URLs. 22 is the ordinary choice here
+      # because this Service has its own address; it is NOT the host's sshd, which Gitea never uses.
+      port: 22
+      # Only when type is NodePort.
+      nodePort: null
+      loadBalancerIP: ""
+      annotations: {}
+  persistence:
+    enabled: true
+    # The SQLite database, every repository, and the SSH host keys appliances pin in known_hosts.
+    # Sized for flow repositories and one playbook -- text, and small. Roadmap 8's package registry
+    # is what would change this materially, and it is off.
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  # gitea/gitea runs as uid/gid 1000, which USER_UID/USER_GID in the workload also set.
+  podSecurityContext:
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
 ingress:
   enabled: true
   # k3s ships Traefik enabled by default, which is why it is the default here. ingress-nginx needs
@@ -1306,7 +1381,7 @@ ingress:
   tls:
     enabled: false
     # ONE WILDCARD CERTIFICATE for *.<publicBaseDomain> is the intended arrangement: seven
-    # subdomains means seven separate certificates and seven ACME challenges otherwise, and they
+    # subdomains means nine separate certificates and nine ACME challenges otherwise, and they
     # would renew independently.
     secretName: acs-cymru-tls
     certManager:
@@ -1475,6 +1550,12 @@ networkPolicy:
   #
   # Traffic arrives SNAT'd by ServiceLB, so the source address seen is the NODE's.
   mqttAllowedCidrs:
+    - 0.0.0.0/0
+  # Where appliances clone from, and the same argument one service along: git over SSH is how a
+  # gateway converges, so an unreachable forge is a fleet that silently stops updating. Narrow it
+  # the same way, and for the same weak reason -- ServiceLB SNATs, so this is defence in depth
+  # behind a per-gateway read-only deploy key rather than the control itself.
+  giteaSshAllowedCidrs:
     - 0.0.0.0/0
   # For the e2e-aas-export initContainer, which reads a Job's status with kubectl. Narrow to the
   # service CIDR; empty removes the rule (and that Job then cannot run under policy).

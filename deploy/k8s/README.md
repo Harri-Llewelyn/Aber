@@ -298,7 +298,7 @@ helm upgrade ... \
 and therefore every OAuth `redirect_uri` db-init registers — is composed from it. Leave it `http` with
 TLS on and sign-in breaks with `invalid redirect_uri` while every pod reports healthy.
 
-One wildcard certificate for `*.<domain>` is the intended arrangement: seven subdomains otherwise
+One wildcard certificate for `*.<domain>` is the intended arrangement: nine subdomains otherwise
 means seven certificates renewing independently.
 
 #### 3. Distribute the root certificate
@@ -313,7 +313,7 @@ kubectl -n cert-manager get secret acs-cymru-ca-key-pair \
 Install it in the trust store of every browser, operator laptop and gateway — GPO on Windows, MDM
 profile on macOS, `/usr/local/share/ca-certificates/` plus `update-ca-certificates` on Debian.
 
-**Until you do, every one of the seven subdomains shows a certificate warning — and the OAuth
+**Until you do, every one of the nine subdomains shows a certificate warning — and the OAuth
 handshake happens in the browser.** A user who learns to click through a warning on `api.<domain>`
 mid-login has been trained to dismiss precisely the warning that would tell them they were being
 intercepted. This is not cosmetic.

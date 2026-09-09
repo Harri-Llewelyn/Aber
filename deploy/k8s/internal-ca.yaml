@@ -38,7 +38,7 @@
 # because the chart only ever names an issuer and never assumes what kind it is.
 #
 # THE COST IS TRUST DISTRIBUTION, AND IT IS REAL. Until the root below is in a machine's trust store,
-# every browser sees a warning on all seven subdomains. That matters more than the usual "click
+# every browser sees a warning on all nine subdomains. That matters more than the usual "click
 # through it" because the OAuth handshake happens IN THE BROWSER: a user who learns to dismiss a
 # warning on api.<domain> mid-login has been trained to dismiss exactly the warning that would tell
 # them they are being intercepted. Distribute the root properly -- see the runbook.

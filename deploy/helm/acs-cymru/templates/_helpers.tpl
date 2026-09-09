@@ -388,6 +388,9 @@ mosquitto: does not cluster -- two brokers behind one Service split the fleet, a
 realtime: holds a logical replication slot, which is per-instance state
 supabase-storage: the file backend is a single writer on a ReadWriteOnce PVC
 grafana: the default backend is a SQLite file on a ReadWriteOnce PVC
+gitea: SQLite plus a repository directory on one ReadWriteOnce PVC -- and the repositories are the
+  half that makes a second replica worse than useless, since two processes writing one git object
+  store corrupt it rather than merely contending for it
 supabase-db: a single Postgres instance with no replication; HA needs an operator
 timescaledb: likewise
 {{- end -}}
@@ -767,6 +770,16 @@ hostname cannot disagree with what is documented as the endpoint.
 {{- define "acs-cymru.i3xUrl" -}}{{ include "acs-cymru.publicUrl" (dict "ctx" . "key" "i3x" "sub" "i3x") }}{{- end -}}
 
 {{/*
+The forge's browser-facing URL.
+
+Derived like every other public URL rather than written as a literal, and it has a consumer the
+others do not: Gitea's own `ROOT_URL`, which is what a repository page prints as the clone command.
+One definition means the address an engineer copies cannot disagree with the address the Ingress
+actually routes -- a mismatch there is discovered on an appliance, as a name that will not resolve.
+*/}}
+{{- define "acs-cymru.giteaUrl" -}}{{ include "acs-cymru.publicUrl" (dict "ctx" . "key" "gitea" "sub" "git") }}{{- end -}}
+
+{{/*
 Host only, for an Ingress rule -- the scheme and any path stripped off.
 
 Ingress `host` is a DNS name and rejects a scheme; feeding it a URL produces a rule that matches
@@ -830,6 +843,13 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
      to anyone who can reach the ingress -- which is intended (it is the health check) and is why
      nothing about the address space is in it. */}}
 {{- $routes = append $routes (dict "name" "i3x" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "i3x")) "service" "i3x-service" "port" 8090) -}}
+{{- end -}}
+{{- if .Values.gitea.enabled -}}
+{{/* THE WEB HALF OF THE FORGE ONLY. Git over SSH is TCP and cannot ride an HTTP Ingress at all --
+     that is `gitea-external`'s job, exactly as raw MQTT is mosquitto-external's. Naming this route
+     is therefore not enough to make an appliance able to clone, which is the thing that would
+     otherwise be discovered on a gateway rather than here. */}}
+{{- $routes = append $routes (dict "name" "gitea" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "gitea")) "service" "gitea" "port" 3000) -}}
 {{- end -}}
 {{- if .Values.mosquitto.enabled -}}
 {{/* MQTT over WEBSOCKETS only -- port 9001. Raw MQTT on 1883 is TCP and cannot ride an HTTP

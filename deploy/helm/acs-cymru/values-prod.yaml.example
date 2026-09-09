@@ -149,6 +149,10 @@ secrets:
   # token reused elsewhere means one leak grants forgery across the site.
   mqttCredentialServiceToken: ""
 
+  # The forge administrator (roadmap 7-9), and the only account Gitea is meant to have. Empty
+  # stops the gitea-init container rather than creating one with a blank password.
+  giteaAdminPassword: ""
+
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
   grafanaOAuthClientSecret: ""
