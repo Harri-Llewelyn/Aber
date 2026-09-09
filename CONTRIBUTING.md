@@ -37,7 +37,14 @@ cheapest ones to run and the easiest to trip:
 node scripts/check-env-drift.mjs        # docker-compose.yml against .env.example
 node scripts/check-schema-surface.mjs
 node scripts/check-migration-idempotency.mjs
+node scripts/check-image-sources.mjs    # a new .py in ingestion/ is a TWO-file change
 ```
+
+**Adding a Python module to `ingestion/` or `i3x/` means editing the Dockerfile as well.** Those
+images `COPY` their sources one file at a time, and the suites import from the working tree where
+the file plainly exists — so a forgotten `COPY` passes every test and every other guard, and then
+crash-loops the container on the first boot that runs it. `check-image-sources.mjs` is the one that
+sees it.
 
 Getting started with the stack itself — prerequisites, `npm run setup`, and bringing it up on
 Compose or Kubernetes — is in the [README](README.md).
