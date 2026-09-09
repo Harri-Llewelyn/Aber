@@ -215,6 +215,10 @@ secrets:
   # than creating an account with a blank password -- a forge that will hold every gateway edge
   # flow is the last place in this file for a default credential.
   giteaAdminPassword: ""
+  # The machine account enroll-gateway authenticates as. Empty turns the forge integration off at
+  # BOTH ends -- no account is created and no repository is asked for -- which is the state every
+  # existing install is in.
+  giteaMachinePassword: ""
 
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
@@ -1323,6 +1327,13 @@ gitea:
   # it is `secrets.giteaAdminPassword`, so an externally-managed Secret can supply it.
   adminUser: gitea_admin
   adminEmail: gitea-admin@acs-cymru.invalid
+  # THE ACCOUNT THE PLATFORM AUTHENTICATES AS, and roadmap 7 calls for exactly one. NOT an admin:
+  # it owns the per-gateway repositories and may attach a read-only deploy key to one, which is the
+  # whole of what enroll-gateway does with it. The password is `secrets.giteaMachinePassword`, and
+  # leaving it empty means no machine account and no gateway repositories -- a deployment without
+  # the forge integration rather than a broken one.
+  machineUser: acs_platform
+  machineEmail: acs-platform@acs-cymru.invalid
   logLevel: info
   # OFF, AND ROADMAP 8 IS WHERE THEY ARE ARGUED ON. Actions is a build runner that executes whatever
   # a repository tells it to -- the general-purpose job runner roadmap 7 refuses to put in a plant,

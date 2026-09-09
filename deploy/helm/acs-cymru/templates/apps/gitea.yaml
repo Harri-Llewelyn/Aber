@@ -80,6 +80,10 @@ shares the same block through a YAML anchor, for the same reason.
 {{- $secretName := include "acs-cymru.secretName" . -}}
 {{- $fullname := include "acs-cymru.fullname" . -}}
 {{- $giteaPublic := include "acs-cymru.giteaUrl" . -}}
+{{- $initScript := .Files.Get "files/gitea-scripts/gitea-init.sh" -}}
+{{- if not $initScript }}
+{{- fail "\n\nacs-cymru: files/gitea-scripts/gitea-init.sh is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nWithout it the forge starts with its web installer LOCKED and no account able to open it -- a\nforge nobody can log into, on a pod that reports Ready.\n" }}
+{{- end }}
 {{/*
 =================================================================================================
 GITEA -- the forge roadmap 7-9 are built on.
@@ -104,6 +108,16 @@ the first account has to be created out of band or a forge on a plant network is
 from anybody making themselves its administrator.
 =================================================================================================
 */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-gitea-scripts" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  gitea-init.sh: |
+{{ $initScript | indent 4 }}
+---
 {{- if .Values.gitea.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -245,43 +259,28 @@ spec:
             - name: GITEA_ADMIN_EMAIL
               value: {{ .Values.gitea.adminEmail | quote }}
             {{- include "acs-cymru.secretEnv" (dict "name" "GITEA_ADMIN_PASSWORD" "secretName" $secretName "key" "GITEA_ADMIN_PASSWORD") | nindent 12 }}
-          command:
-            - /bin/bash
-            - -e
-            - -c
-            - |
-              if [ -z "$GITEA_ADMIN_PASSWORD" ]; then
-                echo 'GITEA_ADMIN_PASSWORD must be set -- Gitea would otherwise come up with its web installer locked and no account able to open it, which is a forge nobody can log into on a stack that reports healthy.' >&2
-                exit 1
-              fi
-              # THE IMAGE BUILDS app.ini, NOT THIS SCRIPT, and calling its own setup is what makes
-              # that true in both containers. Every `gitea` subcommand refuses to run without a
-              # config file -- the error names --config and reads as a broken image -- and
-              # /etc/s6/gitea/setup is what the SERVER runs to produce one from the environment.
-              # Re-running it is harmless: the template is expanded only when the file is absent,
-              # and environment-to-ini merges rather than replaces.
-              /etc/s6/gitea/setup
-              # The database has to exist before a user can be created, and on a cold volume it does
-              # not. `gitea migrate` creates and migrates the schema without starting a server,
-              # which is the supported way to reach a usable database from a script.
-              #
-              # THROUGH su-exec, so nothing in the database or the repository tree ends up owned by
-              # root. This container runs as root because the setup script chowns /data to the git
-              # user, which is the whole reason the server can read what this wrote.
-              su-exec git gitea migrate
-              set +e
-              OUT=$(su-exec git gitea admin user create --admin --username "$GITEA_ADMIN_USER" --password "$GITEA_ADMIN_PASSWORD" --email "$GITEA_ADMIN_EMAIL" --must-change-password=false 2>&1)
-              RC=$?
-              set -e
-              if [ $RC -eq 0 ]; then
-                echo "[gitea-init] created the administrator $GITEA_ADMIN_USER."
-              elif echo "$OUT" | grep -qi "already exists"; then
-                echo "[gitea-init] administrator $GITEA_ADMIN_USER already exists; left alone."
-              else
-                echo "$OUT" >&2
-                echo "[gitea-init] refusing to report success: creating the administrator failed for a reason other than the account already existing." >&2
-                exit 1
-              fi
+            {{/* THE ACCOUNT THE PLATFORM AUTHENTICATES AS, and deliberately not an admin: it owns
+                 the per-gateway repositories and can attach a read-only deploy key to one, which is
+                 all the authority enroll-gateway needs. An admin credential here would be able to
+                 rewrite every repository in the forge -- including the playbook the whole fleet
+                 converges to -- and it would be held by a function reachable from the network.
+
+                 OPTIONAL at both ends: no password means no machine account and no gateway
+                 repositories, which is a deployment without the forge integration rather than a
+                 broken one. */}}
+            - name: GITEA_MACHINE_USER
+              value: {{ .Values.gitea.machineUser | quote }}
+            - name: GITEA_MACHINE_EMAIL
+              value: {{ .Values.gitea.machineEmail | quote }}
+            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "GITEA_MACHINE_PASSWORD" "secretName" $secretName "key" "GITEA_MACHINE_PASSWORD") | nindent 12 }}
+          {{/* THE SCRIPT IS MIRRORED, NOT INLINE, and the Compose one-shot service runs the same
+               file. Which accounts the forge has -- and that the machine account is NOT an admin --
+               is provisioning policy, and policy hand-copied into two shell blocks drifts. */}}
+          command: ["/bin/bash", "/seed/gitea-init.sh"]
+          volumeMounts:
+            - name: init-script
+              mountPath: /seed
+              readOnly: true
           volumeMounts:
             - name: data
               mountPath: /data
@@ -333,6 +332,10 @@ spec:
             - name: data
               mountPath: /data
       volumes:
+        - name: init-script
+          configMap:
+            name: {{ printf "%s-gitea-scripts" $fullname }}
+            defaultMode: 0755
         - name: data
           {{- if .Values.gitea.persistence.enabled }}
           persistentVolumeClaim:

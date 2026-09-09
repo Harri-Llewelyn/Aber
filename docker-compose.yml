@@ -1226,6 +1226,17 @@ services:
       # `mosquitto` DEFAULT ON PURPOSE: that resolves on this network and nowhere a gateway lives,
       # so a default would produce bundles that enrol perfectly and then connect to nothing.
       # enroll-gateway answers 503 rather than consume a token when this is unset or internal.
+      # THE FORGE, for enrolment's fourth step (roadmap 7). An IN-STACK address deliberately: the
+      # clone URL an appliance is handed comes from the forge's own answer, built from
+      # GITEA_ROOT_URL and GITEA_SSH_DOMAIN, so these two never have to agree. Using one address
+      # for both is the classic way this breaks -- the same note Node-RED's OAuth URLs carry.
+      #
+      # ALL THREE OR NONE. Unset means a gateway enrols, gets its broker credential, and is told it
+      # has no repository; half-set means the function logs what it could not reach rather than
+      # answering 401 once per appliance.
+      GITEA_INTERNAL_URL: ${GITEA_INTERNAL_URL:-http://gitea:3000}
+      GITEA_MACHINE_USER: ${GITEA_MACHINE_USER:-acs_platform}
+      GITEA_MACHINE_PASSWORD: ${GITEA_MACHINE_PASSWORD:-acs-platform-machine-account}
       MQTT_PUBLIC_HOST: ${MQTT_PUBLIC_HOST:-}
       MQTT_PUBLIC_TLS_PORT: ${MQTT_PUBLIC_TLS_PORT:-8883}
       # Where an APPLIANCE reaches the platform, written into the bundle's .env.
@@ -2225,38 +2236,27 @@ services:
     # code would report "provisioned" for both.
     environment:
       <<: *gitea-env
+      # Read by /etc/s6/gitea/setup, which chowns what it writes to this account.
       USER: git
       GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-gitea_admin}
       GITEA_ADMIN_PASSWORD: ${GITEA_ADMIN_PASSWORD:-gitea-admin}
       GITEA_ADMIN_EMAIL: ${GITEA_ADMIN_EMAIL:-gitea-admin@acs-cymru.invalid}
+      # THE ACCOUNT THE PLATFORM AUTHENTICATES AS, and deliberately not an admin -- it owns the
+      # per-gateway repositories and can attach a read-only deploy key to one, which is all the
+      # authority enroll-gateway needs. Empty means no machine account and no gateway
+      # repositories, which is a deployment without the forge integration rather than a broken one.
+      GITEA_MACHINE_USER: ${GITEA_MACHINE_USER:-acs_platform}
+      GITEA_MACHINE_PASSWORD: ${GITEA_MACHINE_PASSWORD:-acs-platform-machine-account}
+      GITEA_MACHINE_EMAIL: ${GITEA_MACHINE_EMAIL:-acs-platform@acs-cymru.invalid}
     volumes:
       - gitea_data:/data
-    # ROOT, AND IT IS NOT OPTIONAL: the setup script chowns /data to the `git` user, which is the
-    # whole reason the server can read what this wrote. Gitea itself is then run through `su-exec`
-    # as that user, so nothing in the database or the repository tree ends up owned by root.
-    entrypoint: ["/bin/bash", "-e", "-c"]
-    command:
-      - |
-        /etc/s6/gitea/setup
-        su-exec git gitea migrate
-        set +e
-        OUT=$$(su-exec git gitea admin user create \
-          --admin \
-          --username "$$GITEA_ADMIN_USER" \
-          --password "$$GITEA_ADMIN_PASSWORD" \
-          --email "$$GITEA_ADMIN_EMAIL" \
-          --must-change-password=false 2>&1)
-        RC=$$?
-        set -e
-        if [ $$RC -eq 0 ]; then
-          echo "[gitea-init] created the administrator '$$GITEA_ADMIN_USER'."
-        elif echo "$$OUT" | grep -qi 'already exists'; then
-          echo "[gitea-init] administrator '$$GITEA_ADMIN_USER' already exists; left alone."
-        else
-          echo "$$OUT" >&2
-          echo '[gitea-init] refusing to report success: creating the administrator failed for a reason other than the account already existing.' >&2
-          exit 1
-        fi
+      # THE SAME FILE THE CHART MOUNTS, mirrored into it by scripts/sync-helm-chart-files.mjs.
+      # Provisioning policy in one place; see the header on the script itself.
+      - ./scripts/gitea-init.sh:/seed/gitea-init.sh:ro
+    # ROOT, AND IT IS NOT OPTIONAL: the setup script the init calls chowns /data to the `git`
+    # user, which is the whole reason the server can read what this wrote. Every gitea command
+    # inside runs through `su-exec` as that user.
+    entrypoint: ["/bin/bash", "/seed/gitea-init.sh"]
 
   gitea:
     container_name: acs-cymru_gitea

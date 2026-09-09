@@ -33,6 +33,7 @@ import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import {
   chownSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -53,6 +54,11 @@ const CREDS = join(DATA_DIR, 'flows_cred.json');
 const SETTINGS = join(DATA_DIR, 'settings.js');
 const GATEWAY_ENV = join(DATA_DIR, 'gateway.env');
 const CA_PATH = join(DATA_DIR, 'certs', 'ca.crt');
+// The GitOps identity: this appliance's own SSH keypair, and where the platform told it to pull
+// from. See generateDeployKey() for why the private half is generated here rather than issued.
+const GITOPS_DIR = join(DATA_DIR, 'gitops');
+const DEPLOY_KEY = join(GITOPS_DIR, 'id_ed25519');
+const REPOSITORY = join(GITOPS_DIR, 'repository.json');
 
 const args = process.argv.slice(2);
 const resetPasswordOnly = args.includes('--reset-admin-password');
@@ -191,7 +197,14 @@ async function enrol() {
           Authorization: `Bearer ${ANON_KEY}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ token: TOKEN, agent_version: AGENT_VERSION }),
+        // ssh_public_key is the PUBLIC half only, and it may be null on an appliance whose
+      // ssh-keygen failed. The platform treats a missing key as "no repository for this
+      // gateway" rather than as an error, so enrolment is unaffected either way.
+      body: JSON.stringify({
+        token: TOKEN,
+        agent_version: AGENT_VERSION,
+        ssh_public_key: deployPublicKey,
+      }),
       });
       payload = await response.json().catch(() => ({}));
     } catch (err) {
@@ -339,6 +352,51 @@ if (!/^[0-9a-f]{64}$/.test(TOKEN)) {
     + 'usually a copy-paste that lost the end of the line.'
   );
 }
+
+/**
+ * This appliance's deploy key, generated HERE and never anywhere else.
+ *
+ * THE PRIVATE HALF NEVER LEAVES THE PLANT. Only the public half goes up with the enrolment
+ * request, where the platform registers it against this gateway's repository as READ-ONLY. That is
+ * the same decision as the editor password below -- generated on the appliance, so there is no
+ * fleet-wide store of credentials to compromise, and revoking one gateway is deleting one key from
+ * one repository.
+ *
+ * ed25519 rather than RSA: small, fast to generate on the low-power hardware these appliances run
+ * on, and accepted by every forge worth pointing this at.
+ *
+ * REUSED IF IT EXISTS. A --force re-enrolment against a volume that kept its key sends the same
+ * public half up again, which the platform records as already registered. Regenerating would
+ * orphan the key the repository already trusts.
+ *
+ * NOT FATAL IF IT FAILS. An appliance with no key enrols, gets its broker credential and publishes
+ * telemetry exactly as before; what it cannot do is converge to a reviewed flow. Refusing to boot
+ * over it would trade the gateway's whole purpose for a feature it has never had.
+ */
+function generateDeployKey() {
+  try {
+    mkdirSync(GITOPS_DIR, { recursive: true, mode: 0o700 });
+    if (!existsSync(DEPLOY_KEY)) {
+      execFileSync('ssh-keygen', [
+        '-t', 'ed25519',
+        '-N', '',
+        '-C', `acs-cymru gateway ${GATEWAY_NAME}`,
+        '-f', DEPLOY_KEY,
+      ], { stdio: 'pipe' });
+      log(`generated a deploy key at ${DEPLOY_KEY}`);
+    } else {
+      log(`reusing the deploy key already at ${DEPLOY_KEY}`);
+    }
+    return readFileSync(`${DEPLOY_KEY}.pub`, 'utf8').trim();
+  } catch (err) {
+    log(`WARNING: could not generate a deploy key (${err.message}).`);
+    log('This appliance will enrol and publish telemetry, but it will have no repository to pull '
+      + 'its flow from.');
+    return null;
+  }
+}
+
+const deployPublicKey = generateDeployKey();
 
 log(`enrolling '${GATEWAY_NAME}' with ${SUPABASE_URL} ...`);
 const enrolment = await enrol();
@@ -489,6 +547,37 @@ writeFileSync(
   ].join('\n'),
   { mode: 0o600 },
 );
+
+// 5b. WHERE THIS APPLIANCE PULLS FROM, if the platform gave it a repository.
+//
+//     RECORDED RATHER THAN DERIVED. The clone URL is the forge's own answer -- built from its
+//     ROOT_URL and SSH_DOMAIN -- so the appliance never has to reconstruct an address from parts it
+//     would have to be told separately. A null repository is a deployment with no forge, a bundle
+//     that sent no key, or a forge that was unreachable at enrolment; all three look the same here
+//     and none of them stops the gateway working.
+//
+//     THE HOST KEY IS NOT SOLVED HERE and is owed by whatever pulls: an appliance with no
+//     known_hosts entry for the forge cannot verify it, and the answer must not be to skip
+//     verification (roadmap 7 and 11 both refuse that switch). See docs/roadmap.md 8.
+if (enrolment.repository && enrolment.repository.ssh_url) {
+  writeFileSync(
+    REPOSITORY,
+    JSON.stringify(
+      {
+        ssh_url: enrolment.repository.ssh_url,
+        branch: enrolment.repository.branch || 'main',
+        deploy_key: DEPLOY_KEY,
+        recorded_at: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
+  log(`this gateway pulls from ${enrolment.repository.ssh_url}`);
+} else {
+  log('the platform gave this gateway no repository; it will publish telemetry but not converge.');
+}
 
 // 6. The marker. LAST, so a crash part-way through leaves the appliance un-enrolled rather than
 //    marked enrolled with half a configuration -- though the token is spent either way, which is

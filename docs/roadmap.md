@@ -1125,14 +1125,52 @@ today cannot heal itself. And the sidecar should refuse a commit whose `mqtt-bro
 match the keys in `flows_cred.json`, which turns a silent drop off the broker into a visible refusal
 to converge.
 
-### A third credential plane arrives with this item, and it should be named now
+### A third credential plane arrives with this item — BUILT
 
 **The appliance needs a way to authenticate to the repository**, which is neither the broker plane
-(§5) nor the database one. It should be **per gateway and read-only** — a shared key across the
-fleet makes one compromised appliance a fleet-wide read, and a writable one lets an appliance author
-what it will later be asked to deploy. `enroll-gateway` already mints a per-gateway broker credential
-at bundle time and is the natural place to issue this one, which also means revocation has a home
-alongside the credential it sits beside.
+(§5) nor the database one. It is **per gateway and read-only** — a shared key across the fleet makes
+one compromised appliance a fleet-wide read, and a writable one lets an appliance author what it
+will later be asked to deploy. `enroll-gateway` already minted a per-gateway broker credential, and
+issuing this one beside it means revocation has a home alongside the credential it sits next to.
+
+**What has landed, and it is the whole plane rather than a piece of it.** Enrolment gained a fourth
+step: `bootstrap.mjs` generates an **ed25519 keypair on the appliance** and sends the public half up
+with its enrolment request; the platform creates that gateway's repository in the forge and registers
+the key against it, read-only; the response carries the clone URL, which `bootstrap` records in
+`/data/gitops/repository.json`. **The private half never leaves the plant** — the same decision as the
+editor password, one plane along — and revoking a gateway is deleting one key from one repository.
+
+**The refusal was measured, not assumed.** A key issued this way clones the repository and, on
+`git push`, is refused by the forge in as many words:
+
+```
+Deploy Key: 2:gateway gwy… is not authorized to write to acs_platform/gateway-gwy…
+```
+
+`test_enroll_gateway.py`'s forge lane asserts the three properties that would otherwise fail
+silently: the repository is **private** (a public one leaks the plant's edge topology and reads
+identically from the appliance), the key is **read-only**, and a gateway whose bundle sends no key
+still enrols and still receives its broker credential.
+
+**FAILURE HERE IS NON-FATAL, AND THAT IS THE OPPOSITE DECISION FROM THE CREDENTIAL SERVICE'S.** By
+step 4 the token is spent and the broker credential exists; refusing over a forge outage would leave
+a working broker account no bundle can claim, punishing an appliance for something it did not cause.
+Telemetry — which is what a gateway is *for* — needs nothing from the forge. So the response carries
+`repository: null`, the log names the gateway, and the appliance publishes as it always did.
+
+**The machine account is not an administrator, and that is load-bearing rather than tidy.** It owns
+the per-gateway repositories, which is exactly the authority needed to create one and attach a key to
+it, and it can do nothing to the platform playbook the whole fleet converges to. An admin credential
+in an edge function reachable through the gateway would put that playbook one compromise away.
+
+**Three things this deliberately does NOT do yet.** The repository name is **derived** from the
+`sparkplug_id` rather than stored, so this needed no migration and no column — §9 still owns where a
+repository pointer lives, and deriving it means the name cannot disagree with the gateway it belongs
+to. Nothing yet **writes a flow** into that repository; the repositories are created empty with an
+initial commit, and `FlowBackupUploader`'s move from bucket to branch is the next piece. And **the
+forge's SSH host key is not distributed**, which the puller needs: an appliance with no `known_hosts`
+entry cannot verify the forge, and the answer must not be to skip verification — §11 and this item
+both refuse that switch, and §8 owns where it lands.
 
 **Verifying the commit is what makes the transport untrusted-safe.** If the sidecar checks a signature
 over the revision it is about to apply, the forge and the network between are no longer things that

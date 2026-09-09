@@ -208,6 +208,10 @@ const generated = {
   // service that will hold every gateway's edge flow. No shopfloor user gets an account here --
   // roles stay in Postgres, and the forge is reached through one machine account (roadmap 7).
   GITEA_ADMIN_PASSWORD: hex(12),
+  // The machine account enroll-gateway authenticates as. Its own value, shared with nothing: the
+  // administrator above is for a human at a browser, this one is held by an edge function, and a
+  // single password would mean one leak grants both.
+  GITEA_MACHINE_PASSWORD: hex(12),
   GRAFANA_OAUTH_CLIENT_SECRET: hex(32),
   NODERED_CREDENTIAL_SECRET: hex(32),
   NODERED_OAUTH_CLIENT_SECRET: hex(32),

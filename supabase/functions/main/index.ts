@@ -100,12 +100,25 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // MQTT_PUBLIC_HOST is here because the response tells an appliance where to connect, and that
   // address cannot be derived from SUPABASE_URL -- inside this network that is supabase-kong, which
   // resolves for nothing on a shopfloor.
+  //
+  // THE FORGE CREDENTIAL IS THE THIRD PLANE (roadmap 7), and it is the narrowest of the three the
+  // registry hands out. It authenticates as a machine account that is NOT a Gitea administrator:
+  // it owns the per-gateway repositories, so it can create one and attach a read-only deploy key,
+  // and it can do nothing to the platform playbook the fleet converges to. An admin credential
+  // here would be able to rewrite that playbook, from a function reachable through the gateway.
+  //
+  // ALL THREE OR NONE. The function treats a half-configured forge as disabled and says so in its
+  // log, rather than answering 401 once per appliance -- but a variable omitted HERE is invisible
+  // to it, so the same omission looks like a deployment that chose not to run a forge.
   "enroll-gateway": [
     "SUPABASE_SERVICE_ROLE_KEY",
     "MQTT_CREDENTIAL_SERVICE_URL",
     "MQTT_CREDENTIAL_SERVICE_TOKEN",
     "MQTT_PUBLIC_HOST",
     "MQTT_PUBLIC_TLS_PORT",
+    "GITEA_INTERNAL_URL",
+    "GITEA_MACHINE_USER",
+    "GITEA_MACHINE_PASSWORD",
   ],
 
   // Rotates a decommissioned gateway's broker account to a password nobody records, which is how

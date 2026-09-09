@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { forgeConfig, provisionGatewayRepository, validPublicKey } from "./forge.ts";
 
 /**
  * Physical gateway enrolment: exchange a single-use token for a broker credential.
@@ -24,6 +25,13 @@ import { corsHeaders } from "../_shared/cors.ts";
  *   1. CLAIM the token atomically      (consume_gateway_enrollment_token)
  *   2. issue the broker credential     (the gateway-credential service)
  *   3. mark the gateway AWAITING_BIRTH
+ *   4. create its repository and register its deploy key   (the forge, roadmap 7)
+ *
+ * STEP 4 IS NON-FATAL AND SITS LAST FOR THAT REASON. By then the token is spent and the broker
+ * credential exists; refusing over a forge outage would leave a working broker account no bundle
+ * can claim, and telemetry -- which is what a gateway is FOR -- needs nothing from the forge. It is
+ * also skipped entirely on a deployment that has no forge configured, which is every install that
+ * predates roadmap 7. See forge.ts.
  *
  * Claiming FIRST looks wrong -- it means a failure in step 2 has to be undone -- but the
  * alternative is worse and is unfixable. A validate-then-issue-then-consume order lets two
@@ -121,7 +129,7 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 
-  let body: { token?: unknown; agent_version?: unknown };
+  let body: { token?: unknown; agent_version?: unknown; ssh_public_key?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -136,6 +144,11 @@ export default async function handler(req: Request): Promise<Response> {
 
   const agentVersion =
     typeof body.agent_version === "string" ? body.agent_version.slice(0, 64) : null;
+
+  // THE PUBLIC HALF OF A KEY THE APPLIANCE GENERATED, and the only thing about the forge that
+  // arrives in this request. The private half never leaves the plant -- same decision as the
+  // editor password bootstrap.mjs prints once. Shape-checked in forge.ts rather than trusted.
+  const sshPublicKey = validPublicKey(body.ssh_public_key);
 
   // The service-role client. Its three uses are the RPCs below and one gateway UPDATE -- there is
   // no caller-scoped client here because there is no caller identity to scope one to.
@@ -290,6 +303,32 @@ export default async function handler(req: Request): Promise<Response> {
     );
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // 4. THE FORGE. Non-fatal by construction -- see the header, and forge.ts.
+  // ---------------------------------------------------------------------------------------------
+  const forge = forgeConfig();
+  let repository: { ssh_url: string; branch: string } | null = null;
+
+  if (forge && sshPublicKey) {
+    const repo = await provisionGatewayRepository(
+      forge,
+      identity.sparkplug_id,
+      identity.gateway_name,
+      sshPublicKey,
+    );
+    if (repo) {
+      repository = { ssh_url: repo.ssh_url, branch: repo.default_branch || "main" };
+    }
+  } else if (forge && !sshPublicKey) {
+    // An appliance old enough not to send one, or a malformed key. Neither is a reason to fail an
+    // enrolment, and both are worth a line: the gateway will have no repository and nothing else
+    // in the system will remark on it.
+    console.warn(
+      `${identity.sparkplug_id} sent no usable SSH public key, so it has no repository. Its ` +
+      "bundle predates the forge, or the key was malformed.",
+    );
+  }
+
   console.log(
     `enrolled ${identity.gateway_name} (${identity.sparkplug_id}); ` +
     `applied_at_broker=${credential.applied_to_running_broker}`
@@ -314,6 +353,11 @@ export default async function handler(req: Request): Promise<Response> {
     // but not yet live (the Kubernetes projected-Secret sync, up to ~90s), so the appliance should
     // retry its first CONNECT rather than treat a refusal as a bad password.
     applied_to_running_broker: credential.applied_to_running_broker !== false,
+    // THE GATEWAY'S OWN REPOSITORY, or null. Null means one of three things and the appliance
+    // treats them alike: this deployment runs no forge, the bundle sent no key, or provisioning
+    // failed. The appliance enrols either way and publishes telemetry either way; what it cannot
+    // do without this is converge to a reviewed flow.
+    repository,
   });
 }
 

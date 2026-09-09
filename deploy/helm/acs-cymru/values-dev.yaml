@@ -97,6 +97,7 @@ secrets:
 
   # Matches .env.example, so the Compose and k3d stacks bring the forge up on the same account.
   giteaAdminPassword: gitea-admin
+  giteaMachinePassword: acs-platform-machine-account
 
   grafanaAdminUser: admin
   grafanaAdminPassword: admin
