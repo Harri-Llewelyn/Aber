@@ -223,6 +223,12 @@ would prove the chain works end to end. It is the one item on this list whose re
 operational rather than editorial, and shortening it to "done" while every install still accepts the
 deprecated format would be exactly the kind of entry the header of this file warns about.
 
+**THE SIGNING ALGORITHM IS A DIFFERENT QUESTION AND IS NOT IN THIS ITEM.** This is the key FORMAT,
+and it could be built as a gateway feature precisely because the new keys are not JWTs. HS256 on
+`SUPABASE_JWT_SECRET` is untouched by everything above, and it is load-bearing in a way that only
+shows up when something asks GoTrue for an ID token — which is where §7 ran into it trying to sign
+in to the forge, and where the measurements are.
+
 **The divergence argument still applies to anyone re-enabling Kong.** Kong cannot translate an
 opaque key, so a stack that turns it back on accepts only the legacy format — a stack whose
 authentication differs by deployment target is the class of divergence the shared gateway template
@@ -1132,6 +1138,71 @@ alongside the credential it sits beside.
 over the revision it is about to apply, the forge and the network between are no longer things that
 have to be trusted — a much stronger position than TLS to the host alone, and the one that makes a
 hosted forge an acceptable answer to the question below.
+
+### Signing in to the forge does not work the way Grafana and Node-RED do, and HS256 is one of three reasons
+
+**MEASURED AGAINST THE RUNNING FORGE rather than reasoned about, because the shape of the answer is
+counter-intuitive: this stack already federates two other services and neither mechanism transfers.**
+Gitea's only general-purpose authentication source is `openidConnect`, configured entirely from an
+auto-discovery URL — its custom authorize and token URL flags are, in its own help text, an "option
+for GitLab/GitHub". There is no hand-configured generic OAuth2 source, and a hand-configured generic
+OAuth2 client is precisely what `grafana.ini`'s `[auth.generic_oauth]` and `node-red-init.mjs`'s
+`passport-oauth2` are. **Those two work BECAUSE they never perform discovery and never ask for an ID
+token**, which is a property of how they were configured rather than a property of GoTrue.
+
+**Wall one is the discovery document, and it fails silently in the worst direction.** GoTrue answers
+`/auth/v1/.well-known/openid-configuration` with an empty `issuer` and RELATIVE endpoint paths:
+
+```json
+{ "issuer": "", "authorization_endpoint": "/oauth/authorize", "token_endpoint": "/oauth/token" }
+```
+
+An auth source added against it is accepted without complaint — nothing is validated at
+configuration time — and the first login answers `307` to
+`http://<forge>/oauth/authorize?...&scope=openid`. **Gitea resolved the relative path against its
+own base and sent the browser to itself**, where it is a 404 on the forge. This is the failure
+[`node-red/Dockerfile`](../node-red/Dockerfile) predicted in prose when it chose `passport-oauth2`
+over `passport-openidconnect`; it is now demonstrated.
+
+**Wall two is the ID token, and it is the HS256 half of the question.** Gitea's request above carries
+`scope=openid`, which is not optional for an OIDC source — and requesting it is the exact thing
+`node-red-init.mjs` records GoTrue refusing, with `HS256 is not supported for ID token signing`, under
+a comment that says not to "fix" a login problem by adding it back. The whole stack is HS256 on
+`SUPABASE_JWT_SECRET`: the gateway, PostgREST, Realtime and the pre-minted key pair all depend on it.
+
+**Wall three is unmeasured and should not be assumed away.** GoTrue's OAuth server REQUIRES PKCE —
+`node-red-init.mjs` sets `pkce: true` for that reason — and whether Gitea's provider sends a
+`code_challenge` is only reachable after the first two walls are cleared. It is a question to answer
+before anything is built on the assumption that they are the only two.
+
+**SO MOVING OFF HS256 IS NECESSARY AND NOT SUFFICIENT, which is the thing to be exact about.**
+Asymmetric signing does not repair a relative URL, and the discovery document is a separate defect
+with a separate fix. The document already advertises `RS256` and `ES256`, so the algorithm is a
+configuration question rather than a Supabase limitation — but it is not a small change, because
+every component in this stack verifies with the shared secret and the pre-minted `anon` and
+`service_role` JWTs are signed with it. **§1 owns the key FORMAT migration and explicitly not this
+one**: opaque publishable and secret keys are not JWTs and no component downstream ever sees one,
+which is why that item could be built as a gateway feature. Signing is the opposite shape. If it is
+ever taken on it earns an item of its own rather than a paragraph in either.
+
+**§2 IS THE CHEAPER PATH AND IT SIDESTEPS ALL THREE WALLS.** Entra ID is a real OIDC provider with a
+valid discovery document and genuine ID tokens, so the forge can federate to it DIRECTLY rather than
+through GoTrue — no shim, no signing change, and nothing owed by this repository. What it costs is a
+second client registration and a forge login that depends on the tenant being reachable, which is
+exactly the property §2's own *"the tenant URL is the boundary, and it fails open"* is about; a forge
+that cannot be signed into during an outage is a milder failure than a dashboard that cannot, but it
+is the same failure.
+
+**NONE OF THIS RELAXES THE RULE ABOVE.** Whichever provider authenticates, **authorisation stays in
+Postgres**: `user_roles` and `has_role()` decide, the forge is still reached through one machine
+account, and a group claim arriving from an IdP must never become the thing that grants
+`gitops:manage`. SSO would change who holds a *login*, not who holds a *permission*.
+
+**AND THE HONEST ANSWER MAY BE THAT ALMOST NOBODY NEEDS ONE.** §6 puts the queue, the review and the
+approve control on the dashboard, which people already sign into; the forge UI is for the engineer
+reading a diff that the lane did not render, which is a smaller audience than "everyone who touches a
+flow". One local administrator plus the machine account is the position to hold until somebody is
+actually blocked by it.
 
 ### What this must not touch
 
