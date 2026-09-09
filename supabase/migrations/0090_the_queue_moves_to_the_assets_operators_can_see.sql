@@ -834,6 +834,26 @@ BEGIN
         v_missing := v_missing || 'schemas: an open proposal survives in a lane nobody can decide';
     END IF;
 
+    -- THE TABLE MUST END THE BOOT WITH A CONSTRAINT ON IT, AND A VALIDATED ONE. Both blocks above
+    -- guard on the lane and correctly do nothing when it is already admitted, which is what makes
+    -- them safe against a widening nobody has written yet -- but it also means the whole chain can
+    -- pass while installing no definition at all. That is not hypothetical: `ALTER TABLE`
+    -- autocommits per statement, so the boot that failed here left the DROP applied and the ADD
+    -- rolled back, and the table carried NO constraint until the next repair. This is the assertion
+    -- that would have named that state instead of leaving it to be discovered.
+    --
+    -- Read from the CATALOGUE rather than by restating the list, because a check that repeats the
+    -- array it is checking cannot disagree with it -- and note what is NOT asserted: a count of
+    -- lanes. A later migration widening this is the expected case.
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'public.change_proposals'::regclass
+           AND conname  = 'change_proposals_entity_type_known'
+           AND convalidated
+    ) THEN
+        v_missing := v_missing || 'the entity_type CHECK is missing or was left NOT VALID';
+    END IF;
+
     -- The link lanes' tag list must be non-empty, or every proposed document naming a tag is
     -- refused and the form's dropdown is a list of values nothing accepts.
     IF array_length(public.proposable_link_tags(), 1) IS NULL THEN
