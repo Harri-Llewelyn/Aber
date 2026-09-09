@@ -1081,12 +1081,43 @@ share a submit path and should not be generalised into one.
 ### The credential store is the hazard that can invalidate the shape
 
 **Node-RED keys credentials by node id**, and holds them in `flows_cred.json`, encrypted separately
-and deliberately not in the flow file. A flow round-tripped through export, repository and pull can
-come back with the broker node re-created under a new id; the credential then keys to a node that no
-longer exists, the sidecar reconciles successfully, and the gateway drops off the broker immediately
-afterwards. **This constrains the design more than the transport does and should be proved before
-anything else is built** — if a round trip cannot preserve credential binding, the puller needs a
-merge strategy rather than an overwrite, and that is a different piece of work.
+and deliberately not in the flow file. This section asked for that to be proved before anything else
+was built. **IT HAS BEEN, against `nodered/node-red:5.0.2` — the tag both Dockerfiles pin — and the
+result NARROWS this item rather than widening it.**
+
+**THE PULL PATH IS SAFE, SO THE PULLER IS AN OVERWRITE AND NOT A MERGE.** A byte-identical
+`flows.json` written back over `/data` and restarted leaves `flows_cred.json` *untouched* — not
+rewritten and not re-encrypted — and the broker node keeps its credential. The branch this section
+held open, where a round trip cannot preserve binding and the sidecar needs a merge strategy, does
+not arrive.
+
+**THE HAZARD IS REAL, AND IT IS THE HUMAN PATH RATHER THAN THE TRANSPORT.** With the broker node's id
+changed and the old `flows_cred.json` kept, Node-RED logs `Started flows` and the runtime answers
+`{}` for that node's credential — no warning, no failed check. The gateway then authenticates with an
+empty username, which Mosquitto refuses with CONNACK 5 and Node-RED reports as *"Connection failed to
+broker"* with no cause, the ambiguity `node-red-init.mjs` already exists to remove.
+
+**AND IT IS DESTRUCTIVE ON THE FIRST DEPLOY, WHICH IS THE PART THAT WAS NOT ANTICIPATED HERE.** The
+orphaned credential survives a restart, so the appliance looks recoverable; the next deploy prunes it
+and rewrites the file to an encrypted `{}`. The ciphertext is then gone, `bootstrap.mjs` will not
+re-mint behind its once-only `/data/.enrolled.json` guard, and the enrolment token is already spent —
+so the recovery is a new bundle, which is the loss `FlowBackupUploader` exists to prevent.
+
+**WHAT RE-IDS A NODE IS ONE BUTTON, AND IT IS THE ONE AN OPERATOR REACHES FOR.** The editor imports
+with `generateIds: false`, so ids survive a paste into an empty workspace. They change only on an
+import *conflict* — pasted nodes whose ids are already present — where the offered choices are
+per-node replace/copy and a one-click **Import copy** that re-ids everything. Restoring a backup into
+the appliance that still holds `acs-broker` is exactly that conflict, and the destructive option is
+the convenient one.
+
+**Three things this obliges, and none of them is a merge strategy.** What is committed must be the
+appliance's OWN `/data/flows.json`, never an editor export that has passed through an import dialog.
+The bundle should carry the `acsCredentialsEnv` convention `node-red-init.mjs` already uses on the
+platform side — the credential re-derived from a prefix DECLARED ON THE NODE, and rewritten whenever a
+broker node holds none — because `bootstrap.mjs` hardcodes `acs-broker` and runs once, so an appliance
+today cannot heal itself. And the sidecar should refuse a commit whose `mqtt-broker` node ids do not
+match the keys in `flows_cred.json`, which turns a silent drop off the broker into a visible refusal
+to converge.
 
 ### A third credential plane arrives with this item, and it should be named now
 
@@ -1129,11 +1160,24 @@ no `Operator` holds a login, and the forge never learns what `gitops:manage` mea
 **Two costs that arrive with it and are not otherwise recorded.** Gitea is a durable store with
 state, so it lands inside §4's backup scope before §4 is built — and it would be the second store in
 the repository with no retention answer, which is §12's complaint arriving a second time. Neither is
-a reason to choose differently; both are reasons to decide them in the change that adds it.
+a reason to choose differently. **Both are DEFERRED until the services §§7–9 plan are all present**,
+so that retention is decided once across them rather than per service; what is recorded here is that
+they are owed, and that a Gitea holding every gateway's only flow copy is the opposite of
+`loki_data`, which `docker-compose.yml` deliberately excludes from backup.
 
-**One repository or one per gateway.** A repository per gateway gives clean per-appliance deploy keys
-and independent history; one repository with a branch per gateway gives a fleet-wide diff and one
-place to review. The deploy key granularity is the deciding constraint, not the ergonomics.
+**DECIDED: ONE REPOSITORY PER GATEWAY for flows.** Gitea's deploy keys are per-repository, so this is
+what makes a per-appliance read-only key mean anything: a single flows repository would let every
+appliance's key read every other gateway's `flows.json`, and a `flows.json` is the plant's edge
+topology, broker addresses and device ids. The fleet-wide diff a shared repository would have given is
+the thing given up, and the approvals page is where that view belongs anyway.
+
+**DECIDED: THE PLATFORM PLAYBOOK IS ONE REPOSITORY THE WHOLE FLEET READS, AND GATEWAYS TRACK A TAG
+RATHER THAN `main`.** `main` is protected, a Gitea Actions run validates a commit before it may
+merge, and **naming a new tag off `main` is a separate manual act** — which is what keeps one merge
+from converging every appliance on the next timer. Without it the shared repository has no staged
+rollout at all, and the appliance is the one component whose downtime a machine operator sees rather
+than an engineer. It is the same review gate this item argues for the flow lane, applied to the
+appliance instead.
 
 **Where `target_branch` lives** — deferred to §9, which owns the links-store question, but this item
 is what makes it load-bearing rather than cosmetic.
@@ -1765,16 +1809,22 @@ Postgres port, and neither is claimed here to be wrong — what is missing is th
 a decision beside every port that was narrowed and beside none of the ports that were not, which is
 the same asymmetry this item complains about between the two targets.
 
-### Compose publishes eight ports where Kubernetes publishes seven hostnames
+### Compose publishes ten ports where Kubernetes publishes nine hostnames
 
 The two targets do not disagree about security here so much as about **shape**, and this is the last
 place where a Compose stack looks nothing like the chart.
 
 `templates/ingress.yaml` gives Kubernetes one entry point and routes by hostname:
-`grafana.<publicBaseDomain>`, `nodered.<…>`, `app.<…>`, `studio.<…>`, `docs.<…>`, `mqtt.<…>` and the
-gateway, every host derived from the same helper the service itself is configured from. **No port
-numbers anywhere.** Compose reaches the same services on eight published ports, and a URL carrying
-`:3002` is a URL that only works if the reader knows which machine to put in front of it.
+`grafana.<publicBaseDomain>`, `nodered.<…>`, `app.<…>`, `studio.<…>`, `docs.<…>`, `i3x.<…>`,
+`git.<…>`, `mqtt.<…>` and the gateway, every host derived from the same helper the service itself is
+configured from. **No port numbers anywhere.** Compose reaches the same services on ten published
+ports, and a URL carrying `:3002` is a URL that only works if the reader knows which machine to put
+in front of it.
+
+**The forge adds the one route that cannot be solved this way, and it should be said here rather
+than discovered.** Git over SSH is TCP, so `git.<domain>` covers the web UI and nothing an appliance
+actually clones with — the chart publishes a second LoadBalancer for it exactly as raw MQTT has one.
+A Compose proxy would inherit the same split.
 
 **This extends `supabase-envoy`; it does not add a proxy.** The instinct is to reach for Caddy or
 Traefik, and it is the wrong one — the stack already runs Envoy, with a gateway listener on 8000 and
@@ -1797,7 +1847,7 @@ documentation says "now ask IT", which nobody does. The chart's own dev path sho
 `e2e.ingressIp` and the `127.0.0.1.nip.io` domain exist precisely because a real record was not
 available — and a Compose equivalent should be designed in from the start rather than discovered.
 
-**What it does and does not buy.** It gets one port to firewall instead of eight, one TLS
+**What it does and does not buy.** It gets one port to firewall instead of ten, one TLS
 certificate instead of none, and URLs that survive being pasted into a message. It does **not** fix
 what the Directory displays: `directory_services.endpoint_url` is a stored string, and a proxy in
 front of Node-RED does not change it. That is `0085`'s job and it is sequenced first for this reason —
