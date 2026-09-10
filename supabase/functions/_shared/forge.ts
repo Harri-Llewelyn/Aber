@@ -183,8 +183,20 @@ async function refused(what: string, response: Response): Promise<Error> {
  *
  * PRIVATE, so that only members see the organisation exists -- the same reason every repository in
  * it is private. `includes_all_repositories` is what makes a team created once cover every
- * repository created later, so enrolment never has to touch a team; `can_create_org_repo` is
- * false because creating a repository is the machine account's act at enrolment and nobody else's.
+ * repository created later, so enrolment never has to touch a team.
+ *
+ * BOTH TEAMS MAY CREATE REPOSITORIES IN THE ORGANISATION. The first cut said no -- creating a
+ * repository was enrolment's act and nobody else's -- and the first administrator to try it in the
+ * UI found the "New repository" form refusing the organisation as an owner. The design has
+ * repositories that exist BEFORE a gateway does (a playbook a class of gateway is provisioned
+ * from), and those are made by people. What a hand-made repository does NOT get is what enrolment
+ * applies to the one it names: branch protection on `main` and a deploy key. `ensureRepository`
+ * below adopts a repository that already carries a gateway's name, so a hand-made one becomes a
+ * gateway's on enrolment and is protected then.
+ *
+ * RECONCILED, NOT ONLY CREATED: a team found rather than made is patched if its flag disagrees, so
+ * a forge whose teams predate this decision catches up on the next call, without anybody deleting
+ * a team that has members in it.
  */
 export async function ensureOrganisation(
   cfg: ForgeConfig,
@@ -206,7 +218,7 @@ export async function ensureOrganisation(
 
   const listed = await forgeApi(cfg, "GET", `/orgs/${FORGE_ORGANISATION}/teams?limit=50`);
   if (!listed.ok) throw await refused("could not list the organisation's teams", listed);
-  const teams = await listed.json() as { id: number; name: string }[];
+  const teams = await listed.json() as { id: number; name: string; can_create_org_repo: boolean }[];
 
   const ids = {} as Record<ForgeTeamRole, number>;
   for (const role of Object.keys(FORGE_TEAMS) as ForgeTeamRole[]) {
@@ -214,6 +226,11 @@ export async function ensureOrganisation(
     const existing = teams.find((t) => t.name === name);
     if (existing) {
       ids[role] = existing.id;
+      if (!existing.can_create_org_repo) {
+        const patched = await forgeApi(cfg, "PATCH", `/teams/${existing.id}`, { can_create_org_repo: true });
+        if (!patched.ok) throw await refused(`could not let team '${name}' create repositories`, patched);
+        console.log(`forge: team '${name}' may now create repositories in '${FORGE_ORGANISATION}'`);
+      }
       continue;
     }
     const created = await forgeApi(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/teams`, {
@@ -221,7 +238,7 @@ export async function ensureOrganisation(
       description: `${role.replace("_", " ")}s of the ACS-Cymru dashboard, placed here by forge-membership.`,
       permission: "write",
       includes_all_repositories: true,
-      can_create_org_repo: false,
+      can_create_org_repo: true,
       units: ["repo.code", "repo.issues", "repo.pulls", "repo.releases", "repo.wiki", "repo.projects"],
     });
     if (!created.ok) throw await refused(`could not create team '${name}'`, created);

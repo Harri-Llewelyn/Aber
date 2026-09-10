@@ -1367,9 +1367,14 @@ this section costed.
   may do nothing.** They own nothing, and every gateway repository is private and owned by the machine
   account, so the first login is a forge with no repositories in it. The forge needs an
   **organisation** that owns the gateway repositories — which moves `enroll-gateway`'s creation call
-  from the machine account's own namespace to the organisation's, with the machine account holding
-  only the authority to create repositories there — and a **team with write** on them that every
-  auto-registered login is placed in. **`main` is protected, with approval required from an
+  from the machine account's own namespace to the organisation's — and a **team with write** on them
+  that every auto-registered login is placed in. **Both teams may create repositories there** (amended
+  2026-09-10: the first cut reserved creation for the machine account at enrolment, and the first
+  administrator to open "New repository" found the organisation refused as an owner; this item's own
+  design has repositories that exist before a gateway does, and people make those). A hand-made
+  repository gets the teams' access and nothing else — the protection and the deploy key are what
+  enrolment applies to the repository it names, and a hand-made one carrying a gateway's name is
+  adopted and protected then. **`main` is protected, with approval required from an
   administrators team.** That is where `gitops:manage` being Administrator-only, as `0069` decided,
   is enforced inside the forge: a manager may open and review, and only an administrator's approval
   lets a merge through. **Ensuring membership on first login is the one piece of genuine work here**,

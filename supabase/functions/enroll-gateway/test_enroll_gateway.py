@@ -578,6 +578,30 @@ class TestForgeProvisioning(EnrollGatewayBase):
         )
         self.assertGreaterEqual(protection["required_approvals"], 1)
 
+    def test_both_teams_may_create_repositories_in_the_organisation(self):
+        """
+        An administrator opened "New repository", and the organisation was not offered as an owner:
+        the teams were made with `can_create_org_repo` off. The design has repositories that exist
+        before a gateway does, and people make those. Asserted on the teams enrolment finds or
+        makes -- and a team made BEFORE this decision is patched rather than left, which is what the
+        first half of this test forces by switching the flag off again.
+        """
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+
+        teams = {t["name"]: t for t in self.forge(f"/api/v1/orgs/{self.organisation}/teams?limit=50")}
+        for name in ("administrators", "managers"):
+            self.assertTrue(teams[name]["can_create_org_repo"], f"'{name}' cannot create repositories")
+
+        # A forge from before the decision: the flag is off, and the next enrolment must fix it.
+        self.forge(f"/api/v1/teams/{teams['managers']['id']}", method="PATCH", body={"can_create_org_repo": False})
+        self.delete_repo()
+        status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        teams = {t["name"]: t for t in self.forge(f"/api/v1/orgs/{self.organisation}/teams?limit=50")}
+        self.assertTrue(teams["managers"]["can_create_org_repo"], "an older team was not reconciled")
+
     def test_a_repository_from_before_the_organisation_is_transferred_in(self):
         """
         Repositories created before the organisation existed live under the machine account, where
