@@ -279,6 +279,39 @@ class TestTheDoor(unittest.TestCase):
         self.assertEqual(status, 302)
         self.assertIn("/auth/v1/oauth/authorize", headers.get("location", ""), "the door did not start a fresh login")
 
+    def test_signing_out_of_the_forge_signs_out_of_the_platform(self):
+        """
+        GITEA'S OWN SIGN-OUT LINK, which did nothing: under reverse-proxy authentication the next
+        request re-signs the person in, and the door's sign-out alone lets the still-alive
+        dashboard session sign them in again after a flicker. The forge has no session of its own,
+        so its sign-out is the platform's -- every GoTrue session the person holds ends, the door's
+        cookies are cleared, and the fresh login meets a dashboard with nobody signed in.
+        """
+        email, _, _ = PERSONAS["Shopfloor_Manager"]
+        jar, status = through_the_door(email)
+        self.assertEqual(status, 200)
+
+        # A dashboard session of the same person, alive before the click.
+        dashboard = sign_in(email)
+        me = {"apikey": ANON_KEY, "Authorization": f"Bearer {dashboard}"}
+        status, _, _ = request(f"{SUPABASE_URL}/auth/v1/user", headers=me)
+        self.assertEqual(status, 200)
+
+        # The click. Gitea 1.27's link is a plain GET on this path.
+        status, headers, _ = request(f"{FORGE_URL}/user/logout", jar=jar)
+        self.assertEqual(status, 302)
+        self.assertEqual(headers.get("location"), "/oauth2/signout")
+
+        status, _, text = request(f"{SUPABASE_URL}/auth/v1/user", headers=me)
+        self.assertIn(status, (401, 403), f"the dashboard session survived the forge's sign-out: {text[:120]}")
+
+        status, _, _ = request(f"{FORGE_URL}/oauth2/signout", jar=jar)
+        self.assertEqual(status, 302)
+        self.assertFalse(
+            any(c.name.startswith("ForgeBearerToken") for c in jar),
+            "the door's bearer cookie survived the sign-out",
+        )
+
     # -- helpers ---------------------------------------------------------------------------------
 
     _jars = {}

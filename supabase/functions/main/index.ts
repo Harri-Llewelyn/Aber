@@ -232,6 +232,10 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_MACHINE_USER",
     "GITEA_MACHINE_PASSWORD",
   ],
+  // Gitea's own sign-out link, routed here by the forge listener: ends every GoTrue session the
+  // caller holds, then sends the browser through the door's sign-out. Needs the service key to
+  // revoke; touches the forge not at all.
+  "forge-signout": ["SUPABASE_SERVICE_ROLE_KEY"],
 
   // Factory+ Directory adapter. NO SERVICE-ROLE KEY, and that is the point: it is a live read
   // API over the whole address space, so it authenticates the caller and then queries AS them,

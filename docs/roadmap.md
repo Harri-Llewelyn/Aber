@@ -1435,6 +1435,16 @@ listener forwards the `location`, the sign-out clears the cookies, and `/` start
 Studio's door has the same dead-session case and cannot heal it, because it has no step that asks
 GoTrue; the suite now reproduces the sequence with a global sign-out.
 
+**GITEA'S OWN SIGN-OUT LINK IS THE PLATFORM'S SIGN-OUT, because anything less does nothing.** Under
+reverse-proxy authentication Gitea's sign-out clears its own cookie and the next request signs the
+person straight back in -- measured, by clicking it. Routing the link to the door's `/oauth2/signout`
+alone is no better: `/` then starts a fresh login that the still-alive dashboard session completes
+silently. The forge has no session of its own, so the listener routes `GET /user/logout` to
+`forge-signout`, which ends every GoTrue session the caller holds and then sends the browser through
+the door's sign-out -- landing on a fresh login that meets a dashboard with nobody signed in. It is
+the mirror of what the dashboard's sign-out already does to the forge, and the suite asserts both
+halves: the dashboard token dies, and the door's cookie goes.
+
 **NONE OF THIS RELAXES THE RULE THAT AUTHORISATION STAYS IN POSTGRES.** `user_roles` and `has_role()`
 decide who is let through the door; Gitea's teams decide what they may do inside it, and the two
 must agree by construction — the team a login is placed in is a function of the role the listener

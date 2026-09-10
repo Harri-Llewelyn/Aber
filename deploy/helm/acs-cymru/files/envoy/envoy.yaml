@@ -1052,6 +1052,25 @@ static_resources:
                             envoy.filters.http.ext_authz:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
                               disabled: true
+                        # GITEA'S OWN SIGN-OUT LINK, TAKEN OVER. Under reverse-proxy authentication
+                        # Gitea's sign-out clears its own cookie and the next request signs the
+                        # person straight back in, because the door's cookie is untouched. And the
+                        # door's sign-out alone is no better: `/` then starts a fresh login the
+                        # still-alive dashboard session completes silently. The forge has no
+                        # session of its own, so its sign-out is the platform's: forge-signout
+                        # ends every GoTrue session the caller holds, then answers a 302 to
+                        # /oauth2/signout. The token is KEPT on this route (jwt_authn forwards it,
+                        # and the catch-all below strips it) because the revocation needs to name
+                        # the person; no placement step, because there is nothing to place.
+                        - match: { path: "/user/logout" }
+                          route:
+                            cluster: functions-v1
+                            prefix_rewrite: "/forge-signout"
+                            timeout: 15s
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
                         # STATIC ASSETS: a session, the identity headers, and NO placement step --
                         # a page pulls dozens of these and none of them is a moment anybody's
                         # membership could change. The public host key is under this prefix and
@@ -1234,7 +1253,8 @@ static_resources:
                   #    token GoTrue no longer has a session for is sent to /oauth2/signout, which
                   #    filter 1 answers by clearing the cookies -- the one way a door with a valid
                   #    cookie can be made to start over. Only the Authorization header travels;
-                  #    nothing the function answers reaches Gitea.
+                  #    nothing the function answers reaches Gitea. `/user/logout` skips this
+                  #    filter and goes to forge-signout instead -- see the route.
                   - name: envoy.filters.http.ext_authz
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz

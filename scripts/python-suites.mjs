@@ -582,7 +582,9 @@ export const SUITES = {
       'endpoint, the callback and the cookies, for each seeded persona -- then what the forge did ' +
       'with them. Administrator and Shopfloor_Manager land in their teams; an Operator completes ' +
       'the whole flow and meets the 403; a forged identity header from outside is not a login; and ' +
-      'a role removed from user_roles mid-session is refused and unseated on the next request. ' +
+      'a role removed from user_roles mid-session is refused and unseated on the next request; ' +
+      "a session ended elsewhere is sent back through the door; and Gitea's own sign-out link ends " +
+      'every session the person holds, the dashboard included. ' +
       'Needs the stack, the forge, the seeded personas AND the gateways organisation (one enrolment ' +
       'creates it), and skips without any of them.',
   },
