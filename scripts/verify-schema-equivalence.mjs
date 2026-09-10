@@ -103,6 +103,8 @@ const PSQL_VARS = {
   grafana_public_url: 'http://localhost:3000',
   studio_oauth_client_secret: 'probe-studio-secret',
   studio_public_url: 'http://localhost:54323',
+  gitea_oauth_client_secret: 'probe-gitea-secret',
+  gitea_public_url: 'http://localhost:3003/',
   nodered_oauth_client_secret: 'probe-nodered-secret',
   nodered_webhook_jwt_secret: 'probe-webhook-secret',
   nodered_redirect_uri: 'http://localhost:1880/auth/strategy/callback',

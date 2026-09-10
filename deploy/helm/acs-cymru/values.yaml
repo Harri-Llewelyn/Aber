@@ -219,6 +219,15 @@ secrets:
   # BOTH ends -- no account is created and no repository is asked for -- which is the state every
   # existing install is in.
   giteaMachinePassword: ""
+  # The forge's door: the OAuth client the gateway's `forge` listener authenticates as (hashed into
+  # auth.oauth_clients by 0094) and the key that signs its session cookie -- Studio's pair again,
+  # for the forge. UNLIKE STUDIO'S, THE ROUTE THAT USES THEM IS ON BY DEFAULT, because a forge with
+  # no web UI is a forge nobody can review a pull request on. Empty is fail-closed at both ends:
+  # the migration skips the registration, the gateway substitutes credentials that cannot
+  # authenticate, and the forge answers every browser with a login it cannot complete. Appliances
+  # (SSH) and enroll-gateway (the API) are unaffected by either state.
+  giteaOAuthClientSecret: ""
+  giteaProxyHmacSecret: ""
 
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
@@ -1322,9 +1331,12 @@ gitea:
     # if the two disagree.
     tag: "1.27.3"
     pullPolicy: IfNotPresent
-  # THE ONLY ACCOUNT THE FORGE IS MEANT TO HAVE. Roles live in Postgres and this is reached through
-  # one machine account; no shopfloor user gets a login here. The PASSWORD is not in this file --
-  # it is `secrets.giteaAdminPassword`, so an externally-managed Secret can supply it.
+  # THE LOCAL ADMINISTRATOR, reachable only through `gitea admin` on the volume: the password form
+  # is off, and the web login is the gateway's `forge` listener, which admits Administrator and
+  # Shopfloor_Manager with their dashboard identity. Roles live in Postgres, the platform reaches
+  # the forge through one machine account, and no shopfloor user gets a login here. The PASSWORD is
+  # not in this file -- it is `secrets.giteaAdminPassword`, so an externally-managed Secret can
+  # supply it.
   adminUser: gitea_admin
   adminEmail: gitea-admin@acs-cymru.invalid
   # THE ACCOUNT THE PLATFORM AUTHENTICATES AS, and roadmap 7 calls for exactly one. NOT an admin:

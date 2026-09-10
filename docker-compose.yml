@@ -101,6 +101,35 @@ x-gitea-env: &gitea-env
   GITEA__service__REQUIRE_SIGNIN_VIEW: "true"
   GITEA__repository__FORCE_PRIVATE: "true"
   GITEA__repository__DEFAULT_PRIVATE: private
+  # THE LOGIN, WHICH IS THE GATEWAY'S `forge` LISTENER AND NOT GITEA'S OWN. Gitea cannot be an OIDC
+  # client of GoTrue -- roadmap 7 records the three measured reasons -- so supabase-envoy runs the
+  # OAuth flow, verifies the token, admits Administrator and Shopfloor_Manager, and hands the
+  # identity down as headers. These lines make Gitea read them and create the account on first
+  # sight: the username is the token's `sub` (Gitea refuses `@` in a name; measured), the email and
+  # full name ride beside it.
+  #
+  # THE HEADER IS TRUSTED FROM ANY PEER, AND THAT WAS MEASURED RATHER THAN READ.
+  # REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For and nothing else: a peer OUTSIDE it,
+  # sending X-WEBAUTH-USER, was signed in. So the control is not here. It is the `forge` network at
+  # the foot of this file -- Gitea's HTTP port is reachable from the gateway and the edge runtime
+  # and from nothing else -- and the API's refusal to read the header at all: with
+  # `..._AUTHENTICATION_API` off, basic auth won over a forged header on /api/v1/user (measured),
+  # which is what keeps the machine account's path and the humans' path from being one path.
+  GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION: "true"
+  GITEA__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION: "true"
+  GITEA__service__ENABLE_REVERSE_PROXY_EMAIL: "true"
+  GITEA__service__ENABLE_REVERSE_PROXY_FULL_NAME: "true"
+  GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION_API: "false"
+  # NO PASSWORD FORM: the door is the login, and the local administrator gitea-init creates is
+  # reached through `gitea admin` on the volume, not through a browser. Basic auth on the API is a
+  # separate switch and stays on -- it is how the machine account authenticates, and it was
+  # measured to survive this line.
+  GITEA__service__ENABLE_PASSWORD_SIGNIN_FORM: "false"
+  # X-Forwarded-For from the gateway, so the forge logs the browser's address rather than Envoy's.
+  # `*` because the only peers on the forge network ARE the gateway and the edge runtime; see above
+  # for what this setting does not govern.
+  GITEA__security__REVERSE_PROXY_TRUSTED_PROXIES: "*"
+  GITEA__security__REVERSE_PROXY_LIMIT: "1"
   # OFF UNTIL ROADMAP 8 ARGUES THEM ON: a runner executes whatever a repository tells it to, and a
   # registry is a fourth credential plane.
   GITEA__actions__ENABLED: "false"
@@ -468,6 +497,14 @@ services:
       # container. Same DO UPDATE reasoning as GRAFANA_PUBLIC_URL above: hardcoding it in the
       # migration would rewrite a corrected row on every boot.
       STUDIO_PUBLIC_URL: ${STUDIO_PUBLIC_URL:-http://127.0.0.1:${STUDIO_PORT:-54323}}
+      # The forge's OAuth client, hashed into auth.oauth_clients by 0094. The gateway presents the
+      # same plaintext at the token endpoint. Absent, 0094 warns, registers nothing, and the forge's
+      # door stays shut.
+      GITEA_OAUTH_CLIENT_SECRET: ${GITEA_OAUTH_CLIENT_SECRET:-}
+      # The origin the BROWSER reaches the forge on: GITEA_ROOT_URL, the ONE value Gitea prints in
+      # clone commands, the gateway's listener redirects to, and this registration compares
+      # against. 0094 trims the trailing slash. Same DO UPDATE reasoning as GRAFANA_PUBLIC_URL.
+      GITEA_PUBLIC_URL: ${GITEA_ROOT_URL:-http://localhost:${GITEA_HTTP_PORT:-3003}/}
       # Node-RED's own OAuth client, hashed into auth.oauth_clients by 0003. Node-RED reads the
       # same plaintext from its own environment (see the x-nodered-auth-env anchor above).
       NODERED_OAUTH_CLIENT_SECRET: ${NODERED_OAUTH_CLIENT_SECRET:-}
@@ -504,7 +541,7 @@ services:
           echo \"Executing migration $$f...\";
           attempt=1;
           while :; do
-            if PGOPTIONS=\"-c lock_timeout=5s\" psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v studio_oauth_client_secret=\"$$STUDIO_OAUTH_CLIENT_SECRET\" -v studio_public_url=\"$$STUDIO_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$${SUPABASE_PUBLISHABLE_KEY:-$$SUPABASE_ANON_KEY}\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
+            if PGOPTIONS=\"-c lock_timeout=5s\" psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v studio_oauth_client_secret=\"$$STUDIO_OAUTH_CLIENT_SECRET\" -v studio_public_url=\"$$STUDIO_PUBLIC_URL\" -v gitea_oauth_client_secret=\"$$GITEA_OAUTH_CLIENT_SECRET\" -v gitea_public_url=\"$$GITEA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$${SUPABASE_PUBLISHABLE_KEY:-$$SUPABASE_ANON_KEY}\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
             cat /tmp/migration.log;
             # RETRIED ONLY ON LOCK CONTENTION, never on anything else. Every migration here is
             # idempotent and is replayed on every boot already, so re-running one is safe by
@@ -949,6 +986,22 @@ services:
       SUPABASE_PUBLIC_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
       # The name Envoy DIALS for Studio. Compose has the container; the chart names its Service.
       STUDIO_UPSTREAM_ADDRESS: ${STUDIO_UPSTREAM_ADDRESS:-supabase-studio}
+      # ------------------------------------------------------------------------------------------
+      # THE FORGE LISTENER'S INPUTS. The signing secret and SUPABASE_PUBLIC_URL above serve it too.
+      # ------------------------------------------------------------------------------------------
+      # The OAuth client 0094 registers, and the key that signs the forge's session cookie. Both
+      # from scripts/setup.mjs. Unset is a forge nobody can sign into, not a broken boot -- the
+      # same fail-closed branch as Studio's, below.
+      GITEA_OAUTH_CLIENT_SECRET: ${GITEA_OAUTH_CLIENT_SECRET:-}
+      GITEA_PROXY_HMAC_SECRET: ${GITEA_PROXY_HMAC_SECRET:-}
+      # WHERE THE BROWSER REACHES THE FORGE, which is this gateway's port and not the container's.
+      # ONE VALUE WITH GITEA__server__ROOT_URL, deliberately: Gitea prints it in clone commands,
+      # 0094 registers <this>/oauth2/callback, and the listener sends the browser to the same
+      # address. The trailing slash Gitea wants is trimmed below, so the value GoTrue compares and
+      # the value Gitea prints come from one variable rather than two that must agree.
+      GITEA_PUBLIC_URL: ${GITEA_ROOT_URL:-http://localhost:${GITEA_HTTP_PORT:-3003}/}
+      # The name Envoy DIALS for the forge. Compose has the container; the chart names its Service.
+      GITEA_UPSTREAM_ADDRESS: ${GITEA_UPSTREAM_ADDRESS:-gitea}
     volumes:
       - ./supabase/envoy.yaml:/template/envoy.yaml:ro
       - envoy_config:/config
@@ -1055,6 +1108,33 @@ services:
           "      secret: { inline_string: \"$$STUDIO_PROXY_HMAC_SECRET\" }" \
           > /config/studio-hmac-secret.yaml
 
+        # THE FORGE'S DOOR, the same way. Unset leaves a forge nobody can sign into on a stack that
+        # otherwise runs -- and since the forge's port now IS this listener, that is the posture an
+        # upgraded stack holds until `node scripts/setup.mjs` has run.
+        if [ -z "$$GITEA_OAUTH_CLIENT_SECRET" ] || [ -z "$$GITEA_PROXY_HMAC_SECRET" ]; then
+          echo 'WARNING: GITEA_OAUTH_CLIENT_SECRET / GITEA_PROXY_HMAC_SECRET are not set. The forge will answer every request with a login it cannot complete. Run: node scripts/setup.mjs' >&2
+          GITEA_OAUTH_CLIENT_SECRET='unconfigured'
+          GITEA_PROXY_HMAC_SECRET=$$(tr -dc 'a-f0-9' < /dev/urandom | head -c 64)
+        fi
+        printf '%s\n' \
+          'resources:' \
+          '  - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret' \
+          '    name: forge-oauth-client-secret' \
+          '    generic_secret:' \
+          "      secret: { inline_string: \"$$GITEA_OAUTH_CLIENT_SECRET\" }" \
+          > /config/forge-client-secret.yaml
+        printf '%s\n' \
+          'resources:' \
+          '  - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret' \
+          '    name: forge-proxy-hmac-secret' \
+          '    generic_secret:' \
+          "      secret: { inline_string: \"$$GITEA_PROXY_HMAC_SECRET\" }" \
+          > /config/forge-hmac-secret.yaml
+
+        # GITEA_ROOT_URL carries a trailing slash because Gitea wants one; the redirect_uri must
+        # not, or `<url>//oauth2/callback` fails as `invalid redirect_uri` at the END of a login.
+        GITEA_PUBLIC_URL="$${GITEA_PUBLIC_URL%/}"
+
         # `|` as the delimiter, because every value here contains `/`.
         sed -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
             -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$$SUPABASE_SERVICE_ROLE_KEY|g" \
@@ -1067,6 +1147,8 @@ services:
             -e "s|__SUPABASE_PUBLIC_URL__|$$SUPABASE_PUBLIC_URL|g" \
             -e "s|__STUDIO_PUBLIC_URL__|$$STUDIO_PUBLIC_URL|g" \
             -e "s|__STUDIO_UPSTREAM_ADDRESS__|$$STUDIO_UPSTREAM_ADDRESS|g" \
+            -e "s|__GITEA_PUBLIC_URL__|$$GITEA_PUBLIC_URL|g" \
+            -e "s|__GITEA_UPSTREAM_ADDRESS__|$$GITEA_UPSTREAM_ADDRESS|g" \
             -e "s|__SUPABASE_JWT_SECRET_B64URL__|$$JWT_B64URL|g" \
             /template/envoy.yaml > /config/envoy.yaml
 
@@ -1129,6 +1211,10 @@ services:
       # asked for this. It is safe to publish only because the listener behind it authenticates:
       # remove the filters and this line is the vulnerability the old comment described.
       - "${STUDIO_PORT:-54323}:8001"
+      # THE FORGE'S DOOR, ON THE PORT THE FORGE USED TO PUBLISH ITSELF, for the reason Studio's is:
+      # GITEA_ROOT_URL names this port, the README's table names it, and no appliance ever used it
+      # (a clone is SSH on 2222). The `gitea` service publishes SSH alone now.
+      - "${GITEA_HTTP_PORT:-3003}:8002"
     volumes:
       - envoy_config:/etc/envoy:ro
     command:
@@ -1142,6 +1228,8 @@ services:
         aliases:
           # See the header. Every in-network consumer keeps resolving `supabase-kong`.
           - supabase-kong
+      # The door onto the forge's HTTP port -- see the `forge` network at the foot of this file.
+      forge: {}
     # `/ready` on the admin listener answers 200 only once the listener is serving -- the same
     # question `kong health` answered: "can this container route a request yet", not "is an
     # upstream up". Envoy exits non-zero on a config it cannot parse, so a bad config is a restart
@@ -1278,6 +1366,13 @@ services:
         export GW_BUNDLE_FLOW_SYNC="$$(cat $$T/flow-sync.mjs)"
         export GW_BUNDLE_README="$$(cat $$T/README.md)"
         exec edge-runtime start --main-service /home/deno/functions/main
+    # BOTH NETWORKS. Everything above is on the default network; enroll-gateway also creates a
+    # gateway's repository through the forge's API, which is reachable only on `forge`. The API
+    # ignores the identity header (measured), so this is a path to a basic-auth API and not a
+    # second door -- see the network's note at the foot of this file.
+    networks:
+      - default
+      - forge
     depends_on:
       supabase-db-init:
         condition: service_completed_successfully
@@ -2189,11 +2284,14 @@ services:
   #
   # Gitea ships a full user model -- users, organisations, teams, per-repository permissions -- and
   # having it available is exactly what makes it easy to start authorising people here. Roles live
-  # in Postgres (`user_roles`, `has_role()`), the approvals queue lives in Postgres, and this forge
-  # is reached through ONE machine account. No Operator holds a login, and Gitea never learns what
-  # `gitops:manage` means. `DISABLE_REGISTRATION` and `REQUIRE_SIGNIN_VIEW` below are that decision
-  # in enforceable form; the second is what stops an unauthenticated reader browsing every
-  # gateway's flow.
+  # in Postgres (`user_roles`, `has_role()`), the approvals queue lives in Postgres, and the
+  # PLATFORM reaches this forge through ONE machine account. Two roles hold a login of their own --
+  # Administrator and Shopfloor_Manager, through the gateway's `forge` listener, which is the only
+  # door -- and they are the two that author and review flows. No Operator or Auditor holds one,
+  # no shopfloor person is a Gitea user, and Gitea never learns what `gitops:manage` means: it
+  # learns which team a verified role lands in, which gitea-init.sh builds from the same two
+  # roles. `DISABLE_REGISTRATION` and `REQUIRE_SIGNIN_VIEW` below are that decision in enforceable
+  # form; the second is what stops an unauthenticated reader browsing every gateway's flow.
   #
   # SQLITE, NOT THE PLATFORM DATABASE, and it is the same call Grafana's backend already makes here.
   # Pointing Gitea at supabase-db would put a forge's tables, migrations and connection pool inside
@@ -2269,10 +2367,13 @@ services:
       <<: *gitea-env
     volumes:
       - gitea_data:/data
+    # THE FORGE NETWORK AND NOTHING ELSE. See the network's own note at the foot of this file: with
+    # reverse-proxy authentication on, whoever can reach 3000 can sign in as anybody, so the set of
+    # containers that can reach it is the access control. The gateway publishes the HTTP door on
+    # GITEA_HTTP_PORT (3003); this container publishes SSH alone.
+    networks:
+      - forge
     ports:
-      # 3000 in the container, published on 3003: the frontend holds 3000 on the host and Grafana
-      # took 3002.
-      - "${GITEA_HTTP_PORT:-3003}:3000"
       # NOT LOOPBACK, unlike Prometheus and Loki below, and the difference is who the client is.
       # Those are read by an engineer, who can tunnel; this is dialled by appliances on the plant
       # network, which is the entire point of it. What protects it is that every repository is
@@ -2652,6 +2753,23 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
+
+# =================================================================================================
+# THE FORGE NETWORK. Gitea's HTTP port is reachable from the gateway and the edge runtime, and from
+# nothing else -- and that is the whole access control on the forge's login, not a tidiness.
+#
+# With reverse-proxy authentication on, Gitea signs in whoever the X-WEBAUTH-USER header names, from
+# ANY peer: REVERSE_PROXY_TRUSTED_PROXIES was measured against 1.27.3 and governs X-Forwarded-For
+# only. A container on the default network that could reach gitea:3000 could become any user by
+# sending one header -- and Node-RED runs whatever JavaScript a flow author wrote. So Gitea is on
+# THIS network alone. The gateway joins it to be the door; the edge runtime joins it because
+# enroll-gateway creates repositories through the API, which ignores the header (measured); SSH is
+# published from it for the appliances. Nothing else resolves the name.
+#
+# NOT `internal: true`. An internal network cannot publish ports, and 2222 is the fleet's transport.
+# =================================================================================================
+networks:
+  forge: {}
 
 volumes:
   pgdata:

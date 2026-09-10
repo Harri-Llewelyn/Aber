@@ -232,6 +232,12 @@ const generated = {
   // login nobody can complete, on a stack that otherwise looks perfectly healthy.
   STUDIO_OAUTH_CLIENT_SECRET: hex(32),
   STUDIO_PROXY_HMAC_SECRET: hex(32),
+  // The forge's door (0094, and the `forge` listener in supabase/envoy.yaml): the same two halves
+  // as Studio's, for the same reasons, and generated for the same reason -- the forge's HTTP port
+  // IS that listener, so an unset pair is a forge nobody can sign into on a stack that reports
+  // healthy.
+  GITEA_OAUTH_CLIENT_SECRET: hex(32),
+  GITEA_PROXY_HMAC_SECRET: hex(32),
   // The bearer token supabase-functions presents to the gateway-credential service. Its own value
   // for the same reason as the one above: that service can mint a Mosquitto account for any edge
   // node, and mosquitto.acl makes an account the ability to publish telemetry as that gateway --

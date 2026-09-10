@@ -194,7 +194,9 @@ const SERVICE_GROUPS = [
     title: 'Applications & User Interfaces',
     description: 'The things with a front door. These are meant to be opened — a link here is where '
       + 'you go to do something the dashboard does not do itself.',
-    types: ['MONITORING', 'EDGE_NODE', 'GRAPHICAL_UI', 'DOCUMENTATION']
+    // SOURCE_CONTROL is the forge (0094): a place to review a change, which is a front door in
+    // exactly this sense and a different kind of thing from a database console.
+    types: ['MONITORING', 'EDGE_NODE', 'GRAPHICAL_UI', 'SOURCE_CONTROL', 'DOCUMENTATION']
   },
   {
     title: 'Ingestion & Messaging',

@@ -1,7 +1,7 @@
 # =================================================================================================
 # Envoy gateway -- a translation of supabase/kong.yml, route for route.
 #
-# THIS IS A TEMPLATE, NOT A CONFIG. Twelve `__UPPER_SNAKE__` placeholders are substituted at boot by
+# THIS IS A TEMPLATE, NOT A CONFIG. Fourteen `__UPPER_SNAKE__` placeholders are substituted at boot by
 # `supabase-envoy-init` on Compose and by an initContainer on Kubernetes -- the two share this file
 # and not the substituter, which is why `scripts/check-gateway-surface.mjs` asserts that both know
 # every one of them. A real key committed here would be a leaked key, not a config change, and the
@@ -13,7 +13,9 @@
 # carry deployment facts (`__REALTIME_UPSTREAM_HOST__`, `__REALTIME_UPSTREAM_ADDRESS__`,
 # `__CORS_ORIGINS__`), and four belong to the STUDIO LISTENER (`__SUPABASE_PUBLIC_URL__`,
 # `__STUDIO_PUBLIC_URL__`, `__STUDIO_UPSTREAM_ADDRESS__`, and `__SUPABASE_JWT_SECRET_B64URL__`,
-# the JWKS key the session tokens it admits are verified against).
+# the JWKS key the session tokens it admits are verified against), and two to the FORGE LISTENER
+# (`__GITEA_PUBLIC_URL__`, `__GITEA_UPSTREAM_ADDRESS__`), which shares the first and the last of
+# Studio's four.
 #
 # -------------------------------------------------------------------------------------------------
 # WHAT THIS IS, AND WHAT IT IS PART-WAY THROUGH
@@ -33,6 +35,10 @@
 # on an Administrator session rather than published open: Studio hands whoever reaches it the
 # project's `jwt_secret` and both service API keys, and its SQL editor runs as the database owner.
 # The same door closes `/api/mcp`, which shares that port and answered `initialize` unauthenticated.
+#
+# AND A THIRD, WHICH IS THE FORGE'S. Gitea cannot be an OIDC client of GoTrue (roadmap 7 records the
+# three measured reasons), so its login is this gateway's: the same three filters as Studio's door,
+# admitting Administrator and Shopfloor_Manager, handing the verified identity to Gitea as headers.
 #
 # -------------------------------------------------------------------------------------------------
 # THE FIVE TRANSLATION TRAPS, each of which produces a stack that looks fine and is not:
@@ -944,6 +950,237 @@ static_resources:
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
+    # ===========================================================================================
+    # THE FORGE LISTENER. Gitea's login, which Gitea cannot be given any other way.
+    #
+    # THE SAME THREE FILTERS AS THE STUDIO DOOR ABOVE, and that is the whole argument for it. Gitea's
+    # only general-purpose authentication source is `openidConnect`, configured from a discovery
+    # URL -- and GoTrue's discovery document carries an empty issuer and RELATIVE endpoint paths, so
+    # Gitea resolves `/oauth/authorize` against ITSELF and sends the browser to a 404. Its request
+    # also carries `scope=openid`, which GoTrue refuses on this HS256 stack. Both were measured
+    # against the running forge; roadmap 7 records them. This listener never speaks OIDC: the
+    # oauth2 filter runs the same code flow Studio's does, `jwt_authn` verifies the access token
+    # locally, and the identity reaches Gitea as HEADERS through its reverse-proxy authentication.
+    #
+    # WHO GETS IN: Administrator and Shopfloor_Manager, the two roles that author and review flows.
+    # Operator and Auditor complete the login and meet the 403 below, exactly as they would at
+    # Studio. Authorisation stays in Postgres -- the role in the token is `user_roles` mirrored by
+    # `custom_access_token_hook` -- and what a person may DO once inside is Gitea's own team model,
+    # which gitea-init.sh builds from the same two roles.
+    #
+    # THE HEADERS ARE THE CREDENTIAL, AND THIS IS WHERE THAT HAS TO BE UNDERSTOOD. With reverse-proxy
+    # authentication on, Gitea signs in whoever `X-WEBAUTH-USER` names, from ANY peer:
+    # `REVERSE_PROXY_TRUSTED_PROXIES` was measured and governs only X-Forwarded-For, not this. So
+    # the control is not a setting in Gitea -- it is that nothing but this listener and the edge
+    # runtime can reach Gitea's HTTP port at all (the `forge` network on Compose, the NetworkPolicy
+    # edges on Kubernetes), and that Gitea's API IGNORES the header (`..._AUTHENTICATION_API` is
+    # off, and measured: basic auth wins over a forged header on `/api/v1/user`). The two routes
+    # below OVERWRITE the identity headers with the verified token's claims, or REMOVE them, so a
+    # value a browser sent never reaches Gitea either way.
+    #
+    # THE USERNAME IS THE TOKEN'S `sub`, NOT THE EMAIL. Gitea refuses `@` in a username -- measured:
+    # `name is invalid ... must be valid alpha or numeric or dash(-_) or dot characters` -- and the
+    # subject is stable across an email change, which is the property an audit trail wants. The
+    # email rides in its own header and the full name carries the email again so the forge's UI
+    # shows a person rather than a UUID.
+    #
+    # TWO PATHS PASS THROUGH THE DOOR WITHOUT A SESSION, and both are exactly the surface the forge
+    # had when its port was published bare:
+    #   * `/api/` -- Gitea's API authenticates itself (basic auth, tokens) and ignores the identity
+    #     header. The enrolment suite and an engineer's scripts reach it with a Gitea credential,
+    #     as they did before; a browser session gets no further here than it did at the bare port.
+    #   * `/assets/ssh_host_key.pub` -- the forge's PUBLIC host key, which gitea-init.sh publishes
+    #     so an appliance can verify the forge. It is handed to anyone who opens a TCP connection
+    #     to port 22 anyway; the suite asserts it is served without a login, and it is.
+    # Each exemption is written THREE TIMES -- the oauth2 filter's pass-through, a jwt_authn rule
+    # with no requirement, and an RBAC permission -- because the three filters do not share a
+    # matcher. Add a fourth path and add it in all three places, or the door opens in one filter and
+    # closes in the next, which reads as a broken proxy.
+    #
+    # THE COOKIES ARE RENAMED, and on Compose that is load-bearing rather than tidy: browsers scope
+    # cookies by HOST and not by PORT, so on `localhost` this listener and Studio's share a cookie
+    # jar. With the default names each door would find the other's HMAC cookie, fail to verify it,
+    # and restart the login -- two consoles that sign each other out. On Kubernetes the hostnames
+    # differ and nothing here is exercised, which is why it would have been found on a laptop.
+    #
+    # NOT `git clone` OVER HTTP. A git client cannot complete a browser login, so the smart-HTTP
+    # paths end at a redirect. That is intended: a person clones over SSH with their own key, and an
+    # appliance with its read-only deploy key, on 22 -- which this listener does not touch.
+    # ===========================================================================================
+    - name: forge
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8002 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: forge
+                # Who opened the forge, from the verified token, for the reason the studio log
+                # gives. `%REQ_WITHOUT_QUERY%` for the same reason too: the callback carries the
+                # authorization code in its query string.
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        formatters:
+                          - name: envoy.formatter.req_without_query
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.extensions.formatter.req_without_query.v3.ReqWithoutQuery
+                        text_format_source:
+                          inline_string: "acs-forge method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% user=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)% role=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:app_metadata:role)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
+                route_config:
+                  name: forge
+                  virtual_hosts:
+                    - name: forge
+                      domains: ["*"]
+                      routes:
+                        # THE API: no session, no identity headers. Whatever a client sent under
+                        # these names is dropped before Gitea sees it; what Gitea authenticates is
+                        # the Authorization header the client carried.
+                        - match: { prefix: "/api/" }
+                          route:
+                            cluster: gitea
+                            timeout: 0s
+                          request_headers_to_remove:
+                            - x-webauth-user
+                            - x-webauth-email
+                            - x-webauth-fullname
+                        # EVERYTHING ELSE: the verified claims, written over whatever arrived.
+                        # OVERWRITE rather than append, because a duplicate header is a request
+                        # Gitea would read the FIRST value of -- and the first would be the
+                        # browser's. A missing claim renders empty, and Envoy drops an empty
+                        # header rather than sending an empty value.
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: gitea
+                            # Diffs and archives can take a while to render; nothing on this
+                            # listener holds a response open indefinitely.
+                            timeout: 120s
+                          request_headers_to_add:
+                            - header:
+                                key: x-webauth-user
+                                value: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:sub)%"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                            - header:
+                                key: x-webauth-email
+                                value: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)%"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                            - header:
+                                key: x-webauth-fullname
+                                value: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)%"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                http_filters:
+                  # 1. THE DOOR. Identical in shape to Studio's; see the notes there for every
+                  #    field this does not re-explain.
+                  - name: envoy.filters.http.oauth2
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
+                      config:
+                        authorization_endpoint: __SUPABASE_PUBLIC_URL__/auth/v1/oauth/authorize
+                        token_endpoint:
+                          cluster: auth-v1
+                          uri: http://supabase-auth:9999/oauth/token
+                          timeout: 10s
+                        redirect_uri: __GITEA_PUBLIC_URL__/oauth2/callback
+                        redirect_path_matcher: { path: { exact: /oauth2/callback } }
+                        signout_path: { path: { exact: /oauth2/signout } }
+                        # The two exemptions, first of three places. A request matching either
+                        # skips the flow entirely and reaches the filters below with no token.
+                        pass_through_matcher:
+                          - name: ":path"
+                            string_match: { prefix: "/api/" }
+                          - name: ":path"
+                            string_match: { exact: "/assets/ssh_host_key.pub" }
+                        # Registered `client_secret_basic` by 0094, as Studio's is by 0081.
+                        auth_type: BASIC_AUTH
+                        auth_scopes: [email, profile]
+                        forward_bearer_token: true
+                        use_refresh_token: true
+                        # The same session cap as Studio's, for the same reason: this cookie is
+                        # verified locally and outlives a dashboard sign-out, so the cap is what
+                        # re-derives who is sitting at the keyboard.
+                        default_refresh_token_expires_in: 3600s
+                        credentials:
+                          client_id: c0ffee00-0000-4000-8000-000000000004
+                          token_secret:
+                            name: forge-oauth-client-secret
+                            sds_config:
+                              path_config_source: { path: /etc/envoy/forge-client-secret.yaml }
+                          hmac_secret:
+                            name: forge-proxy-hmac-secret
+                            sds_config:
+                              path_config_source: { path: /etc/envoy/forge-hmac-secret.yaml }
+                          # Distinct from Studio's, for the reason in the header.
+                          cookie_names:
+                            bearer_token: ForgeBearerToken
+                            oauth_hmac: ForgeOauthHMAC
+                            oauth_expires: ForgeOauthExpires
+                            id_token: ForgeIdToken
+                            refresh_token: ForgeRefreshToken
+                            oauth_nonce: ForgeOauthNonce
+                            code_verifier: ForgeCodeVerifier
+                  # 2. THE TOKEN. The same JWKS as Studio's -- one signing secret, one trust domain.
+                  #    The token is stripped after verification (the provider's `forward` defaults
+                  #    to false), so Gitea never sees a Supabase JWT in an Authorization header and
+                  #    never tries to read one as a token of its own.
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      providers:
+                        gotrue:
+                          audiences: [authenticated]
+                          local_jwks:
+                            inline_string: '{"keys":[{"kty":"oct","alg":"HS256","k":"__SUPABASE_JWT_SECRET_B64URL__"}]}'
+                          payload_in_metadata: jwt_payload
+                      rules:
+                        # The two exemptions, second of three places. FIRST, because rules match
+                        # in order and the catch-all below would otherwise demand a token here.
+                        - match: { prefix: "/api/" }
+                        - match: { path: "/assets/ssh_host_key.pub" }
+                        - match: { prefix: "/" }
+                          requires: { provider_name: gotrue }
+                  # 3. THE PRIVILEGE. Two roles, and the two exemptions a third time.
+                  - name: envoy.filters.http.rbac
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                      rules:
+                        action: ALLOW
+                        policies:
+                          administrators_and_managers:
+                            permissions: [{ any: true }]
+                            principals:
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path:
+                                      - { key: jwt_payload }
+                                      - { key: app_metadata }
+                                      - { key: role }
+                                    value: { string_match: { exact: Administrator } }
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path:
+                                      - { key: jwt_payload }
+                                      - { key: app_metadata }
+                                      - { key: role }
+                                    value: { string_match: { exact: Shopfloor_Manager } }
+                          the_api_authenticates_itself:
+                            permissions:
+                              - url_path: { path: { prefix: "/api/" } }
+                            principals: [{ any: true }]
+                          the_host_key_is_public:
+                            permissions:
+                              - url_path: { path: { exact: "/assets/ssh_host_key.pub" } }
+                            principals: [{ any: true }]
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
   # -----------------------------------------------------------------------------------------------
   # Clusters. One per upstream Kong names, and no others -- see "what is deliberately absent".
   #
@@ -1033,3 +1270,18 @@ static_resources:
               - endpoint:
                   address:
                     socket_address: { address: __STUDIO_UPSTREAM_ADDRESS__, port_value: 3000 }
+
+
+    # The forge, for the forge listener above and nothing else. Target-specific address for the
+    # same reason as the two before it: Compose dials the container, the chart names its Service.
+    # HTTP only -- SSH on 22 is the appliances' transport and never passes through this gateway.
+    - name: gitea
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: gitea
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: __GITEA_UPSTREAM_ADDRESS__, port_value: 3000 }

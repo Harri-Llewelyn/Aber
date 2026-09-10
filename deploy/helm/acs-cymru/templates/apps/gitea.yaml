@@ -63,6 +63,27 @@ shares the same block through a YAML anchor, for the same reason.
   value: "true"
 - name: GITEA__repository__DEFAULT_PRIVATE
   value: private
+# THE LOGIN, WHICH IS THE GATEWAY'S `forge` LISTENER AND NOT GITEA'S OWN. The argument and the
+# measurements are on the same lines in docker-compose.yml; this block matches it line for line.
+# The one thing the Kubernetes shape has to add is the NetworkPolicy edge list: the identity
+# header is trusted from ANY peer (REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For only,
+# measured), so the gateway and the edge runtime are the only pods allowed to reach port 3000.
+- name: GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_EMAIL
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_FULL_NAME
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION_API
+  value: "false"
+- name: GITEA__service__ENABLE_PASSWORD_SIGNIN_FORM
+  value: "false"
+- name: GITEA__security__REVERSE_PROXY_TRUSTED_PROXIES
+  value: "*"
+- name: GITEA__security__REVERSE_PROXY_LIMIT
+  value: "1"
 # OFF UNTIL ROADMAP 8 ARGUES THEM ON: a runner executes whatever a repository tells it
 # to, and a registry is a fourth credential plane.
 - name: GITEA__actions__ENABLED

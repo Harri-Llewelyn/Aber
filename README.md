@@ -405,7 +405,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v14.12` | — |
 | `supabase-envoy-init` | `acs-cymru_supabase_envoy_init` | `alpine:3.24` | — |
-| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.39.1` | `54321:8000`, `54323:8001` (Studio, behind a login) |
+| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.39.1` | `54321:8000`, `54323:8001` (Studio, behind a login), `3003:8002` (the forge, behind a login) |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
 | `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.102.3` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.60.4` | — |
@@ -427,7 +427,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
 | `gitea-init` | `acs-cymru_gitea_init` | `gitea/gitea:1.27.3` | — |
-| `gitea` | `acs-cymru_gitea` | `gitea/gitea:1.27.3` | `3003:3000`, `2222:22` |
+| `gitea` | `acs-cymru_gitea` | `gitea/gitea:1.27.3` | `2222:22` (HTTP is behind the gateway's forge listener on `3003`) |
 | `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.2.0` | `3002:3000` |
 | `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.32.14` | `8088:8080` |
 | `prometheus` | `acs-cymru_prometheus` | `prom/prometheus:v3.14.0` | `127.0.0.1:9090:9090` |

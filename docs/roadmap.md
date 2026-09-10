@@ -1384,13 +1384,41 @@ this section costed.
   the forge's own redirect URI — the forge is a different hostname from Studio, so it is a second
   listener and a second client, not a second route on the first.
 
-**FOUR THINGS TO MEASURE BEFORE ANY OF IT IS BELIEVED**, because each is the kind of detail that has
-been wrong on first reading everywhere else in this item: the exact header names Gitea reads for the
-reverse-proxy user and email, and that Envoy strips them inbound; that auto-registration accepts an
-email as the username and does not send the new user to a "complete your profile" page the proxy
-cannot see past; that the `oauth2` filter's cookies are scoped to the forge's hostname and not
-shared with Studio's; and that `REQUIRE_SIGNIN_VIEW` still exempts `/assets/`, which
-`enroll-gateway` reads the host key from with no session.
+**BUILT, 2026-09-10, AND FOUR THINGS WERE MEASURED FIRST, of which two changed the design.** The
+listener is `forge` in `supabase/envoy.yaml`, on 8002, published where the forge's port used to be;
+`0094` registers the client and puts the forge in the Directory; `gitea-init.sh` is untouched. Each
+measurement was against a throwaway `gitea/gitea:1.27.3`, then the live stack:
+
+* **`REVERSE_PROXY_TRUSTED_PROXIES` DOES NOT GATE THE IDENTITY HEADER.** A peer *outside* the
+  configured CIDR, sending `X-WEBAUTH-USER`, was signed in. The setting governs `X-Forwarded-For`
+  and nothing else, so the boundary is the NETWORK: on Compose, Gitea lives on a `forge` network that
+  only the gateway and the edge runtime join (Node-RED can no longer resolve the name; verified);
+  on Kubernetes, the NetworkPolicy edge list admits the same two pods and no others. What makes the
+  edge runtime's access safe is that the API IGNORES the header: with the API switch off, basic auth
+  won over a forged header on `/api/v1/user`. **This is also why a route naming `gitea:3000` must
+  never exist on an Ingress** -- the chart's gitea route now names the gateway's listener, as
+  Studio's does.
+* **An email is not a username.** Gitea refused `someone@example.com` with `name is invalid`; a
+  UUID was accepted. So the username is the token's `sub`, the email rides in its own header, and
+  the full name carries the email so the forge's pages show a person. No profile-completion page
+  intervened.
+* **Cookies are scoped by host, not port**, so on a laptop Studio's door and the forge's share a
+  jar. The forge listener renames all seven of its cookies; without that the two doors sign each
+  other out.
+* **`/assets/ssh_host_key.pub` is served without a session**, and the listener passes exactly that
+  path and `/api/` through the door -- the API authenticates itself and ignores the header, which is
+  precisely the surface the bare port had. `test_enroll_gateway.py`'s forge lane passes unchanged
+  through the door, all nineteen tests.
+
+**Driven end to end without a browser** -- the door's redirect, GoTrue's password grant, the
+consent endpoint, the callback, the cookies -- for all three personas: Administrator and
+Shopfloor_Manager reach the forge and are auto-registered under their `sub`; Operator completes the
+whole flow and meets the 403. A real browser session did the same for the administrator while this
+was being written, which is the more convincing of the two.
+
+**What a person cannot do yet is see a repository**, because the team placement below is not built:
+an auto-registered user owns nothing and every gateway repository is private to the machine account.
+The door is real; the room behind it is the next change.
 
 **NONE OF THIS RELAXES THE RULE THAT AUTHORISATION STAYS IN POSTGRES.** `user_roles` and `has_role()`
 decide who is let through the door; Gitea's teams decide what they may do inside it, and the two
