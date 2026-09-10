@@ -224,6 +224,14 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // authorisation decision, and one endpoint serving both would let a change made for one
   // product's role model silently move the other's.
   "nodered-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
+  // The forge listener's ext_authz step (0094): the role from user_roles, the placement through
+  // the machine account. The same three forge variables enroll-gateway holds, for the same reason.
+  "forge-membership": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "GITEA_INTERNAL_URL",
+    "GITEA_MACHINE_USER",
+    "GITEA_MACHINE_PASSWORD",
+  ],
 
   // Factory+ Directory adapter. NO SERVICE-ROLE KEY, and that is the point: it is a live read
   // API over the whole address space, so it authenticates the caller and then queries AS them,

@@ -1418,9 +1418,13 @@ Shopfloor_Manager reach the forge and are auto-registered under their `sub`; Ope
 whole flow and meets the 403. A real browser session did the same for the administrator while this
 was being written, which is the more convincing of the two.
 
-**What a person cannot do yet is see a repository**, because the team placement below is not built:
-an auto-registered user owns nothing and every gateway repository is private to the machine account.
-The door is real; the room behind it is the next change.
+**AND THE ROOM BEHIND IT IS BUILT.** Every gateway repository lives in a `gateways` organisation the
+machine account owns, with `administrators` and `managers` teams and `main` protected on every
+repository (`_shared/forge.ts`, applied at enrolment); `forge-membership` is the listener's
+`ext_authz` step and places each login in the team its `user_roles` row warrants on the way
+through -- and refuses, and unseats, a login whose role has gone since the token was signed, which is
+a revocation Studio's door cannot give. `test_forge_membership.py` drives the whole door for all
+three personas and asserts each of those.
 
 **NONE OF THIS RELAXES THE RULE THAT AUTHORISATION STAYS IN POSTGRES.** `user_roles` and `has_role()`
 decide who is let through the door; Gitea's teams decide what they may do inside it, and the two
@@ -1500,15 +1504,19 @@ once on the enrolment response, and held in plaintext nowhere central. That is t
 and it stays. Where a repository secret does fit is a per-repository CI token, such as the one that
 pushes a built adapter image to the registry.
 
-**HOW A FIRST LOGIN IS PLACED IN A TEAM.** Reverse-proxy auto-registration creates the Gitea user and
-stops; nothing native adds them to an organisation. Three candidates, in the order worth trying: an
-`ext_authz` call from the forge listener to an edge function in the pattern of `nodered-userinfo`,
-which resolves the role from `user_roles` and ensures membership through the machine account on the
-way past — one request per login, and the role decision is made by the same code that makes it for
-Node-RED; a reconciler on a timer that reads `user_roles` and converges the two teams, which is
-simpler and lags; or Gitea's own LDAP-style group synchronisation, which needs a directory this stack
-does not have. Whichever is chosen must also REMOVE: a login whose role has gone must leave the team,
-or the forge keeps a permission Postgres revoked.
+**DECIDED AND BUILT: A FIRST LOGIN IS PLACED IN A TEAM BY THE LISTENER'S `ext_authz` STEP.**
+Reverse-proxy auto-registration creates the Gitea user and stops; nothing native adds them to an
+organisation. Of the three candidates — an `ext_authz` call from the forge listener to an edge
+function in the pattern of `nodered-userinfo`; a reconciler on a timer; Gitea's LDAP-style group
+synchronisation, which needs a directory this stack does not have — the first is built, as
+`forge-membership`: one call per non-static request, the role from `user_roles`, the placement
+through the machine account, and the first request's "no such user yet" answered by the landing
+page's own follow-up requests. **It REMOVES as well**: a login whose role has gone is taken out of
+both teams and refused on its next request, so a revoked administrator's own SSH key stops working
+then rather than at a sweep. What it does not cover is a revoked login that never returns — their
+membership lingers, unusable through the door and usable over SSH only if they had added a key.
+**A sweep on a timer is the remaining piece for that case**, and it is small: the same function's
+placement logic over Gitea's user list.
 
 
 **DECIDED: THE PLATFORM PLAYBOOK IS ONE REPOSITORY THE WHOLE FLEET READS, AND GATEWAYS TRACK A TAG

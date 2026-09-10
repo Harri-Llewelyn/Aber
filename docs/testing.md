@@ -106,6 +106,14 @@ python supabase/functions/fplus-directory/test_fplus_directory.py
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/enroll-gateway/test_enroll_gateway.py
 
+# The forge's door, end to end -- the same OAuth flow a browser runs, for each seeded persona --
+# and the room behind it: which team the forge put them in, that an Operator completes the flow and
+# meets the 403, that a forged identity header from outside is not a login, and that a role removed
+# mid-session is refused and unseated on the next request. Needs the forge and one enrolled
+# gateway (which creates the organisation), and skips without them.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/forge-membership/test_forge_membership.py
+
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
 # integrity, and that the embedded token is the one the database will accept.
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \

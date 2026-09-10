@@ -153,8 +153,8 @@ function authHeader(cfg: ForgeConfig): string {
   return `Basic ${btoa(`${cfg.user}:${cfg.password}`)}`;
 }
 
-/** One call to the forge's API as the machine account. */
-async function forge(
+/** One call to the forge's API as the machine account. Shared with forge-membership. */
+export async function forgeApi(
   cfg: ForgeConfig,
   method: string,
   path: string,
@@ -189,9 +189,9 @@ async function refused(what: string, response: Response): Promise<Error> {
 export async function ensureOrganisation(
   cfg: ForgeConfig,
 ): Promise<Record<ForgeTeamRole, number>> {
-  const org = await forge(cfg, "GET", `/orgs/${FORGE_ORGANISATION}`);
+  const org = await forgeApi(cfg, "GET", `/orgs/${FORGE_ORGANISATION}`);
   if (org.status === 404) {
-    const created = await forge(cfg, "POST", "/orgs", {
+    const created = await forgeApi(cfg, "POST", "/orgs", {
       username: FORGE_ORGANISATION,
       full_name: "Gateways",
       description: "One repository per gateway. Managed by ACS-Cymru.",
@@ -204,7 +204,7 @@ export async function ensureOrganisation(
     throw await refused(`could not read organisation '${FORGE_ORGANISATION}'`, org);
   }
 
-  const listed = await forge(cfg, "GET", `/orgs/${FORGE_ORGANISATION}/teams?limit=50`);
+  const listed = await forgeApi(cfg, "GET", `/orgs/${FORGE_ORGANISATION}/teams?limit=50`);
   if (!listed.ok) throw await refused("could not list the organisation's teams", listed);
   const teams = await listed.json() as { id: number; name: string }[];
 
@@ -216,7 +216,7 @@ export async function ensureOrganisation(
       ids[role] = existing.id;
       continue;
     }
-    const created = await forge(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/teams`, {
+    const created = await forgeApi(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/teams`, {
       name,
       description: `${role.replace("_", " ")}s of the ACS-Cymru dashboard, placed here by forge-membership.`,
       permission: "write",
@@ -249,15 +249,15 @@ async function ensureRepository(
   // in the organisation while `acs_platform/<name>` still exists does not conflict -- it quietly
   // makes an empty twin, and the appliance's history stays stranded where no login can see it.
   // Found by the suite, which planted a legacy repository and got a copy back.
-  const existing = await forge(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
+  const existing = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
   if (existing.ok) return await existing.json() as ForgeRepository;
   if (existing.status !== 404) {
     throw await refused(`could not read repository '${name}'`, existing);
   }
 
-  const legacy = await forge(cfg, "GET", `/repos/${cfg.user}/${name}`);
+  const legacy = await forgeApi(cfg, "GET", `/repos/${cfg.user}/${name}`);
   if (legacy.ok) {
-    const transferred = await forge(cfg, "POST", `/repos/${cfg.user}/${name}/transfer`, {
+    const transferred = await forgeApi(cfg, "POST", `/repos/${cfg.user}/${name}/transfer`, {
       new_owner: FORGE_ORGANISATION,
     });
     if (!transferred.ok) {
@@ -270,7 +270,7 @@ async function ensureRepository(
     throw await refused(`could not read '${cfg.user}/${name}'`, legacy);
   }
 
-  const created = await forge(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/repos`, {
+  const created = await forgeApi(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/repos`, {
     name,
     description: `Node-RED flow for gateway '${gatewayName}'. Managed by ACS-Cymru.`,
     // Belt and braces: the forge sets FORCE_PRIVATE, so a public repository cannot be created
@@ -286,7 +286,7 @@ async function ensureRepository(
   // what the winner made. A repository outliving its appliance is the point rather than an
   // accident: a gateway re-flashed after a failed SD card gets its flow history back.
   if (created.status === 409) {
-    const raced = await forge(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
+    const raced = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
     if (raced.ok) return await raced.json() as ForgeRepository;
   }
   throw await refused(`could not create repository '${name}'`, created);
@@ -309,12 +309,12 @@ async function ensureRepository(
  * tuned it, rather than reset to this file's idea on every re-enrolment.
  */
 async function ensureBranchProtection(cfg: ForgeConfig, name: string): Promise<void> {
-  const existing = await forge(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`);
+  const existing = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`);
   if (existing.ok) return;
   if (existing.status !== 404) {
     throw await refused(`could not read the branch protection on '${name}'`, existing);
   }
-  const created = await forge(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections`, {
+  const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections`, {
     branch_name: "main",
     enable_push: false,
     enable_approvals_whitelist: true,
@@ -338,7 +338,7 @@ async function ensureDeployKey(
   sparkplugId: string,
   publicKey: string,
 ): Promise<void> {
-  const response = await forge(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${repo}/keys`, {
+  const response = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${repo}/keys`, {
     title: `gateway ${sparkplugId}`,
     key: publicKey,
     // NEVER false. See the header: a writable key lets an appliance author what it will later be

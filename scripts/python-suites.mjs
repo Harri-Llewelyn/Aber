@@ -575,6 +575,17 @@ export const SUITES = {
       'the 503 rollback path. SKIPS ALL SEVENTEEN CHECKS without a stack, which is why it is not ' +
       'in the unit lane.',
   },
+  'supabase/functions/forge-membership/test_forge_membership.py': {
+    lanes: ['stack'],
+    why:
+      "The forge's door, end to end: the gateway's redirect, the password grant, the consent " +
+      'endpoint, the callback and the cookies, for each seeded persona -- then what the forge did ' +
+      'with them. Administrator and Shopfloor_Manager land in their teams; an Operator completes ' +
+      'the whole flow and meets the 403; a forged identity header from outside is not a login; and ' +
+      'a role removed from user_roles mid-session is refused and unseated on the next request. ' +
+      'Needs the stack, the forge, the seeded personas AND the gateways organisation (one enrolment ' +
+      'creates it), and skips without any of them.',
+  },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],
     why:

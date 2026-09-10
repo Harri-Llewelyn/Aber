@@ -1038,7 +1038,8 @@ static_resources:
                       routes:
                         # THE API: no session, no identity headers. Whatever a client sent under
                         # these names is dropped before Gitea sees it; what Gitea authenticates is
-                        # the Authorization header the client carried.
+                        # the Authorization header the client carried. No placement step either:
+                        # there is no verified token to place.
                         - match: { prefix: "/api/" }
                           route:
                             cluster: gitea
@@ -1047,17 +1048,55 @@ static_resources:
                             - x-webauth-user
                             - x-webauth-email
                             - x-webauth-fullname
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                        # STATIC ASSETS: a session, the identity headers, and NO placement step --
+                        # a page pulls dozens of these and none of them is a moment anybody's
+                        # membership could change. The public host key is under this prefix and
+                        # passes the door above; it lands here with no token and no headers.
+                        - match: { prefix: "/assets/" }
+                          route:
+                            cluster: gitea
+                            timeout: 60s
+                          request_headers_to_remove:
+                            - authorization
+                          request_headers_to_add:
+                            - header:
+                                key: x-webauth-user
+                                value: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:sub)%"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                            - header:
+                                key: x-webauth-email
+                                value: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)%"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                            - header:
+                                key: x-webauth-fullname
+                                value: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)%"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
                         # EVERYTHING ELSE: the verified claims, written over whatever arrived.
                         # OVERWRITE rather than append, because a duplicate header is a request
                         # Gitea would read the FIRST value of -- and the first would be the
                         # browser's. A missing claim renders empty, and Envoy drops an empty
                         # header rather than sending an empty value.
+                        #
+                        # THE BEARER IS STRIPPED HERE, NOT BY jwt_authn: the provider forwards it so
+                        # the placement step below can present it, and Gitea must never see a
+                        # Supabase JWT in an Authorization header it would try to read as a token of
+                        # its own. The /api/ route keeps the header, because there it IS Gitea's.
                         - match: { prefix: "/" }
                           route:
                             cluster: gitea
                             # Diffs and archives can take a while to render; nothing on this
                             # listener holds a response open indefinitely.
                             timeout: 120s
+                          request_headers_to_remove:
+                            - authorization
                           request_headers_to_add:
                             - header:
                                 key: x-webauth-user
@@ -1122,15 +1161,16 @@ static_resources:
                             oauth_nonce: ForgeOauthNonce
                             code_verifier: ForgeCodeVerifier
                   # 2. THE TOKEN. The same JWKS as Studio's -- one signing secret, one trust domain.
-                  #    The token is stripped after verification (the provider's `forward` defaults
-                  #    to false), so Gitea never sees a Supabase JWT in an Authorization header and
-                  #    never tries to read one as a token of its own.
+                  #    FORWARDED after verification, unlike Studio's, because the placement step
+                  #    (4) presents it to the edge runtime; the routes above strip it before Gitea
+                  #    everywhere except /api/, where the header is Gitea's own.
                   - name: envoy.filters.http.jwt_authn
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
                       providers:
                         gotrue:
                           audiences: [authenticated]
+                          forward: true
                           local_jwks:
                             inline_string: '{"keys":[{"kty":"oct","alg":"HS256","k":"__SUPABASE_JWT_SECRET_B64URL__"}]}'
                           payload_in_metadata: jwt_payload
@@ -1177,6 +1217,45 @@ static_resources:
                             permissions:
                               - url_path: { path: { exact: "/assets/ssh_host_key.pub" } }
                             principals: [{ any: true }]
+                  # 4. THE PLACEMENT. Gitea auto-registers a login and stops; nothing native puts
+                  #    them in the organisation that owns every gateway repository. So each request
+                  #    that is not an asset or an API call goes past `forge-membership` first,
+                  #    carrying the verified token, and that function puts the person in the team
+                  #    their `user_roles` row warrants -- or, if the role has gone since the token
+                  #    was signed, takes them out of both and answers 403, which is the one thing
+                  #    filter 3 cannot do: it reads the token, and a token does not know it has been
+                  #    revoked.
+                  #
+                  #    AFTER RBAC, so a role that never opened the forge never causes a placement
+                  #    call. `failure_mode_allow`: a 5xx from the function -- the forge or Postgres
+                  #    unreachable -- lets the request THROUGH, because filter 3 has already
+                  #    admitted the role in the token and a placement outage must not take the web
+                  #    UI down with it. A 403 is a decision and is honoured. Only the Authorization
+                  #    header travels; nothing the function answers reaches Gitea.
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      transport_api_version: V3
+                      failure_mode_allow: true
+                      status_on_error: { code: ServiceUnavailable }
+                      http_service:
+                        server_uri:
+                          uri: http://supabase-functions:9000
+                          cluster: functions-v1
+                          timeout: 8s
+                        # The edge runtime routes on the first path segment; the original path is
+                        # appended and ignored.
+                        path_prefix: /forge-membership
+                        authorization_request:
+                          allowed_headers:
+                            patterns:
+                              - exact: authorization
+                        # Nothing the function answers reaches Gitea: `allowed_upstream_headers`
+                        # is left unset, which forwards none (an empty list is refused at boot).
+                        authorization_response:
+                          allowed_client_headers:
+                            patterns:
+                              - exact: content-type
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

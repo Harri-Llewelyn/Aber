@@ -2898,6 +2898,34 @@ paths:
         '405': { description: 'Method other than POST.' }
         '503': { description: 'GRAFANA_ALERT_WEBHOOK_SECRET is not configured; refusing to accept alerts.' }
 
+  /functions/v1/forge-membership:
+    post:
+      tags: [Edge Functions]
+      summary: Place the caller in the forge team their role warrants (the forge listener's ext_authz step)
+      description: |
+        Called by the gateway's `forge` listener on every non-static request through the forge's door,
+        carrying the verified access token (migration 0094; roadmap 7). Resolves the caller's role from
+        `user_roles` and ensures they are in exactly the team of the `gateways` organisation that role
+        maps to -- `administrators` or `managers` -- through the machine account that owns it. A role
+        that has been removed since the token was signed is refused and taken out of both teams on the
+        same request, which is the revocation the listener's own token check cannot give.
+
+        **Acts only on the caller.** The identity is the token's subject and never a parameter; calling
+        it directly places nobody but yourself, in the team you already warrant. Any method is accepted:
+        the listener forwards the original request's method.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The caller holds an admitted role and is in its team, or is not yet registered in the forge (the first request through the door).
+        '401':
+          description: No usable bearer token.
+        '403':
+          description: The caller's role does not open the forge. Any team membership they held has been removed.
+        '502':
+          description: The forge could not be reached or refused the placement. The listener lets the request through.
+        '503':
+          description: This deployment has no forge configured, or the role lookup failed. The listener lets the request through.
   /functions/v1/grafana-userinfo:
     get:
       tags: [Edge Functions]
