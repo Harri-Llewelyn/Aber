@@ -1,8 +1,11 @@
 # Contributing
 
-**The reasoning lives next to the thing it constrains**, not in one design document. A migration's
-header says why its schema is shaped that way, `values.yaml` says why each setting is not simply a
-default, and the component READMEs carry the rest. Read the file before you change it.
+**Comments state what the code does and the constraint a reader changing that line needs**, and no
+more. The argument for a design, the history of how a line came to look this way, measurements and
+post-mortems belong in the component READMEs and in [`docs/incidents.md`](docs/incidents.md), which
+states the rule for what goes where. Comments do not cite roadmap entries by number: an entry that
+ships leaves [`docs/roadmap.md`](docs/roadmap.md), so a numbered citation ages the moment it is
+written. Cite the document that holds the substance, or the roadmap entry by title.
 
 Some logic is **mirrored across languages** and must be kept in step: `frontend/src/utils/` mirrors
 generated columns and views in [`supabase/migrations/0001_baseline_schema.sql`](supabase/migrations/0001_baseline_schema.sql),

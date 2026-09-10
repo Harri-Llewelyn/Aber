@@ -1,48 +1,23 @@
 # =================================================================================================
-# Prometheus scrape configuration -- THE COMPOSE TARGET ONLY.
+# Prometheus scrape configuration -- the Compose target only.
 #
-# THIS FILE IS NOT MIRRORED INTO THE HELM CHART, and that is a deliberate divergence rather than an
-# omission. On Kubernetes the chart renders `ServiceMonitor` objects and defers to the cluster's own
-# Operator-managed Prometheus -- see deploy/helm/acs-cymru/templates/obs/servicemonitors.yaml. A
-# second Prometheus shipped inside the chart would compete with the one the cluster already runs,
-# duplicate every series, and give an operator two places to configure retention.
+# Not mirrored into the Helm chart: on Kubernetes the chart renders ServiceMonitors and defers to
+# the cluster's Operator-managed Prometheus (deploy/k8s/README.md, divergence table).
 #
-# Compose has no such operator, so it gets its own. The two targets therefore reach the same
-# endpoints by different means, which is recorded in deploy/k8s/README.md's divergence table.
+#   ingestion       the only target on the critical data path; `acs_ingestion_messages_dropped_total`
+#                   is telemetry that was not written.
+#   node            host metrics; disk is the one that matters, since two Postgres data directories
+#                   and a TSDB share it.
+#   envoy           every REST, Auth, Storage, Realtime and edge-function request passes through the
+#                   gateway, so one target covers the HTTP tier.
+#   supabase-rest   PostgREST's own process metrics (schema cache, pool, JWT cache).
+#   grafana         serves metrics natively on its normal port.
+#   prometheus      itself.
+#   loki, alloy     the log store and its collector, whose failure destroys the evidence for every
+#                   other fault.
 #
-# -------------------------------------------------------------------------------------------------
-# WHAT IS SCRAPED, AND WHY EACH ONE EARNS ITS PLACE
-#
-#   ingestion       THE ONLY TARGET ON THE CRITICAL DATA PATH. Everything else here observes a
-#                   request tier or a host; this one says whether telemetry is being recorded at
-#                   all. `acs_ingestion_messages_dropped_total` is the series worth watching: any
-#                   non-zero value is telemetry that was NOT written, and under report-by-exception
-#                   nothing ever restates it.
-#
-#   node-exporter   HOST metrics for the machine the stack runs on -- typically a Debian VM under
-#                   Proxmox. DISK IS THE ONE THAT MATTERS: this host carries two Postgres data
-#                   directories and a TSDB, and filling it takes the whole stack down at once.
-#
-#   supabase-kong   Every REST, Auth, Storage, Realtime and edge-function request passes through
-#                   the gateway, so one target covers the entire HTTP tier. PostgREST itself
-#                   exposes no metrics at all (its admin server serves only /ready and /live), which
-#                   is why gateway-side measurement is not a compromise here but the design.
-#
-#   grafana         Serves metrics natively and unauthenticated on its normal port.
-#
-#   prometheus      Itself. A scrape config that cannot see its own health is one blind spot away
-#                   from reporting nothing and looking fine.
-#
-# NOT SCRAPED: mosquitto, which has no HTTP surface and publishes to `$SYS` MQTT topics instead.
-# The Kubernetes target runs `sapcc/mosquitto-exporter` as a sidecar to translate; adding it here is
-# now possible for the first time -- the reason it was Kubernetes-only was that Compose had nothing
-# to scrape into -- and is left as a follow-up rather than folded into this change.
-#
-# -------------------------------------------------------------------------------------------------
-# NO ALERTING BLOCK. Prometheus here is a STORE, not an alert engine: the rules live in
-# grafana/provisioning/alerting/alert-rules.yaml and Grafana evaluates them against this datasource.
-# That keeps every alert in this platform in one file and one contact-point tree, rather than
-# splitting them by which datasource happens to answer.
+# Not scraped: mosquitto, which publishes to `$SYS` topics instead. No alerting block: Prometheus
+# here is a store, and the rules live in grafana/provisioning/alerting/alert-rules.yaml.
 # =================================================================================================
 
 global:
@@ -59,11 +34,8 @@ global:
 
 scrape_configs:
   # -----------------------------------------------------------------------------------------------
-  # The ingestion daemon (issues #22, #24).
-  #
-  # STATIC, NOT SERVICE-DISCOVERED. Compose resolves service names on its own network, the daemon is
-  # pinned to one replica for correctness, and there is exactly one of it -- so DNS is the discovery
-  # mechanism and anything more would be machinery with no consumer.
+  # The ingestion daemon. Static: there is exactly one, pinned to one replica, and Compose DNS
+  # resolves it.
   # -----------------------------------------------------------------------------------------------
   - job_name: ingestion
     static_configs:
@@ -72,12 +44,8 @@ scrape_configs:
           component: ingestion
 
   # -----------------------------------------------------------------------------------------------
-  # Host metrics.
-  #
-  # WHAT THIS MEASURES DEPENDS ON WHERE THE STACK RUNS, and it is worth being explicit. On the Debian
-  # VM this is intended for, the mounts below give the real host. On Docker Desktop for Windows or
-  # macOS it reports the Linux virtual machine the engine runs inside, which is not the developer's
-  # laptop -- the numbers are real, they are just about a different computer.
+  # Host metrics. On Docker Desktop this reports the Linux VM the engine runs inside, not the
+  # developer's laptop.
   # -----------------------------------------------------------------------------------------------
   - job_name: node
     static_configs:
@@ -86,19 +54,10 @@ scrape_configs:
           component: host
 
   # -----------------------------------------------------------------------------------------------
-  # The API gateway's admin listener.
-  #
-  # BOTH THE PORT AND THE PATH MOVED WITH THE GATEWAY. Kong served `/metrics` on a
-  # dedicated status listener (:8100) that existed only when KONG_STATUS_LISTEN was set; Envoy
-  # serves the scrape at `/stats/prometheus` on its ADMIN listener (:9901), which also answers the
-  # container's healthcheck. Carrying the old path over would scrape a 404 while Prometheus
-  # reported the target UP -- an unmeasured gateway that reads as an idle one, which is the exact
-  # failure the Kong prometheus flags were added for.
-  #
-  # THE SERIES NAMES CHANGED TOO: `kong_http_status` -> `envoy_http_downstream_rq_xx`,
-  # `kong_latency_*` -> `envoy_http_downstream_rq_time_bucket`. No dashboard or alert rule in this
-  # repository used the kong_* series -- they appeared only in comments -- so nothing renders empty
-  # because of this. Verify against a live scrape before building a panel on any of them.
+  # The API gateway's admin listener. Envoy serves the scrape at `/stats/prometheus` on :9901,
+  # which also answers the container's healthcheck. The series are `envoy_http_downstream_rq_xx`
+  # and `envoy_http_downstream_rq_time_bucket`; verify against a live scrape before building a
+  # panel on any of them.
   # -----------------------------------------------------------------------------------------------
   - job_name: envoy
     metrics_path: /stats/prometheus
@@ -108,21 +67,10 @@ scrape_configs:
           component: supabase-envoy
 
   # -----------------------------------------------------------------------------------------------
-  # PostgREST's admin server.
-  #
-  # NEW WITH v14.12, AND IMPOSSIBLE BEFORE IT. On v12.2.0 the admin server served /ready and /live
-  # and nothing else -- there was no metrics setting in the configuration at all, so this target
-  # would have scraped a 404. The upgrade is what made it real.
-  #
-  # WHAT IT ADDS OVER THE KONG JOB ABOVE, which already counts every PostgREST request by service
-  # and route: nothing about the HTTP tier, and everything about the process behind it. A
-  # gateway-side 200 cannot tell you the schema cache reloaded, or that the connection pool has
-  # requests queued behind it -- `pgrst_schema_cache_loads_total`, `pgrst_db_pool_waiting` and
-  # `pgrst_db_pool_max` can, and the three `pgrst_jwt_cache_*` counters describe work Kong never
-  # sees at all.
-  #
-  # Names read off a running v14.12, not off a changelog -- the same rule the chart's
-  # servicemonitors.yaml states after getting a Kong metric name wrong in both directions.
+  # PostgREST's admin server (v14.12; earlier versions served only /ready and /live). What it adds
+  # over the gateway job is the process behind the HTTP tier: `pgrst_schema_cache_loads_total`,
+  # `pgrst_db_pool_waiting`, `pgrst_db_pool_max` and the `pgrst_jwt_cache_*` counters. Names read
+  # off a running v14.12.
   # -----------------------------------------------------------------------------------------------
   - job_name: supabase-rest
     static_configs:
@@ -143,24 +91,12 @@ scrape_configs:
           component: prometheus
 
   # -----------------------------------------------------------------------------------------------
-  # The log store and its collector (roadmap 12).
-  #
-  # WHY THESE TWO ARE HERE AT ALL, because "monitor the monitoring" reads as box-ticking and this is
-  # not. Loki and Alloy exist to keep the evidence for every other fault in this stack. Unscraped,
-  # they are the one pair that can fail while producing no evidence about themselves -- and the
-  # failure mode is the bad one: Alloy up, discovery broken, shipping nothing, looking exactly like
-  # a quiet plant. That happened on the first live run, when the socket proxy refused GET /networks
-  # and discovery failed WHOLESALE while the container stayed healthy.
-  #
-  # WHAT MAKES THE ALLOY TARGET WORTH MORE THAN THE LOKI ONE. `loki_write_dropped_entries_total`
-  # carries a `reason` label whose values are the ceilings loki.yaml sets by name --
-  # `rate_limited` and `stream_limited` -- so the alert on those is a DIRECT alert on "the bound you
-  # configured is now biting", rather than an inference from disk usage. `ingester_error` is the
-  # benign backfill case and is deliberately not alerted on; loki/loki.yaml explains why.
-  #
-  # NEITHER EXISTS ON KUBERNETES, and that is the decision in the divergence table rather than an
-  # oversight -- the chart deploys no log workload. The three rules in alert-rules.yaml are written
-  # so an absent series reports OK rather than firing forever on a cluster.
+  # The log store and its collector. Unscraped, they are the one pair that can fail while producing
+  # no evidence about themselves. `loki_write_dropped_entries_total` carries a `reason` label whose
+  # values are the ceilings loki.yaml sets by name (`rate_limited`, `stream_limited`), so the alert
+  # on those is a direct alert on a configured bound biting; `ingester_error` is the benign backfill
+  # case. Neither exists on Kubernetes (divergence table), and the rules report OK on an absent
+  # series.
   # -----------------------------------------------------------------------------------------------
   - job_name: loki
     static_configs:

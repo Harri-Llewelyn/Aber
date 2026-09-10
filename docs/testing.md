@@ -54,7 +54,7 @@ python ingestion/test_structured_logging.py
 # reason="quarantined_or_unregistered" increased, and that a line carrying that same reason AND
 # that device id arrived in the log store. Prometheus cannot name the device -- its endpoint is
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
-# §12 exists to keep is actually being kept.
+# the log store exists to keep is actually being kept.
 python test-harness/test_log_pipeline.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py

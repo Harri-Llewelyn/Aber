@@ -1,31 +1,20 @@
 /**
- * Node-RED initialisation for the Factory+ stack.
+ * Node-RED initialisation.
  *
- * Provisions /data: the repo's flow definition, a generated settings.js, and the MQTT broker
+ * Provisions /data: the flow definition, a generated settings.js, and the MQTT broker
  * credentials encrypted at rest through Node-RED's own credential runtime.
  *
- * THREE WRITES, THREE DIFFERENT LIFETIMES. They cannot share one guard:
+ * Three writes, three different lifetimes:
  *
  *   - the FLOW is user content        -> seed FIRST RUN ONLY (NODE_RED_FORCE_SEED=true resets)
  *   - settings.js is stack config     -> reconcile EVERY BOOT (a volume outlives a fix to it)
  *   - the CREDENTIALS are stack config -> but only while there are none to lose
  *
- * NO FLOW IS SEEDED. The editor opens empty, and that is the whole of the intended state.
+ * No flow is seeded: the editor opens empty, and the marker file records that this script wrote
+ * a blank flow and when. tutorial/README.md holds the walkthrough and the failure modes behind
+ * each guard ("Flow provisioning", "Node-RED authentication").
  *
- * This used to seed the demonstrator's simulator unconditionally, so a stack that had generated no
- * assets still came up publishing under four gateway identities that did not exist. It then seeded
- * a one-node "Start here" comment instead, on the argument that an empty `flows.json` cannot be
- * told apart from a broken seed. The marker file below answers that properly -- it records that
- * this script wrote a blank flow, and when -- so the comment node bought nothing an operator could
- * not already read off `/data`. tutorial/README.md is where the walkthrough lives.
- *
- * Every guard below carries a one-line note. The failure modes behind them -- why `flowFile` is
- * load-bearing, why `_credentialSecret` silently defeats the seed, why settings.js is LOADED
- * rather than grepped, and how to tell an auth failure from a network one -- are documented in:
- *
- *   tutorial/README.md -> "Flow provisioning" and "Node-RED authentication"
- *
- * Verified against Node-RED 5.0.1 (nodered/node-red:latest).
+ * Verified against Node-RED 5.0.1.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -41,31 +30,18 @@ const RUNTIME_DIR =
   process.env.NODE_RED_RUNTIME_DIR || '/usr/src/node-red/node_modules';
 
 const credentialSecret = process.env.NODERED_CREDENTIAL_SECRET;
-// A GATEWAY CREDENTIAL, not a shared platform account. mosquitto.acl confines each client to
-// `spBv1.0/+/+/%u/#`, so this username must be the `sparkplug_id` of the gateway the node publishes
-// under, or every publish is silently dropped by the broker despite a successful connection.
-//
-// THIS PAIR IS THE LEGACY FALLBACK, applied only to a `mqtt-broker-config` node -- see
-// brokerCredentialFor(). No node in the current flow is called that: the consolidated
-// `Simulated Shopfloor` tab has one broker per cell gateway, each naming its own pair through
-// `acsCredentialsEnv`. gwy100000000000400080000 was the retired single-device simulator, whose
-// gateway row migration 0020 deletes, so this default now resolves to nothing on the wire. It stays
-// for volumes seeded before the consolidation, whose flow still carries that node.
+// A gateway credential, not a shared platform account: mosquitto.acl confines each client to
+// `spBv1.0/+/+/%u/#`, so the username must be the gateway's `sparkplug_id`. This pair is the
+// legacy fallback for a `mqtt-broker-config` node (see brokerCredentialFor()); current flows
+// name their own pair per broker node through `acsCredentialsEnv`.
 const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
 const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 
-// Bumped whenever the BODY of the generated settings.js changes in a way an existing volume
-// needs. Without it, a settings.js that merely *has* an adminAuth passes settingsAreCorrect()
-// forever, and a fix to the token validation below would never reach a deployed stack -- the
-// same class of trap as the `flowFile` omission this script was written to prevent.
-// v2 added adminAuth.users. Without it the OAuth handshake completes and every editor request
-// afterwards 401s -- see the comment on `users` in the generated file.
-// v3 persisted the username -> permissions map. Holding it only in memory made every restart
-// silently downgrade live sessions to a read-only editor (padlocked Deploy).
-// v4 compares NODERED_ADMIN_TOKEN in constant time. This is exactly the case the bump exists
-// for: the old `===` keeps working, so nothing fails and no deployed volume would ever pick the
-// fix up on its own.
+// Bumped whenever the body of the generated settings.js changes in a way an existing volume
+// needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
+// forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
+// NODERED_ADMIN_TOKEN comparison.
 const SETTINGS_VERSION = 4;
 
 function fail(message) {
@@ -80,11 +56,8 @@ if (!credentialSecret) {
   fail('NODERED_CREDENTIAL_SECRET is not set; refusing to write credentials unencrypted.');
 }
 
-// Same posture, applied to authentication. THE PREVIOUS DEFAULT WAS AN OPEN ADMIN API, so a
-// missing variable has to stop the boot rather than quietly fall back to it -- an "auth
-// optional" branch here would reintroduce exactly the hole this exists to close. Node-RED
-// reads these from its own environment at settings-load time; they are checked here so the
-// failure is one legible message from the init container instead of a login that never works.
+// A missing auth variable stops the boot: an "auth optional" branch would reopen the admin API.
+// Checked here so the failure is one legible message from the init container.
 const REQUIRED_AUTH_ENV = [
   'NODERED_OAUTH_CLIENT_ID',
   'NODERED_OAUTH_CLIENT_SECRET',
@@ -117,23 +90,15 @@ const runtimeConfigPath = path.join(DATA_DIR, '.config.runtime.json');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// 1. Seed the flow definition from the repo -- FIRST RUN ONLY. The only user content here.
-//
-// THE GUARD IS A MARKER FILE, NOT `flows.json` EXISTING: the image ships a placeholder flows.json
-// and Docker pre-populates a fresh volume from it, so that file exists before this script has ever
-// run. A marker records what this script DID. (tutorial/README.md -> "Flow provisioning")
+// 1. Seed the flow definition: first run only. The guard is a marker file, not `flows.json`
+// existing, because the image ships a placeholder and Docker pre-populates a fresh volume from it.
 const SEED_MARKER = path.join(DATA_DIR, '.factoryplus-seeded');
 const seededBefore = fs.existsSync(SEED_MARKER);
 const seededFlow = !seededBefore || forceSeed;
 
 /**
- * The blank canvas, and why it is genuinely empty.
- *
- * An empty `flows.json` is a valid Node-RED flow, and the objection to it was that it cannot be
- * told apart from a broken seed: the editor opens on nothing, with no way to know whether that is
- * intended or the symptom of a mount that failed. SEED_MARKER answers that -- it records that a
- * blank flow was written and when -- so the canvas does not need a node in it to say so, and a
- * stack asked for a blank slate should not open on somebody else's content.
+ * The blank canvas. An empty `flows.json` is a valid flow; SEED_MARKER records that it was
+ * written deliberately, so the canvas needs no node to say so.
  */
 const EMPTY_FLOW = [];
 
@@ -170,15 +135,10 @@ if (seededFlow) {
   );
 }
 
-// 1b. Reconcile the broker node's TRANSPORT settings -- host, port, TLS -- on every boot.
-//
-// The broker node straddles the seed/reconcile line: it lives inside flows.json, but WHERE the
-// broker is and whether the connection is encrypted is deployment configuration, not user content.
-// So this writes a narrow set of keys on ONE node, only when they are explicitly configured -- on
-// the Compose default it does nothing and the flow stays byte-identical.
-//
-// MUST run before the credential section, which exits early when there are credentials it must not
-// overwrite; after it, the reconciliation would be skipped on the oldest volumes.
+// 1b. Reconcile the broker node's transport settings (host, port, TLS) on every boot: where the
+// broker is is deployment configuration, not user content. Writes a narrow set of keys, only when
+// they are explicitly configured. Must run before the credential section, which exits early on
+// volumes that hold credentials.
 const BROKER_NODE_ID = 'mqtt-broker-config';
 const TLS_NODE_ID = 'factoryplus-tls-config';
 
@@ -188,24 +148,17 @@ const mqttHostEnv = (process.env.MQTT_HOST || '').trim();
 const mqttPortEnv = (process.env.MQTT_PORT || '').trim();
 
 if (mqttTlsEnabled && !mqttTlsCaFile) {
-  // Fail closed, same posture as the credential secret. Node-RED's tls-config node with no CA and
-  // verifyservercert true verifies against the SYSTEM trust store, which knows nothing about an
-  // internal CA -- so the broker node would fail to connect with a generic
-  // "Connection failed to broker" and no mention of certificates at all.
+  // Fail closed: a tls-config node with no CA verifies against the system trust store, which knows
+  // nothing about an internal CA, and the failure names no certificate.
   fail(
     'MQTT_TLS_ENABLED is set but MQTT_TLS_CA_FILE is empty. Node-RED would verify the broker ' +
       'against the system trust store, which cannot verify an internal CA, and the broker node ' +
       'would report only a generic connection failure.'
   );
 }
-// THE PORT HAS TO MOVE WITH THE TRANSPORT, and on Compose nothing moves it for you.
-//
-// The chart derives the broker port from the same flag that turns TLS on
-// (`ternary 8883 1883 ... internalClients`), so the two cannot disagree there. Compose has no
-// conditional in `${}`, so MQTT_PORT is a separate variable an operator can leave behind -- and
-// TLS against the PLAINTEXT listener fails as a handshake timeout that names neither the port nor
-// the transport. Refused here, where the fix is one line of `.env`, rather than left to present as
-// a broker that will not connect.
+// The port has to move with the transport. The chart derives it from the TLS flag; Compose has
+// no conditional, and TLS against the plaintext listener fails as a handshake timeout naming
+// neither. Refused here, where the fix is one line of `.env`.
 if (mqttTlsEnabled && (!mqttPortEnv || mqttPortEnv === '1883')) {
   fail(
     `MQTT_TLS_ENABLED is set but MQTT_PORT is ${mqttPortEnv || 'unset, leaving the flow on 1883'}. ` +
@@ -215,11 +168,9 @@ if (mqttTlsEnabled && (!mqttPortEnv || mqttPortEnv === '1883')) {
 }
 
 if (mqttTlsEnabled && !fs.existsSync(mqttTlsCaFile)) {
-  // Checked HERE rather than left to Node-RED, because of how 05-tls.js handles it: an unreadable
-  // `ca` path marks the tls-config node invalid, and addTLSOptions() then attaches NO ca while
-  // still setting rejectUnauthorized. The broker node reports only
-  // "Connection failed to broker: <clientId>@<url>" -- the same message a wrong password gives --
-  // with the certificate never mentioned. Diagnosing that from the editor is most of an afternoon.
+  // Checked here rather than left to Node-RED: an unreadable `ca` path marks the tls-config node
+  // invalid and the broker node reports only "Connection failed to broker", the same message a
+  // wrong password gives.
   fail(
     `MQTT_TLS_CA_FILE=${mqttTlsCaFile} does not exist. On Kubernetes this is projected from the ` +
       "broker's certificate Secret, so an absent file usually means mosquitto.tls.enabled is off " +
@@ -230,17 +181,12 @@ if (mqttTlsEnabled && !fs.existsSync(mqttTlsCaFile)) {
 if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
   const flow = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
 
-  // EVERY BROKER NODE, NOT JUST THE FIRST. A multi-cell floor needs one broker node per gateway --
-  // mosquitto.acl pins the topic's edge-node segment to the connecting USERNAME, so two gateways
-  // cannot share a connection. Reconciling only `mqtt-broker-config` left the others pointing at
-  // whatever host the flow was authored against, which on Kubernetes is nothing.
+  // Every broker node, not just the first: mosquitto.acl pins the topic's edge-node segment to the
+  // username, so a multi-cell floor has one broker node per gateway.
   const brokers = flow.filter((n) => n.type === 'mqtt-broker');
 
-  // NO BROKER NODES IS A LEGITIMATE STATE and this does not fail on it. A blank flow has none, by
-  // design -- there is nothing to reconcile a broker host onto, and nothing is trying to connect.
-  // This check still exists for the case it was written for: a flow that DOES declare brokers,
-  // deployed against a host it was not authored for. Failing on an empty flow would make the blank
-  // canvas unbootable.
+  // No broker nodes is a legitimate state: a blank flow has none. The check exists for a flow that
+  // does declare brokers, deployed against a host it was not authored for.
   if (brokers.length === 0) {
     console.log(
       '[node-red-init] no mqtt-broker nodes in the flow; broker transport settings not applied. ' +
@@ -260,21 +206,9 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
 
   const applyTls = (broker) => {
     setField(broker, 'usetls', true);
-    // ---------------------------------------------------------------------------------------------
-    // BOTH `verifyservercert` FIELDS ARE SET, AND THAT IS NOT BELT-AND-BRACES.
-    //
-    // 10-mqtt.js calls tlsNode.addTLSOptions(node.options), and 05-tls.js ends that method with an
-    // UNCONDITIONAL `opts.rejectUnauthorized = this.verifyservercert`. So:
-    //
-    //   * omit it on the tls-config node   -> rejectUnauthorized becomes `undefined`
-    //   * 10-mqtt.js then falls back to the BROKER node's verifyservercert
-    //   * which defaults to `false` when absent (10-mqtt.js, "sensible options for the new fields")
-    //
-    // The result of leaving either one out is therefore TLS WITH NO VERIFICATION AT ALL: the
-    // connection succeeds, the editor shows a connected broker, the traffic is encrypted, and any
-    // certificate whatsoever is accepted. Nothing logs a warning. Setting both makes the outcome
-    // independent of which of the two Node-RED happens to consult.
-    // ---------------------------------------------------------------------------------------------
+    // Both `verifyservercert` fields are set. 05-tls.js sets `rejectUnauthorized` unconditionally
+    // from the tls-config node's value, and 10-mqtt.js falls back to the broker node's, which
+    // defaults to false. Leaving either out is TLS with no verification and no warning.
     setField(broker, 'verifyservercert', true);
     setField(broker, 'tls', TLS_NODE_ID);
 
@@ -289,10 +223,8 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
     }
     Object.assign(tlsNode, {
       name: 'Factory+ internal CA',
-      // certType 'files' means cert/key/ca are PATHS, read with fs.readFileSync at deploy time.
-      // 'env' and 'pfx' are the other two modes; 'files' is the only one that suits a mounted
-      // Secret, and it is stated explicitly because 05-tls.js defaults it and a future default
-      // change would silently reinterpret `ca` below.
+      // certType 'files' means cert/key/ca are paths read at deploy time. Stated explicitly because
+      // 05-tls.js defaults it and a default change would silently reinterpret `ca`.
       certType: 'files',
       ca: mqttTlsCaFile,
       // Empty, and they must BOTH stay empty: 05-tls.js marks the node invalid if exactly one of
@@ -306,40 +238,19 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
     });
   };
 
-  // THE INVERSE OF applyTls, AND ITS ABSENCE WAS A ONE-WAY DOOR.
-  //
-  // applyTls has always existed; nothing undid it. So turning TLS back OFF moved the port to 1883
-  // and left `usetls: true` -- a TLS handshake against the PLAINTEXT listener, which 10-mqtt.js
-  // reports as "Connection failed to broker: <clientid>@<url>", the same line a wrong password
-  // gives, with certificates never mentioned. The comments in applyTls already describe how long
-  // that takes to diagnose.
-  //
-  // It matters on both targets: on Kubernetes it is `mosquitto.tls.internalClients` being turned
-  // back off, and on Compose it is a line removed from `.env`. Reconciliation has to be
-  // bidirectional or it is not reconciliation.
-  //
-  // The tls-config node itself is left in place rather than deleted. It is inert with `usetls`
-  // false, and removing a node from a flow an operator may have opened is a bigger act than
-  // clearing the two fields that decide the transport.
+  // The inverse of applyTls. Turning TLS off used to move the port and leave `usetls: true`, a TLS
+  // handshake against the plaintext listener reported as "Connection failed to broker".
+  // Reconciliation has to be bidirectional. The tls-config node is left in place: it is inert
+  // with `usetls` false.
   const clearTls = (broker) => {
     setField(broker, 'usetls', false);
     setField(broker, 'tls', '');
   };
 
-  // THE PROTOCOL VERSION IS RECONCILED, NOT SEEDED, and finding that out is the whole reason this
-  // line exists. Moving the generators to MQTT 5 changed the SEED; an existing Node-RED volume
-  // keeps its own flows.json, because that file is user content and is deliberately never
-  // overwritten. So the broker reported `p5` for the ingestion daemon and the i3X server and `p2`
-  // for all four simulated gateways -- a half-migrated stack, with nothing to indicate it.
-  //
-  // It belongs here for the same reason host, port and TLS do: it is TRANSPORT, not user content.
-  // An operator who rewires a flow in the editor has an opinion about topics and payloads, not
-  // about which MQTT version the platform speaks.
-  //
-  // NOT AN ENVIRONMENT VARIABLE, unlike its neighbours. The daemon's protocol is a constant in
-  // Python (`mqtt.Client(protocol=mqtt.MQTTv5)`), so this is a code-level decision about what the
-  // whole platform speaks rather than a per-deployment setting -- and a knob that let one client
-  // drift from the others would only produce a combination nobody tests.
+  // The protocol version is reconciled, not seeded: it is transport, not user content, and a
+  // volume that kept its own flows.json would otherwise speak MQTT 3.1.1 while the daemon speaks
+  // 5. Not an environment variable: the daemon's protocol is a constant in Python, and a knob
+  // would only produce a combination nobody tests.
   const PROTOCOL_VERSION = '5';
 
   for (const broker of brokers) {
@@ -362,16 +273,10 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
   }
 }
 
-// 2. Reconcile settings.js -- EVERY BOOT.
-//
-// Stack configuration, not user content: this is the file a broken volume needs repaired. Only
-// rewritten when it does not already declare every key correctly.
-//
-// The check LOADS the module rather than grepping it -- Node-RED's own 26KB default mentions
-// `credentialSecret` in a commented-out example, so a substring test passes a file that declares
-// nothing. It checks the AUTH keys and SETTINGS_VERSION too, which is what lets a volume from
-// before authentication existed be repaired rather than left with an open admin API.
-// (tutorial/README.md -> "Flow provisioning")
+// 2. Reconcile settings.js on every boot. Stack configuration, not user content; only rewritten
+// when it does not already declare every key correctly. The check loads the module rather than
+// grepping it: Node-RED's default settings.js mentions `credentialSecret` in a commented-out
+// example. It checks the auth keys and SETTINGS_VERSION too.
 function settingsAreCorrect() {
   if (!fs.existsSync(settingsPath)) return false;
   try {
@@ -393,28 +298,17 @@ function settingsAreCorrect() {
       typeof loaded?.httpNodeAuth === 'function'
     );
   } catch (err) {
-    // Unloadable settings cannot be trusted to declare anything. Replaced (with a backup).
-    //
-    // If this fires on EVERY boot, the init container is missing the modules settings.js
-    // requires -- i.e. node-red-init is not building from node-red/Dockerfile. See its header.
+    // Unloadable settings cannot be trusted to declare anything. Replaced (with a backup). If this
+    // fires on every boot, the init container is missing the modules settings.js requires.
     console.warn(`[node-red-init] settings.js could not be loaded (${err.message}); replacing it.`);
     return false;
   }
 }
 
-// 2b. The generated settings.js.
-//
-// CONFIGURATION IS READ FROM process.env AT NODE-RED LOAD TIME, not baked in as literals. This
-// file sits on a durable volume that every flow author can read, so the OAuth client secret,
-// the Supabase JWT secret and the webhook signing key stay in the container environment. The
-// one exception is credentialSecret, which node-red-init has to be able to COMPARE against
-// above to decide whether the file needs rewriting -- and which is already recoverable from
-// flows_cred.json's key derivation anyway.
-//
-// The require()s are ABSOLUTE. Node resolves modules from the requiring file's location, and
-// this file lives at /data -- so a bare require('passport-oauth2') would search /data/
-// node_modules and /node_modules, never the image's /usr/src/node-red/node_modules. Same idiom
-// this script already uses for @node-red/runtime's credentials module.
+// 2b. The generated settings.js. Configuration is read from process.env at Node-RED load time,
+// not baked in: this file sits on a volume every flow author can read. The one exception is
+// credentialSecret, which node-red-init compares against above. The require()s are absolute:
+// this file lives at /data, so a bare require would never search the image's node_modules.
 const SETTINGS_JS = `/**
  * GENERATED by scripts/node-red-init.mjs -- do not edit.
  *
@@ -441,17 +335,9 @@ const { timingSafeEqual } = require('crypto');
 const env = process.env;
 
 /**
- * Constant-time secret comparison.
- *
- * timingSafeEqual THROWS on a length mismatch, which would leak the length through the
- * exception rather than through the timing -- so unequal lengths are answered by comparing the
- * expected value against ITSELF and returning false. The work is done either way.
- *
- * Used for the break-glass admin token below. That is the highest-value credential on this
- * host: it returns permissions '*', and a flow \`function\` node executes arbitrary JavaScript
- * in a container holding the MQTT credential. The rest of the stack already compares its
- * bearer secrets this way -- gateway-credential-service.mjs and the Grafana alert webhook --
- * and this was the one that did not.
+ * Constant-time secret comparison. timingSafeEqual throws on a length mismatch, so unequal
+ * lengths are answered by comparing the expected value against itself and returning false.
+ * Used for the break-glass admin token, which returns permissions '*'.
  */
 function secretEquals(presented, expected) {
   if (typeof presented !== 'string' || typeof expected !== 'string' || !expected) return false;
@@ -465,22 +351,16 @@ function secretEquals(presented, expected) {
 }
 
 /**
- * Supabase RBAC role -> Node-RED permissions.
- *
- * Node-RED only has '*' and 'read'. Operator and Auditor both map to 'read': neither should be
- * able to deploy a flow, and a flow \`function\` node executes arbitrary JavaScript inside this
- * container -- which holds the MQTT credential and can reach Mosquitto, Supabase and
- * TimescaleDB. The mapping itself lives server-side in the nodered-userinfo edge function; this
- * comment records what it does, and the code below trusts nothing that endpoint did not say.
+ * Supabase RBAC role -> Node-RED permissions. Node-RED only has '*' and 'read'. Operator and
+ * Auditor map to 'read': a flow function node executes arbitrary JavaScript in a container
+ * holding the MQTT credential. The mapping lives server-side in the nodered-userinfo function.
  */
 
 /**
  * Resolve identity and permissions for a Supabase access token.
  *
- * NOT read from the token's own claims. GoTrue's OIDC claims omit app_metadata entirely, and
- * app_metadata.role goes stale on revocation -- deleting a user's public.user_roles row IS how
- * a role is revoked, so a claim-based path would keep granting the old privilege for as long as
- * the token lived. The edge function reads public.user_roles, the same table RLS uses.
+ * Not read from the token's claims: GoTrue's OIDC claims omit app_metadata, and a claim-based
+ * role would outlive its revocation. The edge function reads public.user_roles, as RLS does.
  */
 async function userinfo(accessToken) {
   try {
@@ -493,10 +373,9 @@ async function userinfo(accessToken) {
       }
     });
     if (!res.ok) {
-      // SAY WHY. Every refusal below ends as a bare redirect back to the login screen, so
-      // without this line a failed sign-in is indistinguishable from a mis-click. 401 here
-      // means the apikey or the bearer was rejected at the gateway; 404 means the function is
-      // not registered in supabase/functions/main/index.ts.
+      // Say why: every refusal below ends as a bare redirect to the login screen. 401 means the
+      // apikey or bearer was rejected at the gateway; 404 means the function is not registered in
+      // supabase/functions/main/index.ts.
       console.warn(
         '[acs-cymru] userinfo ' + env.NODERED_USERINFO_URL + ' -> HTTP ' + res.status +
         '; refusing the sign-in.'
@@ -517,21 +396,13 @@ const roleCache = new Map();
 const CACHE_TTL_MS = 30000;
 
 /**
- * Username -> permissions, for adminAuth.users. See the comment on \`users\` below for why this
- * exists at all; the short version is that Node-RED re-resolves the user by USERNAME on every
- * editor request, long after the OAuth profile has gone.
+ * Username -> permissions, for adminAuth.users. Node-RED re-resolves the user by username on
+ * every editor request, long after the OAuth profile has gone.
  *
- * IT IS PERSISTED, and that is not an optimisation. Node-RED writes editor sessions to
- * /data/.sessions.json, so they outlive a restart -- but an in-memory map does not. The
- * mismatch is not a logout, which would at least be obvious: the session still authenticates,
- * \`users\` falls through to the bare-username branch, and getRuntimeSettings copies the
- * (missing) \`permissions\` to the editor, which renders a PADLOCK ON THE DEPLOY BUTTON. An
- * administrator silently becomes read-only in the UI after every \`docker compose restart\`,
- * until they happen to sign out and back in.
- *
- * The file holds usernames and Node-RED permission strings only -- no tokens, no secrets. It is
- * a cache of a decision already recorded in the session's scope, not a second source of truth:
- * a role change reaches the editor at the next sign-in, exactly as the enforced scope does.
+ * Persisted, because Node-RED writes editor sessions to /data/.sessions.json and they outlive a
+ * restart; an in-memory map would leave the session authenticated with no permissions, which
+ * the editor renders as a padlock on Deploy. The file holds usernames and permission strings
+ * only; a role change reaches the editor at the next sign-in.
  */
 // path.posix, not path.join: this string is baked into a file that only ever runs inside the
 // container, but the generator can be run from Windows, where join() would emit a backslash path.
@@ -590,10 +461,8 @@ module.exports = {
   adminAuth: {
     type: 'strategy',
 
-    // Node-RED's default editor session is 7 days. The role behind that session is only
-    // re-derived at login, so a revoked user would keep a working editor for a week. Eight hours
-    // bounds that to about a shift without making people re-authenticate mid-task. The machine
-    // path is unaffected -- it re-checks public.user_roles within 30s, every time.
+    // Node-RED's default editor session is 7 days, and the role is only re-derived at login. Eight
+    // hours bounds a revoked user to about a shift. The machine path re-checks within 30s.
     sessionExpiryTime: 28800,
 
     strategy: {
@@ -608,31 +477,23 @@ module.exports = {
         clientSecret: env.NODERED_OAUTH_CLIENT_SECRET,
         callbackURL: env.NODERED_OAUTH_CALLBACK_URL,
 
-        // NOTE THE ABSENT 'openid' SCOPE. This is required, not an oversight. Requesting it
-        // makes GoTrue try to mint an ID token and refuse:
-        //   HS256 is not supported for ID token signing
-        // The whole stack is HS256 on SUPABASE_JWT_SECRET, which Kong, PostgREST, Realtime and
-        // the pre-minted anon/service_role keys all depend on. Identity comes from userinfo()
-        // instead, so no ID token is needed. Same decision as grafana.ini:23-34 -- do not
-        // "fix" a login problem by adding it back.
+        // No 'openid' scope, deliberately: requesting it makes GoTrue try to mint an ID token and
+        // refuse with "HS256 is not supported for ID token signing". Identity comes from userinfo().
+        // Same decision as grafana.ini.
         scope: ['email', 'profile'],
 
-        // GoTrue's OAuth server REQUIRES PKCE; without it /oauth/authorize fails with
-        //   invalid_request: PKCE flow requires both code_challenge and code_challenge_method
-        // pkce implies state, and state needs a session store -- which Node-RED's
-        // genericStrategy installs (express-session + MemoryStore) before passport.initialize().
+        // GoTrue's OAuth server requires PKCE. pkce implies state, and state needs the session store
+        // Node-RED's genericStrategy installs.
         pkce: true,
         state: true,
 
         // The client is registered token_endpoint_auth_method = 'client_secret_post' in
-        // auth.oauth_clients (archived migration 0003), which is what passport-oauth2 does by default.
-        // Grafana's client is 'client_secret_basic' instead only because its Go OAuth2 client
-        // needs auth_style pinned; GoTrue enforces whichever is registered, exactly.
+        // auth.oauth_clients, which is what passport-oauth2 does by default; GoTrue enforces whichever
+        // is registered.
 
         /**
          * Node-RED calls this with the strategy's own verify arguments and replaces the final
-         * callback, expecting (err, profile). The profile it gets is handed straight to
-         * adminAuth.authenticate below.
+         * callback, expecting (err, profile). The profile is handed to adminAuth.authenticate below.
          */
         async verify(accessToken, refreshToken, profile, done) {
           try {
@@ -668,14 +529,9 @@ module.exports = {
     },
 
     /**
-     * adminAuth.users receives only a USERNAME STRING; adminAuth.authenticate receives the whole
-     * profile (@node-red/editor-api/lib/auth/users.js -- completeVerify calls
-     * Users.authenticate(profile)). The role has to ride through here or it is lost between
-     * verify() and the session Node-RED mints.
-     *
-     * It is variadic because the same hook backs the OAuth2 password grant on POST /auth/token,
-     * which is called with (username, password). That path is refused outright: there are no
-     * local passwords here, and silently accepting it would be a second, undocumented way in.
+     * adminAuth.users receives only a username; adminAuth.authenticate receives the whole profile,
+     * so the role has to ride through here. Variadic because the same hook backs the OAuth2
+     * password grant on POST /auth/token, which is refused outright: there are no local passwords.
      */
     authenticate: async function (profile, password) {
       if (password !== undefined) return null;
@@ -685,15 +541,10 @@ module.exports = {
     },
 
     /**
-     * Resolve a user BY USERNAME. REQUIRED -- bearerStrategy calls Users.get() on every editor
-     * request, and without this the editor logs in and then 401s everything with no error shown.
-     *
-     * It MUST return \`permissions\`, not just a username: the editor draws a padlock on Deploy
-     * when that key is absent, silently making an administrator read-only. Hence the persisted
-     * map above. The last-resort branch returns a bare username to keep an unknown session alive;
-     * that is safe because enforcement reads the token's stored scope, not this object.
-     *
-     * (tutorial/README.md -> "Node-RED authentication")
+     * Resolve a user by username. Required: bearerStrategy calls Users.get() on every editor
+     * request. It must return permissions, or the editor draws a padlock on Deploy. The last-resort
+     * branch returns a bare username to keep an unknown session alive; enforcement reads the
+     * token's stored scope, not this object.
      */
     users: async function (username) {
       const permissions = editorUsers.get(username);
@@ -701,23 +552,17 @@ module.exports = {
     },
 
     /**
-     * Machine-to-machine access to the admin API, read from Authorization: Bearer.
-     *
-     * deploy-nodered forwards the access token of the operator who triggered the deploy, having
-     * already checked their role. This re-derives the role from public.user_roles rather than
-     * trusting that check, so a revocation takes effect on both sides at once and a token
-     * obtained any other way is judged identically.
+     * Machine-to-machine access to the admin API, read from Authorization: Bearer. deploy-nodered
+     * forwards the operator's access token; the role is re-derived from public.user_roles rather
+     * than trusted, so a revocation takes effect on both sides at once.
      */
     tokenHeader: 'authorization',
     tokens: async function (token) {
       if (!token) return null;
 
-      // Break-glass. Empty by default. If Supabase Auth, Kong or the edge runtime is down then
-      // SSO is down with them, and Node-RED may be exactly what you need to reach. Same
-      // reasoning as disable_login_form = false in grafana/grafana.ini.
-      //
-      // secretEquals(), not ===. An unset token is refused by that helper rather than by the
-      // guard here, so there is one answer to "is this the break-glass token" instead of two.
+      // Break-glass, empty by default: if Supabase Auth, the gateway or the edge runtime is down then
+      // SSO is down with them. Same reasoning as disable_login_form = false in grafana/grafana.ini.
+      // secretEquals() refuses an unset token, so there is one answer to "is this the token".
       if (secretEquals(token, env.NODERED_ADMIN_TOKEN)) {
         return { username: 'acs-cymru-break-glass', permissions: '*' };
       }
@@ -743,26 +588,17 @@ module.exports = {
       return user;
     }
 
-    // adminAuth.default IS DELIBERATELY ABSENT. Setting it grants an anonymous identity to every
-    // unauthenticated request, which is precisely the state this file exists to end. Node-RED's
-    // needsPermission() runs passport.authenticate(['bearer','tokens','anon']) -- with no
-    // default, the 'anon' arm has nothing to return and the request is refused.
+    // adminAuth.default is deliberately absent: setting it grants an anonymous identity to every
+    // unauthenticated request. With no default, passport's 'anon' arm has nothing to return.
   },
 
   /**
-   * Authentication for the http-in nodes, i.e. POST /hooks/quarantine.
+   * Authentication for the http-in nodes (POST /hooks/quarantine). A function, because Node-RED
+   * accepts Express middleware here, which allows a bearer check instead of HTTP Basic.
    *
-   * A FUNCTION, NOT {user, pass}. Node-RED accepts Express middleware here
-   * (node-red/red.js:427), which is what allows a bearer check instead of HTTP Basic against a
-   * bcrypt hash. pg_net sends Bearer, and a static password would be one more shared secret to
-   * rotate by hand.
-   *
-   * THE TOKEN IS NOT THE ADMIN CREDENTIAL, and must never be made so.
-   * public.dispatch_device_quarantine_webhook() mints a fresh 60-second JWT per event, scoped
-   * aud=node-red-hooks. A flow author can read msg.req.headers, so anything sent here is
-   * readable by every flow in this instance -- an admin token here would hand every flow the
-   * admin API. What leaks instead is a capability to post a fake quarantine notice, for a
-   * minute.
+   * The token is not the admin credential and must never be: a flow author can read
+   * msg.req.headers, so anything sent here is readable by every flow. The database mints a fresh
+   * 60-second JWT per event, scoped aud=node-red-hooks.
    */
   httpNodeAuth: function (req, res, next) {
     const header = req.headers.authorization || '';
@@ -801,13 +637,9 @@ if (!settingsAreCorrect()) {
   console.log(`[node-red-init] settings.js already correct (v${SETTINGS_VERSION}); left untouched.`);
 }
 
-// 3. Decide whether the broker credentials may be (re)written.
-//
-// "Only while there are none to lose." Credentials that exist and carry content were entered
-// through the editor and are encrypted under whatever key Node-RED was using; rewriting them --
-// or clearing the key that decrypts them, below -- would destroy them. An absent or empty file
-// means there is nothing to protect, which is the state a volume is left in after Node-RED
-// discards credentials it could not decrypt.
+// 3. Decide whether the broker credentials may be (re)written: only while there are none to
+// lose. Credentials that carry content were entered through the editor and are encrypted under
+// whatever key Node-RED was using; rewriting them, or clearing the key, would destroy them.
 function credentialsWorthKeeping() {
   if (!fs.existsSync(credentialsPath)) return false;
   try {
@@ -820,10 +652,8 @@ function credentialsWorthKeeping() {
 }
 
 /**
- * The broker username currently stored in flows_cred.json, or null if it cannot be read.
- *
- * Decrypted with the same scheme the round-trip check below uses. A file we cannot decrypt is not
- * ours to judge, so it reads as null and the keep-them-untouched path applies unchanged.
+ * The broker username currently stored in flows_cred.json, or null if it cannot be read. A file
+ * we cannot decrypt is not ours to judge, so it reads as null and is left untouched.
  */
 function storedBrokerCredential(nodeId = BROKER_NODE_ID) {
   if (!fs.existsSync(credentialsPath)) return null;
@@ -844,42 +674,20 @@ function storedBrokerCredential(nodeId = BROKER_NODE_ID) {
 /**
  * Which credential each broker node in the flow should carry.
  *
- * ONE CONNECTION PER GATEWAY, BECAUSE THE BROKER SAYS SO. `mosquitto.acl` pins the topic's
- * edge-node segment to `%u`, so a client may publish only beneath the gateway whose username it
- * authenticated as. Four cells therefore means four accounts and four connections; there is no
- * shared principal to fall back on, because that account was deliberately deleted.
- *
- * THE ENV PREFIX IS DECLARED ON THE NODE, in `acsCredentialsEnv`, rather than derived from the
- * node's id by a naming convention. A convention is invisible when it breaks: renaming a node
- * would silently move it onto a different account, or onto none, and the only symptom is
- * "Connection failed to broker: <clientId>@<url>" -- which names the CLIENT ID, not the username,
- * and is the same line a wrong host produces.
- *
- * The credential tooling emits exactly these variable names, so a pair set in `.env` is picked up
- * by naming it here and nowhere else.
- *
- * The legacy node keeps reading MQTT_USER / MQTT_PASSWORD with no declaration, so a flow authored
- * before this existed still provisions unchanged.
+ * One connection per gateway, because mosquitto.acl pins the edge-node segment to the username.
+ * The env prefix is declared on the node in `acsCredentialsEnv`, not derived from its id: a
+ * convention is invisible when it breaks, and the only symptom is "Connection failed to broker".
+ * The credential tooling emits exactly these variable names. The legacy node keeps reading
+ * MQTT_USER / MQTT_PASSWORD with no declaration.
  */
 function brokerCredentialFor(node) {
   const prefix = node.acsCredentialsEnv;
 
   if (!prefix) {
     if (node.id === BROKER_NODE_ID) {
-      // CHECKED HERE, NOT AT START-UP, and the difference is which stacks can boot.
-      //
-      // This used to be an unconditional guard: no MQTT_PASSWORD, no boot. That was right when
-      // the pair was the only broker credential, and became wrong when the flow was consolidated
-      // onto four per-cell gateways that name their own pairs -- from then on it demanded a
-      // credential for the RETIRED single-device simulator, whose gateway row 0020 deletes, on
-      // every stack including the ones with no legacy node in their flow at all.
-      //
-      // Emptying MQTT_SIMULATOR_PASSWORD (so mosquitto-init stops creating a broker account for
-      // an edge node that has no gateway row) therefore took the whole Compose stack down at
-      // node-red-init. The fail-closed posture is unchanged and is simply asked at the point it
-      // means something: a flow that CONTAINS this node still refuses to be seeded without a
-      // password, because seeding an empty one is what produces a CONNACK 5 the editor reports
-      // as "Connection failed to broker" with no cause.
+      // Checked here, not at start-up, so a stack whose flow has no legacy node boots without the
+      // legacy pair. A flow that contains this node still refuses to be seeded without a password:
+      // seeding an empty one produces a CONNACK 5 the editor reports with no cause.
       if (!mqttPassword) {
         fail(
           `this volume's flow carries the legacy '${BROKER_NODE_ID}' node, but MQTT_PASSWORD is not set.
@@ -919,20 +727,11 @@ function brokerCredentialFor(node) {
 }
 
 /**
- * A CHANGED BROKER IDENTITY FORCES A REWRITE of the otherwise seed-once credentials.
- *
- * The broker USERNAME is not user content: it is the simulator gateway's `sparkplug_id`, which
- * mosquitto.acl matches the topic's edge-node segment against. Leaving a stale one in place means
- * Node-RED authenticates as an account that no longer exists, and it reports only:
- *
- *     Connection failed to broker: <clientId>@mqtt://mosquitto:1883
- *
- * -- the CLIENT ID, not the username, and no CONNACK code. Identical to the line a wrong host
- * produces, which is why this is corrected here rather than left to a runbook.
- *
- * ONLY A DIFFERING USER TRIGGERS THIS. A password an operator changed in the editor is left alone:
- * that is a credential for the same account, whereas a different account is a different credential
- * and the environment is authoritative about which one this deployment uses.
+ * A changed broker identity forces a rewrite of the otherwise seed-once credentials. The
+ * username is the gateway's `sparkplug_id`, not user content; a stale one authenticates as an
+ * account that no longer exists and reports only "Connection failed to broker: <clientId>@...".
+ * Only a differing user triggers this: a password an operator changed in the editor is left
+ * alone.
  */
 // Read the flow to find every broker node that needs a credential. Done here rather than reusing
 // the copy above, because that block only runs when a transport variable is set.
@@ -978,14 +777,10 @@ if (missingCredential && !brokerIdentityChanged) {
   );
 }
 
-// 3b. Drop any credential key Node-RED generated for itself on an earlier boot.
-//
-// A `_credentialSecret` Node-RED minted for itself WINS over ours on every later start: it fails
-// to decrypt our flows_cred.json, silently discards the credentials, and rewrites the file empty.
-// The broker node ends up with no username and Mosquitto refuses it with CONNACK 5.
-//
-// Guarded by writeCredentials, not by the seed path -- the question is "is there ciphertext only
-// this key can open", not "is this volume fresh". (tutorial/README.md -> "Flow provisioning")
+// 3b. Drop any credential key Node-RED generated for itself on an earlier boot. A minted
+// `_credentialSecret` wins over ours, fails to decrypt flows_cred.json, and rewrites it empty.
+// Guarded by writeCredentials, not the seed path: the question is whether there is ciphertext
+// only this key can open.
 if (writeCredentials && fs.existsSync(runtimeConfigPath)) {
   try {
     const runtimeConfig = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
@@ -1032,11 +827,8 @@ credentials.setKey(credentialSecret);
 for (const [nodeId, credential] of brokerCredentials) {
   await credentials.add(nodeId, credential);
 }
-// ZERO IS A LEGITIMATE COUNT and is said differently, rather than printed as an empty list after a
-// trailing colon. A blank flow declares no broker nodes at all, so "seeding
-// credentials for 0 broker node(s): " is the ordinary output of a working blank canvas -- and it
-// reads exactly like a lookup that returned nothing, which is the one impression this script's
-// logging is otherwise careful never to give.
+// Zero is a legitimate count (a blank flow declares no broker nodes) and is said as such, rather
+// than printed as an empty list that reads like a lookup that returned nothing.
 if (brokerCredentials.size === 0) {
   console.log(
     '[node-red-init] no broker nodes in the flow, so there are no credentials to seed. ' +
@@ -1060,16 +852,9 @@ if (!Object.prototype.hasOwnProperty.call(exported, '$')) {
   );
 }
 
-// 6. Prove Node-RED will be able to read EVERY credential back before we commit it to disk.
-//
-// CHECKED PER BROKER NODE, not against one hardcoded id. This verified only `mqtt-broker-config`,
-// which stopped existing when the introductory tab was folded into the unified one -- so the
-// lookup returned undefined, the comparison failed, and the script correctly refused to write a
-// file it could not prove readable. The guard was right; its scope was stale.
-//
-// A partial check would have been worse than none: with four gateways it would have passed on the
-// one node it knew about and said nothing about the other three, which is exactly the silent
-// half-configured state this guard exists to prevent.
+// 6. Prove Node-RED will be able to read every credential back before committing it to disk.
+// Checked per broker node, not against one hardcoded id: a partial check would pass on the one
+// node it knew about and say nothing about the rest.
 try {
   const key = crypto.createHash('sha256').update(credentialSecret).digest();
   const blob = exported.$;

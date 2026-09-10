@@ -2,41 +2,19 @@
 --
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.
 --
--- =================================================================================================
--- WHAT THIS IS FOR
+-- Gitea's `openidConnect` source is configured from a discovery URL, and GoTrue's discovery
+-- document carries relative endpoint paths and requires `scope=openid`, which this HS256 stack
+-- refuses (supabase/README.md records both). So the forge's login is the gateway's `forge`
+-- listener in supabase/envoy.yaml, in the shape Studio's is: an OAuth 2.1 code flow against this
+-- stack's GoTrue, the access token verified locally, Administrator and Shopfloor_Manager
+-- admitted, and the identity handed to Gitea as reverse-proxy headers. This registers the
+-- client: `...0004`, beside Grafana, Node-RED and Studio. No userinfo function: the gateway reads
+-- the role from the access token.
 --
--- Gitea's only general-purpose authentication source is `openidConnect`, configured entirely from a
--- discovery URL, and GoTrue's discovery document carries an empty issuer and RELATIVE endpoint
--- paths: an auth source added against it sends the browser to `/oauth/authorize` on the FORGE,
--- which is a 404. Its request also carries `scope=openid`, which GoTrue refuses on this HS256 stack
--- (`HS256 is not supported for ID token signing`). Both were measured; roadmap 7 records them.
---
--- So the forge's login is the gateway's, in the shape Studio's already is: the `forge` listener in
--- supabase/envoy.yaml runs an OAuth 2.1 authorization-code flow against this stack's own GoTrue,
--- verifies the access token locally, admits Administrator and Shopfloor_Manager, and hands the
--- verified identity to Gitea as reverse-proxy headers. This file provides the one thing only the
--- database can -- the client that flow authenticates as.
---
--- IT IS THE FOURTH CLIENT OF THE SAME SHAPE. Grafana is `...0001` (0002), Node-RED `...0002`
--- (archived 0006), Studio `...0003` (0081). As with Studio there is no userinfo function to go
--- with it: the gateway reads the role from the access token, which `custom_access_token_hook`
--- mirrors from `user_roles`, so authorisation stays where it always was. Gitea learns a username,
--- an email and a full name, and nothing about `gitops:manage`.
---
--- =================================================================================================
--- WHAT AN ABSENT SECRET DOES
---
--- Skips the registration with a WARNING, exactly as 0081 does. The gateway's own fail-closed branch
--- pairs with it: an upgraded stack that has not yet run `node scripts/setup.mjs` boots, serves every
--- other service, and answers the forge with a login that cannot complete -- which is the correct
--- posture, because the forge's HTTP port IS that listener now and there is no other way in.
---
--- THE REDIRECT URI IS BUILT FROM GITEA_ROOT_URL, the same value Gitea prints in clone commands and
--- the gateway redirects the browser to. One variable, three readers, so they cannot disagree. The
--- trailing slash Gitea wants on ROOT_URL is trimmed here for the reason 0002 and 0081 record: GoTrue
--- compares the string exactly, and `//oauth2/callback` fails as `invalid redirect_uri` at the END
--- of a login that looked fine until then.
--- =================================================================================================
+-- An absent secret skips the registration with a WARNING, as 0081 does, and the forge answers
+-- with a login that cannot complete. The redirect URI is built from GITEA_ROOT_URL, the value
+-- Gitea prints in clone commands, with the trailing slash trimmed: GoTrue compares the string
+-- exactly.
 
 \if :{?gitea_oauth_client_secret} \else \set gitea_oauth_client_secret '' \endif
 \if :{?gitea_public_url}          \else \set gitea_public_url ''          \endif
@@ -100,23 +78,11 @@ BEGIN
 END $$;
 
 -- =================================================================================================
--- AND A ROW IN THE DIRECTORY, because a door nobody can find is not much of a door.
---
--- The Directory page is where people look for services, and the forge was absent from it: while
--- its only login was a local administrator password there was nothing to send a person to. Now
--- there is. The row points at the DOOR -- GITEA_ROOT_URL, the gateway's forge listener -- and is
--- NETWORK because supabase-envoy publishes that port on every interface and authenticates what
--- arrives, the same reasoning 0084 gives for Studio's row.
---
--- `SOURCE_CONTROL` IS A NEW TYPE, and the page's first group claims it beside GRAPHICAL_UI. It is
--- not filed as GRAPHICAL_UI because the type is the category the service declared, and "a place
--- to review a change" is a different kind of thing from "a database console"; a later registry
--- entry for a second forge, or a reader filtering by type, should not have to know that.
---
--- KEPT CURRENT ON EVERY BOOT, as 0085 keeps Grafana's, Studio's and Node-RED's: the address is
--- what GITEA_ROOT_URL says now, not what it said when the row was first inserted. `status` stays
--- UNKNOWN -- nothing in this stack observes the forge (0054's argument), and seeding ACTIVE would
--- assert a health nobody checked.
+-- A row in the Directory, pointing at the door (GITEA_ROOT_URL, the gateway's forge listener),
+-- NETWORK because the gateway publishes that port on every interface behind a login.
+-- `SOURCE_CONTROL` is a new type, filed beside GRAPHICAL_UI on the page. Kept current on every
+-- boot, as 0085 keeps the other derived rows; `status` stays UNKNOWN because nothing observes the
+-- forge.
 -- =================================================================================================
 
 SELECT set_config('acs_cymru.dir_gitea_public_url', :'gitea_public_url', false);

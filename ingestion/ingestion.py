@@ -14,13 +14,9 @@ from datetime import datetime, timezone
 from logging_config import get_logger
 import metrics
 from metrics import start_metrics_server
-# Imports capture.py for the file format, so the daemon and the CLI cannot produce
-# capture files that differ -- and so the encoding-preservation that cost a debugging session to
-# discover is shared rather than reimplemented.
+# capture.py owns the capture file format, so the daemon and the CLI cannot diverge.
 import capture_worker
-# The Directory's MQTT half. Imported here rather than reached for inside main(), so a
-# syntax error in it is a startup failure rather than something the daemon discovers at the
-# moment it would otherwise have started publishing.
+# Imported at module level so a syntax error in it is a startup failure.
 import directory_publish
 
 logger = get_logger("ingestion")
@@ -28,19 +24,13 @@ logger = get_logger("ingestion")
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-# TimescaleDB connection configuration
 TIMESCALEDB_URL = os.getenv("TIMESCALEDB_URL")
 DB_HOST = os.getenv("DB_HOST", "timescaledb")
 DB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None else "5432")
 DB_NAME = os.getenv("DB_NAME", "postgres")
 DB_USER = os.getenv("DB_USER", "postgres")
-# NO DEFAULT, deliberately. A published default ("postgres" / "acscymru123") means a
-# deployment with the variable missing connects with a known-weak credential instead of
-# failing -- the failure mode is silence, which is the worst one. These are validated in
-# main(), matching how SUPABASE_SERVICE_ROLE_KEY has always been treated: refuse to start.
-#
-# Validation lives in main() rather than at import so the pure-logic unit suites, which
-# import this module with a stubbed environment and never open a connection, keep working.
+# No default: a missing password must refuse to start (validated in main(), not at import, so
+# the unit suites can import this module with a stubbed environment).
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # MQTT Broker configuration
@@ -52,59 +42,28 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_USER = os.getenv("MQTT_USER", "factoryplus_ingestion")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
-# MQTTS. Opt-in, and it does NOT change how the daemon authenticates -- MQTT_USER/MQTT_PASSWORD
-# above still identify it.
-#
-# With an internal CA the system trust store knows nothing about it, so an empty MQTT_TLS_CA_FILE
-# makes verification fail outright. That is the correct failure, not a silent downgrade, and it is
-# why there is deliberately NO "skip verification" setting: encryption without verification looks
-# identical on the wire to a successful interception.
-#
-# Why it is off by default: ../ingestion/README.md -> "Configuration"
+# MQTTS is opt-in and does not change how the daemon authenticates. Verification is always on;
+# there is no "skip verification" setting. See ingestion/README.md -> "MQTTS (opt-in)".
 MQTT_TLS_ENABLED = os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
 MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 
-# TWO KEYS, DOING DIFFERENT JOBS, AND NEITHER IS THE SERVICE-ROLE KEY ANY MORE (see Machine Identities in supabase/README.md).
-#
-# The anon key is the `apikey` the gateway checks. Its Lua filter admits a fixed set of literal
-# strings, so the ingestion token cannot be sent in its place -- it would be refused at the edge
-# before PostgREST ever saw it.
-#
-# The ingestion token is the Authorization bearer and is what actually authorises the writes. It
-# names Service_Ingestor (archived migration 0046), an `authenticated` principal holding telemetry:read
-# as a grant of its own since 0080, which
-# cannot write a single row directly: every write goes through a SECURITY DEFINER gate in 0047 that
-# checks the caller is that principal. This is the same shape i3X uses -- pass a bearer through to
-# PostgREST and let RLS answer -- rather than a key that bypasses RLS entirely.
+# Two keys with different jobs (see Machine Identities in supabase/README.md): the anon or
+# publishable key is the `apikey` the gateway's filter admits; the ingestion token is the bearer
+# that names Service_Ingestor, whose writes all go through SECURITY DEFINER gates.
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SUPABASE_INGESTION_KEY = os.getenv("SUPABASE_INGESTION_KEY", "")
 
-# THE GATEWAY CREDENTIAL, in whichever format this deployment registered.
-#
-# Supabase deprecates the anon and service-role JWTs by the end of 2026 and replaces them with
-# opaque `sb_publishable_*` / `sb_secret_*` keys. The gateway accepts BOTH at once and translates
-# the new one, so this daemon does not care which it holds -- it is a string presented as `apikey`
-# and nothing here parses it.
-#
-# PREFERRED, NOT REQUIRED. An install that has not minted the new pair leaves
-# SUPABASE_PUBLISHABLE_KEY empty and keeps working on the legacy key, which is the whole reason
-# both formats are accepted at once: consumers move one at a time rather than on a flag day.
+# The gateway accepts both key formats; the publishable key is preferred when present so installs
+# can move one consumer at a time.
 SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
 
-# Liveness heartbeat. OPT-IN, empty by default: Docker Compose declares no healthcheck for this
-# service and nothing reads the file there, so writing one would be litter. Kubernetes sets it and
-# probes the file's age -- see deploy/helm/acs-cymru/templates/apps/ingestion.yaml.
-#
-# WHY A HEARTBEAT AND NOT A MESSAGE COUNTER. The obvious implementation touches the file in
-# on_message, which reports the daemon dead every time the shopfloor is quiet -- nights, weekends,
-# changeovers. This writes on a timer instead and gates on client.is_connected(), so the signal is
-# "my broker connection is alive", which is the thing that actually breaks and the thing a restart
-# actually fixes. paho's loop_forever() reconnects on its own, but it cannot recover from every
-# state (a stale socket after a broker restart is the common one), and until now nothing noticed.
+# Liveness heartbeat, opt-in. Compose sets no healthcheck; the chart sets the file and probes its
+# age. Written on a timer gated on client.is_connected(), not per message, so a quiet shopfloor
+# does not read as a dead daemon.
 INGESTION_HEALTH_FILE = os.getenv("INGESTION_HEALTH_FILE", "")
 INGESTION_HEALTH_INTERVAL = int(os.getenv("INGESTION_HEALTH_INTERVAL", "15"))
 
@@ -122,88 +81,33 @@ REBIRTH_REQUEST_INTERVAL_SECONDS = int(os.getenv("REBIRTH_REQUEST_INTERVAL_SECON
 # looping births with fresh aliases would otherwise grow it without limit.
 MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 
-# Bound on each entity resolution cache -- the same reasoning as MAX_ALIASES_PER_NODE, applied to
-# the caches that were missed when that one was written. They are keyed by the id observed ON THE
-# WIRE, so they are fed by exactly the same untrusted source (issue #23).
-#
-# A TTL IS NOT A BOUND. Expiry is only checked on read, so an entry nobody reads again is never
-# evicted no matter how stale it is -- a misconfigured gateway cycling ids, a fault loop, or an
-# enumeration attempt against the broker grows the dict forever. The TTL makes entries stale; only
-# a capacity limit makes them go away.
-#
-# 1000 is well above any plausible fleet and low enough to bound memory at a few megabytes. The
-# broker ACL constrains the EDGE NODE segment of a topic but not the DEVICE segment, so this is
-# defence in depth rather than the only thing standing in the way.
+# Capacity bound on each entity cache. The keys are ids seen on the wire, so a TTL alone is not a
+# bound: expiry is only checked on read. 1000 is above any plausible fleet.
 MAX_ENTITIES_PER_CACHE = int(os.getenv("MAX_ENTITIES_PER_CACHE", "1000"))
 
-# A SHORTER TTL FOR NEGATIVE ENTRIES WAS CONSIDERED AND NOT TAKEN, because both arguments for it
-# turn out to be answered elsewhere:
-#
-#   * Freshness. A device that gets registered should not stay "unregistered" for the full TTL --
-#     but the write sites already handle that: the quarantine insert in process_dbirth() SETS the
-#     cache entry to the new row, and the re-quarantine path POPS it. Nothing waits for expiry.
-#   * Abuse. A negative entry is the one an unregistered publisher can create at will -- which is
-#     an argument for expiring it more SLOWLY, not more quickly. Re-resolving sooner means more
-#     PostgREST round trips during exactly the id flood the cap exists to absorb, so a shorter
-#     negative TTL would trade a bounded memory problem for an unbounded directory-load one.
+# Negative entries share the TTL. The write sites in process_dbirth() set or pop the entry, so a
+# newly registered device does not wait for expiry; a shorter negative TTL would only add directory
+# round trips during an id flood.
 
-# Throughput counter reporting. Set to 0 to disable.
-#
-# SEPARATE FROM INGESTION_HEALTH_INTERVAL, and not folded into the liveness heartbeat, because
-# that thread returns immediately when INGESTION_HEALTH_FILE is unset -- which is the Compose
-# default. Counters reported from inside it would therefore never appear on the one target where
-# they are most likely to be read by hand.
-#
-# THIS IS A LOG REPORTER, AND IT IS NOT THE METRICS ENDPOINT. It exists to establish a throughput
-# baseline before the telemetry write path is batched, and to make a stalled daemon legible in
-# `docker logs`. The Prometheus endpoint below reads the same registry -- which is what the note
-# here predicted it would: "a new exporter over the same registry rather than a
-# re-instrumentation". Both remain, because they answer different questions: this one is what
-# somebody reads at 3am with no Prometheus to hand.
+# Throughput counter reporting. Set to 0 to disable. Separate from the health heartbeat, which
+# returns immediately when INGESTION_HEALTH_FILE is unset; this is what `docker logs` shows.
 INGESTION_STATS_INTERVAL = int(os.getenv("INGESTION_STATS_INTERVAL", "60"))
 
-# The Prometheus exposition endpoint (issues #22 and #24). 0 disables it.
-#
-# ITS OWN PORT, not a path on something that already listens, because the daemon listens for
-# nothing else -- it is an MQTT client and a database writer. 9108 is in the unassigned exporter
-# range and does not collide with the stack's published ports.
-#
-# NO CREDENTIAL, deliberately, and that decides what may appear on it: counters and nothing else.
-# No metric values, no device names, no payloads. See ingestion/metrics.py.
+# Prometheus exposition endpoint; 0 disables it. Its own port because the daemon listens for
+# nothing else. No credential, so counters only: no values, names or payloads (see metrics.py).
 INGESTION_METRICS_PORT = int(os.getenv("INGESTION_METRICS_PORT", "9108"))
 
-# How many telemetry rows go into one INSERT statement. A DDATA message is written as a single
-# batched statement; this caps how large that statement may get, so a pathological payload cannot
-# build an unbounded query string. 500 is far above any real Sparkplug payload -- under
-# report-by-exception a DDATA usually carries one metric -- so in practice every message is
-# exactly one statement.
+# Maximum tuples per INSERT statement. A DDATA is one batched statement; this caps its size.
 TELEMETRY_INSERT_PAGE_SIZE = int(os.getenv("TELEMETRY_INSERT_PAGE_SIZE", "500"))
 
-# Bounded retry on a failed TimescaleDB connection.
-#
-# WHY THIS EXISTS. get_timescaledb_connection() previously returned None on the first failure, and
-# every caller answers None by dropping the message with a warning -- so a database blip during a
-# burst lost telemetry silently, visible only in a log line. A short backoff covers the common
-# case (a restart, a brief network fault) without blocking the MQTT callback thread for long: the
-# thread is shared by every device, so a long retry here stalls the whole fleet, which is why the
-# ceiling is deliberately low rather than generous.
+# Bounded retry on a failed TimescaleDB connection. It runs on the paho callback thread, which
+# every device shares, so the ceiling is deliberately low.
 DB_CONNECT_MAX_ATTEMPTS = int(os.getenv("DB_CONNECT_MAX_ATTEMPTS", "3"))
 DB_CONNECT_BACKOFF_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_SECONDS", "0.25"))
 DB_CONNECT_BACKOFF_MAX_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_MAX_SECONDS", "2.0"))
 
-# Unbounded retry, off the message path, for the connection the daemon is supposed to be holding.
-#
-# WHY THIS EXISTS, AND WHY IT IS SEPARATE FROM THE THREE ATTEMPTS ABOVE. Those run on the paho
-# callback thread and are deliberately mean, because that thread is shared by the whole fleet. This
-# one runs on a thread of its own with nothing waiting on it, so it can afford to be patient -- and
-# it has to be, because the fault it exists for is a dependency that is not up YET rather than one
-# that has gone away. `restart: always` brings containers back in whatever order the Docker daemon
-# chooses, and `depends_on` does not apply on that path; measured on this stack, ingestion started
-# 453ms before timescaledb and lost the race.
-#
-# The interval is generous on purpose. Nothing is being dropped while this waits -- an idle daemon
-# with no connection is not losing telemetry, it simply has nothing to write -- so a tight loop
-# would buy nothing and log a great deal.
+# Unbounded retry off the message path, for a historian that is not up yet (Docker restarts
+# containers in its own order; depends_on does not apply). Nothing is lost while it waits.
 DB_HEAL_INTERVAL_SECONDS = float(os.getenv("DB_HEAL_INTERVAL_SECONDS", "30"))
 # Bounded so the healer's period is its own, rather than whatever the OS decides a dead TCP peer
 # is worth. psycopg2's default is the kernel's, which can be minutes.
@@ -212,24 +116,12 @@ DB_HEAL_CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_HEAL_CONNECT_TIMEOUT_SECONDS
 # -----------------------------------------------------------------------------
 # Payload conformance auditing
 # -----------------------------------------------------------------------------
-# ON BY DEFAULT, and switchable because it writes to an APPEND-ONLY table. Every other counter this
-# daemon keeps can be reset by restarting it; a digital_thread row cannot be removed by any
-# application role, by design. An operator commissioning a noisy new gateway needs a way to stop
-# the record filling with the same finding while they fix it, and the honest way to offer that is a
-# flag rather than a hope that the deduplication below is always enough.
+# On by default and switchable because it writes to an append-only table that no application
+# role can prune.
 AUDIT_PAYLOAD_REJECTIONS = os.getenv("AUDIT_PAYLOAD_REJECTIONS", "true").lower() == "true"
 
-# How long a device's attached schemas are cached before being re-read.
-#
-# MUCH LONGER THAN CACHE_TTL_SECONDS (5s, for the device row), because the two answer different
-# questions. The device row carries `status` and `is_quarantined`, which change under the daemon's
-# own feet and must be near-live. A schema binding changes when an engineer edits it, which is a
-# human-scale event -- so re-reading it per message would be one PostgREST round trip per DDATA to
-# learn nothing, on the hottest path in the process.
-#
-# The cost of the staleness is bounded and worth stating: for up to this long after a schema edit,
-# conformance is judged against the previous definition. It cannot cause a wrong DROP, because
-# nothing is dropped for non-conformance -- see payload_violations().
+# Schema bindings change on a human timescale, so they are cached far longer than the device row
+# (CACHE_TTL_SECONDS). Staleness cannot cause a wrong drop: see payload_violations().
 SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "300"))
 
 # -----------------------------------------------------------------------------
@@ -239,41 +131,14 @@ supabase_client = None
 try:
     from supabase import create_client, Client
     if SUPABASE_URL and SUPABASE_GATEWAY_KEY and SUPABASE_INGESTION_KEY:
-        # Declares the daemon as the actor behind its writes, so digital_thread rows say
-        # "ingestion" rather than the generic "service".
-        #
-        # A HEADER, because the daemon and the edge functions used to arrive on the SAME
-        # service-role key -- the connection alone could not tell them apart. PostgREST exposes
-        # request headers as the `request.headers` GUC, which log_digital_thread_event() reads.
-        #
-        # STILL NEEDED NOW THAT THE DAEMON HAS ITS OWN IDENTITY, and for a sharper reason than
-        # before. The trigger concludes `actor_source = 'user'` from `auth.uid()` being non-NULL,
-        # so a daemon with a real `sub` would have relabelled every ingestion write as a human
-        # action -- the exact claim that function refuses to accept from a header. 0048 teaches it
-        # that a machine principal is not a user; this header is what it falls back to reading.
-        #
-        # The trigger accepts only 'ingestion' / 'service' / 'migration' from this header and
-        # never 'user': a client asserting a human author for its own writes is precisely the
-        # claim it must not be able to make.
-        #
-        # Set on the PostgREST session rather than through ClientOptions(headers=...) -- that
-        # constructor is incomplete in supabase-py 2.x and raises on an attribute the Auth client
-        # then expects ("'ClientOptions' object has no attribute 'storage'"). Mutating the
-        # session's headers is the path that actually reaches PostgREST, verified end to end.
+        # Names the daemon as the actor behind its writes; log_digital_thread_event() reads it from
+        # the `request.headers` GUC and accepts only 'ingestion' / 'service' / 'migration'.
+        # Set on the PostgREST session: ClientOptions(headers=...) raises in supabase-py 2.x.
         supabase_client = create_client(SUPABASE_URL, SUPABASE_GATEWAY_KEY)
         try:
-            # `.auth()` AND NOT `session.headers["Authorization"] = ...`, which is the obvious
-            # thing and does not work. Setting the session header appears to succeed -- read it
-            # back and it is there -- but supabase-py re-derives Authorization from the client's
-            # own token on every request, so the anon key goes out regardless and PostgREST
-            # resolves the role as `anon`. That failure is quiet in the worst way: reads of
-            # `devices` and `gateways` come back 42501 while the header says what you set.
-            #
-            # The apikey stays the gateway key (create_client put it there), so the request
-            # carries `apikey: <publishable or anon>` for the gateway's filter and
-            # `Bearer <ingestion token>` for
-            # PostgREST -- which is what makes auth.uid() resolve to Service_Ingestor and opens
-            # the 0047 gates.
+            # `.auth()`, not a session header: supabase-py re-derives Authorization from the client's
+            # token on every request, so a header set by hand is silently replaced by the anon key.
+            # The apikey stays the gateway key; the bearer is what resolves auth.uid() to Service_Ingestor.
             supabase_client.postgrest.auth(SUPABASE_INGESTION_KEY)
             supabase_client.postgrest.session.headers["X-ACS-Cymru-Actor"] = "ingestion"
         except Exception as header_err:
@@ -298,26 +163,10 @@ except Exception as e:
 # -----------------------------------------------------------------------------
 _ts_conn = None
 
-# THE ONE-WRITER PROPERTY IS UNCHANGED; WHAT THIS GUARDS IS THE VARIABLE, NOT THE CONNECTION.
-#
-# get_timescaledb_connection() documents that the module-level global is safe because every write
-# happens on the paho callback thread, and names a second thread as the thing to revisit first. The
-# healer below IS that second thread, so here is the revisit.
-#
-# It is still one writer. The healer never executes a statement: it OPENS a connection and hands it
-# over, and every cursor is still created on the callback thread. psycopg2 is threadsafety 2 --
-# connections may be shared between threads, cursors may not -- so that hand-off is supported by
-# the driver. What is not safe without this lock is two threads assigning `_ts_conn` at once, which
-# would leak whichever connection lost, and that is all this exists for.
-#
-# THE LOCK IS NEVER HELD ACROSS A CONNECT ATTEMPT BY THE HEALER, which is the rule that keeps it
-# from mattering on the message path. The healer connects into a local with the lock released and
-# takes it only to publish the result -- microseconds -- so a message arriving mid-heal is never
-# made to wait on a network round trip. The callback thread, by contrast, does hold it across its
-# own bounded retry, exactly as it did when the global was unguarded; the healer waits instead,
-# which costs nothing.
+# Guards assignment of `_ts_conn` between the callback thread and the healer thread. It is still
+# one writer: the healer opens connections and never uses them (psycopg2 threadsafety 2 allows the
+# hand-off). The healer never holds this across a connect attempt.
 _ts_conn_lock = threading.RLock()
-
 
 def _open_timescaledb_connection():
     """One connection attempt. Split out so the retry loop below stays readable."""
@@ -331,7 +180,6 @@ def _open_timescaledb_connection():
         password=DB_PASSWORD
     )
 
-
 # The escape hatch for the check below. Deliberately a separate variable from INGEST_DB_USER: the
 # credential and the permission to use a dangerous one are different decisions, and requiring both
 # means nobody reaches this state by editing one line.
@@ -339,17 +187,13 @@ ALLOW_HISTORIAN_SUPERUSER = os.getenv(
     "ALLOW_HISTORIAN_SUPERUSER", ""
 ).strip().lower() in ("1", "true", "yes", "on")
 
-
 def _is_authentication_failure(err):
     """
     True for a credential the server actively refused, as opposed to one it never saw.
 
-    MATCHED ON SQLSTATE FIRST, text second. psycopg2 surfaces the server's code as `pgcode` --
-    28P01 is `invalid_password` and 28000 `invalid_authorization_specification` -- and those are
-    the authority. The string check is the fallback for a driver-level failure that carries no
-    code, and is kept narrow so a connection refused or a DNS failure is NOT caught here: those
-    are transient, and treating them as fatal would make the daemon crash-loop through an ordinary
-    database restart.
+    SQLSTATE first (28P01 invalid_password, 28000 invalid_authorization_specification); the text
+    match is a narrow fallback for a driver-level failure with no code. A refused connection or
+    DNS failure must not match: those are transient.
     """
     code = getattr(err, "pgcode", None)
     if code in ("28P01", "28000"):
@@ -357,18 +201,12 @@ def _is_authentication_failure(err):
     text = str(err).lower()
     return "password authentication failed" in text or "no password supplied" in text
 
-
 def _connect_timescaledb(connect_timeout=None):
     """
     One connection attempt, with the exception left to the caller.
 
-    Separate from get_timescaledb_connection() because that function's contract is to absorb
-    failures and return None -- which is right on the message path and useless at startup, where
-    the DIFFERENCE between failures is the whole question.
-
-    `connect_timeout` is for the healer and defaults to absent, which leaves startup behaving
-    exactly as it did: the kernel's timeout. Passing it as a keyword alongside a DSN is supported --
-    libpq merges the two, with the keyword winning.
+    `connect_timeout` is for the healer; absent, libpq's default applies. A keyword alongside a
+    DSN is supported, with the keyword winning.
     """
     kwargs = {} if connect_timeout is None else {"connect_timeout": connect_timeout}
     if TIMESCALEDB_URL:
@@ -377,28 +215,14 @@ def _connect_timescaledb(connect_timeout=None):
         host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, **kwargs
     )
 
-
 def _assert_historian_is_least_privilege(conn):
     """
     Refuse to run as a superuser on the historian.
 
-    WHY THE DAEMON CHECKS THIS ITSELF rather than trusting configuration. Every other guarantee
-    here is enforced where it can be observed: the broker ACL is asserted by delivery, the write
-    gates by `is_ingestion_caller()`, the audit trail by a trigger. "Append-only historian writes"
-    was the exception -- a claim in the README's security model that depended on nobody having
-    changed DB_USER, and it was wrong for months without anything noticing.
-
-    A grant can be widened, a compose file edited, a Helm value overridden. What cannot be argued
-    with is asking the database, at startup, what this connection actually is.
-
-    REFUSES RATHER THAN WARNS, because a warning in a startup log is exactly how the original
-    problem survived. Recovery still has a door: ALLOW_HISTORIAN_SUPERUSER=true, which is a
-    deliberate sentence someone has to write.
-
-    SUPERUSER IS THE ONLY THING TESTED, not the full grant list. The precise grants are asserted by
-    timescaledb/roles.sql's own self-check and by test_historian_role_grants.py, which run against
-    the database rather than through this process. What this adds is the one property those cannot
-    see: which role THIS connection actually holds.
+    The security model claims append-only historian writes; asking the database what this
+    connection is enforces that regardless of configuration. Refuses rather than warns.
+    ALLOW_HISTORIAN_SUPERUSER=true is the deliberate override. Only superuser is tested; the
+    grant list is asserted by timescaledb/roles.sql and test_historian_role_grants.py.
     """
     try:
         with conn.cursor() as cur:
@@ -442,31 +266,14 @@ def _assert_historian_is_least_privilege(conn):
     )
     raise SystemExit(1)
 
-
 def get_timescaledb_connection():
     """
     The daemon's single TimescaleDB connection, reconnecting when it has gone away.
 
-    ONE CONNECTION, NOT A POOL. Every write happens on the paho callback thread, so there is
-    exactly one writer and a pool would be complexity with no consumer. That property is also
-    what makes the module-level global safe -- and it is the thing to revisit first if a worker
-    thread is ever introduced, because psycopg2 connections are not safe for concurrent use.
-
-    `closed` IS CHECKED BUT IS NOT SUFFICIENT. psycopg2 sets it only when the connection was
-    closed on this side; a connection dropped by the server, a restart, or an idle timeout still
-    reports `closed == 0` and fails on first use. The caller's exception handler is what covers
-    that, and the next call through here re-opens.
-
-    RETRIES ARE BOUNDED AND SHORT. Returning None on the first failure meant a momentary blip
-    dropped telemetry silently, since every caller answers None by dropping the message. But this
-    runs on the callback thread shared by the whole fleet, so a generous retry would stall every
-    other device's messages behind one unreachable database. Three attempts over well under a
-    second is the compromise: it absorbs a restart without becoming a stall.
-
-    THE LOCK DOES NOT MAKE THIS CONCURRENT, and is not an invitation to make it so. It serialises
-    assignment to `_ts_conn` against the healer thread, which opens connections and never uses
-    them; see the note on `_ts_conn_lock`. Cursors are still created on one thread only, which is
-    the property psycopg2 actually requires.
+    One connection, one writer (the paho callback thread). `closed` only reflects a close on this
+    side; a server-side drop fails on first use and the caller's handler covers it. Retries are
+    bounded because this thread is shared by the whole fleet. The lock serialises assignment
+    against the healer thread only. See ingestion/README.md -> "Connection handling".
     """
     global _ts_conn
 
@@ -515,11 +322,8 @@ def get_timescaledb_connection():
 # -----------------------------------------------------------------------------
 # Sparkplug B Wire Identity
 # -----------------------------------------------------------------------------
-# Assets are identified on the wire by an immutable, platform-issued id: a 3-character type
-# prefix plus 21 lowercase hex characters, derived from the row's UUID primary key by the
-# `sparkplug_id` generated column (archived migration 0014). Asset *names* are display labels only
-# and can be edited freely without breaking ingestion, telemetry continuity, or the audit
-# trail -- which was the entire point of moving off name-based identity.
+# Assets are addressed on the wire by the platform-issued `sparkplug_id` (3-char prefix plus 21
+# hex chars, derived from the row's UUID). Names are display labels only.
 GATEWAY_ID_PATTERN = re.compile(r"^gwy[0-9a-f]{21}$")
 DEVICE_ID_PATTERN = re.compile(r"^dev[0-9a-f]{21}$")
 SPARKPLUG_ID_LENGTH = 24
@@ -530,15 +334,8 @@ UUID_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 
-# Payload metrics that carry identity rather than configuration or telemetry. Asset_ID is the
-# device's own claim about which asset it is (used only as a cross-check against the topic);
-# Asset_Name is a human-readable hint. Instance_UUID and Schema_UUID are the Factory+ birth
-# profile -- which asset this is, and which model it conforms to.
-#
-# None is stored as a parameter, a telemetry sample, or a DECLARED METRIC. The last matters
-# most: a schema models what a device measures, and an identity assertion is not a measurement.
-# Counting them would flag every Factory+-conformant device as publishing two metrics its
-# schema does not model.
+# Metrics that carry identity rather than configuration or telemetry. None is stored as a
+# parameter, a sample or a declared metric: a schema models measurements, not identity.
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 
 # The Factory+ Sparkplug payload marker, carried in the payload's top-level `uuid` field. Read
@@ -551,25 +348,12 @@ DEFAULT_SPARKPLUG_GROUP = "ACS-Cymru"
 
 class DirectoryUnavailable(Exception):
     """
-    The device/gateway directory could not be REACHED. Distinct from "not registered".
+    The device/gateway directory could not be reached. Distinct from "not registered".
 
-    THESE WERE THE SAME VALUE UNTIL 2026-08. resolve_device() returned None both for a device
-    Supabase does not know about and for a Supabase it could not talk to, and process_dbirth()
-    reads None as "unregistered" -- a state it answers by WRITING A QUARANTINE ROW. So any
-    transport fault during a birth certificate (Kong restarting, a PostgREST error, a dropped
-    connection) would register a legitimate device as UNKNOWN_DEVICE.
-
-    That is the wrong severity for a transient error, because quarantine is not a retry state. It
-    persists in the database, it requires an operator to approve the device out of it
-    (approve_quarantined_device), and until they do every DDATA the device sends is dropped. One
-    unreachable moment would stop a real machine recording indefinitely, under a reason naming its
-    identity -- the one thing that was never in question.
-
-    "Fail closed" is right for TELEMETRY: an unverifiable row must not be written. It is wrong for
-    a STATE CHANGE about the device itself. Raising here keeps the first behaviour and removes the
-    second: callers drop the message, and the next one resolves normally.
+    process_dbirth() answers "unregistered" by writing a quarantine row, which persists until an
+    operator approves the device. A transport fault must not do that, so callers drop the message
+    and the next one resolves normally.
     """
-
 
 # Recorded on devices.quarantine_reason as "<CODE>: <detail>".
 REASON_UNKNOWN_DEVICE = "UNKNOWN_DEVICE"
@@ -577,15 +361,9 @@ REASON_MALFORMED_IDENTITY = "MALFORMED_IDENTITY"
 REASON_IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
 REASON_GATEWAY_MISMATCH = "GATEWAY_MISMATCH"
 
-# Telemetry sanity window. A device supplies its own metric timestamps and they are trusted
-# for ordering, but not unconditionally: a clock-skewed or hostile gateway would otherwise
-# write rows arbitrarily far into the past or future, landing them outside the retention
-# window or in a compressed chunk that rejects the write.
-#
-# Asymmetric on purpose. Late data is normal -- a gateway buffers through a network outage
-# and flushes on reconnect -- so the backward tolerance is generous. Data from the future is
-# never legitimate; it is always a clock fault, so the forward tolerance covers ordinary NTP
-# skew and nothing more.
+# Telemetry sanity window. Device timestamps are trusted for ordering but not unconditionally.
+# Asymmetric: late data is normal (a gateway flushing after an outage); future data is always
+# a clock fault, so the forward tolerance covers NTP skew only.
 TELEMETRY_MAX_AGE_SECONDS = 24 * 60 * 60   # 24 hours behind now
 TELEMETRY_MAX_FUTURE_SECONDS = 5 * 60      # 5 minutes ahead of now
 
@@ -595,59 +373,29 @@ SOURCE_REPORTED_IDENTITY = "reported_identity"
 SOURCE_INSTANCE_UUID = "instance_uuid"
 SOURCE_LEGACY_NAME = "legacy_name"
 
-# Statuses a gateway may NOT assert about itself, and the length cap on the ones it may.
-#
-# `gateways.status` is deliberately unconstrained text (archived migration 0025) because a `Gateway_Status`
-# metric in an NBIRTH overrides whatever the message type implies -- the domain is the fleet's, not
-# ours. That is a statement about VOCABULARY, not about authority, and the two were conflated: the
-# payload string was written through verbatim, so a gateway could claim any value at any length.
-#
-# The three below are the platform's own, written by code that knows something the gateway does
-# not. PENDING_ENROLLMENT and AWAITING_BIRTH are enrolment lifecycle, set by the issuing RPC and by
-# enroll-gateway; STALE is DERIVED at read time by public.gateway_status and is never stored at
-# all. All three short-circuit ahead of the staleness arm in that view, so a gateway asserting one
-# renders itself permanently not-stale on the dashboard -- it would go on looking healthy after it
-# stopped publishing, which is the one thing the derived status exists to prevent.
-#
-# REJECTED, NOT TRUNCATED OR REMAPPED. There is no legitimate reading of a gateway claiming to be
-# awaiting its own birth, so the message type's own status is the honest answer and the claim is
-# dropped with a warning.
+# Statuses a gateway may not assert about itself. PENDING_ENROLLMENT and AWAITING_BIRTH are
+# enrolment lifecycle; STALE is derived at read time by public.gateway_status. All three
+# short-circuit the staleness arm, so a gateway claiming one would never read STALE.
+# Rejected with a warning, not truncated or remapped.
 RESERVED_GATEWAY_STATUSES = frozenset({"PENDING_ENROLLMENT", "AWAITING_BIRTH", "STALE"})
 
-# Long enough for any status a fleet reasonably uses ("MAINTENANCE_SCHEDULED" is 21), short enough
-# that the column cannot be used as storage. Over-length is refused rather than truncated: a
-# truncated status is a DIFFERENT status, and silently inventing one is worse than keeping the
-# status the message type already implies.
+# Over-length is refused rather than truncated: a truncated status is a different status.
 MAX_GATEWAY_STATUS_LENGTH = 32
 
 CACHE_TTL_SECONDS = 5
 
-
 class TTLCache:
     """
-    A bounded, TTL'd, thread-safe LRU. Replaces the bare dicts these caches used to be (issue #23).
+    A bounded, TTL'd, thread-safe LRU.
 
-    TWO PROPERTIES ARE LOAD-BEARING AND BOTH ARE EASY TO BREAK BY ACCIDENT.
+    Two properties callers depend on:
 
-    1. `get` RETURNS THE STORED OBJECT, NEVER A COPY. resolve_device() caches a row dict and the
-       DBIRTH path then mutates THAT DICT IN PLACE -- `device.update(update_fields)` in
-       process_dbirth(), and `device["last_birth_metrics"] = declared` in
-       record_declared_metrics() -- specifically so the next lookup inside the TTL sees the new
-       state and does not re-detect the same change. A cache that returned copies would break that
-       silently, and the symptom would not look like a cache bug: it would be a duplicate UPDATE
-       and a duplicate digital_thread row on every rebirth, which is exactly what the write-only-
-       what-moved work exists to prevent.
+    1. `get` returns the stored object, never a copy. The DBIRTH path mutates the cached row in
+       place so the next lookup inside the TTL sees the new state and does not re-detect it.
+    2. `get` returns `(hit, value)`. None is a legitimate cached value (a negative entry), so a
+       default-returning get would conflate absent and cached-as-unregistered.
 
-    2. `get` RETURNS `(hit, value)`, NOT A VALUE OR A DEFAULT. `None` is a legitimate cached value
-       here -- it is the NEGATIVE entry, "this wire id resolved to nothing". A `get` returning None
-       for both "absent" and "cached as unregistered" would conflate them, and the consequence is
-       not a crash: negative caching would quietly stop working, and every message from an
-       unregistered device would go back to the directory. `_schema_cache` has the same shape for
-       its own reason -- see device_modelled_constraints() on why None and an empty map differ.
-
-    EVICTION IS LRU AND THAT IS NOT AN ARBITRARY CHOICE. The entry a TTL cannot reach is by
-    definition one nobody has read, and the least-recently-used entry is exactly that entry. So the
-    capacity bound removes the stale ones first without needing a sweep to find them.
+    Eviction is LRU: the entry a TTL cannot reach is the one nobody has read.
     """
 
     def __init__(self, maxsize, ttl, name):
@@ -705,7 +453,6 @@ class TTLCache:
         hit, _ = self.get(key)
         return hit
 
-
 # Device and edge-node resolution caches, keyed by the id seen on the wire (the gateway one by the
 # (group, node) PAIR -- see resolve_gateway). Values are the row, or None for a negative entry.
 _device_cache = TTLCache(MAX_ENTITIES_PER_CACHE, CACHE_TTL_SECONDS, "device")
@@ -729,15 +476,9 @@ LEGACY_IDENTITY_WARN_INTERVAL_SECONDS = 300
 _status_rejected_warned = {}
 STATUS_REJECT_WARN_INTERVAL_SECONDS = 300
 
-# Sparkplug B metric alias table, keyed by EDGE NODE -- (group_id, edge_node_id) -> {alias: name}.
-#
-# Sparkplug assigns each metric an integer alias in a birth certificate and thereafter publishes
-# DATA carrying the alias alone, with no name. A daemon reading only `name` therefore ingests
-# nothing at all from an alias-optimised gateway, and reports no error while doing it.
-#
-# PER NODE, NOT PER DEVICE: Sparkplug scopes alias uniqueness to the whole edge node including its
-# devices, so a device's DDATA may legitimately carry an alias declared in that node's NBIRTH.
-# Keying per device would silently miss those.
+# Sparkplug B metric alias table, keyed by edge node: (group_id, edge_node_id) -> {alias: name}.
+# Per node, not per device: alias uniqueness is scoped to the whole edge node, so a device's
+# DDATA may carry an alias declared in the node's NBIRTH.
 _alias_map = {}
 _alias_lock = threading.Lock()
 
@@ -756,13 +497,9 @@ _seq_lock = threading.Lock()
 _device_seen = {}
 _device_seen_lock = threading.Lock()
 
-# `status` and `identity_source` ARE READ BACK DELIBERATELY, and not merely for display: the
-# DBIRTH path compares them against what it is about to write and skips the write when nothing
-# moved (see process_dbirth). Without them in the cached row every rebirth issues an UPDATE that
-# changes nothing -- which costs a PostgREST round trip and, because `devices` is REPLICA IDENTITY
-# FULL and in the supabase_realtime publication, broadcasts a full-row change event to every
-# connected dashboard. The audit trigger already suppresses the *audit row* for such a write
-# (archived migration 0005); it cannot suppress the write itself.
+# `status` and `identity_source` are read back so process_dbirth() can skip an UPDATE that
+# changes nothing. `devices` is REPLICA IDENTITY FULL and published to Realtime, so every
+# no-op write would broadcast a full-row event; the audit trigger suppresses only the audit row.
 _DEVICE_COLUMNS = (
     "id,name,sparkplug_id,reported_identity,gateway_id,is_quarantined,first_dbirth_at,"
     "last_birth_metrics,status,identity_source,conformance_policy"
@@ -773,20 +510,13 @@ _DEVICE_COLUMNS = (
 # column existed -- means record and write anyway, which is the behaviour since 0026.
 CONFORMANCE_ENFORCE = "enforce"
 
-
 # -----------------------------------------------------------------------------
 # Throughput counters
 # -----------------------------------------------------------------------------
-# A plain dict behind a lock rather than a metrics library: the daemon has four dependencies and
-# each one is justified in requirements.txt. Counters are monotonic and are never reset, so a
-# reported delta is the traffic in that interval and the absolute is the traffic since start.
-#
-# INCREMENTED AT THE SITES THAT ALREADY DECIDE, not by wrapping them. Every `drop` reason below
-# corresponds one-to-one with an existing logger.warning, so the counters and the log cannot
-# disagree about what happened.
+# Monotonic, never reset, behind a lock. Incremented at the sites that already decide, so the
+# counters and the log cannot disagree about what happened.
 _counters = {}
 _counters_lock = threading.Lock()
-
 
 def count(name: str, n: int = 1):
     """Add to a monotonic counter. Unknown names are created on first use."""
@@ -795,58 +525,28 @@ def count(name: str, n: int = 1):
     with _counters_lock:
         _counters[name] = _counters.get(name, 0) + n
 
-
 def counter_snapshot() -> dict:
     """A copy of the counters, safe to read while the callback thread is writing."""
     with _counters_lock:
         return dict(_counters)
 
-
-# ---------------------------------------------------------------------------------------------
-# THE DROP PAIR, IN ONE PLACE.
-#
-# Every drop is a counter AND a log line, and metrics.py's header states the property they exist
-# to hold: "the counters and the log cannot disagree about what happened". That was enforced by
-# habit -- two adjacent statements, at nineteen sites, each of which had to remember to name the
-# same reason. This makes it structural: `reason` is written ONCE and produces both the flat
-# counter name `dropped_<reason>` and the `reason` field on the line.
-#
-# WHICH IS ALSO WHY THE FIELDS GO IN THE LOG AND NOT ON THE COUNTER. metrics.py bounds label
-# cardinality deliberately -- `edge_node` is one per gateway, and labelling by DEVICE would be
-# unbounded -- and its endpoint carries NO DEVICE DATA OF ANY KIND because it is served without a
-# credential. A log store is the other side of that line: reached over the container network,
-# behind the Grafana login, never published. So `device` belongs here, on the half that is
-# authenticated, and must not migrate onto the half that is not.
-#
-# `emit_log=False` SUPPRESSES THE LINE AND NEVER THE COUNTER. Two sites throttle their warning
-# because the traffic that triggers it arrives every 30s and the log would be unreadable. The
-# counter must not be throttled with it, or the metric would report one drop per throttle window
-# instead of one per message -- so the asymmetry lives here, in the signature, rather than being
-# re-derived at each call site.
-# ---------------------------------------------------------------------------------------------
+# The drop pair. `reason` produces both the flat counter `dropped_<reason>` and the `reason`
+# field on the warning. Per-device fields go on the log line and never on the counter: the
+# metrics endpoint is unauthenticated and its label cardinality is bounded (metrics.py).
+# `emit_log=False` suppresses the line, never the counter.
 def drop(reason: str, message: str, *args, emit_log: bool = True, **fields):
     """Count a dropped message and warn about it, from one `reason`.
 
-    `reason` is the Prometheus label value; the flat counter is `dropped_<reason>` and must have
-    a mapping in metrics.py's COUNTER_MAP -- test_structured_logging.py asserts that every reason
-    reachable here does, and that the label and the logged field carry the same string.
+    `reason` must have a mapping in metrics.py's COUNTER_MAP; test_structured_logging.py asserts
+    that every reason reachable here does.
     """
     count(f"dropped_{reason}")
     if emit_log:
         logger.warning(message, *args, extra={"reason": reason, **fields})
 
-
-# LABELLED COUNTERS, kept beside the flat ones rather than replacing them.
-#
-# The flat registry is a name -> int dict, which cannot express "gaps, by edge node" without
-# encoding the node into the name and making the STATS line unreadable. This holds the few series
-# that genuinely need a dimension.
-#
-# CARDINALITY IS BOUNDED BY DESIGN. The only label in use is `edge_node`, which is one per gateway
-# on the site. Labelling by DEVICE would be unbounded -- and `seq` is an edge-node-scoped counter
-# anyway, so a device label would be describing the wrong thing.
+# Labelled counters, beside the flat ones. The only label is `edge_node`, one per gateway;
+# labelling by device would be unbounded.
 _labelled = {}
-
 
 def count_labelled(name: str, labels: dict, n: int = 1):
     """Add to a monotonic counter carrying labels. Key order is normalised so it cannot split."""
@@ -856,32 +556,14 @@ def count_labelled(name: str, labels: dict, n: int = 1):
     with _counters_lock:
         _labelled[key] = _labelled.get(key, 0) + n
 
-
 def labelled_snapshot() -> dict:
     with _counters_lock:
         return dict(_labelled)
 
-
-# ---------------------------------------------------------------------------------------------
-# THE HISTORIAN WRITE LATENCY HISTOGRAM.
-#
-# WHY A DISTRIBUTION AND NOT A COUNTER. Every other series here answers "how many"; this one
-# answers "how long", and the two cannot be the same shape. A mean would be actively misleading
-# on this path -- the interesting write is the slow one that stalls every OTHER device behind it,
-# and a mean is precisely the statistic that hides it.
-#
-# THIS IS THE MEASUREMENT THE SINGLE-WRITER CEILING IS ASSERTED WITHOUT. get_timescaledb_connection()
-# states the ceiling in a docstring; nobody has ever measured it. Fitting the instrument BEFORE
-# anything moves is the whole point -- a latency number taken after a rewrite has nothing to be
-# compared against.
-#
-# BUCKETS SPAN THE THREE REGIMES THIS PATH ACTUALLY HAS, rather than being copied from
-# prometheus_client's defaults: sub-millisecond to a few milliseconds is a healthy local insert,
-# tens to hundreds of milliseconds is contention or a saturated disk, and anything at or above
-# 0.25s means the bounded reconnect in get_timescaledb_connection() ran -- DB_CONNECT_BACKOFF_SECONDS
-# is 0.25 and DB_CONNECT_MAX_ATTEMPTS is 3, so the retry path lands in the top three buckets and
-# nowhere else. That makes a reconnect stall READABLE OFF THE HISTOGRAM instead of inferable only
-# by correlating with acs_ingestion_db_reconnects_total.
+# Historian write latency histogram. A distribution, not a mean: the interesting write is the
+# slow one that stalls every other device behind it. Buckets cover a healthy local insert
+# (sub-ms to a few ms), contention (tens to hundreds of ms) and the bounded reconnect: at or
+# above 0.25s means DB_CONNECT_BACKOFF_SECONDS ran, so a reconnect stall is readable here.
 WRITE_SECONDS_BUCKETS = (
     0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
 )
@@ -893,19 +575,12 @@ _write_seconds_buckets = [0] * len(WRITE_SECONDS_BUCKETS)
 _write_seconds_sum = 0.0
 _write_seconds_count = 0
 
-
 def observe_write_seconds(seconds: float):
     """
     Record one committed historian write.
 
-    ONLY COMMITTED WRITES ARE OBSERVED, and that is a deliberate exclusion rather than an
-    oversight. A write that raised has its own counter (`write_failures`), and its duration
-    describes the failure -- a connection timing out -- not the daemon's capacity to keep up. Let
-    the two share a histogram and a p99 spike stops being readable: it could mean a slow database
-    or an absent one, which call for opposite responses.
-
-    Shares _counters_lock rather than taking a second one: it is held for a handful of integer
-    increments, and one lock cannot deadlock against itself.
+    Only committed writes are observed; a failed write has its own counter and its duration
+    describes the failure, not capacity. Shares _counters_lock (re-entrant, held briefly).
     """
     global _write_seconds_sum, _write_seconds_count
     with _counters_lock:
@@ -918,7 +593,6 @@ def observe_write_seconds(seconds: float):
         # Above the last finite bucket. Nothing to increment -- +Inf is derived from the total at
         # render time, so an outlier is still counted in `_count` and still moves `_sum`.
 
-
 def histogram_snapshot() -> dict:
     """Histogram state, in the shape metrics.render_exposition() takes."""
     with _counters_lock:
@@ -930,15 +604,12 @@ def histogram_snapshot() -> dict:
             }
         }
 
-
 def diagnose_device_identity(wire_id: str):
     """
     Explain how `wire_id` fails the wire-identity contract, or return None if it is acceptable.
 
-    A bare legacy name is deliberately *not* an error during the migration window -- only
-    something that is evidently an attempt at a platform-issued id (right prefix, wrong shape)
-    is. That distinction is what makes "the gateway truncated the id" a diagnosable condition
-    rather than just another anonymous unknown device in the queue.
+    A bare legacy name is not an error during the migration window; only a malformed attempt at a
+    platform-issued id (right prefix, wrong shape) is.
     """
     if DEVICE_ID_PATTERN.match(wire_id):
         return None
@@ -968,7 +639,6 @@ def diagnose_device_identity(wire_id: str):
         % wire_id
     )
 
-
 def _throttled(store: dict, key: str, interval: int) -> bool:
     """True at most once per `interval` seconds per key, so a 30s heartbeat cannot flood the log."""
     now = time.time()
@@ -977,7 +647,6 @@ def _throttled(store: dict, key: str, interval: int) -> bool:
         return True
     return False
 
-
 # -----------------------------------------------------------------------------
 # Sparkplug B Alias Resolution
 # -----------------------------------------------------------------------------
@@ -985,15 +654,12 @@ def alias_key(group_id, edge_node_id):
     """The alias table key. Normalised so a missing group and an empty one are the same node."""
     return (group_id or "", edge_node_id or "")
 
-
 def register_birth_aliases(group_id, edge_node_id, payload, reset=False):
     """
     Record the alias -> name bindings a birth certificate declares. Returns the number stored.
 
-    `reset` clears the node's whole table first and is used for NBIRTH only: per Sparkplug an
-    NBIRTH invalidates all prior state for that edge node *and its devices*, so a gateway that
-    renumbers its aliases must not leave the old bindings behind to be matched against. A DBIRTH
-    merges, because it re-declares one device's metrics and must not discard its siblings'.
+    `reset` clears the node's table first and is used for NBIRTH only: an NBIRTH invalidates all
+    prior state for the node and its devices. A DBIRTH merges.
     """
     key = alias_key(group_id, edge_node_id)
     declared = {}
@@ -1030,13 +696,12 @@ def register_birth_aliases(group_id, edge_node_id, payload, reset=False):
         )
     return stored
 
-
 def resolve_metric_name(group_id, edge_node_id, metric):
     """
     The metric's name, resolving an alias-only metric through its edge node's birth map.
 
-    Returns None when the metric carries neither a name nor a resolvable alias -- which the caller
-    must treat as "this node's birth has not been seen", not as "this metric is uninteresting".
+    Returns None when neither a name nor a resolvable alias is present, which the caller must
+    treat as "this node's birth has not been seen".
     """
     if metric.name:
         return metric.name
@@ -1044,7 +709,6 @@ def resolve_metric_name(group_id, edge_node_id, metric):
         return None
     with _alias_lock:
         return _alias_map.get(alias_key(group_id, edge_node_id), {}).get(metric.alias)
-
 
 # -----------------------------------------------------------------------------
 # NCMD Rebirth Requests
@@ -1059,34 +723,17 @@ def build_rebirth_payload():
     metric.boolean_value = True
     return payload.SerializeToString()
 
-
 def request_node_rebirth(client, group_id, edge_node_id, force=False):
     """
     Ask an edge node to republish its birth certificates. Returns True if a request was sent.
 
-    THIS IS WHAT CLOSES THE ALIAS COLD START. The alias table is in-memory, so it is empty after
-    every restart -- and a stable device may not birth again for weeks. Without a way to ask, an
-    ingestion restart would silently stop recording every alias-optimised device until someone
-    power-cycled the gateway.
+    The alias table is in-memory, so this is what closes the cold start after a restart. Rate
+    limited per node so a gateway that never responds is not asked once per message.
 
-    RATE LIMITED PER NODE, and that is the load-bearing part. A gateway that responds to a rebirth
-    by restarting, or one that never responds at all, would otherwise be asked once per message.
-
-    `force` SKIPS THE WAIT, AND ONLY BROKER CAPTURE USES IT. The throttle protects against a flood
-    driven by TRAFFIC -- one request per message from a node with a broken alias table -- and a
-    capture is not that: it is one human pressing one button, and only one capture runs at a time
-    on the whole stack, so the ceiling is an operator's patience rather than the plant's message
-    rate.
-
-    Without it the feature mostly does not work. The daemon requests a rebirth from every node at
-    startup AND on every sequence gap, both of which are routine here, so by the time anybody
-    presses Capture the 300-second throttle for that node is usually already spent -- and a capture
-    that opens without an NBIRTH is one that replays as `unresolved_alias` and drops every metric
-    from an alias-optimised gateway. Measured on the seeded fleet before this argument existed:
-    two captures in a row, `birth_captured=false` on both.
-
-    The throttle is still STAMPED, so a forced request does not leave the node open to being asked
-    again by the next message that notices a gap.
+    `force` skips the wait and still stamps the throttle. Used by broker capture and the
+    dashboard's rebirth requests, where the ceiling is a person pressing a button rather than the
+    plant's message rate; without it the startup and gap requests usually leave the throttle spent
+    by the time a capture opens. See ingestion/README.md -> "Rebirth Requests (NCMD)".
     """
     if client is None or not edge_node_id:
         return False
@@ -1116,7 +763,6 @@ def request_node_rebirth(client, group_id, edge_node_id, force=False):
     )
     return True
 
-
 # -----------------------------------------------------------------------------
 # Sparkplug Sequence Tracking
 # -----------------------------------------------------------------------------
@@ -1124,30 +770,12 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
     """
     Follow an edge node's Sparkplug `seq` counter and ask for a rebirth when it jumps.
 
-    Returns True if the message arrived in sequence (or could not be judged), False if a gap
-    was detected.
+    Returns True if the message arrived in sequence (or could not be judged), False on a gap.
 
-    WHY THIS MATTERS FAR MORE UNDER REPORT-BY-EXCEPTION. When a device published every metric
-    on a timer, a dropped message cost one sample and the next tick five seconds later carried
-    the same information again -- the loss self-healed and nothing downstream could tell. Under
-    RBE a message IS the change: if the DDATA saying a machine went from ACTIVE to INTERRUPTED
-    is the one that gets dropped, nothing ever restates it. The historian, the dashboard and
-    every alert rule keep reporting ACTIVE indefinitely, and they are all confidently wrong.
-
-    The sequence number is the only evidence available that this happened. A metric that stopped
-    arriving is indistinguishable from a metric that stopped changing -- that ambiguity is
-    inherent to RBE -- but `seq` skipping from 41 to 43 is unambiguous, and the response is the
-    same one the alias cold start already uses: ask the node to re-birth, which re-declares every
-    metric at its current value and repairs the divergence.
-
-    NDEATH IS EXCLUDED. It is the broker's Last Will, registered at connect time and published
-    when the node is already gone, so it carries bdSeq rather than a live `seq` and is not part
-    of the counter's run.
-
-    RESYNCS ON A GAP rather than staying latched to the value it expected. Holding the old
-    expectation would make every subsequent message look out of sequence too, turning one drop
-    into a permanent alarm -- and the rebirth this triggers is itself a message that advances
-    the counter.
+    Under report-by-exception a dropped message is a lost state change that nothing restates;
+    `seq` skipping is the only evidence, and a rebirth re-declares every metric at its current
+    value. NDEATH is excluded (a Last Will carries bdSeq, not a live seq). The expectation resyncs
+    on a gap so one drop does not become a permanent alarm.
     """
     if msg_type == "NDEATH" or not payload.HasField("seq"):
         return True
@@ -1185,32 +813,18 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
 
     missed = (seq - expected) % 256
 
-    # THE COUNTER IS THE WHOLE POINT OF ISSUE #24, and it changes nothing else here: the message is
-    # still processed, the rebirth is still requested, the rate limit is still honoured. A gap is
-    # evidence of loss, and discarding the message that carries the evidence would compound it.
-    #
-    # BOTH COUNTERS, because one gap of 200 and 200 gaps of 1 are different faults -- a single
-    # broker reconnect against a gateway that is dropping messages continuously. The rate of the
-    # first is what to alert on; the second is what says how much was lost.
-    #
-    # NEITHER LEGITIMATE NON-GAP REACHES HERE. The 255 -> 0 wrap is absorbed by `expected` being
-    # modulo 256, and the first message after a restart returns above on `previous is None`. Both
-    # are asserted in test_sequence_gap_metrics.py rather than re-checked here.
+    # The message is still processed; only the counters are added. Both counters, because one gap
+    # of 200 and 200 gaps of 1 are different faults. The 255 -> 0 wrap and the first message after
+    # a restart never reach here (asserted in test_sequence_gap_metrics.py).
     count_labelled("acs_ingestion_sequence_gaps_total", {"edge_node": edge_node_id})
     count_labelled(
         "acs_ingestion_sequence_messages_missed_total", {"edge_node": edge_node_id}, missed
     )
 
-    # EXPECTED IN ONE SITUATION, AND WORTH SAYING SO WHERE THE WARNING IS WRITTEN. A daemon that
-    # has just started -- after a slow rollout, an image pull, or a long init wait -- subscribes to
-    # a stream the simulators have been publishing into the whole time. The first message it sees
-    # carries a seq far ahead of the 0 it expects, so a burst of these is the correct report of
-    # messages that genuinely were missed while nothing was listening.
-    #
-    # It is NOT a regression in that situation, and CI now removes the ambiguity from the other
-    # end: `scripts/wait-for-ingestion-consuming.sh` blocks until this daemon has consumed
-    # something before the conformance suite publishes, so a gap burst during a CI run means what
-    # it says rather than "the suite started too early". See issue #47.
+    # Expected once after a start: the first message seen carries a seq far ahead of the 0
+    # expected, and that is a correct report of messages missed while nothing was listening. CI
+    # waits for this daemon to be consuming (scripts/wait-for-ingestion-consuming.sh) before the
+    # conformance suite publishes, so a gap burst in CI means what it says.
     requested = request_node_rebirth(client, group_id, edge_node_id)
     logger.warning(
         "SEQUENCE GAP: edge node '%s' sent %s with seq %d, expected %d -- %d message(s) lost or "
@@ -1221,7 +835,6 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
         else " A rebirth was not requested (throttled or no broker client)."
     )
     return False
-
 
 # -----------------------------------------------------------------------------
 # Device Liveness Watchdog
@@ -1236,21 +849,17 @@ def mark_device_seen(device):
             "name": device.get("name") or device.get("sparkplug_id") or device["id"],
         }
 
-
 def forget_device_seen(device_id):
     """Stop tracking a device -- it has died explicitly, or has just been flipped OFFLINE."""
     with _device_seen_lock:
         _device_seen.pop(device_id, None)
 
-
 def stale_device_ids(now=None, timeout=None):
     """
     Devices heard from in this process that have since been quiet for longer than `timeout`.
 
-    ONLY DEVICES THIS PROCESS HAS SEEN ARE CANDIDATES, and that is what makes a restart safe: an
-    empty map is an absence of evidence, not evidence of absence. Seeding it from the database
-    would mark a whole fleet OFFLINE on every restart -- one audit row each, in an append-only
-    table -- which is a far worse failure than the stale ONLINE this watchdog exists to fix.
+    Only devices this process has seen are candidates: seeding from the database would mark a
+    whole fleet OFFLINE on every restart, one audit row each.
     """
     timeout = DEVICE_OFFLINE_TIMEOUT_SECONDS if timeout is None else timeout
     if timeout <= 0:
@@ -1263,16 +872,13 @@ def stale_device_ids(now=None, timeout=None):
             if now - entry["at"] > timeout
         ]
 
-
 def sweep_stale_devices(now=None, timeout=None):
     """
     Flip quiet devices OFFLINE. Returns the ids written.
 
-    WRITE-ON-CHANGE, and it is not an optimisation. log_digital_thread_event() fires on every
-    UPDATE to `devices`, so a sweep rewriting OFFLINE each tick would append to a deliberately
-    append-only audit table forever. Two things enforce it: the UPDATE carries `status = ONLINE`
-    as a filter, so an already-OFFLINE row matches nothing and no trigger fires; and the device is
-    dropped from tracking afterwards, so it is written once per quiet period rather than per tick.
+    Write-on-change: log_digital_thread_event() fires on every UPDATE to `devices`, so the gate
+    refuses a no-op write and the device is dropped from tracking afterwards, giving one write per
+    quiet period.
     """
     if not supabase_client:
         return []
@@ -1280,9 +886,7 @@ def sweep_stale_devices(now=None, timeout=None):
     written = []
     for device_id, name in stale_device_ids(now, timeout):
         try:
-            # The `status = ONLINE` filter this used to carry is now inside the gate, as
-            # `IS DISTINCT FROM 'OFFLINE'` -- see 0047. It is no longer a caller convention that
-            # a future edit here could drop.
+            # The gate refuses a no-op write (`IS DISTINCT FROM 'OFFLINE'`); no filter is needed here.
             supabase_client.rpc("ingest_mark_device_offline", {
                 "p_device_id": device_id,
             }).execute()
@@ -1301,14 +905,11 @@ def sweep_stale_devices(now=None, timeout=None):
 
     return written
 
-
 def start_device_watchdog():
     """
     Sweep for quiet devices every DEVICE_WATCHDOG_INTERVAL_SECONDS. No-op when disabled.
 
-    A daemon thread, so it can never hold the process open, and forgiving of errors for the same
-    reason as the health heartbeat: a failing sweep should not take down a daemon that is
-    otherwise ingesting.
+    A daemon thread that swallows its own errors: a failing sweep must not take down ingestion.
     """
     if DEVICE_OFFLINE_TIMEOUT_SECONDS <= 0:
         logger.info("Device liveness watchdog disabled (DEVICE_OFFLINE_TIMEOUT_SECONDS=0).")
@@ -1329,25 +930,18 @@ def start_device_watchdog():
         DEVICE_OFFLINE_TIMEOUT_SECONDS, DEVICE_WATCHDOG_INTERVAL_SECONDS
     )
 
-
 def resolve_device(wire_id: str, use_cache: bool = True):
     """
     Resolve an id seen on the wire to its `devices` row, in order of precedence:
 
-      1. sparkplug_id      -- the platform-issued id, the current scheme.
-      2. reported_identity -- a third-party device's own factory-preset id, recorded when it
-                              was discovered. Such a device cannot be made to publish an
-                              issued id, so its own is what must keep resolving.
-      3. id                -- the Factory+ `Instance_UUID`. `devices.id` IS that identifier:
-                              it is already an RFC4122 UUID, so a Factory+ gateway addressing
-                              a device by Instance_UUID resolves with no extra column and no
-                              second identifier namespace. Only tried when the wire id is
-                              UUID-shaped, so it costs nothing on the ordinary path.
-      4. name              -- legacy, pre-0014 devices. Warns; this arm goes away once every
-                              gateway has been reconfigured.
+      1. sparkplug_id      -- the platform-issued id.
+      2. reported_identity -- a third-party device's own factory-preset id.
+      3. id                -- the Factory+ `Instance_UUID`; tried only for a UUID-shaped wire id.
+      4. name              -- legacy devices. Warns.
 
-    Returns the row (with `_identity_source` attached) or None if unregistered. Any failure
-    resolves to None, which callers treat as "quarantined" -- the fail-closed answer.
+    Returns the row (with `_identity_source` attached) or None if unregistered. Raises
+    DirectoryUnavailable when the directory cannot be reached.
+    See ingestion/README.md -> "Resolution precedence".
     """
     if not supabase_client:
         raise DirectoryUnavailable(
@@ -1404,13 +998,10 @@ def resolve_device(wire_id: str, use_cache: bool = True):
         _device_cache.set(wire_id, None)
         return None
     except Exception as e:
-        # Not cached: a transient Supabase failure must not pin this device to "unregistered"
-        # for the full TTL -- and, since 2026-08, must not be REPORTED as "unregistered" either.
-        # Returning None here would let a brief outage quarantine a registered device, because
-        # that is how process_dbirth() answers an unregistered one. See DirectoryUnavailable.
+        # Not cached and not returned as None: a transient failure must neither pin the device to
+        # "unregistered" for the TTL nor let process_dbirth() quarantine it. See DirectoryUnavailable.
         logger.error("Error resolving device identity '%s' in Supabase: %s", wire_id, e)
         raise DirectoryUnavailable(str(e)) from e
-
 
 # Throttle for traffic refused because its edge node is archived, keyed by edge node id. An
 # appliance that has not been switched off beats every 30s and publishes its devices besides, so
@@ -1418,28 +1009,16 @@ def resolve_device(wire_id: str, use_cache: bool = True):
 _archived_gateway_warned = {}
 ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS = 300
 
-
 def resolve_gateway(wire_id: str, group_id: str = None, include_archived: bool = False):
     """
     Resolve an edge node to its `gateways` row, refusing one that has been archived.
 
-    `include_archived` is for the two callers that must DESCRIBE the refusal rather than act on it
-    -- verify_gateway_binding() writes a quarantine reason an operator reads, and the quarantine
-    record needs to say which of the two refusals happened. They get the row and check
-    `is_archived` themselves. It is a parameter rather than a second public function so that
-    `resolve_gateway` stays the one seam every caller and every test patches.
+    `include_archived` is for callers that describe the refusal (verify_gateway_binding() writes
+    the quarantine reason an operator reads); they check `is_archived` themselves.
 
-    ARCHIVED IS A REFUSAL, NOT A MATCH, and it is the application tier of the same two-tier
-    arrangement mosquitto.acl describes. archived migration 0038 revokes a gateway's broker credential when
-    it is archived, so an archived appliance should not be able to connect at all -- but that
-    revocation is ASYNCHRONOUS (net.http_post queues it) and is INERT on a deployment that never
-    configured GATEWAY_REVOKE_SECRET. Both leave a window in which a decommissioned appliance still
-    holds a working credential, and without this it would go on stamping `last_heartbeat` and
-    `status` on a row an operator has retired -- resurrecting it to ONLINE on the dashboard.
-
-    IT REFUSES THE WHOLE EDGE NODE, devices included. A device published beneath an archived
-    gateway is telemetry from decommissioned hardware whichever asset it names, and process_ddata()
-    resolves the gateway before it writes.
+    Archived is a refusal for the whole edge node, devices included. Broker credential revocation
+    on archive is asynchronous and inert without GATEWAY_REVOKE_SECRET, so a retired appliance
+    may still connect; without this it would resurrect its row to ONLINE.
     """
     row = _resolve_gateway_row(wire_id, group_id)
     if row is None or include_archived or not row.get("is_archived"):
@@ -1460,26 +1039,17 @@ def resolve_gateway(wire_id: str, group_id: str = None, include_archived: bool =
     )
     return None
 
-
 def _resolve_gateway_row(wire_id: str, group_id: str = None):
     """
     Resolve an edge node to its `gateways` row.
 
-    THE ADDRESS IS (group, node), which is how Factory+ addresses an edge node and why its
-    Directory keys on /v1/address/{group_id}/{node_id}. Before `gateways.sparkplug_group`
-    existed the group was parsed and discarded, so two groups publishing the same edge node id
-    resolved to ONE row -- silently, with each group's telemetry attributed to the other's asset.
-
-    Resolution order, and the middle arm is the migration path:
+    The address is (group, node), as Factory+ addresses an edge node. Resolution order:
 
       1. (sparkplug_group, sparkplug_id) -- the current scheme.
-      2. sparkplug_id alone              -- group-agnostic. Warns, throttled, naming both the
-                                            group on the wire and the one on the row. Goes away
-                                            once every gateway is reconfigured.
-      3. name                            -- legacy, pre-0014. Warns the same way.
+      2. sparkplug_id alone              -- group-agnostic migration path. Warns, throttled.
+      3. name                            -- legacy. Warns.
 
-    Gateways are never auto-created -- an unregistered edge node is logged and dropped,
-    mirroring the fail-closed treatment of unregistered devices.
+    Gateways are never auto-created: an unregistered edge node is logged and dropped.
     """
     if not wire_id:
         return None
@@ -1496,12 +1066,9 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
         # None here is the negative entry, not a miss. See TTLCache.get().
         return row
 
-    # `status` is read back so process_node_message() can tell a genuine ONLINE/OFFLINE transition
-    # from the 119 heartbeats an hour that carry the same status as the last one. It does not gate
-    # the write -- see the comment there for why that write is not skippable.
-    # `is_archived` is read so resolve_gateway() above can refuse a decommissioned edge node. It
-    # is fetched rather than filtered in the query on purpose: a WHERE clause would make an
-    # archived gateway indistinguishable from an unregistered one, and those need different fixes.
+    # `status` lets process_node_message() tell a transition from a repeated heartbeat in the log.
+    # `is_archived` is fetched rather than filtered so an archived gateway is distinguishable from
+    # an unregistered one; resolve_gateway() refuses it.
     columns = "id,name,sparkplug_id,sparkplug_group,status,is_archived"
     try:
         # 1. Group-qualified.
@@ -1558,10 +1125,8 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
         _gateway_cache.set(cache_key, None)
         return None
     except Exception as e:
-        # Raised rather than returned for the same reason as resolve_device: an unreachable
-        # directory must not read as "this edge node is not registered". verify_gateway_binding()
-        # turns that answer into a quarantine reason, so conflating the two reaches the same
-        # wrongly-quarantined device by a slightly longer route.
+        # Raised, not returned: an unreachable directory must not read as "not registered", which
+        # verify_gateway_binding() would turn into a quarantine reason.
         logger.error("Error resolving gateway identity '%s' in Supabase: %s", wire_id, e)
         raise DirectoryUnavailable(str(e)) from e
 
@@ -1572,46 +1137,27 @@ def _timestamp_is_sane(dt: datetime, now: datetime = None) -> bool:
     """
     True if `dt` falls inside the telemetry sanity window.
 
-    Devices supply their own metric timestamps and are trusted for ordering, but a value far
-    outside this window is a clock fault or a forgery, not an observation: it lands the row
-    outside the retention policy, or inside an already-compressed chunk that rejects the
-    write, or arbitrarily far in the future where it distorts every dashboard's axis.
+    A value far outside it is a clock fault or a forgery: it would land outside retention, in a
+    compressed chunk that rejects the write, or far enough ahead to distort every axis.
     """
     now = now or datetime.now(timezone.utc)
     delta = (dt - now).total_seconds()
     return -TELEMETRY_MAX_AGE_SECONDS <= delta <= TELEMETRY_MAX_FUTURE_SECONDS
 
-
 def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = None):
     """
     Check that the edge node publishing this message is the one the device is bound to.
 
-    `group_id` scopes the edge node lookup -- the address is (group, node), so a node id alone
-    can name two different gateways once more than one group is in use.
+    `group_id` scopes the lookup: the address is (group, node).
 
-    Returns None when the message may be trusted, or a quarantine reason string when it may
-    not. Never raises: a lookup failure is reported as a mismatch, which is the fail-closed
-    answer.
+    Returns None when the message may be trusted, or a quarantine reason string. Never raises: a
+    lookup failure is reported as a mismatch.
 
-    Two cases are NOT a mismatch, each guarding a branch below:
-
-      * No `gateway_id` -- binding is set by an operator at approval, never on the telemetry
-        path. Unbound is not mis-bound.
-      * A node-level message -- no device segment; handled by process_node_message().
-
-    HOW A DEVICE WAS RESOLVED DOES NOT AFFECT THIS CHECK, and it used to. A device matched by
-    legacy `name` was exempted outright, on the reasoning that such a row "may predate any
-    gateway assignment" -- but that case is the `bound_gateway_id` branch below, which returns
-    before the exemption could ever be reached. The exemption therefore only ever fired for a
-    device that IS bound, which is exactly the device it must not fire for: resolve_device()
-    falls back to a `name` lookup for any wire id that is not a platform-issued `dev` id, so
-    naming another gateway's device in the topic's device segment resolved it, marked it
-    legacy, and skipped this function entirely. The broker cannot close that -- mosquitto.acl
-    pins the topic's EDGE-NODE segment to the connecting username and leaves the device segment
-    free -- so this was the only tier standing, and it stood down.
-
-    Threat model and why the broker ACL does not make this redundant:
-    ../ingestion/README.md -> "Gateway Binding"
+    Not a mismatch: a device with no `gateway_id` (binding is set at approval, never here) and a
+    node-level message (no device segment). How the device was resolved does not exempt it: the
+    broker ACL pins the edge-node segment of a topic and leaves the device segment free, so this
+    is the only tier checking the device segment.
+    Threat model: ingestion/README.md -> "Gateway Binding".
     """
     if not device:
         return None
@@ -1620,11 +1166,8 @@ def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = N
     if not bound_gateway_id:
         return None
 
-    # THE UNFILTERED ROW, because this function's job is to DESCRIBE the mismatch and the
-    # description is what an operator acts on. resolve_gateway() refuses an archived edge node by
-    # answering None, which here would be indistinguishable from "never registered" -- and the
-    # quarantine reason below is written into `devices.quarantine_reason`, where a wrong one sends
-    # somebody looking for a provisioning fault on a gateway they themselves retired.
+    # The unfiltered row, so the quarantine reason can say which refusal happened. An archived
+    # gateway answered as None would read as "never registered" in `devices.quarantine_reason`.
     gateway = resolve_gateway(gateway_wire_id, group_id, include_archived=True)
 
     # An unregistered edge node speaking for a *registered, bound* device. resolve_gateway()'s
@@ -1635,10 +1178,8 @@ def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = N
             REASON_GATEWAY_MISMATCH, gateway_wire_id
         )
 
-    # ARCHIVED IS A REFUSAL EVEN WHEN THE BINDING IS CORRECT, and it has to be checked before the
-    # id comparison below -- a device bound to the gateway that is publishing for it matches by
-    # construction, so without this the telemetry of a decommissioned appliance would be accepted
-    # on the strength of being correctly bound to the appliance that was decommissioned.
+    # Checked before the id comparison: a device bound to the archived gateway that is publishing
+    # for it matches by construction.
     if gateway.get("is_archived"):
         return "%s: the publishing edge node '%s' is ARCHIVED. Un-archive the gateway to accept its telemetry again" % (
             REASON_GATEWAY_MISMATCH, gateway_wire_id
@@ -1651,19 +1192,12 @@ def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = N
 
     return None
 
-
 def store_birth_parameters(sparkplug_id: str, payload):
     """
-    Persist the metrics carried by a DBIRTH birth certificate to `asset_config`, so the
-    dashboard's device Config view can show the parameters the device announced
-    (firmware version, serial number, thresholds, interlocks...).
+    Persist the metrics carried by a DBIRTH to `asset_config`, for the device Config view.
 
-    Keyed by the device's `sparkplug_id`, not its name, so renaming the device leaves its
-    recorded birth parameters attached to it.
-
-    These are configuration parameters, not telemetry: they are stored for quarantined
-    devices too, precisely so an administrator can inspect what a newly discovered
-    device claims about itself *before* approving it. DDATA telemetry stays gated.
+    Keyed by `sparkplug_id`, so a rename keeps the parameters attached. Stored for quarantined
+    devices too, so an administrator can inspect a device before approving it.
     """
     if not supabase_client:
         return
@@ -1707,10 +1241,8 @@ def store_birth_parameters(sparkplug_id: str, payload):
         return
 
     try:
-        # uq_asset_config_metric (asset_id, metric_name) makes this a per-metric upsert,
-        # so a re-birth refreshes values instead of accumulating duplicates. The whole batch
-        # goes in one call deliberately: a per-metric gate would turn one round trip into as
-        # many as the birth certificate has metrics, on the hot path.
+        # uq_asset_config_metric (asset_id, metric_name) makes this a per-metric upsert. One call for
+        # the whole batch: a per-metric gate would be one round trip per metric on the hot path.
         supabase_client.rpc("ingest_store_birth_parameters", {
             "p_asset_id": sparkplug_id,
             "p_rows": rows,
@@ -1719,38 +1251,24 @@ def store_birth_parameters(sparkplug_id: str, payload):
     except Exception as e:
         logger.error("Error storing DBIRTH parameters for '%s': %s", sparkplug_id, e, exc_info=True)
 
-
 def extract_declared_metrics(payload):
     """
     The set of metric names a birth certificate declares, sorted, minus the identity metrics.
 
-    Deliberately a separate pass from `store_birth_parameters`, which filters differently: it
-    skips any metric carrying no recognised value field, because it is building a table of
-    parameter *values*. Here the question is which metrics the device says it has, so a metric
-    declared with no value still counts -- it is exactly the kind of thing a schema should
-    account for.
-
-    This is a record of what was observed, not a verdict on it. Whether any of these metrics
-    fall outside the device's assigned schema is derived at read time, so that editing a schema
-    reclassifies its devices immediately rather than at their next birth (which for a stable
-    device could be weeks away).
+    Unlike store_birth_parameters(), a metric declared with no value still counts. This records
+    what was observed; whether it falls outside the schema is derived at read time.
     """
     return sorted({
         metric.name for metric in payload.metrics
         if metric.name and metric.name not in IDENTITY_METRICS
     })
 
-
 def record_declared_metrics(device: dict, payload):
     """
-    Persist the birth-declared metric names onto the device row, but only when the set has
-    actually changed.
+    Persist the birth-declared metric names onto the device row, only when the set has changed.
 
-    The change check is not an optimisation. `log_digital_thread_event()` fires on every UPDATE
-    to `devices`, so writing an unchanged array on every rebirth would append an audit row each
-    time to a table that is deliberately immutable and append-only. Writing only on change means
-    each entry in the thread marks a real change in what the device publishes -- which is
-    precisely the event worth auditing.
+    log_digital_thread_event() fires on every UPDATE to `devices`, so an unchanged write on every
+    rebirth would append an audit row each time.
     """
     if not supabase_client or not device:
         return
@@ -1760,9 +1278,8 @@ def record_declared_metrics(device: dict, payload):
         return
 
     try:
-        # The change check above stays: it saves a round trip. It is no longer what the property
-        # depends on, though -- the gate carries the same `IS DISTINCT FROM` test, so a stale or
-        # evicted cache entry can no longer cause an unchanged rewrite. See 0047.
+        # The change check above saves a round trip; the gate carries the same `IS DISTINCT FROM`
+        # test, so a stale cache entry cannot cause an unchanged rewrite.
         supabase_client.rpc("ingest_record_declared_metrics", {
             "p_device_id": device["id"],
             "p_metrics": declared,
@@ -1782,30 +1299,23 @@ def record_declared_metrics(device: dict, payload):
             "Error recording declared metrics for '%s': %s", device.get("name"), e, exc_info=True
         )
 
-
 def extract_name_hint(payload):
     """
-    The device's self-reported friendly name, used only as the initial label for a newly
-    discovered device.
+    The device's self-reported friendly name, used only as the initial label for a new device.
 
-    It is never applied to an existing row: the friendly name is platform-owned, and letting a
-    DBIRTH write it back would mean a rename in the dashboard gets stomped on the device's next
-    birth -- reintroducing the exact name/identity coupling this scheme removes.
+    Never applied to an existing row: the friendly name is platform-owned.
     """
     for metric in payload.metrics:
         if metric.name == 'Asset_Name' and metric.HasField('string_value'):
             return metric.string_value.strip() or None
     return None
 
-
 def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, payload,
                           group_id: str = None):
     """
     Insert a newly discovered device with is_quarantined = True, and return the created row.
 
-    The arriving edge node is recorded on the row. Ingestion has always had it in scope and
-    always discarded it, which is why approving a quarantined device previously required the
-    operator to re-pick its gateway by hand.
+    The arriving edge node is recorded on the row so approval does not need the gateway re-picked.
     """
     # Unfiltered, so the log can say WHICH of the two refusals this is. The device is still left
     # with no gateway either way: attaching a newly discovered one to an archived appliance would
@@ -1826,13 +1336,9 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # `status` and `is_quarantined` are no longer passed: the gate pins them. This function is the
-    # quarantine path and nothing else, and a caller able to send is_quarantined=False could have
-    # registered an unknown device as a trusted one -- see 0047.
-    #
-    # `last_birth_metrics` is still carried here rather than left to record_declared_metrics'
-    # UPDATE, so a newly discovered device produces one digital_thread entry instead of an insert
-    # immediately chased by an update saying the same thing.
+    # `status` and `is_quarantined` are pinned by the gate; this is the quarantine path only.
+    # `last_birth_metrics` is carried here so a new device produces one digital_thread entry rather
+    # than an insert chased by an update.
     res = supabase_client.rpc("ingest_register_quarantined_device", {
         "p_name": extract_name_hint(payload) or wire_id,
         "p_gateway_id": gateway["id"] if gateway else None,
@@ -1859,24 +1365,16 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
     )
     return row
 
-
 def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reason: str = None,
                    group_id: str = None):
     """
-    On Sparkplug B DBIRTH:
-    Resolve the device by its wire identity. If it is unregistered, insert it quarantined,
-    recording both the id it published under and why it was held.
-    Birth certificate metrics are recorded to `asset_config` either way.
+    On Sparkplug B DBIRTH: resolve the device by its wire identity. If unregistered, insert it
+    quarantined, recording the id it published under and why it was held. Birth certificate
+    metrics are recorded to `asset_config` either way.
 
-    `quarantine_reason` is supplied by the caller when the identity itself was already found
-    to be faulty (malformed, or contradicting the payload's Asset_ID claim). Such a device is
-    still admitted to the queue rather than dropped -- silently discarding it would make a
-    misconfigured gateway invisible instead of diagnosable.
-
-    A registered device is additionally checked against the edge node that published for it
-    (see verify_gateway_binding). A device announced by a gateway it is not bound to is held
-    in the same way and for the same reason: what is on the wire no longer reliably
-    identifies the asset.
+    `quarantine_reason` is supplied when the identity itself was already found faulty. A
+    registered device is also checked against the publishing edge node (verify_gateway_binding)
+    and re-quarantined on a mismatch.
     """
     logger.info("Processing DBIRTH for device '%s' via edge node '%s'", wire_id, gateway_wire_id)
 
@@ -1893,20 +1391,11 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         try:
             device = resolve_device(wire_id, use_cache=False)
         except DirectoryUnavailable as e:
-            # DROP THE BIRTH, CHANGE NOTHING. Without this arm the directory being unreachable is
-            # indistinguishable from the device being unregistered, and the branch below answers
-            # "unregistered" by writing a quarantine row -- so a transient fault here would
-            # register a legitimate device as UNKNOWN_DEVICE and drop its telemetry until an
-            # operator approved it back out.
-            #
-            # Returning is safe because a birth certificate is REPEATED, not once-only: the flow
-            # rebirths on a timer, and ingestion asks for one itself (request_rebirth) whenever it
-            # sees an alias it cannot decode. The aliases from this payload are already registered
-            # above, so nothing is lost by waiting for the next one.
-            # THE MOST EXPENSIVE DROP THE DAEMON MAKES, and until #126 the only one that was
-            # invisible. A birth certificate carries the alias table, so losing one leaves every
-            # later alias-only DDATA from this node unresolvable until the next rebirth -- a
-            # dropped DDATA costs one sample, this costs a device until it speaks again.
+            # Drop the birth and change nothing: answering "unregistered" here would quarantine a
+            # legitimate device. A birth is repeated (the flow rebirths on a timer and the daemon asks
+            # for one on an unknown alias), and the aliases from this payload are already registered.
+            # The most expensive drop the daemon makes: later alias-only DDATA from this node is
+            # unresolvable until the next rebirth.
             drop(
                 "dbirth_directory_unavailable",
                 "DIRECTORY UNAVAILABLE: dropping DBIRTH for '%s' without registering it (%s). "
@@ -1934,10 +1423,8 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                 device, gateway_wire_id, group_id)
 
             if hold_reason:
-                # A registered device publishing a faulty identity, or announced by a gateway
-                # it is not bound to. Re-quarantine it: whatever is on the wire no longer
-                # reliably identifies this asset.
-                # `is_quarantined` is pinned true by the gate: this direction only ever tightens.
+                # A registered device publishing a faulty identity, or announced by a gateway it is not
+                # bound to. Re-quarantine it. `is_quarantined` is pinned true by the gate.
                 supabase_client.rpc("ingest_requarantine_device", {
                     "p_device_id": device["id"],
                     "p_quarantine_reason": hold_reason,
@@ -1949,25 +1436,11 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                     device.get("name"), hold_reason
                 )
             else:
-                # WRITE ONLY WHAT MOVED. A birth certificate is REPEATED -- the shipped flow
-                # rebirths on a timer and ingestion asks for one whenever it meets an alias it
-                # cannot decode -- so an unconditional UPDATE here fires once per rebirth per
-                # device, forever, and changes nothing on all but the first.
-                #
-                # The audit trigger already refuses to record such a write (archived migration 0005
-                # subtracts nothing and compares the rows, so an identical UPDATE writes no
-                # digital_thread row). What it CANNOT suppress is the write itself: the round
-                # trip to PostgREST, the WAL record, and -- because `devices` is REPLICA IDENTITY
-                # FULL and published to `supabase_realtime` -- a full-row change event broadcast
-                # to every connected dashboard. This is the half of that problem that has to be
-                # fixed on this side of the wire.
-                #
-                # Same shape as record_declared_metrics() below, and for the same reason.
-                #
-                # first_dbirth_at is write-once. The check below still avoids sending it when the
-                # row already has one, but the gate is what enforces it now: it COALESCEs against
-                # the stored value, so a stale cache entry can no longer move an original birth
-                # timestamp. See 0047.
+                # Write only what moved. A birth is repeated, and an unconditional UPDATE would fire per
+                # rebirth per device: the audit trigger suppresses the audit row for an identical write but
+                # not the PostgREST round trip, the WAL record or the Realtime broadcast (`devices` is
+                # REPLICA IDENTITY FULL). first_dbirth_at is write-once; the gate COALESCEs against the
+                # stored value, so a stale cache entry cannot move it.
                 desired = {"status": "ONLINE", "identity_source": device["_identity_source"]}
                 update_fields = {
                     field: value
@@ -2012,13 +1485,8 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         # A birth is evidence of life, quarantined or not, so the watchdog counts it.
         mark_device_seen(device)
     except DirectoryUnavailable as e:
-        # The directory went away PART WAY THROUGH -- after resolve_device() succeeded, inside
-        # verify_gateway_binding() or quarantine_new_device(). Caught explicitly rather than left
-        # to the generic arm below so the log says what happened; either way nothing further is
-        # written, which is the property that matters.
-        # The same counter as the arm above: both lose a birth certificate, and an operator
-        # asking "are we losing births" wants one number, not two to add together. Where it
-        # failed is a question for the log line, which distinguishes them.
+        # The directory went away part way through (after resolve_device() succeeded). Same counter
+        # as the arm above: both lose a birth certificate; the log line says where.
         drop(
             "dbirth_directory_unavailable",
             "DIRECTORY UNAVAILABLE part way through DBIRTH for '%s' (%s). No device state was "
@@ -2028,11 +1496,9 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
     except Exception as e:
         logger.error("Error checking/updating Supabase devices for DBIRTH: %s", e, exc_info=True)
 
-
 def process_ddeath(wire_id: str, gateway_wire_id: str):
     """
-    On Sparkplug B DDEATH: mark the registered device OFFLINE in Supabase so the
-    dashboard's "OFFLINE / DDEATH" state reflects the actual death certificate.
+    On Sparkplug B DDEATH: mark the registered device OFFLINE in Supabase.
     """
     logger.info("Processing DDEATH for device '%s' via edge node '%s'", wire_id, gateway_wire_id)
     if not supabase_client:
@@ -2042,13 +1508,8 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
     try:
         device = resolve_device(wire_id)
     except DirectoryUnavailable as e:
-        # A death certificate is a status update, not telemetry. Losing one means the row keeps
-        # saying ONLINE until DEVICE_OFFLINE_TIMEOUT_SECONDS elapses and the watchdog corrects it,
-        # which is the mechanism that exists for exactly this -- a device that stops speaking
-        # without announcing it.
-        # Separate from the birth counter because the consequence is different and bounded: the
-        # watchdog corrects a missed death after DEVICE_OFFLINE_TIMEOUT_SECONDS, so this is a
-        # delayed status, not lost telemetry. Summing it with births would overstate the harm.
+        # A missed death is a delayed status, not lost telemetry: the watchdog corrects it after
+        # DEVICE_OFFLINE_TIMEOUT_SECONDS. Its own counter so it is not summed with lost births.
         drop(
             "ddeath_directory_unavailable",
             "DIRECTORY UNAVAILABLE: dropping DDEATH for '%s' (%s). The watchdog will mark it "
@@ -2062,9 +1523,7 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
         return
 
     try:
-        # Same gate as the watchdog. This path used to write unconditionally; the gate suppresses
-        # the write when the row is already OFFLINE, which saves a round trip and a realtime
-        # broadcast and reaches the same state either way.
+        # Same gate as the watchdog: a row already OFFLINE is not rewritten.
         supabase_client.rpc("ingest_mark_device_offline", {
             "p_device_id": device["id"],
         }).execute()
@@ -2074,16 +1533,13 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
     except Exception as e:
         logger.error("Error applying DDEATH status update for '%s': %s", wire_id, e, exc_info=True)
 
-
 def accept_reported_status(reported: str, edge_node_id: str = None):
     """
     Whether a gateway's self-reported status may be written, or None if it may not.
 
-    A gateway names its own operating states -- that is what keeps `gateways.status` an open
-    domain -- but it does not get to name the platform's. See RESERVED_GATEWAY_STATUSES.
-
-    Returns the accepted string (whitespace-trimmed) or None, which the caller answers by
-    keeping the status the message type implies.
+    A gateway names its own operating states but not the platform's (RESERVED_GATEWAY_STATUSES).
+    Returns the trimmed string or None, which the caller answers by keeping the message type's
+    status.
     """
     if not isinstance(reported, str):
         return None
@@ -2115,22 +1571,13 @@ def accept_reported_status(reported: str, edge_node_id: str = None):
 
     return candidate
 
-
 # -----------------------------------------------------------------------------
 # Appliance health, carried on the heartbeat that already exists
 # -----------------------------------------------------------------------------
-# WHAT AN APPLIANCE REPORTS ABOUT ITSELF, and where each value lands. archived migration 0035 carries the
-# argument for the columns; this is the wire contract.
-#
-# NO NEW TRANSPORT, CREDENTIAL OR TABLE. These arrive as ordinary metrics on the node-level message
-# the appliance already publishes every 30s over a connection it already holds. `on_message()`
-# routes node-level topics here and returns before `process_ddata()`, so none of this reaches the
-# historian or `metric_catalog` -- which is what makes it cheap, and also why it is CURRENT STATE
-# WITH NO HISTORY.
-#
-# `Agent_Version` writes the column `0025` stamps at enrolment. That is the point rather than a
-# collision: enrolment was the only moment the platform ever heard which bundle an appliance runs,
-# so an in-place upgrade was invisible until the appliance re-enrolled.
+# Ordinary metrics on the node-level message the appliance already publishes every 30s.
+# on_message() routes node-level topics here, so none of this reaches the historian: it is
+# current state with no history. `Agent_Version` overwrites the column enrolment stamps, so an
+# in-place upgrade is visible.
 GATEWAY_HEALTH_METRICS = {
     # metric name           column                  kind
     "Uptime_s":            ("uptime_seconds",      "int"),
@@ -2148,11 +1595,7 @@ GATEWAY_HEALTH_METRICS = {
 MAX_GATEWAY_HEALTH_TEXT_LENGTH = 64
 
 # Sanity bounds for `Cert_Expires_At`, in epoch milliseconds: 2000-01-01 to 2200-01-01.
-#
-# DELIBERATELY NOT "IN THE FUTURE". An ALREADY-EXPIRED CA is the exact condition this metric exists
-# to surface, so a notAfter in the past is a valid and important reading. Only values that cannot
-# be a certificate date at all are refused -- a zero, a seconds-vs-milliseconds mix-up, a garbled
-# parse.
+# Not "in the future": an already-expired CA is exactly what this metric exists to surface.
 CERT_EPOCH_MS_MIN = 946684800000
 CERT_EPOCH_MS_MAX = 7258118400000
 
@@ -2162,7 +1605,6 @@ CERT_EPOCH_MS_MAX = 7258118400000
 _health_rejected_warned = {}
 HEALTH_REJECT_WARN_INTERVAL_SECONDS = 300
 
-
 def _numeric_metric_value(metric):
     """The metric's numeric value whichever Sparkplug field carries it, or None."""
     for field in ("int_value", "long_value", "float_value", "double_value"):
@@ -2170,20 +1612,15 @@ def _numeric_metric_value(metric):
             return getattr(metric, field)
     return None
 
-
 def extract_gateway_health(group_id, edge_node_id, payload):
     """
     The recognised health metrics in a node-level payload, as a column -> value dict.
 
-    VALIDATED HERE RATHER THAN BY A CHECK CONSTRAINT, and archived migration 0035 records why: these
-    columns are written in the SAME UPDATE as `status` and `last_heartbeat`. A constraint
-    violation would fail that whole statement, so one nonsensical disk figure would stop a live
-    gateway reporting ONLINE -- a cosmetic fault presenting as an outage. A metric that fails
-    validation is dropped and counted; every other metric in the payload, and the heartbeat
-    itself, still lands.
+    Validated here rather than by a CHECK constraint: these columns are written in the same
+    UPDATE as `status` and `last_heartbeat`, so a constraint violation would stop a live gateway
+    reporting ONLINE. A failing metric is dropped and counted; the rest still lands.
 
-    Returns {} when nothing recognised is present, which is the ordinary case for the platform's
-    own simulators and for any appliance on a bundle predating this.
+    Returns {} when nothing recognised is present.
     """
     health = {}
     for metric in payload.metrics:
@@ -2239,20 +1676,12 @@ def extract_gateway_health(group_id, edge_node_id, payload):
 
     return health
 
-
 # -----------------------------------------------------------------------------
 # The same readings, as Prometheus gauges -- because the columns have no history
 # -----------------------------------------------------------------------------
-# WHY BOTH. `gateways.disk_free_bytes` and its neighbours hold a LATEST VALUE AND NO HISTORY, which
-# archived migration 0035 states plainly. So a dashboard reading the database can answer "how full is that
-# disk" and can never answer "is it filling" -- the question an operator actually acts on. These
-# gauges are that second answer, at the scrape interval, over the Prometheus the stack already runs.
-#
-# FOUR OF THE SEVEN, AND THE OMISSIONS ARE THE POINT. The metrics endpoint needs no credential and
-# is published to the host, so `agent_version`, `flow_hash` and `cert_expires_at` stay in the
-# database: the first two are a fingerprint of an appliance's deployed configuration, the third is
-# a fixed date that gains nothing from a time series and is the single most useful fact an attacker
-# on that port could learn. metrics.py's header carries the full argument.
+# The database columns hold the latest value only; the gauges answer "is it filling".
+# Four of the seven: `agent_version`, `flow_hash` and `cert_expires_at` stay in the database
+# because the metrics endpoint is unauthenticated (see metrics.py).
 GATEWAY_HEALTH_GAUGES = {
     "uptime_seconds":      "acs_ingestion_gateway_uptime_seconds",
     "load_1m":             "acs_ingestion_gateway_load1",
@@ -2262,23 +1691,19 @@ GATEWAY_HEALTH_GAUGES = {
 
 HEALTH_REPORTED_GAUGE = "acs_ingestion_gateway_health_reported_timestamp_seconds"
 
-# Last-seen values per edge node. BOUNDED BY THE FLEET WITHOUT NEEDING A CAP: this is written only
-# after resolve_gateway() has matched a REGISTERED gateway, so an unknown or forged edge node id
-# cannot add an entry -- which is the same argument the cache bound makes, arrived at for free.
-# An archived gateway's series lingers until the daemon restarts; its reported-at timestamp is
-# what says so.
+# Last-seen values per edge node. Written only after resolve_gateway() matched a registered
+# gateway, so a forged edge node id cannot add an entry. An archived gateway's series lingers
+# until restart; its reported-at timestamp says so.
 _gateway_health_gauges = {}
 _gateway_health_gauges_lock = threading.Lock()
-
 
 def record_gateway_health_gauges(edge_node_id, health, at):
     """
     Merge one payload's readings into this edge node's gauge set.
 
-    MERGED, NOT REPLACED, so a payload carrying only what its collector could produce does not
-    silently zero the rest. The reported-at gauge moves whenever anything was recognised, which is
-    what lets a reader tell a steady disk figure from a dead collector -- a gauge holds its last
-    value forever and says nothing about its own age.
+    Merged, not replaced, so a partial payload does not zero the rest. The reported-at gauge moves
+    whenever anything was recognised: a gauge holds its last value forever and says nothing about
+    its own age.
     """
     exported = {metric: health[column]
                 for column, metric in GATEWAY_HEALTH_GAUGES.items() if column in health}
@@ -2287,96 +1712,52 @@ def record_gateway_health_gauges(edge_node_id, health, at):
         entry.update(exported)
         entry[HEALTH_REPORTED_GAUGE] = at.timestamp()
 
-
 def gateway_health_gauge_snapshot() -> dict:
     """A copy, safe to read while the paho callback thread is writing."""
     with _gateway_health_gauges_lock:
         return {node: dict(values) for node, values in _gateway_health_gauges.items()}
 
-
 # -----------------------------------------------------------------------------
 # The appliance clock, measured from the heartbeat that is already arriving
 # -----------------------------------------------------------------------------
-# NOTHING IS ADDED TO THE WIRE AND NOTHING CHANGES ON THE APPLIANCE. Every node-level message
-# already carries the publisher's own clock in `payload.timestamp`, and process_node_message()
-# already stamps receipt time to judge staleness by. The difference between those two numbers IS
-# the appliance's clock offset. Both halves were always here; nothing was subtracting them.
-#
-# WHY THE MEASUREMENT IS WORTH TAKING, which is not obvious from the failure it catches. TLS
-# tolerates precisely the skew this daemon does not. The broker's leaf is valid for ninety days
-# and the root for ten years, so an appliance a few MINUTES fast verifies every certificate,
-# connects, authenticates, and then writes every sample a few minutes into the future for as long
-# as it runs. Inside TELEMETRY_MAX_FUTURE_SECONDS nothing refuses it and nothing counts it -- the
-# readings are all plausible and every one is filed at a time that never happened. Beyond it they
-# are dropped instead. A badly wrong clock announces itself by failing TLS at commissioning, in
-# front of whoever is holding the appliance; a slightly wrong one is silent and permanent, and it
-# is the one this exists for.
-#
-# SIGN CONVENTION: POSITIVE MEANS THE APPLIANCE IS AHEAD OF THIS SERVER, which is the direction
-# that corrupts soonest, because the sanity window is asymmetric. Negative is an appliance running
-# behind: equally unable to be correlated against another gateway on the same line, and far slower
-# to cost anything, since the window allows a full day of it.
-#
-# NOTHING IS REJECTED FOR BEING IMPLAUSIBLE, unlike Cert_Expires_At above, and the difference is
-# deliberate. An appliance reporting 1970 is not a garbled parse to be discarded -- it is a
-# single-board computer with no battery-backed real-time clock that came back after a plant power
-# cut with no reachable time source, which is the most likely instance of this fault in the fleet
-# this platform targets. Refusing to record the extreme values would blind the measurement to its
-# own worst case.
+# Offset = payload.timestamp - receipt time, on every node-level message. TLS tolerates the
+# skew this daemon does not: an appliance a few minutes fast connects fine and files every
+# sample at a time that never happened, inside TELEMETRY_MAX_FUTURE_SECONDS where nothing
+# counts it. Positive means the appliance is ahead of this server, the direction that corrupts
+# soonest. Nothing is rejected as implausible: an appliance reporting 1970 is a board with no
+# RTC after a power cut, the most likely instance of this fault.
 GATEWAY_CLOCK_OFFSET_GAUGE = "acs_ingestion_gateway_clock_offset_seconds"
 GATEWAY_CLOCK_MEASURED_GAUGE = "acs_ingestion_gateway_clock_measured_timestamp_seconds"
 
-# DELIBERATELY BELOW TELEMETRY_MAX_FUTURE_SECONDS, so the warning arrives while telemetry is still
-# being accepted rather than once it has already started being discarded. A minute of skew is
-# enough to break correlation between two appliances on one line; by the time an appliance reaches
-# the window edge it has been quietly misfiling readings for some while.
+# Below TELEMETRY_MAX_FUTURE_SECONDS, so the warning arrives while telemetry is still accepted.
 GATEWAY_CLOCK_OFFSET_WARN_SECONDS = 60
 
-# Throttle for the skew warning, keyed by edge node id. Same arrangement as the refused-health and
-# refused-status throttles above: a wrong clock is wrong on all 119 heartbeats an hour, and this
-# has to be legible without being the whole log. Longer than those, because a clock fault is not
-# something anyone fixes between one beat and the next.
+# Throttle for the skew warning, per edge node. Longer than the health and status throttles:
+# a clock fault is not fixed between one beat and the next.
 GATEWAY_CLOCK_WARN_INTERVAL_SECONDS = 900
 _gateway_clock_warned = {}
 
-# Last measured offset per edge node, with the time it was measured.
-#
-# SEPARATE FROM THE HEALTH GAUGES ABOVE, because the write condition is the whole point. Health is
-# recorded only when an appliance reports some; this is recorded on every node-level message from
-# every registered gateway, INCLUDING appliances on a bundle that reports no health at all. Folding
-# the two together would make the measurement depend on the one thing it must not depend on --
-# what the appliance chose to send. It inherits the same bound for free: written only after
-# resolve_gateway() has matched a registered gateway, so an unknown or forged edge node id cannot
-# add an entry.
+# Last measured offset per edge node. Separate from the health gauges because it is recorded on
+# every node-level message from every registered gateway, whether or not the appliance reports
+# health. Same bound: written only after resolve_gateway() matched.
 _gateway_clock_gauges = {}
 _gateway_clock_gauges_lock = threading.Lock()
-
 
 def record_gateway_clock_offset(edge_node_id, payload, at):
     """
     Measure one appliance's clock offset in seconds and keep it for the next scrape.
 
-    NDEATH MUST NOT REACH HERE, and the caller is what enforces that -- the same exclusion
-    check_message_sequence() makes, for the same reason. An NDEATH is the broker's Last Will,
-    built by the appliance at CONNECT time and held until its connection drops, so the timestamp
-    on it is the clock reading of an arbitrarily earlier moment. Measuring it would report every
-    perfectly synchronised gateway in the fleet as hours slow, once, at the instant it went
-    offline.
-
-    A payload carrying no usable timestamp is not measured and no series is written. Sparkplug
-    makes the field optional, and parse_sparkplug_payload()'s JSON branch substitutes receipt time
-    when it is absent -- which would read as a flawless clock. No series is the honest answer for
-    an appliance that reported nothing to compare.
+    NDEATH must not reach here (the caller excludes it): a Last Will is built at connect time,
+    so its timestamp is an arbitrarily earlier moment. A payload with no usable timestamp is not
+    measured; the JSON branch of parse_sparkplug_payload() substitutes receipt time when absent,
+    which would read as a flawless clock.
     """
     raw = getattr(payload, "timestamp", 0)
     if not raw or raw <= 0:
         return
 
-    # SECONDS THROUGHOUT, WITH NO DATETIME CONVERSION ANYWHERE. `timestamp` is a uint64 chosen by
-    # the appliance, and datetime.fromtimestamp() RAISES on values a genuinely wrong clock does
-    # produce -- a year outside datetime's range would take the whole heartbeat down an exception
-    # path over a diagnostic. Float arithmetic answers for every one of them, and the extreme
-    # readings are the ones worth having.
+    # Seconds throughout, no datetime conversion: datetime.fromtimestamp() raises on the values a
+    # genuinely wrong clock produces, and those are the readings worth having.
     offset = (raw / 1000.0) - at.timestamp()
 
     with _gateway_clock_gauges_lock:
@@ -2399,12 +1780,10 @@ def record_gateway_clock_offset(edge_node_id, payload, at):
             TELEMETRY_MAX_FUTURE_SECONDS, TELEMETRY_MAX_AGE_SECONDS,
         )
 
-
 def gateway_clock_gauge_snapshot() -> dict:
     """A copy, safe to read while the paho callback thread is writing."""
     with _gateway_clock_gauges_lock:
         return {node: dict(values) for node, values in _gateway_clock_gauges.items()}
-
 
 def _reject_health(edge_node_id, metric_name, reason):
     """Drop one health metric, loudly enough to find and quietly enough to live with."""
@@ -2416,18 +1795,14 @@ def _reject_health(edge_node_id, metric_name, reason):
             edge_node_id, metric_name, reason
         )
 
-
 def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: str = None):
     """
-    On Sparkplug B node-level messages (NBIRTH / NDATA / NDEATH):
-    Update the matching `gateways` row's status and last_heartbeat in Supabase.
+    On Sparkplug B node-level messages (NBIRTH / NDATA / NDEATH): update the matching `gateways`
+    row's status and last_heartbeat.
 
-    NBIRTH/NDATA mark the edge node ONLINE; NDEATH marks it OFFLINE. A `Gateway_Status`
-    string metric in the payload (what node_red_flow.json publishes) overrides the
-    status derived from the message type -- subject to accept_reported_status().
-
-    Gateways are never auto-created: an unregistered edge node is logged and dropped,
-    mirroring the fail-closed treatment of unregistered devices.
+    NBIRTH/NDATA mark the edge node ONLINE; NDEATH marks it OFFLINE. A `Gateway_Status` metric
+    overrides the derived status, subject to accept_reported_status(). Gateways are never
+    auto-created.
     """
     # An NBIRTH resets the edge node's whole alias table -- including its devices' -- because it
     # invalidates every binding the node previously declared. Registered before the client check
@@ -2461,12 +1836,8 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     try:
         gateway = resolve_gateway(edge_node_id, group_id)
     except DirectoryUnavailable as e:
-        # Throttled on the same key as the unregistered-node warning below: a heartbeat arrives
-        # every 30s, and a directory that is down is down for all of them.
-        # OUTSIDE THE THROTTLE, DELIBERATELY. The warning is rate-limited because a heartbeat
-        # arrives every 30s and the log would be unreadable; the counter must not be, or the
-        # metric would report one drop per throttle window instead of one per message. This is
-        # the one site where the counter and the log legitimately disagree, and this is why.
+        # Throttled on the same key as the unregistered-node warning: a heartbeat arrives every 30s.
+        # The counter is outside the throttle, or the metric would report one drop per window.
         drop(
             "node_message_directory_unavailable",
             "DIRECTORY UNAVAILABLE: dropping %s from edge node '%s' (%s). This is NOT the "
@@ -2488,36 +1859,22 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
             )
         return
 
-    # THIS WRITE IS NOT SKIPPABLE, and the comparison below is not a guard on it. `last_heartbeat`
-    # has to move on every heartbeat because `public.gateway_status` derives staleness from it at
-    # read time -- suppressing the write would make a live gateway report STALE, which is a far
-    # worse failure than the noise it would save. archived migration 0005 is what keeps this out of the
-    # audit trail: it subtracts `last_heartbeat` before comparing, so a heartbeat that moves only
-    # the timestamp writes no digital_thread row while a genuine ONLINE/OFFLINE transition still
-    # does.
-    #
-    # The comparison exists only to tell the two apart IN THE LOG. A transition is an operational
-    # event worth finding later; the other 119 heartbeats an hour are not.
+    # Not skippable: `public.gateway_status` derives staleness from `last_heartbeat` at read time,
+    # so suppressing this write would make a live gateway read STALE. The audit trigger subtracts
+    # `last_heartbeat` before comparing, so a heartbeat-only write records no digital_thread row.
+    # The comparison below only decides the log level.
     previous_status = gateway.get("status")
     transitioned = previous_status is not None and previous_status != status
 
-    # THE APPLIANCE'S CLOCK, from the two numbers this function is already holding: the timestamp
-    # the node put on this payload and the receipt time stamped above. NDEATH is excluded HERE
-    # rather than inside, so the exclusion sits beside the msg_type the rest of this function
-    # branches on -- see record_gateway_clock_offset() for why a Last Will cannot be measured.
-    #
-    # AFTER the registration check for the same reason the health block below is, and before it
-    # because this one does not depend on the appliance reporting anything.
+    # NDEATH excluded here, beside the msg_type the rest of this function branches on; see
+    # record_gateway_clock_offset(). After the registration check, before health because this does
+    # not depend on the appliance reporting anything.
     if msg_type != "NDEATH":
         record_gateway_clock_offset(edge_node_id, payload, heartbeat_dt)
 
-    # AFTER the registration check, not before: an unregistered node is dropped either way, and
-    # validating its metrics first would log rejections for a gateway nothing is going to write.
-    #
-    # `health_reported_at` is no longer stamped here: the gate stamps it, and only when the health
-    # object is non-empty. That is what makes the column mean what 0035 says it means -- an
-    # appliance on a bundle predating health reporting beats forever and leaves it NULL, reading as
-    # "does not report health" rather than "has stopped reporting it".
+    # After the registration check: an unregistered node is dropped either way, and validating its
+    # metrics first would log rejections for nothing. `health_reported_at` is stamped by the gate,
+    # only when the health object is non-empty, so NULL means "does not report health".
     health = extract_gateway_health(group_id, edge_node_id, payload)
     if health:
         # The scrapeable half, for the readings that need a trend rather than a current value.
@@ -2555,57 +1912,34 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     except Exception as e:
         logger.error("Error updating gateway heartbeat for '%s': %s", edge_node_id, e, exc_info=True)
 
-
 # -----------------------------------------------------------------------------
 # Payload conformance -- what the device sent against what its schema allows
 # -----------------------------------------------------------------------------
-# WHAT THIS DOES NOT DO, STATED FIRST BECAUSE IT IS THE DESIGN DECISION THAT MATTERS.
-#
-# It does not drop telemetry. A metric that no schema models, or whose type contradicts the one its
-# schema declares, is STILL WRITTEN to the historian exactly as before. That is not timidity about
-# changing behaviour; it is the same principle extract_declared_metrics() already states -- the
-# historian records what was observed, and whether an observation was supposed to happen is a
-# judgement made at read time, against a schema an engineer can edit afterwards. Refusing the row
-# would destroy the evidence of the very fault being reported, and would do it on the strength of a
-# schema that may itself be the thing that is wrong.
-#
-# What it adds is the RECORD. Until now a non-conforming payload produced nothing at all -- not a
-# counter, not a row -- so "this machine has been publishing a metric nobody modelled since
-# Tuesday" was unanswerable. Now it is one SCHEMA_REJECTION row in the digital thread.
-#
-# THE DROPPED METRICS ARE INCLUDED FOR THE SAME REASON. A metric skipped for an unresolvable alias
-# or a timestamp outside the sanity window IS genuinely lost, and those were `logger.warning` and a
-# counter -- both of which vanish on restart. Those two carry `dropped: true` so a reader can tell
-# a lost sample from a recorded-but-unmodelled one, which is the distinction that decides whether
-# anyone needs to go and look at the gateway.
+# Under the default `audit` policy nothing is dropped: the historian records what was observed
+# and conformance is judged at read time against a schema an engineer can edit afterwards. What
+# this adds is one SCHEMA_REJECTION row in the digital thread per change in the set of faults.
+# Metrics the loop skipped (unresolved alias, timestamp outside the window) are included with
+# `dropped: true`, since those are genuinely lost.
+# See ingestion/README.md -> "Schema Conformance".
 
 # JSON Schema type names satisfied by each Sparkplug value column. `integer` is accepted for a
-# double because Sparkplug has no integer wire type that survives this far -- process_ddata casts
-# int_value and long_value to float -- so rejecting `{"type": "integer"}` would flag every
-# correctly-modelled counter in the plant.
+# double because process_ddata casts every integer wire type to float.
 _JSON_TYPES_FOR_VALUE = {
     "double": frozenset({"number", "integer"}),
     "string": frozenset({"string"}),
     "bool": frozenset({"boolean"}),
 }
 
-# device_uuid -> ModelledSchema (or None -- see device_modelled_constraints).
-#
-# BOUNDED FOR CONSISTENCY RATHER THAN FOR SAFETY, and the difference is worth stating. This is keyed
-# on a RESOLVED uuid, which only exists because a `devices` row does, so no publisher can push
-# arbitrary keys into it the way it can into _device_cache -- it really is bounded by the fleet.
-# It gets the same container anyway: three caches with two different growth stories is how the
-# second one gets missed, which is how this one was missed when MAX_ALIASES_PER_NODE was written.
+# device_uuid -> ModelledSchema (or None -- see device_modelled_constraints). Keyed on a resolved
+# uuid, so it is bounded by the fleet; it gets the same container as the other caches anyway.
 _schema_cache = TTLCache(MAX_ENTITIES_PER_CACHE, SCHEMA_CACHE_TTL_SECONDS, "schema")
-
 
 class MetricConstraint(NamedTuple):
     """
     What every attached schema, taken together, permits one metric to carry.
 
-    `None` on any field means UNCONSTRAINED for that facet, which is not the same as absent: a
-    metric named in `required` but not in `properties` is modelled with no constraints at all, and
-    reading that as "declares nothing" would make every value it carries a mismatch.
+    `None` on any field means unconstrained for that facet, which is not the same as absent: a
+    metric named in `required` but not in `properties` is modelled with no constraints.
     """
     types:   frozenset = None   # JSON Schema `type`, as a set of names
     enum:    frozenset = None   # `enum`, as a set of permitted scalars
@@ -2613,46 +1947,33 @@ class MetricConstraint(NamedTuple):
     maximum: float     = None
     pattern: str       = None   # `pattern`, a regular expression, strings only
 
-
 class ModelledSchema(NamedTuple):
     """
-    The resolved schema surface for a device: what each metric may carry, and whether anything NOT
-    named is permitted at all.
+    The resolved schema surface for a device: what each metric may carry, and whether anything
+    not named is permitted at all.
 
-    `closed` is `additionalProperties: false` on any attached schema. It sits beside the metric map
-    rather than inside it because it is a statement about the SET, not about any one metric -- and
-    it is the only thing that can make an unmodelled metric a rejectable fault rather than merely a
-    reportable one. JSON Schema's default is to permit unnamed properties, so silence means yes.
+    `closed` is `additionalProperties: false` on any attached schema. It is the only thing that
+    makes an unmodelled metric a rejectable fault; JSON Schema's default permits unnamed
+    properties.
     """
     metrics: dict
     closed:  bool = False
 
-
 def _widen(a, b, union):
     """
-    Combine one facet across two schemas, PERMISSIVELY.
-
-    `None` wins, because the union is what the device is PERMITTED to send and the widest
-    permission is the answer: a schema declaring a metric with no `enum` permits any value, and
-    another schema listing some cannot narrow that.
+    Combine one facet across two schemas, permissively: `None` (unconstrained) wins, because the
+    union is what the device is permitted to send.
     """
     if a is None or b is None:
         return None
     return union(a, b)
 
-
 def modelled_constraints(schema_definitions):
     """
     Metric name -> MetricConstraint across every attached schema, plus whether the set is closed.
 
-    THE UNION ACROSS SCHEMAS IS DELIBERATE and mirrors modelled_metrics_across() in validate.py: a
-    device may carry several submodels, and a metric modelled by any one of them is modelled. A
-    per-schema check would flag a device for publishing what another of its own submodels accounts
-    for.
-
-    Was `modelled_types()`, which read `type` and nothing else -- so `enum`, `minimum`, `maximum`,
-    `pattern` and `additionalProperties` sat in stored schemas and were read past in silence. The
-    documents were already JSON Schema; only the reader was shallow.
+    The union across schemas mirrors modelled_metrics_across() in validate.py: a device may carry
+    several submodels, and a metric modelled by any one of them is modelled.
     """
     result = {}
     closed = False
@@ -2670,15 +1991,9 @@ def modelled_constraints(schema_definitions):
         properties = definition.get("properties")
         properties = properties if isinstance(properties, dict) else {}
 
-        # RESOLVED PER SCHEMA BEFORE THE UNION, and the two steps cannot be collapsed. Within ONE
-        # schema, `required: ["M"]` alongside `properties: {"M": {"type": "number"}}` means M is
-        # required AND typed -- the `required` entry adds no type information and must not erase
-        # the one next to it. ACROSS schemas the opposite holds: a schema that declares M with no
-        # type permits any value, which widens the union to unconstrained.
-        #
-        # Folding both into a single pass gets the answer right only when the schemas happen to
-        # arrive in a convenient order, which is a bug that hides until a device gains a second
-        # submodel.
+        # Resolved per schema before the union. Within one schema, `required: ["M"]` beside a typed
+        # `properties.M` adds no type information and must not erase it; across schemas a schema that
+        # declares M with no type widens the union to unconstrained.
         this_schema = {}
 
         for name, spec in properties.items():
@@ -2703,11 +2018,8 @@ def modelled_constraints(schema_definitions):
             else:
                 enum = None
 
-            # exclusiveMinimum / exclusiveMaximum are deliberately NOT read. Draft 4 spells them as
-            # booleans modifying `minimum`, Draft 6+ as numbers replacing it, and guessing which
-            # dialect a stored document means would move a boundary in whichever direction the
-            # guess was wrong. An unread facet reports nothing; a misread one rejects good
-            # telemetry, and this is the half of the file that can now drop a reading.
+            # exclusiveMinimum / exclusiveMaximum are not read: Draft 4 spells them as booleans, Draft 6+
+            # as numbers, and a misread facet would reject good telemetry.
             minimum = _number_or_none(spec.get("minimum"))
             maximum = _number_or_none(spec.get("maximum"))
 
@@ -2740,22 +2052,18 @@ def modelled_constraints(schema_definitions):
 
     return ModelledSchema(result, closed)
 
-
 def _number_or_none(value):
     """A JSON number, or None. `True` is an int in Python and is not a bound."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
 
-
 def device_modelled_constraints(device_uuid: str):
     """
     The cached ModelledSchema for a device, or None when it has no schema attached at all.
 
-    NONE AND AN EMPTY MAP ARE DIFFERENT ANSWERS and the caller depends on it. None means no schema
-    is bound, so there is nothing to judge against and conformance is not evaluated -- the ordinary
-    state of a newly onboarded device. An empty map means a schema IS bound and models no metrics,
-    which makes every metric unmodelled and is worth reporting.
+    None and an empty map are different answers: None means nothing is bound and conformance is
+    not evaluated; an empty map means a schema is bound and models no metrics.
     """
     # `(hit, value)` rather than a default, because None is a real answer here -- "no schema is
     # bound" -- and is exactly what the paragraph above distinguishes from an empty map.
@@ -2792,18 +2100,12 @@ def device_modelled_constraints(device_uuid: str):
     _schema_cache.set(device_uuid, result)
     return result
 
-
 def constraint_violations(name, value_kind, value, constraint):
     """
     Every facet of one constraint that this value fails, as (code, detail, extra) tuples.
 
-    SEPARATE FROM payload_violations() SO IT CAN BE TESTED WITH THREE LITERALS. It takes no
-    payload, no client and no device -- which is the same reason payload_violations() itself is
-    pure, applied one level down now that there are five facets rather than one.
-
-    ORDER IS SIGNIFICANT AND TYPE COMES FIRST. A value of the wrong type fails `minimum` and
-    `pattern` too, and reporting three faults for one mistake buries the one that explains the
-    other two. So a type mismatch returns alone.
+    Pure, so it is testable with three literals. Type comes first and returns alone: a value of
+    the wrong type fails `minimum` and `pattern` too, and reporting all three buries the cause.
     """
     satisfied = _JSON_TYPES_FOR_VALUE.get(value_kind, frozenset())
 
@@ -2851,21 +2153,17 @@ def constraint_violations(name, value_kind, value, constraint):
 
     return out
 
-
 def payload_violations(observed, dropped, modelled):
     """
     Everything wrong with one DDATA payload, as a list of audit-shaped dicts.
 
     `observed` -- [(metric_name, value_kind, value)] for metrics the loop accepted, where
-                  value_kind is a key of _JSON_TYPES_FOR_VALUE. The VALUE is carried because
-                  `enum`, `minimum`, `maximum` and `pattern` are about values and not about types;
-                  before those were read, the kind alone was enough.
+                  value_kind is a key of _JSON_TYPES_FOR_VALUE.
     `dropped`  -- [(metric_name_or_None, code, detail)] for metrics the loop skipped.
-    `modelled` -- the ModelledSchema from device_modelled_constraints(), or None to skip the schema
-                  half entirely.
+    `modelled` -- the ModelledSchema from device_modelled_constraints(), or None to skip the
+                  schema half entirely.
 
-    Pure, and that is the point: every branch below is reachable from a unit test with three
-    literals, which is not true of anything that has to be handed a protobuf and a live client.
+    Pure: every branch is reachable from a unit test with three literals.
     """
     violations = []
 
@@ -2909,30 +2207,16 @@ def payload_violations(observed, dropped, modelled):
 
     return violations
 
-
 def enforceable_violation(violation, closed):
     """
-    Whether this finding justifies DROPPING the metric, as opposed to only recording it.
-
-    THE TWO ARE NOT THE SAME QUESTION and the difference is the whole of the policy. Recording is
-    free and always correct: the row says what was observed. Dropping discards a reading a machine
-    actually produced, so it is reserved for findings where the schema is unambiguous about the
-    value being wrong.
+    Whether this finding justifies dropping the metric, as opposed to only recording it.
 
       * `type_mismatch`, `enum_mismatch`, `below_minimum`, `above_maximum`, `pattern_mismatch`
-        are the device contradicting a constraint its own bound schema states. Enforceable.
-
-      * `unmodelled_metric` is enforceable ONLY when a schema closes the set with
-        `additionalProperties: false`. JSON Schema's default permits unnamed properties, so
-        silence is permission -- dropping on silence would delete every reading from a device that
-        had gained a sensor before anyone updated its schema, which is the ordinary way a fleet
-        changes.
-
-      * `schema_pattern_invalid` is never enforceable. The fault is in the stored schema, and
-        charging it to the device would silence a machine because somebody typed a bad regex.
-
-      * Anything already `dropped` was skipped by the loop for its own reasons -- an unresolved
-        alias, a timestamp outside the sanity window -- and is not this policy's to re-decide.
+        contradict a constraint the bound schema states. Enforceable.
+      * `unmodelled_metric` is enforceable only when a schema closes the set with
+        `additionalProperties: false`; JSON Schema's default permits unnamed properties.
+      * `schema_pattern_invalid` is never enforceable: the fault is in the stored schema.
+      * Anything already `dropped` was skipped by the loop for its own reasons.
     """
     if violation.get("dropped"):
         return False
@@ -2941,42 +2225,29 @@ def enforceable_violation(violation, closed):
         return bool(closed)
     return code in _ENFORCEABLE_CODES
 
-
 _ENFORCEABLE_CODES = frozenset({
     "type_mismatch", "enum_mismatch", "below_minimum", "above_maximum", "pattern_mismatch",
 })
 
-
 def _violation_signature(violations):
     """
-    A hashable summary of WHAT is wrong, ignoring how often and when.
-
-    Deliberately excludes `detail` and every count: a device publishing the same unmodelled metric
-    on every message has one problem, not one per message, and the audit trail should say so once.
+    A hashable summary of what is wrong, ignoring how often and when: a device publishing the
+    same unmodelled metric on every message has one problem, recorded once.
     """
     return frozenset((v.get("metric"), v.get("code")) for v in violations)
-
 
 # {device_uuid: signature}. In-memory, so a daemon restart re-reports each distinct fault once --
 # which is the right trade: an operator who restarts ingestion to clear a fault wants to know
 # whether it came back.
 _last_violation_signature = {}
 
-
 def record_payload_violations(device: dict, violations, observed_at):
     """
-    Write one SCHEMA_REJECTION row to the digital thread, but only when the fault is NEW.
+    Write one SCHEMA_REJECTION row to the digital thread, only when the fault is new.
 
-    THE CHANGE CHECK IS NOT AN OPTIMISATION -- it is the difference between a feature and an
-    outage. DDATA arrives continuously; under report-by-exception a busy cell publishes several
-    messages a second. Writing a row per non-conforming message would append tens of thousands of
-    rows a day to a table that is append-only and that NO application role can prune, and the first
-    symptom would be the disk filling. archived migration 0005 made exactly this argument about heartbeat
-    UPDATEs; this is the same argument about a path 0005 cannot see, because these rows are written
-    through an RPC rather than by the audit trigger.
-
-    So: write when the SET of (metric, code) pairs changes, and never otherwise. A device whose
-    fault persists is recorded once; a device that develops a second fault is recorded again.
+    DDATA arrives continuously and the table is append-only with no application role able to
+    prune it, so a row per non-conforming message would fill the disk. Written when the set of
+    (metric, code) pairs changes, never otherwise.
     """
     if not AUDIT_PAYLOAD_REJECTIONS or not supabase_client or not device:
         return
@@ -2988,10 +2259,7 @@ def record_payload_violations(device: dict, violations, observed_at):
     signature = _violation_signature(violations)
 
     if not violations:
-        # RECOVERY CLEARS THE MEMO, so a fault that returns after being fixed is recorded again.
-        # Without this, a device that was repaired and then regressed would stay silent forever --
-        # the worst possible failure for an audit trail, because it is indistinguishable from
-        # health.
+        # Recovery clears the memo, so a fault that returns after being fixed is recorded again.
         _last_violation_signature.pop(device_id, None)
         return
 
@@ -3024,27 +2292,21 @@ def record_payload_violations(device: dict, violations, observed_at):
             "Could not record payload violations for '%s': %s", device.get("name"), e, exc_info=True
         )
 
-
 def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = None, client=None):
     """
-    On Sparkplug B DDATA:
-    Verify device registration, quarantine status and gateway binding in Supabase.
-    If quarantined, missing, or announced by a gateway the device is not bound to, drop the
-    DDATA telemetry.
-    Otherwise, insert metric timestamps and values into TimescaleDB telemetry hypertable,
-    keyed by the device's immutable `sparkplug_id` so a rename never breaks the series.
+    On Sparkplug B DDATA: verify device registration, quarantine status and gateway binding. If
+    quarantined, missing, or announced by a gateway the device is not bound to, drop the message.
+    Otherwise insert the metrics into the TimescaleDB telemetry hypertable, keyed by the device's
+    `sparkplug_id`.
 
-    Metric names are resolved through the edge node's alias table, since a DATA message
-    legitimately carries an alias and no name. A metric whose alias is unknown is skipped and a
-    rebirth is requested for the node -- see request_node_rebirth().
+    Metric names are resolved through the edge node's alias table. A metric whose alias is unknown
+    is skipped and a rebirth is requested for the node.
     """
     try:
         device = resolve_device(wire_id)
     except DirectoryUnavailable as e:
-        # Telemetry DOES fail closed -- a row that cannot be attributed is not written. The
-        # difference from the old behaviour is only that nothing is written about the DEVICE
-        # either: the message is dropped and the stream resumes on its own, instead of the device
-        # being pinned to "unregistered" for CACHE_TTL_SECONDS or quarantined by its next DBIRTH.
+        # Telemetry fails closed: an unattributable row is not written. Nothing is written about the
+        # device either; the stream resumes on its own.
         drop(
             "directory_unavailable",
             "DIRECTORY UNAVAILABLE: dropping DDATA for '%s' (%s). Not quarantined; the stream "
@@ -3061,11 +2323,9 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         )
         return
 
-    # The telemetry half of the spoofing fix. Dropped rather than quarantined here: a DDATA
-    # stream carries no birth certificate, so there is nothing for an operator to inspect, and
-    # letting an unbound publisher quarantine a healthy device would hand it the denial of
-    # service this check exists to prevent. The device's own gateway keeps being believed and
-    # its DBIRTH path is what raises the alarm.
+    # Dropped rather than quarantined: a DDATA carries no birth certificate to inspect, and letting
+    # an unbound publisher quarantine a healthy device would be a denial of service. The DBIRTH
+    # path raises the alarm.
     try:
         binding_fault = verify_gateway_binding(device, gateway_wire_id, group_id)
     except DirectoryUnavailable as e:
@@ -3096,11 +2356,9 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     asset_id = device["sparkplug_id"]
     asset_name = device.get("name") or asset_id
 
-    # THE CLOCK STARTS BEFORE THE CONNECTION IS ACQUIRED, not at the INSERT. What bounds this
-    # daemon is how long the one callback thread is occupied per message, and a reconnect occupies
-    # it for up to DB_CONNECT_MAX_ATTEMPTS * DB_CONNECT_BACKOFF_SECONDS while the whole fleet
-    # waits -- the stall get_timescaledb_connection() accepts on purpose. Timing only the INSERT
-    # would make that stall invisible in the one series meant to expose it.
+    # The clock starts before the connection is acquired: a reconnect occupies the one callback
+    # thread for up to DB_CONNECT_MAX_ATTEMPTS * DB_CONNECT_BACKOFF_SECONDS, and that stall is
+    # what the histogram exists to expose.
     write_started = time.perf_counter()
 
     db_conn = get_timescaledb_connection()
@@ -3115,34 +2373,22 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     payload_ts = payload.timestamp if hasattr(payload, 'timestamp') and payload.timestamp > 0 else int(time.time() * 1000)
     payload_dt = datetime.fromtimestamp(payload_ts / 1000.0, timezone.utc)
 
-    # DECLARED OUT HERE so they survive the try, and so the conformance record is written only
-    # after the telemetry write has actually committed. An exception inside rolls the batch back
-    # and leaves these unread, which is correct: a message whose rows were never stored is not
-    # evidence about the device, it is evidence about the database.
+    # Declared out here so they survive the try; the conformance record is written only after the
+    # telemetry write committed. A rolled-back batch is evidence about the database, not the device.
     observed = []
     dropped = []
 
-    # RESOLVED BEFORE THE WRITE, WHICH IS THE STRUCTURAL CHANGE ENFORCEMENT NEEDED (item 7).
-    #
-    # Conformance used to be evaluated entirely after the commit, and the comment down there still
-    # explains why the RECORD belongs there: a rejection row asserts something about the device,
-    # and a batch that rolled back is evidence about the database instead. That reasoning is about
-    # writing the audit row, and it is untouched.
-    #
-    # Dropping is a different question and has to be answered before the rows are built, so the
-    # constraints have to be in hand here. The lookup is skipped entirely when neither consumer
-    # wants it -- the same instinct as the existing AUDIT_PAYLOAD_REJECTIONS guard, which exists
-    # because device_modelled_constraints() can issue a PostgREST round trip on a cache miss.
+    # Resolved before the write because enforcement decides drops as rows are built. Skipped
+    # entirely when neither consumer wants it: device_modelled_constraints() can issue a PostgREST
+    # round trip on a cache miss.
     enforcing = bool(device) and device.get("conformance_policy") == CONFORMANCE_ENFORCE
     modelled = (
         device_modelled_constraints(device["id"])
         if device and (enforcing or AUDIT_PAYLOAD_REJECTIONS)
         else None
     )
-    # A device set to enforce whose schema could not be read is NOT enforced against. None means
-    # either "nothing is bound" or "the directory blinked", and neither is grounds for discarding
-    # a reading -- the second especially, since it would make our own outage look like the
-    # device's fault.
+    # A device set to enforce whose schema could not be read is not enforced against: None means
+    # "nothing is bound" or "the directory blinked", and neither is grounds for discarding a reading.
     enforcing = enforcing and modelled is not None
     rejected_schema = 0
 
@@ -3160,29 +2406,17 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     (asset_id, asset_name)
                 )
 
-                # Rows are ACCUMULATED and written in ONE statement below rather than executed
-                # per metric. The loop's decisions are unchanged; only the write is moved.
-                #
-                # THIS DOES NOT CHANGE FAILURE GRANULARITY, which is the usual objection. The loop
-                # already ran inside `with db_conn:` -- a transaction block that rolls back
-                # wholesale on any exception -- so a bad row aborted the whole message before this
-                # change and aborts the whole message after it. What changes is the number of
-                # round trips: one per metric becomes one per message.
+                # Rows are accumulated and written in one statement below. Failure granularity is unchanged:
+                # the loop already runs inside `with db_conn:`, which rolls back the whole message on any
+                # exception.
                 rows = []
                 rejected_timestamps = 0
                 unresolved_aliases = 0
                 for metric in payload.metrics:
-                    # -----------------------------------------------------------------------
-                    # `observed` and `dropped` are filled alongside the decisions the loop was
-                    # already making -- never by a second pass. A separate conformance walk over
-                    # the payload would have to re-resolve every alias and re-derive every value
-                    # kind, and would then be free to disagree with what was actually written,
-                    # which is the one thing an audit record must not do.
-                    # -----------------------------------------------------------------------
-                    # The alias is the only identity an optimised DATA metric carries. Resolve
-                    # before every other test, including the identity-metric filter -- comparing
-                    # an empty name against IDENTITY_METRICS never matches, so an aliased Asset_ID
-                    # would otherwise be written to the historian as a metric.
+                    # `observed` and `dropped` are filled alongside the loop's own decisions, never by a second
+                    # pass that could disagree with what was written.
+                    # The alias is resolved before every other test, including the identity-metric filter: an
+                    # aliased Asset_ID has an empty name and would otherwise be written as a metric.
                     metric_name = resolve_metric_name(group_id, gateway_wire_id, metric)
                     if metric_name is None:
                         unresolved_aliases += 1
@@ -3206,11 +2440,8 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     else:
                         metric_dt = payload_dt
 
-                    # Reject rather than clamp. Clamping to the window edge would silently
-                    # relabel a reading as having happened at a time it did not, which is a
-                    # worse corruption of a historian than dropping it -- and it would pile
-                    # every sample from a broken clock onto one timestamp, where the primary
-                    # key would collapse them into a single row anyway.
+                    # Reject rather than clamp: clamping relabels a reading to a time it did not happen, and
+                    # piles every sample from a broken clock onto one timestamp.
                     if not _timestamp_is_sane(metric_dt):
                         rejected_timestamps += 1
                         dropped.append((
@@ -3228,10 +2459,8 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     val_string = None
                     val_bool = None
 
-                    # WHICH OF THE THREE COLUMNS THE VALUE LANDS IN is exactly what a JSON Schema
-                    # `type` constrains, so the conformance check reads this rather than
-                    # re-inspecting the protobuf. The four numeric wire types collapse to one kind
-                    # here for the same reason they collapse to one column.
+                    # Which of the three columns the value lands in is what a JSON Schema `type` constrains, so the
+                    # conformance check reads this rather than re-inspecting the protobuf.
                     value_kind = None
 
                     if metric.HasField("int_value"):
@@ -3253,9 +2482,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                         val_string = metric.string_value
                         value_kind = "string"
                     else:
-                        # A metric carrying no recognised value field. Skipped before this change
-                        # too, and skipped in silence -- no counter, no log line, nothing. It is a
-                        # genuine loss and now says so.
+                        # A metric carrying no recognised value field is a genuine loss and is recorded.
                         dropped.append((
                             metric_name,
                             "no_value",
@@ -3274,10 +2501,8 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     # ---------------------------------------------------------------------
                     # Enforcement. Only reached for a device explicitly set to `enforce`.
                     # ---------------------------------------------------------------------
-                    # THE OFFENDING METRIC ONLY, not the message. This mirrors how an unresolved
-                    # alias and an out-of-window timestamp are already handled a few lines up:
-                    # dropping the whole payload would discard samples that conform perfectly
-                    # well, and the loss would be far larger than the fault.
+                    # The offending metric only, not the message, as for an unresolved alias or an out-of-window
+                    # timestamp above.
                     if enforcing:
                         constraint = modelled.metrics.get(metric_name)
                         if constraint is None:
@@ -3297,11 +2522,8 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                             code, detail, _extra = faults[0]
                             dropped.append((metric_name, code, detail))
                             rejected_schema += 1
-                            # LOUD, AND NAMING BOTH SIDES. The schema cache has a five-minute TTL,
-                            # so an edit starts discarding telemetry up to five minutes after
-                            # somebody made it -- long enough that the two are not obviously
-                            # connected. A line that names the device, the metric and the
-                            # constraint is what makes that connection findable afterwards.
+                            # Names the device, the metric and the constraint: the schema cache TTL means an edit starts
+                            # discarding telemetry up to five minutes later, and the line is what connects the two.
                             logger.warning(
                                 "SCHEMA ENFORCED: dropped metric '%s' for device '%s' (%s) -- %s "
                                 "(%s). The device is set to conformance_policy=enforce; this "
@@ -3318,21 +2540,10 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 
                 metric_count = len(rows)
 
-                # DO NOTHING, not DO UPDATE. The historian is an append-only record of what was
-                # observed; an upsert let any publisher rewrite history at a timestamp of its
-                # choosing, which is not a capability a time-series store should offer to the
-                # devices feeding it. A genuine duplicate is a redelivered MQTT message and the
-                # first write already recorded it.
-                #
-                # GUARDED ON A NON-EMPTY LIST: execute_values with no rows emits a syntactically
-                # invalid statement (`VALUES` with nothing after it). A message whose every metric
-                # was filtered -- all identity metrics, or every timestamp rejected -- is entirely
-                # ordinary and must not raise.
-                #
-                # page_size caps how many tuples go into one statement; beyond it psycopg2 sends
-                # several. 500 is far above any real Sparkplug payload, so in practice every
-                # message is one statement, while a pathological payload still cannot build an
-                # unbounded query string.
+                # DO NOTHING, not DO UPDATE: the historian is append-only, and an upsert would let any
+                # publisher rewrite history. A duplicate is a redelivered MQTT message.
+                # Guarded on a non-empty list: execute_values with no rows emits an invalid statement, and a
+                # message whose every metric was filtered is ordinary.
                 if rows:
                     execute_values(
                         cur,
@@ -3350,12 +2561,9 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                 # skips this, keeping the counter honest rather than optimistic.
                 count("metrics_written", metric_count)
                 count("metrics_rejected_timestamp", rejected_timestamps)
-                # AND THE SAME EVENT WITH THE EDGE NODE ON IT, which is the half that makes the
-                # counter actionable. Unlabelled, it says the fleet lost samples and not which
-                # appliance lost them -- and the log line below, the only place the gateway is
-                # named, goes nowhere that is kept. This is the series metrics.py exports;
-                # `metrics_rejected_timestamp` stays in the flat registry so the counter and the
-                # warning cannot drift apart, and is deliberately not exported twice.
+                # The same event labelled by edge node, which is what makes it actionable; this is the series
+                # metrics.py exports. `metrics_rejected_timestamp` stays in the flat registry beside its
+                # warning and is not exported twice.
                 count_labelled(
                     "acs_ingestion_timestamps_rejected_total",
                     {"edge_node": gateway_wire_id}, rejected_timestamps
@@ -3364,11 +2572,8 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                 count("metrics_rejected_schema", rejected_schema)
 
                 if unresolved_aliases:
-                    # Skip the undecodable metrics, keep the rest, and ask the node to re-birth.
-                    # Dropping the whole message would discard samples that resolved perfectly
-                    # well; in the case that actually matters -- a cold start, where every metric
-                    # is alias-only -- the two are identical, because nothing resolves. This
-                    # mirrors how rejected_timestamps is handled a few lines down.
+                    # Skip the undecodable metrics, keep the rest, and ask the node to re-birth. On a cold start
+                    # every metric is alias-only and nothing resolves, so the two are the same there.
                     requested = request_node_rebirth(client, group_id, gateway_wire_id)
                     if requested:
                         logger.warning(
@@ -3398,11 +2603,8 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 
                 logger.info("INGESTED DDATA: Ingested %d metrics for asset '%s' into TimescaleDB", metric_count, asset_id)
 
-        # OUTSIDE `with db_conn`, WHICH IS THE POINT: the block commits on exit, and on a
-        # hypertable the commit is where the write becomes durable. An observation taken at the
-        # end of the cursor block would report everything except the part that touches the disk.
-        # Reached only when the commit itself succeeded -- a commit that raises goes to `except`
-        # below and is deliberately not observed.
+        # Outside `with db_conn`: the block commits on exit, and the commit is where a hypertable
+        # write becomes durable. Reached only when the commit succeeded.
         observe_write_seconds(time.perf_counter() - write_started)
     except Exception as e:
         # The whole message is lost: `with db_conn` rolled the transaction back, so none of the
@@ -3412,20 +2614,10 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         logger.error("Error writing DDATA telemetry to TimescaleDB: %s", e, exc_info=True)
         return
 
-    # -------------------------------------------------------------------------------------
-    # Conformance, AFTER the commit and OUTSIDE the transaction.
-    #
-    # Outside because this writes to Supabase over PostgREST, not to the historian: holding a
-    # TimescaleDB transaction open across an HTTP round trip would put network latency inside a
-    # lock on the hottest path in the process.
-    #
-    # After because a rejection row asserts something about the DEVICE. If the batch rolled back,
-    # the honest statement is that we know nothing about this message -- hence the early return
-    # above rather than falling through.
-    # -------------------------------------------------------------------------------------
-    # The flag is tested HERE as well as inside record_payload_violations, and the duplication is
-    # deliberate: device_modelled_constraints() can issue a PostgREST round trip on a cache miss,
-    # and a daemon with auditing off must not pay for a lookup whose only consumer is disabled.
+    # Conformance, after the commit and outside the transaction: this writes to Supabase over
+    # PostgREST, and a rejection row asserts something about the device, which a rolled-back batch
+    # cannot support. The flag is tested here as well as inside record_payload_violations because
+    # device_modelled_constraints() can issue a round trip on a cache miss.
     if AUDIT_PAYLOAD_REJECTIONS:
         # `modelled` was resolved before the write and is reused rather than re-read: it is the
         # same cached value, and fetching it twice would double the round trips on a cache miss
@@ -3436,38 +2628,19 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
             payload_dt,
         )
 
-
-# WHETHER THE DAEMON IS SUBSCRIBED, WHICH NOTHING COULD OBSERVE BEFORE.
-#
-# `acs_ingestion_db_connected` has always answered the same question about PostgreSQL, and the
-# absence of an MQTT equivalent was a real gap rather than an oversight of symmetry: "the process
-# is running" and "the daemon is receiving Sparkplug messages" are different states with an
-# unbounded gap between them, and only the second one means the stack is working.
-#
-# CI needed exactly this and had to infer it. Issue #47's proposed gate waited for
-# `sum(acs_ingestion_messages_total) > 0` on the reasoning that "the simulators publish
-# continuously" -- which was true when it was written and is not true now that the simulator is
-# opt-in. On a stack with no publisher the count is unreachable and the wait
-# deadlocks, which is what it did on the Compose job: `acs_ingestion_up=1`, zero messages, 180
-# seconds. The daemon was subscribed the whole time and nothing could say so.
-#
-# SET AFTER `subscribe()` RETURNS, NOT AFTER `connect()`. A connected client that has not
-# subscribed receives nothing, which is precisely the state this exists to distinguish.
+# Whether the daemon is subscribed. `acs_ingestion_db_connected` answers the same question for
+# PostgreSQL; "the process is running" and "the daemon is receiving messages" are different
+# states, and CI waits on this one. Set after `subscribe()` returns, not after `connect()`.
+# See docs/incidents.md -> "CI waited for a message count on a stack with no publisher".
 _mqtt_subscribed = False
-
 
 def on_connect(client, userdata, flags, rc, properties=None):
     """
     Subscribe once the broker has accepted the connection.
 
-    `properties` IS THE MQTT 5 SIGNATURE, and it is optional so the function is callable under
-    either protocol -- paho passes five arguments for a v5 client and four for a 3.1.1 one. Keeping
-    the default means this is not the thing that breaks if the protocol is ever moved back.
-
-    `rc` is a `ReasonCodes` under v5 rather than an int, and `== 0` still works: paho's
-    ReasonCodes.__eq__ compares against int. Verified against the pinned 1.6.1 rather than assumed,
-    because a comparison that silently became False would leave the daemon connected and
-    subscribed to nothing.
+    `properties` is the MQTT 5 signature and is optional so the function is callable under either
+    protocol. `rc` is a `ReasonCodes` under v5; `== 0` works because ReasonCodes.__eq__ compares
+    against int (verified against the pinned paho 1.6.1).
     """
     global _mqtt_subscribed
     if rc == 0:
@@ -3479,55 +2652,29 @@ def on_connect(client, userdata, flags, rc, properties=None):
         _mqtt_subscribed = False
         logger.error("Failed to connect to MQTT Broker, return code %s", rc)
 
-
 def on_disconnect(client, userdata, rc, properties=None):
     """
-    Say that the connection ended, and say why WHEN THE LIBRARY GIVES US A WHY -- which, on the
-    pinned paho, it does not for the case anyone cares about.
+    Log that the connection ended, with the broker's reason when the library delivers one.
 
-    BEFORE THIS THERE WAS NO on_disconnect AT ALL, so an involuntary disconnect was entirely silent
-    and the only evidence was a "Connected to MQTT Broker successfully." arriving twice. That much
-    is a real improvement and is why this exists.
+    On the pinned paho 1.6.1 it does not for the common case: a v5 DISCONNECT carrying a reason
+    code with empty properties is shorter than the length paho checks for, so the reason is
+    discarded and this callback sees MQTT_ERR_CONN_LOST instead. The ReasonCodes branch below is
+    for a newer paho or a broker that sends properties.
+    See docs/incidents.md -> "paho 1.6.1 discards the broker's DISCONNECT reason".
 
-    WHAT MQTT 5 WAS EXPECTED TO ADD, AND DOES NOT HERE. v5 lets the broker state a reason in its
-    DISCONNECT, and mosquitto does: a session takeover, measured against this stack with mqtt.js,
-    arrives as 142 `Session taken over`. paho 1.6.1 RECEIVES THAT PACKET AND DISCARDS THE REASON --
-    `_handle_disconnect()` only decodes one when `remaining_length > 2`, and mosquitto's carries a
-    reason code with zero-length properties, which is shorter than that. Enabling paho's protocol
-    log against the same event shows it plainly:
-
-        Received DISCONNECT None None
-
-    and this callback is then reached with paho's own `MQTT_ERR_CONN_LOST` (7) instead. So the
-    branch below that renders a `ReasonCodes` is not dead code -- a newer paho, or a broker sending
-    properties, would take it -- but on the pinned version it does not fire, and claiming otherwise
-    in a comment would be worse than not logging at all.
-
-    IT IS A LOG LINE AND NOT A DECISION. paho's loop_forever() reconnects on its own and should:
-    every reason a broker sends here is either transient or an operator's deliberate act, and a
-    daemon that gave up on one would turn a reconnect into an outage.
-
-    rc == 0 is a disconnect this daemon asked for, which is not worth a line.
+    A log line, not a decision: loop_forever() reconnects on its own. rc == 0 is a disconnect this
+    daemon asked for.
     """
-    # CLEARED FOR EVERY DISCONNECT, INCLUDING THE DELIBERATE ONE. The subscription does not survive
-    # the connection, so `acs_ingestion_mqtt_connected` must not go on claiming it does -- and this
-    # sits ABOVE the `rc == 0` early return, because a clean shutdown is exactly as unsubscribed as
-    # a dropped socket. paho's loop_forever() reconnects on its own and on_connect sets it again.
+    # Cleared for every disconnect, including the deliberate one: the subscription does not survive
+    # the connection. Sits above the `rc == 0` return for that reason; on_connect sets it again.
     global _mqtt_subscribed
     _mqtt_subscribed = False
 
     if rc == 0:
         return
 
-    # TWO DIFFERENT THINGS ARRIVE HERE AND CONFLATING THEM WOULD BE WORSE THAN NOT LOGGING.
-    #
-    #   a ReasonCodes  the BROKER said why -- it sent a DISCONNECT packet. This is the v5 gain:
-    #                  "Session taken over", "Server shutting down", "Administrative action".
-    #   a bare int     PAHO said why, and the broker said nothing. 7 is MQTT_ERR_CONN_LOST: the
-    #                  socket went away. A hard broker restart looks like this, because the process
-    #                  dies before it can send anything -- which is exactly the case v5 CANNOT
-    #                  improve, and printing paho's number as though it were a protocol reason code
-    #                  would misrepresent what was learned.
+    # A ReasonCodes means the broker said why (a DISCONNECT packet). A bare int means paho said
+    # why and the broker said nothing: 7 is MQTT_ERR_CONN_LOST, the socket went away.
     if isinstance(rc, int):
         logger.warning(
             "Disconnected from MQTT Broker: the connection dropped (paho rc=%s); the broker sent "
@@ -3539,11 +2686,10 @@ def on_disconnect(client, userdata, rc, properties=None):
             "Under MQTT 3.1.1 this line could only have said 'unexpected'.", rc, int(rc.value)
         )
 
-
 def parse_sparkplug_payload(msg):
     """
-    Decode a Sparkplug B payload, falling back to the JSON encoding used by the
-    Node-RED simulator flow. Returns None if the payload cannot be decoded.
+    Decode a Sparkplug B payload, falling back to the JSON encoding used by the Node-RED
+    simulator flow. Returns None if the payload cannot be decoded.
     """
     payload = sparkplug_b_pb2.Payload()
     try:
@@ -3564,12 +2710,8 @@ def parse_sparkplug_payload(msg):
             if data.get('uuid'):
                 payload.uuid = str(data['uuid'])
 
-            # The Sparkplug sequence number. Carried through so the fallback is not silently
-            # blind to message loss -- check_message_sequence() tests HasField('seq'), and
-            # dropping it here would make every JSON publisher exempt from gap detection.
-            # Assigned only when present and integral: `seq` is a uint64, so a missing or
-            # non-numeric one must leave the field unset rather than default it to 0, which
-            # would read as a legitimate wrap and mask a real gap.
+            # `seq` is carried through so the JSON fallback is not exempt from gap detection. Assigned
+            # only when present and integral: defaulting a missing seq to 0 would read as a wrap.
             if isinstance(data.get('seq'), (int, float)) and not isinstance(data.get('seq'), bool):
                 payload.seq = int(data['seq']) % 256
 
@@ -3595,7 +2737,6 @@ def parse_sparkplug_payload(msg):
             logger.warning("Failed to decode Sparkplug B payload on topic %s: %s", msg.topic, pb_err)
             return None
 
-
 def extract_claimed_asset_id(payload):
     """The device's own Asset_ID claim, if it published one. Absent from aliased DDATA."""
     for metric in payload.metrics:
@@ -3609,7 +2750,6 @@ def extract_claimed_asset_id(payload):
             return None
     return None
 
-
 def resolve_wire_identity(parts, payload):
     """
     Determine which device a message is about, and whether its identity is trustworthy.
@@ -3617,15 +2757,10 @@ def resolve_wire_identity(parts, payload):
     Returns (wire_id, quarantine_reason). wire_id is None if the message carries no usable
     identity at all.
 
-    The topic is authoritative; the Asset_ID metric is a cross-check, and is absent entirely
-    from alias-encoded DDATA where the topic is the only identity available.
-
-    THE STRICT CONTRACT APPLIES ONLY to devices already publishing a platform-issued id. A
-    legacy device still publishing its name keeps "payload metric wins", so that gateways can
-    be reconfigured one at a time. That arm is live -- it goes away with the rest of the
-    name-matching fallback, not before.
-
-    Resolution precedence: ../ingestion/README.md -> "Asset Identity on the Wire"
+    The topic is authoritative; the Asset_ID metric is a cross-check, absent from alias-encoded
+    DDATA. The strict contract applies only to devices publishing a platform-issued id; a legacy
+    device keeps "payload metric wins" so gateways can be reconfigured one at a time.
+    See ingestion/README.md -> "Asset Identity on the Wire".
     """
     topic_id = parts[4] if len(parts) >= 5 else None
     claimed_id = extract_claimed_asset_id(payload)
@@ -3654,16 +2789,12 @@ def resolve_wire_identity(parts, payload):
         return claimed_id, None
     return topic_id, None
 
-
 def on_message(client, userdata, msg):
     parts = msg.topic.split('/')
     if len(parts) < 4 or parts[0] != 'spBv1.0':
         return
 
-    # The Sparkplug Group ID. Carried through this call only, to scope the alias table and to
-    # address a rebirth request back at the right node -- gateway and device resolution still
-    # ignore it entirely, and no column stores it. Making the group part of an asset's identity
-    # is a schema change and belongs with the rest of that work.
+    # The Sparkplug Group ID, used to scope the alias table and to address a rebirth request.
     group_id = parts[1]
     msg_type = parts[2]
     edge_node_id = parts[3]
@@ -3680,13 +2811,9 @@ def on_message(client, userdata, msg):
     if msg_type in ("NCMD", "DCMD"):
         return
 
-    # A capture in flight takes a copy of what the daemon is about to ingest. Placed HERE rather
-    # than at the top of this function on purpose: everything above is what makes the message
-    # ingestible at all, so a capture records what the daemon acted on rather than everything the
-    # wildcard subscription delivered -- and command topics stay out of capture files, where a
-    # replayed rebirth request would be a command issued to the plant.
-    #
-    # A no-op and one global read when nothing is recording, which is almost always.
+    # A capture in flight takes a copy of what the daemon is about to ingest. Placed after the
+    # checks above so a capture records what was acted on, and command topics stay out of capture
+    # files. A no-op and one global read when nothing is recording.
     capture_worker.observe(msg.topic, msg.payload, parts)
 
     # Counted AFTER the parse and the command-topic filter, so this is messages the daemon
@@ -3723,29 +2850,18 @@ def on_message(client, userdata, msg):
     else:
         logger.info("Received %s message for device '%s' via edge node '%s'", msg_type, wire_id, edge_node_id)
 
-
 REBIRTH_POLL_INTERVAL_SECONDS = int(os.getenv("REBIRTH_POLL_INTERVAL_SECONDS", "5"))
-
 
 def start_rebirth_poller(client):
     """
     Send the rebirth requests a person asked for from the dashboard.
 
-    THE DAEMON IS THE ONLY THING THAT CAN. A browser cannot publish MQTT -- the broker has no
-    WebSocket listener and the credential is a server-side secret -- and `write spBv1.0/+/NCMD/+`
-    is granted to this principal alone. So a request is a row (0058) and this is what notices it.
+    A browser cannot publish MQTT and `write spBv1.0/+/NCMD/+` is granted to this principal alone,
+    so a request is a row and this is what notices it. It sends exactly what
+    request_node_rebirth() already sends, with `force=True` for the same reason capture uses it:
+    the database permits one pending request per gateway.
 
-    IT SENDS EXACTLY WHAT THE DAEMON ALREADY SENDS ITSELF. `request_node_rebirth()` fires at
-    startup, on every sequence gap and at the start of every capture; this adds no new payload and
-    no new topic, only a second reason for the same publish.
-
-    `force=True`, LIKE CAPTURE, and for the same argument: the throttle exists to stop a flood
-    driven by TRAFFIC -- one request per message from a node with a broken alias table -- and a
-    person pressing a button is not that. The database permits one pending request per gateway, so
-    the ceiling is a click.
-
-    A DAEMON THREAD, and forgiving of its own errors: a poll that cannot reach Supabase must not
-    take down a process whose actual job is ingesting telemetry.
+    A daemon thread, forgiving of its own errors.
     """
     def poll():
         while True:
@@ -3795,15 +2911,10 @@ def start_rebirth_poller(client):
         REBIRTH_POLL_INTERVAL_SECONDS,
     )
 
-
 def _require_credentials():
     """
-    Refuse to start without the broker and database credentials.
-
-    Same posture as the Supabase check below, and for the same reason: these previously
-    carried published defaults ("acscymru123" / "postgres"), so a deployment with the
-    variable missing came up connected with a known-weak credential and reported nothing.
-    A missing secret must be a startup failure, not a silent downgrade.
+    Refuse to start without the broker and database credentials. A missing secret must be a
+    startup failure, not a silent downgrade to a published default.
     """
     missing = []
     if not MQTT_PASSWORD:
@@ -3822,18 +2933,13 @@ def _require_credentials():
         )
         raise SystemExit(1)
 
-
 def configure_mqtt_tls(client):
     """
     Put the MQTT client on TLS when MQTT_TLS_ENABLED is set. No-op otherwise.
 
-    Verification is always on and there is no switch to turn it off -- see the note on
-    MQTT_TLS_CA_FILE. `cert_reqs=CERT_REQUIRED` is paho's default, and it is named here anyway so
-    that the intent is legible at the call site rather than inherited.
-
-    A CA file that is set but missing raises rather than falling back to the system store: with an
-    internal CA the system store cannot verify the broker, so the fallback would fail at connect
-    time instead, reporting a TLS handshake error that names neither this variable nor the path.
+    Verification is always on. A CA file that is set but missing raises here rather than falling
+    back to the system store, which cannot verify an internal CA and would fail later with an
+    error naming neither the variable nor the path.
     """
     if not MQTT_TLS_ENABLED:
         return False
@@ -3855,10 +2961,8 @@ def configure_mqtt_tls(client):
         cert_reqs=ssl.CERT_REQUIRED,
         tls_version=ssl.PROTOCOL_TLS_CLIENT,
     )
-    # Hostname checking is what makes the certificate mean anything: without it any certificate
-    # signed by the CA -- including one legitimately issued for a different service -- would be
-    # accepted for the broker. paho leaves this on by default; it is set explicitly because
-    # `tls_insecure_set(True)` is the single line that would silently undo this whole function.
+    # Hostname checking is what makes the certificate mean anything. Set explicitly because
+    # `tls_insecure_set(True)` is the one line that would silently undo this function.
     client.tls_insecure_set(False)
     logger.info(
         "MQTT TLS enabled; verifying the broker against %s",
@@ -3866,17 +2970,13 @@ def configure_mqtt_tls(client):
     )
     return True
 
-
 def start_health_heartbeat(client):
     """
     Touch INGESTION_HEALTH_FILE every INGESTION_HEALTH_INTERVAL seconds while the MQTT connection
-    is up, so an external prober can tell a live daemon from a wedged one.
+    is up. No-op when the variable is unset (the Compose default).
 
-    A daemon thread, so it can never hold the process open on shutdown. It is deliberately
-    forgiving of write errors -- a full or read-only filesystem should stop the heartbeat (which
-    correctly reports unhealthy) rather than crash a daemon that is otherwise ingesting fine.
-
-    No-op when INGESTION_HEALTH_FILE is unset, which is the Compose default.
+    A daemon thread, forgiving of write errors: a full filesystem should stop the heartbeat, not
+    the daemon.
     """
     if not INGESTION_HEALTH_FILE:
         return
@@ -3898,23 +2998,13 @@ def start_health_heartbeat(client):
         INGESTION_HEALTH_INTERVAL,
     )
 
-
 def start_stats_reporter():
     """
     Log the throughput counters every INGESTION_STATS_INTERVAL seconds.
 
-    A DAEMON THREAD OF ITS OWN, not a block inside start_health_heartbeat(), because that function
-    returns immediately when INGESTION_HEALTH_FILE is unset -- the Docker Compose default. Counters
-    reported from inside it would be invisible on the target where `docker logs` is the primary
-    diagnostic.
-
-    BOTH DELTA AND TOTAL ARE REPORTED. The delta is the interval's traffic, which is what answers
-    "is the daemon keeping up"; the total is traffic since start, which is what answers "how much
-    has it dropped today". A reporter emitting only one of them forces the reader to do arithmetic
-    against a previous log line that may have scrolled.
-
-    Counters with a zero delta AND a zero total are omitted, so a healthy line stays short and a
-    drop counter appearing at all is itself the signal.
+    Its own daemon thread, because start_health_heartbeat() returns immediately when
+    INGESTION_HEALTH_FILE is unset. Both delta and total are reported; counters with zero delta
+    and zero total are omitted, so a drop counter appearing at all is the signal.
     """
     if INGESTION_STATS_INTERVAL <= 0:
         logger.info("Throughput counter reporting is disabled (INGESTION_STATS_INTERVAL=0).")
@@ -3947,15 +3037,11 @@ def start_stats_reporter():
     threading.Thread(target=report, name="stats-reporter", daemon=True).start()
     logger.info("Throughput counters reporting every %ss", INGESTION_STATS_INTERVAL)
 
-
 class _HealState:
     """
     What the startup healer still owes, carried between passes.
 
-    A CLASS RATHER THAN CLOSURE VARIABLES so that one pass is callable on its own. The loop is
-    otherwise only reachable through a thread with a sleep in it, which makes the interesting
-    behaviour -- the race with the callback thread, the one-shot privilege check, the retry that
-    stops retrying -- testable only by timing, and that is how a healer becomes a flaky test.
+    A class rather than closure variables so that one pass is callable on its own from a test.
     """
 
     def __init__(self, check_privileges=False, reconcile_capture=False):
@@ -3970,19 +3056,13 @@ class _HealState:
         """True when nothing deferred is outstanding. The loop keeps running anyway; see below."""
         return self.privileges_checked and self.capture_reconciled
 
-
 def _heal_pass(state, supabase=None):
     """
     One iteration of the startup recovery loop. Mutates `state`; returns the usable connection.
-
-    See start_startup_healer() for why any of this exists.
     """
     global _ts_conn
 
-    # SUPABASE, NOT THE HISTORIAN, and first because it depends on neither the connection below nor
-    # its outcome -- reconciliation can succeed on a stack whose historian is still down, and
-    # should. The two startup steps this loop owes have different dependencies, so a single "is the
-    # database up" flag would tie the recovery of one to the availability of the other.
+    # Supabase first: reconciliation depends on neither the historian connection nor its outcome.
     if not state.capture_reconciled and supabase is not None:
         if capture_worker.reconcile(supabase):
             logger.info(
@@ -3993,10 +3073,8 @@ def _heal_pass(state, supabase=None):
 
     conn = _ts_conn
     if conn is None or conn.closed != 0:
-        # CONNECTED WITH THE LOCK RELEASED. Holding it across a network round trip would put the
-        # whole fleet behind an unreachable database on the next message; see the note on
-        # `_ts_conn_lock`. The window that opens is that the callback thread may connect first,
-        # which is resolved below by discarding this one rather than by excluding it.
+        # Connected with the lock released; see `_ts_conn_lock`. The callback thread may connect
+        # first, which is resolved below by discarding this one.
         try:
             fresh = _connect_timescaledb(connect_timeout=DB_HEAL_CONNECT_TIMEOUT_SECONDS)
         except Exception as err:
@@ -4033,24 +3111,19 @@ def _heal_pass(state, supabase=None):
 
     state.reported_down = False
 
-    # ON THE HEALED CONNECTION, because that is the connection whose privileges matter. It is the
-    # check main() skipped when the startup connect failed, so without it a daemon that lost the
-    # ordering race runs unverified against a historian it may hold superuser on -- and the
-    # security model's "append-only historian writes" would again be a claim nothing enforces.
+    # On the healed connection, because that is the connection whose privileges matter: it is the
+    # check main() skipped when the startup connect failed.
     if not state.privileges_checked and conn is not None:
         try:
             _assert_historian_is_least_privilege(conn)
         except SystemExit:
-            # A DAEMON THREAD SWALLOWS SystemExit: it unwinds this thread and leaves the process
-            # running, which would turn a deliberate refusal to start into a warning nobody sees.
-            # The refusal has to reach the process, and os._exit is what does so from here without
-            # some handler elsewhere choosing to ignore it. The assertion has already logged why.
+            # A daemon thread swallows SystemExit, so the refusal has to reach the process via os._exit.
+            # The assertion has already logged why.
             logging.shutdown()
             os._exit(1)
         state.privileges_checked = True
 
     return conn
-
 
 def _heal_loop(state, supabase=None):
     """The sleep around _heal_pass(). Separate so that one pass can be tested without a thread."""
@@ -4061,48 +3134,18 @@ def _heal_loop(state, supabase=None):
         except Exception as exc:  # noqa: BLE001 - a recovery loop must never stop ingestion
             logger.warning("Startup recovery pass failed: %s", exc)
 
-
 def start_startup_healer(supabase=None, check_privileges=False, reconcile_capture=False):
     """
     Retry, off the message path, the startup work a dependency that was not up yet prevented.
 
-    ===============================================================================================
-    THE FAULT THIS EXISTS FOR. `depends_on` orders `docker compose up` and NOTHING ELSE. When the
-    Docker daemon brings `restart: always` containers back -- a host reboot, a Docker Desktop
-    restart -- it starts them in an order of its own choosing and the dependency graph does not
-    apply. Measured on this stack:
+    `depends_on` orders `docker compose up` and nothing else; Docker restarts `restart: always`
+    containers in its own order. Two startup steps depend on a database being up, with different
+    dependencies: the historian connection (which `acs_ingestion_db_connected` reads) and
+    capture_worker.reconcile() (Supabase). Each is retried until it succeeds.
 
-        acs-cymru_ingestion    started 20:08:52.370   restarts=0   policy=always
-        acs-cymru_timescaledb  started 20:08:52.823   restarts=0   policy=always
-
-    Ingestion won by 453ms, so `_connect_timescaledb()` met a refused connection and the daemon
-    entered its MQTT loop having done none of the startup work that needed a database.
-
-    ===============================================================================================
-    AND NOTHING RETRIED IT, WHICH IS THE ACTUAL DEFECT. Two consequences, both silent:
-
-    1. `_ts_conn` was never set, and only a WRITE sets it. On a stack with nothing publishing there
-       is no first write, so the connection was never opened and `acs_ingestion_db_connected` read
-       0 indefinitely -- firing `Historian Unreachable From Ingestion` against a historian that was
-       reachable the whole time and dropping no telemetry, because there was none to drop. Keeping
-       the startup connection instead of discarding it fixed the case where that connection
-       SUCCEEDS; this is the case where it fails.
-
-    2. capture_worker.reconcile() ran once and lost, and its own docstring calls that failure total
-       rather than cosmetic: a job left at RECORDING still matches the single-flight index, so
-       every future capture on the stack is refused with nothing to point at. That one is worse
-       than the alert, and it is invisible until somebody presses the button.
-
-    Note that those have DIFFERENT dependencies -- the historian for one, Supabase for the other --
-    so they are retried independently rather than behind a single "is the database up" flag.
-
-    ===============================================================================================
-    THIS THREAD DOES NOT EXIT once the deferred work is done, and that is deliberate. `_ts_conn` is
-    also cleared by a write that fails, so a database restart on a quiet stack leaves the gauge at
-    0 until traffic resumes -- the same false alarm arriving by a different road. Staying resident
-    means the gauge answers "can this daemon reach the historian" at all times rather than "has a
-    write succeeded since boot", which is what its own HELP text claims and what the alert reads it
-    as. The cost is one thread asleep for DB_HEAL_INTERVAL_SECONDS at a time.
+    The thread stays resident afterwards so the gauge answers "can this daemon reach the
+    historian" rather than "has a write succeeded since boot".
+    See docs/incidents.md -> "Ingestion started before the historian and nothing retried".
     """
     threading.Thread(
         target=_heal_loop,
@@ -4119,14 +3162,11 @@ def start_startup_healer(supabase=None, check_privileges=False, reconcile_captur
 
 def start_metrics_endpoint():
     """
-    Serve the counter registry in Prometheus exposition format (issues #22 and #24).
+    Serve the counter registry in Prometheus exposition format.
 
-    `db_connected` IS READ AT SCRAPE TIME rather than tracked as a counter, because it is a state
-    and not an event. `_ts_conn.closed` is psycopg2's own view: non-zero once the connection was
-    closed on this side. It cannot see a connection dropped by the server -- that still reports 0
-    and fails on first use -- so this gauge answers "did the daemon believe it had a connection",
-    which is the honest question. `acs_ingestion_db_connect_failures_total` rising while this reads
-    1 is the shape of a server-side drop.
+    `db_connected` is read at scrape time because it is a state, not an event. `_ts_conn.closed`
+    cannot see a server-side drop, so this answers "did the daemon believe it had a connection";
+    `acs_ingestion_db_connect_failures_total` rising while it reads 1 is a server-side drop.
     """
     if INGESTION_METRICS_PORT <= 0:
         # The policy decision lives here rather than in metrics.py, where port 0 means "ask the OS
@@ -4135,11 +3175,8 @@ def start_metrics_endpoint():
         return None
 
     def collect():
-        # CACHE OCCUPANCY IS READ AT SCRAPE TIME for the same reason db_connected is: it is a
-        # state, not an event. The evictions counter beside it is the one worth an alert -- a
-        # non-zero value means MAX_ENTITIES_PER_CACHE is actually being reached, which is either a
-        # fleet larger than the cap or the id churn the cap exists to absorb (issue #23). Until
-        # the bound existed there was nothing to count and no way to see either.
+        # Cache occupancy is a state, read at scrape time. The evictions counter is the one worth an
+        # alert: non-zero means MAX_ENTITIES_PER_CACHE is being reached.
         labelled = dict(labelled_snapshot())
         for cache in (_device_cache, _gateway_cache, _schema_cache):
             labelled[("acs_ingestion_cache_entries", (("cache", cache.name),))] = len(cache)
@@ -4147,18 +3184,13 @@ def start_metrics_endpoint():
                 cache.evictions
             )
 
-        # APPLIANCE HEALTH, read at scrape time for the same reason the cache gauges are: these
-        # are states rather than events. Four readings plus the timestamp that says how old they
-        # are -- a gauge holds its last value indefinitely, so without that timestamp a dead
-        # collector and a steady disk are the same picture.
+        # Appliance health, read at scrape time. The reported-at timestamp says how old the readings
+        # are; a gauge holds its last value indefinitely.
         for edge_node, values in gateway_health_gauge_snapshot().items():
             for metric, value in values.items():
                 labelled[(metric, (("edge_node", edge_node),))] = value
 
-        # THE APPLIANCE CLOCK, same shape and the same reason: an offset is a state, not an event.
-        # Read the offset BESIDE its measured-at gauge -- a gauge holds its last value forever, so
-        # a gateway that has been powered down for a month otherwise still reports whatever its
-        # clock said on the day it left.
+        # The appliance clock, beside its measured-at gauge for the same reason.
         for edge_node, values in gateway_clock_gauge_snapshot().items():
             for metric, value in values.items():
                 labelled[(metric, (("edge_node", edge_node),))] = value
@@ -4178,24 +3210,13 @@ def start_metrics_endpoint():
 
     start_metrics_server(INGESTION_METRICS_PORT, collect, logger)
 
-
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
     _require_credentials()
 
-    # BEFORE THE MQTT LOOP, so a misconfigured credential is a startup failure rather than
-    # something discovered from the shape of the data months later.
-    #
-    # TWO KINDS OF FAILURE, AND THEY DESERVE OPPOSITE ANSWERS. A historian that is DOWN is a
-    # transient fault this daemon is built to survive -- it warns per message, drops what it cannot
-    # store, and resumes when the database returns, which is the right behaviour for a process
-    # watching a plant. A historian that REFUSES THE CREDENTIAL is permanent: no amount of retrying
-    # fixes a wrong password, and the daemon would run indefinitely discarding every reading while
-    # logging `password authentication failed` once per message.
-    #
-    # That is not a hypothetical either -- it is what this stack did when the credential override
-    # was introduced with only half of it settable. Nothing distinguished the two cases, so the
-    # loud permanent fault wore the clothes of the quiet transient one.
+    # Before the MQTT loop, so a misconfigured credential is a startup failure. A historian that is
+    # down is transient and survivable; one that refuses the credential is permanent, and retrying
+    # would discard every reading while logging the same line per message.
     _startup_conn = None
     try:
         _startup_conn = _connect_timescaledb()
@@ -4218,27 +3239,11 @@ def main():
 
     if _startup_conn is not None:
         _assert_historian_is_least_privilege(_startup_conn)
-        # AND IT IS KEPT, RATHER THAN CLOSED. This connection used to be opened for the privilege
-        # check and thrown away, leaving `_ts_conn` to be created lazily by the first write.
-        #
-        # THE BUG THAT EXPOSED: `acs_ingestion_db_connected` reads `_ts_conn`, so on a stack where
-        # nothing is publishing there was never a first write, never a connection, and the gauge
-        # read 0 for ever -- firing `Historian Unreachable From Ingestion` against a historian this
-        # very function had just connected to and interrogated. It went unseen while a simulator
-        # published within seconds of every boot. A blank install is the default now, and an idle
-        # stack is a normal state rather than a broken one, so the false alarm became the first
-        # thing a new user sees.
-        #
-        # It is the SAME single writer, opened earlier -- not a second connection and not a pool,
-        # so get_timescaledb_connection()'s one-writer property is unchanged. An idle connection
-        # dropped by the server still reports `closed == 0`; that is the documented gap the caller's
-        # exception handler covers, and it is why `acs_ingestion_db_connect_failures_total` rising
-        # while this gauge reads 1 remains the shape of a server-side drop.
-        #
-        # AND IT ONLY COVERS THE BOOT WHERE THIS CONNECT SUCCEEDS, which is the half that was
-        # missed: when the historian is not up yet, `_startup_conn` is None, this block does not
-        # run, and the gauge is back to reading 0 for ever on a quiet stack. start_startup_healer()
-        # below is the other half.
+        # Kept, not closed: `acs_ingestion_db_connected` reads `_ts_conn`, and on a quiet stack
+        # nothing else opens it, so a discarded startup connection left the gauge at 0 and fired
+        # `Historian Unreachable From Ingestion` against a reachable historian. Same single writer,
+        # opened earlier. This covers only the boot where the connect succeeds; start_startup_healer()
+        # covers the other.
         global _ts_conn
         with _ts_conn_lock:
             _ts_conn = _startup_conn
@@ -4253,15 +3258,9 @@ def main():
         )
         raise SystemExit(1)
 
-    # MQTT 5, and paho-mqtt==1.6.1's v1 callback API. Those are separate choices: the PROTOCOL is
-    # v5 and the CALLBACK STYLE is still v1, which 1.6.1 supports. Upgrading to paho 2.x is what
-    # would force CallbackAPIVersion.VERSION2, and that is a different change.
-    #
-    # WHAT v5 BUYS THIS DAEMON TODAY: nothing measurable, and that is recorded rather than
-    # glossed. The broker's DISCONNECT reason code -- the one benefit that survived review -- is
-    # sent by mosquitto and DISCARDED BY paho 1.6.1 before it reaches on_disconnect(); see the
-    # measurement there. The daemon is on v5 because the platform is, and a stack speaking two
-    # protocol versions is a combination nobody tests.
+    # MQTT 5 with paho-mqtt 1.6.1's v1 callback API; paho 2.x would force CallbackAPIVersion.
+    # The daemon is on v5 because the platform is. The broker's DISCONNECT reason is discarded by
+    # paho 1.6.1 before on_disconnect() sees it (see there).
     client = mqtt.Client(protocol=mqtt.MQTTv5)
     client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
     # Before connect(), necessarily: paho applies the TLS context when the socket is opened.
@@ -4280,19 +3279,14 @@ def main():
     # Also before the connect loop, so a daemon that cannot reach the broker still reports "no
     # traffic" on a timer rather than going silent in a way that looks like a crash.
     start_stats_reporter()
-    # Same reasoning, and it matters more here: a daemon stuck retrying the broker must still be
-    # SCRAPEABLE, or the one condition worth alerting on is the one that takes the endpoint down
-    # with it. `acs_ingestion_up` is 1 and every throughput counter is flat -- which is exactly
-    # what "connected to nothing" looks like, and is distinguishable from a dead target.
+    # A daemon stuck retrying the broker must still be scrapeable: `acs_ingestion_up` at 1 with
+    # flat counters is what "connected to nothing" looks like, and is distinguishable from a dead
+    # target.
     start_metrics_endpoint()
-    # AFTER the client exists, because a capture opens by asking its subject's edge node to
-    # rebirth and that is a publish. Before the connect loop for the same reason as the others: a
-    # daemon retrying the broker should still sweep the jobs a restart abandoned, or the
-    # single-flight index leaves every future capture refused with nothing to point at.
-    #
-    # The rebirth function is passed in rather than imported: capture_worker is imported HERE, so
-    # reaching back for this would be a cycle.
-    # Also after the client exists, for the same reason: it publishes.
+    # After the client exists, because a capture opens by asking its edge node to rebirth, and
+    # before the connect loop so a daemon retrying the broker still sweeps abandoned jobs. The
+    # rebirth function is passed in rather than imported: capture_worker is imported here, so the
+    # reverse import would be a cycle.
     start_rebirth_poller(client)
     capture_reconciled = capture_worker.start(
         supabase_client,
@@ -4302,20 +3296,13 @@ def main():
             client, group_id, edge_node_id, force=True),
     )
 
-    # AFTER the client exists, because it publishes; after capture_worker for no reason beyond
-    # reading order. OFF unless DIRECTORY_MQTT_ENABLED is set, and it logs which of the two it is --
-    # a publisher that is off and silent looks exactly like one that is on and failing.
-    #
-    # THE BIRTH STREAM THIS DAEMON IS SITTING ON IS NOT THE SOURCE, which is the decision the module
-    # header argues at length: the Directory is DERIVED from the enrolment records, so a device that
-    # has never been enrolled does not become a resolvable address by publishing a DBIRTH.
+    # After the client exists, because it publishes. Off unless DIRECTORY_MQTT_ENABLED is set, and
+    # it logs which. The Directory is derived from the enrolment records, not from the birth
+    # stream: publishing a DBIRTH does not make an unenrolled device a resolvable address.
     directory_publish.start(client, supabase_client)
 
-    # LAST OF THE BACKGROUND THREADS, because it needs to know what the ones above did not manage.
-    # Both flags are the outcome of a startup step that a dependency which was not up yet could
-    # have prevented, and each is retried until it succeeds; see the function for the ordering race
-    # that makes that necessary. On a stack that came up cleanly both are False and this thread
-    # only keeps the historian gauge honest.
+    # Last of the background threads, because it needs the outcome of the steps above. On a clean
+    # start both flags are False and this thread only keeps the historian gauge honest.
     start_startup_healer(
         supabase=supabase_client,
         check_privileges=_startup_conn is None,
@@ -4325,12 +3312,8 @@ def main():
     while True:
         try:
             logger.info("Connecting to MQTT Broker at %s:%s...", MQTT_HOST, MQTT_PORT)
-            # `clean_start=True` is v5's spelling of 3.1.1's clean_session, and it is passed
-            # explicitly rather than left to paho's MQTT_CLEAN_START_FIRST_ONLY default so the
-            # session semantics are the ones this daemon already had. NO SESSION EXPIRY
-            # INTERVAL IS SET, deliberately: Sparkplug's NDEATH is the Last Will, and a
-            # surviving session would delay it -- leaving dead edge nodes reading ONLINE with
-            # every device beneath them apparently live.
+            # `clean_start=True` is v5's clean_session. No session expiry interval is set: Sparkplug's
+            # NDEATH is the Last Will, and a surviving session would delay it.
             client.connect(MQTT_HOST, MQTT_PORT, 60, clean_start=True)
             break
         except Exception as e:

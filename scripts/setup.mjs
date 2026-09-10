@@ -1,28 +1,16 @@
 /**
- * Create `.env` for a local stack — GENERATING the credentials rather than copying them.
+ * Create `.env` for a local stack, generating the credentials rather than copying them.
  *
- * WHY THIS CHANGED. `.env.example` ships working Supabase demo values, and the documented
- * quickstart was `npm run setup`, which copied them verbatim. Two later changes made that
- * expensive: Kong now runs `key-auth` with the anon and service-role JWTs registered as gateway
- * API KEYS, so a default install accepts published credentials at its edge; and the four MQTT
- * principals' passwords are committed alongside them. The keys are in git, in this repository, and
- * in every other Supabase self-host guide on the internet.
+ * `.env.example` ships working demo values that are in git and in every self-host guide, and the
+ * gateway's key filter admits the anon and service-role JWTs as API keys, so a copied `.env` is
+ * a stack that accepts published credentials at its edge.
  *
- * THE JWTS ARE A SET AND MUST BE GENERATED TOGETHER. `SUPABASE_ANON_KEY` and
- * `SUPABASE_SERVICE_ROLE_KEY` are HS256 JWTs *signed by* `SUPABASE_JWT_SECRET`. Rotating the
- * secret without re-minting both yields a stack that comes up entirely healthy and rejects every
- * request at the gateway — which is why this script mints them here instead of telling the reader
- * to run three `openssl` commands and hope. It is the same warning `acs-cymru.validateSecrets`
- * prints for the Helm path.
+ * The JWTs are a set: `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are HS256 JWTs signed
+ * by `SUPABASE_JWT_SECRET`, and rotating the secret without re-minting both yields a stack that
+ * comes up healthy and rejects every request. Node's built-in `crypto` does HMAC-SHA256, so this
+ * stays a zero-install script.
  *
- * NO NEW DEPENDENCIES. Node's built-in `crypto` does HMAC-SHA256, which is the whole of HS256, so
- * this stays a zero-install script that runs on any platform — the property `scripts/setup.mjs`
- * has always had (no POSIX shell, no openssl on PATH).
- *
- * `.env.example` KEEPS ITS DEMO VALUES, deliberately. CI does `cp .env.example .env` because a
- * pipeline needs the same credentials every run — the k3d job's `values-dev.yaml` carries the same
- * set for the same reason. `--demo` below is the supported way to ask for that behaviour so it is
- * a named choice rather than a shell command that bypasses this script.
+ * `.env.example` keeps its demo values: `--demo` is the supported way for CI to ask for them.
  */
 
 import fs from 'fs';
@@ -43,34 +31,18 @@ const envExamplePath = path.join(rootDir, '.env.example');
 
 const demoMode = process.argv.includes('--demo');
 
-/** Hex, not base64 or a passphrase alphabet. These values land in `postgres://user:pass@host`
- *  connection strings, a mosquitto password file, psql `-v` variables and YAML — hex is the one
- *  encoding that needs no escaping in any of them. A `+` or `/` from base64 eventually meets a
- *  URL parser or a shell and the failure is a connection refused three layers away. */
+/** Hex: these values land in connection strings, a mosquitto password file, psql `-v` variables
+ *  and YAML, and hex needs no escaping in any of them. */
 const hex = (bytes) => crypto.randomBytes(bytes).toString('hex');
 
 /**
- * THE CLAIMS LIVE IN scripts/lib/service-jwt.mjs NOW, shared with the rotation script (issue #101).
- * What is worth keeping here is why the two kinds of key it mints have different lifetimes.
+ * The claims live in scripts/lib/service-jwt.mjs, shared with the rotation script.
  *
- * THE ANON AND SERVICE-ROLE KEYS STAY AT TEN YEARS. They carry a `role` and no `sub`, because they
- * are not anybody -- PostgREST switches to the named database role and RLS never asks who is
- * calling. They are also the stack's API keys: Kong's `key-auth` admits exactly these two literal
- * strings, so shortening them needs a story for re-issuing them to every client at once. That is a
- * different change and is deliberately not attempted here.
- *
- * THE TWO PRINCIPAL KEYS ARE NOW BOUNDED AT 90 DAYS, and this is the defect #101 records. They
- * carry a `sub` naming a principal seeded by a migration, which is what makes them narrow -- and
- * what makes them the same kind of credential `scripts/mint-mcp-token.mjs` mints, which has always
- * enforced a 90-day ceiling. The stack held operators to that rule and exempted its own two keys
- * from it by a factor of forty.
- *
- * THE ARGUMENT THAT USED TO SIT HERE IS HALF ANSWERED AND HALF STILL TRUE. It said a short expiry
- * "would silently take the stack off the air on a date nobody wrote down, and there is no refresh
- * path for them". There is a refresh path now -- `npm run keys:rotate`, which re-signs both with
- * the SAME SUPABASE_JWT_SECRET and therefore needs no re-issuing of anything else. And the "date
- * nobody wrote down" was never fixed by length: a 2036 expiry is still a date nobody wrote down.
- * It is fixed by `npm run keys:check`, which is what makes any lifetime safe.
+ * The anon and service-role keys stay at ten years: they carry a `role` and no `sub`, and they
+ * are the stack's API keys, so shortening them needs a story for re-issuing them to every client
+ * at once. The two principal keys are bounded at 90 days, the same ceiling
+ * `scripts/mint-mcp-token.mjs` enforces; `npm run keys:rotate` re-signs them with the same
+ * secret, and `npm run keys:check` reports the expiry.
  */
 
 console.log('🚀 Running ACS-Cymru Asset Tracking Environment Setup...');
@@ -96,26 +68,21 @@ if (demoMode) {
 const jwtSecret = hex(32);
 
 /**
- * Service_Ingestor, seeded by archived migration 0046. Pinned here rather than looked up, for the reason
- * 0034's principal is pinned: this file runs before any database exists.
+ * Service_Ingestor, seeded by 0002. Pinned rather than looked up: this file runs before any
+ * database exists.
  */
 const INGESTION_PRINCIPAL = 'b0000000-0000-4000-8000-000000000002';
 
 /**
- * Service_Playback, seeded by archived migration 0056. Pinned for the same reason.
- *
- * A SECOND MACHINE IDENTITY RATHER THAN A SECOND USE OF THE FIRST, and the difference is what the
- * two hold at the BROKER. The ingestion principal may publish `spBv1.0/+/NCMD/+` and nothing else;
- * the playback worker publishes asset data as one gateway. Sharing a Supabase token between them
- * would mean a single leaked credential reached both sets of gates.
+ * Service_Playback, seeded by 0002. A second machine identity rather than a second use of the
+ * first, because the two hold different things at the broker: the ingestion principal may
+ * publish `spBv1.0/+/NCMD/+` only, and the playback worker publishes asset data as one gateway.
  */
 const PLAYBACK_PRINCIPAL = 'b0000000-0000-4000-8000-000000000003';
 
 /**
- * The two bounded keys, minted here rather than inline below so that their `jti` and expiry can be
- * REPORTED. That reporting is not decoration: these now expire, and the failure mode this change
- * has to avoid is an operator learning the date from ingestion stopping. `npm run keys:check`
- * answers it later; this answers it at the moment they are created.
+ * The two bounded keys, minted here rather than inline so their `jti` and expiry can be reported
+ * at the moment they are created.
  */
 const ingestionKey = mintJwt({
   role: 'authenticated', secret: jwtSecret, subject: INGESTION_PRINCIPAL,
@@ -127,10 +94,8 @@ const playbackKey = mintJwt({
 });
 
 /**
- * Every value replaced, and why each is the length it is.
- *
- * Two carry hard limits enforced by the container rather than by taste — supabase/realtime refuses
- * to boot on anything else, and the Helm chart asserts the same two numbers in
+ * Every value replaced, and why each is the length it is. Two carry hard limits enforced by the
+ * container (supabase/realtime refuses to boot on anything else) and asserted by the chart's
  * `acs-cymru.validateRealtime`. Keep the three in step.
  */
 const generated = {
@@ -139,74 +104,39 @@ const generated = {
   SUPABASE_JWT_SECRET: jwtSecret,
   SUPABASE_ANON_KEY: mintJwt({ role: 'anon', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
   SUPABASE_SERVICE_ROLE_KEY: mintJwt({ role: 'service_role', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
-  // THE FORMAT THAT REPLACES THE TWO ABOVE, minted alongside them so a fresh install is already
-  // on it. Supabase deprecates the anon and service-role JWTs by the end of 2026.
-  //
-  // NOT SIGNED, AND NOT PART OF THE MATCHING SET. These are opaque random strings: they are not
-  // JWTs, they are not derived from SUPABASE_JWT_SECRET, and nothing verifies them -- given one as
-  // a bearer, postgrest v14.12 answers `PGRST301 "Expected 3 parts in JWT; got 1"`. They work
-  // because the GATEWAY matches the key as a string, exactly as it already does for the legacy
-  // pair, and hands the upstream the legacy JWT it has always required. So `npm run keys:rotate`
-  // does not touch them, and rotating jwtSecret does not invalidate them.
-  //
-  // HEX, for the reason every other generated value here is hex: these land in a `sed` expression,
-  // a Lua string literal, a YAML scalar and a WebSocket query string, and hex is the one encoding
-  // that needs no escaping in any of them.
-  //
-  // THE PREFIXES ARE UPSTREAM'S and are not decoration -- they are how an operator reading a log
-  // or a bug report tells which of the two formats a caller presented, and `sb_secret_` is what
-  // makes a leaked one recognisable on sight.
+  // The key format that replaces the two above, minted alongside them. Opaque random strings,
+  // not JWTs and not derived from SUPABASE_JWT_SECRET: the gateway matches the key as a string
+  // and hands the upstream the legacy JWT. `npm run keys:rotate` does not touch them. Hex, for the
+  // reason every other value here is hex. The prefixes are upstream's, so a leaked `sb_secret_`
+  // is recognisable on sight.
   SUPABASE_PUBLISHABLE_KEY: `sb_publishable_${hex(24)}`,
   SUPABASE_SECRET_KEY: `sb_secret_${hex(24)}`,
-  // The ingestion daemon's own credential (see Machine Identities in supabase/README.md). `authenticated` with a `sub`, not a
-  // role that bypasses RLS: it authenticates as Service_Ingestor (archived migration 0046), which holds
-  // Operator and therefore cannot write a single row directly. Every write it makes goes through
-  // one of the SECURITY DEFINER gates in 0047, and those check that the caller IS this principal.
-  //
-  // The daemon still needs SUPABASE_ANON_KEY as well, and that is not a redundancy: the gateway's
-  // apikey check admits exactly two literal keys, so this token would be refused at the edge if it
-  // were sent as the apikey. It travels as the Authorization bearer, the way i3X passes a caller's
-  // own token through to PostgREST.
+  // The ingestion daemon's own credential (see Machine Identities in supabase/README.md):
+  // `authenticated` with a `sub`, which cannot write a row directly; every write goes through a
+  // SECURITY DEFINER gate that checks the caller is Service_Ingestor. The daemon still needs the
+  // anon key as `apikey`; this token travels as the Authorization bearer.
   SUPABASE_INGESTION_KEY: ingestionKey.token,
-  // The playback worker's own credential (archived migration 0056). Same shape and same reasoning as the
-  // line above: `authenticated` with a `sub`, because every write it makes goes through a gate
-  // that checks the caller IS Service_Playback. Its narrowness is what makes the storage read arm
-  // meaningful -- that policy admits this principal for exactly one object, the capture of the
-  // job it is currently running.
+  // The playback worker's own credential, same shape and reasoning. Its narrowness is what makes
+  // the storage read arm meaningful: that policy admits this principal for exactly one object.
   SUPABASE_PLAYBACK_KEY: playbackKey.token,
   PG_META_CRYPTO_KEY: hex(32),
   REALTIME_DB_ENC_KEY: hex(8),          // EXACTLY 16 chars
   REALTIME_SECRET_KEY_BASE: hex(32),    // AT LEAST 64 chars
-  // Mandatory from realtime v2.102.3 -- `System.fetch_env!`, so the container refuses to boot
-  // without it. Signs the bearer token its /metrics endpoint requires. Its own secret rather
-  // than SUPABASE_JWT_SECRET: sharing the API signing key would let any holder of that mint
-  // metrics tokens, for no gain.
+  // Mandatory from realtime v2.102.3 (`System.fetch_env!`). Signs the bearer token its /metrics
+  // endpoint requires. Its own secret rather than SUPABASE_JWT_SECRET.
   REALTIME_METRICS_JWT_SECRET: hex(32),
-  // ONE MQTT PASSWORD PER PRINCIPAL, independently generated on purpose. mosquitto.acl confines
-  // each account to a different subtree, which is worth nothing if one leaked password opens the
-  // rest. The USERNAMES are not generated: most are `sparkplug_id`s derived from pinned UUIDs, and
-  // the ACL matches the topic's edge-node segment against the username exactly.
+  // One MQTT password per principal, independently generated: mosquitto.acl confines each account
+  // to a different subtree. The usernames are not generated: most are `sparkplug_id`s.
   MQTT_INGESTION_PASSWORD: hex(24),
   MQTT_I3X_PASSWORD: hex(24),
   MQTT_VALIDATOR_PASSWORD: hex(24),
   MQTT_MONITOR_PASSWORD: hex(24),
-  // NO GATEWAY PASSWORDS ARE MINTED HERE, and the deadlock they once existed to break is gone
-  // rather than worked around. The reasoning that put four of them here was sound at the time:
-  // node-red-init fails closed when a broker node declares a credential pair it cannot find, and it
-  // runs during the very `docker compose up` that would bring up the stack provisioning needs. So
-  // the documented quickstart exited 1 on `service "node-red-init" didn't complete successfully`,
-  // naming neither the flow, the variable, nor the script that would have written it.
-  //
-  // What made that unavoidable was the FLOW being seeded unconditionally: four broker nodes, four
-  // mandatory credential pairs. Nothing is seeded now -- the editor opens empty, declares no broker
-  // nodes, and needs no credential to exist. A gateway's account is minted against a row that
-  // already exists, from the dashboard or by the enrolment bundle, which is the only order in which
-  // the username can be known: it is the row's GENERATED sparkplug_id.
+  // No gateway passwords are minted here: nothing is seeded into the flow, and a gateway's account
+  // is minted against a row that already exists, from the dashboard or by the enrolment bundle,
+  // which is the only order in which its generated sparkplug_id can be known.
   GRAFANA_ADMIN_PASSWORD: hex(12),
-  // Gitea's administrator, and the ONLY account the forge is meant to have. Generated for the same
-  // reason Grafana's is: a development default that survives into a deployment is a login on a
-  // service that will hold every gateway's edge flow. No shopfloor user gets an account here --
-  // roles stay in Postgres, and the forge is reached through one machine account (roadmap 7).
+  // Gitea's administrator, the only account the forge is meant to have. No shopfloor user gets an
+  // account here; roles stay in Postgres.
   GITEA_ADMIN_PASSWORD: hex(12),
   // The machine account enroll-gateway authenticates as. Its own value, shared with nothing: the
   // administrator above is for a human at a browser, this one is held by an edge function, and a
@@ -220,66 +150,44 @@ const generated = {
   // other credential: it is the whole reason Grafana is not given the service-role key, and a secret
   // reused elsewhere would mean one leak reopens the authority this one exists to withhold.
   GRAFANA_ALERT_WEBHOOK_SECRET: hex(32),
-  // The two halves of Studio's door (0081, and the `studio` listener in supabase/envoy.yaml). The
-  // first is one credential written to two places -- the gateway presents it at GoTrue's token
-  // endpoint, and the migration stores its hash -- so they are read from ONE variable rather than
-  // set twice. The second signs the session cookie the gateway hands the browser, and is nothing
-  // else's: rotating it signs everyone out and grants nobody anything.
-  //
-  // GENERATED RATHER THAN LEFT EMPTY for the same reason as GATEWAY_REVOKE_SECRET above, with the
-  // sign flipped -- unset here does not silently disable a control, it silently disables ACCESS.
-  // The gateway and the migration both fail closed, so an unset pair is a Studio that answers a
-  // login nobody can complete, on a stack that otherwise looks perfectly healthy.
+  // The two halves of Studio's door (0081, and the `studio` listener in supabase/envoy.yaml): one
+  // credential the gateway presents at GoTrue and the migration stores the hash of, read from one
+  // variable; and the cookie signing key, which rotating signs everyone out. Generated because
+  // unset silently disables access: an unset pair is a Studio that answers a login nobody can
+  // complete.
   STUDIO_OAUTH_CLIENT_SECRET: hex(32),
   STUDIO_PROXY_HMAC_SECRET: hex(32),
   // The forge's door (0094, and the `forge` listener in supabase/envoy.yaml): the same two halves
-  // as Studio's, for the same reasons, and generated for the same reason -- the forge's HTTP port
-  // IS that listener, so an unset pair is a forge nobody can sign into on a stack that reports
-  // healthy.
+  // as Studio's, for the same reasons.
   GITEA_OAUTH_CLIENT_SECRET: hex(32),
   GITEA_PROXY_HMAC_SECRET: hex(32),
   // The forge's push webhook (0095): what Gitea signs each delivery with and forge-events verifies.
   // Unset does not disable access, only the dashboard's early word of a merge -- but a secret
   // nobody chose is a secret nobody can leak, so it is generated with the rest.
   GITEA_WEBHOOK_SECRET: hex(32),
-  // The bearer token supabase-functions presents to the gateway-credential service. Its own value
-  // for the same reason as the one above: that service can mint a Mosquitto account for any edge
-  // node, and mosquitto.acl makes an account the ability to publish telemetry as that gateway --
-  // so a token shared with anything else would mean one leak grants forgery across the site.
-  // The service REFUSES TO START if this is shorter than 32 characters.
+  // The bearer token supabase-functions presents to the gateway-credential service. Its own value:
+  // that service can mint a Mosquitto account for any edge node, which is the ability to publish
+  // as that gateway. The service refuses to start if this is shorter than 32 characters.
   MQTT_CREDENTIAL_SERVICE_TOKEN: hex(32),
-  // The secret the `gateways` trigger presents to revoke-gateway-credential when a gateway is
-  // archived or deleted (0038). SEPARATE FROM THE ONE ABOVE, and the asymmetry is the point: that
-  // token authorises minting an account for ANY edge node, this one only authorises rotating a
-  // decommissioned gateway's account to a password nobody records. Merging them would hand the
-  // revocation path the issuance authority.
-  //
-  // GENERATED RATHER THAN LEFT EMPTY BECAUSE AN UNSET VALUE MAKES REVOCATION INERT -- archiving a
-  // gateway would silently leave its broker credential working, which is a security control whose
-  // default is "off". Every other secret on this list is generated for the same reason.
+  // The secret the `gateways` trigger presents to revoke-gateway-credential on archive or delete.
+  // Separate from the token above: that authorises minting for any edge node, this only rotating
+  // a decommissioned gateway's account. Generated because an unset value makes revocation inert.
   GATEWAY_REVOKE_SECRET: hex(32),
   // The read-only historian role external BI tools connect as, and the one Grafana uses. Generated
   // like the rest so a local stack never runs a reporting tool as the `postgres` superuser, which
   // is what the Grafana datasource did before this existed.
   BI_READER_PASSWORD: hex(24),
-  // The two historian roles the stack cannot run without: the ingestion daemon connects as
-  // `ingest_writer`, and Supabase's postgres_fdw mapping as `fdw_reader`. Generated rather than
-  // left empty for the same reason as the line above -- the only alternative credential is the
+  // The two historian roles the stack cannot run without (`ingest_writer` for the daemon,
+  // `fdw_reader` for the FDW mapping). Generated because the only alternative credential is the
   // historian superuser, and a stack that comes up on it says nothing about having done so.
   INGEST_WRITER_PASSWORD: hex(24),
   FDW_READER_PASSWORD: hex(24),
 };
 
 /**
- * Names this script leaves EMPTY, each because a generated value would be a standing credential
- * nobody asked for.
- *
- * NODERED_ADMIN_TOKEN is break-glass: a static token accepted on the Node-RED admin API that
- * bypasses Supabase entirely, for when Supabase Auth is down. It returns permissions '*', and a
- * flow `function` node executes arbitrary JavaScript in a container holding the MQTT credential --
- * so minting one by default would create the most powerful credential in the stack, on the one
- * path that skips every check the rest of it performs.
- *
+ * Names this script leaves empty, each because a generated value would be a standing credential
+ * nobody asked for. NODERED_ADMIN_TOKEN is break-glass: it returns permissions '*' on the
+ * Node-RED admin API and bypasses Supabase entirely.
  */
 const deliberatelyEmpty = ['NODERED_ADMIN_TOKEN'];
 
@@ -297,12 +205,8 @@ for (const [key, value] of Object.entries(generated)) {
 }
 
 /**
- * A key this script means to generate but cannot find is a HARD FAILURE, not a warning.
- *
- * The failure it prevents: someone renames a variable in `.env.example`, this script silently
- * stops generating it, and every install from then on ships the committed default for that one
- * value — which is exactly the bug this whole change exists to fix, reintroduced quietly for a
- * subset of the credentials.
+ * A key this script means to generate but cannot find is a hard failure: a renamed variable in
+ * `.env.example` would otherwise silently ship the committed default for that one value.
  */
 if (missing.length) {
   console.error(`❌ .env.example has no assignment for: ${missing.join(', ')}`);

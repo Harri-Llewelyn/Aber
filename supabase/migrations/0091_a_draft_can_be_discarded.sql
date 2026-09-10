@@ -2,47 +2,15 @@
 -- 0091 :: A DRAFT CAN BE DISCARDED
 -- =================================================================================================
 --
--- The Schemas page has told operators for some time that a draft can be "published or discarded",
--- and there has never been a way to discard one. The sentence is in `SchemasTab.jsx`, in the
--- tooltip that explains why Fork is disabled: *"A draft (Foo_v2) already exists — publish or
--- discard it first."*
+-- One draft may exist per lineage, and the only exit from a draft nobody wanted was to publish
+-- it, which archives the parent and repoints every attached device.
 --
--- So the state it describes was a trap. One draft may exist per lineage at a time -- forking is
--- refused while one is open, because two drafts off one parent would create a second head -- and
--- the only exit from a draft nobody wants was to PUBLISH it. Publishing archives the parent and
--- repoints every attached device, which is a considerable act to be pushed into by the absence of
--- a Cancel button.
---
--- =================================================================================================
--- WHY THIS IS AN RPC AND NOT THE DELETE POLICY THAT ALREADY EXISTS
--- =================================================================================================
---
--- `schemas_delete_privileged` has admitted an Administrator since the baseline, so a DELETE was
--- always possible -- and that is precisely the problem. `devices.schema_id` is
--- `ON DELETE SET NULL` and `device_submodels.schema_id` is `ON DELETE CASCADE`, so deleting an
--- ACTIVE schema silently detaches every device bound to it. No error, no warning: a hundred
--- machines quietly stop being judged against anything, and the next conformance run reports every
--- metric as unmodelled.
---
--- This function is the narrow door: it refuses anything whose status is not `draft`, and it says
--- how many device attachments the discard removed rather than letting a CASCADE do it out of
--- sight. The policy stays as it is -- narrowing it is a separate decision about a different
--- surface -- but the UI now has a call that cannot make that mistake.
---
--- A DRAFT MAY LEGITIMATELY HAVE DEVICES ATTACHED. `publish_schema_version()` says so: somebody can
--- attach a draft to a machine to try it out before publishing. Those `device_submodels` rows are
--- the ones the CASCADE removes, and removing them is correct -- the draft they point at is going
--- away. The count is returned so the caller can say so out loud.
---
--- =================================================================================================
--- WHAT IT DOES NOT TOUCH
--- =================================================================================================
---
--- The parent. Discarding v2 leaves v1 exactly as it was -- active, attached, unarchived -- which
--- is the whole point: the lineage returns to the state it was in before the fork. And the audit
--- trail: `schemas` has been in the audit trigger since 0070, so the DELETE writes its own
--- `digital_thread` row naming the Administrator who discarded it, in the security domain where
--- schema acts already live.
+-- An RPC and not the DELETE policy that already exists: `devices.schema_id` is ON DELETE SET
+-- NULL and `device_submodels.schema_id` is ON DELETE CASCADE, so deleting an active schema
+-- silently detaches every device bound to it. This function refuses anything whose status is
+-- not `draft` and reports how many device attachments the discard removed (a draft may
+-- legitimately have devices attached for trial). The parent is untouched, and the DELETE writes
+-- its own `digital_thread` row through the audit trigger.
 -- =================================================================================================
 
 CREATE OR REPLACE FUNCTION public.discard_schema_draft(p_schema_id uuid) RETURNS jsonb
@@ -103,7 +71,6 @@ COMMENT ON FUNCTION public.discard_schema_draft(uuid) IS 'Delete a draft schema 
 
 REVOKE ALL ON FUNCTION public.discard_schema_draft(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.discard_schema_draft(uuid) TO authenticated, service_role;
-
 
 -- -------------------------------------------------------------------------------------------------
 -- Self-check

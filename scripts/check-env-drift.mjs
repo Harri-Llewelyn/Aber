@@ -53,7 +53,9 @@ const note = (msg) => console.log(`  --    ${msg}`);
 const declaredIn = (text) =>
   new Set([...text.matchAll(/^([A-Z_][A-Z0-9_]*)=/gm)].map((m) => m[1]));
 
-const compose = read('docker-compose.yml');
+// `$$` is Compose's escape for a literal `$`: `$${VAR}` reaches the container shell untouched and
+// is not a Compose variable, so those references are removed before the scan.
+const compose = read('docker-compose.yml').replace(/\$\$/g, '');
 const template = read('.env.example');
 const declared = declaredIn(template);
 

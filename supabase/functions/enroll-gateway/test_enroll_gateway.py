@@ -438,7 +438,7 @@ class TestAuthContract(EnrollGatewayBase):
 
 class TestForgeProvisioning(EnrollGatewayBase):
     """
-    Roadmap 7's third credential plane: the gateway's own repository, and the READ-ONLY deploy key
+    The third credential plane: the gateway's own repository, and the READ-ONLY deploy key
     it reads that repository with.
 
     WHAT MAKES THIS WORTH TESTING RATHER THAN EYEBALLING. Three of its properties fail silently:
@@ -453,7 +453,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
         re-issue per appliance.
 
     SKIPPED, NOT FAILED, where no forge is configured. The integration is optional at both ends by
-    design -- an install predating roadmap 7 enrols exactly as it did before.
+    design -- an install predating the forge enrols exactly as it did before.
     """
 
     @classmethod
@@ -715,7 +715,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
         self.assertTrue(
             published.startswith("ssh-ed25519 "),
             f"/assets/ssh_host_key.pub did not serve a public key: {published[:120]!r}. "
-            "gitea-init.sh publishes it on boot; a forge that has not restarted since roadmap 7's "
+            "gitea-init.sh publishes it on boot; a forge that has not restarted since "
             "host-key distribution landed will not have one.",
         )
         self.assertNotIn(
@@ -729,7 +729,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
 
         An appliance with no known_hosts entry can only trust whatever key answers on its first
         connection -- trust on first use, decided at the moment an attacker would choose -- or be
-        told to skip verification, which roadmap 7 and 11 both refuse. This response is the
+        told to skip verification, which this platform refuses everywhere. This response is the
         alternative: TLS, a single-use token bound to one row, and the forge's identity learned
         before the first clone.
 

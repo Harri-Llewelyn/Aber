@@ -7,22 +7,9 @@ on:
     branches: [ master, main ]
 
 jobs:
-  # -------------------------------------------------------------------------------------------
-  # WHICH PATHS CHANGED, so the two jobs that cost eighteen of this workflow's twenty-two minutes
-  # do not run for a change that cannot affect them.
-  #
-  # A JOB-LEVEL FILTER, NOT `paths-ignore` ON THE TRIGGER, and the difference matters. Skipping
-  # the whole workflow for a docs-only change would also skip `check-docs-drift.mjs` and
-  # the link checks -- every guard the documentation actually has. The
-  # cheap jobs therefore still run on everything; only the two end-to-end stacks are gated.
-  #
-  # IT FAILS OPEN. A range this cannot compute -- a first push to a branch, a force-push, a
-  # shallow fetch -- answers `code=true` and runs everything. The cost of a wrong `true` is
-  # eighteen minutes; the cost of a wrong `false` is an untested merge.
-  #
-  # NO THIRD-PARTY ACTION. `dorny/paths-filter` does this in four lines, and it is another
-  # supply-chain edge for something `git diff` already answers.
-  # -------------------------------------------------------------------------------------------
+  # Which paths changed. A job-level filter, not `paths-ignore` on the trigger: the cheap jobs run
+  # on everything, only the two end-to-end stacks are gated. Fails open (a range it cannot compute
+  # answers `code=true`). No third-party action; `git diff` answers this.
   changes:
     name: Which Paths Changed
     runs-on: ubuntu-latest
@@ -115,50 +102,24 @@ jobs:
       - name: Run Vitest Unit Tests
         run: |
           cd frontend
-          # `set -o pipefail` IS LOAD-BEARING, and its absence hid a red suite for a whole run.
-          #
-          # A pipeline reports the exit status of its LAST command, which here is `tee` -- and tee
-          # succeeds whatever vitest did. So a failing test left this step GREEN, and the only
-          # thing that noticed was the count check below, which could not parse
-          # `Tests  1 failed | 1289 passed` and reported ITSELF broken. The job failed one step
-          # late, for the wrong reason, pointing at the wrong file.
+          # `set -o pipefail` is load-bearing: without it the pipeline reports tee's exit status and a
+          # failing suite leaves this step green.
           set -o pipefail
           npm test 2>&1 | tee /tmp/vitest.log
 
-      # The one documented count that cannot be derived statically -- so it is asserted HERE, where
-      # the suite has just run and the number is free. Checked rather than dropped because a test
-      # count is a real signal of coverage; left unchecked it silently decays, which is how README
-      # came to claim 607 when there were 684.
+      # The one documented count that cannot be derived statically, asserted here where the suite has
+      # just run.
       - name: Verify The Documented Frontend Test Count
         run: |
-          # ANSI IS STRIPPED FIRST. vitest colourises its summary, so the raw line is
-          #   ^[[2m      Tests ^[[22m ^[[1m^[[32m684 passed^[[39m…
-          # and a naive `grep 'Tests +[0-9]+ passed'` matches NOTHING -- which would have failed this
-          # step on a perfectly green build, and pointed at the README rather than at the grep.
-          # A FAILING SUITE IS NAMED AS SUCH. vitest writes `Tests  1 failed | 1289 passed` when
-          # anything is red, which matches neither pattern below -- so this check used to report
-          # "could not read the test count" and send the reader off to fix the grep. `set -o
-          # pipefail` above now fails the run before this step is reached, but the branch stays:
-          # a parser that cannot tell a broken CHECK from a broken SUITE is one bad day away from
-          # being believed.
+          # ANSI is stripped first: vitest colourises its summary. A failing suite is named as such rather
+          # than reported as an unparseable count.
           STRIPPED=$(sed -r 's/\x1B\[[0-9;]*[mGKH]//g' /tmp/vitest.log)
           if printf '%s' "$STRIPPED" | grep -qE 'Tests +[0-9]+ failed'; then
             echo "::error::the frontend suite has failing tests; the documented count is not the problem"
             exit 1
           fi
-          # A BOUND, NOT A COUNT, and the documentation says so deliberately: "it moved four times
-          # in one afternoon and each move made both documents wrong until somebody noticed. A
-          # bound only ever becomes conservative, which is the failure worth having."
-          #
-          # THIS CHECK USED TO DEMAND EQUALITY against `Frontend — [0-9]+ tests`, which stopped
-          # matching the moment the README became `1,600+`. CLAIMED came back empty, and the
-          # inequality below compared a real number against nothing and failed every green build.
-          # Two guards disagreeing about policy, with the older one winning silently.
-          #
-          # So the assertion is the bound: the suite must run AT LEAST what is claimed. That still
-          # catches the failure worth catching -- a documented figure drifting above reality, which
-          # is what makes a reader think tests were deleted -- and stops a passing build being red
-          # for adding one.
+          # A bound, not a count: the suite must run at least what README claims. Equality broke the
+          # moment README became `1,600+`; a bound only ever becomes conservative.
           ACTUAL=$(printf '%s' "$STRIPPED" | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
           CLAIMED=$(grep -oE 'Frontend — [0-9,]+\+? tests' README.md | grep -oE '[0-9,]+' | tr -d ',')
           echo "vitest reports ${ACTUAL:-<unparsed>}; README claims at least ${CLAIMED:-<absent>}"
@@ -189,14 +150,9 @@ jobs:
           echo "isUuid UUID_REGEX definitions are byte-identical across frontend and Deno edge function."
 
       # The metric-group separator is mirrored in three places that must agree: the generated column
-      # and the spelling trigger (both now in 0001_baseline_schema.sql), deriveMetricGroup() in the
-      # frontend, and validate.py's Python mirror. Metric names are immutable once issued, so a
-      # silent divergence here would be unfixable in place -- names would be created under one
-      # convention and read under another. Same guard rail as the isUuid check above.
-      #
-      # The two SQL forms differ because of how they reach the baseline: the generated column comes
-      # through pg_dump, which fully qualifies the literal's type, while the trigger body is carried
-      # over verbatim. Both are checked rather than one, since either could drift alone.
+      # and the spelling trigger in 0001, deriveMetricGroup() in the frontend, and validate.py. Metric
+      # names are immutable once issued, so a divergence would be unfixable in place. Both SQL forms are
+      # checked because pg_dump qualifies the literal's type in one and not the other.
       - name: Verify Metric Group Separator Sync
         run: |
           fail=0
@@ -221,11 +177,9 @@ jobs:
           [ "$fail" -eq 0 ] && echo "Metric group separator is '/' in every mirrored definition."
           exit $fail
 
-      # A schema version's name is derived by stripping a trailing `_v<n>`, in two places: the SQL
-      # function public.schema_version_base_name() and baseSchemaName() in the frontend. Unlike the
-      # metric-group separator this cannot corrupt data -- the server always names the row -- but a
-      # divergence makes the Create Version button promise a name the server will not choose, which
-      # is a lie in the UI rather than a bug that announces itself. Same guard rail, cheaper stakes.
+      # The schema version base name is derived in SQL (schema_version_base_name) and in the
+      # frontend (baseSchemaName). A divergence makes the Create Version button promise a name the
+      # server will not choose.
       - name: Verify Schema Version Name Derivation Sync
         run: |
           fail=0
@@ -240,142 +194,66 @@ jobs:
           [ "$fail" -eq 0 ] && echo "Schema version name derivation matches across SQL and frontend."
           exit $fail
 
-      # The four SQL-to-JavaScript mirrors that had no guard: the sparkplug_id derivation, the
-      # gateway staleness threshold, effective-cell resolution, and the location_source labels.
-      #
-      # IT COMPARES VALUES, not the presence of a literal. The three steps above assert that a
-      # characteristic string appears on both sides, which catches a rewrite and misses a
-      # re-tuning -- change `INTERVAL '90 seconds'` to 120 and every "does this file mention a
-      # threshold" check still passes. Verified by retuning each side in turn and confirming the
-      # step fails in both directions.
-      #
-      # `sparkplugId.js` is the one that matters most: it derives an IMMUTABLE WIRE IDENTITY, so a
-      # divergence yields ids that resolve in the UI and not on the wire -- and since `sparkplug_id`
-      # is GENERATED ALWAYS ... STORED off the row's UUID, the values already issued cannot be
-      # corrected. Every device would have to be re-provisioned.
+      # Four SQL-to-JavaScript mirrors compared by VALUE: the sparkplug_id derivation, the gateway
+      # staleness threshold, effective-cell resolution and the location_source labels. `sparkplug_id`
+      # is GENERATED ALWAYS off the row's UUID, so a divergence there cannot be corrected in place.
       - name: Verify SQL-to-JavaScript Mirrors Agree
         run: node scripts/check-mirror-drift.mjs
 
-      # The MTConnect vocabulary is generated, and now lives inside 0002_seed_data.sql rather than
-      # in a migration of its own. The generator writes that block directly and stamps a SHA-256
-      # into its BEGIN marker; this recomputes it, plus the semantic-id form, the category rules and
-      # (kind, name) uniqueness. It no longer diffs two committed files -- which is how the previous
-      # version passed for months while the generator wrote to an archived path that never ran.
+      # The MTConnect vocabulary is generated into 0002_seed_data.sql with a SHA-256 stamped in its
+      # BEGIN marker; this recomputes it plus the semantic-id form, category rules and uniqueness.
       - name: Verify MTConnect Vocabulary Seed Is In Sync
         run: |
           node scripts/generate-mtconnect-vocabulary.mjs
           node scripts/check-mtconnect-seed-sync.mjs
 
-      # Same arrangement for the OPC UA companion specifications, with one extra property: the
-      # generator asserts each NodeSet's ModelUri, Version and PublicationDate against a pin, so an
-      # upstream release of OPC 40501 or 40540 fails HERE rather than being absorbed into the seed
-      # unreviewed. That is deliberate -- a companion spec revision can rename or retype a browse
-      # name, and the vocabulary would otherwise go on describing a document nobody publishes.
+      # Same for the OPC UA companion specifications. The generator also pins each NodeSet's ModelUri,
+      # Version and PublicationDate, so an upstream release fails here rather than being absorbed.
       - name: Verify OPC UA Vocabulary Seed Is In Sync
         run: |
           node scripts/generate-opcua-vocabulary.mjs
           node scripts/check-opcua-seed-sync.mjs
 
-      # ASHRAE 223P is the one vocabulary whose STANDARD IS NOT PUBLISHED -- it is still in public
-      # review -- so the generator pins the ontology version and refuses to run when upstream moves.
-      # That is the point of regenerating here rather than only checking the digest: a concept
-      # renamed before publication should fail a build, not arrive unnoticed in a migration.
+      # ASHRAE 223P is still in public review, so the generator pins the ontology version and refuses
+      # to run when upstream moves.
       - name: Verify ASHRAE 223P Vocabulary Seed Is In Sync
         run: |
           node scripts/generate-ashrae223-vocabulary.mjs
           node scripts/check-ashrae223-seed-sync.mjs
 
-      # Prose ages gracefully; NUMBERS AND LISTS DO NOT. A documentation audit found six factual
-      # drifts in README.md alone -- a test count 77 stale, "three jobs" when CI had five, two image
-      # tags still recorded as :latest after being pinned, "four edge functions" when a fifth had
-      # existed for some time, two test suites never listed, and two migrations unmentioned. All six
-      # were mechanically checkable and all six had been wrong for a while.
-      #
-      # A stale count is worse than no count: a reader cannot tell it is stale and will act on it.
-      # This checks counts, lists, links and pinned versions only -- never reasoning, which cannot be
-      # verified mechanically and where a checker pretending to would give false confidence.
+      # Checks counts, lists, links and pinned versions only; never reasoning. A stale count is worse
+      # than no count because a reader cannot tell it is stale.
       - name: Verify Documentation Matches The Repository
         run: node scripts/check-docs-drift.mjs
 
-      # THE GAP EVERY OTHER CHECK IN THIS JOB LOOKS STRAIGHT PAST: what is actually INSIDE an image.
-      # The Python suites import from the working tree, where every module exists; this compares the
-      # Dockerfile's file-by-file COPY list against what those sources import at column 0.
-      #
-      # Found by `ingestion/directory_publish.py` shipping with 20 passing tests, a broker ACL rule,
-      # a guard of its own, and no COPY -- ModuleNotFoundError on the first boot that ran it. A
-      # module-scope import is a crash loop rather than a quiet no-op, which is why the Dockerfiles
-      # say so in prose beside three separate COPY lines. This is that prose, checkable.
+      # Compares each Dockerfile's COPY list against what its sources import at column 0. The Python
+      # suites import from the working tree, so a missing COPY is invisible to them and is a crash
+      # loop on first boot.
       - name: Verify Each Image Carries The Sources It Imports
         run: node scripts/check-image-sources.mjs
 
-      # THE HALF OF THIS THAT CI CAN ACTUALLY SEE. The script's other check compares a developer's
-      # working `.env` against the template in both directions, and it CANNOT run here: `.env` is
-      # gitignored because it holds real credentials, so there is nothing to compare. That check
-      # skips loudly rather than reporting ok on something it did not examine.
-      #
-      # What runs here is the committed half: every variable docker-compose.yml requires WITH NO
-      # DEFAULT must be declared in .env.example. Scoped to required variables on purpose -- 88 are
-      # referenced and 66 declared, and almost all of the difference is internal knobs with safe
-      # defaults (I3X_PORT, PROMETHEUS_PORT). A bare `${VAR}` is different in kind: Compose
-      # substitutes empty and the stack comes up misconfigured instead of refusing to start.
-      #
-      # It passes today with zero violations, which is the point. It is an invariant that already
-      # holds, and the ordinary way to break it is to add a required variable and forget the
-      # template -- at which point a fresh clone fails somewhere far from the cause.
+      # The committed half of check-env-drift.mjs: every variable docker-compose.yml requires with no
+      # default must be declared in .env.example. The working-`.env` comparison cannot run here (the
+      # file is gitignored) and skips loudly.
       - name: Verify Environment Template Covers Every Required Variable
         run: node scripts/check-env-drift.mjs
 
-      # THE ONE ASSERTION NOTHING ELSE IN THIS REPOSITORY CAN MAKE. validate.py asserts the 401s
-      # that SHOULD happen -- the Directory's /v1/device, i3X's /objects, Node-RED's admin API.
-      # Those are positive claims about routes somebody wrote. Nothing can assert the ABSENCE of a
-      # route nobody wrote, because absence is not probeable: there is no request that shows a
-      # route was never added, and no test fails when one is.
-      #
-      # kong.yml fronts nine services, gates four with key-auth, and leaves six routes open across
-      # four deliberate exemptions. A route added here and gated nowhere passes every other check in
-      # this file. So does a translation that quietly widened an exemption -- which is precisely the
-      # risk in replacing the gateway: the negative assertions have to exist before the swap, not
-      # after it. This is them, and it is deliberately written against the SURFACE rather
-      # than against Kong, so it survives the gateway being replaced.
-      #
-      # Each of the eleven assertions was verified by breaking it: an unreviewed route, key-auth
-      # removed from the functions catch-all, a literal JWT over a placeholder, literal CORS
-      # origins, a lost prometheus flag, a flipped strip_path, a placeholder taught to neither
-      # substituter, a deleted exemption bullet, a stale count claim in each of the two documents
-      # that carry the argument, an open route dropped from the README table, and a services block
-      # the scanner could not read.
-      #
-      # It found one drift on its first clean run: supabase/README.md -- the document kong.yml's
-      # header sends readers to for the full reasoning -- listed TWO deliberately open routes when
-      # there were six, and had done since the userinfo and Directory exemptions were added.
+      # Negative assertions about the gateway surface: a gated route must be gated, an exemption must
+      # be one of the reviewed ones, and the two documents carrying the argument must match. validate.py
+      # asserts the 401s that should happen; nothing else can assert the absence of a route nobody
+      # wrote. Written against the surface, not against a gateway implementation.
       - name: Verify The Gateway Surface Matches What Was Reviewed
         run: node scripts/check-gateway-surface.mjs
 
-      # THE ONLY FILE HERE THAT IS JAVASCRIPT INSIDE JSON INSIDE A TEMPLATE, shipped to hardware
-      # nobody on this project can log into. Nothing compiled it and nothing linted it, and both
-      # things that read it do so too late to help: bootstrap.mjs parses it ON THE APPLIANCE, after
-      # the single-use enrolment token has been spent, and Node-RED evaluates a function node's
-      # body at its FIRST TICK rather than at deploy.
-      #
-      # The failure that prompted this was silent in both directions. Every metric in the flow was
-      # encoded `{ name, type: 'String', value: 'ONLINE' }`, which the daemon's JSON parser does not
-      # read -- each metric arrived with a name and no value and was discarded. It went unnoticed
-      # because the one metric it mattered for was Gateway_Status, and a discarded status falls back
-      # to the one the message type implies: ONLINE for an NDATA, the same answer. The appliance
-      # appeared to report its own state while the platform inferred it.
-      #
-      # Eight assertions, each verified by breaking it: an uncompilable function body, the
-      # { type, value } encoding restored, a byte count sent as a uint32 int_value, a placeholder
-      # bootstrap does not substitute, a dangling wire, the collector wired into the heartbeat, the
-      # cache node publishing to the broker, bootstrap dropping a variable the flow reads -- plus a
-      # file Node-RED could not parse, which exits before comparing anything.
+      # The gateway flow template is JavaScript inside JSON inside a template, parsed on the appliance
+      # after the enrolment token is spent and evaluated by Node-RED at first tick. This compiles each
+      # function body, checks the metric encoding the daemon's JSON parser reads, the wiring and the
+      # placeholders bootstrap substitutes.
       - name: Verify The Gateway Flow Template Runs As It Reads
         run: node scripts/check-gateway-flow-template.mjs
 
-      # vite.config.js fails fast if these are unset. Docker passes them as build
-      # args; a bare `npm run build` in CI has to supply them explicitly. These are
-      # the local-dev demo values from .env.example and are baked into a throwaway
-      # bundle that is never deployed.
+      # vite.config.js fails fast if these are unset. Docker passes them as build args; a bare
+      # `npm run build` has to supply them. Local-dev demo values, baked into a throwaway bundle.
       - name: Build Production Bundle
         env:
           VITE_SUPABASE_URL: http://127.0.0.1:54321
@@ -384,11 +262,8 @@ jobs:
           cd frontend
           npm run build
 
-  # Kubernetes is the primary deployment target and Docker Compose is the local development path;
-  # BOTH must keep working. This job is the cheap half of that -- it renders and validates the
-  # chart without a cluster, so a template that cannot produce valid manifests fails on the PR
-  # rather than at `helm install`. The full in-cluster run (k3d + helm test + validate.py) is the
-  # k8s-validation job; see docs/kubernetes-architecture.md §8.1.
+  # The cheap half of the chart guarantee: render and validate without a cluster, so a template
+  # that cannot produce valid manifests fails on the PR. The in-cluster run is k8s-validation.
   helm-chart:
     name: Helm Chart Lint & Render
     runs-on: ubuntu-latest
@@ -401,33 +276,18 @@ jobs:
         with:
           version: v3.16.3
 
-      # Helm cannot read files outside its chart directory, so the TimescaleDB bootstrap scripts
-      # (and, in later phases, the Kong and Grafana templates and the Node-RED flow) are mirrored
-      # into deploy/helm/acs-cymru/files/ and committed. A stale copy would provision a
-      # DIFFERENT database than Compose does, and would only surface as a schema error at the
-      # first telemetry write.
+      # Helm cannot read files outside its chart directory, so sources are mirrored into
+      # deploy/helm/acs-cymru/files/ and committed. A stale copy provisions a different stack.
       - name: Verify Chart Files Are In Sync With Their Sources
         run: node scripts/sync-helm-chart-files.mjs --check
 
-      # THE SET COMPARISON THE FILE-SYNC CHECK ABOVE CANNOT MAKE. That one asserts the copies the
-      # chart already carries are current; it says nothing about a service the chart never gained.
-      # Six defects in one branch had that second shape, three of them found only by installing the
-      # chart and watching a pod crash ten minutes at a time.
-      #
-      # It runs HERE rather than in k8s-validation because it needs neither a cluster nor helm --
-      # it reads docker-compose.yml and the templates as text, so it costs seconds and fails on a
-      # pull request rather than after a 20-minute install.
+      # The set comparison the file-sync check cannot make: a service Compose has and the chart never
+      # gained. Reads both as text, so it runs here rather than behind a 20-minute install.
       - name: Verify Compose And The Chart Deploy The Same Services
         run: node scripts/check-compose-chart-parity.mjs
 
-      # THESE THREE RUN BEFORE THE SATELLITE CHECKS BELOW, and the ordering is deliberate
-      # rather than tidy. A GitHub Actions job stops at its FIRST failing step, so whichever
-      # check runs first is the only one that reports -- and this job is named for the chart.
-      # It used to lint and render last, behind a broker check that starts a real Mosquitto in
-      # Docker; the result was a run where an invalid probe in the chart went unreported
-      # because an unrelated certificate permission failed thirty seconds earlier, and the k3d
-      # job downstream then failed on the very defect this job exists to catch first.
-      # Chart correctness first, then the couplings it has with everything else.
+      # Chart lint and render run before the satellite checks: a job stops at its first failing step,
+      # and this job is named for the chart.
       - name: Lint Chart
         run: helm lint deploy/helm/acs-cymru -f deploy/helm/acs-cymru/values-dev.yaml
 
@@ -437,36 +297,14 @@ jobs:
             -f deploy/helm/acs-cymru/values-dev.yaml > /tmp/rendered.yaml
           echo "Rendered $(grep -c '^kind:' /tmp/rendered.yaml) objects."
 
-      # Renders cleanly is not the same as "the API server would accept it". A misindented probe
-      # or a bad field name is valid YAML and invalid Kubernetes.
-      #
-      # kubeconform, NOT `kubectl apply --dry-run=client`. That was what stood here, and it cannot
-      # work in this job: `kubectl apply` performs API discovery before it validates anything, so
-      # with no cluster it fails on `dial tcp [::1]:8080: connect: connection refused` -- and
-      # `--validate=false` does not help, because it is the discovery call that fails, not the
-      # validation. The step could only ever have passed against a live cluster, which this job does
-      # not have and should not need. kubeconform validates offline against the published Kubernetes
-      # JSON schemas.
-      #
-      # This is the step that catches a list item YAML read as a MAPPING. `Authorization: Bearer` in
-      # an exec probe is the real example -- the colon-space silently turns one command argument
-      # into a key/value pair, `helm lint` passes, and it aborts the WHOLE `helm install` at the API
-      # server with `cannot unmarshal object into Go struct field ExecAction...command of type
-      # string`: a Go type, no filename, nothing created. kubeconform names the JSON pointer:
-      #   at '/spec/template/spec/containers/0/readinessProbe/exec/command/2': got object, want string
-      #
-      # -ignore-missing-schemas lets a CRD through (ServiceMonitor, if telemetry is ever enabled in
-      # values-dev). It is not silent: READ THE `Skipped:` COUNT in the summary -- anything above 0
-      # is a resource nothing validated.
+      # kubeconform, not `kubectl apply --dry-run=client`: kubectl performs API discovery before it
+      # validates and fails with no cluster. This catches a list item read as a mapping (`Authorization:
+      # Bearer` in an exec probe), which `helm lint` passes and the API server rejects.
+      # -ignore-missing-schemas lets a CRD through; a `Skipped:` count above 0 is a resource nothing
+      # validated.
       - name: Validate Rendered Manifests Against The Kubernetes Schema
         run: |
-          # `-v /tmp:/tmp`, NOT the workspace. The rendered manifest is written to the RUNNER's
-          # /tmp by the step above, which is not inside the repository -- so mounting $PWD gave the
-          # container its own empty /tmp and kubeconform answered
-          #   /tmp/rendered.yaml - failed validation: lstat /tmp/rendered.yaml: no such file
-          # counted as `Errors: 1`. That is a genuine non-zero exit, but it names a missing file
-          # rather than an invalid manifest, so it reads as a broken chart. Mount what the file is
-          # actually on.
+          # `-v /tmp:/tmp`: the rendered manifest is on the runner's /tmp, not in the workspace.
           docker run --rm -v /tmp:/tmp ghcr.io/yannh/kubeconform:v0.6.7 \
             -strict -summary -ignore-missing-schemas \
             -kubernetes-version "${KUBECONFORM_K8S_VERSION}" \
@@ -476,49 +314,22 @@ jobs:
           # schemas are per-release, so this pins WHICH API surface the manifests are judged against.
           KUBECONFORM_K8S_VERSION: 1.31.0
 
-      # mosquitto's ACCEPTED SYNTAX CHANGES BETWEEN MINOR VERSIONS, and nothing else in this pipeline
-      # reads the broker config at all: `docker compose config` validates compose YAML, helm renders
-      # the ConfigMap without parsing its contents, and the unit suites never touch it.
-      #
-      # This was not hypothetical. mosquitto.conf declared `password_file` under each listener, which
-      # 2.1.x accepts and 2.0.x rejects outright -- "Duplicate password_file value in configuration",
-      # exit 3, before a socket is opened. Pinning both targets from `latest` to 2.0.20 therefore took
-      # the broker down on BOTH of them, and the only signal was a stack of unrelated-looking health
-      # timeouts several minutes into the E2E job.
-      #
-      # It runs the real config on the pinned tag and also asserts an unauthenticated client is
-      # REFUSED -- a config that starts is not a config that is safe.
+      # mosquitto's accepted syntax changes between minor versions and nothing else here reads the
+      # broker config. Runs the real config on the pinned tag and asserts an unauthenticated client is
+      # refused.
       - name: Verify Broker Config Starts And Authenticates On The Pinned Version
         run: node scripts/check-broker-config.mjs --verbose
 
-      # Several pins in this stack hold a COUPLING, not a preference: supabase/realtime and
-      # supabase/storage-api migrate shared schemas on boot, supabase/studio is Zod-coupled to a
-      # postgres-meta version, nodered/node-red is what settings.js depends on. Two targets on
-      # different tags break exactly those couplings, and ASYMMETRICALLY -- the failure appears on
-      # whichever target was bumped second, days later, and looks like that target's fault.
-      #
-      # It also checks a coupling a repository-name comparison structurally cannot see:
-      # supabase/functions/Dockerfile builds FROM supabase/edge-runtime, which Compose runs directly.
+      # Several pins hold a coupling (realtime and storage-api migrate shared schemas, studio is
+      # coupled to postgres-meta, node-red to settings.js). Two targets on different tags fail on
+      # whichever was bumped second. Also checks supabase/functions/Dockerfile's FROM against Compose.
       - name: Verify Image Tag Parity Across Both Targets
         run: node scripts/check-image-tag-parity.mjs --verbose
 
-      # Naming any plugin in Kong's `plugins` property *replaces* its bundled set rather than adding
-      # to it, so a plugin referenced in kong.yml but missing from that list does not merely go
-      # unused -- Kong refuses to boot with "plugin '<name>' not enabled; add it to the 'plugins'
-      # configuration property". Two files that must agree in two syntaxes, and the error when they
-      # do not names the config file rather than the list.
-      #
-      # KUBERNETES ONLY, SINCE THE ENVOY MIGRATION. This step used to read `KONG_PLUGINS` out of
-      # docker-compose.yml as well, and that variable is correctly gone: Compose runs Envoy and
-      # declares no Kong, no `supabase-kong-init` and no `kong_config` volume. The
-      # check went on demanding it and failed with "could not find KONG_PLUGINS (compose)" -- a
-      # guard reporting the absence of the thing whose absence was the deliverable.
-      #
-      # SO WHY IS THE STEP STILL HERE AT ALL. Because the chart still deploys Kong by default, and
-      # `supabase/kong.yml` stays in the repository for a reason worth restating: it is read by
-      # nothing on Compose and by the chart on Kubernetes, and the template-hygiene check asserts
-      # exactly that pair rather than the tempting one-liner "kong.yml is gone". The same applies to the
-      # plugin list. This step retires with the chart's Kong, not before it.
+      # Naming any plugin in Kong's `plugins` property replaces its bundled set, so a plugin kong.yml
+      # references but the list omits makes Kong refuse to boot. Kubernetes only: Compose runs Envoy
+      # and declares no KONG_PLUGINS. The step retires with the chart's Kong, which is retained off as
+      # the revert path.
       - name: Verify The Chart's Kong Plugin List Covers Everything kong.yml References
         run: |
           python3 - <<'PY'
@@ -555,10 +366,8 @@ jobs:
           sys.exit(0)
           PY
 
-      # A ServiceMonitor whose `port` names nothing on the Service it selects does not fail: the
-      # operator creates it, Prometheus lists no target, and the dashboards are simply empty --
-      # which reads as an idle component rather than a broken scrape. That is the exact failure
-      # templates/obs/servicemonitors.yaml exists to avoid, so it is asserted rather than trusted.
+      # A ServiceMonitor whose `port` names nothing on its Service does not fail: Prometheus lists no
+      # target and the dashboards are empty.
       - name: Verify Every ServiceMonitor Port Resolves On Its Service
         run: |
           helm template acs-cymru deploy/helm/acs-cymru \
@@ -568,19 +377,9 @@ jobs:
             --set mosquitto.metrics.enabled=true > /tmp/sm.yaml
           python3 - <<'PY'
           import sys, yaml
-          # RESOLVED BY LABEL SELECTOR AND THEN BY PORT, THE WAY THE OPERATOR ACTUALLY DOES IT.
-          #
-          # This used to look the Service up by NAME, keyed on the ServiceMonitor's component label --
-          # which worked only while every Service happened to be named after its component. The metrics
-          # Service added for issue #22 is `ingestion-metrics` on component `ingestion`, so the check
-          # reported a broken target for a pairing that resolves perfectly in a cluster.
-          #
-          # A SELECTOR MATCHING SEVERAL SERVICES IS NOT ITSELF AN ERROR, and assuming it was is the second
-          # thing this got wrong. `mosquitto` and `mosquitto-external` both carry the mosquitto component
-          # label, but only the first publishes a `metrics` port -- the Operator builds targets from the
-          # Endpoints of the named port, so the external LoadBalancer contributes none and nothing is
-          # duplicated. What matters is how many matched Services actually CARRY the port: none means no
-          # target at all, more than one means every sample is scraped twice.
+          # Resolved by label selector and then by port, the way the Operator does it. A selector
+          # matching several Services is not an error; what matters is how many carry the port: none is
+          # no target, more than one is every sample scraped twice.
           docs = [d for d in yaml.safe_load_all(open('/tmp/sm.yaml', encoding='utf-8')) if d]
           services = [d for d in docs if d['kind'] == 'Service']
           sms = [d for d in docs if d['kind'] == 'ServiceMonitor']
@@ -619,10 +418,8 @@ jobs:
           sys.exit(1 if errors else 0)
           PY
 
-      # The chart's guard rails exist because each of these misconfigurations otherwise produces a
-      # stack that reports healthy and refuses every request, or a CrashLoopBackOff whose logs name
-      # something other than the cause. A guard that stops firing is worse than no guard, because
-      # nobody re-tests it by hand.
+      # Each of these misconfigurations otherwise produces a stack that reports healthy and refuses
+      # every request, or a CrashLoopBackOff whose logs name something other than the cause.
       - name: Verify Chart Guard Rails Reject Bad Configurations
         run: |
           fail=0
@@ -664,15 +461,9 @@ jobs:
           expect_failure "no public base domain with auth enabled" "no browser-facing URL" \
             -f "$DEV" --set global.publicBaseDomain=
 
-          # An API that is browser-facing with no origin allowed to call it. Kong starts cleanly and
-          # then returns 200 with no Access-Control-Allow-Origin for every request, which the
-          # browser refuses to read -- so the dashboard signs in and shows empty tables.
-          #
-          # THE NARROWNESS IS THE POINT, and is asserted by the two cases above still reporting
-          # THEIR OWN messages. An install with no public surface at all has no origin to name and
-          # is already refused more specifically; when acs-cymru.corsOrigins also failed there, it
-          # ran first and masked both. This case is what is genuinely left for it: a public API
-          # (publicUrls.supabase) with nothing naming a caller.
+          # A browser-facing API with no origin allowed to call it returns 200 with no CORS header, and
+          # the dashboard signs in to empty tables. The two cases above must still report their own
+          # messages; this is what is left once they do.
           expect_failure "browser-facing API with no derivable CORS origin" "EMPTY browser-origin list"             -f "$DEV" --set global.publicBaseDomain= --set supabaseAuth.enabled=false             --set ingress.enabled=false --set publicUrls.supabase=https://api.example.com
 
           # TLS at the ingress with scheme http registers http:// redirect_uris for an https site.
@@ -685,16 +476,8 @@ jobs:
           expect_failure "ingress enabled with no resolvable host" "no route resolved a hostname" \
             -f "$DEV" --set global.publicBaseDomain= --set supabaseAuth.enabled=false
 
-          # An HPA on a single-writer workload. Refused rather than warned about, because the damage
-          # is silent -- scaling `ingestion` duplicates every telemetry row, every quarantine decision
-          # and every append-only audit row, with no error and no crash. An autoscaler does it under
-          # load, which is the worst moment to find out.
-          #
-          # THE NAMES COME FROM THE CHART, not from a list retyped here. This loop used to name
-          # eight components; the guard it tests hardcoded the same eight; and the chart's own
-          # `singleWriterWorkloads` block named NINE. `i3x-service` was the extra one, so the
-          # guard let it through and this loop never noticed -- three lists, no comparison
-          # (issue #27).
+          # An HPA on a single-writer workload duplicates every telemetry row and audit row silently.
+          # The names come from the chart's `singleWriterWorkloads` block, not a list retyped here.
           SW=$(sed -n '/define "acs-cymru.singleWriterWorkloads"/,/{{- end -}}/p' \
                  deploy/helm/acs-cymru/templates/_helpers.tpl \
                | grep -E '^[a-z0-9-]+:' | cut -d: -f1)
@@ -709,24 +492,15 @@ jobs:
               -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
           done
 
-          # A NAME THAT IS NEITHER ALLOWED NOR FORBIDDEN (issue #31). This was the third class and
-          # the unvalidated one: it rendered no HPA and no error, so a typo installed cleanly and
-          # then never scaled. The symptom arrives months later, under load, as a component that
-          # "should be autoscaling and isn't" -- with nothing logged at install time to search for.
-          #
-          # `superbase-rest` is the case from the issue, and it is the one worth pinning: it is one
-          # transposed letter from a legitimate value, so it is what an operator actually types.
+          # A name that is neither allowed nor forbidden rendered no HPA and no error. `superbase-rest` is
+          # one transposed letter from a legitimate value.
           for c in superbase-rest swagger-ui not-a-component; do
             expect_failure "autoscaling unknown component $c" "not a component this chart can scale" \
               -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
           done
 
-          # PERMITTED BUT NOT DEPLOYED IS ALSO A REFUSAL, and it is the newest of them.
-          # `supabaseKong.enabled` is off, and the allow-list still names `supabase-kong` so a
-          # side-by-side migration can scale either gateway. Before this guard that combination
-          # rendered NO HPA AND NO ERROR -- issue #31's symptom through a third door -- and
-          # values-prod.yaml.example was carrying it: a gateway pinned at one replica where the
-          # file asked for two to six.
+          # Permitted but not deployed is also a refusal: `supabase-kong` stays on the allow-list for a
+          # side-by-side migration, and autoscaling a disabled workload rendered no HPA and no error.
           expect_failure "autoscaling a permitted but disabled component" "workload is DISABLED" \
             -f "$DEV" --set autoscaling.enabled=true --set autoscaling.components[0]=supabase-kong
 
@@ -758,55 +532,25 @@ jobs:
           expect_failure "external plaintext withdrawn with no TLS" "no ports on it at all" \
             -f "$DEV" --set mosquitto.external.plaintext=false
 
-          # Broker TLS with nothing a GATEWAY could verify against: no IP SAN, no operator-supplied
-          # DNS SAN. The in-cluster clients dial `mosquitto` and verify perfectly, so the stack
-          # reports healthy and the demo simulator keeps producing telemetry while every real gateway
-          # fails a hostname check the broker never logs.
+          # Broker TLS with nothing a gateway could verify against: in-cluster clients verify `mosquitto`
+          # and the stack reports healthy while every real gateway fails a hostname check.
           expect_failure "broker TLS with no external SAN" "no IP SAN and no DNS SAN" \
             -f "$DEV" --set mosquitto.tls.enabled=true
 
           exit $fail
 
-      # ---------------------------------------------------------------------------------------
-      # The production example, rendered (issue #30).
-      #
-      # `values-prod.yaml.example` is the file an operator copies to stand up a real deployment,
-      # and nothing looked at it. Every other values file is exercised -- the chart lints and
-      # renders against values-dev.yaml, and the step above drives twenty-odd bad configurations
-      # through `helm template` -- but the one carrying the posture we actually RECOMMEND was
-      # never rendered.
-      #
-      # It is a worked example, so it is full of values the chart must still accept:
-      # `clusterIssuer`, `extraIpSans`, `internalClients`, `external.plaintext`,
-      # `metrics.enabled`. Any of them can be invalidated by a rename in values.yaml or by a new
-      # guard rail in _helpers.tpl, and the failure is otherwise deferred to the worst possible
-      # moment -- an operator's first `helm install`, against a real cluster, following our own
-      # documentation. It is also the only place several settings appear at all, so a rename
-      # applied mechanically to values.yaml and values-dev.yaml simply misses it.
-      #
-      # WHY `existingSecret` AND NOT A PILE OF THROWAWAY CREDENTIALS. The example deliberately
-      # carries no credentials -- pointing at an externally managed Secret is the whole point of
-      # it -- so a bare render fails the credential guard, correctly, and that guard must not be
-      # weakened to make a test pass.
-      #
-      # The obvious alternative, underlaying values-dev.yaml to supply credentials, DOES NOT WORK
-      # and is worth recording: the example pins `jwtSecret: ""`, `anonKey: ""` and the rest to
-      # empty strings, and an explicit empty string overrides an underlaid value rather than
-      # deferring to it. Setting `existingSecret` instead skips the credential block entirely --
-      # which is exactly what the External Secrets path the file recommends does in production.
-      # ---------------------------------------------------------------------------------------
+      # The production example, rendered. It is the file an operator copies, and it is the only
+      # place several settings appear, so a rename applied to values.yaml misses it. It carries no
+      # credentials by design, so `existingSecret` is set rather than underlaying values-dev.yaml:
+      # the example pins the credential keys to empty strings, and an explicit empty string overrides
+      # an underlaid value.
       - name: Render The Production Values Example
         run: |
           set -euo pipefail
           PROD=deploy/helm/acs-cymru/values-prod.yaml.example
 
-          # RENDERED TO A FILE, and every check below reads the file rather than piping a variable.
-          #
-          # `printf '%s' "$OUT" | grep -q ...` is wrong under `set -o pipefail`, which this step
-          # needs so a helm failure is not swallowed. `grep -q` exits on the FIRST match, closing
-          # the pipe; printf is then killed by SIGPIPE; pipefail promotes that to the pipeline's
-          # status. The check fails precisely when the string IS present, which is the most
-          # confusing available direction. Found while writing this step.
+          # Rendered to a file; every check below reads the file. `printf | grep -q` under pipefail
+          # fails exactly when the string is present (grep closes the pipe, printf gets SIGPIPE).
           helm template acs-cymru deploy/helm/acs-cymru \
             -f "$PROD" --set secrets.existingSecret=ci-render-check > /tmp/prod-render.yaml
 
@@ -831,15 +575,9 @@ jobs:
             }
           done
 
-          # SUPABASE STUDIO MUST NOT BE ON THE INGRESS. Studio now has a login -- the gateway
-          # gates its listener on an Administrator session -- so this is no longer the assertion
-          # that it is unauthenticated. It is the assertion that PUBLISHING IT IS A DEPLOYMENT'S
-          # DECISION rather than a chart default: the console hands whoever signs in the project's
-          # jwt_secret and both service API keys, and its SQL editor runs as the database owner.
-          #
-          # It defaulted to ON until a review noticed, with a comment in values.yaml recommending
-          # it be turned off. A default that has to be READ to be safe is not a safe default, and
-          # a comment is not a control. This is the control, and the login did not retire it.
+          # Supabase Studio must not be on the Ingress. The console hands whoever signs in the project's
+          # jwt_secret and both API keys, and its SQL editor runs as the database owner; the gateway's
+          # login gates the listener, but publishing it is a deployment's decision, not a chart default.
           if grep -qE '^\s+- host: studio\.' /tmp/prod-render.yaml; then
             echo "::error::the production example routes Supabase Studio on the Ingress."
             echo "::error::It is behind a login, but it still hands whoever passes that login the"
@@ -849,17 +587,9 @@ jobs:
             exit 1
           fi
 
-          # And the Compose target's equivalent. Checked here rather than in a compose-only job
-          # because the two targets' posture has to move together -- fixing one and forgetting the
-          # other is the drift this repository is built around catching.
-          #
-          # THIS USED TO ASSERT A LOOPBACK BINDING, and it was right until Studio got a door. The
-          # old posture was `127.0.0.1:${STUDIO_PORT:-54323}:3000` on the studio service, where the
-          # binding was the ONLY control and cost the thing people kept asking for -- reaching the
-          # console from anywhere but the host. The control is now an authenticating listener, so
-          # the assertion moves with it: studio publishes NOTHING of its own, and 54323 is the
-          # gateway's gated port. Asserting the old string here would demand the weaker control
-          # back.
+          # The Compose target's equivalent, checked here so the two targets' posture moves together.
+          # studio publishes nothing of its own; 54323 is the gateway's gated listener. Asserting a
+          # loopback binding would demand the weaker control back.
           awk '/^  supabase-studio:/{f=1;next} /^  [a-z]/{f=0} f' docker-compose.yml > /tmp/studio-block.yaml
           if [ ! -s /tmp/studio-block.yaml ]; then
             echo "::error::no supabase-studio service found in docker-compose.yml, so the checks"
@@ -879,14 +609,8 @@ jobs:
             exit 1
           fi
 
-          # THE CHART'S OWN CREDENTIALS SECRET MUST NOT RENDER: `existingSecret` says one already
-          # exists, and shipping a second, empty copy alongside it is how the documented External
-          # Secrets path would quietly break -- pods reading the chart's blank Secret instead of
-          # the operator's real one.
-          #
-          # Matched on the TEMPLATE that produces it, not on `kind: Secret`. Mosquitto renders a
-          # Secret of its own regardless, so a bare kind check would fail here permanently and be
-          # "fixed" by deleting the assertion.
+          # The chart's own credentials Secret must not render when `existingSecret` is set. Matched on
+          # the template, not on `kind: Secret`: Mosquitto renders a Secret of its own regardless.
           if grep -q 'templates/secret.yaml' /tmp/prod-render.yaml; then
             echo "::error::the chart rendered its own credentials Secret despite"
             echo "::error::secrets.existingSecret being set, so the External Secrets path in"
@@ -897,14 +621,9 @@ jobs:
           echo "  ok: values-prod.yaml.example renders $COUNT objects with its TLS, ingress and"
           echo "      metrics posture intact, and defers the Secret to the external one"
 
-      # M4. The whole design of templates/networkpolicy.yaml is that the flow graph is declared ONCE
-      # as edges and both directions are generated from it -- so allowing egress from A while
-      # forgetting ingress on B is unrepresentable. This asserts that property actually holds in the
-      # rendered output, because it is the reason to trust the file at all.
-      #
-      # An asymmetric policy fails in the worst available way: the packet is dropped at the
-      # destination, the source sees a timeout, and NOTHING logs a policy decision -- so it reads as
-      # the destination being slow or down.
+      # templates/networkpolicy.yaml declares the flow graph once as edges and generates both
+      # directions; this asserts the rendered output holds that property. An asymmetric policy drops
+      # packets at the destination and logs nothing.
       - name: Verify NetworkPolicies Are Symmetric And Cover The Load-Bearing Flows
         run: |
           helm template acs-cymru deploy/helm/acs-cymru \
@@ -954,22 +673,16 @@ jobs:
           if dnsprotos != {'UDP', 'TCP'}:
               errors.append(f"DNS egress must allow both UDP and TCP 53; got {dnsprotos or 'nothing'}")
 
-          # THE GATEWAY IS NAMED BY THE RENDER, NOT BY THIS LIST. NetworkPolicy selects POD labels,
-          # the gateway's POD labels read `supabase-envoy` while its SERVICE kept the older
-          # `supabase-kong` name -- so the two flows below are the only entries here whose component
-          # name moves with the gateway. Hard-coding either one reports MISSING against a policy
-          # that is perfectly correct, which is exactly what happened at promotion. Derived so the
-          # same assertion reads against either gateway, as check-gateway-surface.mjs does.
+          # The gateway is named by the render: NetworkPolicy selects pod labels (`supabase-envoy`) while
+          # the Service kept the `supabase-kong` name. Derived so the assertion reads against either.
           seen = {f[0] for f in egress} | {f[1] for f in egress}
           GATEWAY = 'supabase-envoy' if 'supabase-envoy' in seen else 'supabase-kong'
           print(f"  gateway component in the rendered policies: {GATEWAY}")
 
           # The flows whose absence is silent and expensive.
           REQUIRED = [
-              # pg_net posts DIRECTLY to Node-RED -- webhook_endpoints seeds
-              # http://node-red:1880/hooks/quarantine, not a Kong route -- and pg_net has no retries,
-              # no ordering and no DLQ. Block it and every quarantine notification is dropped with
-              # nothing logging it.
+              # pg_net posts directly to Node-RED (webhook_endpoints seeds http://node-red:1880/hooks/quarantine)
+              # with no retries and no DLQ. Block it and every quarantine notification is dropped silently.
               ('supabase-db', 'node-red', 1880, 'pg_net quarantine webhook (no retries/DLQ)'),
               ('supabase-db', GATEWAY, 8000, 'pg_net to edge functions'),
               # M2/M6: public.telemetry is a postgres_fdw projection.
@@ -991,14 +704,9 @@ jobs:
           print("NetworkPolicies are symmetric and cover every load-bearing flow.")
           PY
 
-      # The SAME symmetry property with broker TLS on, because `mosquitto.tls.internalClients` moves
-      # the ingestion daemon and Node-RED from 1883 to 8883 -- and it must move their policy edges
-      # with them. An edge left on 1883 while the client moved is a packet dropped at the broker with
-      # nothing logging a policy decision, which reads as the broker being down.
-      #
-      # It is a second render rather than an extra assertion on the first because the port is a
-      # RENDER-TIME choice: the 1883 edges simply do not exist in this configuration, so no single
-      # render can check both states.
+      # The same property with broker TLS on: `mosquitto.tls.internalClients` moves ingestion and
+      # Node-RED to 8883 and must move their edges too. A second render because the port is a
+      # render-time choice.
       - name: Verify NetworkPolicies Follow The Broker Onto TLS
         run: |
           helm template acs-cymru deploy/helm/acs-cymru \
@@ -1052,15 +760,9 @@ jobs:
           print(f"  in-cluster clients on 8883, external allows {sorted(ext)}; policies symmetric.")
           PY
 
-      # THE INVARIANT PHASE 5 EXISTS TO PROTECT. An OAuth client's registered redirect_uri must
-      # match, byte for byte, the callback the client actually sends -- GoTrue compares them exactly
-      # and answers `invalid redirect_uri` otherwise, which reads as a Grafana or Node-RED fault
-      # rather than as a registration mismatch. Both sides derive from one helper precisely so they
-      # cannot drift; this asserts they did not.
-      #
-      # It also pins the browser-vs-in-cluster split: a URL a BROWSER follows must be an ingress
-      # host, and one a CONTAINER calls must be an in-cluster Service name. Swapping them is the
-      # classic failure here, and it surfaces at a different layer than it is caused.
+      # An OAuth client's registered redirect_uri must match the callback byte for byte; GoTrue
+      # answers `invalid redirect_uri` otherwise. Both derive from one helper. Also pins the split: a
+      # URL a browser follows is an ingress host, one a container calls is an in-cluster Service.
       - name: Verify OAuth Redirect URIs And The Browser/In-Cluster URL Split
         run: |
           python3 - <<'PY'
@@ -1136,24 +838,10 @@ jobs:
           print("OAuth redirect URIs agree, and the browser/in-cluster split holds.")
           PY
 
-      # `replicas: 1` on these is a CORRECTNESS constraint, not a default, and each has its own
-      # reason recorded in its manifest. The sharpest is ingestion: ingestion.py does a plain paho
-      # subscribe with no shared-subscription group, so a second replica duplicates every telemetry
-      # row, every quarantine decision and every append-only audit row -- silently, with no error.
-      #
-      # Recreate matters as much as the count: a RollingUpdate briefly runs two pods, which lands
-      # duplicate telemetry on every single deploy.
-      #
-      # THE LIST IS READ FROM THE CHART, not restated here, and that is the point of this version.
-      # It used to be a dict in this file naming five workloads. `i3x-service` was not one of them --
-      # nor was `grafana` -- so the manifest could have been switched to RollingUpdate and CI would
-      # have agreed. i3x-service is the worst one to miss: its subscription state is in memory, so a
-      # second pod answers /subscriptions/sync with 404 for a subscription that is perfectly alive,
-      # intermittently, depending on which pod the Service picked (issue #27).
-      #
-      # A NAME THAT RESOLVES TO NOTHING IS AN ERROR, which is what makes this a check rather than a
-      # hopeful loop: a typo in the chart's list would otherwise silently protect nothing, in both
-      # this check and the autoscaling guard that reads the same block.
+      # `replicas: 1` on these is a correctness constraint. ingestion subscribes with no shared group,
+      # so a second replica duplicates every row; i3x-service keeps subscription state in memory.
+      # Recreate matters as much as the count: a RollingUpdate briefly runs two pods. The list is
+      # read from the chart, and a name that resolves to nothing is an error.
       - name: Verify Single-Writer Workloads Are Not Scaled Or Rolling
         run: |
           python3 - <<'PY'
@@ -1185,10 +873,8 @@ jobs:
 
           bad = []
           for n, why in sorted(SINGLE.items()):
-              # The chart's list is keyed by the name `autoscaling.components` takes, which for the
-              # Supabase components is the unprefixed one -- `realtime`, not `supabase-realtime`.
-              # Resolving both spellings keeps ONE list serving both key spaces instead of pairing
-              # it with an alias table that is itself a place to drift.
+              # The chart's list is keyed by the name `autoscaling.components` takes, which for Supabase
+              # components is unprefixed (`realtime`). Both spellings are resolved.
               resolved = n if n in workloads else f'supabase-{n}' if f'supabase-{n}' in workloads else None
               if resolved is None:
                   bad.append(f"{n}: named as single-writer but no Deployment or StatefulSet renders "
@@ -1217,30 +903,15 @@ jobs:
           print("Every workload the chart calls single-writer is pinned to one replica.")
           PY
 
-      # M5. local-path provisions a root-owned host directory and several of these images run as a
-      # non-root user, so a missing fsGroup is a crash loop on a permission error naming a path the
-      # operator never chose. The uids are IMAGE PROPERTIES -- confirm against the pinned tag if a
-      # value here ever needs changing:
+      # local-path provisions a root-owned host directory and several images run as non-root, so a
+      # missing fsGroup is a crash loop on a permission error. The uids are image properties; confirm
+      # against the pinned tag before changing one:
       #
       #   docker run --rm --entrypoint sh <image>:<pinned-tag> -c 'getent passwd <user>'
       #
-      # WHICH IS EXACTLY WHAT NOBODY DID FOR THE TWO DATABASES. Both said 999 -- here AND in
-      # values.yaml -- from the day they were written, and the note above telling the next person to
-      # confirm was the only thing standing behind either number. `timescale/timescaledb` is Alpine
-      # (uid/gid 70); neither was 999, which is stock Debian `postgres` and belongs to a third image
-      # that is not in this chart.
-      #
-      # AND THE VALUE THAT MOVES IS `supabase-db`. At 15.x that image was Ubuntu 20.04 with
-      # `postgres` at 105:106. At 17.6.1.160 it is **Alpine 3.23**, Nix-built, with `postgres` at
-      # 100:**101** -- so the PG17 bump changed the base distribution, not merely the server
-      # version. This number was re-measured against the pinned tag, not carried forward.
-      #
-      # It never surfaced because both images run their entrypoint as ROOT and chown the data
-      # directory to their own postgres user before dropping privileges, so fsGroup is decorative
-      # for them today. It stops being decorative the moment anyone sets `runAsUser` -- at which
-      # point the entrypoint can no longer chown and this number is the whole permission story.
-      # A restated constant in a checker is not a check: it agreed with values.yaml perfectly while
-      # both were wrong.
+      # timescale/timescaledb is Alpine (70); supabase/postgres 17.6.1.160 is Alpine with postgres at
+      # 100:101. Both entrypoints run as root and chown, so fsGroup only matters once `runAsUser` is set.
+      # See docs/incidents.md -> "fsGroup restated in the checker rather than measured".
       - name: Verify fsGroup Is Set On Every Workload With A Volume
         run: |
           python3 - <<'PY'
@@ -1273,16 +944,9 @@ jobs:
           print("fsGroup is set correctly on every workload with a volume.")
           PY
 
-      # 5433 and 54322 are docker-compose PUBLISHED ports, chosen to avoid colliding with a local
-      # PostgreSQL. There is no port mapping in Kubernetes. M2: a postgres_fdw foreign server
-      # pointed at 5433 fails as a relation-level error from PostgREST, which reads as a schema
-      # fault rather than a connection one.
-      #
-      # SCOPED TO WIRING FIELDS (value:/port:/containerPort:/targetPort:), not the whole document.
-      # The rendered chart embeds ~400 KB of SQL, and the seed legitimately contains
-      # `postgres://localhost:5433` in its `directory_services` rows -- descriptive display metadata
-      # for the Directory tab, not a connection this stack makes. A whole-document grep flags that
-      # and would train everyone to ignore the check.
+      # 5433 and 54322 are Compose published ports; there is no port mapping in Kubernetes. A
+      # postgres_fdw server pointed at 5433 fails as a relation-level error from PostgREST. Scoped to
+      # wiring fields: the seed legitimately contains `postgres://localhost:5433` as display metadata.
       - name: Verify No Host-Published Database Ports Leak Into The Chart's Wiring
         run: |
           if grep -nE '^[[:space:]]*(value|port|containerPort|targetPort):[[:space:]]*"?[^"]*\b(5433|54322)\b' /tmp/rendered.yaml; then
@@ -1291,24 +955,11 @@ jobs:
           fi
           echo "No host-published database ports in the rendered chart's wiring."
 
-      # A Deployment that inlines a credential into an env `value:` instead of a `secretKeyRef` works
-      # perfectly and puts it into `helm get manifest`, every CI log that renders the chart, and any
-      # GitOps repository the manifests are committed to.
-      #
-      # NO ENV VALUE MAY RENDER IN SCIENTIFIC NOTATION.
-      #
-      # Helm parses a bare large integer in values.yaml as a FLOAT, so `{{ .Values.x | quote }}`
-      # emits "5.24288e+07" for 52428800. Every consumer here reads its environment with parseInt
-      # or Number.parseInt, both of which stop at the '.', so that value arrives as **5**.
-      #
-      # It cost three real defects on this target, all silent: storage-api rejected every upload
-      # over five bytes as "The object exceeded the maximum allowed size", storage-init created the
-      # model bucket with a five-byte limit, and the AAS exporter treated its 32 MiB bundling cap as
-      # three bytes and fell back to a URL reference for every model -- producing an .aasx that
-      # still validated. Compose was never affected: it reads these from .env as strings.
-      #
-      # The fix is `| int64 | quote`. This asserts the OUTCOME so the next value added cannot
-      # reintroduce it, which no amount of remembering would achieve.
+      # A credential inlined into an env `value:` lands in `helm get manifest` and every CI log.
+      # No env value may render in scientific notation: Helm parses a bare large integer as a float,
+      # `| quote` emits "5.24288e+07", and every consumer here reads it with parseInt as 5. The fix
+      # is `| int64 | quote`; this asserts the outcome.
+      # See docs/incidents.md -> "Large integers rendered in scientific notation".
       - name: Verify No Rendered Value Uses Scientific Notation
         run: |
           python3 - <<'PY'
@@ -1325,12 +976,8 @@ jobs:
           print("No rendered value uses scientific notation.")
           PY
 
-      # THE CHECK IS ON THE `service_role` KEY SPECIFICALLY, decided by decoding the JWT's role
-      # claim rather than by pattern-matching the string. The distinction is real and the chart
-      # depends on it: `anon` is public by construction -- it ships inside the frontend bundle and
-      # is served to every browser -- so it legitimately appears in the frontend's /config.js
-      # ConfigMap, and putting it in a Secret would imply a confidentiality it does not have.
-      # `service_role` bypasses RLS entirely and must never leave a Secret.
+      # The `service_role` key specifically, decided by decoding the JWT's role claim. `anon` ships
+      # inside the frontend bundle and legitimately appears in the frontend ConfigMap.
       - name: Verify The Service-Role Key Appears Only In A Secret
         run: |
           python3 - <<'PY'
@@ -1386,39 +1033,17 @@ jobs:
         with:
           python-version: '3.10'
 
-      # THE REQUIREMENTS FILES, NOT A HAND-PICKED LIST -- and the reason is the same one this whole
-      # change is about. This step used to name four packages, chosen by reading the error messages
-      # of the suites that happened to be running at the time. Giving the newly-discovered suites a
-      # runner (#147) broke four of them on imports nobody had needed here before: `requests` (i3x),
-      # `paho` (the playback worker) and the generated `sparkplug_b_pb2`.
-      #
-      # A LIST ASSEMBLED FROM FAILURES IS THE SAME MISTAKE AS A LIST OF SUITES ASSEMBLED FROM
-      # MEMORY. The requirements files are what these packages actually declare they need; reading
-      # them cannot fall behind. e2e-validation already installs ingestion/requirements.txt for
-      # exactly this reason.
-      #
-      # jsonschema and pytest are the two genuinely not declared by either package. jsonschema
-      # validates the AAS export against the vendored official IDTA schema. pytest is for ONE suite,
-      # ingestion/test_cold_archive.py -- the only file in the tree written in its bare-function
-      # style with no `if __name__ == "__main__"` block, so run the way every other suite runs it
-      # imports, calls none of its eight functions and exits 0. Adding it to a lane without pytest
-      # would have "fixed" it into a green step over zero assertions. (pyarrow, which decides
-      # whether its eighth check runs or silently skips, IS in ingestion/requirements.txt.)
+      # From the requirements files, not a hand-picked list. jsonschema and pytest are the two not
+      # declared by either package: jsonschema validates the AAS export against the IDTA schema, and
+      # pytest is for ingestion/test_cold_archive.py, the one suite with no `__main__` block.
       - name: Install Python Test Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r ingestion/requirements.txt -r i3x/requirements.txt
           pip install jsonschema pytest
 
-      # THE GENERATED SPARKPLUG MODULE, WHICH IS GITIGNORED AND SO EXISTS ON EVERY DEVELOPER'S
-      # MACHINE AND IN NO FRESH CHECKOUT. `ingestion/*_pb2.py` is in .gitignore, built at image
-      # build from sparkplug_b.proto -- so test_capture_playback.py and test_capture_worker.py,
-      # which import it directly to assert on WIRE ENCODINGS, passed locally and failed here with
-      # `No module named 'sparkplug_b_pb2'` the first time they were given a runner.
-      #
-      # Same two steps as e2e-validation, which needs it for the same reason. Debian's protoc is
-      # two majors behind the pinned runtime and that is deliberate -- ingestion/requirements.txt
-      # carries the reasoning, and the end-to-end suites are what check the gencode still loads.
+      # `ingestion/*_pb2.py` is gitignored and built from sparkplug_b.proto at image build, so a fresh
+      # checkout has none. Same two steps as e2e-validation.
       - name: Generate Sparkplug B Protobuf Module
         run: |
           sudo apt-get update
@@ -1426,38 +1051,21 @@ jobs:
           protoc --python_out=. sparkplug_b.proto
           cp sparkplug_b_pb2.py ingestion/
 
-      # THE FIXTURE IS SHARED WITH THE LOCAL RUNNER, in one file applied by both this job and
-      # scripts/test-db.mjs. It carries its own reasoning: which auth helpers the base image is
-      # missing or ships stale, why auth.identities is load-bearing rather than cosmetic, and why
-      # the whole thing must run as supabase_admin. It used to be inline here, where nothing
-      # outside CI could reach it -- so no local path existed and every database suite was run
-      # against the live stack instead.
+      # The fixture is shared with scripts/test-db.mjs and carries its own reasoning.
       - name: Bootstrap Supabase Auth Helper Functions
         run: |
           PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 \
             -U supabase_admin -d postgres -f test-harness/auth-bootstrap.sql
 
-      # NOTE: single-dollar "$f", not the doubled form. Doubling is docker-compose
-      # escaping; in a shell "$$" is the PID, so every migration was previously fed a
-      # filename like "2932f" and was silently never applied.
-      #
-      # seed.sql is deliberately NOT applied here: the tests seed their own fixtures,
-      # and the base image's legacy auth.users lacks email_confirmed_at, is_sso_user,
-      # phone_change and other columns the seed writes.
+      # Single-dollar "$f": doubling is Compose escaping, and in a shell "$$" is the PID.
+      # seed.sql is not applied: the tests seed their own fixtures, and the base image's auth.users
+      # lacks columns the seed writes.
       - name: Apply Supabase Database Migrations
         run: |
           PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 -U postgres -d postgres \
             -c "ALTER ROLE postgres SET search_path TO auth, public, extensions;"
-          # THE psql VARIABLES `0002` READS, WITHOUT WHICH THIS DATABASE IS SUBTLY THE WRONG ONE.
-          # It takes them with `\if :{?name}`, falls back to empty and merely WARNS -- so the chain
-          # applies, every schema check passes, and `revoke_gateway_credential()` then finds an
-          # empty vault and returns false before queueing anything. test_credential_revocation.py
-          # fails four assertions with `0 != 1`, naming a pg_net queue depth rather than the unset
-          # secret three thousand lines upstream. That is exactly what happened the first time this
-          # job was given that suite to run (#147): it passed under `npm run test:db`, which set
-          # them, and failed here, which did not. They now come from ONE module that both callers
-          # read -- see scripts/migration-vars.mjs for why the values are fake and the URL is
-          # unreachable.
+          # The psql variables 0002 reads. Without them the chain applies and warns, and the credential
+          # suite fails on an empty vault. One module serves this job and `npm run test:db`.
           PSQL_VARS=$(node scripts/migration-vars.mjs --psql-args)
           for f in supabase/migrations/*.sql; do
             echo "Applying $f...";
@@ -1465,46 +1073,15 @@ jobs:
           done
 
       # =========================================================================================
-      # THE PYTHON SUITES, DISCOVERED RATHER THAN LISTED.
-      #
-      # This job used to name twenty-one suites in twenty-one `run:` steps. The tree had grown to
-      # fifty-three, and the difference was not a rounding error: TWENTY suites -- thousands of
-      # lines of assertions -- ran in no job anywhere, and nothing noticed, because a list with
-      # nothing to compare it against cannot be wrong, only incomplete (#147).
-      #
-      # The suites that had fallen off were disproportionately the ones guarding faults that were
-      # SILENT when they happened, which is why somebody wrote a suite for them in the first place.
-      # `test_startup_healer.py` opens by explaining that its fault had two consequences and "both
-      # of its consequences were silent in opposite directions". It did not run. Neither did
-      # `test_mqtt_tls.py`, every failure of which is a break toward a connection that looks
-      # encrypted and verifies nothing.
-      #
-      # THE FRONTEND ALREADY DID THIS CORRECTLY and that is where the fix came from: in
-      # `frontend-build`, `npm test` hands vitest a DIRECTORY and a following step fails the build
-      # if the count drops below what README claims. The discipline existed in this repository; it
-      # was pointed at the frontend and never at Python.
-      #
-      # WHERE THE REASONING WENT. Each of those twenty-one steps carried a paragraph on why the
-      # suite was worth a job's time -- written, mostly, by whoever fixed the thing it now guards.
-      # None of it was deleted: it lives in `scripts/python-suites.mjs` beside the lane each suite
-      # declares, where it also answers a question the steps could not, which is what should happen
-      # when somebody adds a suite. The runner refuses to run a tree it cannot account for, and
-      # check-docs-drift.mjs makes the same comparison earlier and more cheaply.
-      #
-      # STILL ONE PROCESS PER SUITE -- `python <file>`, exactly as these steps did, rather than
-      # collecting the tree with pytest: two suites tear down provisioned fixtures in
-      # `if __name__ == "__main__"`, which no collecting runner executes. ONE suite is the
-      # exception and declares `runner: 'pytest'` because it is written in that style and has no
-      # `__main__` block at all -- run as a script it would assert nothing and exit 0, which is why
-      # pytest is installed above. python-suites.mjs sets all of this out at length.
+      # The Python suites, discovered rather than listed. scripts/python-suites.mjs declares the lane
+      # for every suite and refuses to run a tree it cannot account for; check-docs-drift.mjs makes
+      # the same comparison earlier. One process per suite (`python <file>`), because two suites tear
+      # down fixtures in `if __name__ == "__main__"`; the one suite declaring `runner: 'pytest'` has
+      # no `__main__` block and would assert nothing as a script.
       # =========================================================================================
 
-      # The `db` lane: suites needing the migrated Postgres above and no seed. Twenty-four of them,
-      # where this job used to run eleven -- the other thirteen were reachable only by somebody
-      # remembering to type `npm run test:db` on their own machine.
-      #
-      # THE SAME LANE `npm run test:db` RUNS, against the same image with the same bootstrap. That
-      # is what makes the local runner worth trusting: passing there now means passing here.
+      # The `db` lane: suites needing the migrated Postgres above and no seed. The same lane
+      # `npm run test:db` runs, against the same image with the same bootstrap.
       - name: Run Database & Edge Function Authorization Suites
         env:
           SUPABASE_DB_HOST: localhost
@@ -1512,40 +1089,20 @@ jobs:
           SUPABASE_DB_PASSWORD: postgres
         run: node scripts/run-python-suites.mjs --lane db
 
-      # The `unit` lane: no database, no broker, no stack. Twenty-two suites, where this job used to
-      # run nine.
-      #
-      # NOTHING IN THIS LANE MAY BE A SUITE THAT SKIPS ITSELF WITHOUT A STACK, and five candidates
-      # were kept out for exactly that -- test_enroll_gateway.py skips all fourteen of its checks,
-      # test_gateway_bundle.py all fifteen, test_historian_role_grants.py runs zero. A fully-skipped
-      # unittest run reports `OK (skipped=14)` and exits 0, so putting them here would have added
-      # five green steps asserting nothing. They are in the `stack` lane, in e2e-validation, where
-      # the thing they need exists. See the vacuous-green note in python-suites.mjs.
+      # The `unit` lane: no database, no broker, no stack. A suite that skips itself without a stack
+      # reports `OK (skipped=N)` and exits 0, so those are in the `stack` lane in e2e-validation.
       - name: Run Python Unit Suites
         run: node scripts/run-python-suites.mjs --lane unit
 
-      # The three suites under `scripts/lib/`, which no workflow called either (#147) -- the
-      # mosquitto credential merge, the orphan sweep's filter, and the service JWT. The merge and
-      # the filter are both things whose failure is silent and expensive: one loses a broker
-      # account, the other decides which accounts the sweep may rotate, and it is what keeps it
-      # from revoking `factoryplus_ingestion` and stopping the stack ingesting.
-      #
-      # Explicit file paths, not the directory: `npm run test:lib` carries a comment saying why.
+      # The three suites under `scripts/lib/`: the mosquitto credential merge, the orphan sweep's
+      # filter and the service JWT. Explicit file paths, not the directory (see `npm run test:lib`).
       - name: Run Node Library Suites
         run: npm run test:lib
 
   # =============================================================================================
-  # The in-cluster half of the two-target guarantee.
-  #
-  # RUNS ALONGSIDE e2e-validation, NEVER INSTEAD OF IT. Both targets must keep working, and
-  # `ingestion/validate.py` is the conformance check for either -- the same 20 checks against the
-  # same assertions. There is no way to automate "these two topologies describe the same system",
-  # and a check that claimed to would pass while they diverged; running the real suite against both
-  # is the substitute, and it is the only one that means anything.
-  #
-  # k3d, NOT kind: k3d is k3s in Docker, so Traefik, ServiceLB and the local-path provisioner all
-  # behave as they will on the confirmed target. kind would test a different ingress controller and
-  # a different storage provisioner than production uses, which is testing the wrong thing carefully.
+  # The in-cluster half of the two-target guarantee. Runs alongside e2e-validation, never instead
+  # of it: validate.py is the conformance check for either target. k3d, not kind, so Traefik,
+  # ServiceLB and local-path behave as they will on the target.
   # =============================================================================================
   k8s-validation:
     # Gated on the diff: eighteen of this workflow's twenty-two minutes are these two jobs,
@@ -1558,15 +1115,8 @@ jobs:
     # Sequential inside the job; the whole thing is bounded so a hung wait cannot burn an hour.
     timeout-minutes: 45
     env:
-      # Every object below is named "<RELEASE>-<thing>" by the chart's fullname helper.
-      #
-      # THAT HELPER COLLAPSES the usual "<release>-<chart>" prefix when the release name already
-      # contains the chart name. Because the release here IS "acs-cymru", the objects come out as
-      # "acs-cymru-db-init" -- with the chart name appearing ONCE, not twice. Assuming the doubled
-      # form is the mistake to make, and it fails late: the install succeeds and the first
-      # `kubectl logs` says NotFound.
-      #
-      # Declared once so a rename is one line, and so the rule is written where the names are used.
+      # Every object below is named "<RELEASE>-<thing>" by the chart's fullname helper, which
+      # collapses the "<release>-<chart>" prefix when the release already contains the chart name.
       RELEASE: acs-cymru
       NS: acs-cymru
     steps:
@@ -1578,26 +1128,11 @@ jobs:
         with:
           version: v3.16.3
 
-      # THIS JOB IS DISK-BOUND, and the failure does not look like a disk problem.
-      #
-      # A GitHub-hosted ubuntu runner starts with roughly 14 GB free on `/`, and this job needs the
-      # host Docker daemon to hold five freshly built images, the k3d node's containerd to hold a
-      # SECOND COPY of all five (`k3d image import` copies, it does not share a store), and then the
-      # dozen third-party images the pods pull -- supabase/postgres, timescaledb, studio, realtime,
-      # kong, grafana and the rest. That total does not fit.
-      #
-      # What happens when it does not fit is the expensive part. k3s's kubelet evicts on
-      # ephemeral-storage below ~3.8 GB, so pods are evicted, rescheduled onto the same single node,
-      # and evicted again -- a cascade that leaves `Evicted`, `ContainerStatusUnknown` and
-      # `Completed` scattered across every workload, replicas of things that have `replicas: 1`, and
-      # a `helm install --wait` that eventually reports `context deadline exceeded`. Nothing in that
-      # picture says "disk": it reads as a broken chart, and it took a full 18-minute run to
-      # diagnose.
-      #
-      # The runner ships ~25 GB of toolchains this repository does not use. Removing them costs
-      # seconds and is the difference between the cascade above and a clean install. `|| true` on
-      # each: the exact contents of the runner image change between releases, and a missing
-      # directory must not fail the job.
+      # This job is disk-bound and the failure does not look like it. The runner starts with ~14 GB
+      # free; five built images, a second copy in the k3d node's containerd, and a dozen pulled images
+      # do not fit. Below ~3.8 GB the kubelet evicts, and the cascade ends as `context deadline
+      # exceeded` on `helm install`. Removing unused toolchains costs seconds. `|| true` on each: the
+      # runner image changes between releases.
       - name: Reclaim Runner Disk Before Creating The Cluster
         run: |
           echo "--- before"
@@ -1618,11 +1153,8 @@ jobs:
           curl -sfL https://raw.githubusercontent.com/k3d-io/k3d/v5.7.4/install.sh | TAG=v5.7.4 bash
           k3d version
 
-      # Port 80 is mapped so Traefik is reachable from the runner, which is what lets the ingress be
-      # exercised through the real path rather than a port-forward straight to a Service.
-      #
-      # `--k3s-arg --disable=metrics-server` keeps the node lean; metrics-server is not used here and
-      # costs memory a 2-core runner would rather spend on Postgres.
+      # Port 80 is mapped so Traefik is reachable from the runner and the ingress is exercised through
+      # the real path. metrics-server is disabled to save memory on a 2-core runner.
       - name: Create k3d Cluster
         run: |
           k3d cluster create acs-cymru \
@@ -1633,19 +1165,10 @@ jobs:
           kubectl cluster-info
           kubectl get nodes -o wide
 
-      # The six images this repository builds. Built here and imported directly into the cluster's
-      # containerd, so nothing is pushed anywhere and no GHCR credential is needed -- release.yml
-      # owns publishing. `pullPolicy: IfNotPresent` is what makes the imported copy win.
-      #
-      # TAGGED UNDER THEIR PUBLISHED NAMES, AT THE CHART'S OWN appVersion. Both halves are load
-      # bearing. The chart resolves an empty `image.tag` to Chart.AppVersion, so a build tagged
-      # anything else is simply not the reference the pods ask for -- and the pods would then try
-      # to PULL the published image instead, which turns this job from "does the chart work" into
-      # "is GHCR reachable and is that tag public". A local build under the exact published
-      # reference is what keeps this job testing the chart and nothing else.
-      #
-      # Reading appVersion from Chart.yaml rather than repeating it means bumping the chart cannot
-      # leave this job building a tag nothing references.
+      # The images this repository builds, built here and imported into the cluster's containerd; no
+      # registry credential is needed. Tagged under their published names at the chart's appVersion,
+      # because the chart resolves an empty `image.tag` to Chart.AppVersion and anything else would
+      # make the pods pull the published image instead. appVersion is read from Chart.yaml.
       - name: Resolve The Chart's appVersion
         id: appversion
         run: |
@@ -1694,35 +1217,16 @@ jobs:
           IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
           V: ${{ steps.appversion.outputs.version }}
         run: |
-          # EVERY IMAGE THIS REPOSITORY BUILDS, not a subset.
-          #
-          # `pullPolicy: IfNotPresent` on a tag that is not in the registry falls through to a pull
-          # and ImagePullBackOffs; on a tag that IS there, it silently runs the LAST RELEASE instead
-          # of this working tree, and the job reports green for code it never executed. db-init and
-          # gateway-credential are the first case (neither has ever been published), i3x-service was
-          # quietly the second.
+          # Every image this repository builds. A tag absent from the registry ImagePullBackOffs; a tag
+          # present there silently runs the last release instead of this tree.
           IMAGE_NAMES="edge-runtime ingestion node-red i3x-service gateway-credential db-init frontend test-runner"
           REFS=""
           for n in $IMAGE_NAMES; do REFS="$REFS $IMG_NS/$n:$V"; done
 
-          # VERIFIED, NOT TRUSTED -- `k3d image import` reports success it did not achieve.
-          #
-          # It writes a tarball into the cluster image volume and `ctr import`s it inside the node. When
-          # the node cannot see that tarball the import fails PER NODE, and k3d prints the error, then
-          # prints "Successfully imported 8 image(s)", then exits 0:
-          #
-          #   ERRO failed to import images in node 'k3d-acs-cymru-server-0': ... exit code '1'
-          #   ctr: open /k3d/images/k3d-acs-cymru-images-<ts>.tar: no such file or directory
-          #   INFO Successfully imported 8 image(s) into 1 cluster(s)
-          #
-          # Seen on main at fc3ac34, on a tree byte-identical to one that had passed ten minutes earlier.
-          # The tell is DURATION: a real import of these eight takes minutes and adds ~10 GB to the disk;
-          # that one took eight seconds and added one. Because the next lines below `docker image rm` the
-          # host copies on the strength of that exit code, the only surviving copy was destroyed -- and the
-          # symptom arrived seventeen minutes later as `helm install` timing out, with ErrImagePull and a
-          # 403 from GHCR for images that have never been published there.
-          #
-          # So the exit code is not the check. The node's own image list is.
+          # Verified, not trusted: `k3d image import` can fail per node and still print "Successfully
+          # imported" and exit 0. The host copies are removed below on the strength of the result, so the
+          # node's own image list is the check.
+          # See docs/incidents.md -> "k3d image import reported success it did not achieve".
           verify_images_in_node() {
             present=$(docker exec k3d-acs-cymru-server-0 ctr -n k8s.io images ls -q 2>/dev/null || true)
             missing=""
@@ -1756,15 +1260,8 @@ jobs:
             sleep 10
           done
 
-          # `k3d image import` COPIES into the node's containerd; it does not share the host
-          # daemon's store. So after this line every one of those images exists twice on the same
-          # filesystem, and the host's copy is never read again -- the cluster is the only consumer
-          # from here on. Dropping it back is the largest single reclaim available, and it has to
-          # happen AFTER the import rather than instead of it.
-          #
-          # The builder cache goes too: it holds every intermediate layer of five multi-stage
-          # builds, which is comparable in size to the images themselves and is of no use once the
-          # job stops building.
+          # `k3d image import` copies into the node's containerd, so after it the host copy is never read
+          # again. Dropping it (and the builder cache) is the largest single reclaim, after the import.
           docker image rm -f \
             "$IMG_NS/edge-runtime:$V" "$IMG_NS/ingestion:$V" "$IMG_NS/node-red:$V" \
             "$IMG_NS/i3x-service:$V" "$IMG_NS/gateway-credential:$V" "$IMG_NS/db-init:$V" \
@@ -1777,39 +1274,18 @@ jobs:
       - name: Mirror Repository Config Into The Chart
         run: node scripts/sync-helm-chart-files.mjs --check
 
-      # DELIBERATELY NO `--wait` ON THE FIRST INSTALL. It deadlocks this chart, and the deadlock is
-      # structural rather than a timing fluke.
-      #
-      # Helm's install order is: create resources -> (if --wait) BLOCK until every workload is
-      # Ready -> run post-install hooks. The bootstrap here is post-install hooks: db-roles-init
-      # sets the passwords for `authenticator`, `supabase_auth_admin` and `supabase_storage_admin`,
-      # which do not exist until it runs. PostgREST, GoTrue, Realtime and storage-api each have an
-      # initContainer that waits for its own role to authenticate -- correctly, since PostgREST
-      # starting early caches an EMPTY schema and then 404s every table from a healthy-looking
-      # process.
-      #
-      # So --wait waits for pods that are waiting for the hooks that --wait will not run until the
-      # pods are ready. It ends as `INSTALLATION FAILED: context deadline exceeded` fifteen minutes
-      # later, with supabase-db healthy, no init-hook pods ever created, and the only real evidence
-      # being `password authentication failed` in the database log. Nothing in that names Helm.
-      #
-      # Hooks are still waited on: `helm install` blocks on hook completion regardless of --wait.
-      # Readiness is then asserted explicitly below, which is what --wait was there for -- and it
-      # is a better assertion anyway, because it runs AFTER the database is actually usable.
+      # No `--wait` on the install: it deadlocks this chart. Helm blocks on every workload being
+      # Ready before running post-install hooks, and the hooks (db-roles-init) create the roles the
+      # workloads' initContainers wait on. Hooks are still waited on regardless of --wait; readiness
+      # is asserted explicitly below, after the database is usable.
       - name: Install The Chart
         run: |
           set -eu
           kubectl create namespace $NS
 
-          # THE INGRESS ADDRESS, for the validate Job's hostAliases only.
-          #
-          # Check 7b signs in through the real OAuth chain and therefore follows BROWSER-FACING
-          # URLs -- api.<domain> and nodered.<domain> -- which is exactly what lets it catch a
-          # redirect_uri that disagrees with what a service advertises. Inside a pod those names
-          # resolve to 127.0.0.1 (the dev domain is 127.0.0.1.nip.io), which is the POD ITSELF, so
-          # the check failed as `Connection refused` against a completely healthy stack.
-          #
-          # Read from k3d's bundled Traefik, which exists before this install.
+          # The ingress address, for the validate Job's hostAliases only. Check 7b follows browser-facing
+          # URLs, which resolve to 127.0.0.1 inside a pod (the dev domain is 127.0.0.1.nip.io). Read from
+          # k3d's bundled Traefik.
           INGRESS_IP=$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}')
           echo "ingress ClusterIP: $INGRESS_IP"
 
@@ -1830,9 +1306,8 @@ jobs:
             kubectl -n $NS logs "job/acs-cymru-$job" | tail -20
           done
 
-      # What `--wait` used to cover, moved to where it can actually succeed. Every workload is
-      # checked, so a component left behind by the hooks fails HERE -- naming itself -- rather than
-      # surfacing later as an unexplained validate.py failure.
+      # Every workload is checked here, after the hooks, so a component left behind fails naming
+      # itself rather than as an unexplained validate.py failure.
       - name: Wait For Every Workload To Become Ready
         run: |
           set -eu
@@ -1843,49 +1318,24 @@ jobs:
             kubectl -n $NS rollout status "$w" --timeout=10m
           done
 
-      # ROLLED OUT IS NOT CONSUMING, and CI kept treating them as the same state (#47).
-      # `rollout status` returns when the container PROCESS starts; the daemon then connects to the
-      # broker and subscribes, and on a loaded runner that gap has been over two minutes -- most of
-      # it inside the init containers. validate.py published into it and reported ten conformance
-      # failures for a cause none of them named.
-      #
-      # NOT A READINESS PROBE, deliberately: apps/ingestion.yaml argues against one and is right --
-      # readiness would gate scraping, and "running but consuming nothing" is the diagnosis worth
-      # having. `ingestion-metrics` sets publishNotReadyAddresses: true for exactly that reason.
-      # The gate belongs in CI.
-      #
-      # SEQUENCE GAP warnings in the daemon's log during this wait are EXPECTED: the simulators
-      # published throughout its init wait and those messages are gone, so the first delivered
-      # message is a jump. That is #24's detection working, not a regression.
+      # Rolled out is not consuming: `rollout status` returns when the process starts, and the daemon
+      # then connects and subscribes, a gap that has exceeded two minutes on a loaded runner. Not a
+      # readiness probe (apps/ingestion.yaml argues against one); the gate belongs in CI. Sequence
+      # gap warnings during this wait are expected.
       - name: Wait For The Ingestion Daemon To Be Consuming
         run: WAIT_MODE=k8s sh scripts/wait-for-ingestion-consuming.sh
 
-      # M6. The cheap gate, FIRST. `public.telemetry` is a postgres_fdw projection, and a mistake in
-      # the foreign server -- most likely the port -- surfaces as a relation-level error from
-      # PostgREST, which reads as a schema fault. Without this, validate.py fails deep in its
-      # telemetry checks pointing at the wrong layer entirely.
+      # The cheap gate first. `public.telemetry` is a postgres_fdw projection, and a mistake in the
+      # foreign server surfaces as a relation-level error from PostgREST.
       - name: Helm Test — postgres_fdw Cross-Database Check
         run: |
           helm test $RELEASE --namespace $NS --timeout 5m
           kubectl -n $NS logs $RELEASE-test-fdw
 
-      # ---------------------------------------------------------------------------------------
-      # THE PROMOTION GATE FOR ENVOY ON KUBERNETES, and the reason it can run.
-      #
-      # The chart shipped Envoy disabled because the manual cluster proof could not reach the parts
-      # needing this project's own images: `db-init` and `gateway-credential` are unpublished GHCR
-      # tags, so a hand-installed cluster ran no migrations and deployed no edge functions, and the
-      # authenticated probe's markers cannot be satisfied against empty upstreams. That remainder
-      # was downstream of CI, not of the chart. This job BUILDS those images and imports
-      # them, so the gap closes here and nowhere else.
-      #
-      # THE SAME COMMAND THE COMPOSE JOB RUNS, deliberately. The script names no gateway concept, so
-      # identical output across both targets is the migration's evidence -- and now both targets are
-      # Envoy, which is what makes a difference between them meaningful rather than expected.
-      #
-      # THE KEY COMES FROM THE CLUSTER'S SECRET, not from .env. Those are the same demo JWTs today,
-      # and reading .env would still be wrong: it would pass on a cluster installed with different
-      # credentials, which is the one condition this check exists to catch.
+      # The gateway surface against the live Envoy in the cluster. The same command the Compose job
+      # runs; the script names no gateway concept, so identical output across both targets is the
+      # evidence. The key comes from the cluster's Secret, not from .env, so a cluster installed with
+      # different credentials fails.
       - name: Verify The Live Gateway Surface — Envoy, In-Cluster
         run: |
           set -eu
@@ -1921,10 +1371,8 @@ jobs:
         run: |
           set -eu
           JOB=job/$RELEASE-e2e-validate
-          # POLLED RATHER THAN `kubectl wait --for=condition=complete`, which returns immediately on
-          # an already-failed Job but otherwise blocks for the full timeout waiting for a condition
-          # that can never arrive -- so a genuine failure is reported as a 20-minute timeout, blaming
-          # the wait instead of the suite. Both terminal conditions are checked each pass.
+          # Polled rather than `kubectl wait --for=condition=complete`, which blocks for the full timeout
+          # on a Job that has failed. Both terminal conditions are checked each pass.
           deadline=$(( $(date +%s) + 1200 ))
           while :; do
             if kubectl -n $NS get "$JOB" -o jsonpath='{.status.succeeded}' 2>/dev/null | grep -q 1; then
@@ -1940,20 +1388,10 @@ jobs:
           echo "validate.py: $STATUS"
           [ "$STATUS" = succeeded ]
 
-      # Ordered after validate.py by an initContainer inside the Job itself, not by this step's
-      # position -- so the ordering holds however the Jobs are triggered.
-      #
-      # THE REASON FOR THE ORDERING CHANGED, and the old one was never true. It used to read that
-      # validate.py "approves Simulated_CNC_01 out of quarantine and records its birth parameters".
-      # It does not and never did: validate.py seeds its own gateway at a pinned UUID and creates
-      # its own VALIDATE_* devices at runtime, and touches the demo device nowhere.
-      #
-      # THE AAS SUITE NOW DOES THE SAME. Its subject used to be seeded outright --
-      # 0002 registered Sim_CNC_Mill_01 and 0020 gave it a schema and a nameplate -- which made a
-      # CONFORMANCE suite depend on DEMO DATA the seed no longer creates. It provisions its own through
-      # test-harness/aas_fixture.py and tears it down afterwards, so it has no data dependency on the
-      # seed OR on validate.py. What remains is the reason the initContainer itself gives: do not
-      # run a conformance suite against a stack whose conformance run did not pass.
+      # Ordered after validate.py by an initContainer inside the Job itself. The AAS suite provisions
+      # its own subject (test-harness/aas_fixture.py), so the only dependency is the one the
+      # initContainer states: do not run a conformance suite against a stack whose conformance run
+      # did not pass.
       - name: In-Cluster Conformance — AAS V3 Export
         run: |
           set -eu
@@ -1974,13 +1412,8 @@ jobs:
           echo "aas-export: $STATUS"
           [ "$STATUS" = succeeded ]
 
-          # A GREEN JOB IS NOT ENOUGH HERE, and this is the specific trap. test_aas_export.py guards
-          # its live checks with @skipUnless(LIVE) so the same file can run in the no-stack CI job --
-          # which means against an unreachable or unprovisioned stack it skips 47 of 58 tests, prints
-          # "OK", and exits ZERO. The Job succeeds, `.status.succeeded` is 1, and CI would report a
-          # pass having verified almost nothing.
-          #
-          # The suite announces the skip on stderr, so assert its ABSENCE.
+          # A green Job is not enough: test_aas_export.py guards its live checks with @skipUnless(LIVE),
+          # so against an unprovisioned stack it skips 47 of 58 and exits 0. Assert the skip's absence.
           if grep -q 'live checks skipped' /tmp/aas.log; then
             echo "::error::the AAS suite SKIPPED its live checks -- it verified the offline parity checks only."
             echo "::error::The suite provisions its own subject through test-harness/aas_fixture.py, so this means"
@@ -1990,10 +1423,8 @@ jobs:
           fi
           echo "AAS live checks ran (not skipped)."
 
-      # THROUGH THE INGRESS, not a port-forward to Kong. On Kubernetes the request crosses Traefik
-      # AND carries the Realtime tenant hostname (§3.4); a port-forward straight to the Service would
-      # skip half of what is being tested. Same 101-status assertion the Compose job makes, for the
-      # same reason: a healthy container behind a misconfigured gateway passes every other check.
+      # Through the ingress, not a port-forward: on Kubernetes the request crosses Traefik and
+      # carries the Realtime tenant hostname. Same 101-status assertion the Compose job makes.
       - name: Verify Realtime WebSocket Upgrade Through The Ingress
         run: |
           set -eu
@@ -2040,10 +1471,8 @@ jobs:
       - name: Diagnostics On Failure
         if: failure()
         run: |
-          # DISK FIRST, because it is the failure that disguises itself as every other failure.
-          # Ephemeral-storage eviction leaves `Evicted`, `ContainerStatusUnknown` and `Completed`
-          # across unrelated workloads and ends as `context deadline exceeded`, which reads as a
-          # broken chart. `NodeHasDiskPressure` in the node conditions settles it in one line.
+          # Disk first, because ephemeral-storage eviction disguises itself as every other failure.
+          # `NodeHasDiskPressure` in the node conditions settles it.
           echo "=== disk and node pressure"
           df -h / | tail -1 || true
           kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.conditions[*]}  {.type}={.status} {.message}{"\n"}{end}{end}' || true
@@ -2059,26 +1488,14 @@ jobs:
             echo "=== $p"; kubectl -n $NS logs "$p" --all-containers --tail 40 || true
           done
 
-          # THE INGESTION DAEMON GETS A LONGER TAIL THAN THE REST, and 40 lines is why this step
-          # could not answer the question it was reached for. validate.py's conformance suite
-          # publishes roughly forty messages and the daemon logs several lines per message, so by
-          # the time the suite fails its first check the evidence for that check has scrolled off.
-          #
-          # That is not a hypothetical cost. `❌ 1. SUPABASE QUARANTINE FAIL` was investigated with
-          # this output and the absence of a `Processing DBIRTH` line for the device read as "the
-          # message never arrived" -- when it only meant "older than forty lines". A truncated log
-          # that looks complete is worse than no log, because it supports a confident wrong answer.
+          # The ingestion daemon gets a longer tail: validate.py publishes ~40 messages and the daemon
+          # logs several lines per message, so 40 lines scrolls the evidence off.
           echo "=== ingestion daemon, extended"
           kubectl -n $NS logs deploy/ingestion -c ingestion --tail 400 || true
 
-          # THE DATABASE IS DELIBERATELY NOT QUERIED HERE, and the reason is worth recording so the
-          # next person does not add it. validate.py cleans up its own rows in a `finally`, so it
-          # runs ON FAILURE TOO -- the k3d log shows "Cleaning up validation data... Cleanup
-          # complete." immediately after "END-TO-END VALIDATION FAILED". By the time this step is
-          # reached the evidence is gone, and a `SELECT` here would return zero rows and be read as
-          # "the row was never created" no matter which of the three possible bugs it was.
-          #
-          # The suite itself reports what it found instead, at the moment it looked. See check 1.
+          # The database is not queried here: validate.py cleans up its own rows in a `finally`, so by
+          # this step the evidence is gone and a SELECT would read as "never created". The suite reports
+          # what it found at the moment it looked.
 
       - name: Tear Down
         if: always()
@@ -2093,14 +1510,9 @@ jobs:
     name: End-to-End Unified Stack Ingestion Validation
     runs-on: ubuntu-latest
     env:
-      # A COMMIT SHA, and it has to be. The obvious pin -- the `1.0.0` tag -- does not work: that
-      # tag predates the conformance suite, so its tree has no `conformance-tests/` at all and the
-      # checkout succeeds while the runner then reports a missing file. The suite lives only on
-      # `main`, so the choice is an unpinned branch or a SHA, and an unpinned branch would let
-      # someone else's commit decide whether this pipeline is green.
-      #
-      # Bumping this is a deliberate act: read the suite's CHANGELOG first, because a new MUST test
-      # is a real finding about this server, not a CI problem to work around.
+      # A commit SHA: the `1.0.0` tag predates the conformance suite, and an unpinned branch would let
+      # someone else's commit decide whether this pipeline is green. Read the suite's CHANGELOG before
+      # bumping: a new MUST test is a real finding about this server.
       I3X_SUITE_REF: "5010274f4952acb1c23dc77b32bd44eed16f0c2b"
     steps:
       - name: Checkout Code
@@ -2128,61 +1540,23 @@ jobs:
           protoc --python_out=. sparkplug_b.proto
           cp sparkplug_b_pb2.py ingestion/
 
-      # `--demo` rather than `cp`, and CI is the one caller entitled to it. A pipeline needs the
-      # same credentials on every run — `values-dev.yaml` carries the same set for the same reason
-      # — but going through the script means "use the published demo keys" is a named request that
-      # prints its own warning, instead of a shell command that quietly bypasses generation.
-      # Developers get freshly minted credentials from a bare `npm run setup`.
+      # `--demo` rather than `cp`: "use the published demo keys" is a named request that prints its
+      # own warning. Developers get freshly minted credentials from a bare `npm run setup`.
       - name: Prepare Environment File
         run: |
           node scripts/setup.mjs --demo
 
-          # THE ENROLMENT ADDRESS, WHICH `--demo` LEAVES EMPTY AND THE STACK CANNOT INVENT.
-          #
-          # `.env.example` ships `SUPABASE_PUBLIC_URL=` blank on purpose: it is the address a
-          # PHYSICAL appliance dials, which only a real deployment knows. gateway-bundle checks it
-          # before minting anything and answers 503 without it, so test_gateway_bundle.py and
-          # test_enroll_gateway.py could assert nothing at all here -- 27 checks reporting a
-          # deployment fault rather than the role gating, ZIP integrity and token validity they
-          # exist for.
-          #
-          # IT MUST NOT BE LOOPBACK. The function rejects `127.0.0.1`, `localhost`, `::1` and
-          # `supabase-kong` by pattern, and is right to: a bundle carrying one of those enrols
-          # nothing, failing on the appliance at its first fetch with a plausible-looking URL. So
-          # setting it to the address the tests themselves use would be refused, and correctly.
-          #
-          # NOTHING DIALS IT. Neither suite reads this variable or fetches this host; the bundle
-          # merely has to be minted, which the guard is what prevents. A name is therefore honest
-          # here in a way an invented IP would not be -- it says "a deployment would put its own
-          # address here" rather than pretending a runner is a shopfloor. It goes in .env rather
-          # than the test step's shell because the EDGE FUNCTION reads it, from the container
-          # environment compose builds at launch -- exporting it beside the suites changes nothing
-          # the function can see.
-          # REPLACED IN PLACE, NOT APPENDED. `.env.example` already carries the key blank, so
-          # appending would leave the file defining it twice -- which compose resolves by taking
-          # the last, and check-env-drift.mjs compares key SETS against the template. A duplicate
-          # is a working stack with a file that reads like a mistake.
+          # SUPABASE_PUBLIC_URL: the address a physical appliance dials, blank in .env.example. The
+          # gateway-bundle function refuses to mint without it and refuses loopback and `supabase-kong`
+          # by pattern. Nothing dials it here; a name is honest where an invented IP would not be. It
+          # goes in .env because the edge function reads it from the container environment. Replaced in
+          # place: the key is already present, and check-env-drift.mjs compares key sets.
           sed -i 's|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=http://api.acs-cymru.test:54321|' .env
 
-          # THE TWO ENROLMENT VALUES, for the same reason and with the same shape of guard.
-          #
-          # enroll-gateway checks its configuration BEFORE touching the one-shot token, so a
-          # misconfigured deployment cannot burn an appliance's bundle discovering it cannot
-          # finish. Without these it answers 503 naming them, and test_enroll_gateway.py's 14
-          # checks -- the token race, the replay rejections, the 503 rollback -- all report that
-          # instead of what they exist for.
-          #
-          # MQTT_PUBLIC_HOST MUST NOT BE `mosquitto`, `localhost` OR `127.0.0.1`, refused by name:
-          # its default resolves on the container network and nowhere a gateway lives, so an unset
-          # value yields a bundle that enrols perfectly and then connects to nothing. It is also
-          # folded into the broker certificate's SAN -- and safely, because mosquitto-tls-init's
-          # BASE_SANS already carry `mosquitto`, `localhost` and `127.0.0.1` unconditionally, so
-          # this ADDS a name and takes none away. Nothing in the stack starts verifying a different
-          # certificate.
-          #
-          # THE TOKEN IS GENERATED, NOT A LITERAL. The credential service refuses to start on
-          # anything shorter than 32 characters, and a fixed string in a workflow is a credential
-          # in the repository even when the stack it unlocks is thrown away an hour later.
+          # The two enrolment values enroll-gateway checks before touching the one-shot token.
+          # MQTT_PUBLIC_HOST must not be `mosquitto`, `localhost` or `127.0.0.1` (refused by name); it is
+          # added to the broker certificate's SAN, alongside the base names mosquitto-tls-init always
+          # carries. The token is generated: the credential service refuses anything under 32 characters.
           sed -i 's|^MQTT_PUBLIC_HOST=.*|MQTT_PUBLIC_HOST=broker.acs-cymru.test|' .env
           sed -i "s|^MQTT_CREDENTIAL_SERVICE_TOKEN=.*|MQTT_CREDENTIAL_SERVICE_TOKEN=$(openssl rand -hex 32)|" .env
 
@@ -2191,21 +1565,8 @@ jobs:
           # even on a throwaway stack, and workflow logs are readable by anyone who can see the run.
           grep -E '^(SUPABASE_PUBLIC_URL|MQTT_PUBLIC_HOST)=' .env
 
-      # LOGS ON FAILURE, BECAUSE `up` DOES NOT PRINT THEM (#134). A one-shot dependency declared
-      # `service_completed_successfully` failing takes the whole `up` down, and compose reports
-      # only its own exit 1 and the service's name:
-      #
-      #     Container acs-cymru_supabase_db_roles_init  Started
-      #     Container acs-cymru_supabase_db_roles_init  Waiting
-      #     service "supabase-db-roles-init" didn't complete successfully: exit 1
-      #
-      # The container's own stderr -- which says whether its preflight failed or one of its
-      # ALTER USER statements did -- is discarded, so a one-off has to be inferred from the
-      # compose file rather than read. That is exactly what happened on run 33515575981, and it
-      # is why that issue is filed as a lead rather than a diagnosis.
-      #
-      # The same idiom as the Realtime upgrade check further down: fail loudly, and print what the
-      # next person needs before exiting.
+      # Logs on failure, because `up` does not print them: a one-shot dependency failing takes the
+      # whole `up` down and compose reports only the service's name and exit 1.
       - name: Launch Unified Docker Compose Stack
         run: |
           if docker compose up -d; then
@@ -2220,15 +1581,9 @@ jobs:
           echo "--- container states ---"
           docker compose ps -a || true
 
-          # EVERY SERVICE, NOT JUST THE FAILED ONE, and deliberately not clever about it. Selecting
-          # the failed containers means parsing `docker compose ps --format json`, whose shape
-          # changed at v2.21 (JSON lines, a single array before it) -- a branch that runs only when
-          # the stack is already broken and cannot be exercised until then. A diagnostic that
-          # itself needs debugging at the moment it is finally read is worth less than a verbose
-          # one, so this dumps the lot and lets the reader use the table above to pick.
-          #
-          # `|| true` on each: a step that aborts before printing what it came to print is the
-          # failure this whole block exists to correct.
+          # Every service, not just the failed one: selecting them means parsing `docker compose ps
+          # --format json`, whose shape changed at v2.21, in a branch that only runs when the stack is
+          # already broken. `|| true` on each so the step prints what it came to print.
           echo "--- logs (all services, newest 150 lines each) ---"
           docker compose logs --no-color --tail 150 || true
 
@@ -2247,10 +1602,8 @@ jobs:
           '
           echo "All core services report healthy!"
 
-      # Storage boots after supabase-db-init and runs its OWN migrations against the `storage`
-      # schema, then supabase-storage-init creates the asset-3d-models bucket through the Storage
-      # REST API. The AAS export suite uploads a real 3D model, so it needs BOTH to have finished
-      # -- polled on the bucket itself rather than on the container's health, because a healthy
+      # Storage runs its own migrations after supabase-db-init, then supabase-storage-init creates
+      # the asset-3d-models bucket through the REST API. Polled on the bucket itself, since a healthy
       # storage-api with no bucket yet would still fail the upload.
       - name: Wait for Storage and the 3D model bucket
         run: |
@@ -2265,14 +1618,10 @@ jobs:
           '
           echo "Storage is up and the asset-3d-models bucket exists!"
 
-      # Realtime boots slower than the core services -- it applies its own _realtime
-      # migrations and seeds the self-hosted tenant first. Polled separately so a slow
-      # boot cannot race the validation step, and on its own timeout so a Realtime
-      # failure is reported as such rather than as a generic stack timeout.
-      # Probed inside the container, not through Kong: the /realtime/v1/ route rewrites
-      # to /socket/, so the tenant API is deliberately not routable from outside. The
-      # tenant is `realtime-dev` (SEED_SELF_HOST's own name, not TENANT_NAME) and the
-      # endpoint requires a bearer token -- an unauthenticated probe returns 403 forever.
+      # Realtime boots slower than the core services (its own migrations, then the tenant seed).
+      # Polled separately on its own timeout. Probed inside the container: the /realtime/v1/ route
+      # rewrites to /socket/, so the tenant API is not routable from outside. The tenant is
+      # `realtime-dev` and the endpoint requires a bearer token.
       - name: Wait for Supabase Realtime
         run: |
           set -a && . ./.env && set +a
@@ -2286,24 +1635,16 @@ jobs:
           '
           echo "Supabase Realtime reports healthy!"
 
-      # The WebSocket route is what the dashboard actually uses; a healthy container
-      # behind a misconfigured Kong route would otherwise pass CI and fail in the browser.
-      # Kong's global cors plugin runs on the upgrade request, so this is the guard against
-      # it rejecting the handshake.
-      - name: Verify Realtime WebSocket Upgrade Through Kong
+      # The WebSocket route is what the dashboard uses; a healthy container behind a misconfigured
+      # gateway route would otherwise pass CI and fail in the browser. The gateway's CORS handling
+      # runs on the upgrade request.
+      - name: Verify Realtime WebSocket Upgrade Through The Gateway
         run: |
           set -a && . ./.env && set +a
 
-          # A successful upgrade leaves curl holding an open WebSocket that never sends a
-          # body, so curl blocks until Kong's 60s proxy_read_timeout and then exits non-zero
-          # ("empty reply from server", exit 52) on some builds and 0 on others -- the
-          # handshake itself succeeded either way. Asserting on curl's exit code or on
-          # %{http_code} therefore tests the curl build, not the route.
-          #
-          # So: bound the request with --max-time, and assert on the status line in the
-          # response headers. `|| true` keeps a non-zero curl exit from aborting the step
-          # under `bash -e` BEFORE the diagnostics below can run -- which is exactly what
-          # hid the cause the first time this failed.
+          # A successful upgrade leaves curl holding an open WebSocket, so curl's exit code and
+          # %{http_code} test the curl build, not the route. Bound the request with --max-time and assert
+          # on the status line. `|| true` keeps `bash -e` from aborting before the diagnostics run.
           ERR="$(mktemp)"
           RESP=$(curl -sS -i --max-time 5 --http1.1 \
             -H "Connection: Upgrade" -H "Upgrade: websocket" \
@@ -2318,41 +1659,15 @@ jobs:
             docker compose logs --tail 50 supabase-realtime supabase-envoy
             exit 1
           fi
-          echo "Realtime completed the WebSocket upgrade through Kong (101 Switching Protocols)."
+          echo "Realtime completed the WebSocket upgrade through the gateway (101 Switching Protocols)."
 
-      # validate.py reads config via os.getenv, and Python does not load .env by
-      # itself. Without sourcing it, SUPABASE_SERVICE_ROLE_KEY is empty, the Supabase
-      # client fails to initialise ("supabase_key is required"), the registered test
-      # device is never seeded, and its telemetry is correctly dropped as unregistered -
-      # failing check 3 while check 4 passes vacuously.
-      #
-      # But .env describes the *inside* of the compose network, and this script runs on
-      # the runner host. DB_HOST=timescaledb / MQTT_HOST=mosquitto are Docker service
-      # names that only resolve between containers, so sourcing them wholesale made
-      # every connection die with "Temporary failure in name resolution". Take the
-      # credentials from .env, then point the topology at the published ports.
-      #
-      # MQTT_VALIDATOR_USER/MQTT_VALIDATOR_PASSWORD MUST REACH THE SCRIPT, and until 2026-08 the
-      # fact that they did not was hidden by a coincidence. validate.py defaulted its password to
-      # the literal `acscymru123`; this job runs `setup.mjs --demo`, which copies .env.example
-      # VERBATIM, and .env.example sets MQTT_VALIDATOR_PASSWORD to exactly that string. So the
-      # default matched the account and CI went green -- while a developer running a plain
-      # `npm run setup`, which mints a random password per principal, got a broker rejection and
-      # nine failures about telemetry, aliases and rebirth that named nothing relevant.
-      #
-      # validate.py now reads the MQTT_VALIDATOR_* names directly and refuses to start without
-      # them, so this `. ./.env` is load-bearing rather than incidental. It is also why the suite
-      # is now WEAKER in CI than locally in one narrow sense: --demo's published credentials can
-      # never diverge from the account, so only a real setup exercises that path.
-      # THE SAME GATE AS THE k3d JOB, and applied here rather than exempted (#47). Compose has the
-      # gap in principle: `docker compose up --wait` returns on health, and the ingestion daemon
-      # carries no healthcheck for the reason its Kubernetes manifest gives about readiness. In
-      # practice this job has not flaked, because the runner brings the stack up and the daemon
-      # subscribes while later steps are still running -- but "has not happened yet" is the same
-      # thing every timing bug is true of until the day it is not.
-      #
-      # It costs nothing when the daemon is already consuming: the endpoint answers on the first
-      # poll and the step exits in under a second.
+      # validate.py reads config via os.getenv. `.env` describes the inside of the compose network,
+      # so the credentials are taken from it and the topology is pointed at the published ports.
+      # MQTT_VALIDATOR_USER/MQTT_VALIDATOR_PASSWORD must reach the script: it refuses to start
+      # without them. See docs/incidents.md -> "The validator's default password matched the demo
+      # credential".
+      # The same consuming gate as the k3d job: `docker compose up --wait` returns on health, and the
+      # ingestion daemon carries no healthcheck. Costs nothing when the daemon is already consuming.
       - name: Wait For The Ingestion Daemon To Be Consuming
         run: WAIT_MODE=compose sh scripts/wait-for-ingestion-consuming.sh
 
@@ -2366,82 +1681,32 @@ jobs:
           export SUPABASE_URL=http://127.0.0.1:54321  # supabase-kong 54321:8000
           python ingestion/validate.py
 
-      # ---------------------------------------------------------------------------------------
-      # THE MIGRATION MODEL'S CENTRAL INVARIANT, CHECKED RATHER THAN REVIEWED.
-      #
-      # There is no migrations ledger: db-init replays EVERY file on EVERY boot, so "a second run
-      # must match no rows" is the property the whole schema rests on. Until this step, it was
-      # upheld by review and by self-checks authors remembered to write, and this job booted the
-      # stack exactly once -- so nothing ever ran the chain twice and compared.
-      #
-      # Three failures the repository records finding the hard way would each have been a one-line
-      # assertion here: 0040's "provision, then restart" landmine, the 0033 time-window false
-      # positive, and 0037/0038's self-checks appending nine audit rows per boot to a table that
-      # cannot be pruned.
-      #
-      # RUNS AFTER validate.py, DELIBERATELY. The stack is fully exercised by then -- devices
-      # discovered, telemetry flowing, audit rows written by real activity -- so the replay happens
-      # against a database in a realistic state rather than a freshly seeded one. A guard that only
-      # ever sees an empty stack is not testing replay, it is testing install.
-      #
-      # The script asserts only what a migration can move (schema digest, the 'migration' audit
-      # lane) and treats a FALL in operator row counts as failure while ignoring a rise, so
-      # concurrent daemon and simulator writes cannot make it flaky.
-      # ---------------------------------------------------------------------------------------
-      # DID THE CHAIN FINISH? There is no applied-migrations ledger, and `docker compose up -d`
-      # reports db-init's exit code exactly once. An abort part-way leaves the stack RUNNING on a
-      # partially-migrated database -- and because 0001 drops the whole telemetry read surface
-      # with `DROP SERVER ... CASCADE` before later files put it back, "partially migrated" can
-      # mean "the views the dashboard queries do not exist".
-      #
-      # Observed on this stack (issue #40): a deadlock at 0023 aborted the chain, 0027 never ran,
-      # and Grafana reported "Database Connection OK" while every data-lifecycle panel failed.
+      # The migration model's central invariant, checked: there is no migrations ledger, db-init
+      # replays every file on every boot, so a second run must match no rows. Runs after validate.py
+      # so the replay meets a database in a realistic state. The script asserts what a migration can
+      # move (schema digest, the 'migration' audit lane) and treats a fall in operator row counts as
+      # failure while ignoring a rise, so concurrent writes cannot make it flaky.
+      # Did the chain finish? An abort part-way leaves the stack running on a partially migrated
+      # database, and 0001 drops the telemetry read surface before later files put it back.
       - name: Migration Chain Completed
         run: node scripts/check-schema-surface.mjs
 
       - name: Migration Chain Replays Cleanly
         run: node scripts/check-migration-idempotency.mjs
 
-      # ---------------------------------------------------------------------------------------
-      # The gateway's POSTURE, against the running gateway rather than against its config file.
-      #
-      # THE STATIC CHECK IN THE LINT JOB IS NOT THIS. That one parses kong.yml and asserts its
-      # shape, which is exactly right while Kong is the gateway and says nothing at all once it
-      # is not -- Envoy's configuration is lds.yaml and cds.yaml. This mode probes each route
-      # unauthenticated and asserts only what is observable: a gated route must be refused before
-      # its upstream sees it, an open one must get through.
-      #
-      # It is here rather than in the lint job because it needs a stack, and it runs AFTER
-      # validate.py deliberately: validate.py asserts that the intended surface behaves, this
-      # asserts that the surface is still the intended one. A run where both pass is the
-      # before-and-after evidence a gateway change is steered by.
-      # BOTH PASSES. The unauthenticated one sends no key, so it cannot see what the gateway does
-      # WITH one -- and that is not hypothetical: the first Envoy translation passed every
-      # unauthenticated assertion while forwarding the apikey out of the query string to PostgREST,
-      # which read it as a column filter and answered 400 where Kong answered 200. --authenticated
-      # is what makes this a promotion gate rather than a comparison.
+      # The gateway's posture against the running gateway, not its config file: each route is probed
+      # unauthenticated and a gated route must be refused before its upstream sees it. Runs after
+      # validate.py: that asserts the intended surface behaves, this that the surface is still the
+      # intended one. Both passes: --authenticated is what catches a gateway that forwards the apikey
+      # out of the query string to PostgREST.
       - name: Verify The Live Gateway Surface
         run: |
           set -a && . ./.env && set +a
           node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:54321
 
-      # ---------------------------------------------------------------------------------------
-      # Every Prometheus target is actually UP.
-      #
-      # THE SAME FAILURE THE SERVICEMONITOR GUARD EXISTS FOR, one target lower. A scrape config
-      # naming an endpoint that serves nothing does not fail: Prometheus lists the target as DOWN,
-      # the dashboards built on it render empty panels, and someone concludes the component is
-      # idle. That is a monitoring stack lying about the thing it was installed to observe, which
-      # is worse than not monitoring it at all.
-      #
-      # It would have caught a real one: `kong` serves metrics only when the `prometheus` plugin
-      # AND `KONG_STATUS_LISTEN` are both set. With the plugin alone there is no endpoint, and
-      # nothing anywhere says so.
-      #
-      # Run after validate.py so the daemon has consumed traffic and its counters are non-empty --
-      # a target that is up but serving nothing is the next failure along, and the assertion on
-      # `acs_ingestion_messages_total` below is what separates them.
-      # ---------------------------------------------------------------------------------------
+      # Every Prometheus target is up. A scrape config naming an endpoint that serves nothing does
+      # not fail; the dashboards render empty. Run after validate.py so the daemon's counters are
+      # non-empty and "up but serving nothing" is separable.
       - name: Verify Every Prometheus Target Is Up
         run: |
           set -euo pipefail
@@ -2471,22 +1736,8 @@ jobs:
                   bad.append(f"{job} ({t['scrapeUrl']}): {t['health']} -- {t.get('lastError') or 'no error reported'}")
               else:
                   print(f"  ok  {job} -> {t['scrapeUrl']}")
-          # Named explicitly rather than counted: a config that silently lost a job would still
-          # satisfy "every target listed is up", because the missing one is not listed.
-          #
-          # THE LIST IS THE WHOLE OF prometheus.yml, AND IT IS CHECKED BOTH WAYS. Naming only some
-          # of the jobs left the same hole the explicit list exists to close, one job along:
-          # `supabase-rest` was added by "scrape PostgREST's own metrics" and never added here, so
-          # losing it would have gone unreported exactly as losing an unnamed job always would.
-          # Asserting equality means a job REMOVED from prometheus.yml fails here, and so does one
-          # ADDED without being declared here -- which is the only way this list stays true.
-          #
-          # `envoy` used to be `kong`. Envoy replaced Kong as the Compose gateway in
-          # "feat(gateway): Envoy is the gateway on Compose; Kong retired", which renamed the scrape
-          # job; this assertion kept naming `kong` and did not fail, because the step never ran --
-          # `Migration Chain Replays Cleanly` ahead of it had been red since before that commit
-          # (#117). A guard behind a failing step is not a guard. Kubernetes still fronts with Kong,
-          # but this job is the Compose stack and reads Compose's prometheus.yml.
+          # The list is the whole of prometheus.yml, checked both ways: a job removed from the file fails
+          # here, and so does one added without being declared here.
           expected = {'ingestion', 'node', 'envoy', 'supabase-rest', 'grafana', 'prometheus'}
           jobs = {t['labels'].get('job') for t in targets}
           for want in sorted(expected - jobs):
@@ -2512,41 +1763,14 @@ jobs:
             exit 1
           }
 
-      # ---------------------------------------------------------------------------------------
-      # Enrolment-token secrecy, which can only be checked WHERE THE SEED EXISTS.
-      #
-      # This suite asserts that the raw token is never stored, that RLS is on with no policies, and
-      # that not even an Administrator can SELECT claim material. Every one of those assertions is
-      # made AS a seeded demo account, so it cannot run in the migrations-only job -- that one
-      # deliberately does not apply seed.sql, and the suite skips itself there.
-      #
-      # `REQUIRE_SEEDED_ACCOUNTS` IS WHAT MAKES RUNNING IT HERE WORTH ANYTHING. A fully-skipped
-      # unittest run reports `OK (skipped=6)` and exits 0, so without the flag a stack that had
-      # lost its seed would give this step a green tick while checking nothing -- on the suite
-      # covering a secrecy boundary, where "not checked" and "not broken" look identical from
-      # outside. The flag turns the absence into a failure, because here the seed is guaranteed.
-      # ---------------------------------------------------------------------------------------
+      # Enrolment-token secrecy can only be checked where the seed exists: every assertion is made as
+      # a seeded demo account. REQUIRE_SEEDED_ACCOUNTS turns a fully skipped run into a failure, since
+      # here the seed is guaranteed.
 
-      # ---------------------------------------------------------------------------------------
-      # i3X 1.0 conformance, run by CESMII'S OWN TEST SUITE rather than by assertions of ours.
-      #
-      # THIS IS THE SAME DISCIPLINE AS VALIDATING AAS AGAINST THE REAL IDTA SCHEMA. Hand-written
-      # structural tests passed three genuine AAS metamodel violations, all of the same shape, and
-      # the only thing that caught them was the published schema. A conformance claim checked
-      # against our own reading of the spec is worth very little; checked against the authors'
-      # executable definition of it, it is worth a great deal. The suite found ELEVEN real MUST
-      # failures on this server's first run -- including a request-body handling bug that corrupted
-      # the NEXT request on a keep-alive connection, which no test written from the same
-      # misunderstanding would ever have looked for.
-      #
-      # Pinned to a commit, not to `main`: an upstream change to the suite must be a deliberate
-      # update here, or a green pipeline could turn red for reasons that have nothing to do with
-      # this repository.
-      #
-      # The expected verdict is **1.0 Compatible**, not Full Compliance, and that is the design:
-      # Update is a MAY, `GET /info` declares `update.current: false`, and `PUT /objects/value`
-      # answers 405. "Optional features were omitted" is the suite agreeing with us.
-      # ---------------------------------------------------------------------------------------
+      # i3X 1.0 conformance, run by CESMII's own suite rather than by assertions of ours, for the
+      # same reason the AAS export is validated against the real IDTA schema. Pinned to a commit. The
+      # expected verdict is 1.0 Compatible, not Full Compliance: Update is a MAY and this server
+      # declares `update.current: false`.
       - name: i3X Conformance — CESMII Official Suite
         run: |
           set -eu
@@ -2564,10 +1788,8 @@ jobs:
           node bin/i3x-test.js run "http://127.0.0.1:${I3X_PORT:-8090}/v1" --token "$TOKEN" \
             | tee /tmp/i3x-conformance.txt
 
-          # ASSERT ON THE VERDICT, not on the exit code. The suite exits non-zero for a failed MUST,
-          # but "Not Compliant" and "could not reach the server" are different problems and only one
-          # of them is ours -- so the verdict line is read explicitly and an absent one is a failure
-          # in its own right.
+          # Assert on the verdict, not the exit code: "Not Compliant" and "could not reach the server"
+          # are different problems, and an absent verdict line is a failure in its own right.
           if grep -q "Result: Full 1.0 Compliance" /tmp/i3x-conformance.txt; then
             echo "i3X: Full 1.0 Compliance"
           elif grep -q "Result: 1.0 Compatible" /tmp/i3x-conformance.txt; then
@@ -2578,70 +1800,29 @@ jobs:
             exit 1
           fi
 
-
       # =========================================================================================
-      # THE `stack` LANE -- every suite that needs a running stack, discovered rather than listed.
+      # The `stack` lane: every suite that needs a running stack, discovered rather than listed.
+      # These cannot go in the no-stack job: without a stack they skip every check and exit 0.
+      # Alphabetical by path is safe: test_enroll_gateway.py stops the credential container and
+      # restarts it in tearDown, and `gateway-credential/` sorts before `supabase/`.
       #
-      # This step used to be two, naming test_aas_export.py and test_gateway_enrollment.py. Eight
-      # further suites needed exactly this stack and were called by nothing at all (#147):
-      # enroll-gateway, gateway-bundle, gateway-credential, aas-api and the four under
-      # `timescaledb/`. Several of them are the only check on their subject anywhere.
-      #
-      # THEY COULD NOT HAVE BEEN PUT IN THE NO-STACK JOB INSTEAD, which is the tempting cheap fix
-      # and is worse than leaving them out. Measured with nothing up, test_enroll_gateway.py skips
-      # all fourteen of its checks, test_gateway_bundle.py all fifteen, test_gateway_credential.py
-      # all thirteen, and test_historian_role_grants.py runs zero -- and a fully-skipped unittest
-      # run reports `OK (skipped=14)` and exits 0. That is the trap this workflow already names at
-      # REQUIRE_SEEDED_ACCOUNTS below: a green tick over nothing, on suites covering credential
-      # issuance and a secrecy boundary. Here the stack exists, so they assert.
-      #
-      # ORDER IS ALPHABETICAL BY PATH AND THAT IS SAFE HERE, but not by luck --
-      # test_enroll_gateway.py STOPS the credential container to exercise the 503 rollback, and
-      # restarts it in tearDown, waiting for it to answer before returning. `gateway-credential/`
-      # sorts before `supabase/` in any case, so it runs first.
-      #
-      # ONE ENVIRONMENT, THE UNION OF WHAT THE TEN NEED. Everything but the four below comes out of
-      # `.env`, which the suites read directly.
-      #
-      #   SUPABASE_URL          the aas-export and aas-api suites take the gateway, not the
-      #                         container name.
-      #   SUPABASE_DB_*         test_gateway_enrollment.py connects to Postgres directly; its
-      #                         password is POSTGRES_PASSWORD, NOT DB_PASSWORD, which is the
-      #                         historian's and would send it to a database with none of this
-      #                         schema.
-      #   REQUIRE_SEEDED_ACCOUNTS
-      #                         READ BY test_gateway_enrollment.py ALONE, and it is what makes
-      #                         running that suite here worth anything. It asserts that the raw
-      #                         enrolment token is never stored, that RLS is on with no policies,
-      #                         and that not even an Administrator can SELECT claim material --
-      #                         every one of those AS a seeded demo account. Without the flag a
-      #                         stack that had lost its seed would skip all six and report success,
-      #                         on the suite covering a secrecy boundary, where "not checked" and
-      #                         "not broken" look identical from outside. The flag turns the
-      #                         absence into a failure, because here the seed is guaranteed.
-      #
-      # The AAS suites provision their own subjects (test-harness/aas_fixture.py) and tear them down
-      # in `if __name__ == "__main__"` -- which is why the runner spawns `python <file>` per suite
-      # rather than collecting them, since no collecting runner executes that block.
+      # One environment, the union of what the suites need; everything else comes from `.env`.
+      #   SUPABASE_URL             the aas suites take the gateway, not the container name.
+      #   SUPABASE_DB_*            test_gateway_enrollment.py connects to Postgres directly; its
+      #                            password is POSTGRES_PASSWORD, not DB_PASSWORD (the historian's).
+      #   REQUIRE_SEEDED_ACCOUNTS  read by test_gateway_enrollment.py; turns a skipped secrecy suite
+      #                            into a failure, because here the seed is guaranteed.
       # =========================================================================================
       - name: Run Stack-Dependent Python Suites
         env:
           REQUIRE_SEEDED_ACCOUNTS: '1'
-          # SAME ARGUMENT, ONE SUITE ALONG. test_log_pipeline.py skips when the stores are
-          # unreachable or the broker credential is absent -- both correct for someone running it
-          # by hand, and both impossible here, where the stack is up by construction and `.env` is
-          # sourced below. Without this its three most valuable assertions (that a real drop is
-          # counted in Prometheus AND readable in Loki naming the device) would vanish from a
-          # green run, which is the vacuous-green failure the note above is about.
+          # test_log_pipeline.py skips when the stores are unreachable or the broker credential is
+          # absent; both are impossible here, so the skip is made a failure.
           REQUIRE_LOG_PIPELINE: '1'
           SUPABASE_DB_HOST: localhost
           SUPABASE_DB_PORT: '54322'
-          # THE HISTORIAN IS REACHED BY ITS PUBLISHED PORT, NOT ITS COMPOSE NAME. `.env` sets
-          # DB_HOST=timescaledb, which resolves inside the compose network and nowhere else -- and
-          # these suites run on the RUNNER, outside it. Sourcing .env without this gives
-          # `could not translate host name "timescaledb" to address`, which reads like a broken
-          # stack rather than a test pointed at the wrong address. TS_TEST_HOST/TS_TEST_PORT exist
-          # in the four timescaledb suites for exactly this, and 5433 is what compose publishes.
+          # The historian by its published port: `.env` sets DB_HOST=timescaledb, which resolves only
+          # inside the compose network, and these suites run on the runner.
           TS_TEST_HOST: localhost
           TS_TEST_PORT: '5433'
         run: |

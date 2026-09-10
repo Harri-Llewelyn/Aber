@@ -1,45 +1,17 @@
 /**
- * A device's lifecycle status, and how it is drawn.
+ * A device's lifecycle status, and how it is drawn: one definition for every render site (the
+ * Overview map, the Devices table and the context drawer).
  *
- * ONE DEFINITION FOR EVERY RENDER SITE. The Overview map, the Devices table and the context
- * drawer each derived this independently, and they disagreed: the map ran a client-side rule
- * engine over the latest telemetry while the table read `status` off the row, so the same machine
- * could be a red chip on one tab and a green badge on the other.
- *
- * ---------------------------------------------------------------------------------------------
- * WHAT WAS REMOVED, AND WHY IT WAS WRONG
- *
- * The map used to evaluate `Systems/TEMPERATURE > 80.0`, `Controller/EXECUTION === 'INTERRUPTED'`
- * and `Controller/EMERGENCY_STOP === 'TRIGGERED'` and paint an "Alarm" state from them. Four
- * things were wrong with it, and only the first is obvious:
- *
- *   1. THE THRESHOLD WAS A LITERAL. `metric_catalog` carries `max_temp_threshold` per device and
- *      the devices publish it, and nothing read it -- so a machine declaring a 65 degC limit sat
- *      green at 70, and one declaring 120 went red at 85. A number that looks like configuration
- *      and behaves like a constant is worse than no number.
- *   2. IT WAS CLIENT-SIDE AND EPHEMERAL. No persistence, no history, no acknowledgement, no
- *      notification. Closing the tab meant the condition had never happened.
- *   3. IT WAS METRIC-NAME EXACT. Only a device publishing that literal MTConnect name was ever
- *      evaluated; the robot, the tool changer, the BMS zone and the KPI aggregator could not
- *      raise it at all, silently.
- *   4. IT CONFLATED TWO AXES. Process condition ("this machine is too hot") and connectivity
- *      lifecycle ("this machine is talking to us") are different questions with different
- *      audiences, and one dot cannot answer both.
- *
- * Threshold and condition alerting belongs in Grafana, which has evaluation intervals, state
- * history, silences and notification policies -- none of which a React render pass has. What is
- * left here is the question this dashboard is actually authoritative for: what the platform knows
- * about the device, from the database.
- * ---------------------------------------------------------------------------------------------
+ * The map used to run a client-side rule engine over the latest telemetry with literal
+ * thresholds, no persistence and exact metric names, and conflated process condition with
+ * connectivity lifecycle. Threshold and condition alerting belongs in Grafana; what is left here
+ * is what the platform knows about the device, from the database.
  */
 
 /**
- * The three lifecycle states, in the order of precedence they are resolved in.
- *
- * QUARANTINED outranks OFFLINE because it is the more actionable of the two and the one an
- * operator can do something about: a quarantined device is waiting to be admitted, and its status
- * column would otherwise read OFFLINE -- which says "this went away" about something that has
- * never been let in.
+ * The three lifecycle states, in the order of precedence they are resolved in. QUARANTINED
+ * outranks OFFLINE: a quarantined device is waiting to be admitted, and OFFLINE would say "this
+ * went away" about something never let in.
  */
 export const DEVICE_STATUS = {
   ONLINE: 'ONLINE',
@@ -48,16 +20,10 @@ export const DEVICE_STATUS = {
 };
 
 /**
- * Resolve a device row to one of DEVICE_STATUS.
- *
- * Reads ONLY database-backed fields. `is_quarantined` is set by ingestion when a device announces
- * itself unrecognised; `status` is written from the Sparkplug lifecycle -- DBIRTH sets ONLINE,
- * DDEATH and the liveness watchdog set OFFLINE. Telemetry values are deliberately not consulted.
- *
- * ARCHIVED IS NOT ONE OF THESE, and that is deliberate rather than an omission. Archiving is a
- * separate axis -- a decommissioned machine still has a last known lifecycle state -- and the
- * render sites draw it as its own badge alongside this one. Folding it in would make a
- * decommissioned device indistinguishable from one that merely went quiet.
+ * Resolve a device row to one of DEVICE_STATUS. Reads only database-backed fields:
+ * `is_quarantined` (set by ingestion) and `status` (DBIRTH sets ONLINE; DDEATH and the liveness
+ * watchdog set OFFLINE). Archived is a separate axis drawn as its own badge, so a decommissioned
+ * device is distinguishable from one that went quiet.
  */
 export function deviceLifecycleStatus(device) {
   if (!device) return DEVICE_STATUS.OFFLINE;
@@ -75,25 +41,15 @@ export function deviceStatusChipClass(status) {
 }
 
 /**
- * The chip class for a device on the shopfloor map, alert state included (issue #34).
+ * The chip class for a device on the shopfloor map, alert state included.
  *
- * WHY RED IS ALLOWED HERE AND NOWHERE ELSE IN THIS FILE. `deviceStatusChipClass` above will never
- * return a danger treatment, and deviceStatus.test.js asserts that for every status: red on this
- * dashboard would assert a PROCESS CONDITION it has no authority over, which is the whole reason
- * threshold alerting was moved to Grafana. That rule is unchanged and this does not weaken it.
+ * Red is allowed here and nowhere else in this file: `deviceStatusChipClass` never returns a
+ * danger treatment, because this dashboard has no authority over process conditions. An alert is
+ * Grafana's verdict, posted to grafana-alert-webhook and landed in `platform_alerts`, so painting
+ * it red relays a judgement rather than making one.
  *
- * An alert is the one case that is not a derivation. Grafana evaluated its own rules against the
- * historian, posted the verdict to grafana-alert-webhook, and it landed in `platform_alerts`. Painting
- * that red RELAYS a judgement rather than making one -- so this takes an alert, never a threshold,
- * and there is no code path here that can turn a telemetry value into a colour.
- *
- * PRECEDENCE, AND EACH STEP EARNS ITS PLACE:
- *   1. archived  -- a decommissioned machine reads inert whatever else is true of it. An alert
- *                   still firing against something taken out of service is noise about a decision
- *                   already made, and OverviewTab already dimmed archived rows for this reason.
- *   2. alerting  -- above status, because an OFFLINE device with a firing alert is the most urgent
- *                   thing on the page, not the least. Grey would bury it.
- *   3. status    -- the existing online/quarantined/offline treatment, unchanged.
+ * Precedence: archived (a decommissioned machine reads inert), then alerting (an OFFLINE device
+ * with a firing alert is the most urgent thing on the page), then status.
  *
  * @param {object} device  a device row
  * @param {object|null} alert  the worst alert firing on it -- see utils/deviceAlerts.js
@@ -104,13 +60,8 @@ export function deviceChipClass(device, alert) {
   return deviceStatusChipClass(deviceLifecycleStatus(device));
 }
 /**
- * The status dot's colour for a device, alert state included (issue #34).
- *
- * The Cells and Gateways pages list their devices as a dot and a name rather than as chips, so
- * this is the same decision as deviceChipClass() rendered in the other idiom -- same precedence,
- * same reason red is permitted, stated once above. Two helpers rather than one because the two
- * surfaces genuinely take different values (a class, a colour), and collapsing them would mean a
- * caller mapping one to the other at every site.
+ * The status dot's colour for a device, alert state included: the same decision as
+ * deviceChipClass() rendered as a colour rather than a class, for the Cells and Gateways pages.
  */
 export function deviceDotColor(device, alert) {
   if (device?.is_archived) return 'var(--text-muted)';
@@ -125,10 +76,8 @@ export function deviceStatusBadgeClass(status) {
 }
 
 /**
- * The dot colour, as a CSS custom property reference.
- *
- * Returned as a token rather than a literal so the two themes stay in step -- these are read into
- * inline styles, which the stylesheet's light-mode block cannot reach.
+ * The dot colour, as a CSS custom property reference, so the two themes stay in step in inline
+ * styles the stylesheet's light-mode block cannot reach.
  */
 export function deviceStatusDotColor(status) {
   if (status === DEVICE_STATUS.ONLINE) return 'var(--success)';
@@ -149,14 +98,9 @@ export function deviceStatusTitle(status) {
 }
 
 /**
- * The tile roll-up for a cell or lane: the state of the devices resolving to it.
- *
- * `attention` when anything there is waiting to be admitted, `normal` when at least one device is
- * live, `idle` when nothing is. Archived devices are skipped -- a decommissioned machine is not a
- * fault and must not colour its whole cell.
- *
- * THERE IS NO LONGER A WORST-STATE-WINS 'alarm'. A tile cannot report a process condition it has
- * no authority over; it reports whether the cell is talking to the platform.
+ * The tile roll-up for a cell or lane. `attention` when anything there is waiting to be admitted,
+ * `normal` when at least one device is live, `idle` when nothing is. Archived devices are
+ * skipped. There is no 'alarm': a tile reports whether the cell is talking to the platform.
  */
 export function rollupDeviceStatus(devices = []) {
   let sawQuarantined = false;

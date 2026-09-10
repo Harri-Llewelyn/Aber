@@ -1,102 +1,43 @@
-# Alert rules, file-provisioned -- THE PLATFORM'S OWN.
+# Alert rules, file-provisioned: the platform's own. Every rule here evaluates the stack, which
+# exists whether or not anything is publishing. A rule about a machine goes in a group of its own
+# and needs a metric that exists in `metric_catalog`, which check-docs-drift asserts.
 #
-# The three MACHINE rules that used to open this file (Thermal Excursion, Emergency Stop Engaged,
-# Low OEE Availability) were retired with the demonstrator they evaluated -- they compared machine
-# telemetry against thresholds on devices no install has any more. What is left here evaluates the
-# STACK, which exists whether or not anything is publishing.
+# Rules provision into the same folder as the platform dashboards. Provisioning is additive: an
+# existing Grafana keeps a rule until it is named in a `deleteRules:` block.
 #
-# A RULE ABOUT YOUR OWN MACHINE goes here, in a group of its own. It needs a metric that exists in
-# `metric_catalog`, and check-docs-drift re-arms its catalog agreement the moment one appears.
+# Two facts about file-provisioned rules:
+#   1. They are read-only in the UI ("Provisioned" badge). Edit this file and restart.
+#   2. Deleting a rule here does not delete it from Grafana; retiring one means adding its uid to
+#      a delete block. The uids below are stable.
 #
-# ONE FOLDER, NOT TWO. These rules used to provision into `ACS-Cymru - Alerts`, and Grafana files
-# alert rules in DASHBOARD folders -- so that folder appeared in the dashboard tree holding nine
-# rules and zero dashboards, looking to every operator like a folder somebody forgot to fill in. It
-# had never held a dashboard and never would. They now share the folder the platform dashboards use,
-# which is the whole of the tree.
-#
-# ON AN EXISTING GRAFANA THE OLD FOLDER LINGERS. Provisioning is additive, as point 2 below says --
-# it does not unload what it previously created -- so an existing demo stack keeps all three until they are named
-# in a `deleteRules:` block. That is deliberate: silently stopping a working alert rule is worse
-# than leaving it.
-#
-# =============================================================================================
-# TWO OPERATIONAL FACTS ABOUT FILE-PROVISIONED RULES, BOTH EASY TO BE SURPRISED BY
-#
-#   1. THEY ARE READ-ONLY IN THE UI. Grafana shows them with a "Provisioned" badge and refuses
-#      edits. That is the point -- the rule lives in the repository, reviewed, on both deployment
-#      targets -- but it means "just tweak the threshold in Grafana" is not available. Edit this
-#      file and restart.
-#   2. DELETING A RULE FROM THIS FILE DOES NOT DELETE IT FROM GRAFANA. Provisioning is additive;
-#      removal needs a `deleteRules:` block naming the uid, or the rule survives as an orphan that
-#      no longer corresponds to anything in the repository. So the uids below are stable and
-#      meaningful, and retiring one means adding it to a delete block rather than quietly dropping
-#      the stanza.
-#
-# EVERY RULE IS MULTI-DIMENSIONAL -- one alert instance per device, from one rule, with the device
-# in the labels. The alternative is a rule per device, which is what the withdrawn client-side
-# evaluation effectively was: it only ever looked at devices publishing one literal metric name, so
-# adding a machine silently added nothing. A rule that groups by asset_id covers whatever is on the
-# floor, and `scripts/check-docs-drift.mjs` asserts every metric name named below exists in
-# `metric_catalog` -- the check that would have caught `OEE/Availability` (wrong case, and a
-# fraction where the metric is a percentage) before it evaluated an empty series forever.
-#
-# THE DATASOURCE IS `timescaledb`, connected as `grafana_reader`. That role may read the rollups,
-# raw `telemetry`, `telemetry_latest` and `assets` -- which is exactly the set these queries touch.
-# `asset_config` is NOT among them and could not be: it lives in Supabase, and postgres_fdw runs
-# Supabase -> TimescaleDB, not the reverse. That is why the per-device thermal limit travels as a
-# published METRIC rather than being joined from the metadata database; see rule 1.
-# =============================================================================================
+# Every rule is multi-dimensional: one alert instance per asset, with the asset in the labels.
+# The `timescaledb` datasource connects as `grafana_reader`, which may read the rollups, raw
+# `telemetry`, `telemetry_latest` and `assets`. `asset_config` lives in Supabase and postgres_fdw
+# runs Supabase -> TimescaleDB only, so a per-device limit travels as a published metric.
 apiVersion: 1
 
 groups:
   # ===============================================================================================
-  # PLATFORM CONDITIONS -- the stack's own health, not the machines'.
+  # PLATFORM CONDITIONS: the stack's own health, not the machines'.
   #
-  # WHY THIS GROUP COULD NOT EXIST UNTIL NOW. Every signal below lives in Supabase, and this file's
-  # header states the blocker plainly: postgres_fdw runs Supabase -> TimescaleDB and not the
-  # reverse, so Grafana could only ever see the historian. archived migration 0027 gave it a second
-  # datasource against the metadata database; these rules are what that was for.
-  #
-  # THEY READ ONE VIEW, `public.platform_health` (archived migration 0029), and the narrowness is deliberate.
-  # `grafana_reader` may SELECT that view and `storage_footprint` and nothing else -- not `devices`,
-  # not `gateways`. A rule needs a number and, where the condition is about an asset, that asset's
-  # wire id; handing a browser-SSO-fronted service the plant's inventory to compute three counts is
-  # the trade the narrow grant exists to refuse.
-  #
-  # A SEPARATE GROUP, NOT THREE MORE RULES IN "Shopfloor Conditions". The two differ in what a
-  # reader should do about them: a thermal excursion is for whoever is on the floor, a stuck
-  # enrolment is for whoever runs the stack. They also want different evaluation intervals -- the
-  # machine group runs at 10s because someone is standing in front of a fault-injection button,
-  # and nothing here changes that fast.
-  #
-  # `entity_type` IS THE LABEL THAT MAKES THESE LAND CORRECTLY. grafana-alert-webhook defaults it to
-  # `device`, which is what keeps the three machine rules above working untouched; these declare
-  # `gateway` or `platform` so the dashboard can tell an asset alert from a fleet one -- and so the
-  # shopfloor map does not paint a machine red for a gateway fault.
+  # These read one view, `public.platform_health`, through the Supabase datasource. `grafana_reader`
+  # may SELECT that view and `storage_footprint` and nothing else, so a browser-SSO-fronted service
+  # never holds the plant's inventory. `entity_type` (`gateway` or `platform`; the webhook defaults
+  # to `device`) is what lets the dashboard tell an asset alert from a fleet one.
   # ===============================================================================================
   - orgId: 1
     name: Platform Conditions
     folder: ACS-Cymru - Platform Infrastructure
-    # ONE MINUTE, NOT TEN SECONDS. None of these conditions moves faster than that: the staleness
-    # threshold behind `gateway_stale` is 90 seconds, an enrolment is measured in hours, and a
-    # quarantine queue changes when a person approves something. Evaluating at the machine group's
-    # 10s would be three more queries every ten seconds against the metadata database to re-read
-    # numbers that cannot have changed.
+    # One minute: none of these conditions moves faster (the staleness threshold is 90s, an enrolment
+    # is measured in hours, a quarantine queue changes when a person approves something).
     interval: 1m
     rules:
       # -----------------------------------------------------------------------------------------
-      # 1. GATEWAY STALE -- an appliance that has stopped reporting.
-      #
-      # THE VIEW OWNS THE DEFINITION OF STALE, not this rule. `gateway_status.is_stale` applies the
-      # 90-second threshold that check-mirror-drift.mjs holds in step with the frontend; the rule
-      # only decides how long to tolerate it before telling anyone. Re-deriving the arithmetic here
-      # would put the threshold in a third place.
-      #
-      # `for: 5m` ON TOP OF THAT 90 SECONDS. A gateway that misses a couple of heartbeats across a
-      # broker reconnect is ordinary and self-heals; one that has been quiet for five minutes has
-      # not. Automated edge gateway telemetry, which this stack does not collect, would make this sharper by having
-      # the appliance report its own health,
-      # at which point silence and unhealthy stop being the same signal.
+      # 1. GATEWAY STALE: an appliance that has stopped reporting.
+      # The view owns the definition of stale (`gateway_status.is_stale`, the 90s threshold that
+      # check-mirror-drift.mjs holds in step with the frontend); the rule only decides how long to
+      # tolerate it. `for: 5m` on top, so a couple of missed heartbeats across a broker reconnect do
+      # not fire.
       # -----------------------------------------------------------------------------------------
       - uid: acs-gateway-stale
         title: Gateway Stale
@@ -166,17 +107,9 @@ groups:
                 uid: __expr__
 
       # -----------------------------------------------------------------------------------------
-      # 2. ENROLMENT STUCK -- a gateway that authenticated and then never published.
-      #
-      # THE FAILURE THIS EXISTS FOR IS SILENT TODAY. 0025 introduced AWAITING_BIRTH: a physical
-      # gateway redeems its enrolment token, lands in that state, and leaves it on its first NBIRTH.
-      # One that stays has a working broker credential and a flow that did not deploy -- and nothing
-      # has ever alarmed on it, so the symptom is an appliance that quietly never arrives and is
-      # noticed when somebody asks where it got to.
-      #
-      # `for: 0s` BECAUSE THE VIEW ALREADY CARRIES THE DELAY. The threshold below is one hour of
-      # `enrolled_at` age, so a debounce on top would only postpone a condition that has already
-      # been true for an hour.
+      # 2. ENROLMENT STUCK: a gateway that redeemed its token, landed in AWAITING_BIRTH, and never
+      # published. `for: 0s` because the view already carries the delay (one hour of `enrolled_at`
+      # age).
       # -----------------------------------------------------------------------------------------
       - uid: acs-enrolment-stuck
         title: Enrolment Stuck
@@ -240,20 +173,9 @@ groups:
                 uid: __expr__
 
       # -----------------------------------------------------------------------------------------
-      # 3. QUARANTINE QUEUE DEPTH -- devices waiting on a human decision.
-      #
-      # THE ONE RULE HERE WITH NO SUBJECT, and `entity_type: platform` is how it says so. A queue
-      # depth is a property of the queue; naming one of its members would be arbitrary, and the
-      # `platform_alerts` schema was generalised specifically so this could be recorded without
-      # inventing an asset for it.
-      #
-      # THE VIEW EMITS THIS ROW AT ZERO AS WELL, which is why `noDataState` barely matters here --
-      # a healthy stack returns a row saying 0 rather than returning nothing. That makes "the queue
-      # is empty" and "the datasource is down" distinguishable, which they are not when a rule's
-      # healthy state is an empty frame.
-      #
-      # FIVE IS A DEMONSTRATOR THRESHOLD. On a real floor it depends on how many devices are
-      # commissioned at once and who is expected to approve them.
+      # 3. QUARANTINE QUEUE DEPTH: devices waiting on a human decision. The one rule with no subject,
+      # hence `entity_type: platform`. The view emits this row at zero, so "the queue is empty" and
+      # "the datasource is down" are distinguishable. Five is a demonstrator threshold.
       # -----------------------------------------------------------------------------------------
       - uid: acs-quarantine-depth
         title: Quarantine Queue Depth
@@ -312,40 +234,20 @@ groups:
                 uid: __expr__
 
       # -----------------------------------------------------------------------------------------
-      # 4. GATEWAY CA EXPIRING -- the failure mode that takes the whole fleet at once.
+      # 4. GATEWAY CA EXPIRING: the failure that takes the whole fleet at once.
       #
-      # THE ONE THAT JUSTIFIED APPLIANCE HEALTH TELEMETRY ON ITS OWN. The broker's internal CA is
-      # copied BY HAND into every appliance's trust store, and re-minting it does not fail loudly:
-      # it succeeds, and every gateway drops off together. There is no other signal. It presents as
-      # the entire fleet going quiet, which is the same shape as a broker outage and gets diagnosed
-      # as one -- see docs/incidents.md, where it already happened once.
+      # The broker's internal CA is copied by hand into every appliance's trust store, and re-minting
+      # it succeeds silently and drops every gateway together (docs/incidents.md). The appliance
+      # reports the date it actually holds, which is what each client will accept;
+      # `gateway_health.cert_expires_in_days` derives the day count once so this rule and the
+      # dashboard cannot disagree.
       #
-      # THE APPLIANCE REPORTS THE DATE IT ACTUALLY HOLDS, which is the only version of this question
-      # worth asking. A check against the broker's own certificate would say what the SERVER will
-      # present; this says what each CLIENT will accept, and the fleet-wide outage happens when
-      # those two stop agreeing. `gateway_health.cert_expires_in_days` derives the day count once
-      # (archived migration 0036) so this rule and the dashboard panel cannot disagree about it.
+      # `for: 0s`: the threshold is the delay. The threshold is in the rule, not the query, so the
+      # thirty days is visible where an operator opens it and the rule is one instance per gateway. A
+      # negative value fires the same rule: an already-expired CA is this condition found late.
       #
-      # `for: 0s`, FOR THE SAME REASON AS THE ENROLMENT RULE ABOVE: the threshold IS the delay.
-      # A debounce on a condition that has thirty days left to run postpones nothing that matters.
-      #
-      # THE THRESHOLD IS IN THE RULE, NOT IN THE QUERY, WHICH IS THE OPPOSITE OF RULE 1. The stale
-      # rule reads a view that emits only already-stale gateways, so its `> 0` is a formality. Here
-      # the query returns EVERY gateway that has reported a certificate date, and Grafana's
-      # threshold picks the ones inside the window -- so "thirty days" is visible in the rule an
-      # operator opens rather than buried in SQL. It is also what makes the rule multi-dimensional
-      # in the ordinary way: one instance per gateway, each carrying its own remaining days.
-      #
-      # A NEGATIVE VALUE FIRES THE SAME RULE, and the summary says so rather than reading as a very
-      # small positive. An already-expired CA is not a different condition, it is this one found
-      # late; splitting it into a second `critical` rule would mean two rules to keep in step for
-      # one date.
-      #
-      # WHY THIS READS THE DATABASE AND NOT PROMETHEUS. The daemon exports appliance load, memory,
-      # disk and uptime as gauges, and deliberately NOT the certificate date: that endpoint needs no
-      # credential and is published to the host, so the day the fleet's trust anchor dies stays in
-      # Supabase. See ingestion/metrics.py's header. The database is also the answer that survives a
-      # daemon restart, which matters for a rule whose subject changes once a year.
+      # Read from the database, not Prometheus: the metrics endpoint is unauthenticated and
+      # deliberately does not export the certificate date (ingestion/metrics.py).
       # -----------------------------------------------------------------------------------------
       - uid: acs-gateway-ca-expiring
         title: Gateway CA Expiring
@@ -379,13 +281,9 @@ groups:
               format: time_series
               rawQuery: true
               editorMode: code
-              # `collected_at AS "time"` because Grafana's time_series format requires a time
-              # column and this view is a point-in-time answer, exactly as in rule 1.
-              #
-              # `IS NOT NULL` IS LOAD BEARING. A virtual gateway, and any appliance on a bundle
-              # predating archived migration 0035, reports no certificate date at all. Including those rows
-              # would hand the reducer a NULL per gateway and turn "has not told us" into an alert
-              # instance, which is the noise that teaches an operator to ignore the rule.
+              # `collected_at AS "time"` because the time_series format requires a time column.
+              # `IS NOT NULL` is load-bearing: a virtual gateway, or an appliance on an older bundle, reports
+              # no certificate date, and a NULL per gateway would become an alert instance.
               rawSql: |
                 SELECT collected_at          AS "time",
                        gateway_name          AS gateway,
@@ -421,24 +319,15 @@ groups:
                 uid: __expr__
 
   # ===============================================================================================
-  # INGESTION PIPELINE -- whether telemetry is being recorded at all.
+  # INGESTION PIPELINE: whether telemetry is being recorded at all.
   #
-  # THE THIRD GROUP, AND THE ONE CLOSEST TO THE DATA. "Shopfloor Conditions" reads the historian and
-  # says what the machines are doing; "Platform Conditions" reads Supabase and says what the stack
-  # believes about itself. Neither can see the pipe BETWEEN them -- a daemon that has stopped
-  # writing looks exactly like a quiet shopfloor, because under report-by-exception absence of data
-  # is ambiguous by construction.
+  # Neither group above can see the pipe between the historian and the stack: under
+  # report-by-exception a daemon that has stopped writing looks like a quiet shopfloor. These read
+  # the daemon's counters from Prometheus.
   #
-  # THESE READ PROMETHEUS, WHICH IS WHY THEY COULD NOT EXIST BEFORE. The daemon's counters have
-  # always been there; issues #22 and #24 exposed them at :9108/metrics and a Prometheus was added
-  # to the Compose stack to collect them. Until that existed there was nowhere for a Grafana rule to
-  # read a COUNTER from -- every rule above reads state out of a database.
-  #
-  # A NOTE ON THE KUBERNETES TARGET. The chart ships ServiceMonitors and defers to the cluster's own
-  # Operator-managed Prometheus, so the datasource these rules name resolves only where a Prometheus
-  # datasource with uid `prometheus` exists. On a cluster without one they load and report
-  # `DatasourceError`, which the policy tree routes like any other error rather than silently
-  # dropping. That is the intended failure: a rule that cannot reach its data should say so.
+  # On Kubernetes the chart ships ServiceMonitors and defers to the cluster's Prometheus, so these
+  # rules resolve only where a datasource with uid `prometheus` exists; elsewhere they report
+  # `DatasourceError`, which the policy tree routes like any other error.
   # ===============================================================================================
   - orgId: 1
     name: Ingestion Pipeline
@@ -449,43 +338,23 @@ groups:
     interval: 1m
     rules:
       # -------------------------------------------------------------------------------------------
-      # 1. CONSUMING NOTHING -- a daemon that is running and has stopped recording.
+      # 1. CONSUMING NOTHING: a daemon that is running and has stopped recording. The liveness
+      # heartbeat cannot express this: the health file is written while the MQTT connection is up.
       #
-      # THE HIGHEST-VALUE RULE HERE, and the one the liveness heartbeat cannot express: the health
-      # file is written while the MQTT connection is up, so a daemon connected to a broker that has
-      # stopped delivering is healthy by that measure and silent by this one.
+      # `for: 10m` against a 5m rate window: long enough to ride out a broker restart, short enough
+      # that a shift does not pass unnoticed.
       #
-      # `for: 10m` AGAINST A 5m RATE WINDOW. On a plant that is always publishing, ten minutes of
-      # nothing is not a quiet period -- it is a fault. Long enough to ride out a broker restart and
-      # the daemon's own reconnect, short enough that a shift does not pass unnoticed.
-      #
-      # -------------------------------------------------------------------------------------------
-      # IT IS GATED ON THERE BEING SOMETHING TO CONSUME, WHICH IT WAS NOT.
-      #
-      # "No traffic" and "no traffic FROM A FLEET THAT SHOULD BE PUBLISHING" are different
-      # conditions, and only the second is a fault. This rule tested the first, which was
-      # indistinguishable on a stack that had a demonstration floor publishing from the moment it
-      # booted. A fresh install has no devices at all now, so the daemon correctly consumes nothing,
-      # correctly reports it, and the rule fired on every new stack -- an alert whose first
-      # appearance is on an install nobody has configured yet teaches people to close the panel.
-      #
-      # SO THE SUBJECT IS `expected_publishers`, counted in Postgres: devices that are registered,
-      # not archived, not quarantined, and bound to a gateway. Each clause is a reason a device
-      # legitimately publishes nothing -- an archived device is retired, a quarantined one is held
-      # BY DESIGN with its telemetry dropped, and one bound to no gateway has no edge node to
-      # arrive through. Counting rows instead would make approving a quarantine look like a fix.
-      #
-      # ZERO DEVICES DISABLES THE RULE AND THAT IS THE INTENT, not a gap: with nothing provisioned
-      # there is no claim to make about telemetry. The first device someone registers re-arms it.
+      # Gated on there being something to consume: the subject is `expected_publishers`, devices that
+      # are registered, not archived, not quarantined, and bound to a gateway that has reported. Each
+      # clause is a reason a device legitimately publishes nothing. Zero devices disables the rule;
+      # the first device someone registers re-arms it.
       # -------------------------------------------------------------------------------------------
       - uid: acs-ingestion-silent
         title: Ingestion Consuming Nothing
         condition: F
         for: 10m
-        # NoData IS NOT OK HERE, unlike every platform rule above. An empty frame means the SCRAPE
-        # failed -- the daemon is gone, or Prometheus cannot reach it -- and that is strictly worse
-        # than the condition being alerted on, not better. Treating it as OK would make killing the
-        # daemon the way to silence the alarm about the daemon.
+        # NoData is not OK here, unlike the platform rules: an empty frame means the scrape failed,
+        # which is worse than the condition being alerted on.
         noDataState: Alerting
         execErrState: Error
         labels:
@@ -507,21 +376,12 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              # sum() ACROSS msg_type, because the series is labelled per message type and a daemon
-              # receiving only NDATA is still consuming. instant:true so the reduce below has a
-              # single value rather than a range to collapse.
-              #
-              # `or vector(0)` BECAUSE THE COUNTER DOES NOT EXIST UNTIL THE FIRST MESSAGE. It is
-              # labelled per msg_type, so there is no series to pre-initialise at zero -- and until
-              # one arrives Prometheus returns an EMPTY result, not a zero. Grafana reads that as
-              # NoData and `noDataState: Alerting` below fires the rule, which is how a stack with
-              # nothing publishing raised a critical alert about ingestion before it had ingested
-              # anything. The gate in F never even ran: NoData short-circuits it.
-              #
-              # THIS DOES NOT WEAKEN THE DEAD-DAEMON CASE, which is what noDataState is really for.
-              # A daemon that has gone away also yields vector(0) here -- and with devices
-              # registered, `$E > 0` holds, so the rule still fires. What changes is only the case
-              # where there is nothing to ingest and therefore nothing to be silent about.
+              # sum() across msg_type, because a daemon receiving only NDATA is still consuming. instant:true
+              # so the reduce has a single value.
+              # `or vector(0)` because the counter does not exist until the first message: Prometheus returns
+              # an empty result, Grafana reads NoData, and `noDataState: Alerting` would fire before the gate
+              # in F ran. A daemon that has gone away also yields vector(0), and with devices registered the
+              # rule still fires.
               expr: sum(rate(acs_ingestion_messages_total[5m])) or vector(0)
               instant: true
           - refId: B
@@ -546,11 +406,8 @@ groups:
                 uid: supabase
               format: time_series
               editorMode: code
-              # THROUGH `platform_health`, NOT `public.devices`. `grafana_reader` holds SELECT on
-              # this view and on nothing else -- 0029's self-check asserts it has no privilege on
-              # the inventory, and querying devices here fails as `permission denied for table
-              # devices` with the rule in `error` health, which reads as a broken datasource rather
-              # than as a grant working. 0074 adds the row.
+              # Through `platform_health`, not `public.devices`: `grafana_reader` holds SELECT on the view and
+              # nothing else, and querying devices fails as `permission denied` with the rule in error health.
               rawSql: |
                 SELECT collected_at AS "time",
                        value        AS expected_publishers
@@ -571,25 +428,17 @@ groups:
             model:
               refId: F
               type: math
-              # BOTH HALVES, and the second is what makes the first mean something. `$B < 0.001` is
-              # the absence of traffic -- the inversion that makes this rule different in kind from
-              # every other one in this file -- and `$E > 0` is the assertion that somebody should
-              # have been sending some.
+              # `$B < 0.001` is the absence of traffic; `$E > 0` is the assertion that somebody should have
+              # been sending some.
               expression: ($B < 0.001) && ($E > 0)
               datasource:
                 type: __expr__
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 2. TELEMETRY BEING DROPPED.
-      #
-      # NOT "ABOVE A THRESHOLD" -- the correct number is zero. Every drop is a message the daemon
-      # refused, and under report-by-exception nothing ever restates it. `for: 5m` is what absorbs a
-      # restart or a momentary directory outage, rather than a threshold pretending some steady loss
-      # is acceptable.
-      #
-      # Multi-dimensional on `reason`, so a quarantine backlog and a database outage are separate
-      # instances of one rule with the reason in the labels.
+      # 2. TELEMETRY BEING DROPPED. The correct number is zero: every drop is a message the daemon
+      # refused, and under report-by-exception nothing restates it. `for: 5m` absorbs a restart or a
+      # momentary directory outage. Multi-dimensional on `reason`.
       # -------------------------------------------------------------------------------------------
       - uid: acs-ingestion-drops
         title: Telemetry Being Dropped
@@ -645,16 +494,10 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 3. BINDING REJECTIONS RISING -- the fourth platform alert, and NOT a health metric.
-      #
-      # This is the signal that something published telemetry for a device it does not own. The
-      # daemon refuses it -- `verify_gateway_binding()` is the check -- so nothing is corrupted, and
-      # that is exactly why it needs its own rule: the platform absorbs it silently and the only
-      # trace is a counter.
-      #
-      # A misconfigured gateway republishing another's devices looks identical to an attempt to
-      # forge telemetry, and both are worth a person's attention. Separated from the drop rule above
-      # at a higher severity for that reason, even though it is the same counter with one label.
+      # 3. BINDING REJECTIONS RISING: something published telemetry for a device it does not own.
+      # `verify_gateway_binding()` refuses it, so nothing is corrupted and the only trace is a counter.
+      # A misconfigured gateway republishing another's devices looks identical to forged telemetry, so
+      # this is separated from the drop rule at a higher severity.
       # -------------------------------------------------------------------------------------------
       - uid: acs-ingestion-binding-rejections
         title: Gateway Binding Rejections Rising
@@ -707,25 +550,12 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 3b. BIRTH CERTIFICATES BEING DROPPED -- the same counter again, at critical, for the same
-      # reason 3 is separated from 2: the drop rule above is true of this and does not say enough.
-      #
-      # A DROPPED DDATA COSTS ONE SAMPLE. A DROPPED DBIRTH COSTS A DEVICE. The birth certificate
-      # carries the alias table, so every later alias-only message from that edge node is
-      # undecodable until it births again -- and an NBIRTH resets the alias table for every device
-      # behind the node, so losing one has that reach across all of them. Rule 2 fires at warning
-      # for any drop reason; an operator triaging it cannot tell those apart, which is exactly the
-      # blindness #126 was about one level down.
-      #
-      # BOTH REASONS, NOT JUST DBIRTH. `node_message_directory_unavailable` is an NBIRTH or NDEATH
-      # dropped from an edge node, and the NBIRTH half is the more damaging of the two.
-      # `sum by (reason)` so the notification names which, since the remedies differ.
-      #
-      # `for: 5m` rather than 15: the trigger is a directory that is briefly unreachable -- a
-      # PostgREST restart, a Kong reload, a failover -- and those resolve in minutes. Fifteen would
-      # miss the event that caused it. The daemon does NOT retry these: the drop is deliberate and
-      # fail-closed (see process_dbirth), so recovery waits on the next rebirth timer, and knowing
-      # promptly is what lets an operator request one instead.
+      # 3b. BIRTH CERTIFICATES BEING DROPPED, at critical. A dropped DDATA costs one sample; a
+      # dropped DBIRTH costs a device, because the birth carries the alias table, and an NBIRTH
+      # resets it for every device behind the node. Both reasons (`sum by (reason)`), since the
+      # remedies differ. `for: 5m`: the trigger is a directory that is briefly unreachable, and the
+      # daemon does not retry these, so recovery waits on the next rebirth timer or an operator's
+      # request.
       # -------------------------------------------------------------------------------------------
       - uid: acs-ingestion-birth-drops
         title: Ingestion Dropping Birth Certificates
@@ -781,29 +611,11 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 3c. THE AUDIT TABLE'S PARTITIONS FALLING BEHIND -- a maintenance failure, caught before it
-      # becomes a data one.
-      #
-      # 0079 range-partitions `digital_thread` by month so retention is DETACH rather than DELETE,
-      # and a pg_cron job keeps three months of partitions ahead of the writes. A cron job that
-      # stops is SILENT -- 0025's own header says so, and there is no log line and nothing in the UI.
-      #
-      # THE DEFAULT PARTITION IS WHY THIS IS A WARNING AND NOT A CRITICAL. Without one, a month with
-      # no partition would refuse every audit INSERT, and because the audit write is a trigger on
-      # cells/gateways/devices that refusal FAILS THE ASSET WRITE -- nobody could create a device or
-      # approve a quarantine. 0079 keeps a default partition precisely so that outage cannot happen,
-      # which turns "the job died" from a stopped line into an untidiness. This rule is what makes
-      # the untidiness visible, and it is the only thing that does.
-      #
-      # `default_rows > 0` IS THE CONDITION, not "is the next partition missing". A missing partition
-      # is harmless while the default absorbs it; what is not harmless is a row sitting in the
-      # default, because retention works by detaching a month and a row filed outside its month is
-      # never detached with it. So this fires on the consequence rather than on the cause, and stays
-      # quiet for a stack that is merely close to the edge.
-      #
-      # `for: 30m` because the repair is automatic and daily: the job runs at 03:20, and a single
-      # evaluation catching the minutes between a partition boundary and the next run would be noise.
-      # A row still in the default half an hour later is a job that did not run.
+      # 3c. THE AUDIT TABLE'S PARTITIONS FALLING BEHIND. `digital_thread` is range-partitioned by
+      # month and a pg_cron job keeps three months ahead; a cron job that stops is silent. A default
+      # partition absorbs the rows so asset writes never fail, which is why this is a warning: the
+      # condition is `default_rows > 0`, because a row filed outside its month is never detached with
+      # it. `for: 30m`, since the job runs daily at 03:20 and the minutes after a boundary are noise.
       # -------------------------------------------------------------------------------------------
       - uid: acs-digital-thread-partitions
         title: Digital Thread Partitions Falling Behind
@@ -865,30 +677,12 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 4. HISTORIAN UNREACHABLE, WITH TELEMETRY ARRIVING.
-      #
-      # BOTH HALVES, AND THE SECOND IS WHAT MAKES THE SUMMARY TRUE. This rule used to read the gauge
-      # alone and assert "telemetry is being dropped" from it -- a claim it had never checked. On an
-      # idle stack that was simply false: nothing was publishing, so nothing was being dropped, and
-      # the alert fired for hours against a historian that was reachable throughout. An alert that
-      # is wrong whenever the plant is quiet is one an operator learns to close unread, which costs
-      # the times it is right.
-      #
-      # `$B < 1` is the daemon holding no connection. `$E > 0` is somebody actually publishing --
-      # `or vector(0)` for the same reason rule 1 needs it, since the counter does not exist until
-      # the first message and Grafana reads an empty frame as NoData rather than as zero.
-      #
-      # THE IDLE CASE IS NOT DISCARDED, IT IS DEMOTED -- see 4b, which catches a historian this
-      # daemon cannot reach on a stack with no traffic. That is worth knowing about and is not data
-      # loss, and the two deserve different severities and different words.
-      #
-      # `for: 2m` stays short because the daemon retries internally -- three attempts inside a
-      # second on the message path, and a resident recovery loop besides -- so two minutes of this
-      # means the retries are not winning.
-      #
-      # `db_connected` is psycopg2's own view and cannot see a connection dropped by the SERVER,
-      # which still reports open and fails on first use. `acs_ingestion_db_connect_failures_total`
-      # rising while this reads 1 is the shape of that; the drop rule above catches the consequence.
+      # 4. HISTORIAN UNREACHABLE, WITH TELEMETRY ARRIVING. Both halves: `$B < 1` is the daemon holding
+      # no connection, `$E > 0` is somebody publishing (`or vector(0)` for the same reason rule 1
+      # needs it). On an idle stack the gauge alone is not data loss; that case is 4b. `for: 2m`
+      # because the daemon retries internally, so two minutes means the retries are not winning.
+      # `db_connected` cannot see a connection dropped by the server; the drop rule catches that
+      # consequence.
       # -------------------------------------------------------------------------------------------
       - uid: acs-ingestion-db-down
         title: Historian Unreachable From Ingestion
@@ -964,22 +758,11 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 4b. HISTORIAN UNREACHABLE, AND NOTHING PUBLISHING.
-      #
-      # THE OTHER HALF OF 4, AND DELIBERATELY NOT CRITICAL. A daemon that cannot reach the historian
-      # on a quiet stack is losing nothing -- there is nothing to lose -- but it is not healthy
-      # either, and the moment a gateway starts publishing it becomes rule 4. Saying so at warning,
-      # in words that do not claim data loss, is the difference between a useful early signal and
-      # the false alarm this pair replaced.
-      #
-      # READ FROM THE RECOVERY LOOP'S OWN COUNTER RATHER THAN FROM THE GAUGE, which is the whole
-      # point. `acs_ingestion_db_heal_failures_total` rises ONLY when the daemon tried to reach the
-      # historian off the message path and could not. It cannot be produced by a stack that has
-      # simply not written anything yet -- the state that made the old rule lie. A gauge at 0 with
-      # this counter flat means the daemon has not looked lately; a gauge at 0 with this rising
-      # means it looked and the historian was not there.
-      #
-      # `for: 10m` against a loop that runs every 30s: twenty consecutive failures, not a restart.
+      # 4b. HISTORIAN UNREACHABLE, AND NOTHING PUBLISHING. Not critical: nothing is being lost, but
+      # the moment a gateway publishes it becomes rule 4. Read from the recovery loop's own counter
+      # (`acs_ingestion_db_heal_failures_total`), which rises only when the daemon tried to reach the
+      # historian off the message path and could not; a stack that has not written yet cannot produce
+      # it. `for: 10m` against a 30s loop: twenty consecutive failures.
       # -------------------------------------------------------------------------------------------
       - uid: acs-ingestion-db-unreachable-idle
         title: Historian Unreachable From Ingestion (No Traffic)
@@ -1034,19 +817,10 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 5. MESSAGE LOSS -- a Sparkplug sequence gap (issue #24).
-      #
-      # UNDER REPORT-BY-EXCEPTION THIS IS THE ONLY LOSS SIGNAL THERE IS. A metric that stopped
-      # arriving is indistinguishable from a metric that stopped changing -- that ambiguity is
-      # inherent -- but `seq` skipping is unambiguous evidence that a change was published and never
-      # recorded. The historian is then confidently wrong about that device until a rebirth.
-      #
-      # PER EDGE NODE, which is what makes the alert actionable: one flapping gateway is a different
-      # problem from plant-wide loss, and the label says which.
-      #
-      # A NOTE ON RESTARTS. Messages published while the daemon is down are not replayed, so a
-      # deploy produces a real gap at every active node. `for: 15m` rides that out; a sustained rate
-      # is live loss and is what this exists to catch.
+      # 5. MESSAGE LOSS: a Sparkplug sequence gap. Under report-by-exception this is the only loss
+      # signal there is. Per edge node, so one flapping gateway is distinguishable from plant-wide
+      # loss. Messages published while the daemon is down are not replayed, so a deploy produces a
+      # real gap at every node; `for: 15m` rides that out.
       # -------------------------------------------------------------------------------------------
       - uid: acs-ingestion-sequence-gaps
         title: Sparkplug Message Loss
@@ -1098,36 +872,19 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-
       # -------------------------------------------------------------------------------------------
-      # 6. APPLIANCE CLOCK SKEW -- the fault that passes every other check in this file.
+      # 6. APPLIANCE CLOCK SKEW: the fault that passes every other check. A gateway with a wrong
+      # clock is ONLINE, drops nothing, skips no sequence numbers and verifies its certificate, and
+      # files every reading at a time that never happened. ingestion.py subtracts the heartbeat's own
+      # timestamp from its arrival time; nothing changes on the appliance.
       #
-      # WHY THIS IS NOT COVERED BY ANYTHING ABOVE. A gateway with a wrong clock is ONLINE, is not
-      # stale, drops no messages, skips no sequence numbers and verifies its certificate perfectly:
-      # TLS validity is measured in months and this is measured in minutes, so the appliance passes
-      # every check the platform makes and files every reading at a time that never happened. Rule 4
-      # catches a clock that is wrong by YEARS, because that one breaks the certificate. Nothing
-      # caught the minutes until this metric existed.
+      # The staleness gate is the second half of the expression and is not optional: a gauge holds
+      # its last value forever, so a powered-down appliance would alert on its last reading. 300s is
+      # past the 90s the dashboard calls STALE, so an OFFLINE gateway is reported by rule 1 instead.
       #
-      # THE MEASUREMENT COSTS NOTHING ON THE APPLIANCE. ingestion.py subtracts the timestamp the node
-      # put on its own heartbeat from the time the heartbeat arrived. No bundle change, no new metric
-      # on the wire, no configuration -- both numbers were already in the payload path.
-      #
-      # THE STALENESS GATE IS THE SECOND HALF OF THE EXPRESSION AND IT IS NOT OPTIONAL. A Prometheus
-      # gauge holds its last value forever, so without it an appliance powered down mid-fault would
-      # go on alerting on whatever its clock said the day it left -- for as long as the daemon runs.
-      # 300s is ten missed heartbeats, comfortably past the 90s the dashboard calls STALE, so a
-      # gateway that is merely OFFLINE stops alerting here and is reported by rule 1 instead.
-      #
-      # 60 SECONDS IS DELIBERATELY WELL INSIDE THE DAEMON'S SANITY WINDOW (-24h/+5m), and matches
-      # GATEWAY_CLOCK_OFFSET_WARN_SECONDS in ingestion.py. Past +5m the telemetry is discarded and
-      # counted by acs_ingestion_timestamps_rejected_total{edge_node}; this is meant to fire long
-      # before that, while the data is still being accepted and silently misfiled.
-      #
-      # `for: 15m` MATTERS MORE HERE THAN ELSEWHERE. A broker or network stall delays a heartbeat
-      # rather than the clock that stamped it, which reads as a NEGATIVE offset of however long the
-      # stall lasted. Fifteen minutes of continuous evaluation separates a genuinely wrong clock
-      # from a slow minute -- and a stall that does outlast it is an incident of its own.
+      # 60 seconds matches GATEWAY_CLOCK_OFFSET_WARN_SECONDS in ingestion.py and is well inside the
+      # daemon's sanity window (-24h/+5m), so this fires while the data is still being accepted.
+      # `for: 15m` because a broker or network stall reads as a negative offset for its duration.
       # -------------------------------------------------------------------------------------------
       - uid: acs-gateway-clock-skew
         title: Gateway Clock Skew
@@ -1185,31 +942,18 @@ groups:
                 uid: __expr__
 
   # ===============================================================================================
-  # THE LOG PIPELINE (roadmap 12).
+  # THE LOG PIPELINE. Loki and Alloy hold the evidence for every other fault here, so their own
+  # failure destroys the record of itself. Four rules for four distinct failures:
   #
-  # WHY THIS GROUP EXISTS, and it is the same argument the store itself rests on rather than a
-  # reflexive "monitor the monitoring". Loki and Alloy hold the evidence for every other fault
-  # here. They are therefore the one pair whose own failure destroys the record of itself: nothing
-  # else in the stack notices that the thing which would have noticed has stopped.
+  #   Collector Down      the container is gone.
+  #   Collection Stalled  the container is up and shipping nothing; looks like a quiet plant.
+  #   Store Refusing      a ceiling in loki/loki.yaml is biting; lines are being lost now.
+  #   Cannot Decode       the collector reads a container and fails to parse it; every other
+  #                       signal is green because the rest of the pipeline is.
   #
-  # FOUR RULES, BECAUSE THERE ARE FOUR DISTINCT FAILURES AND TWO OF THEM ARE INVISIBLE.
-  #
-  #   Collector Down      the container is gone. Loud, and the easy one.
-  #   Collection Stalled  the container is UP and shipping nothing. This is the failure that looks
-  #                       exactly like a quiet plant, and it is not hypothetical -- it happened on
-  #                       the first live run, when the socket proxy refused GET /networks and
-  #                       discovery failed wholesale while the container stayed healthy and the
-  #                       healthcheck stayed green.
-  #   Store Refusing      a ceiling in loki/loki.yaml is biting. Lines are being lost NOW.
-  #   Cannot Decode       the collector is reading a container and failing to parse it. Every other
-  #                       signal here is green while this happens, because the rest of the pipeline
-  #                       genuinely is: the loss is per-target and upstream of the batch.
-  #
-  # THE FIRST TWO ARE A PAIR AND NEITHER COVERS THE OTHER. `up == 0` cannot see a broken collector
-  # that is still answering its scrape; a rate on shipped entries cannot distinguish a dead
-  # collector from a cluster that never had one, because both are NoData. Together they do. This
-  # is the same division of labour `Telemetry Being Dropped` already relies on when it defers the
-  # broken-scrape case to `Ingestion Consuming Nothing`.
+  # The first two are a pair: `up == 0` cannot see a broken collector that still answers its
+  # scrape, and a rate on shipped entries cannot tell a dead collector from a cluster that never
+  # had one.
   # ===============================================================================================
   - orgId: 1
     name: Log Pipeline
@@ -1218,21 +962,15 @@ groups:
     rules:
 
       # -------------------------------------------------------------------------------------------
-      # 1. THE COLLECTOR IS GONE. `up` rather than a rate, because this is the one collector failure
-      # Prometheus can state directly: it knows the target and cannot reach it.
-      #
-      # WARNING AND NOT CRITICAL, deliberately. No telemetry is lost and no device is affected --
-      # what is lost is the RECORD, and only for as long as this lasts. Waking someone at 03:00 for
-      # it would be the wrong trade, and would teach them to route the whole group to nowhere.
+      # 1. THE COLLECTOR IS GONE. `up`, because Prometheus can state this directly. Warning, not
+      # critical: no telemetry is lost, only the record, and only for as long as this lasts.
       # -------------------------------------------------------------------------------------------
       - uid: acs-log-collector-down
         title: Log Collector Down
         condition: C
         for: 5m
-        # OK, NOT ALERTING, AND THE REASON IS THE DIVERGENCE TABLE. The chart deploys no log
-        # workload, so on Kubernetes this series does not exist at all. NoData there is the
-        # CORRECT state, not a fault -- and a rule that fires forever on every cluster is a rule
-        # operators silence, taking the Compose signal with it.
+        # OK, not Alerting: the chart deploys no log workload, so on Kubernetes this series does not
+        # exist and NoData is the correct state (see the divergence table in deploy/k8s/README.md).
         noDataState: OK
         execErrState: Error
         labels:
@@ -1280,25 +1018,17 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-
       # -------------------------------------------------------------------------------------------
-      # 2. THE COLLECTOR IS UP AND COLLECTING NOTHING. The rule that would have caught the first
-      # live defect, and the reason this group has three rules rather than two.
-      #
-      # FIFTEEN MINUTES, NOT FIVE. A stack can be genuinely quiet -- but not for a quarter of an
-      # hour, because this stack logs about ITSELF: the ingestion daemon writes a STATS line every
-      # 60s by default, so a truly silent ten-minute window already means something is wrong.
-      # That is also why the threshold is a rate rather than an absence: `lt 0.001` distinguishes
-      # "nothing at all" from "very little", where a `== 0` on a counter cannot.
+      # 2. THE COLLECTOR IS UP AND COLLECTING NOTHING. Fifteen minutes, because this stack logs about
+      # itself (the ingestion daemon writes a STATS line every 60s), so a silent quarter-hour is a
+      # fault. A rate rather than an absence: `lt 0.001` distinguishes nothing from very little.
       # -------------------------------------------------------------------------------------------
       - uid: acs-log-collection-stalled
         title: Log Collection Stalled
         condition: C
         for: 15m
-        # OK, NOT ALERTING, AND THE REASON IS THE DIVERGENCE TABLE. The chart deploys no log
-        # workload, so on Kubernetes this series does not exist at all. NoData there is the
-        # CORRECT state, not a fault -- and a rule that fires forever on every cluster is a rule
-        # operators silence, taking the Compose signal with it.
+        # OK, not Alerting: the chart deploys no log workload, so on Kubernetes this series does not
+        # exist and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1346,28 +1076,18 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-
       # -------------------------------------------------------------------------------------------
-      # 3. A CEILING IS BITING, which is the rule that makes the size bound honest.
-      #
-      # loki.yaml bounds the store by ingest RATE because Loki has no byte ceiling, and a bound
-      # nobody is told about is a bound that silently eats evidence during exactly the fault it was
-      # sized for -- log volume scales with fault rate. This is what says so.
-      #
-      # THE `reason` FILTER IS LOAD BEARING AND EXCLUDES `ingester_error` ON PURPOSE. That value
-      # counts the "entry too far behind" refusals a collector produces when it first attaches to
-      # containers that have been running for days -- correct behaviour, self-limiting, and
-      # documented in loki/loki.yaml. Alerting on it would fire on every first start and train
-      # people to ignore this rule before it ever said anything true.
+      # 3. A CEILING IS BITING. loki.yaml bounds the store by ingest rate because Loki has no byte
+      # ceiling, and log volume scales with fault rate. The `reason` filter excludes `ingester_error`
+      # on purpose: that counts the "entry too far behind" refusals a collector produces when it first
+      # attaches to long-running containers, which is self-limiting (see loki/loki.yaml).
       # -------------------------------------------------------------------------------------------
       - uid: acs-log-store-refusing
         title: Log Store Refusing Lines
         condition: C
         for: 10m
-        # OK, NOT ALERTING, AND THE REASON IS THE DIVERGENCE TABLE. The chart deploys no log
-        # workload, so on Kubernetes this series does not exist at all. NoData there is the
-        # CORRECT state, not a fault -- and a rule that fires forever on every cluster is a rule
-        # operators silence, taking the Compose signal with it.
+        # OK, not Alerting: the chart deploys no log workload, so on Kubernetes this series does not
+        # exist and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1416,36 +1136,19 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-
       # -------------------------------------------------------------------------------------------
-      # 4. THE COLLECTOR IS READING SOMETHING IT CANNOT DECODE, which is the failure the other three
-      # cannot see between them.
-      #
-      # `loki.source.docker` counts a parsing error when a frame off the Docker API does not decode
-      # into a record. Nothing else here reports that. `up` is 1, because the collector is running
-      # and answering. `loki_write_sent_entries_total` climbs, because the OTHER targets are fine --
-      # so Collection Stalled stays quiet, and it would stay quiet even if the failing target were
-      # the only interesting one. And nothing reaches the store, so Store Refusing has nothing to
-      # count. The line is lost between the container and the batch, which is the one stretch of the
-      # pipeline the other three rules do not watch.
-      #
-      # THRESHOLD ZERO, FOR THE SAME REASON AS RULE 3 ABOVE: a parsing error is a line that was
-      # written and will not be kept, and this store exists to keep those lines. There is no benign
-      # source of this the way `ingester_error` is a benign source of a refusal -- a healthy stack
-      # reads 0, confirmed against the live collector rather than against the documentation.
-      #
-      # SUM BY `component_id` SO THE ALERT NAMES THE PIPELINE, not just the collector. One Alloy can
-      # run several `loki.source.docker` components; this stack runs one, and an annotation that
-      # would still be right if it ran two costs nothing to write now.
+      # 4. THE COLLECTOR IS READING SOMETHING IT CANNOT DECODE. `loki.source.docker` counts a parsing
+      # error when a frame off the Docker API does not decode; `up` is 1, other targets keep shipping
+      # so rule 2 stays quiet, and nothing reaches the store so rule 3 has nothing to count.
+      # Threshold zero: a healthy stack reads 0, and there is no benign source of this. Sum by
+      # `component_id` so the alert names the pipeline.
       # -------------------------------------------------------------------------------------------
       - uid: acs-log-collector-parse-errors
         title: Log Collector Cannot Decode
         condition: C
         for: 10m
-        # OK, NOT ALERTING, AND THE REASON IS THE DIVERGENCE TABLE. The chart deploys no log
-        # workload, so on Kubernetes this series does not exist at all. NoData there is the
-        # CORRECT state, not a fault -- and a rule that fires forever on every cluster is a rule
-        # operators silence, taking the Compose signal with it.
+        # OK, not Alerting: the chart deploys no log workload, so on Kubernetes this series does not
+        # exist and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:

@@ -1,5 +1,5 @@
 """
-The log pipeline, end to end, against a running stack (roadmap §12).
+The log pipeline, end to end, against a running stack.
 
 WHAT THIS ASSERTS THAT NOTHING ELSE CAN. `ingestion/test_structured_logging.py` proves the daemon
 FORMATS the fields and that the counter name and the logged `reason` are derived from one string.
@@ -274,7 +274,7 @@ class DropPairTestCase(unittest.TestCase):
 
     def test_the_same_drop_is_readable_in_the_log_store_naming_the_device(self):
         """
-        HALF TWO, AND THE CLAIM ROADMAP §12 IS ENTIRELY ABOUT.
+        HALF TWO, AND THE CLAIM THE LOG STORE EXISTS FOR.
 
         Prometheus can say a drop happened and how many. It cannot say WHICH DEVICE, because its
         endpoint is served without a credential and carries no device data of any kind by design.
@@ -406,7 +406,7 @@ class MultilineTestCase(unittest.TestCase):
 
     def test_an_uncaught_traceback_is_rejoined_into_one_entry(self):
         """
-        THE REJOINING, PROVOKED RATHER THAN WAITED FOR -- roadmap 12's first remaining item.
+        THE REJOINING, PROVOKED RATHER THAN WAITED FOR.
 
         The test above asserts against whatever tracebacks the stack happens to hold and skips
         when it has been healthy. That skip is the good outcome, and it is also why the stage was

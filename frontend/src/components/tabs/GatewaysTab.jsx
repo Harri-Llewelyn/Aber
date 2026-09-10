@@ -292,7 +292,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
    * the link would follow it to a 403, so they are shown nothing. The UI agrees with the boundary,
    * it does not implement it.
    *
-   * THE PROPOSAL DROPZONE USED TO SIT HERE and admitted Operators, on roadmap 7's argument that a
+   * THE PROPOSAL DROPZONE USED TO SIT HERE and admitted Operators, on the argument that a
    * review step whose proposals can only come from the roles that may merge them is a formality.
    * It went with the forge's door: a pull request opened there under the author's own name is the
    * record now, `main` is protected in every gateway repository, and only an administrator's

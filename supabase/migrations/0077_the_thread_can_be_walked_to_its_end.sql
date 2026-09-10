@@ -1,43 +1,14 @@
 -- 0077: the Digital Thread stops ending at 200 rows.
 --
--- =================================================================================================
--- WHAT WAS ACTUALLY WRONG, AND IT IS NOT THE CAP
+-- `digital_thread_page()` gains a keyset cursor so the tab can ask for the next page. Raising the
+-- cap was the wrong fix: `matching` already scans every row the filters select to count purged
+-- assets over the whole match.
 --
--- `digital_thread_page()` has always returned `truncated` alongside the page, and the Digital
--- Thread tab has always stored it:
---
---     const [truncated, setTruncated] = useState(false)     // DigitalThreadTab.jsx
---     setTruncated(Boolean(d?.truncated))
---
--- and has never once rendered it. The state was added with a comment saying that "showing the
--- newest 200" is the difference between a quiet view and a quietly incomplete one, and then the
--- banner was never wired up. So the page has been silently answering a question about the whole
--- plant with the newest 200 rows -- and on a stack where two thirds of the table is test churn,
--- 200 rows does not necessarily reach yesterday.
---
--- RAISING THE CAP IS THE WRONG FIX and was rejected: `matching` already scans every row the filters
--- select in order to count purged assets over the whole match rather than over the page, and a
--- bigger page makes the JSON aggregation and the browser's render worse without ever being enough.
--- What was missing is a way to ask for the NEXT page.
---
--- =================================================================================================
--- KEYSET, NOT OFFSET, AND `recorded_at` ALONE IS NOT A KEY
---
--- OFFSET is wrong here for a reason specific to this table: `digital_thread` is append-only and
--- read newest-first, so rows are inserted at exactly the end the reader started from. Between
--- "page 1" and "page 2" every offset has shifted by however many events the plant recorded in the
--- meantime, and the reader silently sees some rows twice and misses others entirely. Keyset paging
--- carries where it got to instead, so an arriving row cannot move it.
---
--- The cursor has to be `(recorded_at, id)` and not `recorded_at`. The old ORDER BY was
--- `recorded_at DESC` alone, which is NOT a total order here -- log_digital_thread_event() stamps
--- every row in one transaction with the same `now()`, and a batch relocation of six devices is one
--- transaction by design (0033). Six rows share a timestamp; a cursor of "older than T" would skip
--- the other five, and a cursor of "T or older" would repeat the first one forever. `id` is the
--- primary key and monotonic, so appending it makes the order total and the cursor exact.
---
--- The index matches that order. Without it this is a full scan and a sort per page, which is fine
--- at 500 rows and is not fine at the size this change exists to reach.
+-- KEYSET, NOT OFFSET. The table is append-only and read newest-first, so between two pages every
+-- offset has shifted by however many events arrived. The cursor is `(recorded_at, id)`, not
+-- `recorded_at` alone: log_digital_thread_event() stamps every row in one transaction with the
+-- same `now()`, and a batch relocation is one transaction, so `recorded_at` is not a total order.
+-- The index matches that order.
 
 CREATE INDEX IF NOT EXISTS idx_digital_thread_recorded_id
     ON public.digital_thread (recorded_at DESC, id DESC);
@@ -46,17 +17,10 @@ COMMENT ON INDEX public.idx_digital_thread_recorded_id IS
   'Serves digital_thread_page()''s keyset order. MUST match its ORDER BY (recorded_at DESC, id DESC) exactly -- a cursor walking one order against an index in another degrades to a full sort per page, which is invisible until the table is large.';
 
 -- =================================================================================================
--- DROPPED AND RECREATED, NOT REPLACED
---
--- Two new arguments cannot be added by CREATE OR REPLACE -- Postgres treats a different argument
--- list as a different function and would leave BOTH declared. With the new ones defaulted, a
--- seven-argument call would then be ambiguous and fail at the call site rather than here. Same
--- reasoning and same shape as 0075.
---
--- 0001 recreates the seven-argument form on every boot, because there is no applied-migrations
--- ledger and the whole chain replays in filename order. This file runs after it and the last
--- declaration wins, which is exactly what is wanted -- recorded in check-docs-drift.mjs's
--- INTENDED_REDECLARATIONS so it cannot happen quietly.
+-- DROPPED AND RECREATED, NOT REPLACED: CREATE OR REPLACE would leave both argument lists
+-- declared, and with the new ones defaulted a seven-argument call would be ambiguous. 0001
+-- recreates the seven-argument form on every boot; this file runs after it and the last
+-- declaration wins, recorded in check-docs-drift.mjs's INTENDED_REDECLARATIONS.
 DROP FUNCTION IF EXISTS public.digital_thread_page(
     integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone);
 
@@ -79,15 +43,9 @@ CREATE OR REPLACE FUNCTION public.digital_thread_page(
     AS $$
 WITH matching AS (
     SELECT t.*,
-           -- SCOPED TO THE THREE ASSET TYPES. The anti-join is unchanged and still not narrowed
-           -- BETWEEN them -- an asset is live if it is still in any of the three, which is what
-           -- makes it three index probes rather than a CASE per table. What is narrowed is WHICH
-           -- ROWS ARE ASKED AT ALL: only the entity types that name one of those tables can be
-           -- purged from it, and for anything else the question is meaningless rather than false.
-           --
-           -- `service_principals` (0043, 0044) is the type that forced this. It is an auth.users
-           -- row, in GoTrue's schema, with no public table to probe -- so it answered "absent from
-           -- all three" and was hidden as deleted.
+           -- Scoped to the three asset types: only entity types that name one of those tables can be
+           -- purged from it. `service_principals` is an auth.users row with no public table to probe and
+           -- would otherwise answer "absent from all three".
            t.entity_type IN ('cells', 'gateways', 'devices')
        AND NOT EXISTS (SELECT 1 FROM public.cells    c WHERE c.id = t.entity_id)
        AND NOT EXISTS (SELECT 1 FROM public.gateways g WHERE g.id = t.entity_id)
@@ -103,11 +61,8 @@ WITH matching AS (
 visible AS (
     SELECT * FROM matching
      WHERE (p_include_purged OR NOT is_purged)
-       -- THE CURSOR IS APPLIED HERE AND NOT IN `matching`, which is the whole reason those are two
-       -- CTEs. `purged_assets` below is counted over `matching`, and it is a fact about everything
-       -- the FILTERS select -- not about what is left after paging. Applied one CTE earlier, the
-       -- deleted-asset count would shrink towards zero as the reader paged, and the control that
-       -- reveals those rows would disappear underneath them.
+       -- The cursor is applied here and not in `matching`: `purged_assets` is counted over `matching`
+       -- and is a fact about everything the filters select, not about what is left after paging.
        AND (p_before_id IS NULL
             OR p_before_recorded_at IS NULL
             OR (recorded_at, id) < (p_before_recorded_at, p_before_id))
@@ -148,17 +103,9 @@ GRANT ALL ON FUNCTION public.digital_thread_page(integer, boolean, text, text, u
 GRANT ALL ON FUNCTION public.digital_thread_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint) TO authenticated;
 
 -- =================================================================================================
--- SELF-CHECK: WALK THE THREAD AND PROVE THE WALK IS EXACT
---
--- READ-ONLY, ON WHATEVER ROWS THIS DEPLOYMENT ALREADY HAS. It deliberately seeds nothing: this
--- table is append-only by 0003, so a fixture written here could never be taken back -- which is the
--- exact failure that made two thirds of a development stack's audit log test churn. A check that
--- pollutes the thing it checks is not one worth running on every boot.
---
--- The property is the one a cursor can silently break in BOTH directions at once, and neither shows
--- up as an error: a repeated row (the reader sees an event twice) and a skipped row (the reader
--- never sees it at all). Same-timestamp batches are where both live, so the page size is small
--- enough to land inside one.
+-- SELF-CHECK: walk the thread and prove the walk is exact. Read-only, on whatever rows exist:
+-- the table is append-only, so a fixture could never be taken back. The page size is small
+-- enough to land inside a same-timestamp batch, where a repeated or skipped row would show.
 DO $walk$
 DECLARE
   v_page       jsonb;

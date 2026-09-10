@@ -2945,7 +2945,7 @@ paths:
       summary: Place the caller in the forge team their role warrants (the forge listener's ext_authz step)
       description: |
         Called by the gateway's `forge` listener on every non-static request through the forge's door,
-        carrying the verified access token (migration 0094; roadmap 7). Resolves the caller's role from
+        carrying the verified access token (migration 0094). Resolves the caller's role from
         `user_roles` and ensures they are in exactly the team of the `gateways` organisation that role
         maps to -- `administrators` or `managers` -- through the machine account that owns it. A role
         that has been removed since the token was signed is refused and taken out of both teams on the
@@ -2974,7 +2974,7 @@ paths:
       tags: [Edge Functions]
       summary: Gitea's own sign-out link, routed here by the forge listener; ends every session the caller holds
       description: |
-        The forge listener routes Gitea's `GET /user/logout` here (roadmap 7). Under reverse-proxy
+        The forge listener routes Gitea's `GET /user/logout` here. Under reverse-proxy
         authentication Gitea's own sign-out is a no-op -- the next request carries the identity header
         again -- and the forge has no session of its own, so its sign-out is the platform's: every
         GoTrue session the caller holds is revoked (`scope=global`, the dashboard's included), and the

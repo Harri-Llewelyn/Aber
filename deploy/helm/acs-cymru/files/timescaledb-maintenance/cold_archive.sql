@@ -1,51 +1,21 @@
 -- =============================================================================================
--- Cold telemetry archival — the manifest, and the invariant that makes dropping a chunk safe
+-- Cold telemetry archival: the manifest, and the invariant that makes dropping a chunk safe.
 --
+-- Reconciled on every boot by timescaledb-maintenance. Idempotent: every object is CREATE ... IF
+-- NOT EXISTS or CREATE OR REPLACE.
 --
--- Reconciled on every boot by timescaledb-maintenance, like retention.sql and aggregates.sql.
--- Idempotent by construction: every object here is CREATE ... IF NOT EXISTS or CREATE OR REPLACE.
---
--- ---------------------------------------------------------------------------------------------
--- WHAT PROBLEM THIS SOLVES, STATED AS IT ACTUALLY IS TODAY
---
--- `retention.sql` adds a TimescaleDB retention policy that DROPS raw chunks older than
--- TIMESCALE_RETAIN_FOR (90 days by default). That is a permanent deletion of plant history, run by
--- a background job, with nothing written down about what went. For a demonstrator that is fine. For
--- a facility that has to answer "what did line 2 do in March" eighteen months later, it is the
--- whole problem.
---
--- Cold archival replaces `delete` with `move`: the chunk is written to Parquet on object storage,
--- the object is read back and verified, the manifest records where it went, and ONLY THEN is the
--- chunk dropped.
---
--- ---------------------------------------------------------------------------------------------
--- THE ORDER IS THE FEATURE, AND ONE CHECK CONSTRAINT ENFORCES IT
+-- retention.sql drops raw chunks older than TIMESCALE_RETAIN_FOR with nothing written down. Cold
+-- archival replaces delete with move: the chunk is written to Parquet on object storage, read
+-- back and verified, recorded in the manifest, and only then dropped. One CHECK constraint
+-- enforces the order:
 --
 --     CHECK (dropped_at IS NULL OR verified_at IS NOT NULL)
 --
--- A chunk cannot be recorded as dropped unless it was first recorded as verified. That is a
--- database rule rather than a careful sequence in a Python file, because the failure it prevents is
--- silent and permanent: an exporter that uploads, half-fails, and drops anyway destroys telemetry
--- and leaves a manifest row claiming it is safe on object storage.
+-- It cannot stop `drop_chunks()` being called, only stop the lie being recorded, which is why
+-- `cold_tier_droppable()` exists and the exporter is required to select through it.
 --
--- The exporter is still the thing that must not drop early -- this constraint cannot stop
--- `drop_chunks()` being called, only stop the LIE being recorded. That asymmetry is why
--- `cold_tier_droppable()` exists below and why the exporter is required to select through it: the
--- list of chunks it is allowed to drop is computed here, from the manifest, not assembled by the
--- caller.
---
--- ---------------------------------------------------------------------------------------------
--- WHY THE MANIFEST LIVES HERE AND NOT IN SUPABASE
---
--- It describes chunks, and chunks are here. A manifest in the other database could drift from the
--- hypertable it claims to describe with nothing able to notice, and the exporter would have to
--- write two databases in one logical transaction that cannot be one.
---
--- The dashboard still reads it: `0068` maps it over the existing postgres_fdw bridge, exactly as
--- `0027` does for `storage_footprint`. One writer here, one reader there.
---
--- Related: timescaledb/retention.sql (the policy this stands down), timescaledb/storage.sql
---          (the same shape of reconciled view), supabase/migrations/0068_cold_storage.sql.
+-- The manifest lives here because chunks are here; the dashboard reads it over the postgres_fdw
+-- bridge. Related: timescaledb/retention.sql, timescaledb/storage.sql.
 -- =============================================================================================
 
 \set ON_ERROR_STOP on
@@ -128,19 +98,12 @@ CREATE INDEX IF NOT EXISTS telemetry_archive_manifest_pending_idx
     ON public.telemetry_archive_manifest (claimed_at)
     WHERE dropped_at IS NULL;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 2. What is eligible to leave
 -- ---------------------------------------------------------------------------------------------
--- ONLY FULLY-ELAPSED CHUNKS. `range_end < now() - threshold` rather than `range_start`, so a chunk
--- is never exported while rows can still land in it. Sparkplug data arrives late routinely -- a
--- gateway that was offline republishes on reconnect -- and a chunk exported at its midpoint would
--- be missing whatever arrived afterwards, with the manifest asserting a row_count that was true
--- once.
---
--- ALREADY-CLAIMED CHUNKS ARE EXCLUDED WHOLE, including failed ones. A retry is a decision an
--- operator makes by clearing `last_error`, not something the candidate list makes for them by
--- silently re-offering a chunk that failed for a reason nobody has looked at yet.
+-- Only fully elapsed chunks (`range_end`, not `range_start`), because Sparkplug data arrives
+-- late routinely. Already-claimed chunks are excluded whole, failed ones included: a retry is an
+-- operator's decision, made by clearing `last_error`.
 CREATE OR REPLACE FUNCTION public.cold_tier_candidates(p_older_than interval)
 RETURNS TABLE (
     chunk_schema text,
@@ -169,15 +132,11 @@ COMMENT ON FUNCTION public.cold_tier_candidates(interval) IS
   'Telemetry chunks fully older than the threshold and not yet claimed. Bounded on range_end, not '
   'range_start, so a chunk still accepting late-arriving rows is never exported.';
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 3. What is safe to delete
 -- ---------------------------------------------------------------------------------------------
--- THE EXPORTER IS REQUIRED TO SELECT THROUGH THIS RATHER THAN ASSEMBLE ITS OWN LIST, and that is
--- the point of it existing as a function at all. The CHECK constraint above can stop a false
--- manifest row being written; it cannot stop `drop_chunks()` being called on the wrong chunk. This
--- can, by being the only place that answers the question -- so the rule lives beside the data it
--- protects instead of in whichever caller asked last.
+-- The exporter selects through this rather than assembling its own list, so the rule lives
+-- beside the data it protects.
 CREATE OR REPLACE FUNCTION public.cold_tier_droppable()
 RETURNS TABLE (
     chunk_schema text,
@@ -199,35 +158,17 @@ COMMENT ON FUNCTION public.cold_tier_droppable() IS
   'Chunks whose export has been verified and whose raw rows are therefore redundant. The only '
   'supported source for what drop_chunks() may be pointed at.';
 
-
 -- ---------------------------------------------------------------------------------------------
--- 3b. The drop itself, which the exporter may CALL but could not perform
+-- 3b. The drop itself, which the exporter may call but could not perform
 -- ---------------------------------------------------------------------------------------------
--- SECURITY DEFINER, AND THAT IS THE POINT RATHER THAN A CONVENIENCE.
+-- SECURITY DEFINER: roles.sql revokes DELETE and TRUNCATE on `public.telemetry` from
+-- `ingest_writer`, and this is the one narrow exception, owned by the superuser, whose body is
+-- the rule.
 --
--- `roles.sql` revokes DELETE and TRUNCATE on `public.telemetry` from `ingest_writer` explicitly,
--- and says why: "DELETE and TRUNCATE are the two that make append-only true". The exporter runs as
--- that role. Granting it the ability to drop chunks would undo the one property the historian's
--- role split exists to guarantee -- for the whole table, permanently, so that a job could delete
--- something a manifest said was safe.
---
--- So it gets no such privilege. It gets the ability to ask for THIS, which drops only what the
--- manifest has already verified. The daemon still cannot delete a single telemetry row of its own
--- choosing; the narrow exception is one function, owned by the superuser, whose body is the rule.
---
--- ---------------------------------------------------------------------------------------------
--- A VERIFIED PREFIX, NOT A SET, AND THE DIFFERENCE IS A DATA-LOSS BUG
---
--- `drop_chunks(relation, older_than => X)` is a BOUNDARY, not a selection: it drops every chunk
--- older than X. Calling it once per verified chunk -- the obvious implementation -- would delete
--- every chunk older than each one, INCLUDING chunks never exported. A single verified chunk from
--- the middle of the history would take everything before it.
---
--- TimescaleDB offers no supported "drop exactly this chunk", so the boundary is computed: walk the
--- chunks oldest-first, advance while each is verified, stop at the first that is not. Everything
--- before that point is provably archived. In practice archival runs oldest-first and the verified
--- set IS a prefix -- right up until the run where it is not, which is the run that would have lost
--- data.
+-- A verified prefix, not a set: `drop_chunks(older_than => X)` is a boundary and drops every
+-- chunk older than X, so calling it once per verified chunk would delete never-exported chunks
+-- before it. TimescaleDB offers no "drop exactly this chunk", so the boundary is computed by
+-- walking the chunks oldest-first and stopping at the first that is not verified.
 CREATE OR REPLACE FUNCTION public.cold_tier_drop_verified()
 RETURNS TABLE (dropped_chunk text, object_key text)
 LANGUAGE plpgsql SECURITY DEFINER
@@ -290,17 +231,11 @@ COMMENT ON FUNCTION public.cold_tier_drop_verified() IS
 -- The exporter is the only intended caller and it holds no privilege of its own here.
 REVOKE ALL ON FUNCTION public.cold_tier_drop_verified() FROM PUBLIC;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 4. Self-check
 -- ---------------------------------------------------------------------------------------------
--- THE INVARIANT IS EXERCISED, NOT TRUSTED. It is one CHECK constraint standing between a bug and
--- permanently deleted plant history, so it is worth three writes on every boot to know it is
--- actually there -- a constraint dropped by a hand-edited database looks exactly like one that
--- was never added.
---
--- Rolled back: this table is small and real, and a self-check that left rows behind would put
--- fictional chunk names in an operator's catalogue.
+-- The invariant is exercised, not trusted: a constraint dropped by a hand-edited database looks
+-- exactly like one never added. Rolled back, so no fictional chunk names land in the catalogue.
 DO $selfcheck$
 DECLARE
     v_refused boolean;

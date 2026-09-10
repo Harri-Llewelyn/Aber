@@ -268,7 +268,7 @@ agreeing — so this is the version worth alerting on.
 
 **The reported date is fixed at enrolment.** Replacing `/data/certs/ca.crt` by hand without
 re-enrolling leaves the appliance reporting the old date forever. Until the platform playbook owns
-the CA (roadmap §8), re-enrolment is the only path that updates both the file and the number.
+the CA (docs/roadmap.md, "The appliance itself"), re-enrolment is the only path that updates both the file and the number.
 
 ### Rotating the root, in the order that matters
 
@@ -460,7 +460,7 @@ when an appliance enrols with a deploy key, and a host-run gateway never enrols.
 **`flows_cred.json` is never committed.** It is encrypted with a secret that exists only in the
 appliance's `.env`, so a copy on the platform would be either useless or dangerous. Nothing between
 the forge's web editor and the appliance checks its shape yet — the puller's refusal above is the
-last line, and roadmap 7 records a required status check as the next one.
+last line, and a required status check in the forge is the next one (docs/roadmap.md, "GitOps edge sync").
 
 
 ---

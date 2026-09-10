@@ -1,26 +1,11 @@
 -- =============================================================================================
 -- 0016_directory_service_cleanup.sql
 --
--- Two corrections to the seeded service directory, for databases created before the rows in
--- 0002 changed. A fresh database is built correct by 0002 alone and matches nothing here.
---
---   1. REMOVES the dashboard's own entry. The directory exists to tell an operator where the
---      other services are; an entry linking to the page they are already looking at is the one
---      row that can never be useful, and it sat first in the list because the list was
---      alphabetical.
---
---   2. RENAMES 'Node-RED Edge Gateway' to 'Node-RED (Virtual Edge Gateway Simulator)'. The old
---      name claimed a piece of edge hardware. What is actually at :1880 is the bundled Node-RED
---      publishing simulated Sparkplug B for the demo stack, and an engineer who reads the
---      directory as an inventory of what is deployed should not have to find that out by
---      opening it. Cosmetic in a way 0015 was NOT: this name is display text, on nothing's wire
---      format and in no lookup.
---
--- WHY A MIGRATION AND NOT JUST THE SEED. 0002 uses ON CONFLICT ... DO NOTHING throughout, so it
--- inserts rows that are missing and never touches rows that exist. Editing it alone would leave
--- every database seeded before today on the old name, with the retired row still listed.
---
--- Idempotent: db-init replays it on every boot and the second run matches no rows.
+-- Two corrections to the seeded service directory for databases created before 0002 changed:
+-- removes the dashboard's own entry (a link to the page the reader is on), and renames
+-- 'Node-RED Edge Gateway' to 'Node-RED (Virtual Edge Gateway Simulator)', which is display text
+-- on nothing's wire format. A migration rather than an edit to the seed because 0002 is
+-- ON CONFLICT DO NOTHING throughout. Idempotent: the second run matches no rows.
 -- =============================================================================================
 
 SET search_path TO public;

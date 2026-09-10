@@ -2898,13 +2898,54 @@ paths:
         '405': { description: 'Method other than POST.' }
         '503': { description: 'GRAFANA_ALERT_WEBHOOK_SECRET is not configured; refusing to accept alerts.' }
 
+  /functions/v1/forge-events:
+    post:
+      tags: [Edge Functions]
+      summary: Gitea's push webhook; records the head of main on the gateway's row
+      description: |
+        Registered on each gateway repository at enrolment (migration 0095). Gitea delivers every push
+        to `main` here, signed: `X-Gitea-Signature` is the hex HMAC-SHA256 of the raw body under
+        `GITEA_WEBHOOK_SECRET`, and the signature is the whole of the authentication -- Envoy's key-auth
+        proves only that the caller holds the anon key. On a verified push the gateway named by the
+        repository (`gateway-<sparkplug_id>`) records the commit's sha, its message's first line, who
+        pushed it, when, and the SHA-256 of `flows.json` at that commit, read through the machine account.
+
+        Pushes to other branches, repositories that are not a gateway's, deleted branches, non-push events
+        and gateways this database does not know are answered 200 with `ignored`, because a non-2xx is a
+        failed delivery on the hook's page and none of those is a failure.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - in: header
+          name: X-Gitea-Event
+          required: true
+          schema: { type: string, example: push }
+        - in: header
+          name: X-Gitea-Signature
+          required: true
+          schema: { type: string }
+          description: Hex HMAC-SHA256 of the raw request body under the hook's secret.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Gitea's push event payload.
+      responses:
+        '200':
+          description: Recorded (`recorded` names the gateway and the commit) or ignored (`ignored` says why).
+        '401':
+          description: The signature is missing or does not verify.
+        '503':
+          description: GITEA_WEBHOOK_SECRET is not configured; nothing is accepted.
   /functions/v1/forge-membership:
     post:
       tags: [Edge Functions]
       summary: Place the caller in the forge team their role warrants (the forge listener's ext_authz step)
       description: |
         Called by the gateway's `forge` listener on every non-static request through the forge's door,
-        carrying the verified access token (migration 0094; roadmap 7). Resolves the caller's role from
+        carrying the verified access token (migration 0094). Resolves the caller's role from
         `user_roles` and ensures they are in exactly the team of the `gateways` organisation that role
         maps to -- `administrators` or `managers` -- through the machine account that owns it. A role
         that has been removed since the token was signed is refused and taken out of both teams on the
@@ -2933,7 +2974,7 @@ paths:
       tags: [Edge Functions]
       summary: Gitea's own sign-out link, routed here by the forge listener; ends every session the caller holds
       description: |
-        The forge listener routes Gitea's `GET /user/logout` here (roadmap 7). Under reverse-proxy
+        The forge listener routes Gitea's `GET /user/logout` here. Under reverse-proxy
         authentication Gitea's own sign-out is a no-op -- the next request carries the identity header
         again -- and the forge has no session of its own, so its sign-out is the platform's: every
         GoTrue session the caller holds is revoked (`scope=global`, the dashboard's included), and the

@@ -2,120 +2,41 @@
 -- 0090 :: THE QUEUE MOVES TO THE ASSETS AN OPERATOR CAN ACTUALLY SEE
 -- =================================================================================================
 --
--- Three changes to the proposal queue, and the first is a withdrawal.
+-- 1. THE SCHEMA LANE IS WITHDRAWN. A draft is created by `fork_schema()`, which requires
+--    `schema:manage`, so the only person who could create a draft was the only person who could
+--    publish it, and an Operator proposing a publication was never proposing a change they had
+--    authored. `proposable_columns('schemas')` returns the empty array (so the validator's
+--    fail-closed branch refuses a new one and names the reason), `may_decide_proposal('schemas')`
+--    returns false, and `approve_proposal()` loses its schemas branch. The CHECK constraint still
+--    admits the string, because refusing it would refuse the rows already in the table. Anything
+--    still open in that lane is withdrawn below with a reason. 0087 is not reverted.
 --
+-- 2. CELLS, GATEWAYS AND DOCUMENTS TAKE ITS PLACE. `cells` and `gateways` are patches of
+--    allowlisted columns over an existing row, as `devices` is. `cell_links`, `gateway_links` and
+--    `device_links` are a new shape: the patch is a row to create in `links`, so `display_name`
+--    and `url` are required rather than optional. Three link lanes rather than one because
+--    `entity_id`'s table is decided by `entity_type`, and the validator must know which table to
+--    look the target up in.
+--
+--    Proposable: cells (name, grafana_url, icon; not the lifecycle columns), gateways (name,
+--    description, cell_id, location_scope, access_url; not what the gateway IS or publishes
+--    under, and not any observed health column), *_links (display_name, url, link_tag; adding
+--    only, since `links.id` is not `entity_id`). The new lanes resolve authority
+--    (`cell:manage` etc.), not role names, so a lane cannot drift from the policy on its table.
+--
+-- 3. A PROPOSAL THAT HAS ALREADY COME TRUE CANNOT BE APPROVED. The queue is a way to ask, not a
+--    lock, so a Manager can make the change by hand while a proposal sits open. Approving it then
+--    would record an act with no effect attributed to somebody who did not perform it, so
+--    `approve_proposal()` refuses and the repair is to reject it with a reason. The test is
+--    `to_jsonb(current_row) @> patch`: containment, so a type mismatch fails towards "approval
+--    proceeds", never towards refusing a real change.
 -- =================================================================================================
--- 1. THE SCHEMA LANE IS WITHDRAWN
--- =================================================================================================
---
--- 0088 let a publication be proposed, and the lane was built correctly: an Operator could ask for a
--- draft to go live and only an Administrator could approve it. What it could not supply was a
--- REASON FOR AN OPERATOR TO BE THERE.
---
--- A draft is created by `fork_schema()`, which requires `schema:manage` -- withdrawn from every
--- role but Administrator by 0069, and closed off at the RPC by 0087. So the only person who can
--- create the draft is the only person who can publish it. An Operator proposing a publication was
--- therefore never proposing a CHANGE they had authored; at most they were voting for a draft
--- somebody else had already written and could already publish. That is a different feature -- an
--- endorsement, not a request -- and it is not what this queue is.
---
--- WHAT IS WITHDRAWN, AND WHAT IS KEPT:
---
---   * `proposable_columns('schemas')` returns the empty array, so validate_change_proposal()'s
---     fail-closed branch refuses a new one and NAMES the reason.
---   * `may_decide_proposal('schemas')` returns false, so nothing in this lane can be decided.
---   * `approve_proposal()` loses its schemas branch, which is now unreachable.
---   * THE CHECK CONSTRAINT STILL ADMITS THE STRING, deliberately. A constraint that refused it
---     would refuse the rows ALREADY IN THE TABLE -- every schema proposal ever applied or rejected
---     -- and the migration would fail to apply on any stack that used the lane. History is not
---     retracted because the lane is.
---   * Anything still OPEN in that lane is withdrawn below, with a reason, rather than left to sit
---     in a queue nobody can now decide.
---
--- 0087 IS NOT REVERTED AND MUST NOT BE. It narrowed `fork_schema()` and `publish_schema_version()`
--- to `schema:manage`, closing a live hole through which a Shopfloor_Manager could publish. That
--- fix is about the RPCs themselves and stands entirely on its own.
---
--- =================================================================================================
--- 2. CELLS, GATEWAYS AND DOCUMENTS TAKE ITS PLACE
--- =================================================================================================
---
---   cells, gateways            -- the same shape as `devices`: a patch of allowlisted columns over
---                                a row that already exists.
---
---   cell_links, gateway_links, -- A NEW SHAPE. The patch is not a set of columns to change on an
---   device_links                  existing row; it is a ROW TO CREATE in `links`. Nothing is being
---                                 edited, so there is no "current" to diff against, and the fields
---                                 that identify the new row (`display_name`, `url`) are REQUIRED
---                                 rather than optional -- the opposite of every lane before it,
---                                 where an absent key means "leave this alone".
---
--- These are the assets an Operator looks at all day and cannot edit, which is the condition the
--- queue was built for and the one the schema lane never met.
---
--- WHY THE LINK LANES ARE THREE AND NOT ONE. `change_proposals.entity_id` is a bare uuid whose table
--- is decided by `entity_type`, and the validator has to know WHICH table to look the target up in
--- before it can refuse a proposal against something that does not exist. One `links` lane would
--- have had to carry the asset kind inside the patch -- a second entity_type nested under the first,
--- which the CHECK constraint cannot see and the per-asset unique index cannot scope.
---
--- WHAT IS PROPOSABLE, AND WHAT IS DELIBERATELY NOT:
---
---   cells      -- name, grafana_url, icon. NOT `is_archived` or `auto_delete_at`: archiving is a
---                 lifecycle act with a retention promise attached.
---
---   gateways   -- name, description, cell_id, location_scope, access_url. NOT `deployment`,
---                 `is_virtual`, `is_simulated`, `is_shadow` or `sparkplug_group`: those describe
---                 what the gateway IS and what it publishes under, and moving one re-points a
---                 broker topic namespace rather than editing a label. NOT `status`,
---                 `last_heartbeat`, `agent_version`, `cert_expires_at`, `flow_hash` or any health
---                 column, for 0086's reason exactly -- they are what the platform OBSERVED, and a
---                 proposal able to edit them would let somebody assert a gateway's health by
---                 describing it.
---
---   *_links    -- display_name, url, link_tag. ADDING a document only. Editing and deleting an
---                 existing link are not proposable: `links.id` is not `entity_id` (which addresses
---                 the ASSET), so that lane would need a second identifier the queue has nowhere to
---                 put. Adding is also the half that cannot destroy a reference somebody relies on.
---
--- THE NEW LANES RESOLVE AUTHORITY, NOT ROLE NAMES, and 0087 is why: it found two predicates
--- deciding one question and disagreeing silently, with the wider one winning. A lane gated on
--- `cell:manage` cannot drift from the policy on `public.cells` in that way. The effective answer is
--- the same today -- Administrator and Shopfloor_Manager hold all three grants -- and the point is
--- what happens the day one is withdrawn: the lane closes with it rather than outliving it.
---
--- =================================================================================================
--- 3. A PROPOSAL THAT HAS ALREADY COME TRUE CANNOT BE APPROVED
--- =================================================================================================
---
--- Nothing stops a Manager editing an asset while a proposal sits open against it, and nothing
--- should: the queue is a way to ASK, not a lock. But it means a proposal can be overtaken -- the
--- Manager makes the change by hand, and the request is still sitting there describing a state the
--- plant is already in.
---
--- Approving it then writes a PROPOSAL_APPLIED row that names an approver and a patch and records a
--- change THAT DID NOT HAPPEN IN THAT TRANSACTION, because every column already held the value it
--- proposed. The audit trail would carry an act with no effect, attributed to somebody who did not
--- perform it, and the real change would be a separate earlier row by somebody else.
---
--- So `approve_proposal()` now refuses that case and says so. The approver's repair is to REJECT it
--- -- "already done, by hand, on Tuesday" -- which records what actually happened and closes the
--- row. That is one extra click in exchange for an audit trail that does not lie.
---
--- THE TEST IS `to_jsonb(current_row) @> patch`: containment, not equality. It asks whether the row
--- already holds every value the patch proposes and ignores the columns the patch says nothing
--- about, which is exactly what a patch means. A type mismatch between a form's string and a typed
--- column makes containment FALSE -- so the failure mode is "approval proceeds", never "a real
--- change is refused as a no-op".
--- =================================================================================================
-
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. Close what the withdrawn lane leaves open
 -- -------------------------------------------------------------------------------------------------
--- BEFORE the functions below stop admitting the lane, or these rows become undecidable by anybody.
--- Runs on every boot and is a no-op after the first: the WHERE clause matches nothing once they are
--- closed.
+-- Before the functions below stop admitting the lane, or these rows become undecidable. A no-op
+-- after the first boot.
 DO $$
 DECLARE
     v_closed integer;
@@ -139,33 +60,15 @@ BEGIN
     END IF;
 END $$;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 2. The lanes the queue admits
 -- -------------------------------------------------------------------------------------------------
--- 'schemas' IS STILL LISTED. See the header: the constraint applies to rows already in the table,
--- and removing the string would refuse every schema proposal in the history of the stack. The lane
--- is closed by proposable_columns() and may_decide_proposal(), which govern what can be FILED and
--- DECIDED rather than what may be remembered.
---
--- GUARDED FOR THE SAME REASON `0088` IS, AND THIS IS THE FILE THAT BROKE IT. `0088` narrowed this
--- constraint to three lanes; it is replayed on every boot like every migration here, so the day a
--- `cells` proposal existed it re-applied a definition that row violates and the boot stopped. The
--- widening is not what fails -- the earlier, NARROWER copy is. That makes this block the next one
--- to fail, on the day something after it admits a ninth lane and somebody files on it.
---
--- THE RULE, stated here as well as in `0088` because whoever adds that ninth lane will be reading
--- THIS file to copy the shape: a migration may WIDEN a domain on replay freely and may NARROW one
--- only until something later widens it again. Guard on the LANE the migration exists to admit, not
--- on the definition, so the test stays right for a widening not yet written. A fresh boot and
--- `npm run test:db` both pass either way -- the fault needs a row of the newer lane to exist, and
--- neither of those has one.
---
--- THE SECOND HALF IS THE RECOVERY CASE, and `0088` records how the database gets into it: an
--- `ALTER TABLE` pair autocommits, so a boot that fails on the ADD leaves the DROP applied and the
--- table with no constraint at all. Refusing to install a definition that would RETRACT a row the
--- table already holds is what lets that database be repaired by the migration that admits the row
--- instead of stopping the boot for ever.
+-- 'schemas' is still listed: the constraint applies to rows already in the table. Guarded on the
+-- lane this migration exists to admit, not on the definition: a migration may widen a domain on
+-- replay freely and may narrow one only until something later widens it again, so whoever adds
+-- the next lane must copy this shape. The second half is the recovery case: `ALTER TABLE`
+-- autocommits per statement, and a failed boot can leave the table with no constraint at all.
+-- See docs/incidents.md -> "A replayed narrowing is a retraction".
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -197,7 +100,6 @@ BEGIN
             ]));
     END IF;
 END $$;
-
 
 -- -------------------------------------------------------------------------------------------------
 -- 3. What each lane admits
@@ -241,18 +143,12 @@ $$;
 
 COMMENT ON FUNCTION public.proposable_columns(p_entity_type text) IS 'Which columns a change proposal may name, per entity type. An unknown or withdrawn entity type yields the empty array, so a lane nobody has written an allowlist for can propose nothing at all rather than everything. For the three *_links lanes this is the shape of a row to CREATE, and validate_change_proposal() additionally requires display_name and url.';
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 4. The tags a proposed document may carry
 -- -------------------------------------------------------------------------------------------------
--- MIRRORED BY `TAG_LABELS` in frontend/src/components/modals/EntityLinksModal.jsx, and
--- scripts/check-mirror-drift.mjs compares the two. The failure this prevents is the quiet one: a
--- tag added to the form and not here would be offered in a dropdown and refused on submit, which
--- reads as the form being broken rather than as the value being unknown.
---
--- `links.link_tag` ITSELF STILL CARRIES NO CHECK, and this does not add one. Retro-fitting a
--- constraint to a table with rows in it is a different migration with a different risk; what this
--- does is refuse to CREATE new junk through the queue, which is the path this file opens.
+-- Mirrored by `TAG_LABELS` in frontend/src/components/modals/EntityLinksModal.jsx and compared by
+-- scripts/check-mirror-drift.mjs. `links.link_tag` itself still carries no CHECK; this refuses to
+-- create new junk through the queue only.
 CREATE OR REPLACE FUNCTION public.proposable_link_tags() RETURNS text[]
     LANGUAGE sql IMMUTABLE
     AS $$
@@ -266,7 +162,6 @@ COMMENT ON FUNCTION public.proposable_link_tags() IS 'The link_tag values a prop
 
 REVOKE ALL ON FUNCTION public.proposable_link_tags() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.proposable_link_tags() TO authenticated, service_role;
-
 
 -- -------------------------------------------------------------------------------------------------
 -- 5. Who may decide each lane
@@ -297,13 +192,12 @@ $$;
 
 COMMENT ON FUNCTION public.may_decide_proposal(p_entity_type text) IS 'Who may approve or reject a proposal in this lane. The two device lanes resolve a role pair; every lane added since resolves the PERMISSION its target table''s own policy resolves, so the lane closes when the grant is withdrawn rather than outliving it. An unknown or withdrawn lane -- schemas, since 0090 -- is decidable by nobody.';
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 6. The audit domain of the new lanes
 -- -------------------------------------------------------------------------------------------------
--- `cells` and `gateways` were already classified. The three link lanes are new strings and would
--- otherwise fall through to the fail-closed ELSE and land in the SECURITY domain -- where a
--- Shopfloor_Manager could not read the record of a document they approved themselves.
+-- The three link lanes are new strings and would otherwise fall through to the fail-closed
+-- security domain, where a Shopfloor_Manager could not read the record of a document they
+-- approved.
 CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action text) RETURNS text
     LANGUAGE sql IMMUTABLE
     AS $$
@@ -313,13 +207,9 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
     WHEN p_entity_type IN ('service_principals', 'user_roles', 'system_settings')
       THEN 'security'
 
-    -- The asset trail: the shopfloor's own history, which is what a Shopfloor_Manager manages.
-    -- CREDENTIAL_ISSUED lands here on `gateways` deliberately -- see 0001's header. A Manager may
-    -- mint a virtual gateway's broker credential, so a Manager may read that one was minted.
-    --
-    -- `device_nameplate` and `change_proposals` joined in 0086: an assertion about an asset, and
-    -- the queue of proposed assertions about assets. The three *_links lanes joined in 0090 for
-    -- the same reason -- a document attached to a machine is a fact about that machine.
+    -- The asset trail: the shopfloor's own history. CREDENTIAL_ISSUED lands here on `gateways`
+    -- deliberately: a Manager may mint a virtual gateway's broker credential. `device_nameplate` and
+    -- `change_proposals` joined in 0086; the three *_links lanes in 0090.
     WHEN p_entity_type IN ('cells', 'devices', 'gateways', 'links',
                            'device_nameplate', 'change_proposals',
                            'cell_links', 'gateway_links', 'device_links')
@@ -332,12 +222,10 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
   END
 $$;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 7. Has this proposal already come true?
 -- -------------------------------------------------------------------------------------------------
--- See the header for the argument. Read by approve_proposal(), and exposed to the browser so the
--- queue can WARN before somebody clicks rather than only refusing afterwards.
+-- Read by approve_proposal(), and exposed to the browser so the queue can warn before the click.
 CREATE OR REPLACE FUNCTION public.proposal_is_already_true(p_proposal_id uuid) RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -394,7 +282,6 @@ COMMENT ON FUNCTION public.proposal_is_already_true(uuid) IS 'Whether every valu
 REVOKE ALL ON FUNCTION public.proposal_is_already_true(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.proposal_is_already_true(uuid) TO authenticated, service_role;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 8. What a proposal has to look like before it is queued
 -- -------------------------------------------------------------------------------------------------
@@ -408,11 +295,9 @@ DECLARE
     v_tag     text;
     v_exists  boolean;
 BEGIN
-    -- FAIL-CLOSED, AND IT NAMES THE REAL PROBLEM. The CHECK constraint admits the known lanes and
-    -- this trigger runs BEFORE it, so an entity type with no allowlist reaches here first. This is
-    -- also how 0090's withdrawal of the schema lane is enforced: the string is still admitted by
-    -- the constraint, for the history in the table, and has no allowlist -- so a new one is refused
-    -- here with a sentence that says why.
+    -- Fail closed, naming the real problem: the CHECK constraint admits the known lanes and this
+    -- trigger runs before it. This is also how the schema lane's withdrawal is enforced: the string
+    -- is admitted by the constraint and has no allowlist.
     IF array_length(v_allowed, 1) IS NULL THEN
         RAISE EXCEPTION
             'nothing is proposable on %; proposable_columns() has no allowlist for it',
@@ -432,10 +317,8 @@ BEGIN
     END LOOP;
 
     -- ---------------------------------------------------------------------------------------------
-    -- THE TARGET HAS TO EXIST, and there is no foreign key that can say so: `entity_id` addresses
-    -- a different table depending on `entity_type`. ARCHIVED IS REFUSED TOO -- an archived asset is
-    -- on its way out under a retention promise, and a proposal against one would either be applied
-    -- to a row nobody expects to change again or expire unread.
+    -- The target has to exist, and no foreign key can say so: `entity_id` addresses a different
+    -- table depending on `entity_type`. Archived is refused too.
     -- ---------------------------------------------------------------------------------------------
     v_exists := CASE
         WHEN NEW.entity_type IN ('devices', 'device_nameplate', 'device_links') THEN
@@ -457,13 +340,9 @@ BEGIN
     END IF;
 
     -- ---------------------------------------------------------------------------------------------
-    -- THE LINK LANES ARE A CREATE, so their required fields are required.
-    --
-    -- Every lane before this one is a PATCH: an absent key means "leave this alone", and a patch of
-    -- one key is a complete proposal. A new `links` row has no "as it was" to fall back on -- a
-    -- document with no address is not a document -- so absence here is a hole rather than a
-    -- deliberate omission, and it is caught now rather than by a NOT NULL at approval time a week
-    -- later.
+    -- The link lanes are a create, so their required fields are required: a new `links` row has
+    -- no "as it was" to fall back on, and a hole is caught now rather than by a NOT NULL at
+    -- approval.
     -- ---------------------------------------------------------------------------------------------
     IF NEW.entity_type IN ('cell_links', 'gateway_links', 'device_links') THEN
         IF COALESCE(NULLIF(TRIM(NEW.patch ->> 'display_name'), ''), '') = '' THEN
@@ -497,7 +376,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
 
 -- -------------------------------------------------------------------------------------------------
 -- 9. Approving is applying
@@ -652,11 +530,9 @@ BEGIN
 
         SELECT * INTO v_gw_new FROM jsonb_populate_record(v_gateway, v_proposal.patch);
 
-        -- FOUR CHECK CONSTRAINTS GUARD THIS ONE STATEMENT: site_wide_has_no_cell,
-        -- synthetic_has_no_cell, simulated_is_host and location_scope_valid. A relocation that
-        -- would break any of them fails HERE, inside the approver's transaction, and the proposal
-        -- stays open with the database's own sentence attached -- rather than being recorded as
-        -- applied and quietly not having been.
+        -- Four CHECK constraints guard this statement (site_wide_has_no_cell, synthetic_has_no_cell,
+        -- simulated_is_host, location_scope_valid). A relocation that breaks one fails here, inside the
+        -- approver's transaction, and the proposal stays open with the database's own sentence.
         UPDATE public.gateways
            SET name           = v_gw_new.name,
                description    = v_gw_new.description,
@@ -691,12 +567,8 @@ BEGIN
     -- point is unreachable for one -- and an ELSE that silently did nothing would let a lane added
     -- to the CHECK and forgotten here record an approval that changed nothing.
 
-    -- THE ROW THAT NAMES BOTH PARTIES. The target's own audit trigger fires above, attributed to
-    -- the approver; nothing there records who ASKED. This row does, and it is the only place the
-    -- pair appears together.
-    --
-    -- `proposed_by_email` rides along from 0089, because this row is read by a PERSON and a uuid
-    -- does not tell them who asked for the change they are looking at.
+    -- The row that names both parties; the target's own audit trigger records only the approver.
+    -- `proposed_by_email` rides along because this row is read by a person.
     INSERT INTO public.digital_thread
         (entity_type, entity_id, action, old_data, new_data, changed_by, actor_source, audit_domain)
     VALUES (
@@ -736,16 +608,11 @@ COMMENT ON FUNCTION public.approve_proposal(uuid) IS 'Approving IS applying: the
 REVOKE ALL ON FUNCTION public.approve_proposal(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.approve_proposal(uuid) TO authenticated, service_role;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 10. Rejecting, which has to admit the same lanes as approving
 -- -------------------------------------------------------------------------------------------------
--- Its outer gate is the same union as approve_proposal()'s, for the same reason: a Manager who may
--- decide a cell proposal must be able to say NO to one, and an outer gate narrower than the lane
--- gate would let them approve what they cannot refuse.
---
--- THIS IS ALSO THE REPAIR FOR AN OVERTAKEN PROPOSAL. "Already done by hand" is a rejection reason,
--- and the reason is what makes the record true.
+-- A Manager who may decide a cell proposal must be able to say no to one. This is also the
+-- repair for an overtaken proposal: "already done by hand" is a rejection reason.
 CREATE OR REPLACE FUNCTION public.reject_proposal(p_proposal_id uuid, p_reason text) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -796,12 +663,11 @@ $$;
 REVOKE ALL ON FUNCTION public.reject_proposal(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.reject_proposal(uuid, text) TO authenticated, service_role;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 11. Self-check
 -- -------------------------------------------------------------------------------------------------
 -- Replays on every boot, so a later migration that widens the CHECK and forgets one of the three
--- functions a lane needs fails the boot rather than shipping a lane that cannot be decided.
+-- functions a lane needs fails the boot.
 DO $$
 DECLARE
     v_lane    text;
@@ -834,17 +700,10 @@ BEGIN
         v_missing := v_missing || 'schemas: an open proposal survives in a lane nobody can decide';
     END IF;
 
-    -- THE TABLE MUST END THE BOOT WITH A CONSTRAINT ON IT, AND A VALIDATED ONE. Both blocks above
-    -- guard on the lane and correctly do nothing when it is already admitted, which is what makes
-    -- them safe against a widening nobody has written yet -- but it also means the whole chain can
-    -- pass while installing no definition at all. That is not hypothetical: `ALTER TABLE`
-    -- autocommits per statement, so the boot that failed here left the DROP applied and the ADD
-    -- rolled back, and the table carried NO constraint until the next repair. This is the assertion
-    -- that would have named that state instead of leaving it to be discovered.
-    --
-    -- Read from the CATALOGUE rather than by restating the list, because a check that repeats the
-    -- array it is checking cannot disagree with it -- and note what is NOT asserted: a count of
-    -- lanes. A later migration widening this is the expected case.
+    -- The table must end the boot with a validated constraint on it: both blocks above guard on the
+    -- lane and correctly do nothing when it is already admitted, so the chain could otherwise pass
+    -- while installing no definition at all. Read from the catalogue, and no count of lanes is
+    -- asserted, because a later widening is the expected case.
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
          WHERE conrelid = 'public.change_proposals'::regclass

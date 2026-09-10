@@ -199,7 +199,7 @@ spec:
               */}}
               {{- /*
                 __LOKI_URL__ is the same arrangement, one store along. The chart deploys no Loki
-                either -- roadmap 12's decision was that Compose runs its own log store because it
+                either -- Compose runs its own log store because it
                 already runs its own Prometheus and owns its whole observability stack, while a
                 cluster is assumed to have one and a second collector would duplicate every line.
                 A cluster with no Loki gets a datasource whose health check fails, which is the

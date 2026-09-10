@@ -124,7 +124,7 @@ spec:
             {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
                    already derives for the external broker route, which is the address the
                    certificate's SAN carries -- see mosquitto.tls in values.yaml. */}}
-            {{- /* THE FORGE, for enrolment's fourth step (roadmap 7). The in-cluster Service, not
+            {{- /* THE FORGE, for enrolment's fourth step (docs/physical-gateways.md). The in-cluster Service, not
                    the ingress hostname: the clone URL an appliance is handed comes from the forge's
                    own answer, which is built from its ROOT_URL and SSH_DOMAIN, so these two never
                    have to agree.

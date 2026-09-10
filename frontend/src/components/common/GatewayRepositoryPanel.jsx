@@ -12,7 +12,7 @@ import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch } from '
  * `FlowProposalPanel` took a `flows.json` here and had an edge function commit it to a branch and
  * open a pull request, because the forge had no login of its own and the proposer's name could only
  * reach it in a commit message. The forge has a door now -- the same two roles that review a flow
- * sign in with their dashboard identity (roadmap 7) -- so a pull request opened THERE, under the
+ * sign in with their dashboard identity (supabase/README.md, "The forge's door") -- so a pull request opened THERE, under the
  * author's own name, is the better record, and a second way to open one from here would be a second
  * path to the same state. The endpoint went with the dropzone.
  *
@@ -25,7 +25,7 @@ import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch } from '
  * ---------------------------------------------------------------------------------------------
  * THE PATH IS DERIVED, NOT FETCHED. The repository is named from the `sparkplug_id` in
  * _shared/forge.ts and lives in the organisation named there and in constants.js; nothing is
- * stored and nothing can drift, which is roadmap 9's argument against a pointer column. The
+ * stored and nothing can drift, which is the argument against a pointer column. The
  * address is the forge's door, so an Operator who somehow followed it would meet the gateway's
  * 403 rather than a repository.
  */

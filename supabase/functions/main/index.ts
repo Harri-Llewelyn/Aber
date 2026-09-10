@@ -101,7 +101,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // address cannot be derived from SUPABASE_URL -- inside this network that is supabase-kong, which
   // resolves for nothing on a shopfloor.
   //
-  // THE FORGE CREDENTIAL IS THE THIRD PLANE (roadmap 7), and it is the narrowest of the three the
+  // THE FORGE CREDENTIAL IS THE THIRD PLANE, and it is the narrowest of the three the
   // registry hands out. It authenticates as a machine account that is NOT a Gitea administrator:
   // it owns the per-gateway repositories, so it can create one and attach a read-only deploy key,
   // and it can do nothing to the platform playbook the fleet converges to. An admin credential
@@ -124,16 +124,6 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_WEBHOOK_URL",
     "GITEA_WEBHOOK_SECRET",
   ],
-
-  // Commits a proposed flow to a BRANCH in the gateway's repository and opens a pull request for
-  // it (roadmap 7). NO SERVICE-ROLE KEY, and that is the entry's point: it reads the gateway row
-  // AS THE CALLER, so RLS decides what is visible, and it makes no privileged database write at
-  // all -- the only thing it changes is in the forge.
-  //
-  // The forge credential it holds is the machine account, which is not a Gitea administrator and
-  // owns only the per-gateway repositories. Nothing here can merge: approving is `gitops:manage`,
-  // it belongs with the approvals page, and keeping it out of this worker is what keeps proposing
-  // and approving two privileges rather than one.
 
   // Rotates a decommissioned gateway's broker account to a password nobody records, which is how
   // this platform revokes -- the credential service is add-only by design (0038).

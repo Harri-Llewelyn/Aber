@@ -30,13 +30,13 @@ import {
  *   1. CLAIM the token atomically      (consume_gateway_enrollment_token)
  *   2. issue the broker credential     (the gateway-credential service)
  *   3. mark the gateway AWAITING_BIRTH
- *   4. create its repository and register its deploy key   (the forge, roadmap 7)
+ *   4. create its repository and register its deploy key   (the forge)
  *
  * STEP 4 IS NON-FATAL AND SITS LAST FOR THAT REASON. By then the token is spent and the broker
  * credential exists; refusing over a forge outage would leave a working broker account no bundle
  * can claim, and telemetry -- which is what a gateway is FOR -- needs nothing from the forge. It is
  * also skipped entirely on a deployment that has no forge configured, which is every install that
- * predates roadmap 7. See forge.ts.
+ * predates the forge. See forge.ts.
  *
  * Claiming FIRST looks wrong -- it means a failure in step 2 has to be undone -- but the
  * alternative is worse and is unfixable. A validate-then-issue-then-consume order lets two
@@ -327,7 +327,7 @@ export default async function handler(req: Request): Promise<Response> {
       // THE HOST KEY TRAVELS WITH THE CLONE URL, and it has to be this response rather than a later
       // call: this is the one moment the appliance is provably itself, holding a single-use token
       // bound to one row. An appliance that learned the forge's identity any other way would be
-      // trusting the network -- trust on first use -- which roadmap 7 and 11 both refuse.
+      // trusting the network -- trust on first use -- which this platform refuses everywhere.
       //
       // NULL IS A REAL ANSWER AND NOT AN ERROR. A forge that has not restarted since the host key
       // began being published has none to give. The appliance then enrols, takes its broker

@@ -18,8 +18,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  * This is the `ext_authz` step of that listener. Every non-static request through the door reaches
  * here first with the caller's verified access token; this resolves their role from `user_roles`
  * -- the only source, for the reason nodered-userinfo gives -- and ensures they are in exactly the
- * team that role warrants, through the machine account that owns the organisation. Roadmap 7
- * chose this over a reconciler on a timer because it is one request per login, the role decision
+ * team that role warrants, through the machine account that owns the organisation. This was
+ * chosen over a reconciler on a timer because it is one request per login, the role decision
  * is made by the same code that makes it for Node-RED and Grafana, and REVOCATION IS IMMEDIATE:
  * a token whose role has since been removed from `user_roles` is refused here on its next request,
  * where the listener's own RBAC would have honoured it until the token expired.

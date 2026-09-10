@@ -747,8 +747,7 @@ first role-assignment surface is where `authz:manage` starts meaning something, 
 into a schema where the two roles already differ rather than one where they do not.
 
 **It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
-deploys flows. The repair is to make that person an `Administrator`. Roadmap §3 (multi-factor
-authentication) and the audit-domain work both depended on this split — the MFA reset is gated on
+deploys flows. The repair is to make that person an `Administrator`. Multi-factor authentication ([`docs/roadmap.md`](../docs/roadmap.md)) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
 
@@ -1633,35 +1632,22 @@ reads as "nothing outstanding". An inventory whose coverage is unstated is one a
 over-trust, and this inventory is the compensating control
 [Accepted risks](../README.md#accepted-risks) names by name.
 
-### There is no revocation, so expiry is the whole safety story
+### Expiry, and where revocation does not reach
 
-`mint-mcp-token.mjs` records the constraint the rest of the design follows from: PostgREST checks
-the **signature**, not a session table. Revoking means rotating `SUPABASE_JWT_SECRET`, which
-invalidates every token in the stack including the anon and service-role keys.
-
-Three ways of adding revocation were checked and none works. Deleting the `auth.users` row does not
-help — the signature is validated and the subject is never looked up. Removing the role does not
-either: the relations the i3X address space is assembled from are `FOR SELECT TO authenticated
-USING (true)`, so a role-less principal still reads them. A `revoked_at` predicate would have to be
-added to **every RLS policy in the schema**.
-
-`pgjwt` is installed and `extensions.sign()` exists, so a `SECURITY DEFINER` RPC could sign a token
-without the secret ever leaving the database — technically neat, and it would have made an
-unrevocable credential a button press with a tidy audit trail of a thing nobody can undo. **Solving
-the wrong half well is worse than not solving it, because the clean implementation reads as safety.**
-So minting stays on the host.
-
-Two expiry regimes, and the split is deliberate — but the line falls between **keys that name a
-principal** and **keys that name nobody**, not between scripts:
+Revocation exists since `0074` (see
+[Tokens became revocable in `0074`](#tokens-became-revocable-in-0074-and-the-mint-followed-in-0075))
+and reaches PostgREST only: Storage, Realtime, the edge runtime and Studio verify the signature for
+themselves. Expiry therefore still bounds every token, and the line falls between **keys that name a
+principal** and **keys that name nobody**:
 
 | Key | Expiry | Why |
 | :--- | :--- | :--- |
-| `mint-mcp-token.mjs` tokens | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine, and cannot be revoked, so the expiry is the only bound that exists |
+| `mint-mcp-token.mjs` tokens | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine; revocation reaches PostgREST only, so the expiry bounds the rest |
 | `SUPABASE_INGESTION_KEY`, `SUPABASE_PLAYBACK_KEY` | **90 days**, rotatable | They carry a `sub`, so they are the same kind of credential as the row above and are bounded by the same ceiling. `npm run keys:rotate` re-signs them |
-| `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | 10 years | Not anybody: `role` and no `sub`, so RLS never asks who is calling. They are also the stack's **API keys** — Kong's `key-auth` admits exactly these two literal strings — so shortening them needs a story for re-issuing them to every client at once |
+| `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | 10 years | Not anybody: `role` and no `sub`, so RLS never asks who is calling. They are also the stack's **API keys** — the gateway admits exactly these two literal strings (or their `sb_*` replacements) — so shortening them needs a story for re-issuing them to every client at once |
 
-The ceiling is enforced in both the script and the database, deliberately duplicated: what it bounds
-cannot be revoked, so it should not be removable by editing one file. `mint-mcp-token.mjs` also
+The ceiling is enforced in both the script and the database, deliberately duplicated, so it cannot
+be removed by editing one file. `mint-mcp-token.mjs` also
 **records before it prints** — the token exists nowhere until stdout, so a failed audit write costs
 a row describing a credential nobody holds, where the other order costs an unrevocable credential in
 the wild with no record of it.
@@ -1836,6 +1822,9 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`; since `deploy-nodered` was retired this is the sole enforcement point for `gitops:manage` |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
+| [`forge-membership`](functions/forge-membership) | `Administrator`, `Shopfloor_Manager` | The forge listener's `ext_authz` step: places the caller in the team their role warrants, refuses a role removed since the token was signed (`0094`) |
+| [`forge-signout`](functions/forge-signout) | the caller | Gitea's own sign-out link: ends every GoTrue session the caller holds, then the door's sign-out |
+| [`forge-events`](functions/forge-events) | **no Supabase role at all** | Gitea's push webhook, authorised on its HMAC; records the head of `main` on the gateway row (`0095`) |
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
 
 ### `grafana-alert-webhook` — the one that authorises on a shared secret
@@ -1907,8 +1896,8 @@ rather than an adopted format.
 | `GET /v1/schema/{uuid}` | The devices implementing one schema — the **reverse** lookup |
 
 **It is served at the unprefixed paths**, not under `/functions/v1/`, because a Factory+ client has
-no Supabase `apikey` and no way to acquire one. Those Kong routes are therefore exempt from
-`key-auth` — which makes the function itself the **only** thing in front of the fleet's address
+no Supabase `apikey` and no way to acquire one. Those gateway routes are therefore exempt from the
+`apikey` check — which makes the function itself the **only** thing in front of the fleet's address
 space. Every `/v1/` path refuses a request with no bearer token *before it routes*, and
 `validate.py` check 11b asserts that 401 rather than trusting it.
 
@@ -2359,68 +2348,40 @@ archived migration `0036` removed.
 
 ## API Gateway (`envoy.yaml`)
 
-**This file is a template, and ONE template serves both deployment targets.** Committing literal
-keys would make `.env` no longer authoritative, so the `__UPPER_SNAKE__` placeholders are
-substituted outside the container on both paths:
+**One template serves both deployment targets.** [`envoy.yaml`](envoy.yaml) is committed with
+`__UPPER_SNAKE__` placeholders and substituted outside the container: by `supabase-envoy-init`
+(`sed` into a volume) on Compose, and by an initContainer on the gateway pod on Kubernetes. Not by
+Helm at template time, because with an externally-managed Secret the chart cannot see the key
+values and would substitute empty strings, which the key check would then accept. Each substituter
+scans for surviving markers and fails; adding a placeholder means adding it to both
+([`check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) asserts it).
 
-| | Substituted by | Notes |
-| :--- | :--- | :--- |
-| Docker Compose | `supabase-kong-init` (`sed` into a volume) | |
-| Kubernetes | an initContainer in the Kong pod (`sed` into an `emptyDir`) | `supabase-kong-init` has no counterpart |
+Two placeholders carry the one upstream that differs between targets. Realtime resolves its tenant
+from the **leading hostname label**, so `__REALTIME_UPSTREAM_HOST__` is the Host header
+(`realtime-dev.supabase-realtime` on Compose, `realtime-dev` on Kubernetes) and
+`__REALTIME_UPSTREAM_ADDRESS__` is what Envoy dials. Both substituters refuse a host that does not
+begin `realtime-dev`.
 
-**Not by Helm at template time**, which is the tempting shortcut and breaks the externally-managed
-Secret path in the worst way available: with the Secret owned outside the chart the chart cannot see
-the key values, Helm would substitute **empty strings**, and Kong would register empty API keys —
-*which `key-auth` accepts*. A gateway that reports healthy with its authentication silently off.
-
-`__REALTIME_UPSTREAM_URL__` is a placeholder for the same reason but a different one: it is the only
-upstream that genuinely differs between the targets. Realtime resolves its tenant from the **leading
-hostname label**, so it is `realtime-dev.supabase-realtime` (a Compose network alias) or
-`realtime-dev` (a Kubernetes Service *named* for the tenant). Both substituters validate that label
-and refuse anything else — addressing it by the plain service name makes every WebSocket handshake
-fail with a bare 403 that mentions neither tenants nor hostnames.
-
-**Adding a placeholder means adding it to both substituters.** Each scans for surviving markers and
-fails loudly, and each skips comment lines — because the template documents the convention by name,
-so a whole-file scan would flag the documentation of the rule as a violation of it.
-
-**The edge functions are delivered differently too.** Compose bind-mounts `functions/` for hot-reload;
-Kubernetes bakes them into an image (`functions/Dockerfile`, built with the **repository root** as
-context because `gateway-bundle` COPYs `gateway-bundle-template/`, which sits outside
-`supabase/functions/`). Baking is what makes "which revision of
-`aas-export` is running" a property of the deployed artefact, so a rollback rolls the functions back.
-
-`key-auth` is enabled on `/rest/v1/`, `/realtime/v1/`, `/storage/v1/` and `/functions/v1/`.
-**Six routes are deliberately open, across four exemptions**, and every one is load bearing:
+The `apikey` check gates `/rest/v1/`, `/realtime/v1/`, `/storage/v1/` and `/functions/v1/`, and
+accepts the legacy JWTs and the `sb_publishable_*` / `sb_secret_*` keys alike
+([`docs/gateway-migration.md`](../docs/gateway-migration.md)). **Six routes are open, across four
+exemptions:**
 
 | Route(s) | Exemption | Why |
 | :--- | :--- | :--- |
-| `/auth/v1/` | sign-in | GoTrue authenticates its own callers, and is the OAuth 2.1 server Grafana talks to. Sign-in must work before any session exists |
-| `/storage/v1/object/public/` | public objects | An AAS `File` URL must be dereferenceable by a viewer holding no session. Requiring a key would break every shell already handed out |
-| `/functions/v1/grafana-userinfo`, `/functions/v1/nodered-userinfo` | OAuth userinfo | An OAuth client presents client credentials, never a Supabase apikey, and **no Grafana setting can add a header to `api_url`** — gated, it 401s and Grafana reports `invalid role`, an RBAC fault rather than a gateway one. Exact paths and not a prefix, because `/functions/v1/` would re-open the whole runtime |
-| `/ping`, `/v1/` | Factory+ Directory | A Factory+ client has no apikey and no way to acquire one. `/ping` is open by specification; `/v1/` is authenticated by the **function**, which refuses a request carrying no bearer token and then queries as the *caller*, so RLS still applies |
+| `/auth/v1/` | sign-in | GoTrue authenticates its own callers and is the OAuth 2.1 server the other logins use. Sign-in must work before any session exists |
+| `/storage/v1/object/public/` | public objects | An AAS `File` URL must resolve for a viewer holding no session. Routed before `/storage/v1/`, with `/object/public/` preserved in the upstream path |
+| `/functions/v1/grafana-userinfo`, `/functions/v1/nodered-userinfo` | OAuth userinfo | An OAuth client presents client credentials, never a Supabase apikey. Exact paths, before `/functions/v1/`, so a function added later is gated by default |
+| `/ping`, `/v1/` | Factory+ Directory | A Factory+ client has no apikey. `/ping` is open by specification; `/v1/` is authenticated by the **function**, which refuses a request with no bearer and queries as the caller, so RLS applies |
 
-The public-object exemption is a **separate service** with `/object/public/` baked into its
-upstream URL, not an exempt route, because `strip_path: true` would otherwise remove the segment
-storage-api routes on.
+**The table is asserted, not maintained by hand.** `check-gateway-surface.mjs` compares the whole
+routing and authentication surface against a reviewed inventory, because `validate.py` asserts the
+401s that should happen and nothing can assert the absence of a route nobody wrote.
 
-**This table is asserted rather than maintained by hand.**
-[`scripts/check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) compares `envoy.yaml`'s
-whole routing and authentication surface against a reviewed inventory — which services exist, which
-routes they carry, which are gated, and which are open under which exemption. It exists because
-`validate.py` asserts the 401s that *should* happen and **nothing can assert the absence of a route
-nobody wrote**: a route added here and gated nowhere fails no test that probes. It was written
-against the surface rather than against Kong, so it is also the specification the move to Envoy
-([`docs/gateway-migration.md`](../docs/gateway-migration.md)) had to satisfy.
-
-> This table said **two** routes until that check was written, and had done since the userinfo and
-> Directory exemptions were added. Every one of the four was argued for carefully in the
-> gateway config; the
-> document it points readers at for the full reasoning listed half of them.
-
-> Adding a plugin name to `KONG_PLUGINS` **replaces** the default `bundled` set rather than adding
-> to it. `key-auth` had to be named explicitly or Kong would refuse to start on a config
-> referencing it.
+**The edge functions are delivered differently on the two targets.** Compose bind-mounts
+`functions/`; Kubernetes bakes them into an image (`functions/Dockerfile`, built from the repository
+root because `gateway-bundle` copies `gateway-bundle-template/`), so a rollback rolls the functions
+back with it.
 
 ### The second listener, which is Studio's login (`0081`)
 
@@ -2521,6 +2482,96 @@ substituter renders credentials that cannot authenticate — a stack that runs n
 nobody can open, which is the same posture as the loopback binding it replaces.
 
 ---
+
+### The forge's door, and the room behind it (`0094`)
+
+Gitea's web login is the gateway's `forge` listener in [`envoy.yaml`](envoy.yaml), on `8002`
+(published as `3003` on Compose, `git.<domain>` on Kubernetes). It is the Studio listener with the
+RBAC widened: an OAuth 2.1 code flow against this stack's GoTrue, a session cookie, `jwt_authn`
+against the shared secret, and a role check admitting `Administrator` and `Shopfloor_Manager`.
+`Operator` and `Auditor` complete the login and meet a 403. `0094` registers the OAuth client and
+puts the forge in the Directory.
+
+**Gitea is not an OIDC client of GoTrue, and cannot be.** Three things were measured against
+`gitea/gitea:1.27.3`: GoTrue's discovery document carries an empty `issuer` and relative endpoint
+paths, so Gitea resolves `/oauth/authorize` against itself; its request carries `scope=openid`,
+which GoTrue refuses with `HS256 is not supported for ID token signing`; and whether it sends the
+`code_challenge` GoTrue requires is unmeasured behind the first two. Moving the stack off HS256
+would be necessary and not sufficient, since the relative paths would remain.
+
+**Identity enters Gitea as headers**, through `ENABLE_REVERSE_PROXY_AUTHENTICATION` with
+auto-registration. The username is the token's `sub` (Gitea refuses `@` in a name), the email rides
+in its own header, and the full name carries the email so the UI shows a person. Gitea trusts
+`X-WEBAUTH-USER` from **any** peer — `REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For`
+only — so the access control is reachability: on Compose Gitea sits on a `forge` network only the
+gateway and the edge runtime join; on Kubernetes the NetworkPolicy edge list admits the same two
+pods. The API ignores the header (`ENABLE_REVERSE_PROXY_AUTHENTICATION_API` off), so the machine
+account's basic-auth path is not a second door. The listener overwrites or removes the identity
+headers on every route, so a value a browser sent never reaches Gitea.
+
+**Membership is placed on the way through** by [`forge-membership`](functions/forge-membership),
+the listener's `ext_authz` step: one call per non-static request, the role read from `user_roles`,
+and the person placed in the team that role warrants — `administrators` or `managers` in the
+`gateways` organisation — through the machine account. A login whose role has gone since the
+token was signed is taken out of both teams and refused. What that does not cover is a revoked
+login that never returns; a sweep on a timer is the remaining piece
+([`docs/roadmap.md`](../docs/roadmap.md), *GitOps edge sync*).
+
+**Authorisation stays in Postgres.** `user_roles` and `has_role()` decide who passes the door;
+Gitea's teams decide what they may do inside, and the team is a function of the verified role,
+never of anything the person chose. `main` is protected on every gateway repository with one
+approval required from `administrators` ([`_shared/forge.ts`](functions/_shared/forge.ts)), which
+is where `gitops:manage` being Administrator-only is enforced inside the forge. Gitea's own
+sign-out link is routed to `forge-signout`, which ends every GoTrue session the caller holds,
+because under reverse-proxy authentication Gitea's own sign-out is a no-op.
+
+Two things a laptop finds and a cluster does not: the listener renames all seven of its cookies,
+because browsers scope cookies by host and not port, so on `localhost` this door and Studio's would
+otherwise sign each other out; and `/assets/ssh_host_key.pub` and `/api/` pass the door without a
+session, in all three filters, because the host key is public and the API authenticates itself.
+`test_forge_membership.py` drives the whole flow for all three personas.
+
+### What a gateway's repository comes with, and how the forge reports back (`0095`)
+
+Enrolment furnishes the repository as well as creating it
+([`_shared/forge.ts`](functions/_shared/forge.ts)). Its **wiki** starts with a Home page naming the
+gateway and saying what belongs there: what a person needs to know and the appliance never reads.
+The wiki is a second git repository beside the first, edited in place by either team with no
+protection and no pull request, which is the right shape for notes and the wrong one for anything
+the appliance deploys, and the page says so. Seeded once, never overwritten. Its **issues** start
+with an *Incident* template and label, committed to `main` in the one moment the machine account
+still may — immediately before the branch is protected, because `enable_push: false` binds the
+machine account too and the contents API answers 403 afterwards. A repository from before this
+gets no template from enrolment; an administrator adds one by pull request. Projects and Packages
+are hidden from every repository (`DISABLED_REPO_UNITS`). Both teams may **create repositories**
+in the organisation, for a playbook a class of gateway is provisioned from; a hand-made one carries
+no protection until a gateway enrols under its name and adopts it. The gateway drawer links the
+repository, its issues and its wiki as three acts.
+
+**The forge reports a push.** Enrolment registers a webhook on the repository (`branch_filter:
+main`, one per repository rather than one on the organisation, because only a gateway's repository
+has a row to record on). Gitea delivers every push to `main` to
+[`forge-events`](functions/forge-events), directly over the forge network on Compose and the
+NetworkPolicy edge `gitea → supabase-functions` on Kubernetes, never through the gateway. The
+delivery's `X-Gitea-Signature` — hex HMAC-SHA256 of the raw body under `GITEA_WEBHOOK_SECRET` — is
+the whole of the authentication, verified over the bytes before they are parsed. On a verified push
+`0095`'s columns on `gateways` record the head: `forge_head_sha`, the message's first line, who,
+when, and the SHA-256 of `flows.json` at that commit, read through the machine account. The drawer
+shows it as **Committed**, so a merge is visible at once rather than on the appliance's next tick.
+Pushes to other branches, repositories that are not a gateway's, deleted branches and unknown
+gateways are answered 200 with `ignored`, because a non-2xx is a failed delivery on the hook's page.
+Gitea's `webhook.ALLOWED_HOST_LIST` defaults to public addresses only and refuses every in-stack
+target; it is `private` here. `0095` ends with `ensure_gateway_status_view()`, and the baseline's
+dumped copy of that view became a call to the same function, because `CREATE OR REPLACE VIEW`
+cannot narrow a view the function has just widened and every boot after the first was failing in
+`0001`.
+
+**Not yet a drift check.** The heartbeat's flow hash is the one `bootstrap.mjs` wrote into
+`gateway.env` at enrolment, not what `flow-sync.mjs` last deployed, so `forge_head_flow_sha256`
+and `flow_hash` sit side by side and the dashboard does not call their difference drift. The
+appliance-side half is in [`docs/roadmap.md`](../docs/roadmap.md), *GitOps edge sync*.
+`test_forge_events.py` covers the signature, what is recorded and ignored, and one delivery sent by
+the forge itself for a freshly enrolled gateway.
 
 ## A replay lane is minted, not assigned (`0083`)
 
@@ -2650,7 +2701,7 @@ strength of a variable nobody set would be the worst of both behaviours.
 
 On Kubernetes this is what surfaces the chart's port-free hostnames on the page. On Compose it shows
 whatever the operator configured, which is still a port — **port-free URLs there need the reverse
-proxy in roadmap §11**, sequenced after this so a proxy cannot serve `nodered.<domain>` while this
+proxy** ([`docs/roadmap.md`](../docs/roadmap.md), *The transport between services*), sequenced after this so a proxy cannot serve `nodered.<domain>` while this
 table advertises `localhost:1880`.
 
 ---

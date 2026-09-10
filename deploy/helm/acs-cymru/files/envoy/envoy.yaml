@@ -18,77 +18,30 @@
 # Studio's four.
 #
 # -------------------------------------------------------------------------------------------------
-# WHAT THIS IS, AND WHAT IT IS PART-WAY THROUGH
+# THE GATEWAY on both targets (docs/gateway-migration.md). Three listeners: the API on 8000, which
+# accepts the legacy anon/service-role JWTs and the opaque `sb_publishable_*` / `sb_secret_*` keys
+# at once (`__LEGACY_KEYS_ACCEPTED__` ends that, and the access log and RBAC shadow counter below
+# say when it is safe); Studio's login on 8001; the forge's login on 8002.
 #
-# THIS IS THE GATEWAY. On Compose, Envoy publishes 54321 and Kong is retired; on Kubernetes the
-# chart sets `supabaseEnvoy.enabled` with Kong retained and off. The note that used to sit here --
-# that this ran beside Kong on a second port pending an equivalence probe -- described the migration
-# while it was happening and was wrong to still be here once it had. See docs/gateway-migration.md.
+# Envoy semantics that differ from Kong and produce a stack that looks fine and is not:
+#   1. Route order is first-match, so `/storage/v1/object/public/` precedes `/storage/v1/` and the
+#      userinfo paths precede `/functions/v1/`.
+#   2. The Realtime client puts the key in the WebSocket URL's query string; a header-only check
+#      leaves Realtime permanently 401.
+#   3. Realtime reads its tenant from the leading Host label, so `host_rewrite_literal` is required.
+#   4. Credential hiding is per route: Realtime must keep the key, everything else strips it.
+#   5. The Directory routes keep their path: main/index.ts reads the first segment to pick a worker.
 #
-# IT ACCEPTS TWO API KEY FORMATS AT ONCE, deliberately and temporarily. Supabase deprecates the anon
-# and service-role JWTs by the end of 2026; this gateway matches both those and the opaque
-# `sb_publishable_*` / `sb_secret_*` keys that replace them, translating the latter into the former
-# because no upstream can read a non-JWT. `__LEGACY_KEYS_ACCEPTED__` is how that ends -- and the
-# access log and RBAC shadow counter below are how a deployment learns when ending it is safe.
-#
-# IT ALSO SERVES A SECOND LISTENER, WHICH IS STUDIO'S LOGIN. 54323 is the console, and it is gated
-# on an Administrator session rather than published open: Studio hands whoever reaches it the
-# project's `jwt_secret` and both service API keys, and its SQL editor runs as the database owner.
-# The same door closes `/api/mcp`, which shares that port and answered `initialize` unauthenticated.
-#
-# AND A THIRD, WHICH IS THE FORGE'S. Gitea cannot be an OIDC client of GoTrue (roadmap 7 records the
-# three measured reasons), so its login is this gateway's: the same three filters as Studio's door,
-# admitting Administrator and Shopfloor_Manager, handing the verified identity to Gitea as headers.
-#
-# -------------------------------------------------------------------------------------------------
-# THE FIVE TRANSLATION TRAPS, each of which produces a stack that looks fine and is not:
-#
-#   1. ROUTE ORDER IS SEMANTIC HERE AND IS NOT IN KONG. Kong matches the LONGEST prefix; Envoy
-#      matches the FIRST that matches. So `/storage/v1/object/public/` must precede `/storage/v1/`
-#      and both userinfo paths must precede `/functions/v1/`, or the public bucket becomes gated
-#      and the whole edge runtime becomes open. Neither fails to start.
-#
-#   2. `key_in_query`. The Realtime client puts the key in the WebSocket URL's query string --
-#      a browser cannot set a header on a handshake. A header-only check leaves Realtime
-#      permanently 401 with nothing in any log saying why.
-#
-#   3. REALTIME'S HOST HEADER. Realtime reads its tenant id from the leading hostname LABEL, not
-#      from the JWT. Kong sends `realtime-dev.supabase-realtime` because `preserve_host` defaults
-#      to false and the upstream Host comes from the service URL. Envoy preserves the client's
-#      Host unless told otherwise, so `host_rewrite_literal` is doing that job here. Without it
-#      every handshake gets a bare 403.
-#
-#   4. `hide_credentials` IS PER ROUTE, not global. Kong strips the apikey before forwarding for
-#      REST, Storage and Functions, and deliberately does NOT for Realtime -- which reads the key
-#      from the query itself to identify the tenant. Strip it there and the handshake breaks.
-#
-#   5. `strip_path: false` ON THE DIRECTORY ROUTES. `/ping` and `/v1/` must arrive at the edge
-#      runtime as `/fplus-directory/...`, because main/index.ts reads the FIRST PATH SEGMENT to
-#      decide which worker to spawn. Rewriting to `/` hands it an empty service name and it
-#      answers 400 naming nothing.
-#
-# -------------------------------------------------------------------------------------------------
-# WHAT IS DELIBERATELY ABSENT
-#
-# i3X, Node-RED and Grafana have NO cluster here, because they have none in kong.yml either --
-# they are published on their own host ports and have never been behind the gateway. Adding them
-# would not be a translation, it would be new exposure, and `--runtime` could not catch it: that
-# mode asserts the posture of routes in the inventory and cannot report a route nobody declared.
+# i3X, Node-RED and Grafana have no cluster here: they are published on their own ports.
 # =================================================================================================
 
-# REQUIRED BY SDS, and by nothing else here. Envoy refuses to start any secret discovery source
-# without a node identity -- `GenericSecretSdsApi: node 'id' and 'cluster' are required` -- and the
-# studio listener's client secret and cookie key are both SDS. The values are labels for a
-# management server this stack does not run, so they identify rather than configure; setting them
-# here keeps both targets' start commands unchanged.
+# Required by SDS (the listeners' client secrets and cookie keys); labels only.
 node:
   id: acs-cymru-gateway
   cluster: acs-cymru
 
 admin:
-  # INTERNAL ONLY, matching KONG_STATUS_LISTEN's treatment: no `ports:` entry publishes 9901.
-  # Envoy's admin interface has no authentication and can drain listeners and read the config,
-  # including the substituted keys.
+  # Internal only: unauthenticated, and it can drain listeners and dump the config, keys included.
   address:
     socket_address: { address: 0.0.0.0, port_value: 9901 }
 
@@ -103,24 +56,10 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: gateway
-                # -----------------------------------------------------------------------------
-                # THE ONE LINE THAT SAYS THE MIGRATION IS NOT FINISHED.
-                #
-                # Supabase deprecates the anon and service-role JWTs by the end of 2026. Every
-                # consumer in this repository now presents the publishable key -- but "every
-                # consumer in this repository" is not the question. The question is whether
-                # ANYTHING still presents a legacy key, including callers nobody here wrote, and
-                # until this stack could answer it, turning the legacy pair off was a guess.
-                #
-                # SILENCE IS THE PASS CONDITION. This logs only when a request presented a legacy
-                # key, so an empty log over a representative window -- a full backup cycle, a
-                # month-end, whatever this deployment's slowest periodic job is -- is the evidence
-                # that `LEGACY_KEYS_ACCEPTED=false` is safe. One line is a named path to go and fix.
-                #
-                # A LOG AND A COUNTER, DELIBERATELY BOTH. The RBAC shadow rule below counts these
-                # for Prometheus, which answers "how many, and is it trending to zero" on a
-                # dashboard. It cannot answer "WHICH route, so who do I go and talk to". This can.
-                # -----------------------------------------------------------------------------
+                # Logs only requests that presented a LEGACY key. An empty log over a window
+                # covering the deployment's slowest periodic job is the evidence that
+                # `LEGACY_KEYS_ACCEPTED=false` is safe; the RBAC shadow counter below gives the
+                # trend, this gives the route and caller.
                 access_log:
                   - name: envoy.access_loggers.stdout
                     filter:
@@ -133,19 +72,10 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
                       log_format:
                         text_format_source:
-                          # THE ROUTE NAME, NOT THE PATH, AND THAT IS A CREDENTIAL DECISION.
-                          # The apikey travels in the QUERY STRING on the Realtime route -- a
-                          # browser cannot set a header on a WebSocket handshake -- so `%REQ(:PATH)%`
-                          # would write the key itself to stdout on every one of these lines. That
-                          # is exactly what hide_credentials exists to prevent one layer down, and
-                          # a log is a worse place for it than an upstream access log.
-                          #
-                          # `%ROUTE_NAME%` is the matched route from the inventory above
-                          # (`rest-v1-routes`, `realtime-v1-ws`, ...). With the user agent and the
-                          # downstream address that is enough to identify the consumer, which is
-                          # the only thing this line is for. The key never is.
+                          # The route name, not the path: the apikey travels in the query string
+                          # on the Realtime route and must not be written to stdout.
                           inline_string: "acs-legacy-api-key method=%REQ(:METHOD)% route=%ROUTE_NAME% status=%RESPONSE_CODE% ua=%REQ(USER-AGENT)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
-                # Realtime is a WebSocket upstream; without this the handshake is answered 426.
+                # Realtime is a WebSocket upstream.
                 upgrade_configs:
                   - upgrade_type: websocket
                 route_config:
@@ -153,32 +83,11 @@ static_resources:
                   virtual_hosts:
                     - name: supabase
                       domains: ["*"]
-                      # -------------------------------------------------------------------------
-                      # CORS -- the only statement of origin policy in the stack.
-                      #
-                      # `supabase/functions/_shared/cors.ts` deliberately carries no
-                      # Access-Control-Allow-Origin: the gateway is the only layer that sees a
-                      # request before deciding to route it, so there is no second layer to fall
-                      # back on if this list is wrong. That is why it is substituted from the same
-                      # variable Kong reads rather than written out again here -- two lists would
-                      # be two statements to keep in step.
-                      #
-                      # IT HAS ALREADY FAILED ONCE, in exactly the way a single unenforced statement
-                      # fails. Four literal localhost origins were correct on Compose and silently
-                      # wrong on Kubernetes: the dashboard logged in and then showed empty tables,
-                      # while the gateway reported 200 for every request. Nothing was down and
-                      # nothing logged an error. Check this list against the deployment target
-                      # before blaming a query.
-                      #
-                      # MOVING IT TO A Gateway API HTTPRoute FILTER WAS A ROADMAP ITEM AND WAS
-                      # RETIRED on 2026-09-02. A route-level policy is genuinely harder to get wrong
-                      # than a substituted JSON array, and that was the argument for it. But the two
-                      # reasons it was raised -- Kong 2.8's substitution templates, then CORS having
-                      # no declarative home -- were both removed by other work, and HTTPRoute exists
-                      # on Kubernetes only. Taking it now would state origin policy a SECOND way on
-                      # ONE of two targets, which is the divergence this shared file exists to
-                      # prevent. Revisit if Compose stops being a supported target, not before.
-                      # -------------------------------------------------------------------------
+                      # CORS: the only statement of origin policy in the stack. The edge functions
+                      # declare none. An origin missing from the substituted list presents as a
+                      # dashboard that logs in and shows empty tables while the gateway returns 200.
+                      # Not moved to a Gateway API HTTPRoute filter: that exists on Kubernetes only
+                      # and would state origin policy a second way on one of two targets.
                       typed_per_filter_config:
                         envoy.filters.http.cors:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.CorsPolicy
@@ -187,10 +96,7 @@ static_resources:
                           allow_headers: "*"
                           allow_credentials: true
                       routes:
-                        # -----------------------------------------------------------------------
                         # EXEMPTION 1 of 4 -- sign-in must work before a session exists.
-                        # GoTrue authenticates its own callers.
-                        # -----------------------------------------------------------------------
                         - name: auth-v1-routes
                           match: { prefix: "/auth/v1/" }
                           route:
@@ -201,13 +107,8 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               disabled: true
 
-                        # -----------------------------------------------------------------------
                         # EXEMPTION 2 of 4 -- an AAS File URL must resolve with no session.
-                        #
-                        # BEFORE /storage/v1/ (trap 1). The upstream path must keep
-                        # `/object/public/`, which storage-api routes on, so the rewrite restores
-                        # it rather than stripping to the root.
-                        # -----------------------------------------------------------------------
+                        # Before /storage/v1/; the upstream path keeps `/object/public/`.
                         - name: storage-v1-public-routes
                           match: { prefix: "/storage/v1/object/public/" }
                           route:
@@ -230,10 +131,7 @@ static_resources:
                             cluster: rest-v1
                             prefix_rewrite: "/"
 
-                        # -----------------------------------------------------------------------
-                        # Realtime. Gated, but the key is PRESERVED (trap 4) and the Host is
-                        # rewritten (trap 3).
-                        # -----------------------------------------------------------------------
+                        # Realtime: gated, key preserved, Host rewritten.
                         - name: realtime-v1-ws
                           match: { prefix: "/realtime/v1/" }
                           route:
@@ -247,16 +145,9 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               name: keyauth_preserve
 
-                        # -----------------------------------------------------------------------
                         # EXEMPTION 3 of 4 -- an OAuth client sends client credentials, never a
-                        # Supabase apikey, and no Grafana or Node-RED setting can add a header to
-                        # `api_url`. Gated, Grafana reports `invalid role: Authenticated`, which
-                        # reads as an RBAC fault rather than a gateway one.
-                        #
-                        # EXACT PATHS, NOT A PREFIX, and BEFORE /functions/v1/ (trap 1): a prefix
-                        # here would re-open the whole runtime, and naming the two endpoints means
-                        # a function added later is gated by default.
-                        # -----------------------------------------------------------------------
+                        # Supabase apikey. Exact paths, before /functions/v1/, so a function added
+                        # later is gated by default.
                         - name: functions-v1-grafana-userinfo-route
                           match: { path: "/functions/v1/grafana-userinfo" }
                           route:
@@ -277,45 +168,20 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               disabled: true
 
-                        # -----------------------------------------------------------------------
-                        # THE FOURTH GATE, and the most important of them: the edge runtime boots
-                        # with VERIFY_JWT="false" because each function performs its own role
-                        # check, so without this an unauthenticated request can start any worker.
-                        #
-                        # `/functions/v1/aas-api/description` FALLS HERE AND IS THEREFORE GATED.
-                        # That is the current, reviewed posture and the inventory in
-                        # check-gateway-surface.mjs asserts it. The AAS specification expects that
-                        # endpoint to be readable before a client holds a credential -- the same
-                        # argument that exempts the Directory's /ping -- so it is a candidate for a
-                        # FIFTH exemption. It is deliberately not taken here: widening the gateway
-                        # is a decision to make on its own, not a side effect of a translation.
-                        # To take it, add this route ABOVE this one and add a matching row to
-                        # EXPECTED, or the runtime probe will fail -- which is the point:
-                        #
-                        #   - name: functions-v1-aas-api-description
-                        #     match: { path: "/functions/v1/aas-api/description" }
-                        #     route: { cluster: functions-v1, prefix_rewrite: "/aas-api/description" }
-                        #     typed_per_filter_config:
-                        #       envoy.filters.http.lua:
-                        #         "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
-                        #         disabled: true
-                        # -----------------------------------------------------------------------
+                        # The edge runtime boots with VERIFY_JWT="false" (each function checks
+                        # its own role), so this gate is what stops an unauthenticated request
+                        # starting any worker. `/functions/v1/aas-api/description` is gated too;
+                        # exempting it (the AAS spec expects it readable) is a decision to take
+                        # on its own, with a matching row in check-gateway-surface.mjs's EXPECTED.
                         - name: functions-v1-routes
                           match: { prefix: "/functions/v1/" }
                           route:
                             cluster: functions-v1
                             prefix_rewrite: "/"
 
-                        # -----------------------------------------------------------------------
-                        # EXEMPTION 4 of 4 -- the Factory+ Directory adapter. A Factory+ client has
-                        # no Supabase apikey and no way to acquire one. `/ping` is open by
-                        # specification; `/v1/` is authenticated BY THE FUNCTION, which refuses a
-                        # request with no bearer before it routes and then queries as the caller so
-                        # RLS still applies.
-                        #
-                        # NO PREFIX REWRITE TO ROOT (trap 5): the runtime reads the first path
-                        # segment to pick a worker, so the path must arrive as /fplus-directory/...
-                        # -----------------------------------------------------------------------
+                        # EXEMPTION 4 of 4 -- the Factory+ Directory adapter, whose clients hold
+                        # no Supabase apikey. `/ping` is open by specification; `/v1/` is
+                        # authenticated by the function, which queries as the caller.
                         - name: fplus-directory-ping
                           match: { prefix: "/ping" }
                           route:
@@ -337,29 +203,16 @@ static_resources:
                               disabled: true
 
                 http_filters:
-                  # CORS FIRST, and the order is load bearing. A browser preflight carries no
-                  # apikey, so a key check ahead of CORS would answer 401 to every OPTIONS and the
-                  # browser would report a CORS failure for a policy that is actually correct.
-                  # Kong reaches the same order by plugin priority (cors 2000 > key-auth 1250).
+                  # CORS first: a preflight carries no apikey, so a key check ahead of it would
+                  # answer 401 to every OPTIONS.
                   - name: envoy.filters.http.cors
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.Cors
 
-                  # -------------------------------------------------------------------------
-                  # key-auth.
-                  #
-                  # WHAT KONG'S PLUGIN ACTUALLY DOES, which is less than its name suggests: it
-                  # compares the presented key against the registered consumer keys as a STRING.
-                  # It does not verify a signature, and it does not care that these keys happen
-                  # to be JWTs. So this is an exact-match check and not a weaker translation of
-                  # one -- the same reason upstream's own Envoy gateway can accept opaque
-                  # `sb_publishable_*` keys with no cryptography at the edge.
-                  #
-                  # `default_source_code` gates and STRIPS. `keyauth_preserve` gates and keeps,
-                  # for Realtime alone (trap 4). Exempt routes set `disabled: true`, which is the
-                  # structural equivalent of Kong attaching the plugin per service rather than
-                  # globally.
-                  # -------------------------------------------------------------------------
+                  # key-auth: an exact string match of the presented key against the registered
+                  # ones (no signature is verified). `default_source_code` gates and strips;
+                  # `keyauth_preserve` gates and keeps, for Realtime alone. Exempt routes set
+                  # `disabled: true`.
                   - name: envoy.filters.http.lua
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
@@ -368,34 +221,13 @@ static_resources:
                           local ANON = "__SUPABASE_ANON_KEY__"
                           local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
 
-                          -- THE NEW KEY FORMAT, and the two locals that make this a GATEWAY feature
-                          -- rather than a component upgrade. `sb_publishable_*` and `sb_secret_*` ARE NOT
-                          -- JWTS: given one as a bearer, postgrest v14.12 answers
-                          -- `PGRST301 "Expected 3 parts in JWT; got 1"` -- measured here, not read.
-                          -- Nothing downstream is taught to understand them, and nothing downstream ever
-                          -- sees one. This filter matches the key as a STRING, exactly as it already does
-                          -- for the legacy pair, and hands the upstream the legacy JWT it has always
-                          -- required. That is the whole of the migration at this layer.
-                          --
-                          -- EMPTY MEANS OFF, and the comparison says so out loud rather than relying on
-                          -- the substituters. A stack that has not been given new keys renders "" here,
-                          -- and `PUBLISHABLE ~= ""` is what stops an empty apikey header from matching an
-                          -- empty registered key -- which is every caller who sends the header at all,
-                          -- and the exact failure both substituters refuse to boot on for the legacy
-                          -- pair. Legacy-only is the supported state, not a degraded one: the two formats
-                          -- are accepted SIMULTANEOUSLY so consumers move one at a time.
+                          -- The new keys are not JWTs (PostgREST answers PGRST301 to one); this filter
+                          -- matches them as strings and hands the upstream the legacy JWT. Empty means
+                          -- off, and `PUBLISHABLE ~= ""` stops an empty apikey matching an empty key.
                           local PUBLISHABLE = "__SUPABASE_PUBLISHABLE_KEY__"
                           local SECRET = "__SUPABASE_SECRET_KEY__"
 
-                          -- The legacy JWT a new key stands for, or nil if this is not a new key.
-                          -- THE DEACTIVATION SWITCH, and the step this whole migration exists to reach. Substituted as a
-                          -- BARE LUA BOOLEAN, not a string: `false` here stops the gateway accepting the anon and
-                          -- service-role JWTs at all, which is what actually answers the upstream deprecation. Everything
-                          -- before it -- the translation, the consumer sweep -- was preparation for flipping this.
-                          --
-                          -- DEFAULT TRUE, AND CHANGING THAT IS AN OPERATIONAL DECISION RATHER THAN A CODE ONE. Turning it
-                          -- off while anything still presents a legacy key is an outage for that caller, and the caller
-                          -- may not live in this repository. The RBAC shadow counter below is how you find out first.
+                          -- A bare Lua boolean. `false` stops the gateway accepting the legacy pair.
                           local LEGACY_ACCEPTED = __LEGACY_KEYS_ACCEPTED__
 
                           local function translated(key)
@@ -404,9 +236,7 @@ static_resources:
                             return nil
                           end
 
-                          -- WHICH FORMAT THE CALLER PRESENTED, independent of whether it is ACCEPTED. That separation is
-                          -- the measurement: a key can be recognised and refused, and the two questions get different
-                          -- answers the moment LEGACY_ACCEPTED goes false.
+                          -- Which format the caller presented, independent of whether it is accepted.
                           local function key_format(key)
                             if key == nil then return "absent" end
                             if PUBLISHABLE ~= "" and key == PUBLISHABLE then return "new" end
@@ -415,9 +245,7 @@ static_resources:
                             return "unregistered"
                           end
 
-                          -- RECORDED BEFORE ANY DECISION, refusals included. `handle:respond()` ends the filter chain, so
-                          -- metadata set after a refusal would never be written -- and a request refused BECAUSE it used
-                          -- a legacy key is exactly the one an operator needs to see once the switch is thrown.
+                          -- Recorded before any decision: `handle:respond()` ends the filter chain.
                           local function record_format(handle, fmt)
                             handle:streamInfo():dynamicMetadata():set("acs.gateway", "key_format", fmt)
                           end
@@ -428,9 +256,7 @@ static_resources:
                             return fmt == "new"
                           end
 
-                          -- The key may arrive in the header or the query string; Kong accepts
-                          -- both (key_in_header + key_in_query) so one configuration serves every
-                          -- client. Returns the value and where it came from.
+                          -- The key may arrive in the header or the query string.
                           local function presented_key(handle)
                             local from_header = handle:headers():get("apikey")
                             if from_header ~= nil and from_header ~= "" then
@@ -447,18 +273,14 @@ static_resources:
                           end
 
                           local function refuse(handle)
-                            -- Kong's own body, verbatim. Clients and this repository's own probe
-                            -- read it, and a translation that changed the wording would be a
-                            -- behaviour change nothing else would report.
+                            -- The body clients and check-gateway-surface.mjs read; do not reword.
                             handle:respond(
                               { [":status"] = "401", ["content-type"] = "application/json" },
                               '{"message":"No API key found in request"}'
                             )
                           end
 
-                          -- Remove `apikey` from the query string, preserving every other
-                          -- parameter and their order. Rewriting `:path` is the only way to do
-                          -- this in Envoy -- there is no query-parameter API on the header map.
+                          -- Remove `apikey` from the query string by rewriting `:path`.
                           local function strip_query_key(handle)
                             local path = handle:headers():get(":path") or ""
                             local base, query = string.match(path, "^([^?]*)%?(.*)$")
@@ -475,29 +297,11 @@ static_resources:
                             end
                           end
 
-                          -- Synthesise the bearer the upstreams authorise on, for a NEW key only.
-                          --
-                          -- WHY IT IS NEEDED AT ALL. `service_role` is always BOTH the apikey and the
-                          -- bearer, because its whole purpose is the `role` claim PostgREST switches on;
-                          -- and supabase-js sends the key as the bearer when there is no session, which
-                          -- is the unauthenticated browser. Both of those are a JWT today and neither can
-                          -- be an opaque string.
-                          --
-                          -- WHAT IT DELIBERATELY LEAVES ALONE, which is the security half. An
-                          -- Authorization header carrying somebody ELSE'S token is untouched: the i3X
-                          -- service and all eight edge functions pass the CALLER'S JWT as the bearer and
-                          -- use the API key purely as the gateway credential, so overwriting it would
-                          -- silently promote every one of their callers to `anon` or `service_role`.
-                          -- This replaces the header only when it is absent, or when it is the presented
-                          -- key itself.
-                          --
-                          -- ONE DIVERGENCE FROM THE LEGACY PAIR, stated because it is a privilege
-                          -- difference and not a formatting one: `apikey: <secret key>` with NO
-                          -- Authorization now reaches PostgREST as `service_role`, where
-                          -- `apikey: <service_role JWT>` with no Authorization reaches it as the anon
-                          -- role. That is what the new format means -- the secret key IS the credential
-                          -- rather than a ticket to present one -- and it grants nothing a holder of that
-                          -- key could not already take by setting the header themselves.
+                          -- Synthesise the bearer for a NEW key only, and only when Authorization is
+                          -- absent or is the presented key itself: a caller's own JWT (i3X and the edge
+                          -- functions pass the caller's token as the bearer) must never be overwritten.
+                          -- Note `apikey: <secret key>` with no Authorization reaches PostgREST as
+                          -- `service_role`; the secret key IS the credential.
                           local function synthesise_bearer(handle, key, jwt)
                             local auth = handle:headers():get("authorization")
                             if auth == nil or auth == "" or auth == key or auth == "Bearer " .. key then
@@ -527,21 +331,8 @@ static_resources:
                             if jwt ~= nil then
                               synthesise_bearer(handle, key, jwt)
                             end
-                            -- hide_credentials. PostgREST, storage-api and the edge runtime all
-                            -- authorise on the JWT in Authorization; forwarding the apikey serves
-                            -- no purpose and widens where the service-role key appears in logs.
-                            --
-                            -- BOTH FORMS, and the query half is not optional. This filter first
-                            -- stripped only the header, on the reasoning that Realtime was the
-                            -- one upstream whose clients use the query form. That was wrong:
-                            -- ANY client may put the key in the query, Kong accepts it, and Kong
-                            -- removes it again -- so leaving it on made PostgREST parse
-                            -- `apikey=eyJ...` as a COLUMN FILTER and answer
-                            -- `PGRST100 failed to parse filter`. Kong returned 200 for the same
-                            -- request. Found by diffing the two gateways, not by reading either.
-                            --
-                            -- It is also where a service-role key would end up in an upstream
-                            -- access log, which is the reason hide_credentials exists at all.
+                            -- Strip the key from BOTH the header and the query: a query-string apikey
+                            -- reaching PostgREST is parsed as a column filter (PGRST100).
                             handle:headers():remove("apikey")
                             strip_query_key(handle)
                           end
@@ -553,14 +344,7 @@ static_resources:
                             local PUBLISHABLE = "__SUPABASE_PUBLISHABLE_KEY__"
                             local SECRET = "__SUPABASE_SECRET_KEY__"
 
-                            -- THE DEACTIVATION SWITCH, and the step this whole migration exists to reach. Substituted as a
-                            -- BARE LUA BOOLEAN, not a string: `false` here stops the gateway accepting the anon and
-                            -- service-role JWTs at all, which is what actually answers the upstream deprecation. Everything
-                            -- before it -- the translation, the consumer sweep -- was preparation for flipping this.
-                            --
-                            -- DEFAULT TRUE, AND CHANGING THAT IS AN OPERATIONAL DECISION RATHER THAN A CODE ONE. Turning it
-                            -- off while anything still presents a legacy key is an outage for that caller, and the caller
-                            -- may not live in this repository. The RBAC shadow counter below is how you find out first.
+                            -- A bare Lua boolean, as in the default filter above.
                             local LEGACY_ACCEPTED = __LEGACY_KEYS_ACCEPTED__
 
                             local function translated(key)
@@ -569,9 +353,6 @@ static_resources:
                               return nil
                             end
 
-                            -- WHICH FORMAT THE CALLER PRESENTED, independent of whether it is ACCEPTED. That separation is
-                            -- the measurement: a key can be recognised and refused, and the two questions get different
-                            -- answers the moment LEGACY_ACCEPTED goes false.
                             local function key_format(key)
                               if key == nil then return "absent" end
                               if PUBLISHABLE ~= "" and key == PUBLISHABLE then return "new" end
@@ -580,9 +361,6 @@ static_resources:
                               return "unregistered"
                             end
 
-                            -- RECORDED BEFORE ANY DECISION, refusals included. `handle:respond()` ends the filter chain, so
-                            -- metadata set after a refusal would never be written -- and a request refused BECAUSE it used
-                            -- a legacy key is exactly the one an operator needs to see once the switch is thrown.
                             local function record_format(handle, fmt)
                               handle:streamInfo():dynamicMetadata():set("acs.gateway", "key_format", fmt)
                             end
@@ -608,20 +386,9 @@ static_resources:
                               return nil
                             end
 
-                            -- REPLACED HERE RATHER THAN STRIPPED, and that is this filter's whole
-                            -- difference from the other one under the new key format. Realtime does not
-                            -- merely CARRY the apikey, it PARSES it: the tenant and the RLS claims come out
-                            -- of that token. So an opaque `sb_publishable_*` left in place is not a
-                            -- credential Realtime fails to recognise, it is a JWT it cannot read, and the
-                            -- handshake dies with nothing in any log naming the key format -- the same
-                            -- shape of silent failure as trap 2 and trap 3 in the header.
-                            --
-                            -- Kong's `hide_credentials: false` on this route says "do not DELETE this".
-                            -- Substituting the JWT the key stands for honours that: the parameter is still
-                            -- there, still first, and now readable by the one upstream that reads it.
-                            --
-                            -- NO ESCAPING IS NEEDED. A JWT is three base64url segments and two dots, every
-                            -- character of which is already safe in a query string.
+                            -- Replaced rather than stripped: Realtime PARSES the apikey (tenant and RLS
+                            -- claims), so a new-format key must be substituted with the JWT it stands
+                            -- for. A JWT needs no escaping in a query string.
                             local function replace_key(handle, jwt)
                               if handle:headers():get("apikey") ~= nil then
                                 handle:headers():replace("apikey", jwt)
@@ -640,10 +407,7 @@ static_resources:
                               handle:headers():replace(":path", base .. "?" .. table.concat(kept, "&"))
                             end
 
-                            -- NOTHING IS REMOVED HERE. Realtime reads the apikey from the query
-                            -- string itself to identify the tenant and evaluate RLS; stripping it
-                            -- breaks the handshake, which is why Kong sets hide_credentials false
-                            -- on this route and only this one.
+                            -- Nothing is removed here: stripping the key breaks the Realtime handshake.
                             function envoy_on_request(handle)
                               local key = presented_key(handle)
                               record_format(handle, key_format(key))
@@ -664,9 +428,7 @@ static_resources:
                               local jwt = translated(key)
                               if jwt ~= nil then
                                 replace_key(handle, jwt)
-                                -- The browser client sends the key in the query string; a server-side
-                                -- client may send it as the bearer instead. Same rule as the other
-                                -- filter: somebody else's token is never overwritten.
+                                -- Same rule as the default filter: somebody else's token is never overwritten.
                                 local auth = handle:headers():get("authorization")
                                 if auth == nil or auth == "" or auth == key or auth == "Bearer " .. key then
                                   handle:headers():replace("authorization", "Bearer " .. jwt)
@@ -674,31 +436,11 @@ static_resources:
                               end
                             end
 
-                  # -------------------------------------------------------------------------
-                  # THE LEGACY-KEY COUNTER, and it is a SHADOW rule: it decides nothing.
-                  #
-                  # Envoy's Lua filter has no API for creating a stat, so the count cannot come
-                  # from the filter that does the matching. `shadow_rules` is the way to turn a
-                  # match into a counter without letting it affect a single request: the policy is
-                  # evaluated, the result is recorded, and the traffic is unaffected either way.
-                  # Deactivation is done by LEGACY_ACCEPTED in the Lua above, never here.
-                  #
-                  # READ IT AS: `rbac.legacy_api_key_.shadow_allowed` is the number of requests
-                  # that presented a LEGACY key -- the number that must reach zero and stay there
-                  # before the switch is thrown. `shadow_denied` is everything else. The prometheus
-                  # endpoint the ServiceMonitor already scrapes carries both, so this needs no new
-                  # scrape target and no new dashboard wiring.
-                  #
-                  # IT COUNTS ONLY WHILE LEGACY KEYS ARE STILL ACCEPTED, and that asymmetry is
-                  # measured rather than assumed. `handle:respond()` in the Lua ENDS THE FILTER
-                  # CHAIN, so once LEGACY_ACCEPTED is false a legacy request is refused before this
-                  # filter ever runs and the counter stays flat at zero. That is the right way
-                  # round -- the counter's whole job is to say when the switch is safe, which is a
-                  # question asked BEFORE it is thrown -- but it means the counter cannot be used
-                  # to find stragglers AFTERWARDS. The access log can: it is attached to the
-                  # connection manager, so it still fires for a refused request and records
-                  # `status=401`, which is exactly the line that names whoever just broke.
-                  # -------------------------------------------------------------------------
+                  # The legacy-key counter, a SHADOW rule that decides nothing (the Lua filter
+                  # cannot create a stat). `rbac.legacy_api_key_.shadow_allowed` is the number of
+                  # requests that presented a legacy key. It counts only while legacy keys are
+                  # accepted: a refusal in the Lua ends the filter chain before this runs, so
+                  # stragglers after the switch appear in the access log (status=401), not here.
                   - name: envoy.filters.http.rbac
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
@@ -720,32 +462,12 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
     # ===========================================================================================
-    # THE STUDIO LISTENER. A SECOND DOOR, DELIBERATELY NOT A ROUTE ON THE ONE ABOVE.
-    #
-    # Supabase Studio has no authentication of its own -- no login, no roles, no session -- and
-    # runs as the database owner, for whom RLS is not enforced. This listener is the login it
-    # does not have: an OAuth 2.1 authorization-code flow against this stack's own GoTrue, a
-    # session cookie, and an `Administrator` check before anything reaches it.
-    #
-    # WHY NOT PORT 8000. Every machine principal in this stack authenticates on the gateway
-    # listener with an API key and no browser. A cookie-session filter anywhere on that path
-    # redirects them to a login screen they cannot complete -- the same reason 0048 keeps
-    # machine identities out of the `aal2` predicates. Two listeners, one process, no shared
-    # filter chain.
-    #
-    # WHAT MAKES THIS DIFFERENT FROM EVERY OTHER OAUTH CLIENT HERE: Grafana and Node-RED are
-    # OAuth clients that read a role from a userinfo edge function, because GoTrue's OIDC claims
-    # carry no `app_metadata`. Envoy does not need one. `custom_access_token_hook` mirrors the
-    # role into the ACCESS token, and this listener verifies that token itself -- so the role
-    # arrives in the request rather than being fetched about it. Do not add a third userinfo
-    # function for this; there is nothing for it to answer.
-    #
-    # THE `openid` SCOPE IS ABSENT AND MUST STAY ABSENT. Requesting it makes GoTrue mint an ID
-    # token, and it refuses: `HS256 is not supported for ID token signing`. This whole stack is
-    # HS256 on a shared secret. grafana.ini carries the same note for the same reason.
-    #
-    # MINIMUM ENVOY 1.34. GoTrue's OAuth server requires PKCE, and the oauth2 filter could not
-    # send it before then. See the pin comments in docker-compose.yml and values.yaml.
+    # THE STUDIO LISTENER. Studio has no authentication of its own and runs as the database
+    # owner; this is its login: an OAuth 2.1 code flow against this stack's GoTrue, a session
+    # cookie, and an `Administrator` check. A separate listener because machine principals on
+    # 8000 cannot complete a browser login. No userinfo function is needed: the role is in the
+    # access token (`custom_access_token_hook`). No `openid` scope: GoTrue refuses to sign an ID
+    # token with HS256. Minimum Envoy 1.34 (PKCE).
     # ===========================================================================================
     - name: studio
       address:
@@ -756,57 +478,25 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: studio
-                # -------------------------------------------------------------------------------
-                # WHO OPENED THE DATABASE CONSOLE. Unconditional, unlike the API listener's log
-                # above, which is filtered to one deprecation it exists to count down.
-                #
-                # THIS LISTENER HAD NO ACCESS LOG AT ALL, and the cost of that was a real
-                # investigation: an admin session that outlived its owner's logout had to be
-                # reconstructed from `rbac.allowed` counters and GoTrue's `auth.audit_log_entries`,
-                # because nothing here recorded which identity the requests carried. The counters
-                # said 49 allowed and 0 denied; they could not say for whom.
-                #
-                # `user` AND `role` COME FROM THE VERIFIED TOKEN, not from a header a client sets:
-                # `jwt_authn` writes the payload to dynamic metadata under `jwt_payload` (that is
-                # what `payload_in_metadata` below is for) and this reads it back. Both render as
-                # `-` before the door opens, which is what an unauthenticated redirect looks like.
-                # A 403 line still carries them -- rbac denies AFTER jwt_authn has populated them,
-                # so the refused identity is named rather than guessed.
-                #
-                # `%REQ_WITHOUT_QUERY(...)%`, NOT `%REQ(:PATH)%`, AND THAT IS A CREDENTIAL
-                # DECISION -- the same one the API listener's log records for the Realtime apikey.
-                # `/oauth2/callback` carries the authorization code in its QUERY STRING, so the
-                # plain path operator would write a live credential to stdout on every login.
-                # -------------------------------------------------------------------------------
+                # Who opened the console: `user` and `role` come from the verified token via
+                # `payload_in_metadata`, so a 403 line names the refused identity.
+                # `%REQ_WITHOUT_QUERY%`, because /oauth2/callback carries the authorization code
+                # in its query string.
                 access_log:
                   - name: envoy.access_loggers.stdout
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
                       log_format:
-                        # `%REQ_WITHOUT_QUERY%` IS AN EXTENSION, NOT A BUILT-IN, and it has to be
-                        # registered here to exist. Without this block Envoy refuses the whole
-                        # config with `Not supported field in StreamInfo: REQ_WITHOUT_QUERY` --
-                        # a boot failure of the gateway every other service sits behind, over a
-                        # log line. Found by `envoy --mode validate`, which is the cheap way.
+                        # `%REQ_WITHOUT_QUERY%` is an extension and must be registered here, or
+                        # Envoy refuses the whole config.
                         formatters:
                           - name: envoy.formatter.req_without_query
                             typed_config:
                               "@type": type.googleapis.com/envoy.extensions.formatter.req_without_query.v3.ReqWithoutQuery
                         text_format_source:
                           inline_string: "acs-studio method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% user=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)% role=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:app_metadata:role)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
-                # MEASURED, AND THE ANSWER IS THAT NOTHING UPGRADES HERE. Studio's client bundle
-                # opens no socket to its own origin, its server declares no upgrade handler, and an
-                # upgrade sent to it through this listener is forwarded and then RESET BY STUDIO
-                # (Envoy reports `503 upstream connect error`), which is the upstream refusing
-                # rather than the gateway blocking.
-                #
-                # The console's one websocket is the Realtime inspector's, and it does not come
-                # here: `/api/platform/projects/default/settings` hands the browser
-                # `endpoint: 127.0.0.1:54321`, so that handshake goes to the API listener, which
-                # answers 101 and always has.
-                #
-                # KEPT ANYWAY. It costs nothing, and a Studio version that grows a socket would
-                # otherwise fail with a 426 that names neither this line nor its absence.
+                # Nothing upgrades here today (Studio's one websocket goes to the API listener);
+                # kept so a future Studio that opens one does not fail with a 426.
                 upgrade_configs:
                   - upgrade_type: websocket
                 route_config:
@@ -815,31 +505,21 @@ static_resources:
                     - name: studio
                       domains: ["*"]
                       routes:
-                        # ONE ROUTE, NO EXEMPTIONS. `/api/mcp` is served on this same port -- an
-                        # unauthenticated Supabase MCP server exposing `execute_sql` and
-                        # `apply_migration` as the owner. It is covered here because it is not
-                        # exempted, and that is the intended outcome rather than a side effect:
-                        # an MCP client cannot complete a browser flow, so this removes the
-                        # endpoint rather than merely hiding it. A developer-facing MCP is
-                        # recoverable later, on its own argument and with a credential of its own.
+                        # One route, no exemptions: `/api/mcp` (an unauthenticated MCP server
+                        # running `execute_sql` as the owner) is deliberately behind the door.
                         - match: { prefix: "/" }
                           route:
                             cluster: studio
-                            # Studio streams long-running queries from the SQL editor; the
-                            # gateway's own routes take the default because nothing behind them
-                            # holds a response open.
+                            # Studio streams long-running queries from the SQL editor.
                             timeout: 0s
                 http_filters:
-                  # 1. THE DOOR. Runs the authorization-code flow, holds the cookies, and
-                  #    refreshes without bouncing the user back through consent.
+                  # 1. THE DOOR: the authorization-code flow and the session cookies.
                   - name: envoy.filters.http.oauth2
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
                       config:
-                        # THE BROWSER FOLLOWS THIS, so it is the host-facing address; the token
-                        # exchange below is made by Envoy itself and dials the container. Getting
-                        # these the same way round is the classic way this breaks -- grafana.ini
-                        # carries the identical split for the identical reason.
+                        # The browser follows this (host-facing); the token exchange below is
+                        # made by Envoy against the container.
                         authorization_endpoint: __SUPABASE_PUBLIC_URL__/auth/v1/oauth/authorize
                         token_endpoint:
                           cluster: auth-v1
@@ -848,52 +528,22 @@ static_resources:
                         redirect_uri: __STUDIO_PUBLIC_URL__/oauth2/callback
                         redirect_path_matcher: { path: { exact: /oauth2/callback } }
                         signout_path: { path: { exact: /oauth2/signout } }
-                        # The client is registered `client_secret_basic` (0081). GoTrue enforces
-                        # the registered method exactly and answers 400 invalid_credentials when a
-                        # client uses the other one -- which surfaces to the user as nothing more
-                        # specific than a failed login.
+                        # The client is registered `client_secret_basic` (0081); GoTrue enforces it.
                         auth_type: BASIC_AUTH
                         auth_scopes: [email, profile]
-                        # The verified token has to reach the next filter as a header; without
-                        # this the role check below has nothing to read.
+                        # The verified token reaches the next filter as a header.
                         forward_bearer_token: true
                         use_refresh_token: true
-                        # THE SESSION CAP, AND IT IS THE WHOLE POINT OF THE TWO LINES ABOVE HAVING
-                        # A THIRD. Envoy's session is its own cookie and knows nothing about the
-                        # dashboard's. Signing out of the dashboard -- even globally, which does
-                        # revoke the token GoTrue signed -- leaves this cookie intact, because
-                        # `jwt_authn` below verifies HS256 locally and never asks GoTrue whether
-                        # the session behind it still exists. That much is bounded: the cached
-                        # token expires within GOTRUE_JWT_EXP and the refresh then fails, because
-                        # a logout kills the refresh chain too.
-                        #
-                        # WHAT WAS NOT BOUNDED is the case where nobody signs out at all -- a
-                        # console left open, a shared machine, a laptop handed over. Envoy's
-                        # default refresh-token lifetime is SEVEN DAYS, so the session renewed
-                        # itself for as long as anyone kept opening Studio. An admin's door stayed
-                        # open behind whoever sat down next, and no counter here said so.
-                        #
-                        # 3600s matches GOTRUE_JWT_EXP so the session cannot outlive one access
-                        # token. What happens at the cap is the reason this is enough on its own:
-                        # the filter bounces the browser back through /oauth/authorize, which
-                        # lands on the DASHBOARD's own consent page, which reads the CURRENT
-                        # session. So the hourly re-auth re-derives who you are now -- silent for
-                        # an admin still signed in, and an `Operator` for the person who signed in
-                        # after them, who then meets the 403 below.
-                        #
-                        # Deliberately NOT the stack-wide instrument. GoTrue's sessions carry a
-                        # timebox and an inactivity timeout that would bound this and everything
-                        # else, and everything else includes the wall-mounted shopfloor dashboards
-                        # that are supposed to sit idle. This cap is scoped to the one door that
-                        # opens on a database console.
+                        # The session cap. This cookie is verified locally and outlives a dashboard
+                        # sign-out; Envoy's default refresh lifetime is seven days. 3600s matches
+                        # GOTRUE_JWT_EXP, and the hourly re-auth re-derives who is at the keyboard.
+                        # Scoped to this door rather than set stack-wide, which would also expire
+                        # the wall-mounted dashboards.
                         default_refresh_token_expires_in: 3600s
                         credentials:
                           client_id: c0ffee00-0000-4000-8000-000000000003
-                          # TWO FILES, ONE SECRET EACH. A path config source is expected to carry
-                          # exactly one resource: both secrets in one file is accepted at boot and
-                          # then rejected at runtime with `Unexpected SDS secrets length ...
-                          # number of added resources 2 ... Expected sum is 1`, leaving a listener
-                          # that is up and has no credentials.
+                          # Two files, one secret each: a path config source carrying two resources
+                          # is accepted at boot and rejected at runtime.
                           token_secret:
                             name: studio-oauth-client-secret
                             sds_config:
@@ -902,14 +552,8 @@ static_resources:
                             name: studio-proxy-hmac-secret
                             sds_config:
                               path_config_source: { path: /etc/envoy/studio-hmac-secret.yaml }
-                  # 2. THE TOKEN. Verifies what GoTrue signed, rather than trusting the cookie the
-                  #    filter above set. `oct` is the JWKS key type for HMAC -- this stack signs
-                  #    with a shared secret, so there is no public key to fetch and no jwks_uri to
-                  #    point at.
-                  #
-                  #    NO ISSUER CHECK, and that is measured rather than lazy: GoTrue's OAuth
-                  #    access token carries no `iss` claim at all, and requiring one refuses every
-                  #    request.
+                  # 2. THE TOKEN. Verifies what GoTrue signed; `oct` is the JWKS key type for
+                  #    HMAC. No issuer check: GoTrue's OAuth access token carries no `iss`.
                   - name: envoy.filters.http.jwt_authn
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
@@ -922,12 +566,8 @@ static_resources:
                       rules:
                         - match: { prefix: "/" }
                           requires: { provider_name: gotrue }
-                  # 3. THE PRIVILEGE. Authenticating is not authorising: every persona in this
-                  #    stack can complete the flow above, and an `Operator` reaching the SQL
-                  #    editor would be a worse outcome than the open port this replaces.
-                  #
-                  #    `sourced_metadata`, not the bare `metadata` principal -- that one is
-                  #    deprecated and warns on boot.
+                  # 3. THE PRIVILEGE. Every persona can complete the flow above; only
+                  #    Administrator passes. (`sourced_metadata`; bare `metadata` is deprecated.)
                   - name: envoy.filters.http.rbac
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
@@ -951,61 +591,24 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
     # ===========================================================================================
-    # THE FORGE LISTENER. Gitea's login, which Gitea cannot be given any other way.
+    # THE FORGE LISTENER: Gitea's login. Gitea cannot be an OIDC client of GoTrue (supabase/README.md,
+    # "The forge's door"), so the same three filters as Studio's door run the code flow, verify
+    # the access token locally, and hand the identity to Gitea as X-WEBAUTH-* headers through
+    # its reverse-proxy authentication. Administrator and Shopfloor_Manager get in; Operator and
+    # Auditor meet the 403. What a person may do inside is Gitea's team model (_shared/forge.ts).
     #
-    # THE SAME THREE FILTERS AS THE STUDIO DOOR ABOVE, and that is the whole argument for it. Gitea's
-    # only general-purpose authentication source is `openidConnect`, configured from a discovery
-    # URL -- and GoTrue's discovery document carries an empty issuer and RELATIVE endpoint paths, so
-    # Gitea resolves `/oauth/authorize` against ITSELF and sends the browser to a 404. Its request
-    # also carries `scope=openid`, which GoTrue refuses on this HS256 stack. Both were measured
-    # against the running forge; roadmap 7 records them. This listener never speaks OIDC: the
-    # oauth2 filter runs the same code flow Studio's does, `jwt_authn` verifies the access token
-    # locally, and the identity reaches Gitea as HEADERS through its reverse-proxy authentication.
+    # The headers are the credential: Gitea signs in whoever X-WEBAUTH-USER names, from any
+    # peer, so the control is that only this listener and the edge runtime can reach Gitea's
+    # HTTP port (the `forge` network on Compose, the NetworkPolicy edges on Kubernetes), and
+    # that the API ignores the header. The routes below overwrite or remove the identity headers
+    # so a value a browser sent never reaches Gitea. The username is the token's `sub` (Gitea
+    # refuses `@`); the email rides in its own header.
     #
-    # WHO GETS IN: Administrator and Shopfloor_Manager, the two roles that author and review flows.
-    # Operator and Auditor complete the login and meet the 403 below, exactly as they would at
-    # Studio. Authorisation stays in Postgres -- the role in the token is `user_roles` mirrored by
-    # `custom_access_token_hook` -- and what a person may DO once inside is Gitea's own team model,
-    # which gitea-init.sh builds from the same two roles.
-    #
-    # THE HEADERS ARE THE CREDENTIAL, AND THIS IS WHERE THAT HAS TO BE UNDERSTOOD. With reverse-proxy
-    # authentication on, Gitea signs in whoever `X-WEBAUTH-USER` names, from ANY peer:
-    # `REVERSE_PROXY_TRUSTED_PROXIES` was measured and governs only X-Forwarded-For, not this. So
-    # the control is not a setting in Gitea -- it is that nothing but this listener and the edge
-    # runtime can reach Gitea's HTTP port at all (the `forge` network on Compose, the NetworkPolicy
-    # edges on Kubernetes), and that Gitea's API IGNORES the header (`..._AUTHENTICATION_API` is
-    # off, and measured: basic auth wins over a forged header on `/api/v1/user`). The two routes
-    # below OVERWRITE the identity headers with the verified token's claims, or REMOVE them, so a
-    # value a browser sent never reaches Gitea either way.
-    #
-    # THE USERNAME IS THE TOKEN'S `sub`, NOT THE EMAIL. Gitea refuses `@` in a username -- measured:
-    # `name is invalid ... must be valid alpha or numeric or dash(-_) or dot characters` -- and the
-    # subject is stable across an email change, which is the property an audit trail wants. The
-    # email rides in its own header and the full name carries the email again so the forge's UI
-    # shows a person rather than a UUID.
-    #
-    # TWO PATHS PASS THROUGH THE DOOR WITHOUT A SESSION, and both are exactly the surface the forge
-    # had when its port was published bare:
-    #   * `/api/` -- Gitea's API authenticates itself (basic auth, tokens) and ignores the identity
-    #     header. The enrolment suite and an engineer's scripts reach it with a Gitea credential,
-    #     as they did before; a browser session gets no further here than it did at the bare port.
-    #   * `/assets/ssh_host_key.pub` -- the forge's PUBLIC host key, which gitea-init.sh publishes
-    #     so an appliance can verify the forge. It is handed to anyone who opens a TCP connection
-    #     to port 22 anyway; the suite asserts it is served without a login, and it is.
-    # Each exemption is written THREE TIMES -- the oauth2 filter's pass-through, a jwt_authn rule
-    # with no requirement, and an RBAC permission -- because the three filters do not share a
-    # matcher. Add a fourth path and add it in all three places, or the door opens in one filter and
-    # closes in the next, which reads as a broken proxy.
-    #
-    # THE COOKIES ARE RENAMED, and on Compose that is load-bearing rather than tidy: browsers scope
-    # cookies by HOST and not by PORT, so on `localhost` this listener and Studio's share a cookie
-    # jar. With the default names each door would find the other's HMAC cookie, fail to verify it,
-    # and restart the login -- two consoles that sign each other out. On Kubernetes the hostnames
-    # differ and nothing here is exercised, which is why it would have been found on a laptop.
-    #
-    # NOT `git clone` OVER HTTP. A git client cannot complete a browser login, so the smart-HTTP
-    # paths end at a redirect. That is intended: a person clones over SSH with their own key, and an
-    # appliance with its read-only deploy key, on 22 -- which this listener does not touch.
+    # Two paths pass without a session, each written in all three filters (they share no
+    # matcher): `/api/` (authenticates itself) and `/assets/ssh_host_key.pub` (public). The
+    # cookies are renamed because browsers scope cookies by host, not port, so on localhost this
+    # door and Studio's would otherwise sign each other out. Smart-HTTP clone ends at a redirect
+    # by design; clones are SSH on 22.
     # ===========================================================================================
     - name: forge
       address:
@@ -1016,9 +619,7 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: forge
-                # Who opened the forge, from the verified token, for the reason the studio log
-                # gives. `%REQ_WITHOUT_QUERY%` for the same reason too: the callback carries the
-                # authorization code in its query string.
+                # Who opened the forge, from the verified token; `%REQ_WITHOUT_QUERY%` as for Studio.
                 access_log:
                   - name: envoy.access_loggers.stdout
                     typed_config:
@@ -1036,10 +637,7 @@ static_resources:
                     - name: forge
                       domains: ["*"]
                       routes:
-                        # THE API: no session, no identity headers. Whatever a client sent under
-                        # these names is dropped before Gitea sees it; what Gitea authenticates is
-                        # the Authorization header the client carried. No placement step either:
-                        # there is no verified token to place.
+                        # The API: no session, identity headers dropped, no placement step.
                         - match: { prefix: "/api/" }
                           route:
                             cluster: gitea
@@ -1052,16 +650,10 @@ static_resources:
                             envoy.filters.http.ext_authz:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
                               disabled: true
-                        # GITEA'S OWN SIGN-OUT LINK, TAKEN OVER. Under reverse-proxy authentication
-                        # Gitea's sign-out clears its own cookie and the next request signs the
-                        # person straight back in, because the door's cookie is untouched. And the
-                        # door's sign-out alone is no better: `/` then starts a fresh login the
-                        # still-alive dashboard session completes silently. The forge has no
-                        # session of its own, so its sign-out is the platform's: forge-signout
-                        # ends every GoTrue session the caller holds, then answers a 302 to
-                        # /oauth2/signout. The token is KEPT on this route (jwt_authn forwards it,
-                        # and the catch-all below strips it) because the revocation needs to name
-                        # the person; no placement step, because there is nothing to place.
+                        # Gitea's own sign-out is a no-op under reverse-proxy authentication, so
+                        # it routes to forge-signout, which ends every GoTrue session the caller
+                        # holds and answers a 302 to /oauth2/signout. The token is kept on this
+                        # route because the revocation needs to name the person.
                         - match: { path: "/user/logout" }
                           route:
                             cluster: functions-v1
@@ -1071,10 +663,8 @@ static_resources:
                             envoy.filters.http.ext_authz:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
                               disabled: true
-                        # STATIC ASSETS: a session, the identity headers, and NO placement step --
-                        # a page pulls dozens of these and none of them is a moment anybody's
-                        # membership could change. The public host key is under this prefix and
-                        # passes the door above; it lands here with no token and no headers.
+                        # Static assets: a session and the identity headers, no placement step.
+                        # The public host key is under this prefix and arrives with no token.
                         - match: { prefix: "/assets/" }
                           route:
                             cluster: gitea
@@ -1098,21 +688,13 @@ static_resources:
                             envoy.filters.http.ext_authz:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
                               disabled: true
-                        # EVERYTHING ELSE: the verified claims, written over whatever arrived.
-                        # OVERWRITE rather than append, because a duplicate header is a request
-                        # Gitea would read the FIRST value of -- and the first would be the
-                        # browser's. A missing claim renders empty, and Envoy drops an empty
-                        # header rather than sending an empty value.
-                        #
-                        # THE BEARER IS STRIPPED HERE, NOT BY jwt_authn: the provider forwards it so
-                        # the placement step below can present it, and Gitea must never see a
-                        # Supabase JWT in an Authorization header it would try to read as a token of
-                        # its own. The /api/ route keeps the header, because there it IS Gitea's.
+                        # Everything else: the verified claims OVERWRITE whatever arrived (Gitea
+                        # reads the first of duplicate headers). The bearer is stripped here, after
+                        # the placement step has presented it; Gitea must never see a Supabase JWT.
                         - match: { prefix: "/" }
                           route:
                             cluster: gitea
-                            # Diffs and archives can take a while to render; nothing on this
-                            # listener holds a response open indefinitely.
+                            # Diffs and archives can take a while to render.
                             timeout: 120s
                           request_headers_to_remove:
                             - authorization
@@ -1130,8 +712,7 @@ static_resources:
                                 value: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)%"
                               append_action: OVERWRITE_IF_EXISTS_OR_ADD
                 http_filters:
-                  # 1. THE DOOR. Identical in shape to Studio's; see the notes there for every
-                  #    field this does not re-explain.
+                  # 1. THE DOOR, as Studio's.
                   - name: envoy.filters.http.oauth2
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
@@ -1144,8 +725,7 @@ static_resources:
                         redirect_uri: __GITEA_PUBLIC_URL__/oauth2/callback
                         redirect_path_matcher: { path: { exact: /oauth2/callback } }
                         signout_path: { path: { exact: /oauth2/signout } }
-                        # The two exemptions, first of three places. A request matching either
-                        # skips the flow entirely and reaches the filters below with no token.
+                        # The two exemptions, first of three places.
                         pass_through_matcher:
                           - name: ":path"
                             string_match: { prefix: "/api/" }
@@ -1156,9 +736,7 @@ static_resources:
                         auth_scopes: [email, profile]
                         forward_bearer_token: true
                         use_refresh_token: true
-                        # The same session cap as Studio's, for the same reason: this cookie is
-                        # verified locally and outlives a dashboard sign-out, so the cap is what
-                        # re-derives who is sitting at the keyboard.
+                        # The same session cap as Studio's.
                         default_refresh_token_expires_in: 3600s
                         credentials:
                           client_id: c0ffee00-0000-4000-8000-000000000004
@@ -1170,7 +748,7 @@ static_resources:
                             name: forge-proxy-hmac-secret
                             sds_config:
                               path_config_source: { path: /etc/envoy/forge-hmac-secret.yaml }
-                          # Distinct from Studio's, for the reason in the header.
+                          # Distinct from Studio's (cookies are scoped by host, not port).
                           cookie_names:
                             bearer_token: ForgeBearerToken
                             oauth_hmac: ForgeOauthHMAC
@@ -1179,10 +757,8 @@ static_resources:
                             refresh_token: ForgeRefreshToken
                             oauth_nonce: ForgeOauthNonce
                             code_verifier: ForgeCodeVerifier
-                  # 2. THE TOKEN. The same JWKS as Studio's -- one signing secret, one trust domain.
-                  #    FORWARDED after verification, unlike Studio's, because the placement step
-                  #    (4) presents it to the edge runtime; the routes above strip it before Gitea
-                  #    everywhere except /api/, where the header is Gitea's own.
+                  # 2. THE TOKEN. Forwarded after verification, unlike Studio's, for the
+                  #    placement step; the routes strip it before Gitea except on /api/.
                   - name: envoy.filters.http.jwt_authn
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
@@ -1194,8 +770,7 @@ static_resources:
                             inline_string: '{"keys":[{"kty":"oct","alg":"HS256","k":"__SUPABASE_JWT_SECRET_B64URL__"}]}'
                           payload_in_metadata: jwt_payload
                       rules:
-                        # The two exemptions, second of three places. FIRST, because rules match
-                        # in order and the catch-all below would otherwise demand a token here.
+                        # The two exemptions, second of three places; first, because rules match in order.
                         - match: { prefix: "/api/" }
                         - match: { path: "/assets/ssh_host_key.pub" }
                         - match: { prefix: "/" }
@@ -1236,25 +811,12 @@ static_resources:
                             permissions:
                               - url_path: { path: { exact: "/assets/ssh_host_key.pub" } }
                             principals: [{ any: true }]
-                  # 4. THE PLACEMENT. Gitea auto-registers a login and stops; nothing native puts
-                  #    them in the organisation that owns every gateway repository. So each request
-                  #    that is not an asset or an API call goes past `forge-membership` first,
-                  #    carrying the verified token, and that function puts the person in the team
-                  #    their `user_roles` row warrants -- or, if the role has gone since the token
-                  #    was signed, takes them out of both and answers 403, which is the one thing
-                  #    filter 3 cannot do: it reads the token, and a token does not know it has been
-                  #    revoked.
-                  #
-                  #    AFTER RBAC, so a role that never opened the forge never causes a placement
-                  #    call. `failure_mode_allow`: a 5xx from the function -- the forge or Postgres
-                  #    unreachable -- lets the request THROUGH, because filter 3 has already
-                  #    admitted the role in the token and a placement outage must not take the web
-                  #    UI down with it. A 403 is a decision and is honoured, and so is a 302: a
-                  #    token GoTrue no longer has a session for is sent to /oauth2/signout, which
-                  #    filter 1 answers by clearing the cookies -- the one way a door with a valid
-                  #    cookie can be made to start over. Only the Authorization header travels;
-                  #    nothing the function answers reaches Gitea. `/user/logout` skips this
-                  #    filter and goes to forge-signout instead -- see the route.
+                  # 4. THE PLACEMENT. Gitea auto-registers a login and stops; `forge-membership`
+                  #    puts the person in the team their `user_roles` row warrants, or takes them
+                  #    out and answers 403 if the role has gone since the token was signed. After
+                  #    RBAC. `failure_mode_allow`: a 5xx lets the request through (the role in the
+                  #    token was already admitted); 403 and 302 (dead session -> /oauth2/signout)
+                  #    are honoured. Only the Authorization header travels.
                   - name: envoy.filters.http.ext_authz
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
@@ -1266,34 +828,24 @@ static_resources:
                           uri: http://supabase-functions:9000
                           cluster: functions-v1
                           timeout: 8s
-                        # The edge runtime routes on the first path segment; the original path is
-                        # appended and ignored.
+                        # The edge runtime routes on the first path segment.
                         path_prefix: /forge-membership
                         authorization_request:
                           allowed_headers:
                             patterns:
                               - exact: authorization
-                        # Nothing the function answers reaches Gitea: `allowed_upstream_headers`
-                        # is left unset, which forwards none (an empty list is refused at boot).
+                        # `allowed_upstream_headers` unset: nothing the function answers reaches Gitea.
                         authorization_response:
                           allowed_client_headers:
                             patterns:
                               - exact: content-type
-                              # A dead session comes back as a 302 to /oauth2/signout, and the
-                              # redirect only works if its Location reaches the browser. Without
-                              # this line the denial is forwarded as a bare 302 with no target.
+                              # A dead session is a 302 to /oauth2/signout; Location must reach the browser.
                               - exact: location
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
-  # -----------------------------------------------------------------------------------------------
-  # Clusters. One per upstream Kong names, and no others -- see "what is deliberately absent".
-  #
-  # STRICT_DNS, not LOGICAL_DNS: compose service names resolve to a single address that changes
-  # when a container is recreated, and STRICT_DNS re-resolves on its refresh interval rather than
-  # pinning the first answer for the life of the process.
-  # -----------------------------------------------------------------------------------------------
+  # Clusters. STRICT_DNS re-resolves on its refresh interval; a recreated container changes address.
   clusters:
     - name: auth-v1
       type: STRICT_DNS
@@ -1326,16 +878,9 @@ static_resources:
           - lb_endpoints:
               - endpoint:
                   address:
-                    # THE ADDRESS AND THE HOST HEADER ARE DIFFERENT FACTS, and this one is
-                    # target-specific. Compose dials the container `supabase-realtime`; Kubernetes
-                    # has no such Service -- the chart names it `realtime-dev`, because Realtime
-                    # reads its tenant from the leading Host label and the Service name is the
-                    # Kubernetes-native way to supply it. Hard-coded here, this cluster resolved
-                    # nothing on Kubernetes and every handshake answered `503 no healthy upstream`
-                    # from Envoy itself -- which reads as Realtime being down rather than as a
-                    # name that does not exist. __REALTIME_UPSTREAM_HOST__ is NOT reusable for it:
-                    # that carries the Host header, which must keep the `realtime-dev` LEADING
-                    # LABEL on both targets whatever the address happens to be.
+                    # Target-specific: Compose dials the container, the chart names its Service
+                    # `realtime-dev`. Distinct from __REALTIME_UPSTREAM_HOST__, which is the Host
+                    # header and must keep the `realtime-dev` leading label on both targets.
                     socket_address: { address: __REALTIME_UPSTREAM_ADDRESS__, port_value: 4000 }
 
     - name: storage-v1
@@ -1360,12 +905,7 @@ static_resources:
                   address:
                     socket_address: { address: supabase-functions, port_value: 9000 }
 
-    # NOT ONE OF KONG'S. Studio has never been behind the gateway on either target -- it was a
-    # published port and nothing else. This cluster exists for the studio listener above and is
-    # reachable from nowhere else in this file.
-    #
-    # The ADDRESS is target-specific, exactly as realtime-v1's is: Compose dials the container
-    # `supabase-studio`, and the chart names its own Service.
+    # For the studio listener only. Target-specific address, as realtime-v1's is.
     - name: studio
       type: STRICT_DNS
       connect_timeout: 5s
@@ -1378,9 +918,7 @@ static_resources:
                     socket_address: { address: __STUDIO_UPSTREAM_ADDRESS__, port_value: 3000 }
 
 
-    # The forge, for the forge listener above and nothing else. Target-specific address for the
-    # same reason as the two before it: Compose dials the container, the chart names its Service.
-    # HTTP only -- SSH on 22 is the appliances' transport and never passes through this gateway.
+    # For the forge listener only; HTTP only (SSH on 22 never passes through this gateway).
     - name: gitea
       type: STRICT_DNS
       connect_timeout: 5s

@@ -194,7 +194,7 @@ class TestTheDoor(unittest.TestCase):
 
     def test_a_forged_identity_header_from_outside_is_not_a_login(self):
         """
-        Gitea trusts X-WEBAUTH-USER from any peer (measured; roadmap 7), so the ONLY thing between
+        Gitea trusts X-WEBAUTH-USER from any peer (measured), so the ONLY thing between
         the internet and any identity is that the header never reaches Gitea except as written by
         the listener from a verified token.
         """

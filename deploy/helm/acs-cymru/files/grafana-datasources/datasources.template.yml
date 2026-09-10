@@ -1,40 +1,15 @@
-# TimescaleDB datasource -- A TEMPLATE, rendered before Grafana reads it.
+# Grafana datasources -- a template, rendered before Grafana reads it.
 #
-# ONE TEMPLATE SERVES BOTH DEPLOYMENT TARGETS, the same arrangement supabase/kong.yml uses:
-#   * Docker Compose: the grafana service's entrypoint substitutes __DB_PASSWORD__ with `sed` and
-#     writes the result into the grafana_provisioning_datasources volume.
-#   * Kubernetes: Helm renders the same placeholder into a Secret mounted directly at
-#     /etc/grafana/provisioning/datasources/datasources.yml, and Grafana runs its stock /run.sh
-#     with no entrypoint override at all. See docs/kubernetes-architecture.md §2.4.
+# One template serves both targets: on Compose the grafana entrypoint substitutes the
+# `__UPPER_SNAKE__` placeholders with `sed`; on Kubernetes Helm renders them into a Secret
+# mounted at /etc/grafana/provisioning/datasources/datasources.yml. The password is not
+# committed; .env is the single source of truth.
 #
-# THE PLACEHOLDER IS `__BI_READER_PASSWORD__`, not `${BI_READER_PASSWORD}`. The shell form had to
-# survive Compose's own variable substitution AND sed's, which is what produced the
-# barely-readable `sed "s/\$${DB_PASSWORD}/$$DB_PASSWORD/g"` this replaces. `__UPPER_SNAKE__`
-# needs no escaping in either substituter and matches the convention kong.yml already uses.
-#
-# The password is NOT committed here, for the same reason the Kong API keys are not: .env stays
-# the single source of truth, and the rendered file lands on an internal volume or in a Secret.
-#
-# ---------------------------------------------------------------------------------------------
-# GRAFANA CONNECTS AS `powerbi_reader`, NOT AS `postgres`.
-#
-# It used to hold the superuser credential, which meant a service fronted by browser SSO carried
-# the credential that owns the historian -- and a dashboard query with a typo could DROP a
-# hypertable. The role is created by timescaledb/roles.sql and may SELECT the three rollup views
-# and nothing else: raw `telemetry`, `assets` and `telemetry_latest` are explicitly revoked.
-#
-# THAT RESTRICTION HAS A CONSEQUENCE WORTH KNOWING BEFORE YOU EDIT A DASHBOARD. A panel querying
-# raw `telemetry` now fails with a permission error rather than returning rows. That is the
-# intended behaviour -- charting raw is what the rollups exist to avoid, and `telemetry_gapfill()`
-# is how a report-by-exception series is meant to be read -- but it is a real change in what a
-# dashboard author may write. Widen the grant in roles.sql deliberately if a panel genuinely needs
-# raw, rather than repointing this datasource back at the superuser.
-#
-# The provisioned dashboard already reads only the rollups, so nothing shipped here changes.
-#
-# `BI_READER_PASSWORD` EMPTY MEANS THE ROLE WAS NEVER CREATED, and Grafana will fail to connect
-# with "password authentication failed". That is the honest failure: the alternative is falling
-# back to the superuser, which is the thing this removed.
+# Grafana connects to the historian as `powerbi_reader`, created by timescaledb/roles.sql, which
+# may SELECT the three rollup views and nothing else: a panel querying raw `telemetry` fails with
+# a permission error. Widen the grant in roles.sql deliberately if a panel needs raw. An empty
+# BI_READER_PASSWORD means the role was never created and Grafana fails to connect, which is the
+# honest failure.
 apiVersion: 1
 
 datasources:
@@ -59,33 +34,13 @@ datasources:
       timescaledb: true
 
   # ---------------------------------------------------------------------------------------------
-  # The Supabase database -- ONE VIEW, and the reason it is here at all.
+  # The Supabase database: one view, `public.storage_footprint`, which can only live on this side
+  # because postgres_fdw runs Supabase -> TimescaleDB and nothing runs back. Connects as
+  # `grafana_reader`, which may SELECT that view and nothing else, with the grant re-revoked on
+  # every boot. Same name and password as the historian's `grafana_reader` on purpose: it is the
+  # same tool, and the two roles share nothing but the credential. An empty BI_READER_PASSWORD
+  # skips the role and this datasource fails its health check.
   # ---------------------------------------------------------------------------------------------
-  # The storage question spans two databases and neither can answer it alone. TimescaleDB knows
-  # what the telemetry costs and nothing about `digital_thread` -- the table this platform promises
-  # never to prune, and therefore the one whose growth actually needs watching. The postgres_fdw
-  # link runs Supabase -> TimescaleDB and nothing runs back, so `public.storage_footprint` (created
-  # by archived migration 0027, over `timescaledb/storage.sql`) can only live on this side. That is what
-  # makes a second datasource necessary rather than merely convenient.
-  #
-  # IT CONNECTS AS `grafana_reader`, WHICH MAY SELECT THAT ONE VIEW.
-  #
-  # Grafana used to hold the `postgres` superuser credential for the HISTORIAN and that was removed
-  # deliberately: a service fronted by browser SSO must not carry the key that owns the database.
-  # Repeating it here would be strictly worse, because the Supabase superuser bypasses RLS and can
-  # rewrite the audit trail. archived migration 0027 creates the role, grants SELECT on the view, and then
-  # re-revokes everything else in the schema on every boot -- so the grant is reconciled rather
-  # than merely initial.
-  #
-  # SAME NAME AND SAME PASSWORD AS THE HISTORIAN'S `grafana_reader`, on purpose. It is the same
-  # tool, and a second secret to rotate for it is a second secret to forget. The two roles are
-  # unrelated objects in unrelated databases and share nothing but the credential; neither can
-  # reach anything in the other.
-  #
-  # AN EMPTY BI_READER_PASSWORD SKIPS THE ROLE, in 0027 exactly as in timescaledb/roles.sql -- so
-  # on a stack that never configured one, this datasource fails its health check with
-  # "password authentication failed". That is the honest failure: the alternative is falling back
-  # to a credential that can rewrite the digital thread.
   - name: Supabase
     uid: supabase
     type: postgres
@@ -107,30 +62,15 @@ datasources:
       database: postgres
       sslmode: disable
       postgresVersion: 1700
-      # NOT a TimescaleDB connection, whatever the view underneath reaches over the FDW. Setting
-      # this true makes Grafana's query builder offer `time_bucket()` and friends against a server
-      # that has no TimescaleDB extension installed, and the resulting panel fails at run time with
-      # an undefined-function error that names neither cause.
+      # Not a TimescaleDB connection, whatever the view reaches over the FDW: true would make the
+      # query builder offer `time_bucket()` against a server without the extension.
       timescaledb: false
 
   # ===============================================================================================
-  # Prometheus -- the metrics store, and the only datasource here that is not a database.
-  #
-  # NO CREDENTIAL, AND NOTHING TO SUBSTITUTE. The two Postgres datasources above carry
-  # __BI_READER_PASSWORD__ because they authenticate; Prometheus is reachable on the compose network
-  # and serves reads to anything that can connect. That is also why the port is not published to the
-  # host for Grafana's benefit -- it does not need to be.
-  #
-  # THE URL IS A PLACEHOLDER BECAUSE THE TWO TARGETS REACH DIFFERENT PROMETHEUS INSTANCES. Compose
-  # runs its own and substitutes the compose service name; Kubernetes defers to the cluster's
-  # Operator-managed one and substitutes `grafana.prometheusUrl`, which defaults to
-  # kube-prometheus-stack's conventional service. Hardcoding `prometheus:9090` here would have put
-  # a name that means nothing on Kubernetes into the file both targets share.
-  #
-  # A CLUSTER WITH NO PROMETHEUS gets a datasource whose health check fails, and the five ingestion
-  # rules report DatasourceError. That is the same honest failure the Supabase datasource above
-  # makes when BI_READER_PASSWORD is unset -- a rule that cannot reach its data should say so rather
-  # than evaluate to OK.
+  # Prometheus: no credential, and the URL is a placeholder because the two targets reach
+  # different instances (Compose runs its own; Kubernetes defers to the cluster's Operator-managed
+  # one, `grafana.prometheusUrl`). A cluster with no Prometheus gets a datasource whose health
+  # check fails and rules that report DatasourceError, which is the honest failure.
   # ===============================================================================================
   - name: Prometheus
     uid: prometheus
@@ -149,39 +89,18 @@ datasources:
       httpMethod: POST
 
   # ===============================================================================================
-  # Loki -- the log store, and the drill-down half of every drop counter (roadmap 12).
+  # Loki: no credential (`auth_enabled: false` in loki/loki.yaml is a multi-tenancy switch, not a
+  # password, so no `X-Scope-OrgID` header is needed) and a placeholder URL for the reason
+  # Prometheus' is: the chart deploys no Loki and substitutes `grafana.lokiUrl`. A cluster with no
+  # Loki gets a datasource whose health check fails.
   #
-  # NO CREDENTIAL AND NOTHING TO SUBSTITUTE BUT THE URL, exactly like Prometheus above and for the
-  # same reason: Loki is reachable on the compose network and serves reads to anything that can
-  # connect. `auth_enabled: false` in loki/loki.yaml is a MULTI-TENANCY switch, not a password --
-  # there is no password to configure -- so no `X-Scope-OrgID` header is needed here either.
-  #
-  # WHICH IS THE WHOLE COST ARGUMENT FOR THE STORE, EXPRESSED AS A FILE. Rendering archived
-  # telemetry in Grafana was refused because it would add "a container, a gateway route and an
-  # auth surface over raw plant history". This is the third of those three: a fourth datasource
-  # beside three that already exist, behind the Grafana login that already exists, with no new
-  # principal and no second place to manage access. The store is not published and has no route.
-  #
-  # THE URL IS A PLACEHOLDER FOR THE REASON PROMETHEUS' IS. The two targets reach different Loki
-  # instances: Compose runs its own and substitutes the compose service name; Kubernetes defers to
-  # whatever the cluster already runs and substitutes `grafana.lokiUrl`. The chart deploys no Loki,
-  # for the same reason it deploys no Prometheus -- a second one would duplicate every line the
-  # cluster's collector already ships and give an operator two places to configure retention.
-  #
-  # A CLUSTER WITH NO LOKI gets a datasource whose health check fails. That is the same honest
-  # failure the Supabase datasource makes with no BI_READER_PASSWORD, and it is preferable to a
-  # panel that renders empty and reads as "nothing was logged".
-  #
-  # WHAT A QUERY LOOKS LIKE, because the label set is deliberately small and this is not obvious.
   # alloy/config.alloy labels streams by `service` and `container` only; `reason`, `device` and
-  # `edge_node` are FIELDS inside the JSON line, not labels, because labelling by device would be
-  # unbounded -- the same rule metrics.py states for Prometheus. So the drill-down from a spike on
-  # acs_ingestion_messages_dropped_total{reason="gateway_binding"} is:
+  # `edge_node` are fields inside the JSON line, so the drill-down from a drop counter is:
   #
   #     {service="ingestion"} | json | reason = "gateway_binding"
   #
-  # and it resolves to the same events because test_structured_logging.py asserts the Prometheus
-  # label and the logged field carry the same string.
+  # test_structured_logging.py asserts the Prometheus label and the logged field carry the same
+  # string.
   # ===============================================================================================
   - name: Loki
     uid: loki
@@ -193,13 +112,6 @@ datasources:
     isDefault: false
     version: 1
     jsonData:
-      # A CAP ON RETURNED LINES, AND NOTHING TO DO WITH THE TIME WINDOW. This bounds how many
-      # entries one query brings back, so a panel pointed at a busy hour renders instead of trying
-      # to draw a million rows into a browser.
-      #
-      # IT IS NOT A RETENTION SETTING and does not constrain the range a query may ask for --
-      # earlier wording here claimed both, which would have sent someone looking for the wrong
-      # cause when a long range came back empty. The window is bounded by
-      # `limits_config.retention_period` in loki/loki.yaml, at the store, and asking beyond it
-      # returns nothing rather than an error.
+      # A cap on returned lines per query, not a retention setting and not a bound on the time range.
+      # The window is bounded by `limits_config.retention_period` in loki/loki.yaml.
       maxLines: 5000

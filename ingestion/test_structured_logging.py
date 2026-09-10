@@ -1,10 +1,10 @@
 """
-Structured logging, and the drop pair it exists to make queryable (roadmap §12).
+Structured logging, and the drop pair it exists to make queryable.
 
 WHAT THIS FILE IS ACTUALLY GUARDING. metrics.py's header states a property the daemon was built
 around: "the counters and the log cannot disagree about what happened". Prometheus holds one half
 of every drop -- that one happened, and how many. The half naming WHICH device, under WHICH edge
-node, exists only in the warning beside it. Roadmap §12 is about keeping that half; this suite is
+node, exists only in the warning beside it. The log store keeps that half; this suite is
 about making it a FIELD rather than a sentence, so a store can be asked "which devices dropped on
 gateway_binding last night" without a regex over prose.
 

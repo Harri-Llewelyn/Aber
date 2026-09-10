@@ -1,41 +1,25 @@
 -- =============================================================================================
--- TimescaleDB compression and retention policy RECONCILIATION
+-- TimescaleDB compression and retention policy reconciliation
 --
--- Applied on EVERY boot by the `timescaledb-retention` service (Compose) and by the
--- `timescaledb-retention` hook Job (Helm), against a database that already holds the
--- hypertable. It takes two psql variables:
+-- Applied on every boot by the `timescaledb-retention` service (Compose) and hook Job (Helm),
+-- against a database that already holds the hypertable. It takes two psql variables:
 --
 --     -v compress_after='7 days'      -v retain_after='90 days'
 --     -v compress_after='never'       -v retain_after='never'      (policy removed)
 --
--- WHY THIS IS NOT IN /docker-entrypoint-initdb.d ANY MORE.
---
--- It was, as `timescaledb/init/002_retention.sql`, and that is precisely why the intervals were
--- unchangeable in practice. The postgres entrypoint runs initdb scripts ONLY on an empty data
--- directory, so an operator who edited the file saw no effect on their running stack and had no
--- way to reach one short of destroying the PVC and every telemetry row in it. A retention
--- interval that can only be chosen before the first boot is not a setting, it is a constant with
--- a misleading name.
---
--- Running on every boot instead means the value in `.env` (or in `values.yaml`) IS the policy: a
--- changed interval takes effect at the next restart, in both directions.
---
--- WHY NOT pg_cron. Telemetry lives in this standalone TimescaleDB container, not in Supabase.
--- pg_cron runs inside the Supabase database and reaches this one only through the postgres_fdw
--- link, which exists to serve read queries to PostgREST -- driving destructive maintenance across
--- it would be both slower and far easier to get wrong. TimescaleDB has its own background job
--- scheduler for exactly this, so the policies belong here, next to the hypertable they act on.
+-- Not in /docker-entrypoint-initdb.d: the postgres entrypoint runs initdb scripts only on an
+-- empty data directory, so a policy defined there could never be changed on a running stack.
+-- Running on every boot means the value in `.env` (or values.yaml) is the policy. Not pg_cron:
+-- that runs inside the Supabase database and reaches this one only over the read-only FDW link;
+-- TimescaleDB has its own job scheduler.
 -- =============================================================================================
 
 \set ON_ERROR_STOP on
 
--- Hand the psql variables to PL/pgSQL through GUCs. This indirection is required, not stylistic:
--- psql interpolates `:'var'` while lexing and does NOT descend into dollar-quoted strings, so a
--- `:'compress_after'` written inside the DO block below would reach the server as those literal
--- characters and fail as a syntax error.
+-- Hand the psql variables to PL/pgSQL through GUCs: psql interpolates `:'var'` while lexing and
+-- does not descend into dollar-quoted strings.
 SELECT set_config('acs_cymru.compress_after', :'compress_after', false);
 SELECT set_config('acs_cymru.retain_after',   :'retain_after',   false);
-
 
 DO $$
 DECLARE
@@ -84,33 +68,16 @@ BEGIN
   -- -------------------------------------------------------------------------------------------
   -- Columnstore (Hypercore)
   -- -------------------------------------------------------------------------------------------
-  -- The table must be TOLD HOW to compress before a policy can be attached.
-  --   segmentby: rows for one asset/metric series compress together and stay individually
-  --              retrievable, which matches how the dashboard queries (asset_id + metric_name,
-  --              see queryTelemetry in frontend/src/api.js).
-  --   orderby:   time DESC matches both the query order and the supporting index.
+  -- segmentby: rows for one asset/metric series compress together (matching how the dashboard
+  -- queries); orderby: time DESC matches the query order and the supporting index.
   --
-  -- THE COLUMNSTORE API, NOT THE LEGACY COMPRESSION ONE. `add_columnstore_policy()` superseded
-  -- `add_compression_policy()` in TimescaleDB 2.18; the old spelling still works and is what this
-  -- file used until 2026-08. Two differences matter more than the rename:
+  -- The columnstore API (TimescaleDB 2.18+), not the legacy compression one: the entry points are
+  -- procedures reached with CALL (`PERFORM` fails), and the options are `enable_columnstore`,
+  -- `segmentby`, `orderby`. The job still reports as `policy_compression` and the hypertable
+  -- state as `compression_enabled`, which the guard below and the CI assertions read.
   --
-  --   1. THE NEW ENTRY POINTS ARE PROCEDURES, NOT FUNCTIONS. `add_columnstore_policy` and
-  --      `remove_columnstore_policy` must be reached with CALL; `PERFORM` fails with
-  --      "... is a procedure / HINT: To call a procedure, use CALL." Verified against 2.29.1,
-  --      including from inside this DO block and alongside an inner EXCEPTION handler.
-  --   2. The option names lose their `compress_` prefix and gain an explicit enable flag:
-  --      `timescaledb.compress` -> `timescaledb.enable_columnstore = true`,
-  --      `compress_segmentby`   -> `segmentby`, `compress_orderby` -> `orderby`.
-  --
-  -- What did NOT change: the job still reports as `policy_compression` in
-  -- timescaledb_information.jobs with `compress_after` in its config, and the hypertable's state
-  -- is still `compression_enabled` in timescaledb_information.hypertables -- there is no
-  -- columnstore-named equivalent of either. Both were checked rather than assumed, because a
-  -- rename there would have silently broken the guard below and the CI assertions.
-  --
-  -- Applied only once. Re-issuing the SET with different segmentby columns raises once compressed
-  -- chunks exist, so this is guarded on the current state rather than run unconditionally --
-  -- otherwise the SECOND boot of a compressed database would fail.
+  -- Applied only once: re-issuing the SET with different segmentby columns raises once compressed
+  -- chunks exist, so this is guarded on the current state.
   SELECT h.compression_enabled INTO compressed
   FROM timescaledb_information.hypertables h
   WHERE h.hypertable_schema = 'public' AND h.hypertable_name = 'telemetry';
@@ -123,10 +90,8 @@ BEGIN
     );
   END IF;
 
-  -- Removed and re-added rather than `if_not_exists => TRUE`. With the policy already present at
-  -- a DIFFERENT interval, add_* does not update it -- it emits a notice and does nothing, so a
-  -- changed setting would appear to apply and would not. Removing first is what makes the value
-  -- in the environment authoritative.
+  -- Removed and re-added rather than `if_not_exists => TRUE`: with the policy present at a
+  -- different interval, add_* emits a notice and does nothing.
   CALL remove_columnstore_policy('public.telemetry', if_exists => TRUE);
 
   IF v_compress IS NOT NULL THEN
@@ -143,10 +108,8 @@ BEGIN
   -- -------------------------------------------------------------------------------------------
   -- Retention
   -- -------------------------------------------------------------------------------------------
-  -- A HARD DELETE with no undo: TimescaleDB drops whole chunks rather than deleting rows, and
-  -- nothing in this stack copies them anywhere first. The interval is deliberately an operator
-  -- decision -- manufacturing traceability obligations vary from weeks to decades and this
-  -- project cannot guess which applies -- so the default only holds until someone sets it.
+  -- A hard delete with no undo: TimescaleDB drops whole chunks and nothing here copies them first.
+  -- The interval is an operator decision; the default holds until someone sets it.
   PERFORM remove_retention_policy('public.telemetry', if_exists => TRUE);
 
   IF v_retain IS NOT NULL THEN
@@ -159,22 +122,11 @@ BEGIN
         'before it is dropped.', v_retain, v_compress;
     END IF;
 
-    -- COLD ARCHIVAL AND A DROP POLICY ARE A DATA-LOSS COMBINATION.
-    --
-    -- This policy deletes chunks on a timer and records nothing. The archiver exports a chunk,
-    -- verifies the object and only then drops it. Run both and the timer wins the race for
-    -- anything the archiver has not reached yet: the rows are gone, no manifest row exists, and
-    -- nothing anywhere says they were ever there.
-    --
-    -- Observed while building the archiver, which is why the wording is this specific: a 150-day
-    -- test chunk was exported, and the next reconciliation of this file deleted it before the
-    -- export could be verified.
-    --
-    -- A WARNING RATHER THAN A REFUSAL. Refusing to add the policy would leave chunks accumulating
-    -- on a stack whose archiver is misconfigured -- trading a loud data-loss risk for a quiet
-    -- disk-exhaustion one. And the manifest holding rows is EVIDENCE of archival, not proof it is
-    -- switched on; `archive.enabled` lives in the platform database, which this file cannot read.
-    -- So it reports the conflict and lets the operator settle it.
+    -- Cold archival and a drop policy are a data-loss combination: this policy deletes chunks on a
+    -- timer and records nothing, and the timer wins the race for anything the archiver has not
+    -- reached. A warning rather than a refusal, because refusing would trade a loud data-loss risk
+    -- for a quiet disk-exhaustion one, and `archive.enabled` lives in the platform database, which
+    -- this file cannot read.
     IF to_regclass('public.telemetry_archive_manifest') IS NOT NULL THEN
       DECLARE v_archived bigint;
       BEGIN
