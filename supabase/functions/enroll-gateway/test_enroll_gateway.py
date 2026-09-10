@@ -574,6 +574,22 @@ class TestForgeProvisioning(EnrollGatewayBase):
             "re-enrolment overwrote a wiki page a person had edited",
         )
 
+    def test_the_repository_carries_an_incident_template_and_its_label(self):
+        """
+        ISSUES ARE THE GATEWAY'S INCIDENT LOG, and the template is what makes that true rather than
+        aspirational. Committed to `main` before the branch is protected -- the one moment the
+        machine account may -- so it must be there on the first enrolment or never.
+        """
+        status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        repo = f"/api/v1/repos/{self.organisation}/{self.repo_name()}"
+        templates = {t["file_name"] for t in self.forge(f"{repo}/issue_templates")}
+        self.assertIn(".gitea/ISSUE_TEMPLATE/incident.md", templates, templates)
+        labels = {l["name"] for l in self.forge(f"{repo}/labels")}
+        self.assertIn("incident", labels, labels)
+        # And `main` is protected afterwards, not instead: the seed did not cost the review gate.
+        self.assertFalse(self.forge(f"{repo}/branch_protections/main")["enable_push"])
+
     def test_main_is_protected_and_a_merge_needs_an_administrator(self):
         """
         THE REVIEW GATE, in the forge's own terms. The appliance converges to `main`, so a branch

@@ -1,6 +1,6 @@
 import React from 'react'
 import { FORGE_ORGANISATION, GITEA_URL } from '../../constants'
-import { IconExternalLink, IconGitBranch } from './Icons'
+import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch } from './Icons'
 
 /**
  * Where a gateway's flow lives, and where a change to it is proposed: its own repository in the
@@ -67,20 +67,47 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
         This gateway's flow lives in its own repository in the forge. To change what the appliance
         runs, open a pull request there with the <span className="mono">flows.json</span> exported
         from its Node-RED editor. Nothing is deployed until an administrator has approved it and it
-        is merged to <span className="mono">main</span>, which the appliance then pulls.
+        is merged to <span className="mono">main</span>, which the appliance then pulls. Its
+        issues are the gateway's incident log, and its wiki is for what a person needs to know
+        and the appliance never reads.
       </div>
-      {/* A REAL LINK, for the reason the Node-RED link is one: middle-click and copy-link work,
-          and the usual next step is sending it to whoever is reviewing. */}
-      <a
-        className="btn btn-ghost"
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        title="Open this gateway's repository in the forge"
-        style={{ marginTop: '8px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-      >
-        <IconGitBranch size={13} /> Open in the forge <IconExternalLink size={10} />
-      </a>
+      {/* REAL LINKS, for the reason the Node-RED link is one: middle-click and copy-link work,
+          and the usual next step is sending one to whoever is reviewing. Three, not one, because
+          the repository, its issues and its wiki are three different acts -- change the flow,
+          record an incident, write down what is known -- and a person arriving from an alert
+          should not have to find the Issues tab in another product. */}
+      <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        <a
+          className="btn btn-ghost"
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open this gateway's repository in the forge"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <IconGitBranch size={13} /> Open in the forge <IconExternalLink size={10} />
+        </a>
+        <a
+          className="btn btn-ghost"
+          href={`${url}/issues`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open this gateway's issues in the forge"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <IconAlertCircle size={13} /> Issues <IconExternalLink size={10} />
+        </a>
+        <a
+          className="btn btn-ghost"
+          href={`${url}/wiki`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open this gateway's wiki in the forge"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <IconBookOpen size={13} /> Wiki <IconExternalLink size={10} />
+        </a>
+      </div>
     </div>
   )
 }

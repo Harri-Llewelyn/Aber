@@ -310,6 +310,76 @@ async function ensureRepository(
   throw await refused(`could not create repository '${name}'`, created);
 }
 
+const INCIDENT_LABEL = "incident";
+const INCIDENT_TEMPLATE_PATH = ".gitea/ISSUE_TEMPLATE/incident.md";
+
+/**
+ * An issue template and its label, committed to `main` in the one moment the machine account still
+ * may: before the branch is protected.
+ *
+ * ISSUES ARE THE GATEWAY'S INCIDENT LOG, and a template is what turns a tracker that is on by
+ * default into one somebody uses: the questions an incident on a plant floor needs answered are the
+ * same every time, and the one that matters most -- what the appliance was running when it happened
+ * -- is the one people forget to write down. The template lives in `.gitea/ISSUE_TEMPLATE/`, which
+ * the appliance clones along with everything else and flow-sync.mjs never reads: it reads
+ * `flows.json` and nothing else.
+ *
+ * ONLY BEFORE PROTECTION. `enable_push: false` binds the machine account too -- measured: the
+ * contents API answers 403 once `main` is protected -- so a repository from before this cannot be
+ * given a template by enrolment, and is not. An administrator can add one there by pull request,
+ * which is the right path for a change to a repository that already has a history.
+ *
+ * Idempotent on the file and on the label, because a legacy repository transferred in may carry
+ * either already.
+ */
+async function seedIssueTemplate(cfg: ForgeConfig, name: string): Promise<void> {
+  const label = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/labels`, {
+    name: INCIDENT_LABEL,
+    color: "#b60205",
+    description: "Something this gateway did, or failed to do, that somebody had to look at.",
+  });
+  // 409 and 422 are both Gitea's "that label exists".
+  if (!label.ok && label.status !== 409 && label.status !== 422) {
+    throw await refused(`could not create the '${INCIDENT_LABEL}' label on '${name}'`, label);
+  }
+
+  const present = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/contents/${INCIDENT_TEMPLATE_PATH}`);
+  if (present.ok) return;
+  if (present.status !== 404) throw await refused(`could not read '${INCIDENT_TEMPLATE_PATH}' on '${name}'`, present);
+
+  const template = [
+    "---",
+    "name: Incident",
+    "about: Something this gateway did, or failed to do, that somebody had to look at",
+    'title: "Incident: "',
+    `labels: ${INCIDENT_LABEL}`,
+    "---",
+    "",
+    "**What happened**",
+    "",
+    "",
+    "**When it was first noticed, and how** (an alert, a person on the floor, the dashboard)",
+    "",
+    "",
+    "**What the appliance was running** (the commit on `main` at the time; the dashboard shows the",
+    "flow hash the appliance last reported)",
+    "",
+    "",
+    "**What was done**",
+    "",
+    "",
+    "**What should change** (a pull request here, a wiki page, or nothing)",
+    "",
+  ].join("\n");
+  const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/contents/${INCIDENT_TEMPLATE_PATH}`, {
+    content: btoa(String.fromCharCode(...new TextEncoder().encode(template))),
+    message: "Add the incident template",
+    branch: "main",
+  });
+  if (!created.ok) throw await refused(`could not commit '${INCIDENT_TEMPLATE_PATH}' to '${name}'`, created);
+  console.log(`forge: '${name}' carries the incident template`);
+}
+
 /**
  * Protect `main`: no direct pushes, one approval from `administrators` before a merge.
  *
@@ -332,6 +402,9 @@ async function ensureBranchProtection(cfg: ForgeConfig, name: string): Promise<v
   if (existing.status !== 404) {
     throw await refused(`could not read the branch protection on '${name}'`, existing);
   }
+  // THE LAST MOMENT ANYTHING CAN BE COMMITTED TO `main` DIRECTLY. The protection below binds the
+  // machine account too, so what the repository is to carry from the start goes in here, first.
+  await seedIssueTemplate(cfg, name);
   const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections`, {
     branch_name: "main",
     enable_push: false,

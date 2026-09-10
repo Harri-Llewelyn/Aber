@@ -1462,6 +1462,15 @@ kanban on a repository whose whole content is one flow is a tab to learn to igno
 the gateway's incident log. The runner stays off: it is §8's decision, and it is a host that
 executes untrusted code rather than a setting.
 
+**ISSUES ARE THE INCIDENT LOG, AND THE TEMPLATE IS SEEDED IN THE ONE MOMENT IT CAN BE (2026-09-10).**
+A tracker that is on by default is not one anybody uses; a template that asks the same four things
+every time -- what happened, when and how it was noticed, what the appliance was running, what should
+change -- is. It is committed to `main` with its `incident` label immediately before the branch is
+protected, because `enable_push: false` binds the machine account too (measured: the contents API
+answers 403 afterwards). A repository from before this gets no template from enrolment, and an
+administrator adds one by pull request, which is the right path into a repository with a history.
+The gateway drawer now links the repository, its issues and its wiki as three acts rather than one.
+
 **NONE OF THIS RELAXES THE RULE THAT AUTHORISATION STAYS IN POSTGRES.** `user_roles` and `has_role()`
 decide who is let through the door; Gitea's teams decide what they may do inside it, and the two
 must agree by construction — the team a login is placed in is a function of the role the listener

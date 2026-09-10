@@ -32,6 +32,17 @@ describe('GatewayRepositoryPanel — who sees it', () => {
     expect(link.getAttribute('rel')).toContain('noopener')
   })
 
+  it('links the issues and the wiki beside the repository, as three acts rather than one', () => {
+    render(<GatewayRepositoryPanel gateway={GATEWAY} canOpenForge />)
+    const base = 'http://forge.plant.local/gateways/gateway-gwy2a0000000000400080000'
+    expect(screen.getByTitle(/Open this gateway's issues/i).getAttribute('href')).toBe(`${base}/issues`)
+    expect(screen.getByTitle(/Open this gateway's wiki/i).getAttribute('href')).toBe(`${base}/wiki`)
+    for (const link of screen.getAllByRole('link')) {
+      expect(link.getAttribute('target')).toBe('_blank')
+      expect(link.getAttribute('rel')).toContain('noopener')
+    }
+  })
+
   it('shows a role the forge would refuse nothing at all -- not a disabled link', () => {
     const { container } = render(<GatewayRepositoryPanel gateway={GATEWAY} canOpenForge={false} />)
     expect(container).toBeEmptyDOMElement()
@@ -47,6 +58,7 @@ describe('GatewayRepositoryPanel — host-run gateways', () => {
     render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
     expect(screen.getByText(/has no repository of its own/i)).toBeInTheDocument()
     expect(screen.queryByTitle(/Open this gateway's repository/i)).toBeNull()
+    expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
 
   it('does not call it a virtual gateway', () => {
