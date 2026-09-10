@@ -1230,8 +1230,11 @@ static_resources:
                   #    call. `failure_mode_allow`: a 5xx from the function -- the forge or Postgres
                   #    unreachable -- lets the request THROUGH, because filter 3 has already
                   #    admitted the role in the token and a placement outage must not take the web
-                  #    UI down with it. A 403 is a decision and is honoured. Only the Authorization
-                  #    header travels; nothing the function answers reaches Gitea.
+                  #    UI down with it. A 403 is a decision and is honoured, and so is a 302: a
+                  #    token GoTrue no longer has a session for is sent to /oauth2/signout, which
+                  #    filter 1 answers by clearing the cookies -- the one way a door with a valid
+                  #    cookie can be made to start over. Only the Authorization header travels;
+                  #    nothing the function answers reaches Gitea.
                   - name: envoy.filters.http.ext_authz
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
@@ -1256,6 +1259,10 @@ static_resources:
                           allowed_client_headers:
                             patterns:
                               - exact: content-type
+                              # A dead session comes back as a 302 to /oauth2/signout, and the
+                              # redirect only works if its Location reaches the browser. Without
+                              # this line the denial is forwarded as a bare 302 with no target.
+                              - exact: location
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

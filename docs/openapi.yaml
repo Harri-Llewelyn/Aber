@@ -2918,8 +2918,10 @@ paths:
       responses:
         '200':
           description: The caller holds an admitted role and is in its team, or is not yet registered in the forge (the first request through the door).
+        '302':
+          description: The token verified but GoTrue no longer holds its session (a sign-out, a timebox). `Location` is the door's `/oauth2/signout`, which clears the cookies and starts a fresh login.
         '401':
-          description: No usable bearer token.
+          description: No bearer token at all.
         '403':
           description: The caller's role does not open the forge. Any team membership they held has been removed.
         '502':

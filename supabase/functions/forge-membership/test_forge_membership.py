@@ -243,6 +243,42 @@ class TestTheDoor(unittest.TestCase):
             )
             assert status in (200, 204), f"COULD NOT RESTORE the manager persona's role: {text[:200]}"
 
+    def test_a_session_ended_elsewhere_sends_the_browser_back_through_the_door(self):
+        """
+        THE DOOR HOLDS A COOKIE GoTrue NO LONGER HONOURS, and this is what happens next. A dashboard
+        sign-out revokes the GoTrue session; the forge's cookie is Envoy's own and survives it, its
+        token still verifies locally, and only the membership step notices. A 401 from it would
+        reach the browser as a JSON body with the cookie still set -- stuck until it expires. So a
+        dead session is a redirect to the door's sign-out, which clears the cookies and lands on a
+        fresh login. Found by exactly that sequence on a laptop.
+        """
+        email, _, _ = PERSONAS["Administrator"]
+        jar, status = through_the_door(email)
+        self.assertEqual(status, 200)
+
+        # End every session this persona holds, the way a global dashboard sign-out does. The forge
+        # cookie in `jar` is untouched by this, which is the whole point.
+        token = sign_in(email)
+        status, _, text = request(
+            f"{SUPABASE_URL}/auth/v1/logout?scope=global", method="POST",
+            headers={"apikey": ANON_KEY, "Authorization": f"Bearer {token}"},
+        )
+        self.assertIn(status, (200, 204), text[:200])
+
+        status, headers, text = request(f"{FORGE_URL}/", jar=jar)
+        self.assertEqual(status, 302, f"a dead session was not sent back through the door ({status}): {text[:120]}")
+        self.assertEqual(headers.get("location"), "/oauth2/signout")
+
+        status, headers, _ = request(f"{FORGE_URL}/oauth2/signout", jar=jar)
+        self.assertEqual(status, 302)
+        self.assertFalse(
+            any(c.name.startswith("ForgeBearerToken") for c in jar),
+            "the sign-out did not clear the door's bearer cookie",
+        )
+        status, headers, _ = request(f"{FORGE_URL}/", jar=jar)
+        self.assertEqual(status, 302)
+        self.assertIn("/auth/v1/oauth/authorize", headers.get("location", ""), "the door did not start a fresh login")
+
     # -- helpers ---------------------------------------------------------------------------------
 
     _jars = {}

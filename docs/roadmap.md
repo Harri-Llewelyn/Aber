@@ -1426,6 +1426,15 @@ through -- and refuses, and unseats, a login whose role has gone since the token
 a revocation Studio's door cannot give. `test_forge_membership.py` drives the whole door for all
 three personas and asserts each of those.
 
+**A dead session is sent back through the door, and this was found by walking into it.** After a
+`docker compose down` and up, a browser holding the forge's cookie met a JSON 401 from the placement
+step: the token still verified locally, but GoTrue no longer had the session behind it, and nothing
+restarts a login the oauth2 filter believes is still valid -- the person is stuck until the cookie
+expires. So `forge-membership` answers such a token with a redirect to `/oauth2/signout`, the
+listener forwards the `location`, the sign-out clears the cookies, and `/` starts a fresh login.
+Studio's door has the same dead-session case and cannot heal it, because it has no step that asks
+GoTrue; the suite now reproduces the sequence with a global sign-out.
+
 **NONE OF THIS RELAXES THE RULE THAT AUTHORISATION STAYS IN POSTGRES.** `user_roles` and `has_role()`
 decide who is let through the door; Gitea's teams decide what they may do inside it, and the two
 must agree by construction — the team a login is placed in is a function of the role the listener

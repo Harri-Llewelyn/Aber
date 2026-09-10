@@ -37,6 +37,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  * WHAT A FAILURE MEANS, AND THE THREE ANSWERS THIS GIVES
  *
  *   200  the caller holds an admitted role and is in its team (or is not yet registered).
+ *   302  the token verified but GoTrue no longer has its session -- a dashboard sign-out, a
+ *        global sign-out, a timebox. Redirects to the door's sign-out path, which clears the
+ *        cookies and starts a fresh login; a 401 would leave the browser stuck on a cookie the
+ *        door still honours.
  *   403  the caller's role does not open the forge. The listener's RBAC already refused the two
  *        roles that never had one; this catches the role that was REMOVED since the token was
  *        signed -- and takes the login out of both teams first, so a revoked administrator's SSH
@@ -154,7 +158,20 @@ export default async function handler(req: Request): Promise<Response> {
   });
   const { data: { user }, error: userError } = await asCaller.auth.getUser(token);
   if (userError || !user) {
-    return json({ error: "Invalid user token", details: userError?.message }, 401);
+    // A DEAD SESSION IS SENT BACK THROUGH THE DOOR, NOT REFUSED. The listener's oauth2 filter and
+    // jwt_authn both accepted this token -- its signature is good and it has not expired -- and
+    // only GoTrue knows the session behind it is gone: a dashboard sign-out, a global sign-out, a
+    // session timebox. A 401 here would be forwarded to the browser as a JSON body and nothing
+    // would restart the login, because the door still sees a cookie it minted; the person is stuck
+    // until it expires, up to an hour. So the answer is a redirect to the door's own sign-out
+    // path, which clears every cookie and lands on `/`, where the absence of a cookie starts a
+    // fresh login. Envoy forwards a denied response's status and its `location` header. This is
+    // the one place in the stack a door notices a session died, and Studio's cannot do it.
+    console.log(`forge-membership: ${userError?.message ?? "no user"}; sending the browser back through the door`);
+    return new Response(
+      JSON.stringify({ error: "Session ended", details: userError?.message, next: "/oauth2/signout" }),
+      { status: 302, headers: { ...corsHeaders, "Content-Type": "application/json", Location: "/oauth2/signout" } },
+    );
   }
 
   // Authorisation: user_roles, read with the service key -- a lookup, not a decision made by the
