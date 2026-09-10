@@ -3,84 +3,46 @@
 -- ACS-Cymru Asset Tracking Platform -- consolidated schema baseline (public beta)
 -- =============================================================================================
 --
--- WHAT THIS IS. The squashed structural baseline for the public beta. It replaces the 38
--- incremental migrations `20260101000000` .. `20260101000037`, which are preserved verbatim under
--- `supabase/migrations/archive/` -- they are not deleted, because they carry the reasoning behind
--- most of the decisions this file only shows the outcome of, and the READMEs still cite them by
--- number.
+-- The squashed structural baseline: pure DDL, generated from a pg_dump of a database the
+-- pre-beta chain built (the chain is preserved under `supabase/migrations/archive/`). Baseline
+-- data lives in `0002_seed_data.sql`.
 --
--- SCOPE: PURE DDL. No INSERT, no seeding, no data of any kind. Baseline data lives in
--- `0002_seed_data.sql` and nothing here depends on it having run.
+-- IDEMPOTENT, AND THAT IS NOT OPTIONAL. `supabase-db-init` replays every `/migrations/*.sql` on
+-- every boot with no ledger, so every statement survives re-execution: `CREATE TABLE IF NOT
+-- EXISTS`, `CREATE OR REPLACE` for functions and views, `DROP ... IF EXISTS` ahead of every
+-- constraint, policy and trigger.
 --
--- IT IS IDEMPOTENT, AND THAT IS NOT OPTIONAL. `supabase-db-init` replays every
--- `/migrations/*.sql` on every boot -- there is no applied-migrations ledger. A plain `pg_dump`
--- baseline would install correctly on the first boot and then fail on the second with
--- "relation already exists", taking the whole stack down with it. Every statement below is
--- therefore written to survive re-execution: `CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE`
--- for functions and views, and `DROP ... IF EXISTS` ahead of every constraint, policy and
--- trigger. That is the same discipline the 38 migrations were written with.
---
--- HOW IT WAS PRODUCED, and how to reproduce it: the full chain was replayed onto a virgin
--- `supabase/postgres:15.6.1.143`, `pg_dump --schema-only --schema=public` was taken as the
--- completeness oracle, and the result was mechanically rewritten into the idempotent form above.
--- Equivalence is not asserted -- it is checked, by diffing a dump of a database built from the
--- old chain against a dump of one built from this file. Anything this file missed shows up in
--- that diff.
---
--- WHAT IS DELIBERATELY NOT HERE:
---   * the `storage.buckets` row for `asset-3d-models`. storage-api owns the `storage` schema and
---     migrates it on boot, and `supabase-db-init` finishes long before storage-api starts -- so a
---     migration could create the bucket row but not mark it public, and it would come up private
---     on a fresh stack. `scripts/storage-init.mjs` creates it afterwards. The POLICIES on
---     `storage.objects` are here, because that table exists from the image's stub onward.
---   * anything owned by GoTrue, Realtime or storage-api in their own schemas.
+-- Not here: the `storage.buckets` row (storage-api owns that schema and migrates it after
+-- db-init has finished; `scripts/storage-init.mjs` creates the bucket), and anything owned by
+-- GoTrue, Realtime or storage-api. The policies on `storage.objects` are here, because that
+-- table exists from the image's stub onward.
 --
 -- PSQL VARIABLES. `supabase-db-init` passes `-v ts_host ts_port ts_dbname ts_user ts_password`.
--- Each is defaulted below so this file is still runnable standalone, exactly as the migration it
--- came from was.
+-- Each is defaulted below so this file is still runnable standalone.
 -- =============================================================================================
-
 
 -- ---------------------------------------------------------------------------------------------
 -- 0. Deferred function-body validation
 -- ---------------------------------------------------------------------------------------------
--- REQUIRED, not tidiness. PL/pgSQL resolves type references in a function's DECLARE block at
--- CREATE time, so `fork_schema()` -- which declares `public.schemas%ROWTYPE` -- cannot be created
--- before the table exists. No single ordering satisfies every such dependency in both directions
--- (policies reference functions, functions reference tables, views reference both), which is why
--- pg_dump emits this same setting at the top of every dump it produces.
---
--- It defers SEMANTIC checks only. Syntax errors in a body are still rejected here, and the
--- deferred checks all run the first time each function is called -- which the migration's own
--- self-checks below, and the test suites, do.
+-- Required: PL/pgSQL resolves type references in a DECLARE block at CREATE time, and no single
+-- ordering satisfies every dependency between policies, functions, tables and views. Syntax is
+-- still checked; the deferred semantic checks run on first call, which the self-checks below do.
 SET check_function_bodies = false;
-
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. Extensions
 -- ---------------------------------------------------------------------------------------------
--- Each is created into the schema the original migration chose, and those choices are load
--- bearing: pg_net in `extensions` is where Supabase expects it, and supabase_vault in `vault` is
--- what makes `vault.decrypted_secrets` resolvable from the webhook dispatcher.
+-- Each is created into the schema the original migration chose: pg_net in `extensions` is where
+-- Supabase expects it, and supabase_vault in `vault` makes `vault.decrypted_secrets` resolvable.
 
 CREATE EXTENSION IF NOT EXISTS postgres_fdw;
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
 CREATE EXTENSION IF NOT EXISTS supabase_vault WITH SCHEMA vault;
 
--- pgjwt: DECLARED HERE FROM THE PG17 BUMP ONWARD, and its absence from this list until then was
--- not an oversight -- it was a dependency on a default. Supabase enabled pgjwt on every project up
--- to Postgres 17, so `extensions.sign()` simply existed and 0006 could call it. The 17.6.1.160
--- image still SHIPS the extension but no longer CREATES it, so the first thing that noticed was
--- 0006's own self-check, several migrations later, reporting a missing function rather than a
--- missing extension.
---
--- Being explicit is the improvement here regardless of version: a required extension belongs in
--- the list of required extensions. It also reduces removing pgjwt to a two-line change -- this
--- declaration and the signer in 0006 -- which is what the deprecation eventually forces. Supabase
--- has announced pgjwt's end for Postgres 17 and removed it from the hosted platform; the
--- self-hosted image retaining it is a reprieve, not a reversal.
--- See docs/postgres-17-migration-plan.md, Phase 1.
+-- pgjwt is declared explicitly: the 17.x image ships the extension but no longer creates it, and
+-- `extensions.sign()` is what the webhook dispatcher calls. Supabase has announced pgjwt's end
+-- for Postgres 17; removing it is this line plus the signer in the dispatcher.
 CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
 
 -- Vault holds only secrets that must be read *from SQL* -- in practice the Node-RED admin token
@@ -88,7 +50,6 @@ CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
 -- the store, so the revocation is part of the structure rather than of the seeding.
 REVOKE ALL ON vault.secrets           FROM anon, authenticated;
 REVOKE ALL ON vault.decrypted_secrets FROM anon, authenticated;
-
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. Realtime bootstrap schema
@@ -100,18 +61,12 @@ CREATE SCHEMA IF NOT EXISTS _realtime;
 GRANT ALL ON SCHEMA _realtime TO supabase_admin;
 REVOKE ALL ON SCHEMA _realtime FROM PUBLIC;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 3. TimescaleDB foreign data wrapper
 -- ---------------------------------------------------------------------------------------------
--- TimescaleDB is a separate container on its own port and is not reachable from the browser --
--- only Kong is. The FDW keeps TimescaleDB authoritative for time-series storage while giving the
--- SPA a normal PostgREST collection to query.
---
--- MUST COME BEFORE THE PUBLIC SCHEMA SECTION. `DROP SERVER ... CASCADE` below drops the foreign
--- table *and* the `public.telemetry` view that selects from it; the view is then re-created in
--- section 4 as part of the ordinary public DDL. Moving this section after that one would leave
--- the view dropped on every replay.
+-- TimescaleDB is a separate container reachable only from this database; the FDW gives the SPA
+-- a normal PostgREST collection. Must come before section 4: `DROP SERVER ... CASCADE` drops
+-- the foreign table and the `public.telemetry` view, which section 4 re-creates.
 
 \if :{?ts_host}
 \else
@@ -138,47 +93,16 @@ REVOKE ALL ON SCHEMA _realtime FROM PUBLIC;
 -- table is never routable; only the public view is exposed.
 CREATE SCHEMA IF NOT EXISTS timescale;
 
--- Recreated on every run so connection settings and column definitions stay in step with
--- docker-compose.yml and timescaledb/init/001_schema.sql.
---
--- CASCADE TAKES THE WHOLE TELEMETRY READ SURFACE WITH IT, AND THERE IS A WINDOW. Everything
--- downstream of this server is dropped here and rebuilt later: `public.telemetry` in section 4 of
--- this file, and the rollup foreign tables and their views in 0010. So between this statement and
--- the end of 0010 the read surface does not exist.
---
--- On a healthy boot that window is milliseconds and nothing is serving yet. The case worth knowing
--- about is a file BETWEEN 0001 AND 0010 aborting: db-init stops, the rest of the stack is up, and
--- PostgREST answers requests for `telemetry` with a missing-relation error. That reads as schema
--- drift or a bad deploy rather than as a half-finished init, which is a long way from the cause.
---
--- Self-healing: the next successful replay rebuilds all of it, and db-init replays the whole chain
--- on every boot. Recreating only when the options actually change (compare `srvoptions` first)
--- would remove the window entirely and is the fix if this ever bites in anger -- it is not done
--- here because an unconditional recreate is the thing that keeps the definition honest against
--- edits to this file, and that trade has been worth it so far.
---
--- Recorded by the architecture audit of 2026-08-27 (F3).
+-- Recreated on every run so the connection settings stay in step with docker-compose.yml and
+-- timescaledb/init/001_schema.sql. The CASCADE drops the whole telemetry read surface until the
+-- rollup views are rebuilt later in the chain; a file aborting in between leaves PostgREST
+-- answering `telemetry` with a missing-relation error until the next successful replay.
 -- ---------------------------------------------------------------------------------------------
--- The FDW's own credential, resolved before it is used.
---
--- TWO SEPARATE "NOT SET" CASES, AND ONLY ONE OF THEM IS VISIBLE TO `\if`:
---
---   UNDEFINED  an operator running this file by hand passes no such variable at all, and psql
---              ABORTS on an undefined :'var' rather than treating it as empty. `\if :{?name}` is
---              the only thing that can test for that, so it comes first.
---
---   BLANK      db-init ALWAYS passes the variable, so on a deployment that has not set
---              FDW_READER_PASSWORD it arrives defined and empty. `\if` cannot see the difference
---              -- it takes a literal or a \gset result, never a string comparison -- so the SQL
---              below decides it, and covers both cases at once.
---
--- Getting this wrong is not a loud failure: the mapping would authenticate as a user with no
--- password, and every dashboard query would fail with a connection error naming neither this file
--- nor that variable.
---
--- BOTH FIELDS SWITCH ON THE USER, not one each. A blank user with a non-blank password is not a
--- half-configured state worth honouring -- it is a typo, and pairing the fallback to a single
--- condition is what stops it becoming `fdw_reader` authenticating with the superuser's password.
+-- The FDW's own credential. Two "not set" cases: UNDEFINED (a hand run passes no variable, and
+-- psql aborts on an undefined :'var', so `\if :{?name}` is tested first) and BLANK (db-init
+-- always passes it, so an unset FDW_READER_PASSWORD arrives defined and empty; the SQL below
+-- decides that). Both fields switch on the user: a blank user with a non-blank password is a
+-- typo, not a half-configured state.
 \if :{?ts_fdw_user}
 \else
   \set ts_fdw_user ''
@@ -201,36 +125,14 @@ CREATE SERVER timescaledb_server
   OPTIONS (host :'ts_host', port :'ts_port', dbname :'ts_dbname');
 
 -- `postgres` keeps its own mapping for admin access. A second mapping FOR PUBLIC covers every
--- other local role (authenticated, service_role), since the view runs security_invoker and each
--- querying role needs its own path through the FDW. `anon` still reaches none of it -- it has
--- SELECT on neither the view nor the foreign table.
+-- other local role, since the view runs security_invoker and each querying role needs its own
+-- path through the FDW. `anon` reaches none of it.
 --
--- =============================================================================================
--- THE PUBLIC MAPPING NO LONGER RUNS AS THE HISTORIAN SUPERUSER, WHEN ONE IS CONFIGURED.
---
--- It used to, unconditionally: every FDW session opened on behalf of `authenticated` or
--- `service_role` ran on the REMOTE side as that database's superuser, and the only containment was
--- the LOCAL grant -- SELECT on `timescale.*`. The remote end contributed nothing.
---
--- No application role could abuse it, and that was never the argument. The argument is that
--- nothing stopped the NEXT change from doing so: a widened local grant, or a new foreign table
--- added against this same server, would have inherited superuser reach on the historian silently.
--- The mapping also parks the password in `pg_user_mappings`, which the backup runbook has to warn
--- about -- and a read-only role's password is a smaller thing to park there.
---
--- `fdw_reader` (timescaledb/roles.sql) has SELECT on the six objects Supabase projects and no
--- write of any kind. See Historian roles in README.md.
---
--- WHY THE ADMIN MAPPING IS LEFT ALONE. `postgres` here is the SUPABASE superuser, and its mapping
--- is what a human debugging the FDW connects through. Narrowing it would mean an operator with
--- full rights on one database silently losing them across the link, which is a confusing place to
--- economise -- and it is not the mapping the application uses.
---
--- FALLS BACK WHEN UNCONFIGURED, and it has to. This file replays on every boot, so it reaches a
--- deployment that has not set FDW_READER_PASSWORD yet -- and on that stack `fdw_reader` does not
--- exist, because roles.sql skips a role with no password. Defaulting to `ts_user` is what keeps
--- the read path working through the upgrade that introduces this.
--- =============================================================================================
+-- The public mapping runs as `fdw_reader` (timescaledb/roles.sql: SELECT on the projected
+-- objects, no write) when one is configured, not as the historian superuser, so a widened local
+-- grant or a new foreign table cannot inherit superuser reach on the historian. The admin
+-- mapping is left alone: it is what a human debugging the FDW connects through. Falls back to
+-- `ts_user` when FDW_READER_PASSWORD is unset, because roles.sql skips a role with no password.
 CREATE USER MAPPING FOR postgres
   SERVER timescaledb_server
   OPTIONS (user :'ts_user', password :'ts_password');
@@ -254,23 +156,12 @@ SELECT set_config('acs_cymru.bi_reader_password', :'bi_reader_password', false);
 -- ---------------------------------------------------------------------------------------------
 -- 3a. Default privileges, narrowed BEFORE anything is created
 -- ---------------------------------------------------------------------------------------------
--- THESE MUST PRECEDE EVERY OBJECT IN THIS FILE, and in the chain they did not -- the same three
--- lines sat near the end of the old baseline, after section 4 had already created the tables and
--- functions they govern. ALTER DEFAULT PRIVILEGES applies only to objects created AFTER it runs,
--- so there they narrowed nothing that already existed, and what actually removed the inherited
--- reach was 0009's review and 0071's end-of-chain sweep. Hoisting them here is the one ordering
--- change this file makes, and it is the difference between a fresh database never granting anon
--- and authenticated anything and one that grants them everything and takes it back later.
---
--- The image's bootstrap grants anon, authenticated and service_role ALL on every table, sequence
--- and function created afterwards. A dump cannot state that these were withdrawn: it renders
--- default privileges as what IS granted, so the withdrawal shows up only as lines that are not
--- there.
---
--- PUBLIC IS ABSENT FROM THE LIST DELIBERATELY. The image's recorded default for functions is
--- {postgres=X,anon=X,authenticated=X,service_role=X}; PUBLIC is not in it, so revoking PUBLIC here
--- removes something never recorded, while PostgreSQL still applies its hardwired EXECUTE-to-PUBLIC
--- to every new function. The sweep in section 6 is what removes that.
+-- ALTER DEFAULT PRIVILEGES applies only to objects created after it runs, so these precede
+-- every object in this file. The image's bootstrap grants anon, authenticated and service_role
+-- ALL on every table, sequence and function created afterwards; a dump cannot state that these
+-- were withdrawn. PUBLIC is absent from the list because the image's recorded default for
+-- functions does not include it; PostgreSQL's hardwired EXECUTE-to-PUBLIC is removed by the
+-- sweep in section 6.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES    FROM anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM anon, authenticated;
@@ -288,14 +179,9 @@ BEGIN
     END IF;
 
     -- CREATE then ALTER rather than DROP then CREATE: dropping a role fails while any session is
-    -- connected as it, which on a stack with Grafana running is most of the time. The ALTER also
-    -- rotates the password on every boot, so changing the variable is all a rotation takes.
-    --
-    -- THE ATTRIBUTES ARE DECLARED ON CREATE AND NOT REPEATED ON ALTER. `postgres` is a superuser
-    -- on the historian and is not one here -- the Supabase image reserves that for
-    -- `supabase_admin` -- and from PostgreSQL 16 naming SUPERUSER *or* NOSUPERUSER in ALTER ROLE
-    -- counts as SETTING the attribute, which only a superuser may do. The identical statement
-    -- that succeeds against TimescaleDB fails here, naming neither the cause nor this line.
+    -- connected as it. The ALTER also rotates the password on every boot. The attributes are set
+    -- on CREATE only: from PostgreSQL 16 naming SUPERUSER or NOSUPERUSER in ALTER ROLE counts as
+    -- setting the attribute, which only a superuser may do, and `postgres` is not one here.
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role) THEN
         EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT', v_role);
         RAISE NOTICE 'created %', v_role;
@@ -316,25 +202,17 @@ BEGIN
 END
 $roles$;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 4. public and timescale, generated from the end state of the chain
 -- ---------------------------------------------------------------------------------------------
--- EVERY OBJECT BELOW IS TAKEN FROM A DUMP OF A DATABASE THE WHOLE CHAIN BUILT, so each one
--- is its final form and appears exactly once. That is the difference this file exists to
--- make: `log_digital_thread_event()` was defined five times across the chain and four of
--- those reads were wrong; there is one definition here and it is the one that runs.
---
--- Reasoning inside a function body survives verbatim -- pg_dump keeps `--` comments in the
--- body it stores. What a dump cannot carry is the narrative BETWEEN objects, which lived in
--- the migration headers; those files are preserved under `archive/` and are cited by number
--- wherever the reasoning still matters.
+-- Every object below is taken from a dump of a database the whole chain built, so each one is
+-- its final form and appears exactly once. Comments inside function bodies survive the dump;
+-- the narrative between objects lives in the archived migrations.
 
 -- SCHEMA public :: COMMENT
 --
 
 COMMENT ON SCHEMA public IS 'standard public schema';
-
 
 --
 
@@ -385,15 +263,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION active_schema_version(schema_id uuid) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.active_schema_version(schema_id uuid) IS 'Follows a lineage forward from any version to the one currently in force. Returns the input unchanged when it is already active, is a draft, or has no published successor.';
-
 
 --
 
@@ -484,9 +359,8 @@ BEGIN
   -- ---------------------------------------------------------------------------------------
   -- Straight approval.
   -- ---------------------------------------------------------------------------------------
-  -- Mirrors devices_site_wide_has_no_cell: a site-wide asset cannot also name a cell. Clearing
-  -- it here means the caller gets an approval rather than a constraint violation it cannot
-  -- interpret.
+  -- Mirrors devices_site_wide_has_no_cell: a site-wide asset cannot also name a cell, so it is
+  -- cleared here rather than left to a constraint violation.
   IF p_set_location_scope AND p_location_scope = 'site_wide' THEN
     v_cell := NULL;
   END IF;
@@ -510,15 +384,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) IS 'Atomically approves or merges a quarantined device. Re-checks the actor role against public.user_roles and attributes the resulting digital_thread rows to that actor.';
-
 
 --
 
@@ -547,15 +418,12 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
   END
 $$;
 
-
-
 --
 
 -- FUNCTION audit_domain_for(p_entity_type text, p_action text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane a digital_thread row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
-
 
 --
 
@@ -583,13 +451,9 @@ BEGIN
       USING ERRCODE = 'foreign_key_violation';
   END IF;
 
-  -- THE MIRROR IMAGE OF 0025, AND THE INVERSION IS THE WHOLE POINT OF THIS FILE. That function
-  -- refuses a host-run gateway because there is no appliance to carry a bundle to; this one
-  -- REQUIRES one, because a remote appliance already has a path and it is a better path -- the
-  -- credential is minted on the appliance itself and never travels through a browser.
-  --
-  -- Offering this for a remote appliance would be offering a WORSE option beside a working one,
-  -- and the operator choosing it would have no way to know that.
+  -- The mirror image of the enrolment path: that refuses a host-run gateway because there is no
+  -- appliance to carry a bundle to; this requires one, because a remote appliance mints its
+  -- credential on the appliance itself and never through a browser.
   IF v_gateway.deployment <> 'host' THEN
     RAISE EXCEPTION
       'gateway % runs on an appliance; use an enrolment bundle so the credential is minted there '
@@ -610,15 +474,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION authorize_virtual_gateway_credential(p_gateway_id uuid) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) IS 'Gate for minting a VIRTUAL gateway''s broker credential: checks has_role(), refuses a physical or archived gateway, and returns the generated sparkplug_id the account must be named after. The mirror of issue_gateway_enrollment_token(), which refuses exactly the gateways this accepts.';
-
 
 --
 
@@ -666,8 +527,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- clear_credential_revoked_on_enrolment() :: FUNCTION
@@ -684,8 +543,6 @@ BEGIN
   RETURN NEW;
 END $$;
 
-
-
 --
 
 -- cold_storage_rows() :: FUNCTION
@@ -695,18 +552,9 @@ CREATE OR REPLACE FUNCTION public.cold_storage_rows() RETURNS TABLE(chunk_name t
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
-    -- GATED ON THE SAME THREE ROLES THE BUCKET ADMITS, checked HERE rather than by hiding a tab.
-    --
-    -- `telemetry_archive_read_privileged` (supabase/storage-policies.sql) lets Administrator,
-    -- Shopfloor_Manager and Auditor read the objects. This catalogue names the object keys and the
-    -- shape of the plant's operating history, so it must not be readable by someone who cannot read
-    -- what it points at -- an Operator would otherwise get a full index of an archive every request
-    -- for it is refused.
-    --
-    -- IN THE FUNCTION BECAUSE A HIDDEN TAB IS NOT A GATE. App.jsx says it plainly: "Hiding a tab
-    -- removes a signpost, not an ability ... treating it as one is how a UI gate ends up being the
-    -- ONLY gate." SECURITY DEFINER makes that especially true here -- the definer's rights are
-    -- exactly what would let an ungated function answer anyone.
+    -- Gated on the same three roles the bucket admits (`telemetry_archive_read_privileged` in
+    -- supabase/storage-policies.sql), checked here because a hidden tab is not a gate and this
+    -- function is SECURITY DEFINER.
     SELECT m.chunk_name,
            m.range_start,
            m.range_end,
@@ -729,15 +577,12 @@ CREATE OR REPLACE FUNCTION public.cold_storage_rows() RETURNS TABLE(chunk_name t
      ORDER BY m.range_start DESC;
 $$;
 
-
-
 --
 
 -- FUNCTION cold_storage_rows() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.cold_storage_rows() IS 'The cold telemetry catalogue, read over the FDW from the historian''s manifest. `state` is derived here so no consumer re-implements the claimed->exported->verified->dropped ordering that timescaledb/cold_archive.sql enforces with CHECK constraints.';
-
 
 --
 
@@ -759,14 +604,9 @@ BEGIN
 
   v_hash := encode(extensions.digest(p_token, 'sha256'), 'hex');
 
-  -- THE ARCHIVED ARM IS THE NEW ONE (0037). An archived gateway is decommissioned: there is no
-  -- appliance it is legitimate to hand a broker credential to, and the operator who archived it
-  -- believes the bundle they downloaded is dead.
-  --
-  -- A REFUSED TOKEN IS NOT BURNED. The UPDATE simply matches nothing, so `consumed_at` stays NULL
-  -- and the row remains for the trigger above to withdraw -- or, for a token predating this
-  -- migration, until it expires on its own. Burning on refusal would let anyone holding a stale
-  -- bundle destroy a token that un-archiving might legitimately precede re-issuing.
+  -- An archived gateway is decommissioned: there is no appliance it is legitimate to hand a
+  -- credential to. A refused token is not burned: the UPDATE matches nothing, `consumed_at` stays
+  -- NULL, and the row remains for the trigger to withdraw or to expire on its own.
   UPDATE public.gateway_enrollment_tokens t
      SET consumed_at = now()
     FROM public.gateways g
@@ -791,15 +631,12 @@ BEGIN
    WHERE g.id = v_gateway_id;
 END $_$;
 
-
-
 --
 
 -- FUNCTION consume_gateway_enrollment_token(p_token text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.consume_gateway_enrollment_token(p_token text) IS 'Atomically claim a live enrolment token and return the gateway''s wire identity. Returns NO ROWS for an unknown, expired, already-consumed token or an ARCHIVED gateway (0037) -- the four are deliberately indistinguishable. Called by the enroll-gateway edge function with the service-role key; the token itself is the authorisation, so no role is checked.';
-
 
 --
 
@@ -881,15 +718,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION create_service_principal(p_role_name text, p_note text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.create_service_principal(p_role_name text, p_note text) IS 'Create a machine identity that cannot sign in, holding one read-only role. Administrator only. Writes to auth.users the way 0034 does -- id alone, so the account has no email, no password and no identity provider. Refuses a privileged role: once a token is signed for a principal it cannot be revoked.';
-
 
 --
 
@@ -925,8 +759,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- digital_thread_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone) :: FUNCTION
@@ -938,15 +770,9 @@ CREATE OR REPLACE FUNCTION public.digital_thread_page(p_limit integer DEFAULT 20
     AS $$
 WITH matching AS (
     SELECT t.*,
-           -- SCOPED TO THE THREE ASSET TYPES. The anti-join is unchanged and still not narrowed
-           -- BETWEEN them -- an asset is live if it is still in any of the three, which is what
-           -- makes it three index probes rather than a CASE per table. What is narrowed is WHICH
-           -- ROWS ARE ASKED AT ALL: only the entity types that name one of those tables can be
-           -- purged from it, and for anything else the question is meaningless rather than false.
-           --
-           -- `service_principals` (0043, 0044) is the type that forced this. It is an auth.users
-           -- row, in GoTrue's schema, with no public table to probe -- so it answered "absent from
-           -- all three" and was hidden as deleted.
+           -- Scoped to the three asset types: only entity types that name one of those tables can be
+           -- purged from it. `service_principals` is an auth.users row with no public table to probe and
+           -- would otherwise answer "absent from all three" and be hidden as deleted.
            t.entity_type IN ('cells', 'gateways', 'devices')
        AND NOT EXISTS (SELECT 1 FROM public.cells    c WHERE c.id = t.entity_id)
        AND NOT EXISTS (SELECT 1 FROM public.gateways g WHERE g.id = t.entity_id)
@@ -974,15 +800,12 @@ SELECT jsonb_build_object(
 );
 $$;
 
-
-
 --
 
 -- FUNCTION digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) IS 'One page of the Digital Thread, with deleted assets filtered server-side and counted over the whole match rather than the page. `is_purged` applies only to cells, gateways and devices -- an entity type with no table behind it cannot have been deleted from one.';
-
 
 --
 
@@ -1002,15 +825,12 @@ CREATE OR REPLACE FUNCTION public.directory_liveness_job_map() RETURNS TABLE(pro
     ) AS t(prometheus_job, service_name);
 $$;
 
-
-
 --
 
 -- FUNCTION directory_liveness_job_map() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.directory_liveness_job_map() IS 'Prometheus scrape job -> directory_services.service_name, for the six services whose liveness is genuinely observed. Everything not named here is written UNKNOWN.';
-
 
 --
 
@@ -1088,8 +908,6 @@ BEGIN
   RETURN NULL;  -- AFTER trigger; return value is ignored
 END $$;
 
-
-
 --
 
 -- enforce_digital_thread_append_only() :: FUNCTION
@@ -1100,15 +918,9 @@ CREATE OR REPLACE FUNCTION public.enforce_digital_thread_append_only() RETURNS t
     SET search_path TO 'public'
     AS $$
 BEGIN
-  -- SCOPE, STATED HONESTLY. A trigger cannot constrain a role that can issue DDL: `postgres` and
-  -- `supabase_admin` can DROP this trigger, DISABLE it, or drop the table outright, so a check
-  -- that pretended to stop them would be theatre. What this DOES close is every path reachable
-  -- over PostgREST -- as `authenticated`, and as `service_role`, which is the god key shipped in
-  -- .env and held by ingestion and all four edge functions. PostgREST cannot execute DDL, so for
-  -- those roles the trigger is a real boundary rather than a speed bump.
-  --
-  -- Maintenance therefore has to hold a genuine administrative connection, which is the point:
-  -- clearing audit rows is an act that should require the same authority as dropping a table.
+  -- Scope: a trigger cannot constrain a role that can issue DDL (`postgres`, `supabase_admin`).
+  -- What it closes is every path over PostgREST, including `service_role`, which cannot execute
+  -- DDL. Clearing audit rows therefore requires a genuine administrative connection.
   IF current_user IN ('postgres', 'supabase_admin') THEN
     RETURN COALESCE(NEW, OLD);
   END IF;
@@ -1122,15 +934,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION enforce_digital_thread_append_only() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.enforce_digital_thread_append_only() IS 'Rejects UPDATE and DELETE on public.digital_thread for every application role, including service_role. Owner roles are exempt because they can drop the trigger anyway.';
-
 
 --
 
@@ -1147,8 +956,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
-
 
 --
 
@@ -1196,8 +1003,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- enforce_schema_version_provenance() :: FUNCTION
@@ -1228,8 +1033,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- ensure_cron_job(text, text, text) :: FUNCTION
@@ -1246,15 +1049,12 @@ BEGIN
   PERFORM cron.schedule(p_name, p_schedule, p_command);
 END $$;
 
-
-
 --
 
 -- FUNCTION ensure_cron_job(p_name text, p_schedule text, p_command text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) IS 'Unschedule-then-schedule, so replaying this migration does not accumulate duplicate jobs.';
-
 
 --
 
@@ -1307,15 +1107,12 @@ BEGIN
   GRANT SELECT ON public.gateway_status TO authenticated;
 END $$;
 
-
-
 --
 
 -- FUNCTION ensure_gateway_status_view() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.ensure_gateway_status_view() IS 'Drop-and-recreate public.gateway_status. Called here and by any later migration that adds a column to public.gateways -- the view selects g.*, which CREATE OR REPLACE VIEW cannot widen in place once a new column lands ahead of the derived ones.';
-
 
 --
 
@@ -1431,15 +1228,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION ensure_shadow_devices(p_capture_id uuid) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) IS 'Find or create one shadow device per device named in a capture''s manifest, bound to the playback gateway, and return the device map start_playback_job() takes. Reuses an existing lane rather than minting per playback, so a comparison chart holds still between runs. Copies the metric contract (schema_id and device_submodels) and nothing else -- notably not the nameplate, whose serial number identifies one physical object. See 0060''s header.';
-
 
 --
 
@@ -1531,15 +1325,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION fork_schema(parent_schema_id uuid, change_description text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.fork_schema(parent_schema_id uuid, change_description text) IS 'Derives the next draft version of an active schema, copying its definition. The version number is computed, never supplied.';
-
 
 SET default_tablespace = '';
 
@@ -1590,15 +1381,12 @@ CREATE TABLE IF NOT EXISTS public.gateways (
 
 ALTER TABLE ONLY public.gateways REPLICA IDENTITY FULL;
 
-
-
 --
 
 -- COLUMN gateways.status :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.status IS 'Free text, deliberately unconstrained -- a Gateway_Status metric in an NBIRTH payload overrides whatever the message type implies, so the domain is not closed. The values this platform writes are: PENDING_ENROLLMENT (a physical gateway awaiting its bundle redemption), AWAITING_BIRTH (enrolled, holds a credential, has not yet published), ONLINE and OFFLINE (written by the ingestion daemon from node-level Sparkplug messages). STALE is DERIVED at read time by public.gateway_status and is never stored.';
-
 
 --
 
@@ -1607,14 +1395,12 @@ COMMENT ON COLUMN public.gateways.status IS 'Free text, deliberately unconstrain
 
 COMMENT ON COLUMN public.gateways.last_heartbeat IS 'When the ingestion daemon last received a Sparkplug B node-level message (NBIRTH/NDATA/NDEATH) from this edge node -- receipt time, not the payload timestamp, so it stays comparable with server time regardless of edge clock drift. NULL means no heartbeat has ever arrived.';
 
-
 --
 
 -- COLUMN gateways.is_virtual :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.is_virtual IS 'RETIRED. Nothing reads this column: `deployment` (0064) carries the question it was being asked -- where the connector runs -- with one meaning instead of three. It is still written, by sync_gateway_deployment(), so it cannot drift into being wrong; it is not dropped because 0036 names it in a function signature and calls that function in its own self-check, and every migration replays on every boot. Remove it at the next baseline squash, with 0066.';
-
 
 --
 
@@ -1623,14 +1409,12 @@ COMMENT ON COLUMN public.gateways.is_virtual IS 'RETIRED. Nothing reads this col
 
 COMMENT ON COLUMN public.gateways.sparkplug_id IS 'Immutable Sparkplug B edge node id, derived from the primary key. This is what appears in the MQTT topic (spBv1.0/<group>/<TYPE>/<sparkplug_id>). Never editable; rename the gateway freely without affecting ingestion.';
 
-
 --
 
 -- COLUMN gateways.location_scope :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.location_scope IS '''cell'' or ''site_wide''. A site-wide gateway -- typically is_virtual -- is a host-level proxy with no physical cell. Scope is not inherited by its devices; they resolve to Unassigned until an operator files them.';
-
 
 --
 
@@ -1639,14 +1423,12 @@ COMMENT ON COLUMN public.gateways.location_scope IS '''cell'' or ''site_wide''. 
 
 COMMENT ON COLUMN public.gateways.sparkplug_group IS 'Sparkplug B Group ID -- the second topic segment. With sparkplug_id it forms the edge node address Factory+ resolves as (group, node). Editable: unlike sparkplug_id it is a configuration choice, not an issued identity.';
 
-
 --
 
 -- COLUMN gateways.description :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.description IS 'Optional operator note. Free text, carries no semantics, and is read by nothing.';
-
 
 --
 
@@ -1655,14 +1437,12 @@ COMMENT ON COLUMN public.gateways.description IS 'Optional operator note. Free t
 
 COMMENT ON COLUMN public.gateways.enrolled_at IS 'When this gateway last redeemed an enrolment token and received a broker credential. NULL for a virtual gateway and for a physical one that has never enrolled. Re-enrolment overwrites it.';
 
-
 --
 
 -- COLUMN gateways.agent_version :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.agent_version IS 'Version stamp of the bundle the appliance is running. Written at enrolment and REFRESHED from the Agent_Version metric on every node-level message that carries one, so an appliance upgraded in place is visible without re-enrolment. Lets the fleet''s vintage be seen without reaching into every appliance. NULL for a virtual gateway and for one that has never enrolled.';
-
 
 --
 
@@ -1671,14 +1451,12 @@ COMMENT ON COLUMN public.gateways.agent_version IS 'Version stamp of the bundle 
 
 COMMENT ON COLUMN public.gateways.health_reported_at IS 'When a node-level message last carried at least one recognised health metric. Distinct from last_heartbeat, which moves on every node-level message including those carrying none: NULL here alongside a recent last_heartbeat means the appliance is alive on a bundle that does not report health, which is a different situation from one that has stopped reporting it.';
 
-
 --
 
 -- COLUMN gateways.uptime_seconds :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.uptime_seconds IS 'Seconds since the appliance''s Node-RED runtime started, from the Uptime_s metric. Process uptime, not host uptime -- a restarted container resets it while the machine stays up.';
-
 
 --
 
@@ -1687,14 +1465,12 @@ COMMENT ON COLUMN public.gateways.uptime_seconds IS 'Seconds since the appliance
 
 COMMENT ON COLUMN public.gateways.load_1m IS 'Host 1-minute load average, from node_exporter''s node_load1 via the Load_1m metric. Not normalised by core count, so compare a gateway against itself over time rather than against another gateway.';
 
-
 --
 
 -- COLUMN gateways.mem_available_bytes :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.mem_available_bytes IS 'Host MemAvailable in bytes, from node_exporter''s node_memory_MemAvailable_bytes. Available, not free: it counts reclaimable cache, which is the number that predicts whether an allocation will succeed.';
-
 
 --
 
@@ -1703,14 +1479,12 @@ COMMENT ON COLUMN public.gateways.mem_available_bytes IS 'Host MemAvailable in b
 
 COMMENT ON COLUMN public.gateways.disk_free_bytes IS 'Free bytes on the appliance''s root filesystem, from node_exporter''s node_filesystem_avail_bytes. The metric that earns the collector: an appliance that fills its disk stops publishing and reports nothing about why.';
 
-
 --
 
 -- COLUMN gateways.cert_expires_at :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.cert_expires_at IS 'notAfter of the CA this appliance trusts for the broker, reported by the appliance itself. The CA is hand-distributed into every appliance''s trust store, so re-minting it takes the whole fleet offline at once with no other signal -- this is what makes that a dated warning instead of an outage. Reported, not observed: it is what the appliance HAS, which is the question.';
-
 
 --
 
@@ -1719,14 +1493,12 @@ COMMENT ON COLUMN public.gateways.cert_expires_at IS 'notAfter of the CA this ap
 
 COMMENT ON COLUMN public.gateways.flow_hash IS 'SHA-256 of the flow this appliance was provisioned with, computed by its bootstrap at enrolment. Answers "which bundle''s flow is on that gateway" without a shell on it. It does NOT detect local edits: an operator who changes the flow in the Node-RED editor keeps reporting the hash of what was installed, because the appliance has no way to hash its own running flow without the admin API and a credential to call it with.';
 
-
 --
 
 -- COLUMN gateways.credential_revoked_at :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.credential_revoked_at IS 'When this gateway''s broker credential was last rotated to a password nobody recorded, which is how this platform revokes. NULL on a gateway that is not archived, and on an archived one whose revocation has not yet succeeded -- the sweep in 0038 retries those. Set back to NULL by re-enrolment, because that issues a fresh working credential.';
-
 
 --
 
@@ -1735,7 +1507,6 @@ COMMENT ON COLUMN public.gateways.credential_revoked_at IS 'When this gateway''s
 
 COMMENT ON COLUMN public.gateways.is_simulated IS 'True when this gateway''s telemetry is generated rather than observed -- a broker playback target, or a simulator. Devices INHERIT this through their gateway_id and carry no flag of their own (see 0052''s header): the containment rules a stored device-level copy would need two triggers to maintain are given for nothing by the join. Distinct from is_virtual, which is about whether an edge appliance exists, not about whether the readings are real -- a physical appliance replaying a capture is virtual=false, simulated=true.';
 
-
 --
 
 -- COLUMN gateways.is_shadow :: COMMENT
@@ -1743,14 +1514,12 @@ COMMENT ON COLUMN public.gateways.is_simulated IS 'True when this gateway''s tel
 
 COMMENT ON COLUMN public.gateways.is_shadow IS 'True when this gateway exists only to publish recorded captures -- its devices are replay lanes for real machines rather than machines. Implies is_simulated (a CHECK enforces it), and takes precedence over it in device_locations: the readings are genuine, so "replayed" is more informative than "synthetic". Devices INHERIT this through gateway_id and carry no flag of their own (see 0052).';
 
-
 --
 
 -- COLUMN gateways.deployment :: COMMENT
 --
 
 COMMENT ON COLUMN public.gateways.deployment IS 'Where this gateway''s connector runs: ''host'' (inside this stack) or ''remote'' (an edge appliance on the plant network). This is the axis every behaviour branching on is_virtual was actually about -- bundles, flow backups, enrolment. Kept in step with is_virtual by sync_gateway_deployment() until that column is retired.';
-
 
 --
 
@@ -1772,15 +1541,12 @@ CREATE OR REPLACE FUNCTION public.gateway_has_broker_credential(g public.gateway
         ));
 $$;
 
-
-
 --
 
 -- FUNCTION gateway_has_broker_credential(g public.gateways) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.gateway_has_broker_credential(g public.gateways) IS 'Does an account exist at the broker for this gateway, by either route it can arrive -- a remote appliance completing enrolment, or the CREDENTIAL_ISSUED row a host-run mint leaves -- minus revocation. Cannot admit a gateway that never held one, which is what lets revocation use it without creating accounts through the add-only credential service (0063).';
-
 
 --
 
@@ -1819,15 +1585,12 @@ CREATE OR REPLACE FUNCTION public.gateway_health_rows() RETURNS TABLE(sparkplug_
      WHERE NOT g.is_archived
 $$;
 
-
-
 --
 
 -- FUNCTION gateway_health_rows() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.gateway_health_rows() IS 'One row per live gateway: its identity, its heartbeat freshness, and the appliance health it reports (0035). SECURITY DEFINER so the Grafana reader needs no privilege on `gateways`. Carries NOTHING about devices, cells or quarantine -- that inventory is the boundary 0029 drew and this does not cross it.';
-
 
 --
 
@@ -1838,15 +1601,12 @@ CREATE OR REPLACE FUNCTION public.gateway_holds_a_credential(g public.gateways) 
     LANGUAGE sql IMMUTABLE
     AS $$ SELECT g.deployment = 'remote' AND g.enrolled_at IS NOT NULL $$;
 
-
-
 --
 
 -- FUNCTION gateway_holds_a_credential(g public.gateways) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.gateway_holds_a_credential(g public.gateways) IS 'True for a REMOTE appliance that completed enrolment, and false for everything else -- which includes every host-run gateway, whose credential leaves no enrolment behind. Ask gateway_has_broker_credential() instead when the question is "does an account exist at the broker": this one is about enrolment, and mistaking the two is what 0056, 0062 and 0063 each had to correct.';
-
 
 --
 
@@ -1905,8 +1665,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- has_role(text[]) :: FUNCTION
@@ -1924,8 +1682,6 @@ CREATE OR REPLACE FUNCTION public.has_role(allowed_roles text[]) RETURNS boolean
       AND r.name = ANY (allowed_roles)
   );
 $$;
-
-
 
 --
 
@@ -1960,8 +1716,6 @@ BEGIN
     RETURN coalesce(v_stop, false);
 END;
 $$;
-
-
 
 --
 
@@ -1999,8 +1753,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- ingest_claim_rebirth_requests() :: FUNCTION
@@ -2035,8 +1787,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- ingest_fail_capture(uuid, text) :: FUNCTION
@@ -2057,8 +1807,6 @@ BEGIN
      WHERE id = p_job_id AND status IN ('PENDING', 'RECORDING');
 END;
 $$;
-
-
 
 --
 
@@ -2116,8 +1864,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- ingest_mark_device_offline(uuid) :: FUNCTION
@@ -2146,8 +1892,6 @@ BEGIN
     RETURN v_rows > 0;
 END;
 $$;
-
-
 
 --
 
@@ -2180,8 +1924,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- ingest_record_declared_metrics(uuid, text[], timestamp with time zone) :: FUNCTION
@@ -2211,8 +1953,6 @@ BEGIN
     RETURN v_rows > 0;
 END;
 $$;
-
-
 
 --
 
@@ -2290,8 +2030,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- ingest_record_rebirth_outcome(uuid, boolean, text) :: FUNCTION
@@ -2311,8 +2049,6 @@ BEGIN
      WHERE id = p_id;
 END;
 $$;
-
-
 
 --
 
@@ -2390,8 +2126,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- ingest_requarantine_device(uuid, text, text) :: FUNCTION
@@ -2432,8 +2166,6 @@ BEGIN
     RETURN true;
 END;
 $$;
-
-
 
 --
 
@@ -2479,8 +2211,6 @@ BEGIN
     RETURN v_rows > 0;
 END;
 $$;
-
-
 
 --
 
@@ -2544,8 +2274,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- is_active_capture_object(text) :: FUNCTION
@@ -2561,15 +2289,12 @@ CREATE OR REPLACE FUNCTION public.is_active_capture_object(p_name text) RETURNS 
     );
 $$;
 
-
-
 --
 
 -- FUNCTION is_active_capture_object(p_name text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.is_active_capture_object(p_name text) IS 'True when a storage object path is the destination of a capture job that is RECORDING right now. Confines the ingestion daemon''s authority over broker-captures to the single file it is producing: with no capture in flight the daemon can reach nothing in the bucket at all.';
-
 
 --
 
@@ -2586,15 +2311,12 @@ CREATE OR REPLACE FUNCTION public.is_active_playback_capture(p_name text) RETURN
     );
 $$;
 
-
-
 --
 
 -- FUNCTION is_active_playback_capture(p_name text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.is_active_playback_capture(p_name text) IS 'True when a storage object is the capture of a playback job that is RUNNING right now. Confines the playback worker''s read of broker-captures to the single file it is publishing: with no playback in flight the worker can reach nothing in the bucket at all.';
-
 
 --
 
@@ -2609,15 +2331,12 @@ CREATE OR REPLACE FUNCTION public.is_capture_subject_prefix(p_folder text) RETUR
         OR EXISTS (SELECT 1 FROM public.devices  d WHERE d.sparkplug_id = p_folder);
 $$;
 
-
-
 --
 
 -- FUNCTION is_capture_subject_prefix(p_folder text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.is_capture_subject_prefix(p_folder text) IS 'True when a storage folder names a real gateway or device. The prefix rule for broker-captures, which files by the SUBJECT RECORDED rather than by the gateway a capture plays back as.';
-
 
 --
 
@@ -2628,17 +2347,11 @@ CREATE OR REPLACE FUNCTION public.is_ingestion_caller() RETURNS boolean
     LANGUAGE sql STABLE
     SET search_path TO 'public'
     AS $$
-    -- One arm now. `service_role` was admitted by 0047 only so that a daemon deployed before the
-    -- credential swap kept working; nothing hands the daemon that key any more.
-    --
-    -- Note this does not stop `service_role` from writing these tables -- it bypasses RLS and
-    -- always could. What it stops is `service_role` using the NARROW gates, which is what keeps
-    -- "who may call these" a statement about one identity rather than about a key that half the
-    -- stack holds.
+    -- One arm: Service_Ingestor only. `service_role` bypasses RLS and can write these tables
+    -- directly; what this stops is `service_role` using the narrow gates, so "who may call these"
+    -- stays a statement about one identity.
     SELECT COALESCE(auth.uid()::text = 'b0000000-0000-4000-8000-000000000002', false);
 $$;
-
-
 
 --
 
@@ -2646,7 +2359,6 @@ $$;
 --
 
 COMMENT ON FUNCTION public.is_ingestion_caller() IS 'True only for the Service_Ingestor principal (0046). Guards every ingest_* write gate. The transitional service_role arm was removed by 0048 -- see Machine Identities in supabase/README.md.';
-
 
 --
 
@@ -2670,15 +2382,12 @@ CREATE OR REPLACE FUNCTION public.is_machine_principal(p_user_id uuid) RETURNS b
     );
 $$;
 
-
-
 --
 
 -- FUNCTION is_machine_principal(p_user_id uuid) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.is_machine_principal(p_user_id uuid) IS 'True for a seeded or minted machine identity -- no email, no password, no identity provider, and therefore unable to sign in. The predicate is 0042''s, deliberately unchanged: a second definition of "is this a service account" would be worse than none. Used by log_digital_thread_event() to keep a machine''s writes from being recorded as a human''s.';
-
 
 --
 
@@ -2695,15 +2404,12 @@ CREATE OR REPLACE FUNCTION public.is_playback_caller() RETURNS boolean
     SELECT COALESCE(auth.uid()::text = 'b0000000-0000-4000-8000-000000000003', false);
 $$;
 
-
-
 --
 
 -- FUNCTION is_playback_caller() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.is_playback_caller() IS 'True only for the Service_Playback principal (0056). Guards every playback_* worker gate. Deliberately distinct from is_ingestion_caller(): the two processes hold different broker rights -- the daemon may publish only NCMD rebirth requests, the worker may publish asset data as one gateway -- and a shared predicate would let either use the other''s gates.';
-
 
 --
 
@@ -2721,15 +2427,12 @@ CREATE OR REPLACE FUNCTION public.is_valid_quarantine_reason(p_reason text) RETU
     );
 $$;
 
-
-
 --
 
 -- FUNCTION is_valid_quarantine_reason(p_reason text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.is_valid_quarantine_reason(p_reason text) IS 'True when the reason is one of the four quarantine codes, bare or followed by ": <detail>". Both shapes are produced by ingestion.py -- see 0047''s header for why this is a prefix check rather than an equality check.';
-
 
 --
 
@@ -2766,14 +2469,8 @@ BEGIN
       USING ERRCODE = 'foreign_key_violation';
   END IF;
 
-  -- A HOST-RUN GATEWAY HAS NO APPLIANCE TO ENROL. `deployment = 'host'` means the connector runs
-  -- inside this stack -- a host connector or a simulator -- so a bundle for one would produce a
-  -- broker credential nothing could ever present. Refused here rather than left to fail later at
-  -- the point where a download does nothing.
-  --
-  -- This read `is_virtual` until 0065, and it is the clearest example of why that word had to go:
-  -- the check is about whether there is a MACHINE to carry the bundle to, and "virtual" was three
-  -- other claims wearing the same name.
+  -- A host-run gateway has no appliance to enrol: `deployment = 'host'` means the connector runs
+  -- inside this stack, and a bundle for one would produce a credential nothing could present.
   IF v_gateway.deployment = 'host' THEN
     RAISE EXCEPTION 'gateway % runs on this host; enrolment bundles are for appliances only',
       v_gateway.name
@@ -2818,15 +2515,12 @@ BEGIN
   RETURN QUERY SELECT v_token, v_expires;
 END $$;
 
-
-
 --
 
 -- FUNCTION issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) IS 'Mint a single-use enrolment token for a physical gateway and move it to PENDING_ENROLLMENT. Returns the raw token ONCE -- only its SHA-256 is stored. Requires Administrator or Shopfloor_Manager. Re-issuing consumes any previous live token, so a regenerated bundle invalidates the one already downloaded.';
-
 
 --
 
@@ -2866,15 +2560,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION list_service_principals() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.list_service_principals() IS 'Machine identities that can reach this stack: auth.users rows with no email and no password, which cannot sign in through GoTrue and are presented only by a JWT signed outside it. Administrator only. Returns no email, no token and nothing derived from one.';
-
 
 --
 
@@ -2897,13 +2588,9 @@ BEGIN
     -- -----------------------------------------------------------------------------------------
     -- Suppression. UPDATE only: an INSERT or DELETE is always an event.
     -- -----------------------------------------------------------------------------------------
-    -- ONE comparison covers both cases, because subtracting a key that is absent is a no-op:
-    --
-    --   * rows identical            -> equal with or without last_heartbeat  -> a no-op write
-    --   * only last_heartbeat moved -> equal once it is removed              -> liveness telemetry
-    --
-    -- `IS NOT DISTINCT FROM` rather than `=` so a NULL on either side compares as equal instead
-    -- of yielding NULL and falling through to log the row.
+    -- One comparison covers both cases, because subtracting an absent key is a no-op: identical
+    -- rows are a no-op write, and rows differing only in last_heartbeat are liveness telemetry.
+    -- `IS NOT DISTINCT FROM` so a NULL on either side compares as equal.
     IF TG_OP = 'UPDATE'
        AND (to_jsonb(NEW) - 'last_heartbeat') IS NOT DISTINCT FROM (to_jsonb(OLD) - 'last_heartbeat')
     THEN
@@ -2941,20 +2628,15 @@ BEGIN
     -- -----------------------------------------------------------------------------------------
     -- What kind of actor
     -- -----------------------------------------------------------------------------------------
-    -- A PERSON, not merely somebody. `auth.uid()` being non-NULL used to be sufficient because
-    -- the only accounts carrying a `sub` were people's. Service_Ingestor (0046) is the
-    -- counter-example, and there will be more, because the Access Control page mints them. A
-    -- machine falls through to the declared-header path below and is recorded as what it actually
-    -- is -- while `changed_by` still receives v_actor, so the row NAMES it as well (0048).
+    -- A person, not merely a `sub`: machine principals carry one too. A machine falls through to
+    -- the declared-header path below and is recorded as what it is, while `changed_by` still
+    -- receives v_actor so the row names it.
     IF v_actor IS NOT NULL AND NOT public.is_machine_principal(v_actor) THEN
         v_source := 'user';
     ELSE
-        -- A caller may declare itself with an `X-ACS-Cymru-Actor` request header, which
-        -- PostgREST exposes as request.headers. That is how the ingestion daemon is told apart
-        -- from an edge function. They used to arrive on the same service-role key, so the
-        -- connection alone could not distinguish them; the daemon now has its own identity, and
-        -- this header is still what names it, because the branch above deliberately declines to
-        -- read a machine's `sub` as evidence of a person.
+        -- A caller may declare itself with an `X-ACS-Cymru-Actor` request header, which PostgREST
+        -- exposes as request.headers. That is how the ingestion daemon is told apart from an edge
+        -- function; the branch above declines to read a machine's `sub` as evidence of a person.
         BEGIN
             v_declared := NULLIF(
                 current_setting('request.headers', true)::json ->> 'x-acs-cymru-actor', ''
@@ -2968,11 +2650,9 @@ BEGIN
             -- exactly the assertion a client must not be able to make about itself.
             v_source := v_declared;
         ELSE
-            -- WHICH ROLE IS CALLING, and NOT `current_user`. This function is SECURITY DEFINER,
-            -- so inside it `current_user` is the function's OWNER -- always `postgres` -- which
-            -- silently labelled every ingestion write as 'migration'. PostgREST connects as
-            -- `authenticator` and then SET ROLEs, so the effective role is what `role` holds;
-            -- a direct psql session never SET ROLE at all and reports 'none', where
+            -- Which role is calling, and not `current_user`: this function is SECURITY DEFINER, so
+            -- `current_user` is the owner (`postgres`). PostgREST connects as `authenticator` and SET ROLEs,
+            -- so `role` holds the effective role; a direct psql session reports 'none', where
             -- `session_user` is the honest answer.
             v_role := NULLIF(current_setting('role', true), 'none');
             IF v_role IS NULL OR v_role = '' THEN
@@ -2999,8 +2679,6 @@ BEGIN
     RETURN COALESCE(NEW, OLD);
 END;
 $$;
-
-
 
 --
 
@@ -3070,15 +2748,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION log_role_assignment() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.log_role_assignment() IS 'Audit trigger for public.user_roles. Separate from log_digital_thread_event() because that function reads NEW.id and user_roles has no id column -- its key is (user_id, role_id).';
-
 
 --
 
@@ -3092,8 +2767,6 @@ CREATE OR REPLACE FUNCTION public.may_manage_captures() RETURNS boolean
     SELECT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']);
 $$;
 
-
-
 --
 
 -- platform_health_rows() :: FUNCTION
@@ -3105,15 +2778,9 @@ CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition
     AS $$
     -- ---------------------------------------------------------------------------------------
     -- A gateway that has stopped heartbeating.
-    --
-    -- READS `gateway_status.is_stale` RATHER THAN RE-DERIVING IT. That view owns the staleness
-    -- threshold (90 seconds, mirrored into the frontend and checked by check-mirror-drift.mjs), and
-    -- a second copy of the arithmetic here would be a second place for it to drift. The alert rule
-    -- adds its own `for:` duration on top, which is the part that belongs to alerting rather than
-    -- to the definition of stale.
-    --
-    -- ARCHIVED GATEWAYS ARE EXCLUDED. A decommissioned appliance is not heartbeating on purpose,
-    -- and alerting on it would train an operator to ignore the rule.
+    -- Reads `gateway_status.is_stale` rather than re-deriving it: that view owns the 90s
+    -- threshold (mirrored into the frontend, checked by check-mirror-drift.mjs). The alert rule
+    -- adds its own `for:` on top. Archived gateways are excluded.
     -- ---------------------------------------------------------------------------------------
     SELECT 'gateway_stale'::text,
            g.sparkplug_id,
@@ -3127,15 +2794,9 @@ CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition
     UNION ALL
 
     -- ---------------------------------------------------------------------------------------
-    -- An enrolment that never completed.
-    --
-    -- A physical gateway redeems its token, lands in AWAITING_BIRTH, and leaves that state on its
-    -- first NBIRTH. One that stays there has authenticated to the broker and then failed to
-    -- publish -- a flow that did not deploy, a credential the appliance did not persist. 0025
-    -- introduced the state and NOTHING has ever alarmed on it, so the failure mode today is a
-    -- gateway that silently never arrives.
-    --
-    -- The age is measured from `enrolled_at`, which 0025 stamps at redemption.
+    -- An enrolment that never completed: a physical gateway redeems its token, lands in
+    -- AWAITING_BIRTH, and leaves that state on its first NBIRTH. Age is measured from
+    -- `enrolled_at`.
     -- ---------------------------------------------------------------------------------------
     SELECT 'enrolment_stuck'::text,
            g.sparkplug_id,
@@ -3150,17 +2811,9 @@ CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition
     UNION ALL
 
     -- ---------------------------------------------------------------------------------------
-    -- The quarantine queue.
-    --
-    -- FLEET-WIDE, AND THEREFORE ONE ROW WITH NO SUBJECT. A queue depth is a property of the queue;
-    -- naming one of its members would be arbitrary. This is the condition `entity_type = 'platform'`
-    -- was added to `platform_alerts` for.
-    --
-    -- EMITTED EVEN AT ZERO, which is deliberate. A rule whose query returns NO ROWS when healthy
-    -- cannot distinguish "nothing is quarantined" from "the datasource is down" -- Grafana treats
-    -- an empty frame as NoData and the rule's NoData handling decides what happens, which is a
-    -- second thing to configure correctly. A row carrying 0 makes the healthy case explicit and
-    -- lets the threshold do the work.
+    -- The quarantine queue: fleet-wide, so one row with no subject (`entity_type = 'platform'`).
+    -- Emitted even at zero, so a rule can tell "nothing is quarantined" from "the datasource is
+    -- down" without relying on NoData handling.
     -- ---------------------------------------------------------------------------------------
     SELECT 'quarantine_depth'::text,
            NULL::text,
@@ -3188,15 +2841,12 @@ CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition
        AND d.gateway_id IS NOT NULL
 $$;
 
-
-
 --
 
 -- FUNCTION platform_health_rows() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.platform_health_rows() IS 'One row per platform condition worth alerting on: stale gateways, stuck enrolments, the quarantine queue depth, and how many devices are expected to be publishing. SECURITY DEFINER so the Grafana reader needs no privilege on gateways or devices -- it emits a count and, where the condition names an asset, that asset''s wire id, and nothing else about it.';
-
 
 --
 
@@ -3230,15 +2880,12 @@ CREATE OR REPLACE FUNCTION public.platform_storage_rows() RETURNS TABLE(tier tex
      ORDER BY pg_total_relation_size(c.oid) DESC;
 $$;
 
-
-
 --
 
 -- FUNCTION platform_storage_rows() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.platform_storage_rows() IS 'Byte counts for every ordinary table in the Supabase public schema, tiered so an audit trail that is never pruned is distinguishable from reference data that never grows. SECURITY DEFINER so the dashboard reader needs no privilege on the tables it reports the size of.';
-
 
 --
 
@@ -3276,8 +2923,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- playback_finish(uuid, integer, text) :: FUNCTION
@@ -3301,8 +2946,6 @@ BEGIN
      WHERE id = p_job_id AND status IN ('PENDING', 'RUNNING');
 END;
 $$;
-
-
 
 --
 
@@ -3334,8 +2977,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- playback_reconcile_jobs() :: FUNCTION
@@ -3362,8 +3003,6 @@ BEGIN
     RETURN v_n;
 END;
 $$;
-
-
 
 --
 
@@ -3392,15 +3031,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION playback_report_credentials(p_edge_nodes text[]) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.playback_report_credentials(p_edge_nodes text[]) IS 'The playback worker reporting which gateways it can authenticate as. The only writer of playback_worker_status. Called on startup and on a heartbeat, so a stale reported_at means the worker is down rather than credential-less.';
-
 
 --
 
@@ -3429,8 +3065,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-
 
 --
 
@@ -3489,15 +3123,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION prevent_active_schema_mutation() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.prevent_active_schema_mutation() IS 'Freezes every column except `status` on an active or archived schema, and rejects illegal status transitions for all callers.';
-
 
 --
 
@@ -3550,15 +3181,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION prune_platform_alerts(p_retain interval) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.prune_platform_alerts(p_retain interval) IS 'Delete alert occurrences older than the retention window, EXCEPT the newest occurrence of any fingerprint -- so an alert that has been firing longer than the window is never removed while it is still the current state. Returns the number of rows deleted. Scheduled as prune_platform_alerts; see the migration header for why the obvious one-line predicate is wrong.';
-
 
 --
 
@@ -3600,15 +3228,9 @@ BEGIN
   IF draft.parent_schema_id IS NOT NULL THEN
     SELECT * INTO parent FROM public.schemas WHERE id = draft.parent_schema_id FOR UPDATE;
 
-    -- REBIND BEFORE ARCHIVING, so no window exists in which a device points at an archived schema.
-    -- The whole function is one transaction, so this is ordering for readability rather than for
-    -- observability -- but the read-backwards rule from the 3D-model upload applies: write the
-    -- pointer, then retire what it pointed at.
-    --
-    -- A device already carrying BOTH versions as submodels would collide on
-    -- `uq_device_submodels (device_id, schema_id)` when the old row is repointed. That is a real
-    -- state -- someone can attach a draft to a device to try it out before publishing -- so the
-    -- redundant old-version rows are dropped first rather than allowed to abort the publish.
+    -- Rebind before archiving, so no window exists in which a device points at an archived schema.
+    -- A device already carrying both versions as submodels would collide on `uq_device_submodels`
+    -- when repointed, so the redundant old-version rows are dropped first.
     DELETE FROM public.device_submodels old_link
      WHERE old_link.schema_id = parent.id
        AND EXISTS (
@@ -3621,12 +3243,9 @@ BEGIN
     UPDATE public.device_submodels SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_submodels = ROW_COUNT;
 
-    -- The legacy 1:1 pointer moves too. Archived migration 0034 kept `devices.schema_id` as the fallback
-    -- arm of the `device_schemas` view, and migrations 0021/0033 still write it -- a device
-    -- provisioned only through that column would otherwise stay pinned to an archived version and
-    -- start reporting the new version's metrics as Unmodelled. This UPDATE also fires
-    -- `log_digital_thread_event()`, so the rebinding lands in the audit trail per device, which is
-    -- where the history of "what was this machine judged against, when" belongs.
+    -- The legacy 1:1 pointer moves too: `devices.schema_id` is the fallback arm of the
+    -- `device_schemas` view. This UPDATE fires `log_digital_thread_event()`, so the rebinding lands
+    -- in the audit trail per device.
     UPDATE public.devices SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_legacy = ROW_COUNT;
 
@@ -3649,15 +3268,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION publish_schema_version(draft_schema_id uuid) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS 'Activates a draft version, archives its parent, and atomically repoints every device_submodels row and legacy devices.schema_id from the parent to it.';
-
 
 --
 
@@ -3691,13 +3307,9 @@ BEGIN
     v_gateway.id,
     'CREDENTIAL_ISSUED',
     NULL,
-    -- THE IDENTITY AS IT WAS AT THE TIME, for 0026's reason: `name` is mutable and the gateway may
-    -- later be renamed or purged, and an audit row readable only by joining to a live row loses
-    -- its meaning in exactly the cases it matters most.
-    --
-    -- NO PASSWORD, AND NOT EVEN A HASH OF ONE. This table is readable by any authenticated user
-    -- holding `digital_thread:read`, its rows cannot be deleted, and the whole point of the
-    -- reveal-once flow is that the secret exists in one browser for one minute.
+    -- The identity as it was at the time: `name` is mutable and the gateway may later be renamed or
+    -- purged. No password and no hash of one: this table is readable by any holder of
+    -- `digital_thread:read` and its rows cannot be deleted.
     jsonb_build_object(
       'name',           v_gateway.name,
       'sparkplug_id',   v_gateway.sparkplug_id,
@@ -3718,15 +3330,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION record_gateway_credential_issued(p_gateway_id uuid) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) IS 'Record that a broker credential was minted for a virtual gateway, as a CREDENTIAL_ISSUED row in digital_thread attributed to the calling operator. Carries the wire identity and never the password: the audit trail is append-only and the secret is reveal-once.';
-
 
 --
 
@@ -3808,15 +3417,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) IS 'Record that a host script issued a broker credential to a gateway, as a CREDENTIAL_ISSUED row in digital_thread. Reachable by service_role ALONE -- 0041''s pair is the operator path and gates on has_role(), which no host script can satisfy. actor_source is pinned to ''service'' and changed_by to NULL; the host and OS user are stored under `claimed` because the database cannot verify either. Carries the wire identity and never the password.';
-
 
 --
 
@@ -3838,15 +3444,9 @@ DECLARE
     -- truncation is visible rather than silent.
     c_max_listed CONSTANT INTEGER := 50;
 BEGIN
-    -- THE GATE THIS FUNCTION HAS ALWAYS RELIED ON, NOW STATED IN THE BODY. Until 0046 the only
-    -- caller was `service_role` and the GRANT was the access control. The daemon no longer holds
-    -- that key, so the grant below has to widen to `authenticated` -- and a bare widening would
-    -- let every signed-in user, the four seeded demonstration personas included, forge
-    -- SCHEMA_REJECTION rows into an append-only table no application role can prune.
-    --
-    -- Same shape as the seven gates in 0047, deliberately: granted broadly, gated on identity
-    -- inside. This is the one daemon RPC that predates that pattern, which is exactly how it came
-    -- to be the one left behind by it.
+    -- The gate stated in the body: the grant below is to `authenticated`, and without this any
+    -- signed-in user could forge SCHEMA_REJECTION rows into an append-only table. Same shape as the
+    -- other `ingest_*` gates: granted broadly, gated on identity inside.
     PERFORM public.require_ingestion_caller('record_ingestion_rejection');
 
     IF p_device_id IS NULL THEN
@@ -3920,15 +3520,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) IS 'Record a Sparkplug payload the ingestion daemon refused, as a SCHEMA_REJECTION row in digital_thread. The violation list is capped at 50 entries with the true count kept alongside. actor_source is pinned to ''ingestion'' and changed_by to NULL: this is the narrow gate that replaces service_role''s direct INSERT on the audit table. Callable only by the Service_Ingestor principal (0051), which is what makes the grant to `authenticated` safe.';
-
 
 --
 
@@ -3978,13 +3575,9 @@ BEGIN
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  -- THE SUBJECT MUST BE A SERVICE PRINCIPAL, using 0042's predicate: no email and no password means
-  -- no way to authenticate through GoTrue, so the only thing that can present this identity is a
-  -- JWT signed outside it.
-  --
-  -- REFUSING A HUMAN ACCOUNT IS THE POINT OF THIS CHECK. A 90-day non-expiring-in-practice token
-  -- minted against an Administrator's login would be a permanent, unrevocable escalation of that
-  -- person's session -- and it would be recorded here as routine.
+  -- The subject must be a service principal: no email and no password means nothing can present
+  -- this identity except a JWT signed outside GoTrue. A token minted against a human login would
+  -- be a permanent, unrevocable escalation of that person's session.
   SELECT (u.email IS NULL AND (u.encrypted_password IS NULL OR u.encrypted_password = ''))
     INTO v_is_service
     FROM auth.users u WHERE u.id = p_principal_id;
@@ -4051,15 +3644,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) IS 'Record that a long-lived JWT was signed for a service principal, as a TOKEN_MINTED row in digital_thread. Refuses a human account and any expiry beyond service_token_max_days(). actor_source is pinned to ''service'' and changed_by to NULL: the caller holds a machine credential, so the row cannot name a person and does not pretend to.';
-
 
 --
 
@@ -4133,15 +3723,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION refresh_directory_liveness() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.refresh_directory_liveness() IS 'Collects the previous Prometheus `up` probe, writes ACTIVE/DOWN for the six observed services and UNKNOWN for the rest, then queues the next probe. Returns how many rows were written from a real observation. Run every minute by cron; safe to call by hand.';
-
 
 --
 
@@ -4179,15 +3766,12 @@ BEGIN
     USING ERRCODE = 'restrict_violation';
 END $$;
 
-
-
 --
 
 -- FUNCTION refuse_archiving_the_last_shadow_gateway() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.refuse_archiving_the_last_shadow_gateway() IS 'Refuses the archive that would leave a stack with no un-archived shadow gateway. Not a ban on archiving one: swapping in a replacement first is legitimate and is what 0060''s own error text tells an operator to do.';
-
 
 --
 
@@ -4269,8 +3853,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- release_gateway_enrollment_token(text) :: FUNCTION
@@ -4305,15 +3887,12 @@ BEGIN
   RETURN v_released = 1;
 END $_$;
 
-
-
 --
 
 -- FUNCTION release_gateway_enrollment_token(p_token text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.release_gateway_enrollment_token(p_token text) IS 'Undo a claim made by consume_gateway_enrollment_token() when the credential could not be issued, so the appliance can retry with the same bundle. Refuses to release an expired token or one that has since been superseded by a re-issue -- both would restore a row the partial unique index counts, blocking the operator from issuing a replacement. Returns whether it released.';
-
 
 --
 
@@ -4339,11 +3918,7 @@ DECLARE
   v_changed   boolean;
 BEGIN
   -- Fail closed, before anything observable happens. SECURITY DEFINER means RLS does not apply
-  -- inside this function, so `devices_update_privileged` -- the policy that would otherwise be
-  -- the gate -- is not consulted at all. This re-derives its allow-list from the database rather
-  -- than trusting that the caller reached us through a UI that checked. The same list,
-  -- deliberately: relocating in a batch must not be authorised more loosely than relocating one
-  -- device at a time.
+  -- inside this function, so the allow-list `devices_update_privileged` uses is re-derived here.
   IF NOT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) THEN
     RAISE EXCEPTION 'insufficient privileges to relocate devices'
       USING ERRCODE = 'insufficient_privilege';
@@ -4511,15 +4086,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION relocate_devices(p_moves jsonb) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.relocate_devices(p_moves jsonb) IS 'Apply a batch of device relocations in ONE transaction, so the whole rearrangement shares a single digital_thread causation_id. Refuses the batch outright on an unknown device, an unknown cell, a duplicate device or a missing location_scope -- a half-applied batch is the failure mode this exists to remove. Authority: Administrator or Shopfloor_Manager.';
-
 
 --
 
@@ -4567,8 +4139,6 @@ BEGIN
     RETURN true;
 END;
 $$;
-
-
 
 --
 
@@ -4624,15 +4194,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION request_gateway_rebirth(p_gateway_id uuid) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) IS 'Ask an edge node to republish its birth certificate. The only way a rebirth_requests row is created. The daemon sends it; this only records that somebody asked.';
-
 
 --
 
@@ -4676,8 +4243,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- require_ingestion_caller(text) :: FUNCTION
@@ -4697,8 +4262,6 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- require_playback_caller(text) :: FUNCTION
@@ -4717,8 +4280,6 @@ BEGIN
     END IF;
 END;
 $$;
-
-
 
 --
 
@@ -4746,24 +4307,11 @@ BEGIN
      AND has_function_privilege('anon', p.oid, 'EXECUTE');
 
   -- ---------------------------------------------------------------------------------------------
-  -- A DIRECT GRANT, NOT AN EFFECTIVE PRIVILEGE (issue #117)
-  --
-  -- has_function_privilege() answers "can this role execute it", and that is TRUE when the only
-  -- thing granting EXECUTE is PUBLIC -- which is precisely what the revoke loop below is about to
-  -- take away. Asking it here made the sweep COPY the privilege it was removing: PUBLIC's implicit
-  -- EXECUTE on a newly created function was captured as something `authenticated` held, PUBLIC was
-  -- revoked, and `authenticated` was then handed an EXPLICIT grant it never had.
-  --
-  -- It only bit on a FIRST boot, which is why it went unseen. A function created earlier in the
-  -- same boot still carries PUBLIC's grant when the sweep runs; on every later boot 0001's
-  -- `REVOKE ALL ON ALL FUNCTIONS` has already stripped PUBLIC, so the same code kept nothing and
-  -- the schema settled one grant narrower. Eleven trigger bodies -- audit_domain_for,
-  -- stamp_audit_domain, log_role_assignment and the rest -- were `authenticated`-executable on a
-  -- fresh install and not on a restarted one.
-  --
-  -- Reading the ACL directly is the whole fix: aclexplode() lists grants that were actually made
-  -- to the role, and a NULL proacl (the untouched default) yields no rows, which is the right
-  -- answer. A genuine RPC that a migration granted on purpose still matches and is still restored.
+  -- A direct grant, not an effective privilege. has_function_privilege() answers TRUE when the
+  -- only thing granting EXECUTE is PUBLIC, which the revoke loop below is about to remove, so
+  -- asking it here made the sweep copy the privilege it was removing onto `authenticated` on a
+  -- first boot. aclexplode() lists grants actually made to the role; a NULL proacl yields no
+  -- rows, which is the right answer.
   -- ---------------------------------------------------------------------------------------------
   FOREACH fn IN ARRAY all_fns LOOP
     IF EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
@@ -4795,15 +4343,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION revoke_anon_function_privileges() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.revoke_anon_function_privileges() IS 'Revoke EXECUTE from PUBLIC and anon on every function in public, restoring what authenticated and service_role held. MUST BE CALLED BY THE LAST MIGRATION THAT CREATES A FUNCTION -- see 0071. PostgreSQL grants EXECUTE to PUBLIC on creation, so a function added after the sweep is anon-executable until the next call.';
-
 
 --
 
@@ -4838,15 +4383,12 @@ BEGIN
   RETURN NEW;
 END $$;
 
-
-
 --
 
 -- FUNCTION revoke_credential_on_decommission() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.revoke_credential_on_decommission() IS 'Rotates a decommissioned gateway''s broker credential to a password nobody records. Gated on gateway_has_broker_credential() (0056), NOT gateway_holds_a_credential() (0038): the latter asks about physical enrolment and therefore refused every virtual gateway, which is every gateway a provisioned stack has. The gate still cannot admit a gateway that never held an account, so 0040''s guarantee -- revocation never CREATES one -- is preserved.';
-
 
 --
 
@@ -4877,13 +4419,9 @@ BEGIN
     RETURN false;
   END IF;
 
-  -- THROUGH KONG TO THE EDGE FUNCTION, not straight at the credential service. The chart admits
-  -- only `supabase-functions` to that service and calls it the only edge into credential issuance;
-  -- `supabase-db -> supabase-kong` is already permitted for exactly this. See the function's own
-  -- header.
-  --
-  -- `apikey` gets past Kong. `x-revoke-secret` is what authorises the act -- the anon key ships in
-  -- every browser bundle and proves nothing.
+  -- Through the gateway to the edge function, not straight at the credential service: the chart
+  -- admits only `supabase-functions` to that service. `apikey` gets past the gateway;
+  -- `x-revoke-secret` is what authorises the act.
   PERFORM net.http_post(
     url     := rtrim(v_url, '/') || '/revoke-gateway-credential',
     headers := jsonb_build_object(
@@ -4897,15 +4435,12 @@ BEGIN
   RETURN true;
 END $_$;
 
-
-
 --
 
 -- FUNCTION revoke_gateway_credential(p_sparkplug_id text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) IS 'Rotate a gateway''s broker account to a password nobody records, which is how this platform revokes -- the credential service is add-only by design and must not gain a delete verb. Returns false when the service is not configured. ASYNCHRONOUS: net.http_post queues the request, so a true return means "asked", not "revoked". The sweep is what makes archive eventually correct.';
-
 
 --
 
@@ -4918,15 +4453,12 @@ CREATE OR REPLACE FUNCTION public.schema_version_base_name(schema_name text) RET
   SELECT regexp_replace(COALESCE(schema_name, ''), '_v[0-9]+$', '');
 $_$;
 
-
-
 --
 
 -- FUNCTION schema_version_base_name(schema_name text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.schema_version_base_name(schema_name text) IS 'The lineage stem of a versioned schema name. Mirrored by baseSchemaName() in frontend/src/utils/schemaVersion.js -- keep the two in step.';
-
 
 --
 
@@ -4951,15 +4483,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) IS 'Declare a setting from a migration. Inserts on first boot and refreshes only the metadata afterwards, so an operator''s value survives every replay. Not reachable through PostgREST.';
-
 
 --
 
@@ -4970,15 +4499,12 @@ CREATE OR REPLACE FUNCTION public.service_token_max_days() RETURNS integer
     LANGUAGE sql IMMUTABLE
     AS $$ SELECT 90 $$;
 
-
-
 --
 
 -- FUNCTION service_token_max_days() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-mcp-token.mjs; these tokens cannot be revoked, so the expiry is the only bound that exists.';
-
 
 --
 
@@ -4994,8 +4520,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
-
 
 --
 
@@ -5082,15 +4606,10 @@ BEGIN
     -- --------------------------------------------------------------------------------------
     -- The replace decision, made here rather than in the browser
     -- --------------------------------------------------------------------------------------
-    -- THE MODAL IS A PRECONDITION IN THE DATABASE, NOT A UI CONVENTION. `p_replace` exists so that
-    -- overwriting a stored capture is something the caller has to SAY, and an API caller that has
-    -- never seen the modal is refused with the note of the capture it was about to destroy. The
-    -- destroy-a-rare-fault risk is the whole reason the note field exists, and a check only the
-    -- frontend performs does not mitigate it.
-    --
-    -- NOTHING IS DESTROYED HERE. The old row and the old object both survive until the replacement
-    -- exists -- `ingest_finalise_capture()` swaps them at the end. A capture destroyed at START by
-    -- a recording that then fails is a capture destroyed for nothing.
+    -- `p_replace` makes overwriting a stored capture something the caller has to say; an API caller
+    -- that never saw the modal is refused with the note of the capture it was about to destroy.
+    -- Nothing is destroyed here: the old row and object survive until `ingest_finalise_capture()`
+    -- swaps them at the end.
     SELECT c.id, c.note, c.recorded_at INTO v_existing
       FROM public.captures c
      WHERE (p_subject_kind = 'gateway' AND c.subject_kind = 'gateway' AND c.gateway_id = v_gateway_id)
@@ -5112,10 +4631,8 @@ BEGIN
     -- --------------------------------------------------------------------------------------
     -- Single-flight, reported rather than left to the index
     -- --------------------------------------------------------------------------------------
-    -- The partial unique index is what ENFORCES this, and it stays: two tabs cannot race it. This
-    -- lookup exists only so the refusal names the job in the way -- `23505 duplicate key value
-    -- violates unique constraint "capture_jobs_single_flight"` is true and tells an operator
-    -- nothing about which capture is already running.
+    -- The partial unique index enforces this; the lookup exists so the refusal names the job in
+    -- the way rather than a 23505.
     SELECT j.id, j.status, j.subject_sparkplug_id INTO v_running
       FROM public.capture_jobs j
      WHERE j.status IN ('PENDING', 'RECORDING')
@@ -5130,11 +4647,9 @@ BEGIN
     -- --------------------------------------------------------------------------------------
     -- The row
     -- --------------------------------------------------------------------------------------
-    -- THE STORAGE PATH IS DETERMINISTIC AND DERIVED FROM THE SUBJECT, which is what makes an
-    -- orphaned object impossible: there is at most one object per subject, so a replacement
-    -- overwrites the key rather than leaving the previous file behind for a browser to sweep. It
-    -- also means the path satisfies the bucket's prefix policy by construction rather than because
-    -- the daemon assembled it correctly.
+    -- The storage path is derived from the subject: at most one object per subject, so a
+    -- replacement overwrites the key, and the path satisfies the bucket's prefix policy by
+    -- construction.
     INSERT INTO public.capture_jobs (
         subject_kind, gateway_id, device_id,
         sparkplug_group, edge_node_id, device_sparkplug_id,
@@ -5154,15 +4669,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) IS 'Queue a broker capture of one gateway or one device. The only way a capture_jobs row is created. Refuses without Administrator or Shopfloor_Manager, refuses a second concurrent capture, and refuses to overwrite a stored capture unless p_replace is true -- which is what makes the replace confirmation a property of the schema rather than of the frontend.';
-
 
 --
 
@@ -5202,10 +4714,7 @@ BEGIN
     -- ------------------------------------------------------------------------------------
     -- TIER ONE: the target must be marked simulated
     -- ------------------------------------------------------------------------------------
-    -- REFUSAL, NOT A WARNING, and this is what turns 0052's marking from a label into a
-    -- precondition. `capture.py play` can only warn, having no view of the directory. Here the
-    -- answer is available, so a capture cannot be published onto a gateway whose telemetry anyone
-    -- downstream believes is real -- the historian records a replayed reading identically to an
+    -- A refusal, not a warning: the historian records a replayed reading identically to an
     -- observed one, and `is_simulated` is the only thing that says otherwise.
     IF NOT v_gateway.is_simulated THEN
         RAISE EXCEPTION
@@ -5223,17 +4732,10 @@ BEGIN
     -- ------------------------------------------------------------------------------------
     -- TIER TWO, the database half: the target must hold a broker credential
     -- ------------------------------------------------------------------------------------
-    -- AND NOT `status = 'ONLINE'`, which is the tempting check and is wrong. A playback target is
-    -- legitimately OFFLINE: nothing publishes as it until a playback runs, so requiring liveness
-    -- would refuse every FIRST playback and pass only after one had already succeeded.
-    --
-    -- This does not prove the WORKER holds the credential -- nothing in the database can know that,
-    -- and the worker refuses for itself when it does not. It proves the credential EXISTS, which is
-    -- what turns "the broker will reject this" into an answer available before the job is queued.
-    --
-    -- `gateway_has_broker_credential()`, NOT the similarly named `gateway_holds_a_credential()`:
-    -- that one means "physical and enrolled" and excludes every virtual gateway by definition. See
-    -- section 4b above -- this was measured, not argued.
+    -- Not `status = 'ONLINE'`: a playback target is legitimately OFFLINE until a playback runs.
+    -- This proves the credential exists, not that the worker holds it (the worker refuses for
+    -- itself). `gateway_has_broker_credential()`, not `gateway_holds_a_credential()`, which means
+    -- "physical and enrolled" and excludes every virtual gateway.
     IF NOT public.gateway_has_broker_credential(v_gateway) THEN
         RAISE EXCEPTION
           'start_playback_job: gateway % holds no broker credential, so nothing can authenticate '
@@ -5245,10 +4747,8 @@ BEGIN
     -- ------------------------------------------------------------------------------------
     -- The device map
     -- ------------------------------------------------------------------------------------
-    -- EVERY TARGET MUST BE A DEVICE OF THIS GATEWAY. Publishing under the target gateway's edge
-    -- node with a device segment belonging to another gateway is exactly what
-    -- `verify_gateway_binding()` quarantines -- so an unchecked map produces a playback that
-    -- "succeeds" and quarantines a device, which reads as a fleet fault rather than a mapping one.
+    -- Every target must be a device of this gateway: publishing another gateway's device segment
+    -- is exactly what `verify_gateway_binding()` quarantines.
     FOR v_key, v_target IN SELECT key, value FROM jsonb_each_text(coalesce(p_device_map, '{}'::jsonb))
     LOOP
         IF NOT EXISTS (
@@ -5292,15 +4792,12 @@ BEGIN
 END;
 $$;
 
-
-
 --
 
 -- FUNCTION start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) :: COMMENT
 --
 
 COMMENT ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) IS 'Queue a capture for publication onto a simulated gateway. The only way a playback_jobs row is created. Refuses a target that is not is_simulated, one holding no broker credential, a device map naming devices of another gateway, and a second concurrent playback onto the same edge node. See 0056''s header for the three tiers this is the first of.';
-
 
 --
 
@@ -5347,15 +4844,12 @@ BEGIN
   RETURN v_asked;
 END $$;
 
-
-
 --
 
 -- FUNCTION sweep_gateway_credential_revocations() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.sweep_gateway_credential_revocations() IS 'Retries broker-credential revocation for archived gateways whose trigger call did not land, and clears stamps that pg_net shows were never answered. Run by pg_cron every 15 minutes. Gated on gateway_has_broker_credential() since 0063. Does nothing for DELETED gateways -- their row is gone; scripts/revoke-orphaned-broker-accounts.mjs is the sweep for those.';
-
 
 --
 
@@ -5381,19 +4875,10 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- ON UPDATE, WHICHEVER COLUMN MOVED WINS, and there is no disagreement case to refuse. That was
-  -- not obvious and the first version of this function guarded against one:
-  --
-  --   Both columns are two-valued and the row starts in agreement, so an update that changes BOTH
-  --   necessarily flips both -- host/true to remote/false, or the reverse -- which agrees again. A
-  --   caller naming one column and restating the other at its CURRENT value is indistinguishable
-  --   from one that named a single column, because NEW carries the whole row either way.
-  --
-  -- So the guard was unreachable, and a test written to prove it fires is a test that cannot pass.
-  -- Refusing something impossible reads as a rule a reader must hold in their head; this reads as
-  -- the arithmetic it is. The INSERT arm above is different and does need its rule: `is_virtual`
-  -- has a column default, so an insert naming only `deployment` arrives with both set and possibly
-  -- disagreeing -- and there, deployment is the one the caller chose.
+  -- On UPDATE, whichever column moved wins. Both columns are two-valued and the row starts in
+  -- agreement, so an update that changes both flips both and agrees again; there is no
+  -- disagreement case to refuse. The INSERT arm above needs its rule because `is_virtual` has a
+  -- column default.
   IF NEW.deployment IS DISTINCT FROM OLD.deployment THEN
     NEW.is_virtual := (NEW.deployment = 'host');
   ELSIF NEW.is_virtual IS DISTINCT FROM OLD.is_virtual THEN
@@ -5403,15 +4888,12 @@ BEGIN
   RETURN NEW;
 END $$;
 
-
-
 --
 
 -- FUNCTION sync_gateway_deployment() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.sync_gateway_deployment() IS 'Keeps gateways.deployment and gateways.is_virtual in agreement while both exist. Transitional: it goes when is_virtual does. deployment wins when a caller names it; a caller naming both and disagreeing is refused.';
-
 
 --
 
@@ -5424,13 +4906,9 @@ CREATE OR REPLACE FUNCTION public.system_settings_stamp() RETURNS trigger
     AS $$
 BEGIN
     NEW.updated_at := now();
-    -- `auth.uid()`, NOT `current_setting('request.jwt.claim.sub')`. That GUC is the PRE-v10
-    -- PostgREST convention and the pinned 12.2.0 does not set it -- it sets `request.jwt.claims`,
-    -- a JSON string. Reading the old name directly returned NULL for every real request while
-    -- looking perfectly correct in a test that set the GUC by hand. auth.uid() coalesces both
-    -- forms, which is why every other policy in this schema goes through it.
-    --
-    -- NULL under service_role and during migrations, which is correct: neither is a person.
+    -- `auth.uid()`, not `current_setting('request.jwt.claim.sub')`: that GUC is the pre-v10
+    -- PostgREST convention and the pinned version sets `request.jwt.claims` instead. NULL under
+    -- service_role and during migrations, which is correct.
     NEW.updated_by := auth.uid();
     -- The key is part of the closed set, so an UPDATE may not rename one out from under its
     -- reader. Blocked here rather than by a policy because a policy cannot see the OLD row's key
@@ -5449,8 +4927,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-
 
 --
 
@@ -5475,15 +4951,12 @@ BEGIN
   RETURN NEW;
 END $$;
 
-
-
 --
 
 -- FUNCTION withdraw_gateway_enrollment_tokens() :: COMMENT
 --
 
 COMMENT ON FUNCTION public.withdraw_gateway_enrollment_tokens() IS 'Burns any unredeemed enrolment token when a gateway is archived. SECURITY DEFINER because the operator archiving the gateway has no grant on gateway_enrollment_tokens -- RLS is on with no policy, deliberately, so the table is reachable only by service_role and by definers like this.';
-
 
 --
 
@@ -5501,8 +4974,6 @@ CREATE TABLE IF NOT EXISTS public.ashrae223_vocabulary (
     CONSTRAINT ashrae223_vocabulary_semantic_id_namespace CHECK ((semantic_id ~~ 'http://data.ashrae.org/standard223#%'::text))
 );
 
-
-
 --
 
 -- TABLE ashrae223_vocabulary :: COMMENT
@@ -5510,14 +4981,12 @@ CREATE TABLE IF NOT EXISTS public.ashrae223_vocabulary (
 
 COMMENT ON TABLE public.ashrae223_vocabulary IS 'ASHRAE 223P semantic concepts, generated from the open223 ontology (Apache-2.0). Reference data, not deployment state -- a row is a concept the standard defines. ⚠ The standard is still in public review; concepts may move before publication.';
 
-
 --
 
 -- COLUMN ashrae223_vocabulary.subclass_of :: COMMENT
 --
 
 COMMENT ON COLUMN public.ashrae223_vocabulary.subclass_of IS 'Immediate s223 superclass, or NULL at the top of the hierarchy. Used to give the vocabulary panel browsable sections.';
-
 
 --
 
@@ -5534,8 +5003,6 @@ CREATE TABLE IF NOT EXISTS public.asset_config (
     datatype integer,
     updated_at timestamp with time zone DEFAULT now()
 );
-
-
 
 --
 
@@ -5580,8 +5047,6 @@ CREATE TABLE IF NOT EXISTS public.capture_jobs (
 
 ALTER TABLE ONLY public.capture_jobs REPLICA IDENTITY FULL;
 
-
-
 --
 
 -- TABLE capture_jobs :: COMMENT
@@ -5589,14 +5054,12 @@ ALTER TABLE ONLY public.capture_jobs REPLICA IDENTITY FULL;
 
 COMMENT ON TABLE public.capture_jobs IS 'One row per recording ATTEMPTED, including the ones that failed. At most one row is PENDING or RECORDING at a time across the whole stack (capture_jobs_single_flight). Written only through the gates in 0055 -- there is no direct-write RLS policy -- and pushed to the Capture page by Realtime as the daemon updates its progress columns.';
 
-
 --
 
 -- COLUMN capture_jobs.stop_requested :: COMMENT
 --
 
 COMMENT ON COLUMN public.capture_jobs.stop_requested IS 'Set by request_capture_stop(); observed by the daemon on its next message, which then flushes and completes. A column rather than an endpoint because the daemon hosts no REST tier, and because a flag survives a page reload.';
-
 
 --
 
@@ -5625,8 +5088,6 @@ CREATE TABLE IF NOT EXISTS public.captures (
     CONSTRAINT captures_subject_kind_valid CHECK ((subject_kind = ANY (ARRAY['gateway'::text, 'device'::text])))
 );
 
-
-
 --
 
 -- TABLE captures :: COMMENT
@@ -5634,14 +5095,12 @@ CREATE TABLE IF NOT EXISTS public.captures (
 
 COMMENT ON TABLE public.captures IS 'The capture that EXISTS for a subject -- at most one per gateway and one per device, enforced by two partial unique indexes. Written by ingest_finalise_capture() for a recorded capture and by register_uploaded_capture() for one uploaded through the browser; both paths land here so that playback has a single way to name a capture. Distinct from capture_jobs, which records the ACT of recording and has no row at all for an uploaded file. See 0055''s header.';
 
-
 --
 
 -- COLUMN captures.manifest :: COMMENT
 --
 
 COMMENT ON COLUMN public.captures.manifest IS 'What is in the file, so the list can describe a capture nobody has downloaded: metric_names (capped at 50, with metric_name_count beside it), topic_count, observed_rate_hz, birth_captured, and the edge_node_ids / device_ids the recording publishes under. birth_captured=false means the recording contains no NBIRTH/DBIRTH, so an alias-optimised gateway will replay as unresolved_alias and drop every metric -- from a file that otherwise looks complete. Note it means the NODE''s birth: announcing a DEVICE takes a DBIRTH, and only that sets a device ONLINE. device_ids is what the playback dialog builds its device map from, which is why it is here rather than read out of a file that may be 100 MiB.';
-
 
 --
 
@@ -5662,15 +5121,12 @@ CREATE TABLE IF NOT EXISTS public.cells (
 
 ALTER TABLE ONLY public.cells REPLICA IDENTITY FULL;
 
-
-
 --
 
 -- COLUMN cells.icon :: COMMENT
 --
 
 COMMENT ON COLUMN public.cells.icon IS 'Icon key for this cell, rendered by the dashboard from a bundled SVG set. A closed set (see cells_icon_valid) rather than free text: the column is a lookup key, never markup or a URL.';
-
 
 --
 
@@ -5712,15 +5168,12 @@ CREATE TABLE IF NOT EXISTS public.devices (
 
 ALTER TABLE ONLY public.devices REPLICA IDENTITY FULL;
 
-
-
 --
 
 -- COLUMN devices.sparkplug_id :: COMMENT
 --
 
 COMMENT ON COLUMN public.devices.sparkplug_id IS 'Immutable Sparkplug B device id, derived from the primary key. This is what appears in the MQTT topic and keys telemetry in TimescaleDB and birth parameters in asset_config.';
-
 
 --
 
@@ -5729,14 +5182,12 @@ COMMENT ON COLUMN public.devices.sparkplug_id IS 'Immutable Sparkplug B device i
 
 COMMENT ON COLUMN public.devices.reported_identity IS 'The Sparkplug B device id this device actually published under, when it differs from the platform-issued sparkplug_id. NULL means the device uses its issued id.';
 
-
 --
 
 -- COLUMN devices.quarantine_reason :: COMMENT
 --
 
 COMMENT ON COLUMN public.devices.quarantine_reason IS 'Why this device is in the quarantine queue, as "<CODE>" or "<CODE>: <detail>": UNKNOWN_DEVICE (well-formed id, never seen), MALFORMED_IDENTITY (id failed the 24-char gwy/dev format check), IDENTITY_MISMATCH (topic device id and Asset_ID payload metric disagreed), or GATEWAY_MISMATCH (announced by an edge node it is not bound to, or one that is unregistered or archived). Enforced by is_valid_quarantine_reason() (0047), not by a CHECK -- the detail suffix is free text and only the code is pinned.';
-
 
 --
 
@@ -5745,14 +5196,12 @@ COMMENT ON COLUMN public.devices.quarantine_reason IS 'Why this device is in the
 
 COMMENT ON COLUMN public.devices.identity_source IS 'How ingestion last resolved this device: ''sparkplug_id'' (current scheme) or ''legacy_name'' (matched by name during the migration window). Drives the deprecation badge in the UI.';
 
-
 --
 
 -- COLUMN devices.model_3d_path :: COMMENT
 --
 
 COMMENT ON COLUMN public.devices.model_3d_path IS 'Object key of this device''s 3D model within the asset-3d-models bucket (<device_uuid>/<filename>). Never a URL -- the public URL is composed at export time from a configurable base.';
-
 
 --
 
@@ -5761,14 +5210,12 @@ COMMENT ON COLUMN public.devices.model_3d_path IS 'Object key of this device''s 
 
 COMMENT ON COLUMN public.devices.cell_id IS 'Explicit location override. NULL means inherit from gateways.cell_id -- deliberately no default, since an explicit value wins over inheritance and a default would make inheritance unreachable. Resolve through public.device_locations, never by reading this column alone.';
 
-
 --
 
 -- COLUMN devices.location_scope :: COMMENT
 --
 
 COMMENT ON COLUMN public.devices.location_scope IS '''cell'' (located in, or awaiting, a cell) or ''site_wide'' (asserted to have no single cell -- BMS, AGV, ambient sensor). Distinct from cell_id IS NULL, which means undecided.';
-
 
 --
 
@@ -5777,7 +5224,6 @@ COMMENT ON COLUMN public.devices.location_scope IS '''cell'' (located in, or awa
 
 COMMENT ON COLUMN public.devices.description IS 'Optional operator note. Free text, carries no semantics, and is read by nothing -- typed identification belongs in device_nameplate.';
 
-
 --
 
 -- COLUMN devices.conformance_policy :: COMMENT
@@ -5785,14 +5231,12 @@ COMMENT ON COLUMN public.devices.description IS 'Optional operator note. Free te
 
 COMMENT ON COLUMN public.devices.conformance_policy IS '''audit'' (default) evaluates every DDATA metric against the device''s attached schemas and records what fails, writing the sample regardless -- the behaviour since 0026. ''enforce'' additionally DROPS a metric whose value contradicts a constraint its bound schema states. Per device and not per daemon: enforcement is a judgement about one asset''s schema being trustworthy enough to reject against, and a fleet is not uniform. An unmodelled metric is dropped only when a schema closes the set with additionalProperties: false.';
 
-
 --
 
 -- COLUMN devices.shadow_of :: COMMENT
 --
 
 COMMENT ON COLUMN public.devices.shadow_of IS 'For a shadow device: the real machine whose recordings this lane replays. NULL for every ordinary device. This is PROVENANCE, not a copy of a gateway flag -- whether a device is synthetic still derives from gateways.is_shadow / is_simulated (see 0052 and 0059), and this stores the one thing the gateway cannot know. Set only by ensure_shadow_devices().';
-
 
 --
 
@@ -5823,15 +5267,12 @@ CREATE OR REPLACE VIEW public.device_locations WITH (security_invoker='true') AS
    FROM (public.devices d
      LEFT JOIN public.gateways g ON ((g.id = d.gateway_id)));
 
-
-
 --
 
 -- VIEW device_locations :: COMMENT
 --
 
 COMMENT ON VIEW public.device_locations IS 'Effective cell per device, and which arm answered. Precedence: shadow (a replay lane behind a playback gateway) and simulated (synthetic telemetry) resolve to NO cell and take priority over everything else; then site-wide assets, which have none by assertion; then explicit devices.cell_id, then inherited gateways.cell_id, else unassigned. The first two are the gateway''s flags and are inherited -- devices store no copy. Mirrors frontend/src/utils/cellResolution.js -- keep the two in step. Derived at read time and never stored, so flipping a gateway''s flag or cell reclassifies its devices immediately.';
-
 
 --
 
@@ -5857,8 +5298,6 @@ CREATE TABLE IF NOT EXISTS public.device_nameplate (
     CONSTRAINT device_nameplate_year_shape CHECK (((year_of_construction IS NULL) OR (year_of_construction ~ '^[0-9]{4}$'::text)))
 );
 
-
-
 --
 
 -- TABLE device_nameplate :: COMMENT
@@ -5866,14 +5305,12 @@ CREATE TABLE IF NOT EXISTS public.device_nameplate (
 
 COMMENT ON TABLE public.device_nameplate IS 'Operator-supplied IDTA 02006 Digital Nameplate data, one row per device. The FALLBACK source: where a device publishes its own identification as birth metrics (OPC 40001 Machinery Manufacturer, SerialNumber, YearOfConstruction), the exporter prefers what the device said. Deliberately not in asset_config, which ingestion overwrites from every DBIRTH.';
 
-
 --
 
 -- COLUMN device_nameplate.updated_by :: COMMENT
 --
 
 COMMENT ON COLUMN public.device_nameplate.updated_by IS 'Who last edited this nameplate. A nameplate is an assertion about an asset, so who made it is part of the record -- the same reason digital_thread exists.';
-
 
 --
 
@@ -5889,15 +5326,12 @@ CREATE TABLE IF NOT EXISTS public.device_submodels (
     CONSTRAINT device_submodels_key_is_id_short CHECK (((submodel_key IS NULL) OR (submodel_key ~ '^[A-Za-z_][A-Za-z0-9_]*$'::text)))
 );
 
-
-
 --
 
 -- TABLE device_submodels :: COMMENT
 --
 
 COMMENT ON TABLE public.device_submodels IS 'Schemas attached to a device, one AAS Submodel each. Supersedes the 1:1 devices.schema_id, which is retained as a fallback for devices with no rows here.';
-
 
 --
 
@@ -5920,15 +5354,12 @@ UNION
            FROM public.device_submodels ds
           WHERE (ds.device_id = d.id)))));
 
-
-
 --
 
 -- VIEW device_schemas :: COMMENT
 --
 
 COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device: device_submodels rows, plus the legacy devices.schema_id for devices that have none.';
-
 
 --
 
@@ -5951,15 +5382,12 @@ CREATE TABLE IF NOT EXISTS public.digital_thread (
     CONSTRAINT digital_thread_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])))
 );
 
-
-
 --
 
 -- COLUMN digital_thread.actor_source :: COMMENT
 --
 
 COMMENT ON COLUMN public.digital_thread.actor_source IS 'What kind of actor made the change: user | ingestion | migration | service. Complements changed_by, which names WHICH user and is NULL for every machine-originated write.';
-
 
 --
 
@@ -5968,14 +5396,12 @@ COMMENT ON COLUMN public.digital_thread.actor_source IS 'What kind of actor made
 
 COMMENT ON COLUMN public.digital_thread.causation_id IS 'The transaction that wrote this row (txid_current()). Rows sharing it were written by ONE act -- an operator approval that also rebound a schema, a delete that cascaded. NOT a global identifier: it is unique only within this database, and only until the epoch counter is reset by a restore from a dump. Group by it; never store it as a foreign reference.';
 
-
 --
 
 -- COLUMN digital_thread.audit_domain :: COMMENT
 --
 
 COMMENT ON COLUMN public.digital_thread.audit_domain IS 'asset | security. Stamped by trg_digital_thread_stamp_domain from audit_domain_for(); callers do not supply it and cannot override it. Decides which SELECT policy admits the row.';
-
 
 --
 
@@ -5989,15 +5415,12 @@ CREATE SEQUENCE IF NOT EXISTS public.digital_thread_id_seq
     NO MAXVALUE
     CACHE 1;
 
-
-
 --
 
 -- digital_thread_id_seq :: SEQUENCE OWNED BY
 --
 
 ALTER SEQUENCE public.digital_thread_id_seq OWNED BY public.digital_thread.id;
-
 
 --
 
@@ -6011,15 +5434,12 @@ CREATE TABLE IF NOT EXISTS public.directory_liveness_probe (
     CONSTRAINT directory_liveness_probe_id_check CHECK (id)
 );
 
-
-
 --
 
 -- TABLE directory_liveness_probe :: COMMENT
 --
 
 COMMENT ON TABLE public.directory_liveness_probe IS 'The single in-flight pg_net request id for the Prometheus liveness probe. One row by CHECK (id), because two concurrent probes would race to write the same directory rows from different observations.';
-
 
 --
 
@@ -6037,8 +5457,6 @@ CREATE TABLE IF NOT EXISTS public.directory_services (
     CONSTRAINT directory_services_status_valid CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'DOWN'::text, 'UNKNOWN'::text])))
 );
 
-
-
 --
 
 -- COLUMN directory_services.status :: COMMENT
@@ -6046,14 +5464,12 @@ CREATE TABLE IF NOT EXISTS public.directory_services (
 
 COMMENT ON COLUMN public.directory_services.status IS 'Observed liveness: ACTIVE (Prometheus reports up=1), DOWN (up=0), or UNKNOWN (nothing observes this service). Written only by refresh_directory_liveness(). UNKNOWN is not a failure -- nine of the fifteen registered services have no exporter, and saying so is the point.';
 
-
 --
 
 -- COLUMN directory_services.last_heartbeat :: COMMENT
 --
 
 COMMENT ON COLUMN public.directory_services.last_heartbeat IS 'When this service was last OBSERVED up. NULL whenever status is not ACTIVE, including UNKNOWN: a timestamp on a row nothing probes would imply a freshness it does not have, which is the defect this column had before 0054 -- it held the moment the row was seeded.';
-
 
 --
 
@@ -6072,15 +5488,12 @@ CREATE TABLE IF NOT EXISTS public.gateway_enrollment_tokens (
     CONSTRAINT gateway_enrollment_tokens_hash_is_sha256 CHECK ((token_hash ~ '^[0-9a-f]{64}$'::text))
 );
 
-
-
 --
 
 -- TABLE gateway_enrollment_tokens :: COMMENT
 --
 
 COMMENT ON TABLE public.gateway_enrollment_tokens IS 'Single-use, short-lived claims that let a physical gateway appliance exchange its downloaded bundle for a broker credential exactly once. NOT READABLE BY ANY BROWSER-FACING ROLE -- RLS is enabled with no policy for anon or authenticated, so only service_role (which bypasses RLS) can see it, and only the enroll-gateway edge function holds that key. Deliberately a separate table rather than columns on public.gateways: that table is world-readable to authenticated users, its full row is copied into digital_thread on every write, and public.gateway_status selects g.*.';
-
 
 --
 
@@ -6107,8 +5520,6 @@ CREATE OR REPLACE VIEW public.gateway_health AS
     flow_hash
    FROM public.gateway_health_rows() r(sparkplug_id, gateway_name, live_status, is_stale, is_virtual, heartbeat_age_seconds, health_reported_at, health_age_seconds, uptime_seconds, load_1m, mem_available_bytes, disk_free_bytes, cert_expires_at, cert_expires_in_days, agent_version, flow_hash);
 
-
-
 --
 
 -- VIEW gateway_health :: COMMENT
@@ -6116,53 +5527,20 @@ CREATE OR REPLACE VIEW public.gateway_health AS
 
 COMMENT ON VIEW public.gateway_health IS 'The fleet''s current condition, one row per non-archived gateway. Read by the `supabase` datasource: backs the gateway variable and the panels in the "Gateway Fleet Health" dashboard, and the certificate-expiry alert rule. Current values only -- the trends are Prometheus gauges exported by the ingestion daemon.';
 
-
 --
 
 -- gateway_status :: VIEW
 --
 
-CREATE OR REPLACE VIEW public.gateway_status WITH (security_invoker='true') AS
- SELECT id,
-    name,
-    cell_id,
-    access_url,
-    status,
-    created_at,
-    is_archived,
-    archived_at,
-    auto_delete_at,
-    last_heartbeat,
-    is_virtual,
-    sparkplug_id,
-    location_scope,
-    sparkplug_group,
-    description,
-    enrolled_at,
-    agent_version,
-    health_reported_at,
-    uptime_seconds,
-    load_1m,
-    mem_available_bytes,
-    disk_free_bytes,
-    cert_expires_at,
-    flow_hash,
-    credential_revoked_at,
-    is_simulated,
-    is_shadow,
-    deployment,
-        CASE
-            WHEN (status = ANY (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text])) THEN status
-            WHEN (status = 'OFFLINE'::text) THEN 'OFFLINE'::text
-            WHEN (last_heartbeat IS NULL) THEN status
-            WHEN ((now() - last_heartbeat) > '00:01:30'::interval) THEN 'STALE'::text
-            ELSE status
-        END AS live_status,
-    ((last_heartbeat IS NOT NULL) AND ((now() - last_heartbeat) > '00:01:30'::interval)) AS is_stale,
-    (EXTRACT(epoch FROM (now() - last_heartbeat)))::bigint AS heartbeat_age_seconds
-   FROM public.gateways g;
-
-
+-- THE VIEW IS BUILT BY ITS FUNCTION, NOT BY THE DUMPED STATEMENT THAT USED TO STAND HERE. pg_dump
+-- writes a view's column list out explicitly, and CREATE OR REPLACE VIEW cannot narrow a view: once
+-- a later migration adds a gateways column and rebuilds this view through
+-- ensure_gateway_status_view() (g.* now five columns wider), the explicit list here has FEWER
+-- columns than the live view and every subsequent boot fails in this file with
+-- "cannot drop columns from view". Found by 0095, the first migration since the squash to add a
+-- gateways column. The function drops and recreates, which is the only shape that survives both a
+-- fresh database and a replay.
+SELECT public.ensure_gateway_status_view();
 
 --
 
@@ -6170,7 +5548,6 @@ CREATE OR REPLACE VIEW public.gateway_status WITH (security_invoker='true') AS
 --
 
 COMMENT ON VIEW public.gateway_status IS 'public.gateways with heartbeat staleness derived at read time. Mirrors frontend/src/utils/gatewayStatus.js -- keep the 90s threshold AND the pending-state short-circuit in step. Deliberately a view, not a stored column or a pg_cron writer: writing status would append to the immutable digital_thread audit table on every sweep and would be stale between ticks. Rebuilt by public.ensure_gateway_status_view() -- call it after adding a gateways column.';
-
 
 --
 
@@ -6191,15 +5568,12 @@ CREATE TABLE IF NOT EXISTS public.idta_submodel_templates (
     CONSTRAINT idta_submodel_templates_semantic_id_type_valid CHECK ((semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text])))
 );
 
-
-
 --
 
 -- TABLE idta_submodel_templates :: COMMENT
 --
 
 COMMENT ON TABLE public.idta_submodel_templates IS 'IDTA Asset Administration Shell submodel-template elements. Reference data, not deployment state -- a row here is an element the template defines, not a value a device holds. semantic_id is issued by IDTA/IEC CDD/ECLASS and must never be minted locally.';
-
 
 --
 
@@ -6208,14 +5582,12 @@ COMMENT ON TABLE public.idta_submodel_templates IS 'IDTA Asset Administration Sh
 
 COMMENT ON COLUMN public.idta_submodel_templates.is_mandatory IS 'Whether the template marks this element as mandatory. Recorded so the exporter can report what a shell would need to claim conformance -- it does NOT claim it; see the exporter.';
 
-
 --
 
 -- COLUMN idta_submodel_templates.ordinal :: COMMENT
 --
 
 COMMENT ON COLUMN public.idta_submodel_templates.ordinal IS 'Order the element appears in the published template, so the exported submodel reads like the specification rather than like a hash map.';
-
 
 --
 
@@ -6232,15 +5604,12 @@ CREATE TABLE IF NOT EXISTS public.iso22400_vocabulary (
     semantic_id text
 );
 
-
-
 --
 
 -- TABLE iso22400_vocabulary :: COMMENT
 --
 
 COMMENT ON TABLE public.iso22400_vocabulary IS 'ISO 22400-2 key performance indicator definitions. Reference data, not deployment state -- a row here is a KPI the standard defines, not a metric a device publishes.';
-
 
 --
 
@@ -6257,8 +5626,6 @@ CREATE TABLE IF NOT EXISTS public.links (
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now()
 );
-
-
 
 --
 
@@ -6291,15 +5658,12 @@ END) STORED,
     CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ModelReference'::text]))))
 );
 
-
-
 --
 
 -- COLUMN metric_catalog.semantic_id :: COMMENT
 --
 
 COMMENT ON COLUMN public.metric_catalog.semantic_id IS 'AAS (IEC 63278) semanticId for this metric -- the globally-resolvable identity of the concept it measures. NULL means unmapped, which is a legitimate state for a local extension.';
-
 
 --
 
@@ -6308,14 +5672,12 @@ COMMENT ON COLUMN public.metric_catalog.semantic_id IS 'AAS (IEC 63278) semantic
 
 COMMENT ON COLUMN public.metric_catalog.semantic_id_type IS 'Which kind of AAS Reference semantic_id is: IRI, IRDI, or ModelReference.';
 
-
 --
 
 -- COLUMN metric_catalog.permitted_values :: COMMENT
 --
 
 COMMENT ON COLUMN public.metric_catalog.permitted_values IS 'The values a discrete metric is allowed to report, from its standard vocabulary. NULL means unconstrained -- most metrics are, and a continuous SAMPLE always is. Deliberately NOT frozen by enforce_metric_catalog_immutability: it is a transcribed assertion about a standard, not a wire contract a device is configured against. See this migration''s header.';
-
 
 --
 
@@ -6331,8 +5693,6 @@ CREATE TABLE IF NOT EXISTS public.metric_groups (
     CONSTRAINT metric_groups_name_is_one_segment CHECK (((name <> ''::text) AND (strpos(name, '/'::text) = 0)))
 );
 
-
-
 --
 
 -- mtconnect_vocabulary :: TABLE
@@ -6345,8 +5705,6 @@ CREATE TABLE IF NOT EXISTS public.mtconnect_vocabulary (
     semantic_id text
 );
 
-
-
 --
 
 -- TABLE mtconnect_vocabulary :: COMMENT
@@ -6354,14 +5712,12 @@ CREATE TABLE IF NOT EXISTS public.mtconnect_vocabulary (
 
 COMMENT ON TABLE public.mtconnect_vocabulary IS 'MTConnect controlled vocabularies, generated from the Apache-2.0 mtconnect/schema repository. Reference data, not deployment state.';
 
-
 --
 
 -- COLUMN mtconnect_vocabulary.semantic_id :: COMMENT
 --
 
 COMMENT ON COLUMN public.mtconnect_vocabulary.semantic_id IS 'Local-namespace IRI for this vocabulary concept. Minted by this deployment, not issued by MTConnect -- see archived migration 0032.';
-
 
 --
 
@@ -6374,15 +5730,12 @@ CREATE TABLE IF NOT EXISTS public.one_shot_migrations (
     note text
 );
 
-
-
 --
 
 -- TABLE one_shot_migrations :: COMMENT
 --
 
 COMMENT ON TABLE public.one_shot_migrations IS 'Ledger for migrations that must run exactly once, rather than on every boot like the rest of the chain. Claimed by INSERT ... ON CONFLICT DO NOTHING inside the same transaction as the work it guards. Written only by the migration owner (postgres): service_role holds SELECT and no write since 0053, because deleting a claim re-arms a destructive one-shot and the next boot reports success exactly as the first did.';
-
 
 --
 
@@ -6399,15 +5752,12 @@ CREATE TABLE IF NOT EXISTS public.opcua_vocabulary (
     semantic_id text
 );
 
-
-
 --
 
 -- TABLE opcua_vocabulary :: COMMENT
 --
 
 COMMENT ON TABLE public.opcua_vocabulary IS 'OPC UA companion specification data points (OPC 40001 Machinery, OPC 40010 Robotics). Reference data, not deployment state. node_id holds a browse path, not a resolvable numeric NodeId -- see the migration header.';
-
 
 --
 
@@ -6419,8 +5769,6 @@ CREATE TABLE IF NOT EXISTS public.permissions (
     name text NOT NULL,
     description text
 );
-
-
 
 --
 
@@ -6449,15 +5797,12 @@ CREATE TABLE IF NOT EXISTS public.platform_alerts (
 
 ALTER TABLE ONLY public.platform_alerts REPLICA IDENTITY FULL;
 
-
-
 --
 
 -- TABLE platform_alerts :: COMMENT
 --
 
 COMMENT ON TABLE public.platform_alerts IS 'One row per Grafana alert OCCURRENCE -- machine conditions and platform conditions alike -- delivered by the grafana-alert-webhook edge function. Append-only on (fingerprint, starts_at); an occurrence transitions firing -> resolved in place.';
-
 
 --
 
@@ -6466,7 +5811,6 @@ COMMENT ON TABLE public.platform_alerts IS 'One row per Grafana alert OCCURRENCE
 
 COMMENT ON COLUMN public.platform_alerts.entity_type IS 'What the alert is about: device | gateway | platform. The dashboard reddens an asset only for its own kind, so this is read before entity_id anywhere a colour or a link is derived.';
 
-
 --
 
 -- COLUMN platform_alerts.entity_id :: COMMENT
@@ -6474,14 +5818,12 @@ COMMENT ON COLUMN public.platform_alerts.entity_type IS 'What the alert is about
 
 COMMENT ON COLUMN public.platform_alerts.entity_id IS 'The subject row id, or NULL for a platform-scoped alert or an id that matched nothing. Carries no foreign key on purpose -- see the column definition.';
 
-
 --
 
 -- COLUMN platform_alerts.sparkplug_id :: COMMENT
 --
 
 COMMENT ON COLUMN public.platform_alerts.sparkplug_id IS 'The immutable Sparkplug id of the asset the alert was raised for, taken from the Grafana label. Never a display name. NULL only for entity_type = platform, which has no single subject.';
-
 
 --
 
@@ -6517,15 +5859,12 @@ CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='tru
           ORDER BY a.fingerprint, a.starts_at DESC, a.recorded_at DESC) newest
   WHERE (status = 'firing'::text);
 
-
-
 --
 
 -- VIEW platform_alerts_active :: COMMENT
 --
 
 COMMENT ON VIEW public.platform_alerts_active IS 'Currently firing alerts, one row per Grafana fingerprint (the newest occurrence). A later resolved occurrence supersedes an earlier firing one, so a missed resolve cannot pin a stale alert.';
-
 
 --
 
@@ -6541,15 +5880,12 @@ CREATE OR REPLACE VIEW public.platform_health AS
     detail
    FROM public.platform_health_rows() r(condition, sparkplug_id, subject, value, detail);
 
-
-
 --
 
 -- VIEW platform_health :: COMMENT
 --
 
 COMMENT ON VIEW public.platform_health IS 'The platform''s own condition, long-form so a Grafana rule over one `condition` value produces one alert instance per subject. Read by the `supabase` datasource; see grafana/provisioning/alerting/alert-rules.yaml.';
-
 
 --
 
@@ -6582,15 +5918,12 @@ CREATE TABLE IF NOT EXISTS public.playback_jobs (
 
 ALTER TABLE ONLY public.playback_jobs REPLICA IDENTITY FULL;
 
-
-
 --
 
 -- TABLE playback_jobs :: COMMENT
 --
 
 COMMENT ON TABLE public.playback_jobs IS 'One row per playback attempted. At most one is PENDING or RUNNING per TARGET GATEWAY -- two publishers on one edge node interleave sequence numbers. Written only through the gates in 0056; there is no direct-write policy. Progress is pushed to the page by Realtime.';
-
 
 --
 
@@ -6604,8 +5937,6 @@ CREATE TABLE IF NOT EXISTS public.playback_worker_status (
     CONSTRAINT playback_worker_status_id_check CHECK (id)
 );
 
-
-
 --
 
 -- TABLE playback_worker_status :: COMMENT
@@ -6613,14 +5944,12 @@ CREATE TABLE IF NOT EXISTS public.playback_worker_status (
 
 COMMENT ON TABLE public.playback_worker_status IS 'What the playback worker can actually publish as: the gateway sparkplug_ids it holds broker passwords for, and when it last said so. One row by CHECK (id). Written only by playback_report_credentials(), read by the playback dialog so a target the worker cannot authenticate as is refused before a job is queued rather than after. Holds no secret -- a sparkplug_id is a public identifier and the passwords are deliberately not here.';
 
-
 --
 
 -- COLUMN playback_worker_status.reported_at :: COMMENT
 --
 
 COMMENT ON COLUMN public.playback_worker_status.reported_at IS 'Heartbeat. An empty held_edge_nodes with a RECENT timestamp means the worker is running and holds no credentials; a stale timestamp means the worker is not running. Those are different problems and the page says which.';
-
 
 --
 
@@ -6643,15 +5972,12 @@ CREATE TABLE IF NOT EXISTS public.rebirth_requests (
 
 ALTER TABLE ONLY public.rebirth_requests REPLICA IDENTITY FULL;
 
-
-
 --
 
 -- TABLE rebirth_requests :: COMMENT
 --
 
 COMMENT ON TABLE public.rebirth_requests IS 'A person asking an edge node to republish its birth certificate. The daemon claims PENDING rows and publishes Node Control/Rebirth, which is the only NCMD this stack sends and the only one mosquitto.acl permits it. Not a general command channel: writing a metric VALUE is actuation and is deliberately not reachable from here. See 0058''s header.';
-
 
 --
 
@@ -6663,8 +5989,6 @@ CREATE TABLE IF NOT EXISTS public.role_permissions (
     permission_id uuid NOT NULL
 );
 
-
-
 --
 
 -- roles :: TABLE
@@ -6675,8 +5999,6 @@ CREATE TABLE IF NOT EXISTS public.roles (
     name text NOT NULL,
     description text
 );
-
-
 
 --
 
@@ -6691,15 +6013,12 @@ CREATE SEQUENCE IF NOT EXISTS public.roles_id_seq
     NO MAXVALUE
     CACHE 1;
 
-
-
 --
 
 -- roles_id_seq :: SEQUENCE OWNED BY
 --
 
 ALTER SEQUENCE public.roles_id_seq OWNED BY public.roles.id;
-
 
 --
 
@@ -6713,8 +6032,6 @@ CREATE TABLE IF NOT EXISTS public.schema_bootstrap (
     CONSTRAINT schema_bootstrap_id_check CHECK (id)
 );
 
-
-
 --
 
 -- TABLE schema_bootstrap :: COMMENT
@@ -6722,14 +6039,12 @@ CREATE TABLE IF NOT EXISTS public.schema_bootstrap (
 
 COMMENT ON TABLE public.schema_bootstrap IS 'One row. completed_at IS NULL means db-init is part-way through the migration chain; a non-null completed_at means it reached the end of seed.sql on this boot. Written by db-init, not by a migration -- a migration cannot know whether the files after it succeeded.';
 
-
 --
 
 -- COLUMN schema_bootstrap.completed_at :: COMMENT
 --
 
 COMMENT ON COLUMN public.schema_bootstrap.completed_at IS 'Cleared at the start of every boot and stamped after seed.sql. The e2e-validate Job gates on it.';
-
 
 --
 
@@ -6755,15 +6070,12 @@ CREATE TABLE IF NOT EXISTS public.schemas (
     CONSTRAINT schemas_version_positive CHECK ((version >= 1))
 );
 
-
-
 --
 
 -- COLUMN schemas.semantic_id :: COMMENT
 --
 
 COMMENT ON COLUMN public.schemas.semantic_id IS 'AAS semanticId for the Submodel this schema corresponds to, e.g. an IDTA submodel template id.';
-
 
 --
 
@@ -6772,14 +6084,12 @@ COMMENT ON COLUMN public.schemas.semantic_id IS 'AAS semanticId for the Submodel
 
 COMMENT ON COLUMN public.schemas.version IS 'Auto-incremented lineage position. Never supplied by a caller -- fork_schema() derives it from the parent.';
 
-
 --
 
 -- COLUMN schemas.parent_schema_id :: COMMENT
 --
 
 COMMENT ON COLUMN public.schemas.parent_schema_id IS 'The version this one was forked from. NULL only for a v1 root.';
-
 
 --
 
@@ -6788,14 +6098,12 @@ COMMENT ON COLUMN public.schemas.parent_schema_id IS 'The version this one was f
 
 COMMENT ON COLUMN public.schemas.status IS 'draft (editable) | active (in force, immutable) | archived (superseded, immutable).';
 
-
 --
 
 -- COLUMN schemas.change_description :: COMMENT
 --
 
 COMMENT ON COLUMN public.schemas.change_description IS 'Why this version exists. Captured at fork time; immutable once the version is published.';
-
 
 --
 
@@ -6822,8 +6130,6 @@ OPTIONS (
     schema_name 'public',
     table_name 'storage_footprint'
 );
-
-
 
 --
 
@@ -6861,15 +6167,12 @@ UNION ALL
     NULL::timestamp with time zone AS newest_data
    FROM public.platform_storage_rows() p(tier, relation, table_bytes, index_bytes, toast_bytes, total_bytes);
 
-
-
 --
 
 -- VIEW storage_footprint :: COMMENT
 --
 
 COMMENT ON VIEW public.storage_footprint IS 'Every relation this platform stores, from both databases: the historian over postgres_fdw and the Supabase public schema locally. Bytes by kind, chunk count and compression for hypertables, and the time span the chunks cover. Read by Grafana as the `supabase` datasource.';
-
 
 --
 
@@ -6902,15 +6205,12 @@ END),
     CONSTRAINT system_settings_value_within_bounds CHECK (((value_type <> 'number'::text) OR (((min_value IS NULL) OR (((value #>> '{}'::text[]))::numeric >= min_value)) AND ((max_value IS NULL) OR (((value #>> '{}'::text[]))::numeric <= max_value)))))
 );
 
-
-
 --
 
 -- TABLE system_settings :: COMMENT
 --
 
 COMMENT ON TABLE public.system_settings IS 'Runtime configuration an Administrator may change without a container restart. The key set is closed: RLS grants UPDATE only, and new keys arrive by migration beside the code that reads them. Nothing secret belongs here -- every authenticated user can read this table.';
-
 
 --
 
@@ -6919,14 +6219,12 @@ COMMENT ON TABLE public.system_settings IS 'Runtime configuration an Administrat
 
 COMMENT ON COLUMN public.system_settings.min_value IS 'Inclusive lower bound for a number setting. NULL means unbounded. Enforced by CHECK, not by the reader: a value the table accepts and the consumer then ignores is a setting that lies.';
 
-
 --
 
 -- COLUMN system_settings.max_value :: COMMENT
 --
 
 COMMENT ON COLUMN public.system_settings.max_value IS 'Inclusive upper bound for a number setting. NULL means unbounded.';
-
 
 --
 
@@ -6947,8 +6245,6 @@ OPTIONS (
     table_name 'telemetry'
 );
 
-
-
 --
 
 -- telemetry :: VIEW
@@ -6963,15 +6259,12 @@ CREATE OR REPLACE VIEW public.telemetry WITH (security_invoker='true') AS
     val_bool
    FROM timescale.telemetry;
 
-
-
 --
 
 -- VIEW telemetry :: COMMENT
 --
 
 COMMENT ON VIEW public.telemetry IS 'Read-only PostgREST projection of the standalone TimescaleDB telemetry hypertable, reached over postgres_fdw. Filter with asset_id / metric_name / time and always pass a limit -- postgres_fdw pushes WHERE clauses to the remote but not LIMIT, so an unbounded query materialises the whole matching range locally.';
-
 
 --
 
@@ -6997,8 +6290,6 @@ OPTIONS (
     table_name 'telemetry_1h'
 );
 
-
-
 --
 
 -- telemetry_1h :: VIEW
@@ -7018,15 +6309,12 @@ CREATE OR REPLACE VIEW public.telemetry_1h WITH (security_invoker='true') AS
     n_rows
    FROM timescale.telemetry_1h t;
 
-
-
 --
 
 -- VIEW telemetry_1h :: COMMENT
 --
 
 COMMENT ON VIEW public.telemetry_1h IS 'Hourly rollup, aggregated from telemetry_5m. Retained far longer than the raw hypertable, so it answers questions about periods the raw retention window has already dropped.';
-
 
 --
 
@@ -7052,8 +6340,6 @@ OPTIONS (
     table_name 'telemetry_1m'
 );
 
-
-
 --
 
 -- telemetry_1m :: VIEW
@@ -7073,15 +6359,12 @@ CREATE OR REPLACE VIEW public.telemetry_1m WITH (security_invoker='true') AS
     n_rows
    FROM timescale.telemetry_1m t;
 
-
-
 --
 
 -- VIEW telemetry_1m :: COMMENT
 --
 
 COMMENT ON VIEW public.telemetry_1m IS 'One-minute rollup of the telemetry hypertable. avg_double is derived from the stored sum and count; min/max are preserved because an average hides the excursion. last_string/last_bool carry state metrics, which cannot be averaged. Filter with bucket / asset_id / metric_name.';
-
 
 --
 
@@ -7107,8 +6390,6 @@ OPTIONS (
     table_name 'telemetry_5m'
 );
 
-
-
 --
 
 -- telemetry_5m :: VIEW
@@ -7128,15 +6409,12 @@ CREATE OR REPLACE VIEW public.telemetry_5m WITH (security_invoker='true') AS
     n_rows
    FROM timescale.telemetry_5m t;
 
-
-
 --
 
 -- VIEW telemetry_5m :: COMMENT
 --
 
 COMMENT ON VIEW public.telemetry_5m IS 'Five-minute rollup, aggregated from telemetry_1m. See telemetry_1m.';
-
 
 --
 
@@ -7157,8 +6435,6 @@ OPTIONS (
     table_name 'telemetry_latest'
 );
 
-
-
 --
 
 -- telemetry_latest :: VIEW
@@ -7173,15 +6449,12 @@ CREATE OR REPLACE VIEW public.telemetry_latest WITH (security_invoker='true') AS
     val_bool
    FROM timescale.telemetry_latest t;
 
-
-
 --
 
 -- VIEW telemetry_latest :: COMMENT
 --
 
 COMMENT ON VIEW public.telemetry_latest IS 'Newest sample per (asset_id, metric_name), evaluated on the TimescaleDB side so postgres_fdw ships one row per series instead of a time window. Filter with asset_id. This is what the dashboard''s latest-value routes read; public.telemetry remains the raw record for exports.';
-
 
 --
 
@@ -7193,15 +6466,12 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
     role_id integer NOT NULL
 );
 
-
-
 --
 
 -- TABLE user_roles :: COMMENT
 --
 
 COMMENT ON TABLE public.user_roles IS 'Role assignment per auth user. Includes three seeded machine principals that cannot sign in: b0000000-0000-4000-8000-000000000001, the read-only principal the MCP client authenticates as (0034); b0000000-0000-4000-8000-000000000002, Service_Ingestor, the identity the ingestion daemon authenticates as (0046); and b0000000-0000-4000-8000-000000000003, Service_Playback, the identity the playback worker authenticates as (0056). All three hold Operator and write nothing directly -- every write goes through a SECURITY DEFINER gate that checks which of them is calling.';
-
 
 --
 
@@ -7217,15 +6487,12 @@ CREATE TABLE IF NOT EXISTS public.webhook_endpoints (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-
-
 --
 
 -- TABLE webhook_endpoints :: COMMENT
 --
 
 COMMENT ON TABLE public.webhook_endpoints IS 'Outbound webhook targets. Managed by migration only -- there is deliberately no INSERT/UPDATE/DELETE RLS policy, so no API caller can point the database at a host of their choosing.';
-
 
 --
 
@@ -7254,8 +6521,6 @@ OPTIONS (
     table_name 'telemetry_archive_manifest'
 );
 
-
-
 --
 
 -- digital_thread id :: DEFAULT
@@ -7263,14 +6528,12 @@ OPTIONS (
 
 ALTER TABLE ONLY public.digital_thread ALTER COLUMN id SET DEFAULT nextval('public.digital_thread_id_seq'::regclass);
 
-
 --
 
 -- roles id :: DEFAULT
 --
 
 ALTER TABLE ONLY public.roles ALTER COLUMN id SET DEFAULT nextval('public.roles_id_seq'::regclass);
-
 
 --
 
@@ -7283,7 +6546,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.ashrae223_vocabulary
         ADD CONSTRAINT ashrae223_vocabulary_pkey PRIMARY KEY (name);
-    
     
     --
   END IF;
@@ -7299,7 +6561,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.asset_config
         ADD CONSTRAINT asset_config_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7313,7 +6574,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.capture_jobs
         ADD CONSTRAINT capture_jobs_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7329,7 +6589,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.captures
         ADD CONSTRAINT captures_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7343,7 +6602,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.captures
         ADD CONSTRAINT captures_storage_path_key UNIQUE (storage_path);
-    
     
     --
   END IF;
@@ -7359,7 +6617,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.cells
         ADD CONSTRAINT cells_name_key UNIQUE (name);
     
-    
     --
   END IF;
 END $c$;
@@ -7373,7 +6630,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.cells
         ADD CONSTRAINT cells_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7389,7 +6645,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.device_nameplate
         ADD CONSTRAINT device_nameplate_pkey PRIMARY KEY (device_id);
     
-    
     --
   END IF;
 END $c$;
@@ -7403,7 +6658,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.device_submodels
         ADD CONSTRAINT device_submodels_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7419,7 +6673,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7433,7 +6686,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.digital_thread
         ADD CONSTRAINT digital_thread_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7449,7 +6701,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.directory_liveness_probe
         ADD CONSTRAINT directory_liveness_probe_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7463,7 +6714,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.directory_services
         ADD CONSTRAINT directory_services_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7479,7 +6729,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.directory_services
         ADD CONSTRAINT directory_services_service_name_key UNIQUE (service_name);
     
-    
     --
   END IF;
 END $c$;
@@ -7493,7 +6742,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.gateway_enrollment_tokens
         ADD CONSTRAINT gateway_enrollment_tokens_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7509,7 +6757,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.gateways
         ADD CONSTRAINT gateways_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7523,7 +6770,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.idta_submodel_templates
         ADD CONSTRAINT idta_submodel_templates_pkey PRIMARY KEY (template_id, id_short);
-    
     
     --
   END IF;
@@ -7539,7 +6785,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.iso22400_vocabulary
         ADD CONSTRAINT iso22400_vocabulary_pkey PRIMARY KEY (name);
     
-    
     --
   END IF;
 END $c$;
@@ -7553,7 +6798,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.links
         ADD CONSTRAINT links_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7569,7 +6813,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.metric_catalog
         ADD CONSTRAINT metric_catalog_name_key UNIQUE (name);
     
-    
     --
   END IF;
 END $c$;
@@ -7583,7 +6826,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.metric_catalog
         ADD CONSTRAINT metric_catalog_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7599,7 +6841,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.metric_groups
         ADD CONSTRAINT metric_groups_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7613,7 +6854,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.mtconnect_vocabulary
         ADD CONSTRAINT mtconnect_vocabulary_pkey PRIMARY KEY (kind, name);
-    
     
     --
   END IF;
@@ -7629,7 +6869,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.one_shot_migrations
         ADD CONSTRAINT one_shot_migrations_pkey PRIMARY KEY (key);
     
-    
     --
   END IF;
 END $c$;
@@ -7643,7 +6882,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.opcua_vocabulary
         ADD CONSTRAINT opcua_vocabulary_pkey PRIMARY KEY (companion_spec, name);
-    
     
     --
   END IF;
@@ -7659,7 +6897,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.permissions
         ADD CONSTRAINT permissions_name_key UNIQUE (name);
     
-    
     --
   END IF;
 END $c$;
@@ -7673,7 +6910,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.permissions
         ADD CONSTRAINT permissions_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7689,7 +6925,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.platform_alerts
         ADD CONSTRAINT platform_alerts_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7703,7 +6938,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.playback_jobs
         ADD CONSTRAINT playback_jobs_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7719,7 +6953,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.playback_worker_status
         ADD CONSTRAINT playback_worker_status_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7733,7 +6966,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.rebirth_requests
         ADD CONSTRAINT rebirth_requests_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7749,7 +6981,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.role_permissions
         ADD CONSTRAINT role_permissions_pkey PRIMARY KEY (role_id, permission_id);
     
-    
     --
   END IF;
 END $c$;
@@ -7763,7 +6994,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.roles
         ADD CONSTRAINT roles_name_key UNIQUE (name);
-    
     
     --
   END IF;
@@ -7779,7 +7009,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.roles
         ADD CONSTRAINT roles_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7793,7 +7022,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.schema_bootstrap
         ADD CONSTRAINT schema_bootstrap_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7809,7 +7037,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.schemas
         ADD CONSTRAINT schemas_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7823,7 +7050,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.schemas
         ADD CONSTRAINT schemas_schema_name_key UNIQUE (schema_name);
-    
     
     --
   END IF;
@@ -7839,7 +7065,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.system_settings
         ADD CONSTRAINT system_settings_key_key UNIQUE (key);
     
-    
     --
   END IF;
 END $c$;
@@ -7853,7 +7078,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.system_settings
         ADD CONSTRAINT system_settings_pkey PRIMARY KEY (id);
-    
     
     --
   END IF;
@@ -7869,7 +7093,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.asset_config
         ADD CONSTRAINT uq_asset_config_metric UNIQUE (asset_id, metric_name);
     
-    
     --
   END IF;
 END $c$;
@@ -7883,7 +7106,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.device_submodels
         ADD CONSTRAINT uq_device_submodels UNIQUE (device_id, schema_id);
-    
     
     --
   END IF;
@@ -7899,7 +7121,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.platform_alerts
         ADD CONSTRAINT uq_platform_alerts_event UNIQUE (fingerprint, starts_at);
     
-    
     --
   END IF;
 END $c$;
@@ -7913,7 +7134,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.user_roles
         ADD CONSTRAINT user_roles_pkey PRIMARY KEY (user_id, role_id);
-    
     
     --
   END IF;
@@ -7929,7 +7149,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.webhook_endpoints
         ADD CONSTRAINT webhook_endpoints_event_key_url_key UNIQUE (event_key, url);
     
-    
     --
   END IF;
 END $c$;
@@ -7944,7 +7163,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.webhook_endpoints
         ADD CONSTRAINT webhook_endpoints_pkey PRIMARY KEY (id);
     
-    
     --
   END IF;
 END $c$;
@@ -7954,14 +7172,12 @@ END $c$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS capture_jobs_single_flight ON public.capture_jobs USING btree ((true)) WHERE (status = ANY (ARRAY['PENDING'::text, 'RECORDING'::text]));
 
-
 --
 
 -- captures_one_per_device :: INDEX
 --
 
 CREATE UNIQUE INDEX IF NOT EXISTS captures_one_per_device ON public.captures USING btree (device_id) WHERE (subject_kind = 'device'::text);
-
 
 --
 
@@ -7970,14 +7186,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS captures_one_per_device ON public.captures USI
 
 CREATE UNIQUE INDEX IF NOT EXISTS captures_one_per_gateway ON public.captures USING btree (gateway_id) WHERE (subject_kind = 'gateway'::text);
 
-
 --
 
 -- gateway_enrollment_tokens_hash_key :: INDEX
 --
 
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_enrollment_tokens_hash_key ON public.gateway_enrollment_tokens USING btree (token_hash);
-
 
 --
 
@@ -7986,14 +7200,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS gateway_enrollment_tokens_hash_key ON public.g
 
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_enrollment_tokens_one_live_per_gateway ON public.gateway_enrollment_tokens USING btree (gateway_id) WHERE (consumed_at IS NULL);
 
-
 --
 
 -- idx_capture_jobs_created_at :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_capture_jobs_created_at ON public.capture_jobs USING btree (created_at DESC);
-
 
 --
 
@@ -8002,14 +7214,12 @@ CREATE INDEX IF NOT EXISTS idx_capture_jobs_created_at ON public.capture_jobs US
 
 CREATE INDEX IF NOT EXISTS idx_device_submodels_device ON public.device_submodels USING btree (device_id);
 
-
 --
 
 -- idx_device_submodels_schema :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_device_submodels_schema ON public.device_submodels USING btree (schema_id);
-
 
 --
 
@@ -8018,14 +7228,12 @@ CREATE INDEX IF NOT EXISTS idx_device_submodels_schema ON public.device_submodel
 
 CREATE INDEX IF NOT EXISTS idx_devices_cell_id ON public.devices USING btree (cell_id) WHERE (cell_id IS NOT NULL);
 
-
 --
 
 -- idx_devices_name :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_devices_name ON public.devices USING btree (name);
-
 
 --
 
@@ -8034,14 +7242,12 @@ CREATE INDEX IF NOT EXISTS idx_devices_name ON public.devices USING btree (name)
 
 CREATE INDEX IF NOT EXISTS idx_devices_reported_identity ON public.devices USING btree (reported_identity) WHERE (reported_identity IS NOT NULL);
 
-
 --
 
 -- idx_devices_sparkplug_id :: INDEX
 --
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_sparkplug_id ON public.devices USING btree (sparkplug_id);
-
 
 --
 
@@ -8050,14 +7256,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_sparkplug_id ON public.devices USI
 
 CREATE INDEX IF NOT EXISTS idx_digital_thread_causation ON public.digital_thread USING btree (causation_id) WHERE (causation_id IS NOT NULL);
 
-
 --
 
 -- idx_digital_thread_domain :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_digital_thread_domain ON public.digital_thread USING btree (audit_domain, recorded_at DESC);
-
 
 --
 
@@ -8066,14 +7270,12 @@ CREATE INDEX IF NOT EXISTS idx_digital_thread_domain ON public.digital_thread US
 
 CREATE INDEX IF NOT EXISTS idx_gateways_group_sparkplug_id ON public.gateways USING btree (sparkplug_group, sparkplug_id);
 
-
 --
 
 -- idx_gateways_name :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_gateways_name ON public.gateways USING btree (name);
-
 
 --
 
@@ -8082,14 +7284,12 @@ CREATE INDEX IF NOT EXISTS idx_gateways_name ON public.gateways USING btree (nam
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_gateways_sparkplug_id ON public.gateways USING btree (sparkplug_id);
 
-
 --
 
 -- idx_links_entity :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_links_entity ON public.links USING btree (entity_type, entity_id);
-
 
 --
 
@@ -8098,14 +7298,12 @@ CREATE INDEX IF NOT EXISTS idx_links_entity ON public.links USING btree (entity_
 
 CREATE INDEX IF NOT EXISTS idx_metric_catalog_group ON public.metric_catalog USING btree (metric_group);
 
-
 --
 
 -- idx_metric_catalog_semantic_id :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_metric_catalog_semantic_id ON public.metric_catalog USING btree (semantic_id) WHERE (semantic_id IS NOT NULL);
-
 
 --
 
@@ -8114,14 +7312,12 @@ CREATE INDEX IF NOT EXISTS idx_metric_catalog_semantic_id ON public.metric_catal
 
 CREATE INDEX IF NOT EXISTS idx_platform_alerts_entity ON public.platform_alerts USING btree (entity_type, entity_id);
 
-
 --
 
 -- idx_platform_alerts_sparkplug_started :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_platform_alerts_sparkplug_started ON public.platform_alerts USING btree (sparkplug_id, starts_at DESC);
-
 
 --
 
@@ -8130,14 +7326,12 @@ CREATE INDEX IF NOT EXISTS idx_platform_alerts_sparkplug_started ON public.platf
 
 CREATE INDEX IF NOT EXISTS idx_platform_alerts_status_started ON public.platform_alerts USING btree (status, starts_at DESC);
 
-
 --
 
 -- idx_playback_jobs_created_at :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_playback_jobs_created_at ON public.playback_jobs USING btree (created_at DESC);
-
 
 --
 
@@ -8146,14 +7340,12 @@ CREATE INDEX IF NOT EXISTS idx_playback_jobs_created_at ON public.playback_jobs 
 
 CREATE INDEX IF NOT EXISTS idx_rebirth_requests_requested_at ON public.rebirth_requests USING btree (requested_at DESC);
 
-
 --
 
 -- idx_schemas_parent :: INDEX
 --
 
 CREATE INDEX IF NOT EXISTS idx_schemas_parent ON public.schemas USING btree (parent_schema_id);
-
 
 --
 
@@ -8162,14 +7354,12 @@ CREATE INDEX IF NOT EXISTS idx_schemas_parent ON public.schemas USING btree (par
 
 CREATE INDEX IF NOT EXISTS idx_schemas_status ON public.schemas USING btree (status);
 
-
 --
 
 -- playback_jobs_one_per_target :: INDEX
 --
 
 CREATE UNIQUE INDEX IF NOT EXISTS playback_jobs_one_per_target ON public.playback_jobs USING btree (target_gateway_id) WHERE (status = ANY (ARRAY['PENDING'::text, 'RUNNING'::text]));
-
 
 --
 
@@ -8178,14 +7368,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS playback_jobs_one_per_target ON public.playbac
 
 CREATE UNIQUE INDEX IF NOT EXISTS rebirth_requests_one_pending_per_gateway ON public.rebirth_requests USING btree (gateway_id) WHERE (status = 'PENDING'::text);
 
-
 --
 
 -- uq_devices_shadow_per_gateway :: INDEX
 --
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_devices_shadow_per_gateway ON public.devices USING btree (gateway_id, shadow_of) WHERE (shadow_of IS NOT NULL);
-
 
 --
 
@@ -8194,14 +7382,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_devices_shadow_per_gateway ON public.device
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_metric_groups_name_ci ON public.metric_groups USING btree (lower(name));
 
-
 --
 
 -- uq_schemas_one_draft_per_parent :: INDEX
 --
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_schemas_one_draft_per_parent ON public.schemas USING btree (parent_schema_id) WHERE (((status)::text = 'draft'::text) AND (parent_schema_id IS NOT NULL));
-
 
 --
 
@@ -8211,7 +7397,6 @@ DROP TRIGGER IF EXISTS system_settings_stamp_trg ON public.system_settings;
 
 CREATE TRIGGER system_settings_stamp_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.system_settings_stamp();
 
-
 --
 
 -- cells trg_cells_digital_thread :: TRIGGER
@@ -8219,7 +7404,6 @@ DROP TRIGGER IF EXISTS trg_cells_digital_thread ON public.cells;
 --
 
 CREATE TRIGGER trg_cells_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
-
 
 --
 
@@ -8229,7 +7413,6 @@ DROP TRIGGER IF EXISTS trg_device_quarantine_webhook_insert ON public.devices;
 
 CREATE TRIGGER trg_device_quarantine_webhook_insert AFTER INSERT ON public.devices FOR EACH ROW WHEN ((new.is_quarantined IS TRUE)) EXECUTE FUNCTION public.dispatch_device_quarantine_webhook();
 
-
 --
 
 -- devices trg_device_quarantine_webhook_update :: TRIGGER
@@ -8237,7 +7420,6 @@ DROP TRIGGER IF EXISTS trg_device_quarantine_webhook_update ON public.devices;
 --
 
 CREATE TRIGGER trg_device_quarantine_webhook_update AFTER UPDATE OF is_quarantined ON public.devices FOR EACH ROW WHEN (((new.is_quarantined IS TRUE) AND (old.is_quarantined IS DISTINCT FROM true))) EXECUTE FUNCTION public.dispatch_device_quarantine_webhook();
-
 
 --
 
@@ -8247,7 +7429,6 @@ DROP TRIGGER IF EXISTS trg_devices_digital_thread ON public.devices;
 
 CREATE TRIGGER trg_devices_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
 
-
 --
 
 -- digital_thread trg_digital_thread_append_only :: TRIGGER
@@ -8255,7 +7436,6 @@ DROP TRIGGER IF EXISTS trg_digital_thread_append_only ON public.digital_thread;
 --
 
 CREATE TRIGGER trg_digital_thread_append_only BEFORE DELETE OR UPDATE ON public.digital_thread FOR EACH ROW EXECUTE FUNCTION public.enforce_digital_thread_append_only();
-
 
 --
 
@@ -8265,7 +7445,6 @@ DROP TRIGGER IF EXISTS trg_digital_thread_stamp_domain ON public.digital_thread;
 
 CREATE TRIGGER trg_digital_thread_stamp_domain BEFORE INSERT ON public.digital_thread FOR EACH ROW EXECUTE FUNCTION public.stamp_audit_domain();
 
-
 --
 
 -- schemas trg_enforce_schema_version_provenance :: TRIGGER
@@ -8273,7 +7452,6 @@ DROP TRIGGER IF EXISTS trg_enforce_schema_version_provenance ON public.schemas;
 --
 
 CREATE TRIGGER trg_enforce_schema_version_provenance BEFORE INSERT ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.enforce_schema_version_provenance();
-
 
 --
 
@@ -8283,7 +7461,6 @@ DROP TRIGGER IF EXISTS trg_gateways_clear_credential_revoked ON public.gateways;
 
 CREATE TRIGGER trg_gateways_clear_credential_revoked BEFORE UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.clear_credential_revoked_on_enrolment();
 
-
 --
 
 -- gateways trg_gateways_digital_thread :: TRIGGER
@@ -8291,7 +7468,6 @@ DROP TRIGGER IF EXISTS trg_gateways_digital_thread ON public.gateways;
 --
 
 CREATE TRIGGER trg_gateways_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
-
 
 --
 
@@ -8301,7 +7477,6 @@ DROP TRIGGER IF EXISTS trg_gateways_keep_a_playback_target ON public.gateways;
 
 CREATE TRIGGER trg_gateways_keep_a_playback_target BEFORE UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.refuse_archiving_the_last_shadow_gateway();
 
-
 --
 
 -- gateways trg_gateways_revoke_credential_delete :: TRIGGER
@@ -8309,7 +7484,6 @@ DROP TRIGGER IF EXISTS trg_gateways_revoke_credential_delete ON public.gateways;
 --
 
 CREATE TRIGGER trg_gateways_revoke_credential_delete BEFORE DELETE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.revoke_credential_on_decommission();
-
 
 --
 
@@ -8319,7 +7493,6 @@ DROP TRIGGER IF EXISTS trg_gateways_revoke_credential_update ON public.gateways;
 
 CREATE TRIGGER trg_gateways_revoke_credential_update AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.revoke_credential_on_decommission();
 
-
 --
 
 -- gateways trg_gateways_sync_deployment :: TRIGGER
@@ -8327,7 +7500,6 @@ DROP TRIGGER IF EXISTS trg_gateways_sync_deployment ON public.gateways;
 --
 
 CREATE TRIGGER trg_gateways_sync_deployment BEFORE INSERT OR UPDATE OF deployment, is_virtual ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.sync_gateway_deployment();
-
 
 --
 
@@ -8337,7 +7509,6 @@ DROP TRIGGER IF EXISTS trg_gateways_withdraw_enrolment ON public.gateways;
 
 CREATE TRIGGER trg_gateways_withdraw_enrolment AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.withdraw_gateway_enrollment_tokens();
 
-
 --
 
 -- metric_catalog trg_metric_catalog_immutability :: TRIGGER
@@ -8345,7 +7516,6 @@ DROP TRIGGER IF EXISTS trg_metric_catalog_immutability ON public.metric_catalog;
 --
 
 CREATE TRIGGER trg_metric_catalog_immutability BEFORE UPDATE ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.enforce_metric_catalog_immutability();
-
 
 --
 
@@ -8355,7 +7525,6 @@ DROP TRIGGER IF EXISTS trg_metric_group_spelling ON public.metric_catalog;
 
 CREATE TRIGGER trg_metric_group_spelling BEFORE INSERT ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.enforce_metric_group_spelling();
 
-
 --
 
 -- playback_jobs trg_playback_target_must_be_shadow :: TRIGGER
@@ -8363,7 +7532,6 @@ DROP TRIGGER IF EXISTS trg_playback_target_must_be_shadow ON public.playback_job
 --
 
 CREATE TRIGGER trg_playback_target_must_be_shadow BEFORE INSERT ON public.playback_jobs FOR EACH ROW EXECUTE FUNCTION public.playback_target_must_be_shadow();
-
 
 --
 
@@ -8373,7 +7541,6 @@ DROP TRIGGER IF EXISTS trg_prevent_active_schema_mutation ON public.schemas;
 
 CREATE TRIGGER trg_prevent_active_schema_mutation BEFORE UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.prevent_active_schema_mutation();
 
-
 --
 
 -- schemas trg_schemas_digital_thread :: TRIGGER
@@ -8381,7 +7548,6 @@ DROP TRIGGER IF EXISTS trg_schemas_digital_thread ON public.schemas;
 --
 
 CREATE TRIGGER trg_schemas_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
-
 
 --
 
@@ -8391,7 +7557,6 @@ DROP TRIGGER IF EXISTS trg_system_settings_digital_thread ON public.system_setti
 
 CREATE TRIGGER trg_system_settings_digital_thread AFTER INSERT OR DELETE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
 
-
 --
 
 -- system_settings trg_system_settings_digital_thread_update :: TRIGGER
@@ -8400,7 +7565,6 @@ DROP TRIGGER IF EXISTS trg_system_settings_digital_thread_update ON public.syste
 
 CREATE TRIGGER trg_system_settings_digital_thread_update AFTER UPDATE ON public.system_settings FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_digital_thread_event();
 
-
 --
 
 -- user_roles trg_user_roles_digital_thread :: TRIGGER
@@ -8408,7 +7572,6 @@ DROP TRIGGER IF EXISTS trg_user_roles_digital_thread ON public.user_roles;
 --
 
 CREATE TRIGGER trg_user_roles_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.log_role_assignment();
-
 
 --
 
@@ -8421,7 +7584,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.capture_jobs
         ADD CONSTRAINT capture_jobs_capture_id_fkey FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL;
-    
     
     --
   END IF;
@@ -8437,7 +7599,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.capture_jobs
         ADD CONSTRAINT capture_jobs_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE;
     
-    
     --
   END IF;
 END $c$;
@@ -8451,7 +7612,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.capture_jobs
         ADD CONSTRAINT capture_jobs_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-    
     
     --
   END IF;
@@ -8467,7 +7627,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.captures
         ADD CONSTRAINT captures_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE;
     
-    
     --
   END IF;
 END $c$;
@@ -8481,7 +7640,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.captures
         ADD CONSTRAINT captures_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-    
     
     --
   END IF;
@@ -8497,7 +7655,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.device_nameplate
         ADD CONSTRAINT device_nameplate_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE;
     
-    
     --
   END IF;
 END $c$;
@@ -8511,7 +7668,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.device_submodels
         ADD CONSTRAINT device_submodels_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE;
-    
     
     --
   END IF;
@@ -8527,7 +7683,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.device_submodels
         ADD CONSTRAINT device_submodels_schema_id_fkey FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE CASCADE;
     
-    
     --
   END IF;
 END $c$;
@@ -8541,7 +7696,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_cell_id_fkey FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL;
-    
     
     --
   END IF;
@@ -8557,7 +7711,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE SET NULL;
     
-    
     --
   END IF;
 END $c$;
@@ -8571,7 +7724,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_schema_id_fkey FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL;
-    
     
     --
   END IF;
@@ -8587,7 +7739,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_shadow_of_fkey FOREIGN KEY (shadow_of) REFERENCES public.devices(id) ON DELETE SET NULL;
     
-    
     --
   END IF;
 END $c$;
@@ -8601,7 +7752,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.digital_thread
         ADD CONSTRAINT digital_thread_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES auth.users(id);
-    
     
     --
   END IF;
@@ -8617,7 +7767,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.directory_services
         ADD CONSTRAINT directory_services_registered_schema_id_fkey FOREIGN KEY (registered_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL;
     
-    
     --
   END IF;
 END $c$;
@@ -8631,7 +7780,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.gateway_enrollment_tokens
         ADD CONSTRAINT gateway_enrollment_tokens_gateway_fk FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-    
     
     --
   END IF;
@@ -8647,7 +7795,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.gateways
         ADD CONSTRAINT gateways_cell_id_fkey FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE CASCADE;
     
-    
     --
   END IF;
 END $c$;
@@ -8661,7 +7808,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.metric_catalog
         ADD CONSTRAINT metric_catalog_superseded_by_fkey FOREIGN KEY (superseded_by) REFERENCES public.metric_catalog(id) ON DELETE SET NULL;
-    
     
     --
   END IF;
@@ -8677,7 +7823,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.playback_jobs
         ADD CONSTRAINT playback_jobs_capture_id_fkey FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL;
     
-    
     --
   END IF;
 END $c$;
@@ -8691,7 +7836,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.playback_jobs
         ADD CONSTRAINT playback_jobs_target_gateway_id_fkey FOREIGN KEY (target_gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-    
     
     --
   END IF;
@@ -8707,7 +7851,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.rebirth_requests
         ADD CONSTRAINT rebirth_requests_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
     
-    
     --
   END IF;
 END $c$;
@@ -8721,7 +7864,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.role_permissions
         ADD CONSTRAINT role_permissions_permission_id_fkey FOREIGN KEY (permission_id) REFERENCES public.permissions(id) ON DELETE CASCADE;
-    
     
     --
   END IF;
@@ -8737,7 +7879,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.role_permissions
         ADD CONSTRAINT role_permissions_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
     
-    
     --
   END IF;
 END $c$;
@@ -8752,7 +7893,6 @@ DO $c$ BEGIN
     ALTER TABLE ONLY public.schemas
         ADD CONSTRAINT schemas_parent_schema_id_fkey FOREIGN KEY (parent_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL;
     
-    
     --
   END IF;
 END $c$;
@@ -8766,7 +7906,6 @@ DO $c$ BEGIN
     
     ALTER TABLE ONLY public.user_roles
         ADD CONSTRAINT user_roles_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
-    
     
     --
   END IF;
@@ -8785,7 +7924,6 @@ DROP POLICY IF EXISTS ashrae223_vocabulary_select_authenticated ON public.ashrae
 
 CREATE POLICY ashrae223_vocabulary_select_authenticated ON public.ashrae223_vocabulary FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- asset_config :: ROW SECURITY
@@ -8801,7 +7939,6 @@ DROP POLICY IF EXISTS asset_config_delete_privileged ON public.asset_config;
 
 CREATE POLICY asset_config_delete_privileged ON public.asset_config FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
-
 --
 
 -- asset_config asset_config_insert_privileged :: POLICY
@@ -8809,7 +7946,6 @@ DROP POLICY IF EXISTS asset_config_insert_privileged ON public.asset_config;
 --
 
 CREATE POLICY asset_config_insert_privileged ON public.asset_config FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -8819,7 +7955,6 @@ DROP POLICY IF EXISTS asset_config_select_authenticated ON public.asset_config;
 
 CREATE POLICY asset_config_select_authenticated ON public.asset_config FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- asset_config asset_config_update_privileged :: POLICY
@@ -8827,7 +7962,6 @@ DROP POLICY IF EXISTS asset_config_update_privileged ON public.asset_config;
 --
 
 CREATE POLICY asset_config_update_privileged ON public.asset_config FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -8844,7 +7978,6 @@ DROP POLICY IF EXISTS capture_jobs_select_privileged ON public.capture_jobs;
 
 CREATE POLICY capture_jobs_select_privileged ON public.capture_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
 
-
 --
 
 -- captures :: ROW SECURITY
@@ -8860,7 +7993,6 @@ DROP POLICY IF EXISTS captures_delete_privileged ON public.captures;
 
 CREATE POLICY captures_delete_privileged ON public.captures FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
-
 --
 
 -- captures captures_select_privileged :: POLICY
@@ -8868,7 +8000,6 @@ DROP POLICY IF EXISTS captures_select_privileged ON public.captures;
 --
 
 CREATE POLICY captures_select_privileged ON public.captures FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
-
 
 --
 
@@ -8885,7 +8016,6 @@ DROP POLICY IF EXISTS cells_delete_privileged ON public.cells;
 
 CREATE POLICY cells_delete_privileged ON public.cells FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
-
 --
 
 -- cells cells_insert_privileged :: POLICY
@@ -8893,7 +8023,6 @@ DROP POLICY IF EXISTS cells_insert_privileged ON public.cells;
 --
 
 CREATE POLICY cells_insert_privileged ON public.cells FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -8903,7 +8032,6 @@ DROP POLICY IF EXISTS cells_select_authenticated ON public.cells;
 
 CREATE POLICY cells_select_authenticated ON public.cells FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- cells cells_update_privileged :: POLICY
@@ -8911,7 +8039,6 @@ DROP POLICY IF EXISTS cells_update_privileged ON public.cells;
 --
 
 CREATE POLICY cells_update_privileged ON public.cells FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -8928,7 +8055,6 @@ DROP POLICY IF EXISTS device_nameplate_delete_privileged ON public.device_namepl
 
 CREATE POLICY device_nameplate_delete_privileged ON public.device_nameplate FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
-
 --
 
 -- device_nameplate device_nameplate_insert_privileged :: POLICY
@@ -8936,7 +8062,6 @@ DROP POLICY IF EXISTS device_nameplate_insert_privileged ON public.device_namepl
 --
 
 CREATE POLICY device_nameplate_insert_privileged ON public.device_nameplate FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -8946,7 +8071,6 @@ DROP POLICY IF EXISTS device_nameplate_select_authenticated ON public.device_nam
 
 CREATE POLICY device_nameplate_select_authenticated ON public.device_nameplate FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- device_nameplate device_nameplate_update_privileged :: POLICY
@@ -8954,7 +8078,6 @@ DROP POLICY IF EXISTS device_nameplate_update_privileged ON public.device_namepl
 --
 
 CREATE POLICY device_nameplate_update_privileged ON public.device_nameplate FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -8971,7 +8094,6 @@ DROP POLICY IF EXISTS device_submodels_delete_privileged ON public.device_submod
 
 CREATE POLICY device_submodels_delete_privileged ON public.device_submodels FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
-
 --
 
 -- device_submodels device_submodels_insert_privileged :: POLICY
@@ -8979,7 +8101,6 @@ DROP POLICY IF EXISTS device_submodels_insert_privileged ON public.device_submod
 --
 
 CREATE POLICY device_submodels_insert_privileged ON public.device_submodels FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -8989,7 +8110,6 @@ DROP POLICY IF EXISTS device_submodels_select_authenticated ON public.device_sub
 
 CREATE POLICY device_submodels_select_authenticated ON public.device_submodels FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- device_submodels device_submodels_update_privileged :: POLICY
@@ -8997,7 +8117,6 @@ DROP POLICY IF EXISTS device_submodels_update_privileged ON public.device_submod
 --
 
 CREATE POLICY device_submodels_update_privileged ON public.device_submodels FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -9014,7 +8133,6 @@ DROP POLICY IF EXISTS devices_delete_privileged ON public.devices;
 
 CREATE POLICY devices_delete_privileged ON public.devices FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
-
 --
 
 -- devices devices_insert_privileged :: POLICY
@@ -9022,7 +8140,6 @@ DROP POLICY IF EXISTS devices_insert_privileged ON public.devices;
 --
 
 CREATE POLICY devices_insert_privileged ON public.devices FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -9032,7 +8149,6 @@ DROP POLICY IF EXISTS devices_select_authenticated ON public.devices;
 
 CREATE POLICY devices_select_authenticated ON public.devices FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- devices devices_update_privileged :: POLICY
@@ -9040,7 +8156,6 @@ DROP POLICY IF EXISTS devices_update_privileged ON public.devices;
 --
 
 CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -9057,7 +8172,6 @@ DROP POLICY IF EXISTS digital_thread_select_asset ON public.digital_thread;
 
 CREATE POLICY digital_thread_select_asset ON public.digital_thread FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text])));
 
-
 --
 
 -- digital_thread digital_thread_select_security :: POLICY
@@ -9065,7 +8179,6 @@ DROP POLICY IF EXISTS digital_thread_select_security ON public.digital_thread;
 --
 
 CREATE POLICY digital_thread_select_security ON public.digital_thread FOR SELECT TO authenticated USING (((audit_domain = 'security'::text) AND public.has_role(ARRAY['Administrator'::text, 'Auditor'::text])));
-
 
 --
 
@@ -9089,7 +8202,6 @@ DROP POLICY IF EXISTS directory_services_delete_privileged ON public.directory_s
 
 CREATE POLICY directory_services_delete_privileged ON public.directory_services FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
-
 --
 
 -- directory_services directory_services_insert_privileged :: POLICY
@@ -9097,7 +8209,6 @@ DROP POLICY IF EXISTS directory_services_insert_privileged ON public.directory_s
 --
 
 CREATE POLICY directory_services_insert_privileged ON public.directory_services FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -9107,7 +8218,6 @@ DROP POLICY IF EXISTS directory_services_select_authenticated ON public.director
 
 CREATE POLICY directory_services_select_authenticated ON public.directory_services FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- directory_services directory_services_update_privileged :: POLICY
@@ -9115,7 +8225,6 @@ DROP POLICY IF EXISTS directory_services_update_privileged ON public.directory_s
 --
 
 CREATE POLICY directory_services_update_privileged ON public.directory_services FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -9139,7 +8248,6 @@ DROP POLICY IF EXISTS gateways_delete_privileged ON public.gateways;
 
 CREATE POLICY gateways_delete_privileged ON public.gateways FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
-
 --
 
 -- gateways gateways_insert_privileged :: POLICY
@@ -9147,7 +8255,6 @@ DROP POLICY IF EXISTS gateways_insert_privileged ON public.gateways;
 --
 
 CREATE POLICY gateways_insert_privileged ON public.gateways FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -9157,7 +8264,6 @@ DROP POLICY IF EXISTS gateways_select_authenticated ON public.gateways;
 
 CREATE POLICY gateways_select_authenticated ON public.gateways FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- gateways gateways_update_privileged :: POLICY
@@ -9165,7 +8271,6 @@ DROP POLICY IF EXISTS gateways_update_privileged ON public.gateways;
 --
 
 CREATE POLICY gateways_update_privileged ON public.gateways FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -9182,7 +8287,6 @@ DROP POLICY IF EXISTS idta_submodel_templates_select_authenticated ON public.idt
 
 CREATE POLICY idta_submodel_templates_select_authenticated ON public.idta_submodel_templates FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- iso22400_vocabulary :: ROW SECURITY
@@ -9197,7 +8301,6 @@ DROP POLICY IF EXISTS iso22400_vocabulary_select_authenticated ON public.iso2240
 --
 
 CREATE POLICY iso22400_vocabulary_select_authenticated ON public.iso22400_vocabulary FOR SELECT TO authenticated USING (true);
-
 
 --
 
@@ -9214,7 +8317,6 @@ DROP POLICY IF EXISTS links_delete_privileged ON public.links;
 
 CREATE POLICY links_delete_privileged ON public.links FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
-
 --
 
 -- links links_insert_privileged :: POLICY
@@ -9222,7 +8324,6 @@ DROP POLICY IF EXISTS links_insert_privileged ON public.links;
 --
 
 CREATE POLICY links_insert_privileged ON public.links FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -9232,7 +8333,6 @@ DROP POLICY IF EXISTS links_select_authenticated ON public.links;
 
 CREATE POLICY links_select_authenticated ON public.links FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- links links_update_privileged :: POLICY
@@ -9240,7 +8340,6 @@ DROP POLICY IF EXISTS links_update_privileged ON public.links;
 --
 
 CREATE POLICY links_update_privileged ON public.links FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
-
 
 --
 
@@ -9257,7 +8356,6 @@ DROP POLICY IF EXISTS metric_catalog_insert_privileged ON public.metric_catalog;
 
 CREATE POLICY metric_catalog_insert_privileged ON public.metric_catalog FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
-
 --
 
 -- metric_catalog metric_catalog_select_authenticated :: POLICY
@@ -9266,7 +8364,6 @@ DROP POLICY IF EXISTS metric_catalog_select_authenticated ON public.metric_catal
 
 CREATE POLICY metric_catalog_select_authenticated ON public.metric_catalog FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- metric_catalog metric_catalog_update_privileged :: POLICY
@@ -9274,7 +8371,6 @@ DROP POLICY IF EXISTS metric_catalog_update_privileged ON public.metric_catalog;
 --
 
 CREATE POLICY metric_catalog_update_privileged ON public.metric_catalog FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
-
 
 --
 
@@ -9291,7 +8387,6 @@ DROP POLICY IF EXISTS metric_groups_insert_privileged ON public.metric_groups;
 
 CREATE POLICY metric_groups_insert_privileged ON public.metric_groups FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
-
 --
 
 -- metric_groups metric_groups_select_authenticated :: POLICY
@@ -9300,7 +8395,6 @@ DROP POLICY IF EXISTS metric_groups_select_authenticated ON public.metric_groups
 
 CREATE POLICY metric_groups_select_authenticated ON public.metric_groups FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- metric_groups metric_groups_update_privileged :: POLICY
@@ -9308,7 +8402,6 @@ DROP POLICY IF EXISTS metric_groups_update_privileged ON public.metric_groups;
 --
 
 CREATE POLICY metric_groups_update_privileged ON public.metric_groups FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
-
 
 --
 
@@ -9324,7 +8417,6 @@ DROP POLICY IF EXISTS mtconnect_vocabulary_select_authenticated ON public.mtconn
 --
 
 CREATE POLICY mtconnect_vocabulary_select_authenticated ON public.mtconnect_vocabulary FOR SELECT TO authenticated USING (true);
-
 
 --
 
@@ -9348,7 +8440,6 @@ DROP POLICY IF EXISTS opcua_vocabulary_select_authenticated ON public.opcua_voca
 
 CREATE POLICY opcua_vocabulary_select_authenticated ON public.opcua_vocabulary FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- permissions :: ROW SECURITY
@@ -9363,7 +8454,6 @@ DROP POLICY IF EXISTS permissions_select_authenticated ON public.permissions;
 --
 
 CREATE POLICY permissions_select_authenticated ON public.permissions FOR SELECT TO authenticated USING (true);
-
 
 --
 
@@ -9380,7 +8470,6 @@ DROP POLICY IF EXISTS platform_alerts_all_service_role ON public.platform_alerts
 
 CREATE POLICY platform_alerts_all_service_role ON public.platform_alerts TO service_role USING (true) WITH CHECK (true);
 
-
 --
 
 -- platform_alerts platform_alerts_select_authenticated :: POLICY
@@ -9388,7 +8477,6 @@ DROP POLICY IF EXISTS platform_alerts_select_authenticated ON public.platform_al
 --
 
 CREATE POLICY platform_alerts_select_authenticated ON public.platform_alerts FOR SELECT TO authenticated USING (true);
-
 
 --
 
@@ -9405,7 +8493,6 @@ DROP POLICY IF EXISTS playback_jobs_select_privileged ON public.playback_jobs;
 
 CREATE POLICY playback_jobs_select_privileged ON public.playback_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
 
-
 --
 
 -- playback_worker_status :: ROW SECURITY
@@ -9420,7 +8507,6 @@ DROP POLICY IF EXISTS playback_worker_status_select_privileged ON public.playbac
 --
 
 CREATE POLICY playback_worker_status_select_privileged ON public.playback_worker_status FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
-
 
 --
 
@@ -9437,7 +8523,6 @@ DROP POLICY IF EXISTS rebirth_requests_select_privileged ON public.rebirth_reque
 
 CREATE POLICY rebirth_requests_select_privileged ON public.rebirth_requests FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
 
-
 --
 
 -- role_permissions :: ROW SECURITY
@@ -9453,7 +8538,6 @@ DROP POLICY IF EXISTS role_permissions_select_authenticated ON public.role_permi
 
 CREATE POLICY role_permissions_select_authenticated ON public.role_permissions FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- roles :: ROW SECURITY
@@ -9468,7 +8552,6 @@ DROP POLICY IF EXISTS roles_select_authenticated ON public.roles;
 --
 
 CREATE POLICY roles_select_authenticated ON public.roles FOR SELECT TO authenticated USING (true);
-
 
 --
 
@@ -9492,7 +8575,6 @@ DROP POLICY IF EXISTS schemas_delete_privileged ON public.schemas;
 
 CREATE POLICY schemas_delete_privileged ON public.schemas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
 
-
 --
 
 -- schemas schemas_insert_privileged :: POLICY
@@ -9500,7 +8582,6 @@ DROP POLICY IF EXISTS schemas_insert_privileged ON public.schemas;
 --
 
 CREATE POLICY schemas_insert_privileged ON public.schemas FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
-
 
 --
 
@@ -9510,7 +8591,6 @@ DROP POLICY IF EXISTS schemas_select_authenticated ON public.schemas;
 
 CREATE POLICY schemas_select_authenticated ON public.schemas FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- schemas schemas_update_privileged :: POLICY
@@ -9518,7 +8598,6 @@ DROP POLICY IF EXISTS schemas_update_privileged ON public.schemas;
 --
 
 CREATE POLICY schemas_update_privileged ON public.schemas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
-
 
 --
 
@@ -9535,7 +8614,6 @@ DROP POLICY IF EXISTS system_settings_all_service_role ON public.system_settings
 
 CREATE POLICY system_settings_all_service_role ON public.system_settings TO service_role USING (true) WITH CHECK (true);
 
-
 --
 
 -- system_settings system_settings_select_authenticated :: POLICY
@@ -9544,7 +8622,6 @@ DROP POLICY IF EXISTS system_settings_select_authenticated ON public.system_sett
 
 CREATE POLICY system_settings_select_authenticated ON public.system_settings FOR SELECT TO authenticated USING (true);
 
-
 --
 
 -- system_settings system_settings_update_admin :: POLICY
@@ -9552,7 +8629,6 @@ DROP POLICY IF EXISTS system_settings_update_admin ON public.system_settings;
 --
 
 CREATE POLICY system_settings_update_admin ON public.system_settings FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
-
 
 --
 
@@ -9569,7 +8645,6 @@ DROP POLICY IF EXISTS user_roles_select_own_or_privileged ON public.user_roles;
 
 CREATE POLICY user_roles_select_own_or_privileged ON public.user_roles FOR SELECT TO authenticated USING (((user_id = (auth.uid())::text) OR public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])));
 
-
 --
 
 -- webhook_endpoints :: ROW SECURITY
@@ -9584,7 +8659,6 @@ DROP POLICY IF EXISTS webhook_endpoints_select_privileged ON public.webhook_endp
 --
 
 CREATE POLICY webhook_endpoints_select_privileged ON public.webhook_endpoints FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
-
 
 --
 
@@ -9608,7 +8682,6 @@ END $g$;
 GRANT USAGE ON SCHEMA timescale TO authenticated;
 GRANT USAGE ON SCHEMA timescale TO service_role;
 
-
 --
 
 -- FUNCTION active_schema_version(schema_id uuid) :: ACL
@@ -9618,7 +8691,6 @@ REVOKE ALL ON FUNCTION public.active_schema_version(schema_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.active_schema_version(schema_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.active_schema_version(schema_id uuid) TO authenticated;
 
-
 --
 
 -- FUNCTION approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) :: ACL
@@ -9627,7 +8699,6 @@ GRANT ALL ON FUNCTION public.active_schema_version(schema_id uuid) TO authentica
 REVOKE ALL ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) TO service_role;
 
-
 --
 
 -- FUNCTION audit_domain_for(p_entity_type text, p_action text) :: ACL
@@ -9635,7 +8706,6 @@ GRANT ALL ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_acto
 
 REVOKE ALL ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) TO service_role;
-
 
 --
 
@@ -9646,7 +8716,6 @@ REVOKE ALL ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id 
 GRANT ALL ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) TO authenticated;
 
-
 --
 
 -- FUNCTION capped_capture_manifest(p_manifest jsonb) :: ACL
@@ -9656,7 +8725,6 @@ REVOKE ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) FROM PUB
 GRANT ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) TO authenticated;
 
-
 --
 
 -- FUNCTION clear_credential_revoked_on_enrolment() :: ACL
@@ -9664,7 +8732,6 @@ GRANT ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) TO authen
 
 REVOKE ALL ON FUNCTION public.clear_credential_revoked_on_enrolment() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.clear_credential_revoked_on_enrolment() TO service_role;
-
 
 --
 
@@ -9675,7 +8742,6 @@ REVOKE ALL ON FUNCTION public.cold_storage_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.cold_storage_rows() TO service_role;
 GRANT ALL ON FUNCTION public.cold_storage_rows() TO authenticated;
 
-
 --
 
 -- FUNCTION consume_gateway_enrollment_token(p_token text) :: ACL
@@ -9683,7 +8749,6 @@ GRANT ALL ON FUNCTION public.cold_storage_rows() TO authenticated;
 
 REVOKE ALL ON FUNCTION public.consume_gateway_enrollment_token(p_token text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.consume_gateway_enrollment_token(p_token text) TO service_role;
-
 
 --
 
@@ -9694,7 +8759,6 @@ REVOKE ALL ON FUNCTION public.create_service_principal(p_role_name text, p_note 
 GRANT ALL ON FUNCTION public.create_service_principal(p_role_name text, p_note text) TO service_role;
 GRANT ALL ON FUNCTION public.create_service_principal(p_role_name text, p_note text) TO authenticated;
 
-
 --
 
 -- FUNCTION custom_access_token_hook(event jsonb) :: ACL
@@ -9703,7 +8767,6 @@ GRANT ALL ON FUNCTION public.create_service_principal(p_role_name text, p_note t
 REVOKE ALL ON FUNCTION public.custom_access_token_hook(event jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.custom_access_token_hook(event jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.custom_access_token_hook(event jsonb) TO supabase_auth_admin;
-
 
 --
 
@@ -9714,7 +8777,6 @@ REVOKE ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_pur
 GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) TO authenticated;
 
-
 --
 
 -- FUNCTION directory_liveness_job_map() :: ACL
@@ -9722,7 +8784,6 @@ GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purg
 
 REVOKE ALL ON FUNCTION public.directory_liveness_job_map() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.directory_liveness_job_map() TO service_role;
-
 
 --
 
@@ -9733,7 +8794,6 @@ REVOKE ALL ON FUNCTION public.dispatch_device_quarantine_webhook() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.dispatch_device_quarantine_webhook() TO service_role;
 GRANT ALL ON FUNCTION public.dispatch_device_quarantine_webhook() TO authenticated;
 
-
 --
 
 -- FUNCTION enforce_digital_thread_append_only() :: ACL
@@ -9741,7 +8801,6 @@ GRANT ALL ON FUNCTION public.dispatch_device_quarantine_webhook() TO authenticat
 
 REVOKE ALL ON FUNCTION public.enforce_digital_thread_append_only() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.enforce_digital_thread_append_only() TO service_role;
-
 
 --
 
@@ -9752,7 +8811,6 @@ REVOKE ALL ON FUNCTION public.enforce_metric_catalog_immutability() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.enforce_metric_catalog_immutability() TO service_role;
 GRANT ALL ON FUNCTION public.enforce_metric_catalog_immutability() TO authenticated;
 
-
 --
 
 -- FUNCTION enforce_metric_group_spelling() :: ACL
@@ -9761,7 +8819,6 @@ GRANT ALL ON FUNCTION public.enforce_metric_catalog_immutability() TO authentica
 REVOKE ALL ON FUNCTION public.enforce_metric_group_spelling() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.enforce_metric_group_spelling() TO service_role;
 GRANT ALL ON FUNCTION public.enforce_metric_group_spelling() TO authenticated;
-
 
 --
 
@@ -9772,14 +8829,12 @@ REVOKE ALL ON FUNCTION public.enforce_schema_version_provenance() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.enforce_schema_version_provenance() TO service_role;
 GRANT ALL ON FUNCTION public.enforce_schema_version_provenance() TO authenticated;
 
-
 --
 
 -- FUNCTION ensure_cron_job(p_name text, p_schedule text, p_command text) :: ACL
 --
 
 REVOKE ALL ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) FROM PUBLIC;
-
 
 --
 
@@ -9788,7 +8843,6 @@ REVOKE ALL ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_co
 
 REVOKE ALL ON FUNCTION public.ensure_gateway_status_view() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ensure_gateway_status_view() TO service_role;
-
 
 --
 
@@ -9799,7 +8853,6 @@ REVOKE ALL ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) FROM PUBL
 GRANT ALL ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) TO authenticated;
 
-
 --
 
 -- FUNCTION fork_schema(parent_schema_id uuid, change_description text) :: ACL
@@ -9809,7 +8862,6 @@ REVOKE ALL ON FUNCTION public.fork_schema(parent_schema_id uuid, change_descript
 GRANT ALL ON FUNCTION public.fork_schema(parent_schema_id uuid, change_description text) TO service_role;
 GRANT ALL ON FUNCTION public.fork_schema(parent_schema_id uuid, change_description text) TO authenticated;
 
-
 --
 
 -- TABLE gateways :: ACL
@@ -9817,7 +8869,6 @@ GRANT ALL ON FUNCTION public.fork_schema(parent_schema_id uuid, change_descripti
 
 GRANT ALL ON TABLE public.gateways TO service_role;
 GRANT ALL ON TABLE public.gateways TO authenticated;
-
 
 --
 
@@ -9827,7 +8878,6 @@ GRANT ALL ON TABLE public.gateways TO authenticated;
 REVOKE ALL ON FUNCTION public.gateway_has_broker_credential(g public.gateways) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.gateway_has_broker_credential(g public.gateways) TO service_role;
 GRANT ALL ON FUNCTION public.gateway_has_broker_credential(g public.gateways) TO authenticated;
-
 
 --
 
@@ -9849,7 +8899,6 @@ END $g$;
 REVOKE ALL ON FUNCTION public.gateway_holds_a_credential(g public.gateways) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.gateway_holds_a_credential(g public.gateways) TO service_role;
 
-
 --
 
 -- FUNCTION handle_new_user() :: ACL
@@ -9857,7 +8906,6 @@ GRANT ALL ON FUNCTION public.gateway_holds_a_credential(g public.gateways) TO se
 
 REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.handle_new_user() TO service_role;
-
 
 --
 
@@ -9868,7 +8916,6 @@ REVOKE ALL ON FUNCTION public.has_role(allowed_roles text[]) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.has_role(allowed_roles text[]) TO service_role;
 GRANT ALL ON FUNCTION public.has_role(allowed_roles text[]) TO authenticated;
 
-
 --
 
 -- FUNCTION ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) :: ACL
@@ -9877,7 +8924,6 @@ GRANT ALL ON FUNCTION public.has_role(allowed_roles text[]) TO authenticated;
 REVOKE ALL ON FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) TO authenticated;
-
 
 --
 
@@ -9888,7 +8934,6 @@ REVOKE ALL ON FUNCTION public.ingest_claim_capture_job() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_claim_capture_job() TO service_role;
 GRANT ALL ON FUNCTION public.ingest_claim_capture_job() TO authenticated;
 
-
 --
 
 -- FUNCTION ingest_claim_rebirth_requests() :: ACL
@@ -9897,7 +8942,6 @@ GRANT ALL ON FUNCTION public.ingest_claim_capture_job() TO authenticated;
 REVOKE ALL ON FUNCTION public.ingest_claim_rebirth_requests() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_claim_rebirth_requests() TO service_role;
 GRANT ALL ON FUNCTION public.ingest_claim_rebirth_requests() TO authenticated;
-
 
 --
 
@@ -9908,7 +8952,6 @@ REVOKE ALL ON FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) F
 GRANT ALL ON FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) TO authenticated;
 
-
 --
 
 -- FUNCTION ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb) :: ACL
@@ -9917,7 +8960,6 @@ GRANT ALL ON FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) TO
 REVOKE ALL ON FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb) TO authenticated;
-
 
 --
 
@@ -9928,7 +8970,6 @@ REVOKE ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) FROM 
 GRANT ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) TO authenticated;
 
-
 --
 
 -- FUNCTION ingest_reconcile_capture_jobs() :: ACL
@@ -9937,7 +8978,6 @@ GRANT ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) TO aut
 REVOKE ALL ON FUNCTION public.ingest_reconcile_capture_jobs() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_reconcile_capture_jobs() TO service_role;
 GRANT ALL ON FUNCTION public.ingest_reconcile_capture_jobs() TO authenticated;
-
 
 --
 
@@ -9948,7 +8988,6 @@ REVOKE ALL ON FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p
 GRANT ALL ON FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p_metrics text[], p_observed_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p_metrics text[], p_observed_at timestamp with time zone) TO authenticated;
 
-
 --
 
 -- FUNCTION ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb) :: ACL
@@ -9957,7 +8996,6 @@ GRANT ALL ON FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p_
 REVOKE ALL ON FUNCTION public.ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb) TO authenticated;
-
 
 --
 
@@ -9968,7 +9006,6 @@ REVOKE ALL ON FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttl
 GRANT ALL ON FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttled boolean, p_error text) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttled boolean, p_error text) TO authenticated;
 
-
 --
 
 -- FUNCTION ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[], p_observed_at timestamp with time zone) :: ACL
@@ -9977,7 +9014,6 @@ GRANT ALL ON FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttle
 REVOKE ALL ON FUNCTION public.ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[], p_observed_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[], p_observed_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[], p_observed_at timestamp with time zone) TO authenticated;
-
 
 --
 
@@ -9988,7 +9024,6 @@ REVOKE ALL ON FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_qua
 GRANT ALL ON FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_quarantine_reason text, p_reported_identity text) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_quarantine_reason text, p_reported_identity text) TO authenticated;
 
-
 --
 
 -- FUNCTION ingest_set_device_state(p_device_id uuid, p_status text, p_identity_source text, p_first_dbirth_at timestamp with time zone) :: ACL
@@ -9997,7 +9032,6 @@ GRANT ALL ON FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_quar
 REVOKE ALL ON FUNCTION public.ingest_set_device_state(p_device_id uuid, p_status text, p_identity_source text, p_first_dbirth_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_set_device_state(p_device_id uuid, p_status text, p_identity_source text, p_first_dbirth_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_set_device_state(p_device_id uuid, p_status text, p_identity_source text, p_first_dbirth_at timestamp with time zone) TO authenticated;
-
 
 --
 
@@ -10008,7 +9042,6 @@ REVOKE ALL ON FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_r
 GRANT ALL ON FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_rows jsonb, p_observed_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_rows jsonb, p_observed_at timestamp with time zone) TO authenticated;
 
-
 --
 
 -- FUNCTION is_active_capture_object(p_name text) :: ACL
@@ -10017,7 +9050,6 @@ GRANT ALL ON FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_ro
 REVOKE ALL ON FUNCTION public.is_active_capture_object(p_name text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_active_capture_object(p_name text) TO service_role;
 GRANT ALL ON FUNCTION public.is_active_capture_object(p_name text) TO authenticated;
-
 
 --
 
@@ -10028,7 +9060,6 @@ REVOKE ALL ON FUNCTION public.is_active_playback_capture(p_name text) FROM PUBLI
 GRANT ALL ON FUNCTION public.is_active_playback_capture(p_name text) TO service_role;
 GRANT ALL ON FUNCTION public.is_active_playback_capture(p_name text) TO authenticated;
 
-
 --
 
 -- FUNCTION is_capture_subject_prefix(p_folder text) :: ACL
@@ -10037,7 +9068,6 @@ GRANT ALL ON FUNCTION public.is_active_playback_capture(p_name text) TO authenti
 REVOKE ALL ON FUNCTION public.is_capture_subject_prefix(p_folder text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_capture_subject_prefix(p_folder text) TO service_role;
 GRANT ALL ON FUNCTION public.is_capture_subject_prefix(p_folder text) TO authenticated;
-
 
 --
 
@@ -10048,7 +9078,6 @@ REVOKE ALL ON FUNCTION public.is_ingestion_caller() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_ingestion_caller() TO service_role;
 GRANT ALL ON FUNCTION public.is_ingestion_caller() TO authenticated;
 
-
 --
 
 -- FUNCTION is_machine_principal(p_user_id uuid) :: ACL
@@ -10057,7 +9086,6 @@ GRANT ALL ON FUNCTION public.is_ingestion_caller() TO authenticated;
 REVOKE ALL ON FUNCTION public.is_machine_principal(p_user_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_machine_principal(p_user_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.is_machine_principal(p_user_id uuid) TO authenticated;
-
 
 --
 
@@ -10068,7 +9096,6 @@ REVOKE ALL ON FUNCTION public.is_playback_caller() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_playback_caller() TO service_role;
 GRANT ALL ON FUNCTION public.is_playback_caller() TO authenticated;
 
-
 --
 
 -- FUNCTION is_valid_quarantine_reason(p_reason text) :: ACL
@@ -10077,7 +9104,6 @@ GRANT ALL ON FUNCTION public.is_playback_caller() TO authenticated;
 REVOKE ALL ON FUNCTION public.is_valid_quarantine_reason(p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_valid_quarantine_reason(p_reason text) TO service_role;
 GRANT ALL ON FUNCTION public.is_valid_quarantine_reason(p_reason text) TO authenticated;
-
 
 --
 
@@ -10088,7 +9114,6 @@ REVOKE ALL ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, 
 GRANT ALL ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) TO service_role;
 GRANT ALL ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) TO authenticated;
 
-
 --
 
 -- FUNCTION list_service_principals() :: ACL
@@ -10098,7 +9123,6 @@ REVOKE ALL ON FUNCTION public.list_service_principals() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.list_service_principals() TO service_role;
 GRANT ALL ON FUNCTION public.list_service_principals() TO authenticated;
 
-
 --
 
 -- FUNCTION log_digital_thread_event() :: ACL
@@ -10106,7 +9130,6 @@ GRANT ALL ON FUNCTION public.list_service_principals() TO authenticated;
 
 REVOKE ALL ON FUNCTION public.log_digital_thread_event() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.log_digital_thread_event() TO service_role;
-
 
 --
 
@@ -10116,7 +9139,6 @@ GRANT ALL ON FUNCTION public.log_digital_thread_event() TO service_role;
 REVOKE ALL ON FUNCTION public.log_role_assignment() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.log_role_assignment() TO service_role;
 
-
 --
 
 -- FUNCTION may_manage_captures() :: ACL
@@ -10125,7 +9147,6 @@ GRANT ALL ON FUNCTION public.log_role_assignment() TO service_role;
 REVOKE ALL ON FUNCTION public.may_manage_captures() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.may_manage_captures() TO service_role;
 GRANT ALL ON FUNCTION public.may_manage_captures() TO authenticated;
-
 
 --
 
@@ -10160,7 +9181,6 @@ REVOKE ALL ON FUNCTION public.playback_claim_job() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.playback_claim_job() TO service_role;
 GRANT ALL ON FUNCTION public.playback_claim_job() TO authenticated;
 
-
 --
 
 -- FUNCTION playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) :: ACL
@@ -10169,7 +9189,6 @@ GRANT ALL ON FUNCTION public.playback_claim_job() TO authenticated;
 REVOKE ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) TO service_role;
 GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) TO authenticated;
-
 
 --
 
@@ -10180,7 +9199,6 @@ REVOKE ALL ON FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent i
 GRANT ALL ON FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent integer, p_messages_total integer, p_elapsed_seconds integer) TO service_role;
 GRANT ALL ON FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent integer, p_messages_total integer, p_elapsed_seconds integer) TO authenticated;
 
-
 --
 
 -- FUNCTION playback_reconcile_jobs() :: ACL
@@ -10189,7 +9207,6 @@ GRANT ALL ON FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent in
 REVOKE ALL ON FUNCTION public.playback_reconcile_jobs() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.playback_reconcile_jobs() TO service_role;
 GRANT ALL ON FUNCTION public.playback_reconcile_jobs() TO authenticated;
-
 
 --
 
@@ -10200,7 +9217,6 @@ REVOKE ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[]) F
 GRANT ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[]) TO service_role;
 GRANT ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[]) TO authenticated;
 
-
 --
 
 -- FUNCTION playback_target_must_be_shadow() :: ACL
@@ -10208,7 +9224,6 @@ GRANT ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[]) TO
 
 REVOKE ALL ON FUNCTION public.playback_target_must_be_shadow() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.playback_target_must_be_shadow() TO service_role;
-
 
 --
 
@@ -10219,14 +9234,12 @@ REVOKE ALL ON FUNCTION public.prevent_active_schema_mutation() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.prevent_active_schema_mutation() TO service_role;
 GRANT ALL ON FUNCTION public.prevent_active_schema_mutation() TO authenticated;
 
-
 --
 
 -- FUNCTION prune_platform_alerts(p_retain interval) :: ACL
 --
 
 REVOKE ALL ON FUNCTION public.prune_platform_alerts(p_retain interval) FROM PUBLIC;
-
 
 --
 
@@ -10237,7 +9250,6 @@ REVOKE ALL ON FUNCTION public.publish_schema_version(draft_schema_id uuid) FROM 
 GRANT ALL ON FUNCTION public.publish_schema_version(draft_schema_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.publish_schema_version(draft_schema_id uuid) TO authenticated;
 
-
 --
 
 -- FUNCTION record_gateway_credential_issued(p_gateway_id uuid) :: ACL
@@ -10247,7 +9259,6 @@ REVOKE ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid
 GRANT ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) TO authenticated;
 
-
 --
 
 -- FUNCTION record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) :: ACL
@@ -10255,7 +9266,6 @@ GRANT ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid)
 
 REVOKE ALL ON FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) TO service_role;
-
 
 --
 
@@ -10266,7 +9276,6 @@ REVOKE ALL ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_vio
 GRANT ALL ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) TO authenticated;
 
-
 --
 
 -- FUNCTION record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) :: ACL
@@ -10274,7 +9283,6 @@ GRANT ALL ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_viol
 
 REVOKE ALL ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) TO service_role;
-
 
 --
 
@@ -10284,7 +9292,6 @@ GRANT ALL ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_
 REVOKE ALL ON FUNCTION public.refresh_directory_liveness() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.refresh_directory_liveness() TO service_role;
 
-
 --
 
 -- FUNCTION refuse_archiving_the_last_shadow_gateway() :: ACL
@@ -10292,7 +9299,6 @@ GRANT ALL ON FUNCTION public.refresh_directory_liveness() TO service_role;
 
 REVOKE ALL ON FUNCTION public.refuse_archiving_the_last_shadow_gateway() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.refuse_archiving_the_last_shadow_gateway() TO service_role;
-
 
 --
 
@@ -10303,7 +9309,6 @@ REVOKE ALL ON FUNCTION public.register_uploaded_capture(p_subject_kind text, p_s
 GRANT ALL ON FUNCTION public.register_uploaded_capture(p_subject_kind text, p_subject_id uuid, p_storage_path text, p_size_bytes bigint, p_message_count integer, p_manifest jsonb, p_note text, p_replace boolean) TO service_role;
 GRANT ALL ON FUNCTION public.register_uploaded_capture(p_subject_kind text, p_subject_id uuid, p_storage_path text, p_size_bytes bigint, p_message_count integer, p_manifest jsonb, p_note text, p_replace boolean) TO authenticated;
 
-
 --
 
 -- FUNCTION release_gateway_enrollment_token(p_token text) :: ACL
@@ -10311,7 +9316,6 @@ GRANT ALL ON FUNCTION public.register_uploaded_capture(p_subject_kind text, p_su
 
 REVOKE ALL ON FUNCTION public.release_gateway_enrollment_token(p_token text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.release_gateway_enrollment_token(p_token text) TO service_role;
-
 
 --
 
@@ -10322,7 +9326,6 @@ REVOKE ALL ON FUNCTION public.relocate_devices(p_moves jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.relocate_devices(p_moves jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.relocate_devices(p_moves jsonb) TO authenticated;
 
-
 --
 
 -- FUNCTION request_capture_stop(p_job_id uuid) :: ACL
@@ -10331,7 +9334,6 @@ GRANT ALL ON FUNCTION public.relocate_devices(p_moves jsonb) TO authenticated;
 REVOKE ALL ON FUNCTION public.request_capture_stop(p_job_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.request_capture_stop(p_job_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.request_capture_stop(p_job_id uuid) TO authenticated;
-
 
 --
 
@@ -10342,7 +9344,6 @@ REVOKE ALL ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) FROM PU
 GRANT ALL ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) TO authenticated;
 
-
 --
 
 -- FUNCTION request_playback_stop(p_job_id uuid) :: ACL
@@ -10351,7 +9352,6 @@ GRANT ALL ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) TO authe
 REVOKE ALL ON FUNCTION public.request_playback_stop(p_job_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.request_playback_stop(p_job_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.request_playback_stop(p_job_id uuid) TO authenticated;
-
 
 --
 
@@ -10362,7 +9362,6 @@ REVOKE ALL ON FUNCTION public.require_ingestion_caller(p_fn text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.require_ingestion_caller(p_fn text) TO service_role;
 GRANT ALL ON FUNCTION public.require_ingestion_caller(p_fn text) TO authenticated;
 
-
 --
 
 -- FUNCTION require_playback_caller(p_fn text) :: ACL
@@ -10372,14 +9371,12 @@ REVOKE ALL ON FUNCTION public.require_playback_caller(p_fn text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.require_playback_caller(p_fn text) TO service_role;
 GRANT ALL ON FUNCTION public.require_playback_caller(p_fn text) TO authenticated;
 
-
 --
 
 -- FUNCTION revoke_anon_function_privileges() :: ACL
 --
 
 REVOKE ALL ON FUNCTION public.revoke_anon_function_privileges() FROM PUBLIC;
-
 
 --
 
@@ -10389,7 +9386,6 @@ REVOKE ALL ON FUNCTION public.revoke_anon_function_privileges() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.revoke_credential_on_decommission() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.revoke_credential_on_decommission() TO service_role;
 
-
 --
 
 -- FUNCTION revoke_gateway_credential(p_sparkplug_id text) :: ACL
@@ -10397,7 +9393,6 @@ GRANT ALL ON FUNCTION public.revoke_credential_on_decommission() TO service_role
 
 REVOKE ALL ON FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) TO service_role;
-
 
 --
 
@@ -10408,7 +9403,6 @@ REVOKE ALL ON FUNCTION public.schema_version_base_name(schema_name text) FROM PU
 GRANT ALL ON FUNCTION public.schema_version_base_name(schema_name text) TO service_role;
 GRANT ALL ON FUNCTION public.schema_version_base_name(schema_name text) TO authenticated;
 
-
 --
 
 -- FUNCTION seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) :: ACL
@@ -10416,7 +9410,6 @@ GRANT ALL ON FUNCTION public.schema_version_base_name(schema_name text) TO authe
 
 REVOKE ALL ON FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) TO service_role;
-
 
 --
 
@@ -10427,7 +9420,6 @@ REVOKE ALL ON FUNCTION public.service_token_max_days() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.service_token_max_days() TO service_role;
 GRANT ALL ON FUNCTION public.service_token_max_days() TO authenticated;
 
-
 --
 
 -- FUNCTION stamp_audit_domain() :: ACL
@@ -10435,7 +9427,6 @@ GRANT ALL ON FUNCTION public.service_token_max_days() TO authenticated;
 
 REVOKE ALL ON FUNCTION public.stamp_audit_domain() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.stamp_audit_domain() TO service_role;
-
 
 --
 
@@ -10446,7 +9437,6 @@ REVOKE ALL ON FUNCTION public.start_capture_job(p_subject_kind text, p_subject_i
 GRANT ALL ON FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) TO service_role;
 GRANT ALL ON FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) TO authenticated;
 
-
 --
 
 -- FUNCTION start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) :: ACL
@@ -10456,7 +9446,6 @@ REVOKE ALL ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gat
 GRANT ALL ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) TO service_role;
 GRANT ALL ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) TO authenticated;
 
-
 --
 
 -- FUNCTION sweep_gateway_credential_revocations() :: ACL
@@ -10464,7 +9453,6 @@ GRANT ALL ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gate
 
 REVOKE ALL ON FUNCTION public.sweep_gateway_credential_revocations() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.sweep_gateway_credential_revocations() TO service_role;
-
 
 --
 
@@ -10474,7 +9462,6 @@ GRANT ALL ON FUNCTION public.sweep_gateway_credential_revocations() TO service_r
 REVOKE ALL ON FUNCTION public.sync_gateway_deployment() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.sync_gateway_deployment() TO service_role;
 
-
 --
 
 -- FUNCTION system_settings_stamp() :: ACL
@@ -10482,7 +9469,6 @@ GRANT ALL ON FUNCTION public.sync_gateway_deployment() TO service_role;
 
 REVOKE ALL ON FUNCTION public.system_settings_stamp() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.system_settings_stamp() TO service_role;
-
 
 --
 
@@ -10492,7 +9478,6 @@ GRANT ALL ON FUNCTION public.system_settings_stamp() TO service_role;
 REVOKE ALL ON FUNCTION public.withdraw_gateway_enrollment_tokens() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.withdraw_gateway_enrollment_tokens() TO service_role;
 
-
 --
 
 -- TABLE ashrae223_vocabulary :: ACL
@@ -10500,7 +9485,6 @@ GRANT ALL ON FUNCTION public.withdraw_gateway_enrollment_tokens() TO service_rol
 
 GRANT ALL ON TABLE public.ashrae223_vocabulary TO service_role;
 GRANT SELECT ON TABLE public.ashrae223_vocabulary TO authenticated;
-
 
 --
 
@@ -10510,7 +9494,6 @@ GRANT SELECT ON TABLE public.ashrae223_vocabulary TO authenticated;
 GRANT ALL ON TABLE public.asset_config TO service_role;
 GRANT ALL ON TABLE public.asset_config TO authenticated;
 
-
 --
 
 -- TABLE capture_jobs :: ACL
@@ -10518,7 +9501,6 @@ GRANT ALL ON TABLE public.asset_config TO authenticated;
 
 GRANT ALL ON TABLE public.capture_jobs TO service_role;
 GRANT SELECT ON TABLE public.capture_jobs TO authenticated;
-
 
 --
 
@@ -10528,7 +9510,6 @@ GRANT SELECT ON TABLE public.capture_jobs TO authenticated;
 GRANT ALL ON TABLE public.captures TO service_role;
 GRANT SELECT,DELETE ON TABLE public.captures TO authenticated;
 
-
 --
 
 -- TABLE cells :: ACL
@@ -10536,7 +9517,6 @@ GRANT SELECT,DELETE ON TABLE public.captures TO authenticated;
 
 GRANT ALL ON TABLE public.cells TO service_role;
 GRANT ALL ON TABLE public.cells TO authenticated;
-
 
 --
 
@@ -10546,7 +9526,6 @@ GRANT ALL ON TABLE public.cells TO authenticated;
 GRANT ALL ON TABLE public.devices TO service_role;
 GRANT ALL ON TABLE public.devices TO authenticated;
 
-
 --
 
 -- TABLE device_locations :: ACL
@@ -10554,7 +9533,6 @@ GRANT ALL ON TABLE public.devices TO authenticated;
 
 GRANT ALL ON TABLE public.device_locations TO service_role;
 GRANT SELECT ON TABLE public.device_locations TO authenticated;
-
 
 --
 
@@ -10564,7 +9542,6 @@ GRANT SELECT ON TABLE public.device_locations TO authenticated;
 GRANT ALL ON TABLE public.device_nameplate TO service_role;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.device_nameplate TO authenticated;
 
-
 --
 
 -- TABLE device_submodels :: ACL
@@ -10572,7 +9549,6 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.device_nameplate TO authentica
 
 GRANT ALL ON TABLE public.device_submodels TO service_role;
 GRANT ALL ON TABLE public.device_submodels TO authenticated;
-
 
 --
 
@@ -10582,7 +9558,6 @@ GRANT ALL ON TABLE public.device_submodels TO authenticated;
 GRANT ALL ON TABLE public.device_schemas TO service_role;
 GRANT ALL ON TABLE public.device_schemas TO authenticated;
 
-
 --
 
 -- TABLE digital_thread :: ACL
@@ -10591,14 +9566,12 @@ GRANT ALL ON TABLE public.device_schemas TO authenticated;
 GRANT SELECT,REFERENCES,TRIGGER,MAINTAIN ON TABLE public.digital_thread TO service_role;
 GRANT SELECT ON TABLE public.digital_thread TO authenticated;
 
-
 --
 
 -- TABLE directory_liveness_probe :: ACL
 --
 
 GRANT ALL ON TABLE public.directory_liveness_probe TO service_role;
-
 
 --
 
@@ -10608,14 +9581,12 @@ GRANT ALL ON TABLE public.directory_liveness_probe TO service_role;
 GRANT ALL ON TABLE public.directory_services TO service_role;
 GRANT ALL ON TABLE public.directory_services TO authenticated;
 
-
 --
 
 -- TABLE gateway_enrollment_tokens :: ACL
 --
 
 GRANT ALL ON TABLE public.gateway_enrollment_tokens TO service_role;
-
 
 --
 
@@ -10636,7 +9607,6 @@ END $g$;
 GRANT ALL ON TABLE public.gateway_status TO service_role;
 GRANT SELECT ON TABLE public.gateway_status TO authenticated;
 
-
 --
 
 -- TABLE idta_submodel_templates :: ACL
@@ -10644,7 +9614,6 @@ GRANT SELECT ON TABLE public.gateway_status TO authenticated;
 
 GRANT ALL ON TABLE public.idta_submodel_templates TO service_role;
 GRANT SELECT ON TABLE public.idta_submodel_templates TO authenticated;
-
 
 --
 
@@ -10654,7 +9623,6 @@ GRANT SELECT ON TABLE public.idta_submodel_templates TO authenticated;
 GRANT ALL ON TABLE public.iso22400_vocabulary TO service_role;
 GRANT SELECT ON TABLE public.iso22400_vocabulary TO authenticated;
 
-
 --
 
 -- TABLE links :: ACL
@@ -10662,7 +9630,6 @@ GRANT SELECT ON TABLE public.iso22400_vocabulary TO authenticated;
 
 GRANT ALL ON TABLE public.links TO service_role;
 GRANT ALL ON TABLE public.links TO authenticated;
-
 
 --
 
@@ -10672,7 +9639,6 @@ GRANT ALL ON TABLE public.links TO authenticated;
 GRANT ALL ON TABLE public.metric_catalog TO service_role;
 GRANT ALL ON TABLE public.metric_catalog TO authenticated;
 
-
 --
 
 -- TABLE metric_groups :: ACL
@@ -10680,7 +9646,6 @@ GRANT ALL ON TABLE public.metric_catalog TO authenticated;
 
 GRANT ALL ON TABLE public.metric_groups TO service_role;
 GRANT ALL ON TABLE public.metric_groups TO authenticated;
-
 
 --
 
@@ -10690,14 +9655,12 @@ GRANT ALL ON TABLE public.metric_groups TO authenticated;
 GRANT ALL ON TABLE public.mtconnect_vocabulary TO service_role;
 GRANT SELECT ON TABLE public.mtconnect_vocabulary TO authenticated;
 
-
 --
 
 -- TABLE one_shot_migrations :: ACL
 --
 
 GRANT SELECT,REFERENCES,TRIGGER,MAINTAIN ON TABLE public.one_shot_migrations TO service_role;
-
 
 --
 
@@ -10707,7 +9670,6 @@ GRANT SELECT,REFERENCES,TRIGGER,MAINTAIN ON TABLE public.one_shot_migrations TO 
 GRANT ALL ON TABLE public.opcua_vocabulary TO service_role;
 GRANT SELECT ON TABLE public.opcua_vocabulary TO authenticated;
 
-
 --
 
 -- TABLE permissions :: ACL
@@ -10715,7 +9677,6 @@ GRANT SELECT ON TABLE public.opcua_vocabulary TO authenticated;
 
 GRANT ALL ON TABLE public.permissions TO service_role;
 GRANT ALL ON TABLE public.permissions TO authenticated;
-
 
 --
 
@@ -10725,7 +9686,6 @@ GRANT ALL ON TABLE public.permissions TO authenticated;
 GRANT ALL ON TABLE public.platform_alerts TO service_role;
 GRANT SELECT ON TABLE public.platform_alerts TO authenticated;
 
-
 --
 
 -- TABLE platform_alerts_active :: ACL
@@ -10733,7 +9693,6 @@ GRANT SELECT ON TABLE public.platform_alerts TO authenticated;
 
 GRANT ALL ON TABLE public.platform_alerts_active TO service_role;
 GRANT SELECT ON TABLE public.platform_alerts_active TO authenticated;
-
 
 --
 
@@ -10754,7 +9713,6 @@ END $g$;
 GRANT ALL ON TABLE public.playback_jobs TO service_role;
 GRANT SELECT ON TABLE public.playback_jobs TO authenticated;
 
-
 --
 
 -- TABLE playback_worker_status :: ACL
@@ -10762,7 +9720,6 @@ GRANT SELECT ON TABLE public.playback_jobs TO authenticated;
 
 GRANT ALL ON TABLE public.playback_worker_status TO service_role;
 GRANT SELECT ON TABLE public.playback_worker_status TO authenticated;
-
 
 --
 
@@ -10772,7 +9729,6 @@ GRANT SELECT ON TABLE public.playback_worker_status TO authenticated;
 GRANT ALL ON TABLE public.rebirth_requests TO service_role;
 GRANT SELECT ON TABLE public.rebirth_requests TO authenticated;
 
-
 --
 
 -- TABLE role_permissions :: ACL
@@ -10781,7 +9737,6 @@ GRANT SELECT ON TABLE public.rebirth_requests TO authenticated;
 GRANT ALL ON TABLE public.role_permissions TO service_role;
 GRANT ALL ON TABLE public.role_permissions TO authenticated;
 
-
 --
 
 -- TABLE roles :: ACL
@@ -10789,7 +9744,6 @@ GRANT ALL ON TABLE public.role_permissions TO authenticated;
 
 GRANT ALL ON TABLE public.roles TO service_role;
 GRANT ALL ON TABLE public.roles TO authenticated;
-
 
 --
 
@@ -10800,14 +9754,12 @@ GRANT ALL ON SEQUENCE public.roles_id_seq TO service_role;
 GRANT ALL ON SEQUENCE public.roles_id_seq TO anon;
 GRANT ALL ON SEQUENCE public.roles_id_seq TO authenticated;
 
-
 --
 
 -- TABLE schema_bootstrap :: ACL
 --
 
 GRANT ALL ON TABLE public.schema_bootstrap TO service_role;
-
 
 --
 
@@ -10816,7 +9768,6 @@ GRANT ALL ON TABLE public.schema_bootstrap TO service_role;
 
 GRANT ALL ON TABLE public.schemas TO service_role;
 GRANT ALL ON TABLE public.schemas TO authenticated;
-
 
 --
 
@@ -10837,14 +9788,12 @@ END $g$;
 GRANT ALL ON TABLE public.system_settings TO service_role;
 GRANT SELECT ON TABLE public.system_settings TO authenticated;
 
-
 --
 
 -- COLUMN system_settings.value :: ACL
 --
 
 GRANT UPDATE(value) ON TABLE public.system_settings TO authenticated;
-
 
 --
 
@@ -10854,7 +9803,6 @@ GRANT UPDATE(value) ON TABLE public.system_settings TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry TO service_role;
 
-
 --
 
 -- TABLE telemetry :: ACL
@@ -10862,7 +9810,6 @@ GRANT SELECT ON TABLE timescale.telemetry TO service_role;
 
 GRANT ALL ON TABLE public.telemetry TO service_role;
 GRANT ALL ON TABLE public.telemetry TO authenticated;
-
 
 --
 
@@ -10872,7 +9819,6 @@ GRANT ALL ON TABLE public.telemetry TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_1h TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_1h TO service_role;
 
-
 --
 
 -- TABLE telemetry_1h :: ACL
@@ -10880,7 +9826,6 @@ GRANT SELECT ON TABLE timescale.telemetry_1h TO service_role;
 
 GRANT ALL ON TABLE public.telemetry_1h TO service_role;
 GRANT SELECT ON TABLE public.telemetry_1h TO authenticated;
-
 
 --
 
@@ -10890,7 +9835,6 @@ GRANT SELECT ON TABLE public.telemetry_1h TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_1m TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_1m TO service_role;
 
-
 --
 
 -- TABLE telemetry_1m :: ACL
@@ -10898,7 +9842,6 @@ GRANT SELECT ON TABLE timescale.telemetry_1m TO service_role;
 
 GRANT ALL ON TABLE public.telemetry_1m TO service_role;
 GRANT SELECT ON TABLE public.telemetry_1m TO authenticated;
-
 
 --
 
@@ -10908,7 +9851,6 @@ GRANT SELECT ON TABLE public.telemetry_1m TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_5m TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_5m TO service_role;
 
-
 --
 
 -- TABLE telemetry_5m :: ACL
@@ -10916,7 +9858,6 @@ GRANT SELECT ON TABLE timescale.telemetry_5m TO service_role;
 
 GRANT ALL ON TABLE public.telemetry_5m TO service_role;
 GRANT SELECT ON TABLE public.telemetry_5m TO authenticated;
-
 
 --
 
@@ -10926,7 +9867,6 @@ GRANT SELECT ON TABLE public.telemetry_5m TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_latest TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_latest TO service_role;
 
-
 --
 
 -- TABLE telemetry_latest :: ACL
@@ -10934,7 +9874,6 @@ GRANT SELECT ON TABLE timescale.telemetry_latest TO service_role;
 
 GRANT ALL ON TABLE public.telemetry_latest TO service_role;
 GRANT SELECT ON TABLE public.telemetry_latest TO authenticated;
-
 
 --
 
@@ -10944,7 +9883,6 @@ GRANT SELECT ON TABLE public.telemetry_latest TO authenticated;
 GRANT ALL ON TABLE public.user_roles TO service_role;
 GRANT ALL ON TABLE public.user_roles TO authenticated;
 
-
 --
 
 -- TABLE webhook_endpoints :: ACL
@@ -10952,7 +9890,6 @@ GRANT ALL ON TABLE public.user_roles TO authenticated;
 
 GRANT ALL ON TABLE public.webhook_endpoints TO service_role;
 GRANT ALL ON TABLE public.webhook_endpoints TO authenticated;
-
 
 --
 
@@ -10962,15 +9899,10 @@ GRANT ALL ON TABLE public.webhook_endpoints TO authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO service_role;
 
-
 --
 
 -- DEFAULT PRIVILEGES FOR SEQUENCES :: DEFAULT ACL
 --
-
-
-
-
 
 --
 
@@ -10980,15 +9912,10 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENC
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO postgres;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO service_role;
 
-
 --
 
 -- DEFAULT PRIVILEGES FOR FUNCTIONS :: DEFAULT ACL
 --
-
-
-
-
 
 --
 
@@ -10998,50 +9925,27 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIO
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO postgres;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 
-
 --
 
 -- DEFAULT PRIVILEGES FOR TABLES :: DEFAULT ACL
 --
 
-
-
-
-
 --
 -- PostgreSQL database dump complete
 --
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 5. Realtime publication
 -- ---------------------------------------------------------------------------------------------
--- `telemetry` is absent deliberately and is not an oversight: it is a postgres_fdw foreign table
--- whose rows enter TimescaleDB's WAL, never Supabase's. Adding it to the publication does not
--- error -- it silently emits nothing, which is the worse failure.
+-- `telemetry` is absent: it is a postgres_fdw foreign table whose rows enter TimescaleDB's WAL,
+-- and adding it would silently emit nothing. REPLICA IDENTITY FULL is required: Realtime
+-- evaluates RLS against the old row too.
 --
--- REPLICA IDENTITY FULL is required rather than cosmetic: Realtime evaluates RLS against the old
--- row too, and with the default identity it only has the primary key.
---
--- `digital_thread` IS ALSO ABSENT, AND FOR A DIFFERENT REASON -- it was published until this was
--- narrowed. An UNAUTHENTICATED subscriber still receives the change ENVELOPE: Realtime redacts
--- the payload to `{}` and attaches a 401, but the message itself arrives, so the mere FACT and
--- TIMING of a change leaks to anyone who can reach the socket. Kong's `key-auth` does not close
--- that: the anon key is a registered key that is necessarily shipped to every browser.
---
--- The envelope is upstream Realtime behaviour and cannot be fixed here, so what is available is
--- to publish less. `digital_thread` is the audit log -- it times quarantine decisions, approvals
--- and reconfiguration, which is the most operationally sensitive stream in the publication -- and
--- NOTHING SUBSCRIBES TO IT. All four consumers (Overview, Cells, Devices, Gateways) subscribe to
--- ['cells','gateways','devices'] only, so removing it costs no behaviour at all.
---
--- THIS IS NOT AN ACCESS CHANGE. A publication governs logical replication and nothing else: the
--- grants and the RLS policies on `digital_thread` are untouched, so authenticated users and API
--- clients read the audit log through PostgREST exactly as before. The Digital Thread tab already
--- refreshes by polling.
---
--- The residual, accepted knowingly: asset-edit timing still leaks through the three tables that
--- ARE published, because the dashboard genuinely needs them live.
+-- `digital_thread` is absent because an unauthenticated subscriber still receives the change
+-- envelope (payload redacted, 401 attached), so the fact and timing of an audit write would leak
+-- to anyone who can reach the socket, and nothing subscribes to it. A publication governs
+-- logical replication only; grants and RLS on the table are untouched. Asset-edit timing still
+-- leaks through the three published tables, accepted because the dashboard needs them live.
 
 DO $$
 BEGIN
@@ -11050,30 +9954,14 @@ BEGIN
   END IF;
 END $$;
 
--- SET TABLE is ABSOLUTE, not additive -- it replaces the publication's whole membership. That is
--- what lets this narrowing reach a database that already exists without a follow-up migration:
--- every boot replays this file, and the next replay drops `digital_thread` from the set. A
--- separate 0010 doing the removal would instead fight this statement forever, re-adding and
--- re-dropping the table on each boot (the 0030/0032 lesson).
+-- SET TABLE is absolute, not additive: it replaces the publication's whole membership, which is
+-- what lets a narrowing reach an existing database on the next replay.
 --
--- ---------------------------------------------------------------------------------------------
--- THE MEMBERSHIP IS NOW COMPUTED, AND THE ABSOLUTENESS ABOVE IS EXACTLY WHY IT HAD TO BE.
---
--- `platform_alerts` is created by 0023, which runs AFTER this file on every boot. A literal
--- `SET TABLE ..., public.platform_alerts` therefore fails on a fresh database -- the table does not
--- exist yet -- and ON_ERROR_STOP=1 makes that a failed boot. But listing it nowhere is worse: this
--- statement is absolute, so the next replay of 0001 would silently DROP it from the publication
--- again, and the frontend's alert subscription would go dead on the second boot with nothing
--- logged. That is the 0030/0032 lesson arriving from the other direction.
---
--- So: the INTENDED set is declared here, and the statement publishes the intersection of that set
--- with the tables that actually exist. On a fresh database's first boot `platform_alerts` is absent
--- and the publication comes up with three tables; 0023 then creates it and adds it itself, so
--- realtime works on that same boot. Every later boot finds it present and keeps it.
---
--- Adding a table to realtime means adding its name HERE as well as publishing it where it is
--- created. A table added only at its own migration lasts exactly until the next restart.
--- ---------------------------------------------------------------------------------------------
+-- The membership is computed: `platform_alerts` is created by a later file, so a literal list
+-- naming it fails on a fresh database, and a list omitting it would drop it from the
+-- publication on every replay. The intended set is declared here and intersected with the
+-- tables that exist. Adding a table to realtime means adding its name here as well as
+-- publishing it where it is created.
 DO $$
 DECLARE
   -- Every table this platform intends to publish, in one place. Order is not significant.
@@ -11103,14 +9991,12 @@ ALTER TABLE public.devices        REPLICA IDENTITY FULL;
 -- stops the file asserting a replication requirement for a table that is not replicated.
 ALTER TABLE public.digital_thread REPLICA IDENTITY DEFAULT;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 6. Privileges withdrawn
 -- ---------------------------------------------------------------------------------------------
--- THESE CANNOT BE READ OFF A DUMP, which describes what IS granted rather than what must not be.
--- The image's default privileges hand anon, authenticated and service_role full rights on every
--- sequence created after them, so without these two lines a fresh database comes up with the
--- audit sequence writable by the roles 0003 and 0070 exist to keep away from it.
+-- These cannot be read off a dump, which describes what is granted rather than what must not
+-- be. The image's default privileges hand anon, authenticated and service_role full rights on
+-- every sequence created after them.
 REVOKE ALL ON SEQUENCE public.digital_thread_id_seq FROM anon, authenticated;
 REVOKE ALL ON SEQUENCE public.digital_thread_id_seq FROM service_role;
 
@@ -11132,12 +10018,10 @@ REVOKE ALL ON FUNCTION public.prune_platform_alerts(interval)
 REVOKE ALL ON FUNCTION public.revoke_anon_function_privileges()
   FROM PUBLIC, anon, authenticated, service_role;
 
--- THE ANON SWEEP, WHICH HAS TO RUN LAST. PostgreSQL grants EXECUTE to PUBLIC on every function as
--- it is created, and no default-privilege setting prevents it -- so the only way to remove it is
--- to revoke once every function exists. `revoke_anon_function_privileges()` re-grants
--- `authenticated` and `service_role` exactly what they held before it ran, so it narrows reach
--- without deciding policy. 0071 exists because this used to run in the middle of the chain, where
--- it swept the functions defined so far and left every later one untouched.
+-- The anon sweep, which has to run last: PostgreSQL grants EXECUTE to PUBLIC on every function
+-- as it is created and no default-privilege setting prevents it. The helper re-grants
+-- `authenticated` and `service_role` what they held before, so it narrows reach without
+-- deciding policy.
 DO $sweep$
 DECLARE
   v_corrected integer;
@@ -11149,13 +10033,10 @@ BEGIN
 END
 $sweep$;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 7. Structural self-checks
 -- ---------------------------------------------------------------------------------------------
--- The two invariants that fail SILENTLY if the structure is wrong, so they are asserted rather
--- than assumed. A schema that is merely missing a table announces itself on the first query;
--- these two do not.
+-- The two invariants that fail silently if the structure is wrong.
 
 DO $$
 BEGIN
@@ -11168,16 +10049,9 @@ BEGIN
     RAISE EXCEPTION 'baseline incomplete: schema immutability trigger is not attached';
   END IF;
 
-  -- Realtime evaluates RLS against the old row; with the default replica identity it only has
-  -- the primary key, and change events are silently withheld rather than erroring.
-  --
-  -- THE SET IS DERIVED FROM THE PUBLICATION, NOT LISTED HERE. It was listed, and the list is what
-  -- broke: narrowing the publication to drop `digital_thread` left this check still demanding FULL
-  -- on a table that is no longer replicated, so section 5 and this assertion contradicted each
-  -- other and db-init failed with a message about replica identity -- naming neither the
-  -- publication nor the change that had actually been made. A check that restates a constant
-  -- rather than reading it is a second source of truth, and it fails on the day the first one
-  -- changes.
+  -- Realtime evaluates RLS against the old row; with the default replica identity change events
+  -- are silently withheld. The set is derived from the publication, not listed here, so section
+  -- 5 and this assertion cannot contradict each other.
   IF EXISTS (
     SELECT 1
       FROM pg_publication_tables pt
@@ -11189,4 +10063,3 @@ BEGIN
     RAISE EXCEPTION 'baseline incomplete: a published table is not REPLICA IDENTITY FULL';
   END IF;
 END $$;
-

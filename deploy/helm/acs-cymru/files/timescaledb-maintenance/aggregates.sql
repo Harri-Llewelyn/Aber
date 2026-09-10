@@ -1,36 +1,19 @@
 -- =============================================================================================
 -- Telemetry rollups and the latest-value view.
 --
--- Applied on EVERY boot by the `timescaledb-maintenance` service (Compose) and hook Job (Helm),
--- alongside retention.sql. It takes three psql variables:
+-- Applied on every boot by the `timescaledb-maintenance` service (Compose) and hook Job (Helm).
+-- It takes three psql variables:
 --
 --     -v rollup_1m_retain='180 days' -v rollup_5m_retain='1 year' -v rollup_1h_retain='5 years'
 --
--- `never` (also `off`, `none`, `disabled`) removes a policy without dropping the rollup.
+-- `never` (also `off`, `none`, `disabled`) removes a policy without dropping the rollup. Not in
+-- timescaledb/init/, for the reason retention.sql is not: initdb scripts never reach an existing
+-- database.
 --
--- NOT IN timescaledb/init/, FOR THE SAME REASON retention.sql IS NOT. The postgres entrypoint runs
--- initdb scripts ONLY on an empty data directory, so anything defined there never reaches a
--- database that already exists -- and on Kubernetes "recreate the volume" means deleting the PVC.
--- Rollups added to init/ would exist on fresh installs and silently not exist anywhere else.
---
--- ---------------------------------------------------------------------------------------------
--- WHAT THIS SOLVES, AND WHAT IT DELIBERATELY DOES NOT
---
--- `public.telemetry` in Supabase is a postgres_fdw projection of this hypertable, and the wrapper
--- pushes WHERE down but NOT LIMIT. Two different problems hide under that one sentence:
---
---   1. TREND QUERIES over a long window. Genuinely need less data, which is what the rollups
---      below are for. Grafana reads this database DIRECTLY by SQL and never crosses the FDW, so
---      it benefits from them without any Supabase involvement at all.
---
---   2. LATEST-VALUE lookups. The dashboard's two `/latest` routes fetch a window and discard
---      almost all of it -- the device drawer pulls TWENTY-FOUR HOURS for one device to keep the
---      newest row per metric. A rollup does not help here: averaging 24h of buckets is still
---      shipping 24h of buckets. `telemetry_latest` below is what fixes it, and it works *because*
---      of the wrapper's limitation rather than around it -- see its own comment.
---
--- The CSV export is deliberately left reading RAW. It is an export of observations, and a
--- rollup would hand the operator numbers no instrument ever produced.
+-- `public.telemetry` in Supabase is a postgres_fdw projection, and the wrapper pushes WHERE down
+-- but not LIMIT. The rollups serve trend queries (Grafana reads this database directly and never
+-- crosses the FDW); `telemetry_latest` serves latest-value lookups. The CSV export reads raw: it
+-- is an export of observations.
 -- =============================================================================================
 
 \set ON_ERROR_STOP on
@@ -41,22 +24,13 @@ SELECT set_config('acs_cymru.rollup_1m_retain', :'rollup_1m_retain', false);
 SELECT set_config('acs_cymru.rollup_5m_retain', :'rollup_5m_retain', false);
 SELECT set_config('acs_cymru.rollup_1h_retain', :'rollup_1h_retain', false);
 
-
 -- ---------------------------------------------------------------------------------------------
--- 1. telemetry_latest -- one row per (asset, metric), evaluated REMOTELY.
+-- 1. telemetry_latest -- one row per (asset, metric), evaluated remotely.
 -- ---------------------------------------------------------------------------------------------
--- THE POINT IS WHERE THIS RUNS. postgres_fdw does not push LIMIT, but it does push WHERE, and a
--- view on this side is evaluated HERE -- so Supabase issues
---
---     SELECT ... FROM public.telemetry_latest WHERE asset_id = 'dev...'
---
--- and receives one row per metric instead of a day of rows to throw away. `DISTINCT ON` is served
--- directly by idx_telemetry_asset_metric_time (asset_id, metric_name, time DESC), so the fleet-wide
--- case is bounded by SERIES COUNT rather than by time window -- it does not grow as history does.
---
--- A plain view, not a continuous aggregate: "the newest row" is not an aggregate over a bucket,
--- and materialising it would mean a writer that has to be kept in step with every insert. This
--- stays derived, which is the same choice public.gateway_status makes in Supabase.
+-- A view on this side is evaluated here, so Supabase receives one row per metric instead of a
+-- day of rows to discard. `DISTINCT ON` is served by idx_telemetry_asset_metric_time, so the
+-- fleet-wide case is bounded by series count rather than time window. A plain view, not a
+-- continuous aggregate: "the newest row" is not an aggregate over a bucket.
 CREATE OR REPLACE VIEW telemetry_latest AS
 SELECT DISTINCT ON (asset_id, metric_name)
        time,
@@ -72,31 +46,15 @@ COMMENT ON VIEW telemetry_latest IS
   'Newest sample per (asset_id, metric_name). Evaluated on this server so postgres_fdw ships one '
   'row per series instead of a whole time window. Backed by idx_telemetry_asset_metric_time.';
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 2. The rollups: 1 minute -> 5 minutes -> 1 hour.
 -- ---------------------------------------------------------------------------------------------
--- SUM AND COUNT ARE STORED, NOT AVG, and that is what makes the hierarchy exact. The 5m view is
--- built FROM the 1m view rather than from raw, so refresh cost stays proportional -- but
--- avg(avg) is WRONG whenever the buckets being combined hold different numbers of samples. A
--- machine that reported twice in one minute and two hundred times in the next would have both
--- minutes weighted equally. Storing the components and dividing at read time cannot get this
--- wrong; the presentation views in Supabase compute `sum_double / NULLIF(n_double, 0)`.
---
--- MIN AND MAX ARE KEPT because in manufacturing the excursion IS the signal. A temperature spike
--- averaged into a minute is a spike nobody can see afterwards, and a rollup that loses it is not
--- safe to chart in place of raw -- which is the whole purpose of building one.
---
--- val_string AND val_bool ARE CARRIED AS last(), NOT DROPPED. They are state metrics --
--- Controller/EXECUTION is 'ACTIVE', EMERGENCY_STOP is 'ARMED' -- and they are precisely what the
--- Grafana alert rules read. A rollup that covered only val_double would force every state panel
--- and every alert to stay on raw, which is most of the query volume this exists to reduce.
--- `last(value, time)` is the correct summariser for a state: it is what the metric read at the
--- end of the bucket.
---
--- CREATED `WITH NO DATA`, deliberately and not merely because TimescaleDB requires it: filling
--- years of history synchronously during a boot would hold the stack down for as long as it took.
--- The refresh policy backfills in bounded increments instead.
+-- SUM and COUNT are stored, not AVG: the 5m view is built from the 1m view, and avg(avg) is
+-- wrong when buckets hold different numbers of samples; the presentation views compute
+-- `sum_double / NULLIF(n_double, 0)`. MIN and MAX are kept because the excursion is the signal.
+-- val_string and val_bool are carried as last(): they are state metrics the alert rules read.
+-- Created WITH NO DATA so a boot does not backfill years synchronously; the refresh policy
+-- backfills in bounded increments.
 CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_1m
 WITH (timescaledb.continuous) AS
 SELECT time_bucket(INTERVAL '1 minute', time) AS bucket,
@@ -148,14 +106,11 @@ SELECT time_bucket(INTERVAL '1 hour', bucket) AS bucket,
  GROUP BY 1, 2, 3
 WITH NO DATA;
 
--- REAL-TIME AGGREGATION ON, so a query sees the CURRENT bucket -- the one the refresh policy has
--- not folded in yet -- by unioning the materialised part with the raw tail. Without this a live
--- dashboard trails the world by up to one schedule_interval and appears to have stopped updating,
--- which is the single most confusing way for a rollup to be wrong.
+-- Real-time aggregation on, so a query sees the current bucket by unioning the materialised
+-- part with the raw tail; without it a live dashboard trails by up to one schedule_interval.
 ALTER MATERIALIZED VIEW telemetry_1m SET (timescaledb.materialized_only = false);
 ALTER MATERIALIZED VIEW telemetry_5m SET (timescaledb.materialized_only = false);
 ALTER MATERIALIZED VIEW telemetry_1h SET (timescaledb.materialized_only = false);
-
 
 -- ---------------------------------------------------------------------------------------------
 -- 3. Policies -- refresh and retention, reconciled on every boot.
@@ -164,15 +119,10 @@ DO $$
 DECLARE
   disabled CONSTANT text[] := ARRAY['never', 'off', 'disabled', 'none', 'false', '0'];
 
-  -- THE REFRESH WINDOW MUST EXCEED THE LATE-DATA WINDOW. ingestion.py accepts telemetry up to
-  -- TELEMETRY_MAX_AGE_SECONDS (24h) old, because a gateway that buffers through an outage and
-  -- flushes on reconnect is normal. A start_offset under that would fold late arrivals into
-  -- nothing -- they would land in raw and never appear in any rollup, so the two would disagree
-  -- and only the rollup would be consulted. 25 hours covers it with an hour to spare.
-  --
-  -- Cheap despite the width: TimescaleDB refreshes only the buckets its invalidation log marks
-  -- as changed, not the whole span, so this is a bound on what MAY be rewritten rather than a
-  -- description of what is.
+  -- The refresh window must exceed the late-data window: ingestion.py accepts telemetry up to
+  -- TELEMETRY_MAX_AGE_SECONDS (24h) old, and a smaller start_offset would leave late arrivals in
+  -- raw and in no rollup. Cheap despite the width: TimescaleDB refreshes only the buckets its
+  -- invalidation log marks as changed.
   late_data CONSTANT interval := INTERVAL '25 hours';
 
   spec     record;
@@ -224,56 +174,27 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- THE ROLLUPS OUTLIVE THE RAW DATA, and that is the point of setting their retention separately.
-  -- retention.sql drops raw chunks (90 days by default); these keep shape, excursions and state
-  -- transitions for far longer at a fraction of the size. A question about last spring answered
-  -- from telemetry_1h is a question that would otherwise have no answer at all.
+  -- The rollups outlive the raw data: retention.sql drops raw chunks (90 days by default), and
+  -- these keep shape, excursions and state transitions far longer at a fraction of the size.
   RAISE NOTICE 'telemetry rollups reconciled (1m -> 5m -> 1h, real-time aggregation on).';
 END $$;
-
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. telemetry_gapfill() -- carry the last observation forward across buckets nobody reported in.
 -- ---------------------------------------------------------------------------------------------
--- WHY A ROLLUP ALONE IS THE WRONG SHAPE FOR REPORT-BY-EXCEPTION DATA. The aggregates above emit a
--- row only for a bucket that CONTAINED a sample. Correct as an aggregate, wrong as a signal: under
--- RBE a metric that has not changed publishes nothing, so a machine running steadily at 42 degC
--- for an hour produces one bucket in sixty. Charted directly the other fifty-nine read as NULL --
--- and a gap in a temperature trace does not mean "unknown", it means "unchanged", which is very
--- nearly the opposite. Grafana draws a broken line through it and a `no data` alert rule reads it
--- as the machine having stopped.
+-- Under report-by-exception a metric that has not changed publishes nothing, so the aggregates
+-- above emit one bucket in sixty for a steady machine, and a gap means "unchanged", not
+-- "unknown". LOCF cannot live in the continuous aggregate (TimescaleDB rejects gapfill inside a
+-- continuous definition; filling is relative to a query window). Nor does this use
+-- time_bucket_gapfill(): that expands groups a query already produced and cannot invent a series
+-- that returned no rows, which is exactly the case of a silent RBE device. The grid is built
+-- from the series list first and observations are joined onto it.
 --
--- LOCF CANNOT LIVE IN THE CONTINUOUS AGGREGATE ITSELF. TimescaleDB rejects time_bucket_gapfill()
--- inside a `WITH (timescaledb.continuous)` definition, and rightly: gapfill is defined relative to
--- a query window, and a materialised view has no window to be relative to. Filling belongs at READ
--- time. That is why the absence of locf() in section 2 is not the defect it looks like.
---
--- AND WHY THIS DOES NOT USE time_bucket_gapfill() EITHER, which is the part that is easy to get
--- wrong. That function expands the groups a query already produced; it cannot invent a series that
--- returned NO ROWS AT ALL. A device silent for the whole window has no rows in the window, so it
--- yields no group, so there is nothing to expand and the result comes back EMPTY -- precisely the
--- case gap-filling exists for, and precisely the case a silent RBE device is in. Measured on this
--- database before this function existed: a 3-minute window opening 25 minutes after a device's
--- last change returned zero rows. The grid below is built from the SERIES LIST FIRST and
--- observations are joined onto it, so a series that reported nothing still gets one row per
--- bucket carrying its last known value.
---
--- The LOCF itself is the standard gaps-and-islands form: a running count of non-null values labels
--- each island, and the one real value in an island is broadcast across it. Deliberately plain SQL
--- rather than locf() -- it costs nothing here and keeps the function readable by anyone who does
--- not know the TimescaleDB toolkit.
---
--- SOURCE RESOLUTION FOLLOWS THE BUCKET: the widest rollup no coarser than the bucket asked for,
--- and raw only below one minute. Asking for hourly buckets must not scan raw rows.
---
--- THE SEED IS WHAT MAKES A LONG SILENCE WORK. Under RBE the last change is usually BEFORE the
--- window opens, so without a prior value the leading buckets would still be NULL. Each series gets
--- one `ORDER BY time DESC LIMIT 1` lookup strictly earlier than the window, served directly by
--- idx_telemetry_asset_metric_time, and that value fills everything up to the first real sample.
---
--- `is_carried` DISTINGUISHES A CARRIED VALUE FROM AN OBSERVED ONE, so a caller can render the two
--- differently and an alert rule can refuse to fire on a reading nobody actually took. Filling a
--- gap silently would be its own kind of lie.
+-- The LOCF is the standard gaps-and-islands form in plain SQL. Source resolution follows the
+-- bucket: the widest rollup no coarser than the bucket asked for, and raw only below one minute.
+-- Each series is seeded with one lookup strictly earlier than the window, so a long silence
+-- still fills. `is_carried` distinguishes a carried value from an observed one, so an alert rule
+-- can refuse to fire on a reading nobody took.
 CREATE OR REPLACE FUNCTION telemetry_gapfill(
     from_ts      TIMESTAMPTZ,
     to_ts        TIMESTAMPTZ,

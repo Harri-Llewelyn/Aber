@@ -28,7 +28,7 @@
 # network would otherwise be one HTTP request away from anybody making themselves its admin. It is
 # for a human, rarely.
 #
-# The MACHINE ACCOUNT is what the platform authenticates as -- roadmap 7's "one machine account" --
+# The MACHINE ACCOUNT is what the platform authenticates as -- the platform's one machine account --
 # and it is deliberately NOT an admin. It owns the per-gateway repositories, which is all the
 # authority it needs to create one and attach a read-only deploy key to it. An admin token here
 # would be able to read and rewrite every repository in the forge, including the platform playbook
@@ -56,8 +56,8 @@ su-exec git gitea migrate
 #
 # THE PROBLEM THIS SOLVES. A gateway clones over SSH with its deploy key. With no `known_hosts` entry
 # it must either accept whatever key answers on the first connection -- trust on first use, which is
-# exactly the moment an attacker would choose -- or be told to skip verification, which roadmap 7 and
-# 11 both refuse outright. Neither is acceptable for a machine that will pull unattended for years.
+# exactly the moment an attacker would choose -- or be told to skip verification, which this platform
+# refuses outright. Neither is acceptable for a machine that will pull unattended for years.
 #
 # THE HOST KEY IS PUBLIC BY CONSTRUCTION. Anyone who can open a TCP connection to port 22 is handed
 # it during the handshake; that is what `ssh-keyscan` does. Publishing it changes nothing about its
@@ -166,5 +166,5 @@ if [ -n "$GITEA_MACHINE_PASSWORD" ]; then
 else
   echo '[gitea-init] GITEA_MACHINE_PASSWORD is unset, so no machine account was created and the'
   echo '[gitea-init] platform will not create gateway repositories. This is a deployment choice,'
-  echo '[gitea-init] not a fault -- see docs/roadmap.md 7.'
+  echo '[gitea-init] not a fault; set GITEA_MACHINE_PASSWORD to enable it.'
 fi

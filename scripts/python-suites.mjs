@@ -122,7 +122,7 @@ export const SUITES = {
   'ingestion/test_structured_logging.py': {
     lanes: ['unit'],
     why:
-      'The JSON log formatter and the drop pair (roadmap 12). THE ASSERTION THAT EARNS ITS ' +
+      'The JSON log formatter and the drop pair. THE ASSERTION THAT EARNS ITS ' +
       "PLACE IN CI IS test_the_logged_field_and_the_prometheus_label_are_the_same_string: it " +
       'reads every `drop("<reason>")` out of ingestion.py and requires the logged `reason` ' +
       "field to equal the `reason` LABEL metrics.py exports for it. That is the drill-down " +
@@ -575,16 +575,27 @@ export const SUITES = {
       'the 503 rollback path. SKIPS ALL SEVENTEEN CHECKS without a stack, which is why it is not ' +
       'in the unit lane.',
   },
-  'supabase/functions/propose-gateway-flow/test_propose_gateway_flow.py': {
+  'supabase/functions/forge-events/test_forge_events.py': {
     lanes: ['stack'],
     why:
-      'Roadmap 7 flow proposal: an upload becomes a branch and a pull request in the '
-      + 'gateway repository. It ENROLS a gateway first, because enrolment is what creates that '
-      + 'repository and the name is derived in _shared/forge.ts so the two functions cannot '
-      + 'disagree -- a hand-made repository would stop checking that. The load-bearing '
-      + 'assertion is that `main` does not move: the appliance converges to main, so a '
-      + 'proposal committed there would deploy an unreviewed flow while every response still '
-      + 'looked correct. Needs the stack AND a forge, and skips entirely without either.',
+      "The forge's push webhook: an unsigned or mis-signed delivery is refused and writes nothing; " +
+      'a signed push to main lands on the right gateway with the right fields; pushes to other ' +
+      'branches, repositories that are not a gateway\'s, deleted branches and unknown gateways are ' +
+      "ignored with a 200; and Gitea's own test delivery for a freshly enrolled gateway arrives " +
+      'signed over the forge network and records the real head of main.',
+  },
+  'supabase/functions/forge-membership/test_forge_membership.py': {
+    lanes: ['stack'],
+    why:
+      "The forge's door, end to end: the gateway's redirect, the password grant, the consent " +
+      'endpoint, the callback and the cookies, for each seeded persona -- then what the forge did ' +
+      'with them. Administrator and Shopfloor_Manager land in their teams; an Operator completes ' +
+      'the whole flow and meets the 403; a forged identity header from outside is not a login; and ' +
+      'a role removed from user_roles mid-session is refused and unseated on the next request; ' +
+      "a session ended elsewhere is sent back through the door; and Gitea's own sign-out link ends " +
+      'every session the person holds, the dashboard included. ' +
+      'Needs the stack, the forge, the seeded personas AND the gateways organisation (one enrolment ' +
+      'creates it), and skips without any of them.',
   },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],

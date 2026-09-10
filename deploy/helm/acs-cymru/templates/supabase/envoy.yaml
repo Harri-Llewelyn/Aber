@@ -92,6 +92,13 @@ spec:
       port: 8001
       targetPort: studio
       protocol: TCP
+    # THE FORGE'S DOOR, and the only backend the gitea ingress route may name, for the reason the
+    # studio port gives -- with reverse-proxy authentication on, `gitea:3000` signs in whoever a
+    # request header names, so a route pointing there would let the internet pick its own identity.
+    - name: forge
+      port: 8002
+      targetPort: forge
+      protocol: TCP
     {{- if .Values.supabaseEnvoy.metrics.enabled }}
     # NAMED `metrics`, selected BY NAME by the ServiceMonitor, as Kong's is.
     #
@@ -224,6 +231,31 @@ spec:
                 "      secret: { inline_string: \"$STUDIO_PROXY_HMAC_SECRET\" }" \
                 > /config/studio-hmac-secret.yaml
 
+              # The forge's door, the same way. Unlike Studio's route, the gitea route is ON by
+              # default, so an unset pair here is a forge nobody can sign into -- reported, and
+              # still not a reason to refuse the gateway every other service sits behind.
+              if [ -z "$GITEA_OAUTH_CLIENT_SECRET" ] || [ -z "$GITEA_PROXY_HMAC_SECRET" ]; then
+                echo 'NOTE: forge OAuth client secret / cookie key are not set. The forge listener will answer a login that cannot complete. Set secrets.giteaOAuthClientSecret and secrets.giteaProxyHmacSecret.' >&2
+                GITEA_OAUTH_CLIENT_SECRET='unconfigured'
+                GITEA_PROXY_HMAC_SECRET=$(tr -dc 'a-f0-9' < /dev/urandom | head -c 64)
+              fi
+              printf '%s\n' \
+                'resources:' \
+                '  - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret' \
+                '    name: forge-oauth-client-secret' \
+                '    generic_secret:' \
+                "      secret: { inline_string: \"$GITEA_OAUTH_CLIENT_SECRET\" }" \
+                > /config/forge-client-secret.yaml
+              printf '%s\n' \
+                'resources:' \
+                '  - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret' \
+                '    name: forge-proxy-hmac-secret' \
+                '    generic_secret:' \
+                "      secret: { inline_string: \"$GITEA_PROXY_HMAC_SECRET\" }" \
+                > /config/forge-hmac-secret.yaml
+              # No trailing slash on a redirect_uri, or GoTrue answers `invalid redirect_uri`.
+              GITEA_PUBLIC_URL="${GITEA_PUBLIC_URL%/}"
+
               sed -e "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" \
                   -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$SUPABASE_SERVICE_ROLE_KEY|g" \
                   -e "s|__SUPABASE_PUBLISHABLE_KEY__|$SUPABASE_PUBLISHABLE_KEY|g" \
@@ -235,6 +267,8 @@ spec:
                   -e "s|__SUPABASE_PUBLIC_URL__|$SUPABASE_PUBLIC_URL|g" \
                   -e "s|__STUDIO_PUBLIC_URL__|$STUDIO_PUBLIC_URL|g" \
                   -e "s|__STUDIO_UPSTREAM_ADDRESS__|$STUDIO_UPSTREAM_ADDRESS|g" \
+                  -e "s|__GITEA_PUBLIC_URL__|$GITEA_PUBLIC_URL|g" \
+                  -e "s|__GITEA_UPSTREAM_ADDRESS__|$GITEA_UPSTREAM_ADDRESS|g" \
                   -e "s|__SUPABASE_JWT_SECRET_B64URL__|$JWT_B64URL|g" \
                   /template/envoy.yaml > /config/envoy.yaml
 
@@ -326,6 +360,31 @@ spec:
             # Service in templates/supabase/studio.yaml.
             - name: STUDIO_UPSTREAM_ADDRESS
               value: supabase-studio
+            # ------------------------------------------------------------------------------
+            # The forge listener's inputs (0094). It shares the JWKS key and SUPABASE_PUBLIC_URL
+            # with Studio's. OPTIONAL refs for the reason Studio's are -- an operator's existing
+            # Secret predates them -- with the init container's fail-closed branch covering
+            # the absent case.
+            # ------------------------------------------------------------------------------
+            - name: GITEA_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "acs-cymru.secretName" . }}
+                  key: GITEA_OAUTH_CLIENT_SECRET
+                  optional: true
+            - name: GITEA_PROXY_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "acs-cymru.secretName" . }}
+                  key: GITEA_PROXY_HMAC_SECRET
+                  optional: true
+            # The address the BROWSER reaches the forge on: the same helper Gitea's ROOT_URL and
+            # the Ingress host come from, so the three cannot disagree.
+            - name: GITEA_PUBLIC_URL
+              value: {{ include "acs-cymru.giteaUrl" . | quote }}
+            # The name Envoy DIALS -- the Service in templates/apps/gitea.yaml.
+            - name: GITEA_UPSTREAM_ADDRESS
+              value: gitea
           volumeMounts:
             - name: template
               mountPath: /template
@@ -349,6 +408,9 @@ spec:
             # describe itself wrongly without changing what it serves.
             - name: studio
               containerPort: 8001
+            # The forge's listener, declared unconditionally for the same reason.
+            - name: forge
+              containerPort: 8002
             {{- if .Values.supabaseEnvoy.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.supabaseEnvoy.metrics.port }}

@@ -777,6 +777,12 @@ by the whole fleet, so a generous retry stalls every other device behind one unr
 A connection dropped by the server still reports `closed == 0` and fails on first use, which is what
 the caller's exception handler and the next call through here cover.
 
+A separate healer thread retries, off the message path and every `DB_HEAL_INTERVAL_SECONDS`, the two startup
+steps a dependency that was not up yet can prevent: the historian connection and `capture_worker.reconcile()`.
+It opens a connection with the lock released and only takes `_ts_conn_lock` to publish the result, so a
+message arriving mid-heal never waits on a network round trip. It stays resident so
+`acs_ingestion_db_connected` answers "can this daemon reach the historian" at all times.
+
 ---
 
 ## Metric Aliases

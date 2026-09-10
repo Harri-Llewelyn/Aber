@@ -1,93 +1,36 @@
 -- 0086: a change can be proposed by somebody who may not make it.
 --
--- =================================================================================================
--- WHAT THIS IS, AND WHAT IT IS DELIBERATELY NOT
---
 -- One queue for a change a person proposes but may not apply. An `Operator` proposes; an
--- `Administrator` or `Shopfloor_Manager` approves; THE APPROVAL IS THE WRITE.
+-- `Administrator` or `Shopfloor_Manager` approves; the approval is the write. This is the first
+-- write `Operator` has held, and it is a write to a queue, not an asset: the asset write policies
+-- do not move. A second write path to an asset table would mean this design has failed.
 --
--- `Operator` is role 3 and held two permissions before this file, neither of them a write. So this
--- is not the loosening of an existing grant -- it is the first write that role has ever been
--- given, and it is worth being exact about what it is a write TO: a queue, not an asset.
+-- APPROVING IS APPLYING, as `approve_quarantined_device()` does: the actor's role is re-checked
+-- server-side, the patch is applied in one transaction, and the audit rows name the approver.
+-- Every CHECK, foreign key and trigger on the target runs at approval time, so an invalid change
+-- cannot be approved; nothing here re-implements those rules.
 --
--- THE ASSET WRITE POLICIES DO NOT MOVE. `devices`, `cells`, `gateways` and `schemas` stay gated on
--- has_role(ARRAY['Administrator', 'Shopfloor_Manager']) exactly as they were before this file. What
--- is new is one table an Operator may INSERT into, and an apply path that runs as the approver. If
--- a later change ever adds a second write path to an asset table -- however convenient -- this item
--- has failed, and that is the review question to ask of it.
+-- THE PATCH IS OPERATOR-CONTROLLED INPUT. It is validated on the way in and again at apply. No
+-- SQL is ever built from its keys: the patch is merged with `jsonb_populate_record` and assigned
+-- column by column in hand-written SQL. The allowlist is `proposable_columns()`. The columns
+-- ingestion writes (`status`, `first_dbirth_at`, `reported_identity`, `identity_source`,
+-- `is_quarantined`) are absent from every allowlist: they are what the platform observed.
 --
--- =================================================================================================
--- WHY APPROVING IS APPLYING
+-- TWO CAPS, BOTH IN THE DATABASE: a partial unique index on (entity_type, entity_id, proposed_by)
+-- WHERE status = 'open' (scoped to the proposer, so one person's forgotten proposal cannot block
+-- everybody else), and a per-proposer ceiling on open proposals held in `system_settings`. The RLS
+-- policy admits a direct PostgREST INSERT, so a cap living only in an RPC would be bypassable.
 --
--- `approve_quarantined_device()` is the precedent and already has the three properties that matter:
--- it re-checks the actor's role SERVER-SIDE rather than trusting the caller, it applies in one
--- transaction, and it attributes the resulting `digital_thread` rows to the approver.
---
--- The consequence is the point. Because the approval IS the write, every CHECK, every foreign key
--- and every trigger on the target table runs at approval time, and an invalid change CANNOT BE
--- APPROVED -- it aborts the approval instead of being accepted and then failing somewhere else. A
--- queue that accepts a change it cannot apply produces an audit record of something that did not
--- happen, which is worse than no record at all.
---
--- Concretely: a patch setting `location_scope = 'site_wide'` while leaving `cell_id` populated
--- fails `devices_site_wide_has_no_cell` at approval and the approver is told so. Nothing in this
--- file re-implements that rule, and nothing should.
---
--- =================================================================================================
--- THE PATCH IS OPERATOR-CONTROLLED INPUT
---
--- It is validated on the way IN -- so a proposal naming a column nobody may propose never reaches
--- an approver looking approvable -- and again at apply, so an edit between the two cannot smuggle
--- one past. NO SQL IS EVER BUILT FROM THE PATCH'S KEYS: the patch is merged onto the current row
--- with `jsonb_populate_record` and then assigned column by column in SQL written out by hand. The
--- allowlist is `proposable_columns()`, which is the only place that answer exists.
---
--- The columns ingestion writes are absent from every allowlist, and that is the security half of
--- the design rather than a tidiness preference: `status`, `first_dbirth_at`, `reported_identity`,
--- `identity_source` and `is_quarantined` are what the platform OBSERVED, and a proposal able to
--- edit them would let an operator assert a device's identity by describing it.
---
--- =================================================================================================
--- TWO CAPS, DOING TWO DIFFERENT JOBS, BOTH IN THE DATABASE
---
---   1. A partial unique index on (entity_type, entity_id, proposed_by) WHERE status = 'open'.
---      One open proposal per asset per person, which forces three nameplate edits into one coherent
---      diff instead of three. SCOPED TO THE PROPOSER DELIBERATELY: a cap on the asset alone would
---      let one operator's forgotten proposal block everybody else from proposing against that
---      machine -- a denial of service by accident rather than by intent.
---
---   2. A ceiling on total open proposals per proposer, held in `system_settings`. This is the one
---      that actually bounds reviewer load, because the per-asset rule still permits one proposal
---      against each of five hundred devices. A setting rather than a constant, because the right
---      number differs per plant.
---
--- BOTH ARE ENFORCED HERE RATHER THAN IN A BUTTON, and 0069's header already made the argument: a
--- rule the frontend applies and the database does not is "a frontend flag and therefore never an
--- access control". The RLS policy below admits a direct PostgREST INSERT, so a cap living only in
--- an RPC would be a cap with a documented way around it.
---
--- =================================================================================================
--- WHAT THIS FILE DOES NOT TOUCH
---
--- `quarantine:approve` and `quarantine:reject`, which are not proposable and not delegable -- a
--- quarantine entry is a discovery the SYSTEM made, not a change a person authored, and approving
--- one mints identity and binds a device to a gateway. The schema lineage invariants, which
--- `publish_schema_version()` maintains and which a schema lane must go through rather than around.
--- And the write policies on every asset table, which are the same after this migration as before.
--- =================================================================================================
-
+-- Not touched: `quarantine:approve` and `quarantine:reject` (a quarantine entry is a discovery the
+-- system made, and approving one mints identity), the schema lineage invariants, and the write
+-- policies on every asset table.
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The permission, and the first write grant `Operator` has ever held
 -- -------------------------------------------------------------------------------------------------
--- Mirrored by PERMISSION_UUIDS in frontend/src/constants.js and by DEFAULT_ROLE_PERMISSIONS_MAP in
--- frontend/src/hooks/usePermissions.js; scripts/check-mirror-drift.mjs replays this whole chain and
--- compares the two, so a grant added here and not there renders controls the database refuses.
---
--- GRANTED TO ALL THREE, not to Operator alone. A Shopfloor_Manager who can apply a change directly
--- can also propose one -- a manager drafting a change for a colleague to check is the same act --
--- and a permission that exists only for the role which cannot act reads as a demotion rather than
--- as a capability.
+-- Mirrored by PERMISSION_UUIDS in frontend/src/constants.js and DEFAULT_ROLE_PERMISSIONS_MAP in
+-- frontend/src/hooks/usePermissions.js; scripts/check-mirror-drift.mjs compares them. Granted to
+-- all three roles: a manager drafting a change for a colleague to check is the same act.
 INSERT INTO public.permissions VALUES
     ('b678f901-2345-4c1d-8706-933e08544e43', 'proposal:create',
      'Propose a change to an asset for an approver to apply')
@@ -100,21 +43,13 @@ ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (3, 'b678f901-2345-4c1d-8706-933e08544e43')
 ON CONFLICT DO NOTHING;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 2. Two entity types join the asset lane
 -- -------------------------------------------------------------------------------------------------
--- `audit_domain_for()` FAILS CLOSED: an entity_type nobody classified is 'security', readable by
--- Administrator and Auditor alone. That is the right default and the wrong answer for these two.
---
--- `device_nameplate` has never appeared in `digital_thread`, because no trigger writes it and the
--- apply path below is the first thing that does. It is operator-supplied identification about a
--- machine, a Shopfloor_Manager may edit it today, and filing it under 'security' would hide a
--- manager's own act from that manager.
---
--- `change_proposals` is the queue itself. Only the expiry timer writes an audit row against it --
--- every other transition is legible in the proposal row -- and an expiry a manager cannot see is an
--- expiry that gets reported as a disappearance.
+-- `audit_domain_for()` fails closed to 'security' (Administrator and Auditor only), which is the
+-- wrong answer for these two: `device_nameplate` is operator-supplied identification a
+-- Shopfloor_Manager may edit, and `change_proposals` is the queue itself, whose expiry a manager
+-- must be able to see.
 CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action text) RETURNS text
     LANGUAGE sql IMMUTABLE
     AS $$
@@ -124,12 +59,9 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
     WHEN p_entity_type IN ('service_principals', 'user_roles', 'system_settings')
       THEN 'security'
 
-    -- The asset trail: the shopfloor's own history, which is what a Shopfloor_Manager manages.
-    -- CREDENTIAL_ISSUED lands here on `gateways` deliberately -- see 0001's header. A Manager may
-    -- mint a virtual gateway's broker credential, so a Manager may read that one was minted.
-    --
-    -- `device_nameplate` and `change_proposals` joined in 0086: an assertion about an asset, and
-    -- the queue of proposed assertions about assets.
+    -- The asset trail: the shopfloor's own history. CREDENTIAL_ISSUED lands here on `gateways`
+    -- deliberately: a Manager may mint a virtual gateway's broker credential, so may read that one
+    -- was minted. `device_nameplate` and `change_proposals` joined in 0086.
     WHEN p_entity_type IN ('cells', 'devices', 'gateways', 'links',
                            'device_nameplate', 'change_proposals')
       THEN 'asset'
@@ -143,25 +75,18 @@ $$;
 
 COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane a digital_thread row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 3. The allowlist, which is the only place the answer exists
 -- -------------------------------------------------------------------------------------------------
--- IMMUTABLE and per entity type. Read by the validation trigger on the way in and by the apply path
--- on the way out, so the two cannot drift into disagreeing about what is proposable.
---
--- WHAT IS ABSENT FROM `devices`, AND WHY, because the omissions carry the argument:
+-- IMMUTABLE and per entity type; read by the validation trigger and by the apply path. Absent
+-- from `devices`, and why:
 --   status, first_dbirth_at, reported_identity, identity_source, is_quarantined
---                       -- written by ingestion from what the plant actually did. A proposal able
---                          to set them would let an operator assert an observation.
---   gateway_id          -- the DATA PATH. 0036 separated location from it precisely so a location
---                          change need not rewire a device's connection; this keeps them apart.
---   schema_id           -- schema binding belongs to `publish_schema_version()`, transactionally,
---                          and a patch repointing it would fork the lineage that function keeps.
+--                       -- written by ingestion from what the plant actually did.
+--   gateway_id          -- the data path; location was separated from it on purpose.
+--   schema_id           -- schema binding belongs to `publish_schema_version()`.
 --   is_archived, archived_at, auto_delete_at
 --                       -- lifecycle, with a retention promise attached to a date the user picked.
---   conformance_policy  -- decides what ingestion ENFORCES. 0069 made that class of decision
---                          Administrator-only; it is not an asset detail.
+--   conformance_policy  -- decides what ingestion enforces; Administrator-only since 0069.
 --   sparkplug_id        -- generated, and the identity on the wire.
 CREATE OR REPLACE FUNCTION public.proposable_columns(p_entity_type text) RETURNS text[]
     LANGUAGE sql IMMUTABLE
@@ -182,12 +107,11 @@ $$;
 
 COMMENT ON FUNCTION public.proposable_columns(p_entity_type text) IS 'Which columns a change proposal may name, per entity type. An unknown entity type yields the empty array, so a lane nobody has written an allowlist for can propose nothing at all rather than everything.';
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 4. The queue
 -- -------------------------------------------------------------------------------------------------
--- `entity_type` holds the TABLE NAME rather than a singular noun, so it speaks the vocabulary
--- `digital_thread.entity_type` and `audit_domain_for()` already use.
+-- `entity_type` holds the table name, the vocabulary `digital_thread.entity_type` and
+-- `audit_domain_for()` use.
 CREATE TABLE IF NOT EXISTS public.change_proposals (
     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     entity_type       text NOT NULL,
@@ -253,7 +177,6 @@ CREATE INDEX IF NOT EXISTS change_proposals_open_by_age
 CREATE INDEX IF NOT EXISTS change_proposals_by_entity
     ON public.change_proposals (entity_type, entity_id);
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 5. The settings, and the floor the queue cannot work without
 -- -------------------------------------------------------------------------------------------------
@@ -294,14 +217,9 @@ SELECT public.seed_setting(
     'the ninety-day fallback in prune_closed_proposals()'
 );
 
--- BOUNDS SET BY UPDATE, NOT BY EXTRA ARGUMENTS -- 0032's reason, restated by 0002: adding
--- parameters to seed_setting() creates an OVERLOAD rather than replacing it, because CREATE OR
--- REPLACE matches on the argument list.
---
--- MIN 1 ON THE EXPIRY, AND THE FLOOR IS THE WHOLE POINT. Zero would auto-close every proposal at
--- the moment it was created -- a working configuration in which the feature silently does nothing,
--- every operator's proposal vanishes before an approver sees it, and nothing anywhere reports an
--- error. The ceiling is a typo guard in the same spirit as 0032's.
+-- Bounds set by UPDATE, not by extra arguments: adding parameters to seed_setting() creates an
+-- overload. MIN 1 on the expiry: zero would auto-close every proposal at creation, silently. The
+-- ceiling is a typo guard.
 UPDATE public.system_settings
    SET min_value = 1, max_value = 90
  WHERE key = 'proposals.open_expiry_days'
@@ -319,14 +237,11 @@ UPDATE public.system_settings
  WHERE key = 'proposals.retention_days'
    AND (min_value IS DISTINCT FROM 7 OR max_value IS DISTINCT FROM 3650);
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 6. What a proposal must look like, checked on the way in
 -- -------------------------------------------------------------------------------------------------
--- A CHECK constraint cannot do this: it would have to call proposable_columns() per key, and it
--- must also confirm the target exists. So it is a trigger, and it runs on INSERT and on every
--- UPDATE that touches the patch -- an operator editing an open proposal is exactly the path a
--- validation written for INSERT alone would miss.
+-- A trigger, not a CHECK: it calls proposable_columns() per key and confirms the target exists.
+-- Runs on INSERT and on every UPDATE that touches the patch.
 CREATE OR REPLACE FUNCTION public.validate_change_proposal() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -335,11 +250,8 @@ DECLARE
     v_allowed text[] := public.proposable_columns(NEW.entity_type);
     v_key     text;
 BEGIN
-    -- FAIL-CLOSED, AND IT NAMES THE REAL PROBLEM. The CHECK constraint admits two entity types and
-    -- this trigger runs BEFORE it, so an entity type with no allowlist reaches here first. Without
-    -- this branch the loop below reports "proposable columns are: " with nothing after the colon,
-    -- which reads as a broken message rather than as a lane nobody has written an allowlist for --
-    -- the state a widened CHECK and a forgotten proposable_columns() entry would produce.
+    -- Fail closed, naming the real problem: the CHECK constraint admits the entity types and this
+    -- trigger runs before it, so a lane with no allowlist reaches here first.
     IF array_length(v_allowed, 1) IS NULL THEN
         RAISE EXCEPTION
             'nothing is proposable on %; proposable_columns() has no allowlist for it',
@@ -358,13 +270,9 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- THE TARGET HAS TO EXIST, and there is no foreign key that can say so: `entity_id` addresses
-    -- two different tables depending on `entity_type`. Both lanes are keyed by a device, which is
-    -- why one lookup answers for both.
-    --
-    -- ARCHIVED IS REFUSED TOO. An archived device is on its way out under a retention promise, and
-    -- a proposal against one would either be applied to a row nobody expects to change again or
-    -- expire unread.
+    -- The target has to exist, and no foreign key can say so: `entity_id` addresses a table that
+    -- varies with `entity_type`. Archived is refused too: a proposal against a row on its way out
+    -- would be applied to something nobody expects to change again, or expire unread.
     IF NOT EXISTS (
         SELECT 1 FROM public.devices d
          WHERE d.id = NEW.entity_id AND d.is_archived = false
@@ -384,13 +292,11 @@ CREATE TRIGGER trg_change_proposals_validate
     BEFORE INSERT OR UPDATE OF patch, entity_type, entity_id ON public.change_proposals
     FOR EACH ROW EXECUTE FUNCTION public.validate_change_proposal();
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 7. Cap 2, which has to be a trigger
 -- -------------------------------------------------------------------------------------------------
--- The per-asset cap is an index and needs nothing. This one counts rows, so it is a trigger -- and
--- it is a trigger rather than a line in an RPC because the INSERT policy below admits a direct
--- PostgREST write. A cap only an RPC enforced would be documented and bypassable in the same page.
+-- The per-asset cap is an index. This one counts rows, and it is a trigger rather than a line in
+-- an RPC because the INSERT policy admits a direct PostgREST write.
 CREATE OR REPLACE FUNCTION public.enforce_open_proposal_cap() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -432,22 +338,13 @@ CREATE TRIGGER trg_change_proposals_cap
     FOR EACH ROW WHEN (NEW.status = 'open')
     EXECUTE FUNCTION public.enforce_open_proposal_cap();
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 8. What may move after the row exists
 -- -------------------------------------------------------------------------------------------------
--- The UPDATE policy lets a proposer edit their own open proposal, which the caps make necessary
--- rather than convenient: told "you already have an open proposal on this device", they have to be
--- able to open it and add to it. Otherwise the constraint reads as a wall and people route around
--- it by proposing against a neighbouring asset, or stop proposing.
---
--- But an UPDATE policy cannot say WHICH COLUMNS may move, and `status` is the one that must not:
--- a proposer who could set 'applied' would have granted themselves the asset write this entire
--- design exists to withhold.
---
--- SO THE TRANSITION FUNCTIONS DECLARE THEMSELVES with a session flag, exactly as the approval path
--- declares its actor with `acs_cymru.actor_id`. SET LOCAL, so it is discarded at COMMIT and cannot
--- bleed into the connection's next statement.
+-- The UPDATE policy lets a proposer edit their own open proposal, which the caps make necessary.
+-- An UPDATE policy cannot say which columns may move, and `status` must not: a proposer who could
+-- set 'applied' would have the asset write. So the transition functions declare themselves with a
+-- session flag (SET LOCAL, discarded at COMMIT), as the approval path declares its actor.
 CREATE OR REPLACE FUNCTION public.guard_change_proposal_transition() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -490,7 +387,6 @@ CREATE TRIGGER trg_change_proposals_transition
     BEFORE UPDATE ON public.change_proposals
     FOR EACH ROW EXECUTE FUNCTION public.guard_change_proposal_transition();
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 9. Who may see and file one
 -- -------------------------------------------------------------------------------------------------
@@ -505,13 +401,9 @@ CREATE POLICY change_proposals_select_own_or_approver ON public.change_proposals
     USING (proposed_by = auth.uid()
            OR public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
--- WRITE. `has_authority` rather than a role name, on 0080's argument: the three machine principals
--- held `Operator` and nothing else until that migration, and a policy naming the role would have
--- admitted them along with the shopfloor -- each with its own allowance under the per-person cap.
--- They now resolve through `principal_permissions` and hold no `proposal:create`.
---
--- `proposed_by = auth.uid()` is what stops a proposal being filed in somebody else's name, which
--- would otherwise be a way to consume another person's allowance.
+-- WRITE. `has_authority` rather than a role name: a policy naming `Operator` would have admitted
+-- the three machine principals before 0080. `proposed_by = auth.uid()` stops a proposal being
+-- filed in somebody else's name to consume their allowance.
 DROP POLICY IF EXISTS change_proposals_insert_proposer ON public.change_proposals;
 CREATE POLICY change_proposals_insert_proposer ON public.change_proposals
     FOR INSERT TO authenticated
@@ -531,7 +423,6 @@ CREATE POLICY change_proposals_update_own_open ON public.change_proposals
 
 GRANT SELECT, INSERT, UPDATE ON public.change_proposals TO authenticated;
 GRANT ALL ON public.change_proposals TO service_role;
-
 
 -- -------------------------------------------------------------------------------------------------
 -- 10. Withdrawing, which is the proposer's own act
@@ -572,7 +463,6 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.withdraw_proposal(uuid) IS 'The proposer closes their own open proposal, freeing the slot it holds under both caps. Not available to an approver: making somebody else''s proposal disappear without a reason is what rejection exists to prevent.';
-
 
 -- -------------------------------------------------------------------------------------------------
 -- 11. Rejecting, which carries a reason
@@ -619,21 +509,13 @@ $$;
 
 COMMENT ON FUNCTION public.reject_proposal(uuid, text) IS 'An approver refuses a proposal, with a reason the constraint also requires. The slot is freed immediately and the same change may be proposed again at once -- the reason, not a cooldown, is what makes the second attempt different from the first.';
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 12. Approving, which is applying
 -- -------------------------------------------------------------------------------------------------
--- The whole design in one function. It re-checks the role, re-validates the patch, applies it in
--- this transaction so every constraint on the target runs, and writes the audit row naming BOTH
--- parties.
---
--- NO DYNAMIC SQL. `jsonb_populate_record` merges the patch onto the current row and the UPDATE
--- assigns the allowlisted columns by name, written out. The patch's keys never become identifiers.
---
--- WHO `updated_by` NAMES on the nameplate is the one attribution question this raises, and the
--- column's own comment settles it: a nameplate is an assertion ABOUT an asset, so who made it is
--- part of the record -- that is the PROPOSER. The approver is who authorised it, which is what the
--- digital_thread row says. Both are in the record; neither column has to hold both.
+-- Re-checks the role, re-validates the patch, applies it in this transaction so every constraint
+-- on the target runs, and writes the audit row naming both parties. No dynamic SQL. On the
+-- nameplate, `updated_by` names the proposer (who made the assertion); the digital_thread row
+-- names the approver.
 CREATE OR REPLACE FUNCTION public.approve_proposal(p_proposal_id uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -769,20 +651,12 @@ $$;
 
 COMMENT ON FUNCTION public.approve_proposal(uuid) IS 'Approving IS applying: the role is re-checked server-side, the patch re-validated against proposable_columns(), and the change written in this transaction so every CHECK and foreign key on the target runs now -- an invalid change aborts the approval instead of becoming an audit record of something that did not happen.';
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 13. The timer, which is not a person
 -- -------------------------------------------------------------------------------------------------
--- An open proposal nobody acts on holds a slot under both caps indefinitely, so it closes on a
--- timer. `decided_by` stays NULL: naming an approver for a decision nobody made would put a false
--- attribution in the one record this feature exists to produce.
---
--- IT DECLARES `service`. `digital_thread.actor_source` admits user | ingestion | migration |
--- service, and only the last three can be DECLARED -- 'user' is derived from auth.uid() rather than
--- claimed. A timer has no session and is not a person, so 'service' is what it is: a machine acting
--- on its own schedule, which is what that value already means for the other scheduled jobs. §7's
--- reconciling sidecar asks the identical question and should give the identical answer rather than
--- minting a second kind for the same shape of actor.
+-- An open proposal nobody acts on holds a slot under both caps, so it closes on a timer.
+-- `decided_by` stays NULL. It declares `service`: a machine acting on its own schedule, which is
+-- what that value means for the other scheduled jobs.
 CREATE OR REPLACE FUNCTION public.expire_open_proposals() RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -839,12 +713,8 @@ COMMENT ON FUNCTION public.expire_open_proposals() IS 'Closes open proposals old
 -- -------------------------------------------------------------------------------------------------
 -- 14. And the queue itself stops growing without end
 -- -------------------------------------------------------------------------------------------------
--- Every other durable store in this repository has a retention answer and 0079 has just finished
--- giving one to the largest. A queue of closed proposals with operator-authored free text attached
--- would be the next store to arrive without one.
---
--- WHAT THE APPROVAL CHANGED IS NOT PRUNED HERE. That is in `digital_thread` under its own policy;
--- this removes only the queue entry, so shortening it destroys no record of what happened.
+-- What the approval changed is in `digital_thread` under its own policy; this removes only the
+-- queue entry.
 CREATE OR REPLACE FUNCTION public.prune_closed_proposals() RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -869,15 +739,10 @@ $$;
 
 COMMENT ON FUNCTION public.prune_closed_proposals() IS 'Removes decided proposals older than proposals.retention_days. Only the queue entry: what an approval changed is in digital_thread under its own retention.';
 
--- EVERY function this file creates, and the REVOKE comes FIRST on all of them.
---
--- PostgreSQL grants EXECUTE on a new function to PUBLIC, and `anon` is a member of PUBLIC -- so
--- `GRANT EXECUTE ... TO authenticated` alone narrows NOTHING, it restates a permission everybody
--- already had. 0001's sweep catches the leak on the SECOND boot and `CREATE OR REPLACE` then
--- preserves the healed ACL, which is what makes this invisible on any stack that has been
--- restarted once and present on exactly one kind of installation: a new one. 0076 shipped this
--- fault and it reached CI; test_anon_privilege_baseline.py is the suite that now refuses it, and
--- it refused this file's first draft.
+-- Every function this file creates, REVOKE first: PostgreSQL grants EXECUTE on a new function to
+-- PUBLIC, and `anon` is a member of PUBLIC, so a GRANT alone narrows nothing. 0001's sweep heals
+-- it on the second boot, which is what makes the leak invisible on any restarted stack;
+-- test_anon_privilege_baseline.py refuses it.
 REVOKE ALL ON FUNCTION public.proposable_columns(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.validate_change_proposal() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.enforce_open_proposal_cap() FROM PUBLIC;
@@ -901,17 +766,11 @@ GRANT EXECUTE ON FUNCTION public.proposable_columns(text) TO authenticated, serv
 GRANT EXECUTE ON FUNCTION public.expire_open_proposals() TO service_role;
 GRANT EXECUTE ON FUNCTION public.prune_closed_proposals() TO service_role;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 15. The schedule
 -- -------------------------------------------------------------------------------------------------
--- `ensure_cron_job` unschedules before scheduling, which is what makes this survive the every-boot
--- replay -- `cron.schedule` appends rather than replaces, and 0032 records finding that the hard
--- way.
---
--- 03:45, after `prune_platform_alerts` (03:15) and `purge_expired_archives` (03:30) rather than
--- beside them. Both jobs are small, and the ordering is only so that a morning reading of the cron
--- history has one thing happening at a time.
+-- `ensure_cron_job` unschedules before scheduling (`cron.schedule` appends). 03:45, after the
+-- other nightly jobs, so a morning reading of the cron history has one thing at a time.
 SELECT public.ensure_cron_job(
   'expire_open_proposals',
   '45 3 * * *',
@@ -924,13 +783,10 @@ SELECT public.ensure_cron_job(
   $job$SELECT public.prune_closed_proposals()$job$
 );
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 16. Self-check
 -- -------------------------------------------------------------------------------------------------
--- READ-ONLY, and it writes nothing. 0037 and 0038 are why that is stated: their self-checks
--- appended nine audit rows per boot to a table that is append-only to every application role, and
--- by the time it was found `migration` was the largest actor_source in `digital_thread`.
+-- Read-only: a self-check that writes to an append-only audit table appends on every boot.
 DO $$
 DECLARE
     v_problems text[] := ARRAY[]::text[];

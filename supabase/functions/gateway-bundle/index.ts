@@ -67,7 +67,7 @@ const TEMPLATE_ENV: Record<string, string> = {
   "Dockerfile": "GW_BUNDLE_DOCKERFILE",
   "bootstrap.mjs": "GW_BUNDLE_BOOTSTRAP",
   "flows.template.json": "GW_BUNDLE_FLOWS",
-  // ROADMAP 7'S PULLER. Without it in this map the appliance's compose file names a service whose
+  // THE PULLER (flow-sync.mjs). Without it in this map the appliance's compose file names a service whose
   // script is not in the archive, and `docker compose up` fails on a bundle that looks complete --
   // so this entry, the entrypoint that exports it and main's allowlist move together or not at all.
   "flow-sync.mjs": "GW_BUNDLE_FLOW_SYNC",

@@ -101,7 +101,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // address cannot be derived from SUPABASE_URL -- inside this network that is supabase-kong, which
   // resolves for nothing on a shopfloor.
   //
-  // THE FORGE CREDENTIAL IS THE THIRD PLANE (roadmap 7), and it is the narrowest of the three the
+  // THE FORGE CREDENTIAL IS THE THIRD PLANE, and it is the narrowest of the three the
   // registry hands out. It authenticates as a machine account that is NOT a Gitea administrator:
   // it owns the per-gateway repositories, so it can create one and attach a read-only deploy key,
   // and it can do nothing to the platform playbook the fleet converges to. An admin credential
@@ -119,21 +119,10 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_INTERNAL_URL",
     "GITEA_MACHINE_USER",
     "GITEA_MACHINE_PASSWORD",
-  ],
-
-  // Commits a proposed flow to a BRANCH in the gateway's repository and opens a pull request for
-  // it (roadmap 7). NO SERVICE-ROLE KEY, and that is the entry's point: it reads the gateway row
-  // AS THE CALLER, so RLS decides what is visible, and it makes no privileged database write at
-  // all -- the only thing it changes is in the forge.
-  //
-  // The forge credential it holds is the machine account, which is not a Gitea administrator and
-  // owns only the per-gateway repositories. Nothing here can merge: approving is `gitops:manage`,
-  // it belongs with the approvals page, and keeping it out of this worker is what keeps proposing
-  // and approving two privileges rather than one.
-  "propose-gateway-flow": [
-    "GITEA_INTERNAL_URL",
-    "GITEA_MACHINE_USER",
-    "GITEA_MACHINE_PASSWORD",
+    // The push webhook enrolment registers on each repository (0095): where Gitea should deliver,
+    // and the secret it signs with. Both optional -- unset means no hook, and enrolment says so.
+    "GITEA_WEBHOOK_URL",
+    "GITEA_WEBHOOK_SECRET",
   ],
 
   // Rotates a decommissioned gateway's broker account to a password nobody records, which is how
@@ -229,6 +218,28 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // authorisation decision, and one endpoint serving both would let a change made for one
   // product's role model silently move the other's.
   "nodered-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
+  // The forge listener's ext_authz step (0094): the role from user_roles, the placement through
+  // the machine account. The same three forge variables enroll-gateway holds, for the same reason.
+  "forge-membership": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "GITEA_INTERNAL_URL",
+    "GITEA_MACHINE_USER",
+    "GITEA_MACHINE_PASSWORD",
+  ],
+  // Gitea's own sign-out link, routed here by the forge listener: ends every GoTrue session the
+  // caller holds, then sends the browser through the door's sign-out. Needs the service key to
+  // revoke; touches the forge not at all.
+  "forge-signout": ["SUPABASE_SERVICE_ROLE_KEY"],
+  // Gitea's push webhook (0095): verifies the delivery's HMAC against GITEA_WEBHOOK_SECRET, records
+  // the head of main on the gateway row, and reads flows.json at that head through the machine
+  // account for its hash. The service key writes the row; the forge credential reads the file.
+  "forge-events": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "GITEA_WEBHOOK_SECRET",
+    "GITEA_INTERNAL_URL",
+    "GITEA_MACHINE_USER",
+    "GITEA_MACHINE_PASSWORD",
+  ],
 
   // Factory+ Directory adapter. NO SERVICE-ROLE KEY, and that is the point: it is a live read
   // API over the whole address space, so it authenticates the caller and then queries AS them,

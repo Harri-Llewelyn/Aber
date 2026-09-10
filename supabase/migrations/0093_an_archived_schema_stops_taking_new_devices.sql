@@ -2,67 +2,24 @@
 -- 0093 :: AN ARCHIVED SCHEMA STOPS TAKING NEW DEVICES
 -- =================================================================================================
 --
--- Issue #167, reported against `/schemas` at CRITICAL: "I archived Test_Schema when I made
--- Test_Schema_v2 but I can still assign Test_Schema to a device in the Edit Details dialog."
+-- `publish_schema_version()` repoints every device onto the new version before archiving the
+-- parent, so no device is judged against a superseded contract; nothing stopped an operator
+-- putting one back afterwards from the Edit Details dialog. Reattaching v1 to a machine
+-- publishing v2's metrics makes every added metric Unmodelled, and under
+-- `conformance_policy = 'enforce'` the daemon drops readings from a healthy machine.
 --
--- That is exactly what happened, and it undoes the one thing the versioning work exists to
--- guarantee. `publish_schema_version()` is atomic on purpose: it repoints every `device_submodels`
--- row AND the legacy `devices.schema_id` onto the new version, and only then archives the parent,
--- so that no device is left being judged against a contract the platform has moved past. Nothing
--- stopped an operator putting one back afterwards -- one device at a time, from a dialog whose
--- dropdown listed every schema ever created, with no sweep that would ever move it forward again.
+-- WHAT IS FORBIDDEN IS THE MOVE, NOT THE STATE. A device sitting on an archived schema is a
+-- migration that has not finished, and `/v1/schema/{uuid}` deliberately reports it. Rejected:
+-- an INSERT naming an archived schema, and an UPDATE that changes schema_id to one. Allowed: an
+-- UPDATE that leaves schema_id where it was, so renaming such a device still works. A draft
+-- stays assignable: attaching a draft to one device is how a version is tried before publishing.
+-- Shadow devices are exempt: `ensure_shadow_devices()` copies the origin's contract, and a
+-- replay lane must be able to mirror an unfinished migration.
 --
--- THE DAMAGE IS NOT COSMETIC, WHICH IS WHY THE SEVERITY IS RIGHT. A device's schemas decide what
--- `modelled_constraints()` judges its DDATA against. Reattaching v1 to a machine now publishing
--- v2's metrics makes every added metric "Unmodelled" and every retuned range judged against the
--- superseded one -- and with `conformance_policy = 'enforce'` the daemon then DROPS readings from
--- a healthy machine for contradicting a contract nobody meant it to be under.
---
--- =================================================================================================
--- WHAT IS FORBIDDEN IS THE *MOVE*, NOT THE STATE
--- =================================================================================================
---
--- A device sitting on an archived schema is a REAL and legitimate state: it is a migration that has
--- not finished. `/v1/schema/{uuid}` in `fplus-directory` deliberately refuses to hide it, on the
--- grounds that "an archived schema with devices still attached" is the most useful thing that route
--- can report. This guard agrees with that, and only rejects the transition INTO it:
---
---   * an INSERT naming an archived schema                          -- rejected
---   * an UPDATE that CHANGES schema_id to an archived schema       -- rejected
---   * an UPDATE that leaves schema_id where it already was         -- allowed
---
--- The third line is the one doing the quiet work. Without it, renaming a device that happens to sit
--- on an archived schema would fail -- the guard would convert an unfinished migration from
--- something to finish into something that freezes every other edit on the row.
---
--- A DRAFT STAYS ASSIGNABLE, and that asymmetry is deliberate rather than an omission. Attaching a
--- draft to one device is how a version is tried against a real machine before it is published, and
--- `publish_schema_version()` already reads that as a state to MERGE -- see the DELETE of duplicate
--- submodels in its body, which exists for precisely that operator. A draft is not in force *yet*;
--- an archived version is not in force *any more*. Only the second is a step backwards.
---
--- SHADOW DEVICES ARE EXEMPT, and this is not a loophole. `ensure_shadow_devices()` COPIES the
--- contract of the device being replayed -- `schema_id` and every `device_submodels` row -- because
--- without it a replay is either unjudged or wholly rejected, and both look like a broken capture.
--- If the origin device is mid-migration and still on an archived version, the replay lane must be
--- able to say so too. The shadow makes no new assignment; it mirrors one that already exists, and
--- refusing it would break playback for the exact fleet this guard is trying to protect.
---
--- =================================================================================================
--- WHY A TRIGGER AND NOT A CHECK, A POLICY, OR THE UI
--- =================================================================================================
---
--- A CHECK constraint cannot see another table's row. An RLS policy cannot either, and would in any
--- case be bypassed by every SECURITY DEFINER path -- including the proposal lane, which APPLIES a
--- patch on approval and would otherwise carry an archived `schema_id` straight past a policy the
--- proposer's own session would have been refused by.
---
--- AND NOT THE UI ALONE. The dropdown is fixed as well (`assignableSchemas()` in
--- frontend/src/utils/schemaVersion.js, which keeps the currently-attached archived version visible
--- so saving cannot silently detach it) -- but that is the half that stops an operator being OFFERED
--- the mistake. PostgREST is a public write surface: `PATCH /devices?id=eq.<id>` with any
--- `schema_id` is one curl away, and the approvals queue reaches the same columns by another route
--- entirely. The rule belongs where every route passes.
+-- A trigger, not a CHECK (cannot see another table), a policy (bypassed by every SECURITY
+-- DEFINER path, including the proposal lane) or the UI alone (`assignableSchemas()` in
+-- frontend/src/utils/schemaVersion.js fixes the dropdown, but PostgREST is a public write
+-- surface).
 -- =================================================================================================
 
 CREATE OR REPLACE FUNCTION public.reject_archived_schema_assignment() RETURNS trigger
@@ -77,11 +34,8 @@ DECLARE
     v_version    integer;
     v_successor  text;
 BEGIN
-    -- ONE FUNCTION, TWO TABLES. `devices.schema_id` and `device_submodels.schema_id` are the two
-    -- arms of the `device_schemas` view, and a guard on one of them is not a guard: the frontend
-    -- writes the first, the AAS submodel path writes the second, and a device provisioned either
-    -- way is judged against whatever the view unions. Splitting this into two function bodies
-    -- would be two places for the rule to drift.
+    -- One function, two tables: `devices.schema_id` and `device_submodels.schema_id` are the two
+    -- arms of the `device_schemas` view, and a guard on one of them is not a guard.
     IF TG_TABLE_NAME = 'devices' THEN
         v_device_id := NEW.id;
         -- READ OFF `NEW`, NOT OUT OF THE TABLE. On INSERT the row is not visible to a query yet,
@@ -145,26 +99,17 @@ $$;
 
 COMMENT ON FUNCTION public.reject_archived_schema_assignment() IS 'Refuses a NEW binding of a device to an archived schema, on either arm of the device_schemas view. Leaving an existing binding in place is allowed -- an archived schema with devices still attached is an unfinished migration, not a fault -- and shadow devices are exempt because they copy the contract of the device they replay. Issue #167.';
 
--- NOBODY EXECUTES THIS DIRECTLY, AND THE GRANT HAS TO SAY SO. A trigger function runs as part of
--- the statement that fired it and needs no EXECUTE grant to do that -- but a bare CREATE FUNCTION
--- leaves the SQL default in place, which is EXECUTE to PUBLIC, so `anon` may call it. Harmless
--- here (it dereferences NEW and raises), and still wrong: `test_anon_privilege_baseline.py` is the
--- suite that asserts no new function arrives reachable by an unauthenticated caller.
---
--- IT WAS ALSO A ONE-BOOT-LATE IDEMPOTENCY DEFECT, which is how it was found. `0001`'s sweeper
--- revokes PUBLIC across every function in `public`, and it runs 92 files BEFORE this one -- so on
--- the boot that creates this function the sweep has already passed, and the ACL is only corrected
--- on the NEXT boot. Two consecutive replays of the same chain therefore produced two different
--- pg_dumps, which is exactly what check-migration-idempotency.mjs exists to catch. A migration
--- that creates a function states its own grants; it does not lean on a sweeper upstream of it.
+-- A trigger function needs no EXECUTE grant, but a bare CREATE FUNCTION leaves EXECUTE to
+-- PUBLIC, so `anon` may call it. 0001's sweeper runs before this file, so the ACL would only be
+-- corrected on the next boot, which check-migration-idempotency.mjs catches. A migration that
+-- creates a function states its own grants.
 REVOKE ALL ON FUNCTION public.reject_archived_schema_assignment() FROM PUBLIC, anon;
 
 -- -------------------------------------------------------------------------------------------------
 -- The two triggers
 -- -------------------------------------------------------------------------------------------------
--- BEFORE, so the row never lands. `UPDATE OF schema_id` narrows the update case to the column that
--- matters, so a heartbeat or a status write on a device that legitimately sits on an archived
--- schema does not even enter the function.
+-- BEFORE, so the row never lands. `UPDATE OF schema_id` keeps a heartbeat or status write on a
+-- device that sits on an archived schema out of the function.
 DROP TRIGGER IF EXISTS trg_devices_reject_archived_schema ON public.devices;
 CREATE TRIGGER trg_devices_reject_archived_schema
     BEFORE INSERT OR UPDATE OF schema_id ON public.devices
@@ -178,16 +123,10 @@ CREATE TRIGGER trg_device_submodels_reject_archived_schema
 -- -------------------------------------------------------------------------------------------------
 -- Self-check
 -- -------------------------------------------------------------------------------------------------
--- IT EXERCISES THE GUARD RATHER THAN COUNTING ANYTHING. A self-check that asserts a total is a
--- landmine under every later migration -- 0069 asserted an absolute permission count and 0086 broke
--- it on the second boot, where `npm run test:db` cannot see it. So this one creates an archived
--- schema, tries to attach a device to it, and reads the outcome; every row it writes is rolled back
--- by the nested block, so it leaves nothing behind and is safe to replay on every boot.
---
--- AND IT FAILS ONLY ON THE ONE WRONG ANSWER. If the INSERT is accepted, the guard is not working
--- and db-init should stop. If it is refused for some OTHER reason -- a constraint added later, a
--- column that became NOT NULL -- that is inconclusive rather than a regression in this migration,
--- and it says so rather than taking the stack down over a probe.
+-- Exercises the guard rather than counting anything (docs/incidents.md, "Self-checks must not
+-- count totals"): creates an archived schema, tries to attach a device, reads the outcome, and
+-- rolls every row back. It fails only if the INSERT is accepted; a refusal for some other reason
+-- is inconclusive and says so.
 DO $selfcheck$
 DECLARE
     v_probe_schema uuid := gen_random_uuid();

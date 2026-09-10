@@ -63,14 +63,43 @@ shares the same block through a YAML anchor, for the same reason.
   value: "true"
 - name: GITEA__repository__DEFAULT_PRIVATE
   value: private
-# OFF UNTIL ROADMAP 8 ARGUES THEM ON: a runner executes whatever a repository tells it
-# to, and a registry is a fourth credential plane.
+# THE LOGIN, WHICH IS THE GATEWAY'S `forge` LISTENER AND NOT GITEA'S OWN. The argument and the
+# measurements are on the same lines in docker-compose.yml; this block matches it line for line.
+# The one thing the Kubernetes shape has to add is the NetworkPolicy edge list: the identity
+# header is trusted from ANY peer (REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For only,
+# measured), so the gateway and the edge runtime are the only pods allowed to reach port 3000.
+- name: GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_EMAIL
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_FULL_NAME
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION_API
+  value: "false"
+- name: GITEA__service__ENABLE_PASSWORD_SIGNIN_FORM
+  value: "false"
+- name: GITEA__security__REVERSE_PROXY_TRUSTED_PROXIES
+  value: "*"
+- name: GITEA__security__REVERSE_PROXY_LIMIT
+  value: "1"
+# Off: a runner executes whatever a repository tells it to, and a registry is a fourth credential
+# plane. Turning either on is a decision (docs/roadmap.md, "The appliance itself").
 - name: GITEA__actions__ENABLED
   value: {{ .Values.gitea.actions.enabled | quote }}
 - name: GITEA__packages__ENABLED
   value: {{ .Values.gitea.packages.enabled | quote }}
 - name: GITEA__cron.update_checker__ENABLED
   value: "false"
+# Projects and Packages are hidden from every repository; the wiki and issues stay. Same rationale
+# as the Compose file's gitea-env block.
+- name: GITEA__repository__DISABLED_REPO_UNITS
+  value: "repo.projects,repo.packages"
+# Webhooks may call private addresses: the one they call is the edge runtime (forge-events), a
+# cluster-internal Service. Gitea's default admits public addresses only. See the Compose file.
+- name: GITEA__webhook__ALLOWED_HOST_LIST
+  value: "private"
 - name: GITEA__log__LEVEL
   value: {{ .Values.gitea.logLevel | quote }}
 {{- end -}}
@@ -86,12 +115,12 @@ shares the same block through a YAML anchor, for the same reason.
 {{- end }}
 {{/*
 =================================================================================================
-GITEA -- the forge roadmap 7-9 are built on.
+GITEA -- the forge: one private repository per enrolled gateway, cloned by the appliance's puller.
 
 THE ARGUMENT FOR IT IS IN docker-compose.yml AND IS NOT REPEATED HERE. What this file adds is the
 three things the Kubernetes shape has to answer that Compose does not.
 
-ONE: SSH IS NOT AN INGRESS CONCERN. Roadmap 7 gives every appliance a per-gateway READ-ONLY deploy
+ONE: SSH IS NOT AN INGRESS CONCERN. Every appliance holds a per-gateway READ-ONLY deploy
 key, and a Gitea deploy key is an SSH key -- there is no per-repository read-only HTTP token to use
 instead. An HTTP Ingress cannot carry SSH at all, so the same split mosquitto already makes applies:
 a plain ClusterIP for in-cluster resolution, and a SECOND Service for the fleet. Getting this wrong
@@ -127,8 +156,8 @@ metadata:
     {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   annotations:
     # KEPT ACROSS `helm uninstall`, and this is the volume in the chart where that matters most
-    # after the databases. It holds every repository -- which, once roadmap 9 retires the
-    # gateway-backups bucket, is the only copy of every gateway's edge flow -- plus the SSH host
+    # after the databases. It holds every repository -- the only copy of every gateway's edge
+    # flow, since nothing writes to the gateway-backups bucket any more -- plus the SSH host
     # keys appliances carry in known_hosts. Losing those does not merely lose data: every gateway
     # refuses to clone with a host-key mismatch, which reads as an attack rather than as a restore.
     "helm.sh/resource-policy": keep
@@ -172,7 +201,8 @@ in-cluster name must stay a plain ClusterIP so `gitea:3000` resolves the same wa
 and mixing the two would tie internal service discovery to an external IP allocation.
 
 WHY SSH RATHER THAN AN HTTP TOKEN, restated here because this Service is what pays for it: a Gitea
-deploy key is per-repository and read-only, which is the credential model roadmap 7 specifies. An
+deploy key is per-repository and read-only, which is the credential model enrolment issues
+(docs/physical-gateways.md). An
 HTTP token is per-USER and carries that user's access to EVERY repository, so using one would hand
 each appliance the whole fleet's flows in order to save a port.
 */}}

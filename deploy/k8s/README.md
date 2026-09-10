@@ -183,7 +183,7 @@ kubectl -n acs-cymru delete pvc data-timescaledb-0
 
 ## Reaching the stack
 
-Seven subdomains, all on one Ingress, all derived from `global.publicBaseDomain`:
+Eight subdomains, all on one Ingress, all derived from `global.publicBaseDomain`:
 
 | Host | Backend | Compose equivalent |
 |---|---|---|
@@ -193,8 +193,10 @@ Seven subdomains, all on one Ingress, all derived from `global.publicBaseDomain`
 | `grafana.<domain>` | `grafana:3000` | `:3002` |
 | `studio.<domain>` | `supabase-kong:8001` (the gateway's studio listener — **off by default**) | `:54323` |
 | `docs.<domain>` | `swagger-ui:8080` | `:8088` |
+| `git.<domain>` | `supabase-kong:8002` (the gateway's forge listener; never `gitea:3000`) | `:3003` |
 | `mqtt.<domain>` | `mosquitto:9001` (WebSockets) | `:9001` |
 | — | `mosquitto-external:1883` (LoadBalancer) | `:1883` |
+| — | `<release>-ingress-gitea-ssh:22` (LoadBalancer; `gitea.ssh.external`) | `:2222` |
 
 **Raw MQTT on 1883 is not on the Ingress** and cannot be — it is TCP, not HTTP. That is the
 `mosquitto-external` Service's job.
@@ -660,6 +662,15 @@ from the node CIDR via `networkPolicy.extraEgress`.
 over 512 bytes falls back to TCP, so a UDP-only rule fails *intermittently*), and
 `supabase-db → node-red:1880` — the quarantine webhook goes there **directly**, not through Kong, and
 pg_net has no retries or DLQ, so blocking it drops every notification silently.
+
+**The forge depends on this policy for its login, and the policy is off by default.** Gitea runs
+with reverse-proxy authentication and signs in whoever the `X-WEBAUTH-USER` header names, from any
+peer (`REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For` only). On Compose, Gitea sits on a
+network only the gateway and the edge runtime join. On Kubernetes the equivalent is the two
+NetworkPolicy edges to `gitea:3000` — so with `networkPolicy.enabled: false` **any pod in the
+namespace can reach Gitea's HTTP port and become any user**, Node-RED included, which runs whatever
+JavaScript a flow author writes. Enable the policy on any cluster where the forge holds real flows,
+or keep `gitea.enabled: false` until you do.
 
 ### PDBs and HPAs
 
@@ -1299,9 +1310,11 @@ anyone retiring one deletes it, in the same commit as the change.
 | `deno_cache` volume | `emptyDir` | Compose-only hot-reload convenience |
 | `node-red-init` runs `chown -R 1000:1000 /data` | `podSecurityContext.fsGroup: 1000` | Kubernetes does it natively on mount |
 | `mosquitto-init` writes the password file once | initContainer assembles it, sidecar reloads it | Gateway credentials become reviewable Secret state instead of something typed into a container |
+| `gitea-init` one-shot creates the forge's administrator and machine account | An initContainer on the gitea pod, running the same `gitea-init.sh` | Same arrangement as `mosquitto-init`: provisioning against the volume the server mounts |
+| Gitea sits on a `forge` Docker network that only the gateway and the edge runtime join | NetworkPolicy edges from the gateway and `supabase-functions` to `gitea:3000`, **only when `networkPolicy.enabled`** | Gitea signs in whoever `X-WEBAUTH-USER` names, from any peer, so reachability of port 3000 is the forge's access control. With the policy off (the default) every pod in the namespace can reach it; see the security note under *Hardening* |
 | Gateway provisioning via `docker exec` | `--target=k8s`: patch the Secret, then force the reload | Same script, two backends, so the ACL reasoning stays in one place |
 | Ingestion has no healthcheck | Liveness probe on the heartbeat file's age | A wedged paho loop is invisible on Compose; Kubernetes can restart it |
-| `loki` + `alloy` + `docker-socket-proxy` run the log store | No log workload; the Grafana **datasource** is provisioned either way, pointed at `grafana.lokiUrl` | Same reasoning as Prometheus, which this chart also does not deploy: Compose owns its whole observability stack, a cluster is assumed to run one already, and a second store plus a second collector would duplicate every line and give an operator two places to configure retention. **Not a judgement that logs matter less here** — `kubectl logs` dies at reschedule, so the Kubernetes case is the stronger one. See roadmap §12 |
+| `loki` + `alloy` + `docker-socket-proxy` run the log store | No log workload; the Grafana **datasource** is provisioned either way, pointed at `grafana.lokiUrl` | Same reasoning as Prometheus, which this chart also does not deploy: Compose owns its whole observability stack, a cluster is assumed to run one already, and a second store plus a second collector would duplicate every line and give an operator two places to configure retention. **Not a judgement that logs matter less here** — `kubectl logs` dies at reschedule, so the Kubernetes case is the stronger one |
 | `alloy` reaches the Docker API through a read-only socket proxy | A DaemonSet reads `/var/log/pods` | There is no Docker socket to front, and the kubelet supplies the pod and container labels the proxy exists to obtain on Compose |
 | Streams are labelled `service` + `container` | Whatever the cluster's collector applies | **A CONTRACT, NOT A DETAIL.** Every log query shipped here selects on `{service="<name>"}` — the provisioned drop panel's drill-down included. A stock Kubernetes log stack sets `namespace`/`pod`/`container` and no `service`, so the datasource connects, the health check passes, and every query returns nothing. A cluster feeding `grafana.lokiUrl` must relabel `service` to the workload name |
 | Gateway CORS origins default to `localhost:3000` / `:8088` | Derived from `publicBaseDomain` by `acs-cymru.corsOrigins` | Compose serves the dashboard on a published port; the chart serves it on `app.<domain>` and calls the API on `api.<domain>`, which is cross-origin. Same `__CORS_ORIGINS__` placeholder, different substituter — substituted into `envoy.yaml` on Compose and into whichever gateway the chart deploys |

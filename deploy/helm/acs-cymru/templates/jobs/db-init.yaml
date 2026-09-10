@@ -131,6 +131,18 @@ spec:
                   optional: true
             - name: STUDIO_PUBLIC_URL
               value: {{ include "acs-cymru.studioUrl" . | quote }}
+            # The forge's client (0094), and the address its redirect_uri is built from -- the
+            # same helper Gitea's ROOT_URL and the Ingress host come from. Optional like Studio's,
+            # so an operator's existing Secret still runs the migrations; absent, 0094 warns and
+            # registers nothing.
+            - name: GITEA_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: GITEA_OAUTH_CLIENT_SECRET
+                  optional: true
+            - name: GITEA_PUBLIC_URL
+              value: {{ include "acs-cymru.giteaUrl" . | quote }}
             - name: NODERED_OAUTH_CALLBACK_URL
               value: {{ printf "%s/auth/strategy/callback" (include "acs-cymru.noderedUrl" .) | quote }}
             {{- /*
@@ -239,6 +251,8 @@ spec:
                     -v grafana_public_url="$GRAFANA_PUBLIC_URL" \
                     -v studio_oauth_client_secret="$STUDIO_OAUTH_CLIENT_SECRET" \
                     -v studio_public_url="$STUDIO_PUBLIC_URL" \
+                    -v gitea_oauth_client_secret="$GITEA_OAUTH_CLIENT_SECRET" \
+                    -v gitea_public_url="$GITEA_PUBLIC_URL" \
                     -v nodered_oauth_client_secret="$NODERED_OAUTH_CLIENT_SECRET" \
                     -v nodered_webhook_jwt_secret="$NODERED_WEBHOOK_JWT_SECRET" \
                     -v nodered_redirect_uri="$NODERED_OAUTH_CALLBACK_URL" \

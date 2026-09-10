@@ -844,12 +844,19 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
      nothing about the address space is in it. */}}
 {{- $routes = append $routes (dict "name" "i3x" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "i3x")) "service" "i3x-service" "port" 8090) -}}
 {{- end -}}
-{{- if .Values.gitea.enabled -}}
-{{/* THE WEB HALF OF THE FORGE ONLY. Git over SSH is TCP and cannot ride an HTTP Ingress at all --
-     that is `gitea-external`'s job, exactly as raw MQTT is mosquitto-external's. Naming this route
-     is therefore not enough to make an appliance able to clone, which is the thing that would
-     otherwise be discovered on a gateway rather than here. */}}
-{{- $routes = append $routes (dict "name" "gitea" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "gitea")) "service" "gitea" "port" 3000) -}}
+{{- if and .Values.gitea.enabled .Values.supabaseEnvoy.enabled -}}
+{{/* THE WEB HALF OF THE FORGE ONLY, AND THROUGH THE GATEWAY, NEVER DIRECTLY. Git over SSH is TCP
+     and cannot ride an HTTP Ingress at all -- that is `gitea-external`'s job, exactly as raw MQTT
+     is mosquitto-external's. Naming this route is therefore not enough to make an appliance able
+     to clone, which is the thing that would otherwise be discovered on a gateway rather than here.
+
+     THE BACKEND IS THE GATEWAY'S `forge` LISTENER (8002) AND THIS LINE IS THE WHOLE CONTROL, as
+     Studio's is. Gitea runs with reverse-proxy authentication on, which signs in whoever the
+     X-WEBAUTH-USER header names -- from any peer, measured. A route naming `gitea:3000` would put
+     that on a public hostname, where a request from the internet chooses its own identity. Gated
+     on the gateway being Envoy for the same reason as Studio's: Kong has no such listener, and on a
+     Kong stack the forge's web UI is correctly absent rather than published bare. */}}
+{{- $routes = append $routes (dict "name" "gitea" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "gitea")) "service" .Values.supabaseEnvoy.serviceName "port" 8002) -}}
 {{- end -}}
 {{- if .Values.mosquitto.enabled -}}
 {{/* MQTT over WEBSOCKETS only -- port 9001. Raw MQTT on 1883 is TCP and cannot ride an HTTP

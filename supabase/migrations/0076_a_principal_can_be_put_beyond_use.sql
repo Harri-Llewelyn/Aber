@@ -1,63 +1,28 @@
 -- =============================================================================================
 -- 0076_a_principal_can_be_put_beyond_use.sql
 --
--- Revocation for a whole service PRINCIPAL, not one of its tokens.
+-- Revocation for a whole service principal, not one of its tokens. The `auth.users` row is
+-- flagged, not deleted: `digital_thread.changed_by` references it, and the history of a revoked
+-- principal is the part most worth keeping.
 --
--- THE LAST OPEN BULLET OF ROADMAP ITEM 3, which asks: *"Whether revoking a principal deletes its
--- `auth.users` row or flags it. Flagging it and revoking its outstanding tokens is the
--- recommendation: deleting orphans the `digital_thread` attribution, and the history of a revoked
--- principal is the part most worth keeping."* That recommendation is followed here, and the
--- reasoning holds up: `digital_thread.changed_by` is a foreign key to `auth.users`, so deleting the
--- row would either fail against its own audit trail or, with a cascade, erase who did what.
+-- A flag nothing reads would change nothing, so it is enforced where 0074 put the token
+-- denylist, `auth_pre_request()`, keyed on the `sub` claim.
 --
--- ---------------------------------------------------------------------------------------------
--- A FLAG THAT NOTHING READS IS THE EXACT TRAP 0043 ALREADY DOCUMENTED.
+-- Both the principal flag and each outstanding jti are denylisted. The tokens are redundant for
+-- PostgREST and not for the audit trail (a TOKEN_REVOKED row per token says what was withdrawn)
+-- or for reinstatement: lifting the flag restores the identity, not the tokens that were live,
+-- and `revoke_service_token()` has no inverse.
 --
--- 0043 rejected deleting the `auth.users` row because *"the signature is validated and the subject
--- never looked up"* -- the token keeps working against a principal that no longer exists. A flag
--- has PRECISELY the same problem: writing `revoked_at` somewhere changes nothing on its own, and
--- would ship a control that reads as safety while every outstanding token carried on working.
---
--- So the flag is enforced where 0074 put the token denylist -- `auth_pre_request()`, PostgREST's
--- `db-pre-request` hook -- and keyed on the `sub` claim. That is what makes this a revocation
--- rather than an annotation.
---
--- ---------------------------------------------------------------------------------------------
--- WHY BOTH, WHEN THE SUBJECT CHECK ALONE WOULD COVER THE TOKENS.
---
--- Revoking the principal refuses every token naming it, including ones this stack has no
--- TOKEN_MINTED row for. So denylisting each outstanding jti as well is redundant *for PostgREST*.
--- It is not redundant for two other things:
---
---   * THE AUDIT TRAIL. A TOKEN_REVOKED row per token is what says which credentials were actually
---     withdrawn on the day. `PRINCIPAL_REVOKED` alone would leave a reader to work out what was
---     outstanding at that moment, from an append-only log, after the fact.
---   * REINSTATEMENT. Lifting the principal flag must not resurrect credentials that were live when
---     it was revoked -- an operator reinstating an identity is restoring the IDENTITY, not handing
---     back whatever tokens happened to exist. Because the tokens are separately denylisted, they
---     stay withdrawn, and `revoke_service_token()` has no inverse to undo that.
---
--- That composition is why reinstatement can exist at all without being dangerous.
---
--- ---------------------------------------------------------------------------------------------
--- A PERSON'S ACCOUNT IS REFUSED, AND THAT IS A SAFETY PROPERTY RATHER THAN TIDINESS.
---
--- `sub` is on every JWT, a human session included. If this table could name a person, an
--- Administrator could be locked out of PostgREST entirely through a control built for machines --
--- and, since the same hook then refuses the request that would undo it, locked out of undoing it.
--- `is_machine_principal()` (0042) is the guard, and it is checked in the RPC rather than trusted
--- from the caller.
+-- A person's account is refused: `sub` is on every JWT, and a table that could name a person
+-- could lock an Administrator out of PostgREST, including out of undoing it.
+-- `is_machine_principal()` is checked in the RPC, not trusted from the caller.
 -- =============================================================================================
-
 
 -- ---------------------------------------------------------------------------------------------
 -- The flag
 -- ---------------------------------------------------------------------------------------------
--- NOT SELF-PRUNING, UNLIKE revoked_service_tokens, and the difference is real rather than an
--- oversight. A token row can go once the token expires, because the signature check refuses it
--- from then on. A principal has no expiry: it is revoked until somebody reinstates it, and a row
--- that vanished on a timer would silently readmit the identity. The table is bounded by the number
--- of service principals, which is single digits.
+-- Not self-pruning, unlike revoked_service_tokens: a principal has no expiry, and a row that
+-- vanished on a timer would readmit the identity. Bounded by the number of service principals.
 CREATE TABLE IF NOT EXISTS public.revoked_service_principals (
   principal_id  uuid        PRIMARY KEY,
   revoked_at    timestamptz NOT NULL DEFAULT now(),
@@ -85,7 +50,6 @@ CREATE POLICY revoked_service_principals_select_privileged
 -- Administrator included -- gets `permission denied`, and the policy above reads as though it were
 -- working. 0074 shipped with exactly that defect for one commit.
 GRANT SELECT ON public.revoked_service_principals TO authenticated;
-
 
 -- ---------------------------------------------------------------------------------------------
 -- The choke point learns a second question
@@ -121,19 +85,11 @@ BEGIN
   END;
 
   -- ------------------------------------------------------------------------------------------
-  -- The principal denylist (0076), CHECKED FIRST
+  -- The principal denylist, checked first
   -- ------------------------------------------------------------------------------------------
-  -- THE ORDER IS ABOUT THE MESSAGE, NOT ABOUT CORRECTNESS -- either arm refuses the request, so
-  -- the outcome is identical and only the explanation differs. Revoking a principal CASCADES to
-  -- its outstanding tokens, so after one both arms match, and with the token arm first the holder
-  -- was told "this token has been revoked" -- true, and the least useful of the two true answers.
-  -- It invites them to ask for a replacement, which the mint then refuses for a reason they have
-  -- not been told. "This identity has been revoked" is the fact that explains both.
-  --
-  -- THE CAST IS GUARDED, because `sub` is a claim and this function must not raise on a malformed
-  -- one. PostgREST puts whatever the JWT carried into the GUC; a token signed elsewhere with
-  -- `sub: "hello"` would abort every request through this hook if the cast were bare -- turning a
-  -- junk token presented by one caller into a total outage for everybody.
+  -- The order is about the message: after a principal revocation both arms match, and "this
+  -- identity has been revoked" is the fact that explains both. The cast is guarded because `sub`
+  -- is a claim, and a bare cast on a malformed one would abort every request through this hook.
   IF v_sub IS NOT NULL AND v_sub <> '' THEN
     BEGIN
       IF EXISTS (
@@ -158,10 +114,8 @@ BEGIN
   -- ------------------------------------------------------------------------------------------
   -- The token denylist (0074)
   -- ------------------------------------------------------------------------------------------
-  -- A TOKEN WITH NO `jti` IS UNREVOKABLE BY THIS ARM AND MUST STILL BE SERVED. Every human
-  -- session, the anon key and the service_role key are in that case. The subject arm above does
-  -- NOT share that exemption, which is the point of having it: a principal revocation reaches a
-  -- token this stack never recorded.
+  -- A token with no `jti` (every human session, the anon and service_role keys) is unrevokable by
+  -- this arm and must still be served. The subject arm above does not share that exemption.
   IF v_jti IS NOT NULL AND v_jti <> '' AND EXISTS (
     SELECT 1 FROM public.revoked_service_tokens
      WHERE jti = v_jti AND expires_at > now()
@@ -181,53 +135,15 @@ COMMENT ON FUNCTION public.auth_pre_request() IS
   '-- no claims, unparseable claims, a token with no jti, a sub that is not a uuid -- because '
   'those are the ordinary majority and refusing them would take the whole API down.';
 
--- REVOKED FROM PUBLIC, GRANTED TO anon -- AND THOSE ARE NOT THE SAME GRANTEE.
---
--- PostgreSQL gives every new function EXECUTE to PUBLIC. Issuing a GRANT on a function whose ACL is
--- still NULL MATERIALISES that default first and then adds to it, so the GRANT below does not
--- replace PUBLIC's entry -- it preserves it. Measured on a database booted exactly once, before
--- this line existed:
---
---     auth_pre_request  {=X/postgres,postgres=X/postgres,service_role=X/postgres,anon=X/postgres,...}
---                        ^^^^^^^^^^^ PUBLIC
---
--- and on the same chain booted twice, where 0001's section 6 sweep has since removed it. TWO BOOTS
--- OF THE SAME FILES PRODUCED TWO DIFFERENT SCHEMAS, which is what check-migration-idempotency.mjs
--- refuses -- it caught this as `REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC;`
--- appearing in the second dump and not the first.
---
--- Revoking PUBLIC here settles it on boot one instead. `anon` KEEPS its explicit grant, which it
--- must: PostgREST runs this hook after switching to the request's role, and for an unauthenticated
--- request that role is `anon`. Revoking anon as the sibling functions do would take the whole
--- anonymous API down.
--- ALL FOUR GRANTEES REVOKED AND RE-GRANTED IN ONE FIXED ORDER, which is stronger than it looks
--- and is about the DUMP rather than about privilege.
---
--- An ACL is an ordered array, and pg_dump renders it in that order, so two boots that arrive at the
--- same PERMISSIONS by different routes still produce different SQL -- and
--- check-migration-idempotency.mjs compares a sha256 of the dump, so a pure reordering fails it
--- while reporting no added or removed line at all.
---
--- The routes genuinely differ, because this is the only function in `public` that `anon` is meant
--- to reach. 0001's section 6 sweep strips PUBLIC and anon from every function and then restores
--- only the `authenticated` and `service_role` grants it found, so `anon` is re-added afterwards by
--- the GRANT below and lands LAST -- but only from the second boot onwards, since on the first this
--- function does not exist when 0001 runs. Measured:
---
---     boot 1       {postgres, service_role, anon, authenticated}
---     boot 2+      {postgres, service_role, authenticated, anon}
---
--- Revoking all three roles here empties the array to `{postgres}` whatever preceded it, so the
--- three GRANTs below always append in the same order. This is the last declaration of the function
--- in the chain, so its ordering is the one that survives.
---
--- ANON KEEPS ITS GRANT, which it must: PostgREST runs this hook after switching to the request's
--- role, and for an unauthenticated request that role is `anon`. Revoking anon as the sibling
--- functions do would take the whole anonymous API down, /ping included.
+-- Revoked from PUBLIC first: a GRANT on a function whose ACL is NULL materialises the default
+-- EXECUTE-to-PUBLIC and preserves it. All four grantees are revoked and re-granted in one fixed
+-- order because pg_dump renders an ACL in array order and check-migration-idempotency.mjs
+-- compares a digest of the dump; this is the only function in `public` that `anon` reaches, so
+-- 0001's sweep and this file would otherwise order the array differently on the first and
+-- second boots. `anon` keeps its grant: PostgREST runs this hook as the request's role.
 REVOKE ALL ON FUNCTION public.auth_pre_request()
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.auth_pre_request() TO anon, authenticated, service_role;
-
 
 -- ---------------------------------------------------------------------------------------------
 -- The act
@@ -291,9 +207,7 @@ BEGIN
   -- ------------------------------------------------------------------------------------------
   -- Every outstanding token as well, which is what makes reinstatement safe
   -- ------------------------------------------------------------------------------------------
-  -- Redundant for PostgREST -- the subject arm already refuses them -- and NOT redundant for the
-  -- audit trail or for reinstatement. See the header. Each is denylisted individually so that
-  -- lifting the principal flag later does not hand back credentials that were live today.
+  -- Redundant for PostgREST and not for the audit trail or for reinstatement; see the header.
   FOR v_row IN
     SELECT DISTINCT ON (dt.new_data ->> 'jti')
            dt.new_data ->> 'jti'                     AS jti,
@@ -363,7 +277,6 @@ COMMENT ON FUNCTION public.revoke_service_principal(uuid, text) IS
 REVOKE ALL ON FUNCTION public.revoke_service_principal(uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.revoke_service_principal(uuid, text) TO authenticated;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- Putting it back
 -- ---------------------------------------------------------------------------------------------
@@ -429,18 +342,11 @@ COMMENT ON FUNCTION public.reinstate_service_principal(uuid) IS
 REVOKE ALL ON FUNCTION public.reinstate_service_principal(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.reinstate_service_principal(uuid) TO authenticated;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- A revoked principal cannot be issued a new token
 -- ---------------------------------------------------------------------------------------------
--- WITHOUT THIS THE PAGE WOULD OFFER A MINT THAT PRODUCES A DEAD CREDENTIAL. The subject arm
--- refuses anything naming a revoked principal, so a token issued now would be signed, recorded,
--- returned, pasted into a client -- and refused on its first request, with the operator having
--- followed the page to get there. Refusing at the point of issue is the only place that reads as
--- a decision rather than a fault.
---
--- ADDED HERE RATHER THAN IN 0075 so the guard sits beside the mechanism it depends on; 0075 has no
--- knowledge of this table.
+-- Without this the page would sign a credential that is refused on its first request. Here
+-- rather than in 0075 so the guard sits beside the table it reads.
 CREATE OR REPLACE FUNCTION public.assert_principal_not_revoked(p_principal_id uuid)
 RETURNS void
 LANGUAGE plpgsql
@@ -457,17 +363,9 @@ BEGIN
 END;
 $$;
 
--- REVOKED FROM PUBLIC FIRST, as revoke_service_principal() and reinstate_service_principal() above
--- both are. PostgreSQL grants EXECUTE on a new function to PUBLIC by default, and `anon` is a
--- member of PUBLIC -- so a GRANT on its own does not narrow anything, it merely restates a
--- permission everybody already had. This one was written without the REVOKE and leaked to `anon`,
--- which validate.py's check 13a caught on the first end-to-end run.
---
--- NOT AN ESCALATION, AND STILL WORTH FIXING. The function is invoker-rights, so an anonymous caller
--- reaching it gets `permission denied for table revoked_service_principals` -- 0076 grants that
--- table to `authenticated` only. What it costs is the baseline: check 13a demands an EMPTY set
--- precisely so that a real finding cannot hide among harmless ones, and every entry that is
--- "harmless, because of something else" erodes exactly that property.
+-- Revoked from PUBLIC first, as the two RPCs above are: `anon` is a member of PUBLIC, so a GRANT
+-- on its own narrows nothing. The function is invoker-rights, so the leak was not an escalation,
+-- but validate.py's check 13a demands an empty set so a real finding cannot hide.
 REVOKE ALL ON FUNCTION public.assert_principal_not_revoked(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.assert_principal_not_revoked(uuid) TO authenticated, service_role;
 

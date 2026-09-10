@@ -627,7 +627,7 @@ writeFileSync(
 //     THE HOST KEY ARRIVES WITH IT, AND THAT IS WHAT MAKES THE PULL VERIFIABLE. An appliance with
 //     no known_hosts entry could only trust whatever key answers on its first connection -- trust
 //     on first use, decided at the one moment an attacker would choose -- or be told to skip
-//     verification, which roadmap 7 and 11 both refuse. THIS response is the alternative: it comes
+//     verification, which this platform refuses everywhere. THIS response is the alternative: it comes
 //     over TLS, authenticated by a single-use token bound to one gateway row, so the forge's
 //     identity is learned from the platform BEFORE the first clone. flow-sync.mjs points
 //     GIT_SSH_COMMAND at the file written here and never at a skip-verification switch.

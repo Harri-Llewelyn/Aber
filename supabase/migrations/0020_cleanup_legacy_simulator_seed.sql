@@ -1,54 +1,20 @@
 -- =============================================================================================
 -- 0020_cleanup_legacy_simulator_seed.sql
 --
--- Retires the introductory single-device simulator -- `Virtual_Gateway_NodeRED` and
--- `Simulated_CNC_01` -- and moves what hung off it onto `Sim_CNC_Mill_01`, the machining cell's
--- first CNC on the `Simulated Shopfloor` flow.
+-- Retires the introductory single-device simulator (`Virtual_Gateway_NodeRED` and
+-- `Simulated_CNC_01`) and moves its schema attachment and nameplate onto `Sim_CNC_Mill_01`. A
+-- migration rather than an edit to 0002 because 0002 is ON CONFLICT DO NOTHING throughout.
 --
--- WHY THEY GO AT ALL. They described a stack that no longer exists. The flow was consolidated onto
--- one tab of four cell gateways and six `Sim_`-prefixed devices, and nothing has published under
--- `dev200000000000400080000` since. What was left was a gateway permanently OFFLINE and a device
--- permanently quarantined, sitting at the top of the shopfloor map and the quarantine queue,
--- describing hardware that was never there -- and, worse, a device the AAS conformance suite
--- still targeted by name, so the one asset the export was proved against was the one asset that
--- had stopped receiving a DBIRTH.
+-- Order is a dependency: 1. attach the schema to the new device (so it is never attached to
+-- nothing); 2. seed the nameplate here, because `device_nameplate` does not exist when 0002
+-- runs; 3. delete the legacy device, then the gateway (`devices.gateway_id` references it);
+-- 4. purge the orphaned birth parameters, since `asset_config` is keyed by the text
+-- `sparkplug_id` and nothing cascades.
 --
--- ---------------------------------------------------------------------------------------------
--- WHY A MIGRATION AND NOT JUST AN EDIT TO 0002
+-- Not deleted: `digital_thread` (the deletes append to it, which is the purge being recorded),
+-- the schema row (re-pointed, not retired), and historical telemetry in TimescaleDB.
 --
--- 0002 uses ON CONFLICT ... DO NOTHING throughout: it inserts what is missing and never touches
--- what exists. Deleting the rows from that file alone would build a fresh database correctly and
--- leave every existing one exactly as it was -- the legacy pair still present, and now with
--- nothing in the repository explaining where they came from.
---
--- ---------------------------------------------------------------------------------------------
--- FOUR THINGS, IN THIS ORDER, AND THE ORDER IS A DEPENDENCY
---
---   1. ATTACH the tri-standard schema to Sim_CNC_Mill_01. Before the delete, so that at no point
---      between the two is the schema attached to nothing.
---   2. SEED the device's IDTA Digital Nameplate. This CANNOT live in 0002: `device_nameplate` is
---      created by 0011, and 0002 runs nine migrations earlier against a table that does not yet
---      exist. Seeding it here is the only ordering that works on a fresh database.
---   3. DELETE the legacy device, then the legacy gateway. Device first: `devices.gateway_id`
---      references the gateway, so the reverse order fails on the foreign key.
---   4. PURGE the orphaned birth parameters. `asset_config` is keyed by the TEXT `sparkplug_id`,
---      not by a foreign key to `devices`, so nothing cascades and those rows would otherwise
---      outlive the device forever -- invisible, since every reader joins through a device row
---      that no longer exists.
---
--- WHAT IS DELIBERATELY NOT DELETED:
---
---   * `digital_thread`. It is append-only and immutable by design, and the history of a device
---      that once existed is exactly what an audit trail is for. The deletes below APPEND to it
---      (trg_devices_digital_thread fires on DELETE), which is the correct outcome: the purge is
---      itself recorded.
---   * The `Simulated_CNC_01_Schema` row. It is being re-pointed, not retired -- see 0002.
---   * Historical telemetry in TimescaleDB. It lives in a different database reached over
---      postgres_fdw and is keyed by `dev200000000000400080000`; a Supabase migration cannot
---      transactionally delete it, and it ages out under the retention policy on its own.
---
--- Idempotent: db-init replays every migration on every boot with ON_ERROR_STOP=1 and there is no
--- applied-migrations ledger, so the second run must match no rows rather than fail.
+-- Idempotent: the second run matches no rows.
 -- =============================================================================================
 
 SET search_path TO public;
@@ -67,12 +33,8 @@ DECLARE
   v_gateways       INTEGER;
   v_config         INTEGER;
 BEGIN
-  -- 1. THE ATTACHMENT, guarded on both rows existing.
-  --
-  -- The device may legitimately be absent: 0002 seeds it, but a database can be mid-upgrade, and
-  -- a missing device here is not a reason to fail a boot. The schema may be absent for the same
-  -- reason. Both are checked rather than assumed, because an INSERT against either would raise a
-  -- foreign-key violation that db-init reports as a failed migration.
+  -- 1. The attachment, guarded on both rows existing: a database can be mid-upgrade, and an
+  -- INSERT against a missing row would raise a foreign-key violation and fail the boot.
   IF EXISTS (SELECT 1 FROM public.devices WHERE id = v_target_device)
      AND EXISTS (SELECT 1 FROM public.schemas WHERE id = v_schema) THEN
 
@@ -81,30 +43,18 @@ BEGIN
     ON CONFLICT (device_id, schema_id) DO NOTHING;
     GET DIAGNOSTICS v_attached = ROW_COUNT;
 
-    -- The 1:1 fallback arm as well as the join row. `device_schemas` unions the two, so either
-    -- alone is sufficient for the exporter -- but a device created through the UI carries
-    -- neither, and setting both means the attachment survives an operator detaching one.
-    --
-    -- IS DISTINCT FROM, so a boot that changes nothing writes nothing. log_digital_thread_event()
-    -- has had a change guard since 0005 and would suppress the audit row anyway; this makes the
-    -- statement itself a no-op rather than relying on the trigger to clean up after it.
+    -- The 1:1 fallback arm as well as the join row: `device_schemas` unions the two, and setting both
+    -- means the attachment survives an operator detaching one. IS DISTINCT FROM, so a boot that
+    -- changes nothing writes nothing.
     UPDATE public.devices
        SET schema_id = v_schema
      WHERE id = v_target_device
        AND schema_id IS DISTINCT FROM v_schema;
     GET DIAGNOSTICS v_fallback = ROW_COUNT;
 
-    -- 2. THE NAMEPLATE.
-    --
-    -- WHY SEED ONE AT ALL, when the exporter prefers what the device publishes. Precisely because
-    -- it prefers it: `nameplateProperty()` resolves published-value-first and falls back to this
-    -- table, so seeding it changes nothing on a running stack where the CNC has sent its DBIRTH,
-    -- and is the difference between a Nameplate submodel and an empty one on a stack where it has
-    -- not. That second case is not hypothetical -- it is every CI run that brings up the database
-    -- without the broker, and the AAS suite asserts SerialNumber and FirmwareVersion are present.
-    --
-    -- ON CONFLICT DO NOTHING: an operator who has edited this device's nameplate through the UI
-    -- owns it from then on, and a migration replayed on every boot must not overwrite them.
+    -- 2. The nameplate. The exporter prefers what the device publishes and falls back to this table,
+    -- so on a stack without a broker (every CI run) this is the difference between a Nameplate
+    -- submodel and an empty one. ON CONFLICT DO NOTHING: an operator who has edited it owns it.
     INSERT INTO public.device_nameplate (
       device_id, manufacturer_name, manufacturer_product_designation, manufacturer_product_type,
       serial_number, year_of_construction, hardware_version, firmware_version, country_of_origin
@@ -123,11 +73,8 @@ BEGIN
     GET DIAGNOSTICS v_nameplate = ROW_COUNT;
   END IF;
 
-  -- 3. THE DELETES. Device before gateway -- devices.gateway_id references gateways(id).
-  --
-  -- BY PINNED ID, never by name. A name is a display label an operator may have changed, and
-  -- deleting by one would purge whatever happened to be called `Simulated_CNC_01` today.
-  -- device_submodels and device_nameplate both cascade from the device row.
+  -- 3. The deletes. Device before gateway. By pinned id, never by name: a name is a display label
+  -- an operator may have changed. device_submodels and device_nameplate cascade.
   DELETE FROM public.devices WHERE id = v_legacy_device;
   GET DIAGNOSTICS v_devices = ROW_COUNT;
 
@@ -147,13 +94,8 @@ BEGIN
 END;
 $$;
 
-
--- Self-check. The DO block reports what it changed; this asserts the END STATE, which is what the
--- next boot -- and the AAS conformance suite -- have to be able to assume.
---
--- The attachment assertion is CONDITIONAL on the device existing, and only that one is. The
--- legacy rows must be gone unconditionally; the attachment can only be asserted where there is
--- something to attach to, and a database mid-upgrade has not run 0002 yet.
+-- Self-check: asserts the end state. The legacy rows must be gone unconditionally; the
+-- attachment can only be asserted where there is something to attach to.
 DO $$
 DECLARE
   v_target_device CONSTANT uuid := '22000000-0000-4000-8000-000000000001';
@@ -176,14 +118,8 @@ BEGIN
   END IF;
 
   IF EXISTS (SELECT 1 FROM public.devices WHERE id = v_target_device) THEN
-    -- THE ATTACHMENT ASSERTION IS GATED ON THE SCHEMA STILL EXISTING, exactly as the attach block
-    -- above is, and 0073 is why. That migration retires `Simulated_CNC_01_Schema` along with the
-    -- rest of the demonstration seed, so on a stack that was provisioned before the retirement the
-    -- device outlives its schema -- and this check ran BEFORE 0073 in the chain, failing db-init on
-    -- the second boot over a row the chain itself had deliberately removed on the first.
-    --
-    -- Asserted where the schema is present, which is the case it was written for: a database
-    -- mid-upgrade that has 0002's schema and must not lose the attachment to it.
+    -- Gated on the schema still existing: 0073 retires it, so on a stack provisioned before the
+    -- retirement the device outlives its schema.
     IF EXISTS (SELECT 1 FROM public.schemas WHERE id = v_schema) THEN
       -- Through the VIEW, not the table: `device_schemas` is what the exporter reads, and asserting
       -- on device_submodels alone would pass while the union the consumer actually sees was empty.

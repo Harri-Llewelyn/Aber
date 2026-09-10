@@ -27,7 +27,7 @@ import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
-import { FlowProposalPanel } from '../common/FlowProposalPanel'
+import { GatewayRepositoryPanel } from '../common/GatewayRepositoryPanel'
 import {
   IconRadio,
   IconPlus,
@@ -284,24 +284,25 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       : null
   )
   /**
-   * WHO MAY PROPOSE A FLOW, and it is a ROLE rather than a permission on purpose.
+   * WHO MAY OPEN THE FORGE, and it is a ROLE rather than a permission on purpose.
    *
-   * There is no proposal permission to read: `gitops:manage` is the APPROVAL authority, and
-   * granting it here would collapse the two into one. The edge function decides by role name --
-   * Administrator, Shopfloor_Manager, Operator -- so this mirrors that list rather than inventing a
-   * second rule that could disagree with the control: the UI agrees with the boundary, it does not
-   * implement it.
+   * The forge's own door -- the `forge` listener in supabase/envoy.yaml -- admits Administrator and
+   * Shopfloor_Manager by the role in the verified token, and nobody else. This mirrors that list
+   * rather than inventing a second rule that could disagree with the control: an Operator shown
+   * the link would follow it to a 403, so they are shown nothing. The UI agrees with the boundary,
+   * it does not implement it.
    *
-   * OPERATOR IS THE POINT. Roadmap 7 says a review step whose proposals can only come from the two
-   * roles that may already merge them is a formality rather than a gate.
+   * THE PROPOSAL DROPZONE USED TO SIT HERE and admitted Operators, on the argument that a
+   * review step whose proposals can only come from the roles that may merge them is a formality.
+   * It went with the forge's door: a pull request opened there under the author's own name is the
+   * record now, `main` is protected in every gateway repository, and only an administrator's
+   * approval lets a merge through -- which is still two privileges rather than one.
    *
-   * THE FLOW-BACKUP GATES USED TO SIT HERE and were the mirror of supabase/storage-policies.sql:
+   * THE FLOW-BACKUP GATES SAT HERE BEFORE THAT and were the mirror of supabase/storage-policies.sql:
    * GATEWAY_MANAGE to write, plus the Auditor's DIGITAL_THREAD_READ to read. They went with the
-   * backup panel -- a copy in a bucket has no diff, no history and no reviewer, and every upload to
-   * it was an upload that could have been a proposal. The bucket's RLS is untouched; roadmap 9
-   * retires the bucket itself.
+   * backup panel -- a copy in a bucket has no diff, no history and no reviewer.
    */
-  const canProposeFlow = canManage || userRole === 'Operator'
+  const canOpenForge = userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 
   const unassignedDevices = assets.filter(a => !a.is_archived && !a.active_gateway_id)
 
@@ -953,6 +954,24 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + 'provisioned with. Identifies which bundle\'s flow is installed; it does NOT '
                 + 'detect edits made afterwards in the Node-RED editor.'
             },
+            /**
+             * WHERE main IS, from the forge rather than from the appliance. forge-events records
+             * it on every push (0095), so a merge shows here at once rather than on the
+             * appliance's next tick. Not yet a drift check against the Flow row above: that hash
+             * is the flow the appliance was ENROLLED with, not the one it last deployed.
+             */
+            {
+              label: 'Committed',
+              value: selected.forge_head_sha
+                ? `${selected.forge_head_sha.slice(0, 12)} · ${formatHeartbeat(selected.forge_head_at)}`
+                : null,
+              title: 'The head of main in this gateway\'s repository, as the forge reported it on '
+                + 'the last push'
+                + (selected.forge_head_message ? `: "${selected.forge_head_message}"` : '')
+                + (selected.forge_head_by ? ` by ${selected.forge_head_by}` : '')
+                + '. The appliance deploys it on its next tick. Empty until the first push after '
+                + 'the repository got its webhook.'
+            },
           ] : []),
           {
             label: 'Description',
@@ -1187,13 +1206,12 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             {/* WITH THE DEVICE LIST FOR THE SAME REASON: "what this appliance is asked to run" is a
                 fact about the gateway, and it is next to "what has published underneath it".
                 Withheld from an archived gateway, which is not a thing to be proposing changes to,
-                and rendered as nothing at all for a role that may not propose. */}
+                and rendered as nothing at all for a role the forge would refuse. */}
             {!selected.is_archived && (
               <div style={{ marginTop: '14px' }}>
-                <FlowProposalPanel
+                <GatewayRepositoryPanel
                   gateway={selected}
-                  canPropose={canProposeFlow}
-                  showToast={showToast}
+                  canOpenForge={canOpenForge}
                 />
               </div>
             )}

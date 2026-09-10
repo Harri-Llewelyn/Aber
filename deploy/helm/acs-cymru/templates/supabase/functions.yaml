@@ -124,7 +124,7 @@ spec:
             {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
                    already derives for the external broker route, which is the address the
                    certificate's SAN carries -- see mosquitto.tls in values.yaml. */}}
-            {{- /* THE FORGE, for enrolment's fourth step (roadmap 7). The in-cluster Service, not
+            {{- /* THE FORGE, for enrolment's fourth step (docs/physical-gateways.md). The in-cluster Service, not
                    the ingress hostname: the clone URL an appliance is handed comes from the forge's
                    own answer, which is built from its ROOT_URL and SSH_DOMAIN, so these two never
                    have to agree.
@@ -138,6 +138,12 @@ spec:
             - name: GITEA_MACHINE_USER
               value: {{ .Values.gitea.machineUser | quote }}
             {{- include "acs-cymru.optionalSecretEnv" (dict "name" "GITEA_MACHINE_PASSWORD" "secretName" $secretName "key" "GITEA_MACHINE_PASSWORD") | nindent 12 }}
+            {{- /* The push webhook enrolment registers on each gateway repository (0095): this
+                   Service, reached by Gitea over the NetworkPolicy edge gitea -> supabase-functions,
+                   and the secret forge-events verifies deliveries with. Optional: unset is no hook. */}}
+            - name: GITEA_WEBHOOK_URL
+              value: "http://supabase-functions:9000/forge-events"
+            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "GITEA_WEBHOOK_SECRET" "secretName" $secretName "key" "GITEA_WEBHOOK_SECRET") | nindent 12 }}
             {{- end }}
             - name: MQTT_PUBLIC_HOST
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicHost

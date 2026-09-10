@@ -1,61 +1,23 @@
 -- =============================================================================================
--- Storage access control for the 3D model bucket.
+-- Storage access control for the platform's buckets.
 --
--- Applied on EVERY boot by the `supabase-storage-policies` service (Compose) and the Job of the
+-- Applied on every boot by the `supabase-storage-policies` service (Compose) and the Job of the
 -- same name (Helm). Idempotent: every policy is dropped before it is created, and the grants are
 -- repeatable.
 --
--- ORDERING: AFTER `supabase-storage` is healthy, and BEFORE `supabase-storage-init`.
+-- ORDERING: after `supabase-storage` is healthy (storage-api creates `storage.objects` by its
+-- own migrations; the PG17 image ships the `storage` schema empty, which is why this is not in
+-- 0001) and before `supabase-storage-init`, which creates the bucket through the Storage REST
+-- API as service_role and needs the grants below, or fails with a misleading
+-- `400 new row violates row-level security policy`.
 --
--- The first half is obvious -- `storage.objects` does not exist until storage-api migrates it into
--- being. The second half is not, and getting it wrong fails in a way that reads as someone else's
--- bug: storage-init creates the bucket through the Storage REST API, and storage-api serves that
--- call by ASSUMING service_role. Without the grants below, that SELECT on `storage.buckets` is
--- refused, and storage-api reports it as `400 new row violates row-level security policy` with the
--- real cause -- a 42501 privilege error naming `service_role` -- buried inside a nested
--- `originalError`. It is not an RLS failure at all.
+-- Between storage-api creating the table and this running, RLS is enabled with no policies, so
+-- `anon` and `authenticated` are denied and `service_role` (which bypasses RLS) is unaffected:
+-- a brief loss of function, never of control. Do not enable RLS here or grant before the
+-- policies exist.
 --
--- ---------------------------------------------------------------------------------------------
--- WHY THIS IS NOT IN 0001_baseline_schema.sql ANY MORE.
---
--- It was, as section 6, and it worked for exactly as long as the database image happened to make
--- it work. `supabase/postgres:15.6.1.143` shipped a STUB `storage` schema -- buckets, objects and
--- migrations, with a reduced column set -- so `storage.objects` existed from first boot and a
--- migration could attach policies to it. `supabase/postgres:17.6.1.160` ships the `storage`
--- SCHEMA and nothing in it. The stub is gone.
---
--- That turns 0001 into a migration that aborts on `relation "storage.objects" does not exist`,
--- and the ordering makes it unfixable in place: `storage.objects` is created by storage-api's own
--- migrations when that service boots, and storage-api depends on db-init having COMPLETED. The
--- table therefore cannot exist while the migrations run, on any target, by construction.
---
--- So the policies move to where the table is real. This is the same reasoning that already put
--- the bucket ROW in scripts/storage-init.mjs rather than in a migration (see its header): the
--- parts of storage that a migration cannot own are the parts storage-api creates for itself.
---
--- ---------------------------------------------------------------------------------------------
--- THE WINDOW THIS OPENS, AND WHY IT FAILS CLOSED.
---
--- Between storage-api creating `storage.objects` and this script running, the table exists with
--- RLS enabled by storage-api's own migrations and NO policies of ours attached. A table with RLS
--- enabled and no matching policy DENIES -- so `anon` and `authenticated` can read nothing and
--- write nothing in that gap. `service_role` bypasses RLS and is unaffected, which is what lets
--- storage-init create the bucket during the same window.
---
--- The gap is therefore a brief loss of FUNCTION, never a loss of CONTROL. That direction is not
--- an accident and must be preserved: any future edit that enables RLS here rather than relying on
--- storage-api, or that grants before policies exist, inverts it.
---
--- ---------------------------------------------------------------------------------------------
--- THE POLICIES THEMSELVES are unchanged from 0001 section 6.
---
--- Public read, because an AAS `File` element's URL has to be dereferenceable by a viewer holding
--- no Factory+ session; a signed URL would expire and break every shell already handed out.
--- WRITES are gated on device-management authority, NOT merely on `authenticated`: an upload
--- changes what a shell publishes *and* puts bytes at a world-readable URL.
---
--- Depends on public.has_role(), created by 0001 section 4 -- which is why this runs after db-init
--- as well as after storage.
+-- The 3D-model bucket is public read (an AAS `File` URL must resolve with no session) and writes
+-- are gated on device-management authority. Depends on public.has_role() from 0001.
 -- =============================================================================================
 
 \set ON_ERROR_STOP on
@@ -115,51 +77,24 @@ CREATE POLICY "asset_3d_models_delete_privileged" ON storage.objects
 -- gateway-backups -- Node-RED flow backups from physical gateway appliances
 -- =============================================================================================
 --
--- PRIVATE, and there is no `getPublicUrl()` path for this bucket. Reads go through a signed URL
--- minted for a caller whose role has already been checked.
+-- Private; reads go through a signed URL minted for a caller whose role has been checked.
 --
 --   Administrator, Shopfloor_Manager   read, write, replace, delete
---   Auditor                            READ ONLY
+--   Auditor                            read only
 --   Operator                           nothing
 --
--- Why the split is asymmetric, and what a backup does and does not contain:
---   ./README.md -> "Storage buckets and why they differ"
+-- See ./README.md -> "Storage buckets and why they differ".
 --
--- ---------------------------------------------------------------------------------------------
--- THE PATH IS CONFINED BY THE DATABASE, NOT BY THE UPLOADER.
+-- The path is confined by the database: every object must live under `<sparkplug_id>/` naming a
+-- gateway that exists (`storage.foldername(name)[1]` is the leading folder), as mosquitto.acl
+-- confines a client to its own edge node. SELECT is not path-confined, so a reader can find the
+-- backups of a gateway that has since been deleted.
 --
--- Every object must live under `<sparkplug_id>/`, and that first folder must name a gateway that
--- actually exists. `storage.foldername(name)` returns the path segments, so `[1]` is the leading
--- folder.
---
--- This is the same idea as mosquitto.acl's `pattern readwrite spBv1.0/+/+/%u/#` one layer up: the
--- client does not get to assert where its data belongs. A convention the frontend happens to follow
--- is not a control -- Storage's REST API is reachable with any authenticated session, so without
--- this a privileged user could scatter objects anywhere in the bucket, including paths that shadow
--- another gateway's backups.
---
--- SELECT IS *NOT* PATH-CONFINED, and that asymmetry is deliberate: a reader may list the bucket to
--- find backups, and requiring a valid gateway prefix on read would hide the backups of a gateway
--- that had since been deleted -- which is exactly when someone is looking for them.
---
--- ---------------------------------------------------------------------------------------------
--- `storage.objects.name` IS FULLY QUALIFIED INSIDE THE SUBQUERY, AND IT MUST BE.
---
--- `public.gateways` HAS ITS OWN COLUMN CALLED `name`. Postgres resolves an unqualified identifier
--- against the INNERMOST scope first, so the natural-looking
---
---     EXISTS (SELECT 1 FROM public.gateways g WHERE g.sparkplug_id = (storage.foldername(name))[1])
---
--- binds `name` to `gateways.name` -- the gateway's DISPLAY LABEL -- not to the object's path. It
--- parses, it runs, and it is false for every row, because `storage.foldername('Sim_Gateway_Cell1')`
--- is an empty array. The policy then denies every upload, including correct ones.
---
--- THAT IS THE BENIGN HALF OF THE FAILURE. The dangerous half is that the same expression would
--- start ACCEPTING rows if a gateway were ever named something path-shaped, and would then accept
--- them under ANY prefix -- so the confinement this policy exists to enforce would silently depend on
--- what somebody typed into a display field. Caught by test_path_is_confined_to_an_existing_gateway,
--- which is why that test asserts a valid path is accepted as well as that invalid ones are refused:
--- a check that only tested refusals passes perfectly against a policy that refuses everything.
+-- `storage.objects.name` is fully qualified inside the subquery, and must be: `public.gateways`
+-- has its own `name`, and an unqualified reference binds to the gateway's display label, which
+-- refuses every upload and would accept any prefix if a gateway were ever named something
+-- path-shaped. test_path_is_confined_to_an_existing_gateway asserts a valid path is accepted as
+-- well as that invalid ones are refused.
 -- =============================================================================================
 
 DROP POLICY IF EXISTS "gateway_backups_read_privileged" ON storage.objects;
@@ -184,10 +119,8 @@ CREATE POLICY "gateway_backups_insert_privileged" ON storage.objects
     )
   );
 
--- UPDATE covers `upsert: true`, which is how storage-js replaces an object that already exists.
--- Both halves are gated: USING decides which existing objects may be targeted, WITH CHECK decides
--- what the result may look like -- so an update cannot move an object out from under the prefix
--- rule that the insert enforced.
+-- UPDATE covers `upsert: true`. Both halves are gated: USING decides which existing objects may
+-- be targeted, WITH CHECK what the result may look like.
 DROP POLICY IF EXISTS "gateway_backups_update_privileged" ON storage.objects;
 CREATE POLICY "gateway_backups_update_privileged" ON storage.objects
   FOR UPDATE TO authenticated
@@ -214,27 +147,13 @@ CREATE POLICY "gateway_backups_delete_privileged" ON storage.objects
     AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
   );
 
-
 -- ---------------------------------------------------------------------------------------------
 -- Grants.
 -- ---------------------------------------------------------------------------------------------
--- THESE ARE NEW WORK, not a copy of 0001's, and the reason is worth recording. Up to
--- supabase/postgres:15.6.1.143 the stub schema arrived with ALL privileges already granted on all
--- three storage tables to anon, authenticated, service_role, postgres and supabase_storage_admin
--- alike -- so `anon` held DELETE on storage.buckets at the grant layer, with RLS as the only thing
--- standing in front of it. 0001 then added its own narrower grants on top, which read as the
--- access control but were in practice redundant: nothing had been revoked.
---
--- On 17.6.1.160 the tables are created by storage-api and carry NO grants to these roles at all,
--- so the privileges have to be stated. Stating them means stating only what each role needs, and
--- the result is tighter than the stack ever had on PG15. That is a deliberate narrowing; if
--- something in storage-api turns out to need more, add it here explicitly rather than reaching for
--- the old blanket grant.
---
--- service_role gets the admin surface because it IS the admin path: storage-api assumes this role
--- to serve the Storage REST API, which is how the bucket itself is created (scripts/
--- storage-init.mjs). It bypasses RLS, so the policies above do not constrain it -- the grants are
--- the only limit that applies, which is exactly why it is enumerated rather than given ALL.
+-- On the PG17 image the storage tables are created by storage-api with no grants to these roles,
+-- so the privileges are stated, and only what each role needs. service_role gets the admin
+-- surface because storage-api assumes it to serve the REST API; it bypasses RLS, so the grants
+-- are the only limit that applies to it, which is why it is enumerated rather than given ALL.
 GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
 
 GRANT SELECT                         ON storage.buckets TO anon, authenticated;
@@ -275,10 +194,7 @@ BEGIN
     RAISE EXCEPTION 'expected 4 gateway_backups_* policies on storage.objects, found %', n;
   END IF;
 
-  -- THE ASYMMETRY IS THE POLICY, so it is asserted rather than left to a reading of the SQL above.
-  -- Auditor holds SELECT and must hold nothing else; the failure of getting this wrong is silent
-  -- and permanent -- an auditor able to overwrite a backup is an auditor able to edit the record
-  -- they exist to examine, and nothing would ever error.
+  -- The asymmetry is the policy, so it is asserted: Auditor holds SELECT and nothing else.
   SELECT count(*) INTO v_auditor_writes FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
      AND policyname LIKE 'gateway_backups_%'
@@ -297,91 +213,37 @@ END $$;
 -- broker-captures -- recorded Sparkplug traffic, for playback
 -- =============================================================================================
 --
--- Modelled on gateway-backups above, with the same four policies, the same role split and the same
--- prefix rule -- and the differences are worth naming rather than left to be inferred.
---
--- WHAT IS IN ONE OF THESE FILES. A capture is a recording of what the plant actually said: every
--- edge node and device id that spoke during the window, every metric name, and the values. A
--- flows.json describes what the edge is CONFIGURED to do; a capture shows what it DID. So the
--- privacy argument for the bucket above applies here at least as strongly.
---
--- THE PREFIX IS THE GATEWAY IT PLAYS BACK AS, NOT THE ONE IT WAS RECORDED FROM, and those are
--- different by construction. `capture.py play` cannot publish under a recorded identity --
--- mosquitto.acl pins the topic's edge-node segment to the connecting username -- so a capture is
--- always rewritten onto one gateway's own assets. Filing it under that gateway is the only prefix
--- that is a fact about the file rather than a guess.
---
--- A CONSEQUENCE THAT IS NOT A LEAK: a capture filed under gateway A can name gateway B, because it
--- records whatever was on the wire. The roles admitted here -- Administrator, Shopfloor_Manager,
--- Auditor -- can already enumerate the whole fleet through the directory, so this reveals nothing
--- the reader could not already look up. It IS the reason nobody below them can read the bucket.
---
--- AUDITOR IS READ ONLY, re-asserted by the reconcile block at the end of this file for the same
--- reason it is asserted for the bucket above: an auditor who can overwrite a capture can edit the
--- evidence they exist to examine, and nothing would ever error.
+-- Modelled on gateway-backups above: the same four policies, role split and prefix rule. A
+-- capture records every edge node, device id, metric name and value that spoke in the window,
+-- so the privacy argument applies at least as strongly. Captures are filed under the subject
+-- recorded; a capture filed under gateway A can name gateway B, which the admitted roles can
+-- already enumerate through the directory. Auditor is read only, re-asserted at the end.
 -- =============================================================================================
 
 -- ---------------------------------------------------------------------------------------------
--- TWO CHANGES FROM THE BUCKET ABOVE, BOTH REQUIRED BY THE CAPTURE PAGE (0055).
+-- Two changes from the bucket above, required by the capture page.
 --
--- 1. THE PREFIX RULE ADMITS DEVICES AS WELL AS GATEWAYS. Captures are filed by the SUBJECT
---    RECORDED, and the page records from a gateway OR from a single device. The rule is
---    `public.is_capture_subject_prefix()` rather than an inlined EXISTS so that the two policies
---    below and the gate that builds the path cannot drift apart -- see its comment in 0055.
+-- 1. The prefix rule admits devices as well as gateways: `public.is_capture_subject_prefix()`,
+--    shared with the gate that builds the path so the two cannot drift.
 --
--- 2. THE INGESTION DAEMON MAY WRITE, AND ONLY WRITE. Recording is a server-side act: a browser
---    cannot open an MQTT subscription, mosquitto has no WebSocket listener, and the recording
---    credential is a server-side secret. The daemon is the host, and it authenticates as
---    `Service_Ingestor`, which holds `Operator` -- so without an arm here every capture it records
---    would be uploaded, refused with 42501, caught, logged, and lost. That is 0051's defect
---    exactly: the symptom is a capture that never appears rather than an error anybody sees.
---
---    A SECURITY DEFINER FUNCTION IN 0047'S SHAPE IS THE OBVIOUS MOVE, AND IT CANNOT WORK HERE.
---    A capture's bytes go through the Storage REST API, not through Postgres; no SQL function can
---    carry a 50 MiB body into a bucket. The row in `storage.objects` is written by storage-api
---    under the caller's own JWT, so the only place this authority can live is a policy arm. The
---    gates in 0055 remain what that paragraph is right about -- they are how `capture_jobs` and
---    `captures` are written -- but the bucket needs this.
---
---    UPDATE IS INCLUDED AND INSERT ALONE IS NOT ENOUGH, which is a deliberate widening beyond what
---    would be the obvious design. Each subject has exactly ONE capture object, at a path derived from its
---    sparkplug id, so a re-record overwrites that key -- and storage-js spells overwrite as
---    `upsert: true`, which needs both. The alternative, deleting browser-side before
---    the job starts, keeps the daemon at INSERT and costs more than it saves: it destroys the old
---    capture before the new one exists, so a recording that then fails leaves nothing, and it needs
---    a browser present at exactly the right moment or the bucket accumulates orphans no policy
---    reaches. Overwriting in place makes an orphan impossible and destroys nothing until the
---    replacement is written.
---
---    THE DAEMON'S ARM IS SCOPED TO THE OBJECT OF THE JOB IT IS RUNNING, not to the bucket. It is
---    `is_ingestion_caller() AND is_active_capture_object(name)`, so with no capture in flight the
---    daemon can reach nothing here at all, and while one is it can reach exactly one path -- the
---    one `start_capture_job()` derived from the subject. See that function's comment in 0055.
---
---    IT READS AS WELL AS WRITES, WHICH THE FIRST VERSION OF THIS REFUSED TO ALLOW AND WAS WRONG
---    ABOUT. Write-only is the obvious posture and it is not achievable: an overwrite is
---    `INSERT ... ON CONFLICT DO UPDATE`, and Postgres checks the SELECT policy for the row being
---    conflicted with, so a principal that cannot read an object cannot replace it. Measured
---    against the running stack, not inferred -- INSERT of a new object returned 200 and the upsert
---    that followed returned `new row violates row-level security policy`. Confined to the active
---    job the read gives up almost nothing: the daemon may read back the file it is at that moment
---    writing, and holds its contents in memory regardless.
---
---    THERE IS STILL NO DELETE ARM. Removing a capture is a human act with a confirmation in front
---    of it, and nothing about recording requires destroying an earlier recording -- the overwrite
---    is what replaces it.
+-- 2. The ingestion daemon may write, and only write, the object of the capture job it is
+--    running: `is_ingestion_caller() AND is_active_capture_object(name)`. Recording is a
+--    server-side act (a browser cannot open an MQTT subscription), and a SECURITY DEFINER
+--    function cannot carry a 50 MiB body into a bucket; the row is written by storage-api under
+--    the caller's JWT, so a policy arm is the only place this authority can live. UPDATE is
+--    included because a re-record overwrites the one object per subject with `upsert: true`,
+--    which destroys nothing until the replacement is written. SELECT is included because an
+--    upsert is `INSERT ... ON CONFLICT DO UPDATE` and Postgres checks the SELECT policy for the
+--    conflicting row (measured: the upsert was refused without it). No DELETE arm: removing a
+--    capture is a human act.
 -- ---------------------------------------------------------------------------------------------
 
--- THREE WAYS IN, AND TWO OF THEM ARE MACHINES CONFINED TO ONE FILE EACH.
---
+-- Three ways in, two of them machines confined to one file each:
 --   a person          Administrator, Shopfloor_Manager or Auditor, reading the whole bucket
---   the daemon        the object of the capture job it is RECORDING (0055)
---   the worker        the object of the playback job it is RUNNING (0056)
---
--- THE PLAYBACK ARM IS A PREREQUISITE, NOT A REFINEMENT. `Service_Playback` holds `Operator`, so
--- without it every playback fails at the first read with 42501 -- caught, logged, and visible only
--- as a job that failed for a reason nothing surfaces. That is 0051's defect for the third time,
--- which is why it is asserted below rather than trusted to this text.
+--   the daemon        the object of the capture job it is recording
+--   the worker        the object of the playback job it is running
+-- The playback arm is a prerequisite: without it every playback fails at its first read with
+-- 42501, visible only as a failed job.
 DROP POLICY IF EXISTS "broker_captures_read_privileged" ON storage.objects;
 CREATE POLICY "broker_captures_read_privileged" ON storage.objects
   FOR SELECT TO authenticated
@@ -412,9 +274,8 @@ CREATE POLICY "broker_captures_insert_privileged" ON storage.objects
   );
 
 -- UPDATE covers `upsert: true`, which is how a re-record replaces the one capture stored for a
--- subject. Both halves are gated: USING decides which existing objects may be targeted, WITH CHECK
--- what the result may look like -- so an update cannot move an object out from under the rule that
--- admitted the insert.
+-- subject. Both halves are gated: USING decides which objects may be targeted, WITH CHECK what
+-- the result may look like.
 DROP POLICY IF EXISTS "broker_captures_update_privileged" ON storage.objects;
 CREATE POLICY "broker_captures_update_privileged" ON storage.objects
   FOR UPDATE TO authenticated
@@ -443,7 +304,6 @@ CREATE POLICY "broker_captures_delete_privileged" ON storage.objects
     bucket_id = 'broker-captures'
     AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
   );
-
 
 -- ---------------------------------------------------------------------------------------------
 -- Reconcile: broker-captures
@@ -477,14 +337,9 @@ BEGIN
       'bucket -- write authority is Administrator and Shopfloor_Manager only.', v_auditor_writes;
   END IF;
 
-  -- THE DAEMON REACHES THREE OF THE FOUR POLICIES, AND EVERY ARM IT HAS IS CONFINED TO ONE FILE.
-  --
-  -- Too NARROW is silent in the way 0051 was: the daemon uploads, is refused with 42501, catches
-  -- it, logs it, and the operator sees a capture that recorded successfully and then never
-  -- appeared. SELECT belongs in this count for a reason that is not obvious and was MEASURED
-  -- rather than reasoned: replacing a capture is an upsert, which storage-api serves as
-  -- `INSERT ... ON CONFLICT DO UPDATE`, and Postgres evaluates that against the SELECT policy as
-  -- well -- so omitting the read arm breaks re-recording, and only re-recording.
+  -- The daemon reaches three of the four policies, each confined to one file. SELECT belongs in
+  -- this count because replacing a capture is an upsert, which Postgres evaluates against the
+  -- SELECT policy as well.
   SELECT count(*) INTO v_daemon_writes FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
      AND policyname LIKE 'broker_captures_%'
@@ -499,11 +354,9 @@ BEGIN
       'seen only as a capture that never appears. See 0055.', v_daemon_writes;
   END IF;
 
-  -- EVERY ONE OF THOSE ARMS MUST BE SCOPED TO THE ACTIVE JOB. A bare `is_ingestion_caller()` is
-  -- the widening this design exists to avoid: standing authority over every capture in the bucket,
-  -- held by the process most exposed to the plant network. Paired with is_active_capture_object(),
-  -- the same principal reaches exactly one path while a capture runs and nothing at all when none
-  -- does.
+  -- Every one of those arms must be scoped to the active job: a bare `is_ingestion_caller()` would
+  -- be standing authority over every capture in the bucket, held by the process most exposed to
+  -- the plant network.
   SELECT count(*) INTO v_daemon_reads FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
      AND policyname LIKE 'broker_captures_%'
@@ -532,12 +385,9 @@ BEGIN
   END IF;
 
   -- ---------------------------------------------------------------------------------------------
-  -- THE PLAYBACK WORKER READS, AND DOES NOTHING ELSE.
-  --
-  -- Missing entirely, every playback fails at its first read with 42501 -- 0051's defect for the
-  -- third time on this bucket. Present on any policy but SELECT, a process that already holds
-  -- broker publish rights could also overwrite or destroy the recordings it is meant to replay,
-  -- which is the one combination worth ruling out explicitly.
+  -- The playback worker reads, and does nothing else. Missing, every playback fails at its first
+  -- read; present on any policy but SELECT, a process holding broker publish rights could also
+  -- overwrite the recordings it replays.
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
      WHERE schemaname = 'storage' AND tablename = 'objects'
@@ -569,27 +419,13 @@ BEGIN
     'confined to the object of its running job, and never deleting).';
 END $$;
 
-
-
 -- ---------------------------------------------------------------------------------------------
 -- telemetry-archive -- cold telemetry chunks as Parquet
 -- ---------------------------------------------------------------------------------------------
--- THE ONE BUCKET WHOSE OBJECTS ARE NOT COPIES OF ANYTHING. A flow backup describes an appliance
--- that still exists; a capture records traffic the plant produced and still holds. An object here
--- is the ONLY remaining copy of a span of telemetry -- the raw chunk was dropped precisely because
--- this object was verified (timescaledb/cold_archive.sql).
---
--- That asymmetry decides every policy below:
---
---   * NO BROWSER ROLE WRITES HERE AT ALL, which is narrower than the capture bucket beside it.
---     There is no operator action that should produce one of these: objects are written by the
---     exporter and by nothing else, so admitting Administrator to INSERT would be admitting a
---     path that exists only to be misused.
---   * READ is the same privileged set as captures. This is plant operating history; the roles that
---     can already see the whole fleet can read what it did.
---   * DELETE is Administrator-only and is genuinely destructive -- it is the one operation in this
---     file that loses data nothing else holds. It exists because cold storage needs a way to end
---     eventually; it is not offered to anyone else for exactly that reason.
+-- An object here is the only remaining copy of a span of telemetry: the raw chunk was dropped
+-- because this object was verified (timescaledb/cold_archive.sql). So no browser role writes
+-- here at all (objects are written by the exporter and nothing else), READ is the same
+-- privileged set as captures, and DELETE is Administrator-only and genuinely destructive.
 DROP POLICY IF EXISTS "telemetry_archive_read_privileged" ON storage.objects;
 CREATE POLICY "telemetry_archive_read_privileged" ON storage.objects
   FOR SELECT TO authenticated
@@ -597,11 +433,9 @@ CREATE POLICY "telemetry_archive_read_privileged" ON storage.objects
     bucket_id = 'telemetry-archive'
     AND (
       public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
-      -- THE DAEMON READS ITS OWN WRITES, and that is not a convenience: verification is a read-back
-      -- of the object it just uploaded, and `verified_at` is what the historian's CHECK constraint
-      -- requires before a chunk may be recorded as dropped. Without this arm the export completes,
-      -- verification fails with 42501, and nothing is ever archived -- which fails safe, but
-      -- silently, which is 0051's defect again.
+      -- The daemon reads its own writes: verification is a read-back of the object it just uploaded,
+      -- and `verified_at` is what the historian's CHECK requires before a chunk may be dropped.
+      -- Without this arm nothing is ever archived, silently.
       OR public.is_ingestion_caller()
     )
   );
@@ -636,7 +470,6 @@ CREATE POLICY "telemetry_archive_delete_admin" ON storage.objects
     bucket_id = 'telemetry-archive'
     AND public.has_role(ARRAY['Administrator'])
   );
-
 
 -- ---------------------------------------------------------------------------------------------
 -- Reconcile: telemetry-archive

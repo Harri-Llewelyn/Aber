@@ -1,24 +1,16 @@
 -- =============================================================================================
 -- Migration: 0004_drop_gateway_ip_address.sql
--- Remove public.gateways.ip_address -- a field nothing in the monitoring flow reads
+-- Remove public.gateways.ip_address, which nothing reads
 -- =============================================================================================
 --
--- THIS DESTROYS DATA and is not reversible without a restore. Recorded here rather than in a
--- commit message, because a later reader finding an empty `ip_address` in a backup deserves to
--- know it was deliberate.
---
--- Idempotent, as every migration must be -- db-init replays them all on every boot.
---
--- Why the field went, why the view is dropped and rebuilt rather than CASCADEd, and why fresh
--- and existing databases converge:  supabase/README.md -> "Dropping a gateways column (0004)"
+-- This destroys data and is not reversible without a restore. Idempotent: db-init replays every
+-- migration on every boot. See supabase/README.md -> "Dropping a gateways column (0004)".
 -- =============================================================================================
-
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. Drop the dependent view, drop the column, rebuild the view
 -- ---------------------------------------------------------------------------------------------
--- gateway_status selects from gateways, so the column cannot be dropped while it exists. CASCADE
--- would drop the view instead of rebuilding it, leaving the gateways page 404ing.
+-- gateway_status selects from gateways. CASCADE would drop the view instead of rebuilding it.
 DROP VIEW IF EXISTS public.gateway_status;
 
 ALTER TABLE public.gateways DROP COLUMN IF EXISTS ip_address;
@@ -28,12 +20,10 @@ ALTER TABLE public.gateways DROP COLUMN IF EXISTS ip_address;
 -- beside it.
 SELECT public.ensure_gateway_status_view();
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 2. Self-check
 -- ---------------------------------------------------------------------------------------------
--- Proves the outcome rather than asserting it. The second assertion is the one that matters:
--- a CASCADE drop would satisfy the first and leave the page broken.
+-- The second assertion is the one that matters: a CASCADE drop would satisfy the first.
 DO $$
 BEGIN
   IF EXISTS (

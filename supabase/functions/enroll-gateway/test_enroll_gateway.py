@@ -438,7 +438,7 @@ class TestAuthContract(EnrollGatewayBase):
 
 class TestForgeProvisioning(EnrollGatewayBase):
     """
-    Roadmap 7's third credential plane: the gateway's own repository, and the READ-ONLY deploy key
+    The third credential plane: the gateway's own repository, and the READ-ONLY deploy key
     it reads that repository with.
 
     WHAT MAKES THIS WORTH TESTING RATHER THAN EYEBALLING. Three of its properties fail silently:
@@ -453,7 +453,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
         re-issue per appliance.
 
     SKIPPED, NOT FAILED, where no forge is configured. The integration is optional at both ends by
-    design -- an install predating roadmap 7 enrols exactly as it did before.
+    design -- an install predating the forge enrols exactly as it did before.
     """
 
     @classmethod
@@ -464,21 +464,28 @@ class TestForgeProvisioning(EnrollGatewayBase):
         cls.machine_password = os.getenv(
             "GITEA_MACHINE_PASSWORD", "acs-platform-machine-account"
         )
+        # Every gateway repository lives in this organisation (forge.ts); the machine account owns
+        # it, which is exactly the authority to create a repository in it and no more.
+        cls.organisation = os.getenv("GITEA_ORGANISATION", "gateways")
         try:
             cls.forge("/api/v1/version")
         except Exception as err:  # noqa: BLE001 -- any failure here means "no forge"
             raise unittest.SkipTest(f"no forge reachable at {cls.forge_url}: {err}")
 
     @classmethod
-    def forge(cls, path, method="GET"):
+    def forge(cls, path, method="GET", body=None):
         """The forge's API, as the machine account -- the same credential enroll-gateway holds."""
         credentials = base64.b64encode(
             f"{cls.machine_user}:{cls.machine_password}".encode()
         ).decode()
+        headers = {"Authorization": f"Basic {credentials}"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
         req = urllib.request.Request(
             f"{cls.forge_url}{path}",
             method=method,
-            headers={"Authorization": f"Basic {credentials}"},
+            data=json.dumps(body).encode() if body is not None else None,
+            headers=headers,
         )
         with urllib.request.urlopen(req, timeout=15) as response:
             raw = response.read().decode()
@@ -490,10 +497,13 @@ class TestForgeProvisioning(EnrollGatewayBase):
 
     @classmethod
     def delete_repo(cls):
-        try:
-            cls.forge(f"/api/v1/repos/{cls.machine_user}/{cls.repo_name()}", method="DELETE")
-        except urllib.error.HTTPError:
-            pass  # Never created, which is the ordinary state before the first test.
+        # Both namespaces: the organisation, and the machine account's own, where the transfer test
+        # plants a legacy repository and where every repository lived before the organisation.
+        for owner in (cls.organisation, cls.machine_user):
+            try:
+                cls.forge(f"/api/v1/repos/{owner}/{cls.repo_name()}", method="DELETE")
+            except urllib.error.HTTPError:
+                pass  # Never created, which is the ordinary state before the first test.
 
     @classmethod
     def tearDownClass(cls):
@@ -528,19 +538,135 @@ class TestForgeProvisioning(EnrollGatewayBase):
         self.assertTrue(payload["repository"]["ssh_url"].endswith(f"{self.repo_name()}.git"))
         self.assertEqual(payload["repository"]["branch"], "main")
 
-        repo = self.forge(f"/api/v1/repos/{self.machine_user}/{self.repo_name()}")
+        repo = self.forge(f"/api/v1/repos/{self.organisation}/{self.repo_name()}")
         self.assertTrue(
             repo["private"],
             "the gateway repository is PUBLIC -- a flows.json names the plant's brokers and devices",
         )
 
-        keys = self.forge(f"/api/v1/repos/{self.machine_user}/{self.repo_name()}/keys")
+        keys = self.forge(f"/api/v1/repos/{self.organisation}/{self.repo_name()}/keys")
         self.assertEqual(len(keys), 1, keys)
         self.assertTrue(
             keys[0]["read_only"],
             "the deploy key is WRITABLE -- an appliance could author the flow it is later asked "
             "to deploy, and an approved commit would stop being evidence that anyone approved it",
         )
+
+    def test_the_wiki_is_seeded_with_the_gateway_and_never_overwritten(self):
+        """
+        THE WIKI IS THE UNREVIEWED HALF, seeded so the first person to open it finds the gateway
+        named rather than an empty "create the first page" prompt, and told what does not belong
+        there. Seeded ONCE: a re-enrolment (a re-flashed appliance) must leave what people wrote.
+        """
+        status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        home = f"/api/v1/repos/{self.organisation}/{self.repo_name()}/wiki/page/Home"
+        text = base64.b64decode(self.forge(home)["content_base64"]).decode()
+        self.assertIn(self.sparkplug_id, text)
+        self.assertIn("not reviewed", text, "the page does not say the wiki is unreviewed")
+
+        edited = base64.b64encode(b"# Edited by a person\n").decode()
+        self.forge(home, method="PATCH", body={"title": "Home", "content_base64": edited})
+        status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(
+            self.forge(home)["content_base64"], edited,
+            "re-enrolment overwrote a wiki page a person had edited",
+        )
+
+    def test_the_repository_carries_an_incident_template_and_its_label(self):
+        """
+        ISSUES ARE THE GATEWAY'S INCIDENT LOG, and the template is what makes that true rather than
+        aspirational. Committed to `main` before the branch is protected -- the one moment the
+        machine account may -- so it must be there on the first enrolment or never.
+        """
+        status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        repo = f"/api/v1/repos/{self.organisation}/{self.repo_name()}"
+        templates = {t["file_name"] for t in self.forge(f"{repo}/issue_templates")}
+        self.assertIn(".gitea/ISSUE_TEMPLATE/incident.md", templates, templates)
+        labels = {l["name"] for l in self.forge(f"{repo}/labels")}
+        self.assertIn("incident", labels, labels)
+        # And `main` is protected afterwards, not instead: the seed did not cost the review gate.
+        self.assertFalse(self.forge(f"{repo}/branch_protections/main")["enable_push"])
+
+    def test_main_is_protected_and_a_merge_needs_an_administrator(self):
+        """
+        THE REVIEW GATE, in the forge's own terms. The appliance converges to `main`, so a branch
+        anyone with write could push to is a branch anyone with write could deploy from; and a
+        review whose approval can come from the same team that opened the request is a formality.
+        Both are branch protection, applied at enrolment, and both would fail silently: a repository
+        without them looks identical from a clone.
+        """
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+
+        protection = self.forge(
+            f"/api/v1/repos/{self.organisation}/{self.repo_name()}/branch_protections/main"
+        )
+        self.assertFalse(
+            protection["enable_push"],
+            "main accepts direct pushes -- anyone with write could deploy an unreviewed flow",
+        )
+        self.assertTrue(protection["enable_approvals_whitelist"])
+        self.assertEqual(
+            protection["approvals_whitelist_teams"], ["administrators"],
+            "approval is not confined to administrators -- a manager could approve a manager",
+        )
+        self.assertGreaterEqual(protection["required_approvals"], 1)
+
+    def test_both_teams_may_create_repositories_in_the_organisation(self):
+        """
+        An administrator opened "New repository", and the organisation was not offered as an owner:
+        the teams were made with `can_create_org_repo` off. The design has repositories that exist
+        before a gateway does, and people make those. Asserted on the teams enrolment finds or
+        makes -- and a team made BEFORE this decision is patched rather than left, which is what the
+        first half of this test forces by switching the flag off again.
+        """
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+
+        teams = {t["name"]: t for t in self.forge(f"/api/v1/orgs/{self.organisation}/teams?limit=50")}
+        for name in ("administrators", "managers"):
+            self.assertTrue(teams[name]["can_create_org_repo"], f"'{name}' cannot create repositories")
+
+        # A forge from before the decision: the flag is off, and the next enrolment must fix it.
+        self.forge(f"/api/v1/teams/{teams['managers']['id']}", method="PATCH", body={"can_create_org_repo": False})
+        self.delete_repo()
+        status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        teams = {t["name"]: t for t in self.forge(f"/api/v1/orgs/{self.organisation}/teams?limit=50")}
+        self.assertTrue(teams["managers"]["can_create_org_repo"], "an older team was not reconciled")
+
+    def test_a_repository_from_before_the_organisation_is_transferred_in(self):
+        """
+        Repositories created before the organisation existed live under the machine account, where
+        no login can see them. Re-enrolling such a gateway must MOVE that repository -- history,
+        keys and all -- rather than create an empty twin beside it, which would be a gateway whose
+        flow history quietly became unreachable on the day the forge got a door.
+        """
+        legacy = self.forge(
+            "/api/v1/user/repos", method="POST",
+            body={"name": self.repo_name(), "private": True, "auto_init": True, "default_branch": "main"},
+        )
+        self.assertEqual(legacy["owner"]["login"], self.machine_user)
+
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        self.assertIsNotNone(payload.get("repository"), payload)
+
+        moved = self.forge(f"/api/v1/repos/{self.organisation}/{self.repo_name()}")
+        self.assertEqual(moved["owner"]["login"], self.organisation)
+        self.assertEqual(moved["id"], legacy["id"], "the legacy repository was copied, not moved")
+        # THE OLD PATH STILL ANSWERS, AND THAT IS GITEA'S DOING RATHER THAN A COPY LEFT BEHIND: a
+        # transfer leaves a redirect from the old owner, so an appliance holding the old clone URL
+        # keeps working. What matters is that it answers with the MOVED repository, not a twin.
+        redirected = self.forge(f"/api/v1/repos/{self.machine_user}/{self.repo_name()}")
+        self.assertEqual(redirected["id"], legacy["id"])
+        self.assertEqual(redirected["owner"]["login"], self.organisation)
 
     def test_a_gateway_without_a_key_still_enrols(self):
         """
@@ -589,7 +715,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
         self.assertTrue(
             published.startswith("ssh-ed25519 "),
             f"/assets/ssh_host_key.pub did not serve a public key: {published[:120]!r}. "
-            "gitea-init.sh publishes it on boot; a forge that has not restarted since roadmap 7's "
+            "gitea-init.sh publishes it on boot; a forge that has not restarted since "
             "host-key distribution landed will not have one.",
         )
         self.assertNotIn(
@@ -603,7 +729,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
 
         An appliance with no known_hosts entry can only trust whatever key answers on its first
         connection -- trust on first use, decided at the moment an attacker would choose -- or be
-        told to skip verification, which roadmap 7 and 11 both refuse. This response is the
+        told to skip verification, which this platform refuses everywhere. This response is the
         alternative: TLS, a single-use token bound to one row, and the forge's identity learned
         before the first clone.
 

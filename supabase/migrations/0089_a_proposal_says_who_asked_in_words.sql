@@ -1,50 +1,17 @@
 -- 0089: a proposal names its author in something a person can read.
 --
--- =================================================================================================
--- THE PROBLEM, REPORTED FROM THE PAGE
+-- `change_proposals.proposed_by` is a uuid and stays the key (the policy, the cap and the audit
+-- trail resolve through it), but an approver cannot resolve it into a person: `auth.users` is
+-- not exposed to the browser. This adds `proposed_by_email`, read off the signed token's `email`
+-- claim rather than typed into a form, since a self-declared name is not evidence.
 --
--- `change_proposals.proposed_by` is a uuid, and it is the right thing to key on: it is what the RLS
--- policy compares, what the per-person cap counts, and what `digital_thread.changed_by` carries.
--- It is also unreadable. An approver looking at a queue sees `a0000000`, and there is nowhere in
--- this stack to resolve that into a person -- `auth.users` is not exposed to the browser, and
--- `list_machine_principals()` deliberately returns machines and no email at all.
+-- Stamped by a trigger, not a DEFAULT: a DEFAULT applies only when the column is omitted, and
+-- this table takes a direct PostgREST INSERT from any Operator. The trigger overwrites
+-- unconditionally, as `system_settings_stamp()` does to `updated_by`.
 --
--- So the approver cannot answer the first question anybody asks about a request: who is asking.
---
--- =================================================================================================
--- THE EMAIL COMES OUT OF THE TOKEN, NOT OUT OF A FORM
---
--- The obvious repair is a "your name" box on the proposal form. This does not do that, and the
--- reason is the rule this repository already applies to devices: A SELF-DECLARED MARKER IS NOT
--- EVIDENCE -- see ingestion/README.md#schema-conformance, which is why a device announcing a
--- schema does not get judged against the one it claims.
---
--- A typed name has exactly that shape. It is unverified, it can name somebody else, and it would
--- sit in the audit record of a change looking like an attribution. The signed access token already
--- carries the proposer's email, GoTrue put it there, and the `email` claim is read straight off it
--- -- so the honest version of "who asked" costs nobody a keystroke and cannot be wrong.
---
--- STAMPED BY A TRIGGER, NOT BY A DEFAULT, and that difference is the whole security of it. A
--- DEFAULT applies only when the column is omitted, so a client that SENDS `proposed_by_email` would
--- have its own value kept -- and this table takes a direct PostgREST INSERT from any Operator, by
--- design. The trigger overwrites unconditionally, which is the same thing `system_settings_stamp()`
--- does to `updated_by` for the same reason, and which `test_system_settings_rls.py` calls "the test
--- that almost did not exist".
---
--- =================================================================================================
--- WHAT IT IS NOT
---
--- It is not an identity and nothing authorises on it. `proposed_by` remains the key: the policy,
--- the cap and the audit trail all resolve through the uuid, and this column is a label beside it.
--- An email that changes in GoTrue does not retro-fit onto proposals already filed, which is correct
--- -- the record says who asked at the time, not who they are now.
---
--- NULL IS A REAL STATE. A proposal filed by something with no email in its token gets NULL rather
--- than a placeholder, and the page falls back to the uuid. Machine principals hold no
--- `proposal:create` so they cannot reach this table at all today; the column does not assume that
--- stays true.
--- =================================================================================================
-
+-- Nothing authorises on it. An email that changes in GoTrue does not retro-fit onto proposals
+-- already filed. NULL is a real state: a token with no email gets NULL, and the page falls back
+-- to the uuid.
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The column
@@ -54,25 +21,19 @@ ALTER TABLE public.change_proposals
 
 COMMENT ON COLUMN public.change_proposals.proposed_by_email IS 'The proposer''s email, taken from the signed access token at INSERT and never from the request body. A readable label beside proposed_by, which stays the key everything resolves through. NULL when the token carried no email.';
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 2. The stamp
 -- -------------------------------------------------------------------------------------------------
--- OVERWRITES RATHER THAN FILLS IN. Whatever the client sent is discarded, so this cannot become a
--- field somebody types somebody else's address into.
+-- Overwrites rather than fills in, so whatever the client sent is discarded.
 CREATE OR REPLACE FUNCTION public.stamp_proposal_author() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 BEGIN
-    -- THE PRIMITIVE, NOT `auth.email()`. Hosted Supabase defines that helper as exactly this
-    -- expression, so the two agree there -- but the base image the database suites run against
-    -- ships a LEGACY definition reading the singular `request.jwt.claim.email` GUC, and returns
-    -- NULL for a session that set the modern `request.jwt.claims` JSON. That is the same trap
-    -- test-harness/auth-bootstrap.sql already records for `auth.uid()`, and a security-relevant
-    -- stamp should not behave differently depending on which helper an image happens to ship.
-    --
-    -- NULL under service_role and during a migration, which is correct: neither is a person.
+    -- The primitive, not `auth.email()`: the base image the database suites run against ships a
+    -- legacy definition reading the singular `request.jwt.claim.email` GUC and returns NULL for a
+    -- modern session (the same trap test-harness/auth-bootstrap.sql records for `auth.uid()`).
+    -- NULL under service_role and during a migration, which is correct.
     NEW.proposed_by_email := NULLIF(auth.jwt() ->> 'email', '');
     RETURN NEW;
 END;
@@ -87,14 +48,12 @@ CREATE TRIGGER trg_change_proposals_author
     BEFORE INSERT ON public.change_proposals
     FOR EACH ROW EXECUTE FUNCTION public.stamp_proposal_author();
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 3. It is not editable afterwards either
 -- -------------------------------------------------------------------------------------------------
--- `0086`'s guard lists the columns a proposer may move -- the patch and the rationale -- by naming
--- everything they may NOT. The new column has to join that list, or an UPDATE could rewrite the
--- author of a proposal an approver is already reading. Rebuilt whole rather than extended, because
--- the check is one expression and a partial redeclaration would be unreadable.
+-- The new column joins the list of columns a proposer may not move, or an UPDATE could rewrite
+-- the author of a proposal an approver is already reading. Rebuilt whole because the check is
+-- one expression.
 CREATE OR REPLACE FUNCTION public.guard_change_proposal_transition() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -135,13 +94,10 @@ COMMENT ON FUNCTION public.guard_change_proposal_transition() IS 'Outside the tr
 
 REVOKE ALL ON FUNCTION public.guard_change_proposal_transition() FROM PUBLIC;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 4. And the approval records it beside the uuid
 -- -------------------------------------------------------------------------------------------------
--- The audit row already names both parties by uuid. It gains the proposer's email for the same
--- reason the column exists: the row is read by a person, and `a0000000-…` does not tell them who
--- asked for the change they are looking at.
+-- The audit row gains the proposer's email for the same reason the column exists.
 CREATE OR REPLACE FUNCTION public.approve_proposal(p_proposal_id uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -246,29 +202,15 @@ BEGIN
          WHERE device_id = v_proposal.entity_id;
 
     ELSIF v_proposal.entity_type = 'schemas' THEN
-        -- THE FUNCTION, NOT A COLUMN WRITE. It activates the draft, archives its parent, repoints
-        -- every device_submodels row and the legacy devices.schema_id, and drops the duplicate
-        -- links that would otherwise collide -- all in this transaction, which is what makes the
-        -- approval and the rebinding impossible to separate.
-        --
-        -- IT RE-CHECKS AUTHORITY FOR ITSELF, and since 0087 that check is `schema:manage` rather
-        -- than the pair -- so it agrees with may_decide_proposal() above rather than being a
-        -- second, wider door standing beside it. Left in place deliberately: this path is not the
-        -- only caller, and a gate that only works because its caller checked first is not a gate.
+        -- The function, not a column write: it activates the draft, archives its parent and repoints
+        -- every attached device in this transaction. It re-checks authority for itself (`schema:manage`
+        -- since 0087), so it agrees with may_decide_proposal() rather than being a wider door beside it.
         PERFORM public.publish_schema_version(v_proposal.entity_id);
     END IF;
 
-    -- THE ROW THAT NAMES BOTH PARTIES. The target's own audit trigger fires above, attributed to
-    -- the approver; nothing there records who ASKED. This row does, and it is the only place the
-    -- pair appears together.
-    --
-    -- `proposed_by_email` rides along from 0089, because this row is read by a PERSON and a uuid
-    -- does not tell them who asked for the change they are looking at.
-    --
-    -- For the schema lane this lands in the SECURITY domain, because audit_domain_for('schemas')
-    -- says so and 0070's rule is who may perform the act. The proposer therefore cannot read it.
-    -- What they can read is their own proposal row, which carries the status, the approver and the
-    -- id of this row: the queue is the proposer's record, the thread is the platform's.
+    -- The row that names both parties; the target's own audit trigger records only the approver.
+    -- `proposed_by_email` rides along because this row is read by a person. For the schema lane it
+    -- lands in the security domain, so the proposer reads their own proposal row instead.
     INSERT INTO public.digital_thread
         (entity_type, entity_id, action, old_data, new_data, changed_by, actor_source, audit_domain)
     VALUES (
@@ -307,7 +249,6 @@ COMMENT ON FUNCTION public.approve_proposal(uuid) IS 'Approving IS applying: the
 
 REVOKE ALL ON FUNCTION public.approve_proposal(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.approve_proposal(uuid) TO authenticated, service_role;
-
 
 -- -------------------------------------------------------------------------------------------------
 -- 5. Self-check

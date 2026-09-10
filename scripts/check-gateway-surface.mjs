@@ -562,6 +562,9 @@ const TEMPLATE_PLACEHOLDERS = [
   '__SUPABASE_PUBLIC_URL__',
   '__STUDIO_PUBLIC_URL__',
   '__STUDIO_UPSTREAM_ADDRESS__',
+  // The forge listener's two (0094). It shares the JWKS key and SUPABASE_PUBLIC_URL with Studio's.
+  '__GITEA_PUBLIC_URL__',
+  '__GITEA_UPSTREAM_ADDRESS__',
 ];
 
 const template = read(ENVOY_TEMPLATE);

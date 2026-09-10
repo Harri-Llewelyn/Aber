@@ -54,7 +54,7 @@ python ingestion/test_structured_logging.py
 # reason="quarantined_or_unregistered" increased, and that a line carrying that same reason AND
 # that device id arrived in the log store. Prometheus cannot name the device -- its endpoint is
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
-# §12 exists to keep is actually being kept.
+# the log store exists to keep is actually being kept.
 python test-harness/test_log_pipeline.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
@@ -106,13 +106,21 @@ python supabase/functions/fplus-directory/test_fplus_directory.py
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/enroll-gateway/test_enroll_gateway.py
 
-# A flow proposed as a branch and a pull request rather than an upload. The assertion that carries
-# the rest is that `main` DOES NOT MOVE: the appliance converges to main, so a proposal committed
-# there would deploy an unreviewed flow while reporting success. Also that an Operator MAY propose
-# (the role the review step exists for), and that flows_cred.json is refused by shape. Needs a
-# forge, and skips without one.
+# The forge's door, end to end -- the same OAuth flow a browser runs, for each seeded persona --
+# and the room behind it: which team the forge put them in, that an Operator completes the flow and
+# meets the 403, that a forged identity header from outside is not a login, and that a role removed
+# mid-session is refused and unseated on the next request, that a session ended elsewhere is
+# sent back through the door, and that Gitea's own sign-out link signs the person out of the
+# platform. Needs the forge and one enrolled gateway (which creates the organisation), and skips
+# without them.
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
-  python supabase/functions/propose-gateway-flow/test_propose_gateway_flow.py
+  python supabase/functions/forge-membership/test_forge_membership.py
+
+# The forge's push webhook (0095): signature refusals, what a push to main records on the gateway
+# row, what is ignored, and one delivery sent by the forge itself for a freshly enrolled gateway.
+# GITEA_WEBHOOK_SECRET is the value in .env (the one the edge runtime holds). Skips without it.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
+  python supabase/functions/forge-events/test_forge_events.py
 
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
 # integrity, and that the embedded token is the one the database will accept.

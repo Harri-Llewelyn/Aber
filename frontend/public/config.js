@@ -34,6 +34,9 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // the server side, HOST INCLUDED. Used only to end Studio's own session at sign-out; cookies
   // ignore the port but not the host, so localhost and 127.0.0.1 are two different sessions.
   VITE_STUDIO_URL: '',
+  // The forge's door as the BROWSER reaches it -- GITEA_ROOT_URL on the server side, host
+  // included. The gateway drawer links to a repository under it, and sign-out beacons it.
+  VITE_GITEA_URL: '',
   // Storage buckets, as named by scripts/storage-init.mjs (STORAGE_BUCKET and CAPTURE_BUCKET).
   // Blank falls through to the defaults in src/api.js, which are the same two names -- so a
   // deployment only sets these if it renamed a bucket. `gateway-backups` is no longer among them:

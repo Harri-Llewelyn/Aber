@@ -1,80 +1,33 @@
 -- =============================================================================================
 -- 0074_a_token_can_finally_be_taken_back.sql
 --
--- Revocation for the long-lived service tokens 0043 has been recording since the day it shipped.
+-- Revocation for the long-lived service tokens 0043 records. This adds no mint; it adds the
+-- control that makes one ordinary.
 --
--- THE REVOCABLE-TOKENS ROADMAP ITEM, AND ONLY THE HALF THAT MAKES THE OTHER HALF SAFE. That item
--- has since shipped and left the list, so it is named rather than numbered here -- its number was
--- reused the moment it went. It was explicit about the order: *"Revocation is the item and the buttons are its consequence."* A mint button was
--- designed and refused once already, and the refusal is quoted there because it is the whole
--- design constraint -- *"technically neat, and it would have made an unrevocable credential a
--- button press with a tidy audit trail of a thing nobody can undo. Solving the wrong half well is
--- worse than not solving it, because the clean implementation reads as safety."* So this file
--- adds NO mint. It adds the control that makes one ordinary.
+-- WHY A PRE-REQUEST HOOK. Deleting the `auth.users` row does nothing (PostgREST validates the
+-- signature and never looks the subject up); removing the role does nothing that matters (the
+-- i3X relations are `FOR SELECT TO authenticated USING (true)`); a `revoked_at` predicate would
+-- have to be added to every RLS policy. PostgREST's `db-pre-request` runs a function in the
+-- caller's role before every request and can RAISE, which is the single choke point. The `jti`
+-- every minted token already records is the key.
 --
--- ---------------------------------------------------------------------------------------------
--- THE FOURTH REVOCATION DESIGN. THE FIRST THREE DO NOT WORK, AND 0043 SAYS WHY.
+-- WHAT THIS DOES NOT REACH. storage, realtime, the edge runtime and Studio verify the JWT
+-- secret for themselves and never consult this hook. The MCP reader and `Service_Ingestor`
+-- reach PostgREST and nothing else, so for a machine principal this is the only door; a
+-- person's session is revocable through GoTrue's refresh tokens instead.
 --
---   * DELETING THE `auth.users` ROW does nothing. PostgREST validates the signature and never
---     looks the subject up, so the token keeps working against a principal that no longer exists.
---   * REMOVING THE ROLE does nothing that matters. The relations the i3X address space is
---     assembled from are `FOR SELECT TO authenticated USING (true)`, so a token with no role at
---     all still reads them.
---   * A `revoked_at` PREDICATE would have to be added to EVERY RLS policy in the schema, and a
---     revocation that is only as good as its least-updated policy is not one.
---
--- The fourth is PostgREST's `db-pre-request`: a function named in configuration, run in the
--- caller's role before every request, which can RAISE and abort it. It is the single choke point
--- the third design lacked and it touches no policy at all. `postgrest/postgrest:v14.12` supports
--- it and `PGRST_DB_PRE_REQUEST` is unset on both targets, so nothing is being displaced.
---
--- AND THE KEY IT NEEDS HAS BEEN IN THE INVENTORY SINCE 0043. `mint-mcp-token.mjs` stamps a `jti`
--- from `randomUUID()` and hands it to `record_service_token_issued()`; `rotate-service-keys.mjs`
--- does the same for the ingestion and playback keys. Every token this can revoke has been
--- recording the exact identifier a denylist needs, for an inventory that could not act on it.
--- 0043's own comment says a jti *"DOES NOT ENABLE REVOCATION and nothing here pretends
--- otherwise."* That sentence stops being true here, and 0043 is left alone rather than edited:
--- it was accurate when written, and rewriting history to match the present is how a reader loses
--- the ability to trust any of it.
---
--- ---------------------------------------------------------------------------------------------
--- WHAT THIS DOES NOT REACH, STATED HERE RATHER THAN DISCOVERED LATER.
---
--- A pre-request function is invisible to everything that verifies `SUPABASE_JWT_SECRET` for
--- itself, and four services do: `supabase-storage`, `supabase-realtime`, the edge runtime (which
--- boots `VERIFY_JWT="false"` and authorises per function), and Studio.
---
--- THAT IS COMPLETE COVERAGE FOR WHAT THIS IS ACTUALLY ABOUT, and the gap should not be left
--- looking accidental. The MCP reader and `Service_Ingestor` reach PostgREST and nothing else, so
--- for a MACHINE principal the choke point is the only door. For a person's session it is not --
--- and a person's session is already revocable through GoTrue's refresh tokens, which is a
--- different mechanism for a different problem.
---
--- ---------------------------------------------------------------------------------------------
--- FAIL-CLOSED IS THE RISK, AND IT IS THE REASON THIS FUNCTION IS SHAPED THE WAY IT IS.
---
--- A function that runs before EVERY PostgREST request is a single point of failure by
--- construction. If it raises when it should not, the entire API is down -- the correct direction
--- for a security control and an outage all the same. So `auth_pre_request()` raises for exactly
--- one reason, a jti present in the denylist, and returns quietly for every other condition it can
--- meet: no claims at all (the anon key), claims that will not parse, a token carrying no jti
--- (every human session, and the anon and service_role keys). Those are not errors and must not be
--- treated as suspicious -- they are the overwhelming majority of requests this stack serves.
+-- FAIL-CLOSED IS THE RISK. A function that runs before every request is a single point of
+-- failure, so `auth_pre_request()` raises for exactly one reason (a jti in the denylist) and
+-- returns quietly for no claims, unparseable claims and a token with no jti, which is every
+-- human session and the anon and service_role keys.
 -- =============================================================================================
-
 
 -- ---------------------------------------------------------------------------------------------
 -- The denylist
 -- ---------------------------------------------------------------------------------------------
--- SELF-PRUNING BY CONSTRUCTION, WHICH IS WHAT BOUNDS IT. A revoked token past its own `exp` is
--- already refused by the signature check, so its row does no work and can go. `expires_at` is
--- carried for exactly that reason -- it is the token's own expiry, not a retention policy -- and
--- `revoke_service_token()` prunes on the way past. Without this the table grows forever and the
--- lookup this adds to every request grows with it.
---
--- NOT AUDIT. `digital_thread` is where the history lives, appended by the RPC below and
--- unpruneable by design. This is an OPERATIONAL table whose only job is to answer one question
--- quickly, and deleting a dead row from it loses nothing a reader could want.
+-- Self-pruning: a revoked token past its own `exp` is already refused by the signature check,
+-- so `revoke_service_token()` prunes such rows on the way past and the per-request lookup stays
+-- bounded. Not audit: `digital_thread` holds the history.
 CREATE TABLE IF NOT EXISTS public.revoked_service_tokens (
   -- THE PRIMARY KEY IS THE LOOKUP. Every request that carries a jti does one index probe on this
   -- and nothing else, which is the entire cost of the control.
@@ -96,30 +49,18 @@ COMMENT ON TABLE public.revoked_service_tokens IS
 
 ALTER TABLE public.revoked_service_tokens ENABLE ROW LEVEL SECURITY;
 
--- READ IS ADMINISTRATOR AND AUDITOR, matching the `security` audit domain these events file
--- under. There is deliberately NO insert, update or delete policy: the only writer is
--- revoke_service_token() below, which is SECURITY DEFINER, so a policy granting write here would
--- widen the surface without enabling anything the RPC does not already do properly.
--- DROP THEN CREATE, because every migration here is REPLAYED ON EVERY BOOT and `CREATE POLICY`
--- has no `IF NOT EXISTS`. Without this, the second `docker compose up` fails db-init with
--- `policy "..." already exists` -- which takes the whole stack down, since every service that
--- depends on db-init completing never starts. The same shape appears throughout 0069 and 0001.
+-- Read is Administrator and Auditor, matching the `security` audit domain. No insert, update or
+-- delete policy: the only writer is revoke_service_token(), which is SECURITY DEFINER.
+-- DROP then CREATE, because `CREATE POLICY` has no `IF NOT EXISTS` and this replays every boot.
 DROP POLICY IF EXISTS revoked_service_tokens_select_privileged ON public.revoked_service_tokens;
 CREATE POLICY revoked_service_tokens_select_privileged
   ON public.revoked_service_tokens
   FOR SELECT TO authenticated
   USING (public.has_role(ARRAY['Administrator', 'Auditor']));
 
--- THE POLICY IS DEAD WITHOUT THIS, and the failure does not look like a missing grant. A policy
--- narrows a privilege that has been granted; it does not confer one. Without the GRANT every
--- caller -- Administrator included -- gets `permission denied for table revoked_service_tokens`,
--- so the page that should list withdrawn credentials shows an error to exactly the person
--- entitled to read it, and the policy above reads as though it were working.
---
--- `authenticated` ONLY, matching `digital_thread`: `anon` is granted nothing at all, so an
--- unauthenticated caller cannot learn that a credential was withdrawn or when it lapses.
+-- A policy narrows a granted privilege; it does not confer one. Without this GRANT every caller
+-- gets `permission denied`. `authenticated` only, matching `digital_thread`.
 GRANT SELECT ON public.revoked_service_tokens TO authenticated;
-
 
 -- ---------------------------------------------------------------------------------------------
 -- The choke point
@@ -191,30 +132,14 @@ COMMENT ON FUNCTION public.auth_pre_request() IS
   'claims, unparseable claims, or a token with no jti -- because those are the ordinary majority '
   'and refusing them would take the whole API down.';
 
--- EVERY ROLE POSTGREST SWITCHES TO, and the omission of one is an outage for that role alone --
--- which is the kind of partial failure that gets diagnosed as anything but this function.
--- REVOKED FROM PUBLIC, GRANTED TO anon -- AND THOSE ARE NOT THE SAME GRANTEE.
---
--- PostgreSQL gives every new function EXECUTE to PUBLIC. Issuing a GRANT on a function whose ACL is
--- still NULL MATERIALISES that default first and then adds to it, so the GRANT below does not
--- replace PUBLIC's entry -- it preserves it. Measured on a database booted exactly once, before
--- this line existed:
---
---     auth_pre_request  {=X/postgres,postgres=X/postgres,service_role=X/postgres,anon=X/postgres,...}
---                        ^^^^^^^^^^^ PUBLIC
---
--- and on the same chain booted twice, where 0001's section 6 sweep has since removed it. TWO BOOTS
--- OF THE SAME FILES PRODUCED TWO DIFFERENT SCHEMAS, which is what check-migration-idempotency.mjs
--- refuses -- it caught this as `REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC;`
--- appearing in the second dump and not the first.
---
--- Revoking PUBLIC here settles it on boot one instead. `anon` KEEPS its explicit grant, which it
--- must: PostgREST runs this hook after switching to the request's role, and for an unauthenticated
--- request that role is `anon`. Revoking anon as the sibling functions do would take the whole
--- anonymous API down.
+-- Every role PostgREST switches to; omitting one is an outage for that role alone. Revoked from
+-- PUBLIC first: a GRANT on a function whose ACL is NULL materialises PostgreSQL's default
+-- EXECUTE-to-PUBLIC and preserves it, so without the REVOKE the first and second boots
+-- produce different schemas, which check-migration-idempotency.mjs refuses. `anon` keeps its
+-- grant: PostgREST runs this hook as the request's role, and for an unauthenticated request
+-- that role is `anon`.
 REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.auth_pre_request() TO anon, authenticated, service_role;
-
 
 -- ---------------------------------------------------------------------------------------------
 -- The act
@@ -232,11 +157,7 @@ DECLARE
   v_expires   timestamptz;
   v_id        bigint;
 BEGIN
-  -- ADMINISTRATOR ALONE, which is the sixth policy in the direction the retired revocable-tokens roadmap item describes:
-  -- `system_settings` for read and for write, `list_service_principals()` and
-  -- `create_service_principal()` are the five that already separate Administrator from
-  -- Shopfloor_Manager by hand. Withdrawing a credential is an access-control act, not an
-  -- operational one.
+  -- Administrator alone: withdrawing a credential is an access-control act, not an operational one.
   IF NOT public.has_role(ARRAY['Administrator']) THEN
     RAISE EXCEPTION 'insufficient privileges to revoke a service token'
       USING ERRCODE = 'insufficient_privilege';
@@ -257,12 +178,8 @@ BEGIN
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  -- THE MINT ROW IS THE SOURCE OF THE PRINCIPAL AND THE EXPIRY, and requiring it is what stops
-  -- this table filling with jtis nobody issued. A caller cannot revoke a token this stack has no
-  -- record of minting -- and if one exists, the missing record is the more urgent problem.
-  --
-  -- NEWEST FIRST: a jti is a randomUUID and collision is not a practical concern, but ordering
-  -- makes the choice defined rather than incidental.
+  -- The mint row is the source of the principal and the expiry; requiring it stops this table
+  -- filling with jtis nobody issued. Newest first, so the choice is defined.
   SELECT dt.new_data INTO v_mint
     FROM public.digital_thread dt
    WHERE dt.entity_type = 'service_principals'

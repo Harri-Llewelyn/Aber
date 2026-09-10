@@ -2,38 +2,16 @@
 --
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.
 --
--- =================================================================================================
--- WHAT THIS IS FOR
+-- Studio has no authentication of its own and connects as the database owner. The gateway holds
+-- a listener in front of it: an OAuth 2.1 authorization-code flow against this stack's GoTrue, a
+-- session cookie, and an `Administrator` check. This file registers the client that flow
+-- authenticates as: `...0003`, beside Grafana (`...0001`) and Node-RED (`...0002`). No userinfo
+-- function goes with it: `custom_access_token_hook` mirrors the role into the access token and
+-- the gateway verifies that token itself.
 --
--- Studio has no authentication of its own -- no login, no roles, no session -- and connects as the
--- database owner, for whom RLS is not enforced. It was reachable on `127.0.0.1:54323`, which made
--- a position on the host the only credential, and made the console unreachable for the people who
--- kept asking for it.
---
--- `supabase-envoy` now holds a second listener in front of it: an OAuth 2.1 authorization-code
--- flow against this stack's own GoTrue, a session cookie, and an `Administrator` check. This file
--- provides the one thing only the database can -- the client that flow authenticates as.
---
--- IT IS THE THIRD CLIENT OF THE SAME SHAPE. Grafana is `...0001` (0002) and Node-RED is `...0002`
--- (archived 0006); this is `...0003`. What differs is what happens after the token comes back:
--- those two call a userinfo edge function to learn the user's role, because GoTrue's OIDC claims
--- carry no `app_metadata`. Envoy does not, and must not -- `custom_access_token_hook` mirrors the
--- role into the ACCESS token, and the gateway verifies that token itself. There is deliberately no
--- `studio-userinfo` function to go with this row.
---
--- =================================================================================================
--- WHAT AN ABSENT SECRET DOES
---
--- Skips the registration with a WARNING, exactly as 0002 does for Grafana. The gateway's own
--- fail-closed branch pairs with it: an unconfigured stack still boots, still serves every other
--- service, and answers Studio with a login that cannot complete. An operator upgrading an existing
--- stack has no STUDIO_OAUTH_CLIENT_SECRET in `.env` until they run `node scripts/setup.mjs`, and
--- the correct outcome for them is a shut door rather than a stack that will not start.
---
--- THE DIRECTORY ENTRY IS DELIBERATELY NOT TOUCHED. `0002` lists Studio at
--- `http://127.0.0.1:54323`, and the proxy takes over that exact port for this reason -- the
--- address people look up stays true, and gains a login rather than moving.
--- =================================================================================================
+-- An absent secret skips the registration with a WARNING, as 0002 does for Grafana; the gateway
+-- then answers Studio with a login that cannot complete. The Directory entry stays at
+-- `http://127.0.0.1:54323`, which is the port the proxy takes over.
 
 \if :{?studio_oauth_client_secret} \else \set studio_oauth_client_secret '' \endif
 \if :{?studio_public_url}          \else \set studio_public_url ''          \endif

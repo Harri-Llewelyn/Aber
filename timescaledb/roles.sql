@@ -1,50 +1,17 @@
 -- =============================================================================================
--- Read-only database roles on the historian.
+-- Database roles on the historian.
 --
--- Applied on EVERY boot by the `timescaledb-maintenance` service (Compose) and hook Job (Helm),
--- alongside retention.sql and aggregates.sql. It takes one psql variable:
+-- Applied on every boot by the `timescaledb-maintenance` service (Compose) and hook Job (Helm),
+-- after aggregates.sql and storage.sql, because it grants on objects those files create. An
+-- empty `-v bi_reader_password` skips the role rather than creating one with a blank password.
 --
---     -v bi_reader_password='...'
+-- Not a Supabase migration: `public.telemetry` over there is a postgres_fdw projection, and a
+-- GRANT issued there grants nothing on these views.
 --
--- An empty value SKIPS the role entirely rather than creating one with a blank password. An
--- operator who has not configured BI should end up with no role, not with an unauthenticated one.
---
--- ---------------------------------------------------------------------------------------------
--- WHY THIS IS NOT A SUPABASE MIGRATION.
---
--- The rollups live HERE, in the standalone historian. `public.telemetry` in Supabase is a
--- postgres_fdw projection, and the Supabase migration runner never opens a connection to this
--- database -- so a GRANT issued over there grants nothing on these views. It would apply cleanly,
--- report success, and leave the BI tool with no access at all.
---
--- ORDERING IS LOAD-BEARING: this file runs AFTER aggregates.sql, because it grants on objects that
--- file creates. Running it first produces "relation telemetry_1h does not exist" on a fresh
--- volume and only there, which is the worst kind of ordering bug -- it passes on every stack that
--- already has the rollups.
---
--- ---------------------------------------------------------------------------------------------
--- WHAT THIS ROLE MAY READ, AND WHY THE LIST IS SHORT
---
--- The three rollups, and nothing else:
---
---   * NOT raw `telemetry`. A BI tool reading raw defeats the entire purpose of the rollups -- it
---     is the query pattern the aggregates exist to keep off the hypertable -- and read access to
---     every individual observation is a far wider grant than a KPI dashboard needs.
---   * NOT `telemetry_latest`. It is a DISTINCT ON over raw and carries the same exposure.
---   * NOT `assets`. Nothing in a rollup needs the display label, and the asset list is inventory
---     rather than measurement.
---
--- A CONTINUOUS AGGREGATE IS A VIEW, AND THAT IS WHAT MAKES THIS WORK. With
--- `materialized_only = false` (set by aggregates.sql, so a live dashboard sees the current
--- bucket) a query against telemetry_1h unions the materialised data with the raw hypertable tail.
--- The reader still needs no privilege on `telemetry`, because a non-security_invoker view executes
--- with its OWNER's privileges -- the standard PostgreSQL indirection. The grant list above is
--- therefore genuinely sufficient AND genuinely restrictive: the reader can see aggregated buckets
--- and cannot select a single raw observation. `test_bi_reader_grants.py` asserts both halves,
--- because "sufficient" here rests on a property of views that is easy to assume and easy to lose.
---
--- NOSUPERUSER / NOCREATEDB / NOCREATEROLE / NOINHERIT are stated explicitly rather than left to
--- defaults, because this file is the description of what the role is allowed to be.
+-- `powerbi_reader` may read the three rollups and nothing else: not raw `telemetry`, not
+-- `telemetry_latest`, not `assets`. A continuous aggregate is a view executed with its owner's
+-- privileges, so the reader needs no privilege on `telemetry` even with real-time aggregation on.
+-- `test_bi_reader_grants.py` asserts both halves. The role attributes are stated explicitly.
 -- =============================================================================================
 
 \set ON_ERROR_STOP on
@@ -65,7 +32,6 @@ SELECT set_config('acs_cymru.bi_reader_password', :'bi_reader_password', false);
 SELECT set_config('acs_cymru.ingest_writer_password', :'ingest_writer_password', false);
 SELECT set_config('acs_cymru.fdw_reader_password', :'fdw_reader_password', false);
 
-
 DO $$
 DECLARE
   v_password text := btrim(coalesce(current_setting('acs_cymru.bi_reader_password', true), ''));
@@ -79,10 +45,8 @@ BEGIN
     RETURN;
   END IF;
 
-  -- CREATE then ALTER rather than DROP then CREATE: dropping a role that owns nothing still
-  -- fails while any session is connected as it, which on a stack with a BI tool attached is most
-  -- of the time. ALTER also rotates the password on every boot, so changing the environment
-  -- variable is all that a rotation takes.
+  -- CREATE then ALTER rather than DROP then CREATE: dropping a role fails while any session is
+  -- connected as it. ALTER also rotates the password on every boot.
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role) THEN
     EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT', v_role);
     RAISE NOTICE 'roles: created %', v_role;
@@ -116,22 +80,13 @@ BEGIN
     'telemetry_latest explicitly revoked).', v_role;
 END $$;
 
-
 -- ---------------------------------------------------------------------------------------------
--- grafana_reader -- the INTERNAL engineering read surface
+-- grafana_reader -- the internal engineering read surface
 -- ---------------------------------------------------------------------------------------------
--- WHY A SECOND ROLE RATHER THAN WIDENING THE FIRST. Grafana and Power BI are not the same kind of
--- consumer and conflating them was a mistake worth naming: Power BI is an EXTERNAL business tool
--- that should see aggregated buckets and nothing else, while Grafana is an INTERNAL engineering
--- console whose whole job is the raw signal -- the excursion, the state transition, the individual
--- observation. Granting `powerbi_reader` what Grafana needs would have quietly handed an external
--- tool every reading in the historian, which is exactly what the narrow grant existed to prevent.
---
--- FOUND BY REPOINTING GRAFANA AND THEN READING ITS PANELS. The datasource health check passes on
--- CONNECT, so "Database Connection OK" said nothing about whether any panel could run -- four of
--- them could not. A connection test is not a permission test.
---
--- Still strictly read-only, and still no writes anywhere: this is a wider READ, not a wider role.
+-- A second role rather than a wider `powerbi_reader`: Power BI is an external business tool that
+-- should see aggregated buckets only, and Grafana is an internal console whose job is the raw
+-- signal. A datasource health check passes on connect and says nothing about whether a panel can
+-- run. Still read-only.
 DO $$
 DECLARE
   v_password text := btrim(coalesce(current_setting('acs_cymru.bi_reader_password', true), ''));
@@ -161,9 +116,8 @@ BEGIN
   EXECUTE format('GRANT SELECT ON public.telemetry_latest TO %I', v_role);
   EXECUTE format('GRANT SELECT ON public.assets TO %I', v_role);
 
-  -- The cold archive catalogue, READ ONLY. This is the role every FDW session from the platform
-  -- database opens as, so without it `cold_storage_rows()` (0068) fails inside a dashboard panel
-  -- rather than at deploy -- the same failure 0027's foreign table documents. Guarded on the
+  -- The cold archive catalogue, read only: every FDW session from the platform database opens as
+  -- this role, so without it `cold_storage_rows()` fails inside a dashboard panel. Guarded on the
   -- table existing because a first boot applies cold_archive.sql after this file.
   IF to_regclass('public.telemetry_archive_manifest') IS NOT NULL THEN
     EXECUTE format('GRANT SELECT ON public.telemetry_archive_manifest TO %I', v_role);
@@ -179,19 +133,14 @@ BEGIN
   -- pg_stat_* and nothing else.
   EXECUTE format('GRANT pg_monitor TO %I', v_role);
 
-  -- The storage footprint, created by storage.sql -- which is why THAT file must run before this
-  -- one, and does in both runners. Bytes and chunk time-spans only: storage_footprint_rows() is
-  -- SECURITY DEFINER precisely so this grant does not have to be widened to the hypertables it
-  -- reports on.
-  --
-  -- NOT ALSO GRANTED TO powerbi_reader. The size of the telemetry is an operations question, and
-  -- that role exists to answer business ones from aggregated buckets.
+  -- The storage footprint, created by storage.sql (which runs before this file). Bytes and chunk
+  -- time-spans only: storage_footprint_rows() is SECURITY DEFINER so this grant need not widen to
+  -- the hypertables. Not granted to powerbi_reader: the size of the telemetry is an operations
+  -- question.
   EXECUTE format('GRANT SELECT ON public.storage_footprint TO %I', v_role);
 
-  -- AND EXECUTE ON THE FUNCTION BEHIND IT, which SELECT on the view does not imply. A
-  -- non-security_invoker view checks TABLE access as its owner, but a function called in the view
-  -- body is still checked against the CALLING role -- so without this the role has SELECT on a view
-  -- it cannot run, and the error names the function rather than the missing grant.
+  -- And EXECUTE on the function behind it, which SELECT on the view does not imply: a function
+  -- called in a view body is checked against the calling role.
   EXECUTE format('GRANT EXECUTE ON FUNCTION public.storage_footprint_rows() TO %I', v_role);
 
   RAISE NOTICE
@@ -199,12 +148,11 @@ BEGIN
     'and pg_stat_* -- read-only throughout.', v_role;
 END $$;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- Self-check
 -- ---------------------------------------------------------------------------------------------
 -- A grant that silently did not apply is indistinguishable from one that did until a BI tool
--- connects, which is typically days later and on someone else's machine.
+-- connects days later.
 DO $$
 DECLARE
   v_role CONSTANT text := 'powerbi_reader';
@@ -243,10 +191,8 @@ BEGIN
         'assets / telemetry_1h, so the provisioned dashboard has panels that will fail';
     END IF;
 
-    -- Separate from the block above so the message names the cause. This one fails when
-    -- storage.sql did not run, or ran AFTER this file -- an ordering fault, not a grant fault, and
-    -- one that otherwise presents as a data-lifecycle panel that is empty on a fresh volume and
-    -- correct everywhere else.
+    -- Separate from the block above so the message names the cause: storage.sql did not run, or ran
+    -- after this file.
     IF to_regclass('public.storage_footprint') IS NULL THEN
       RAISE EXCEPTION
         'roles self-check: public.storage_footprint does not exist. storage.sql must run BEFORE '
@@ -262,45 +208,20 @@ BEGIN
   END IF;
 END $$;
 
-
 -- ---------------------------------------------------------------------------------------------
--- ingest_writer -- the ingestion daemon, which is the process most exposed to the plant network
+-- ingest_writer -- the ingestion daemon, the process most exposed to the plant network
 -- ---------------------------------------------------------------------------------------------
--- IT CONNECTED AS `postgres` UNTIL NOW. The daemon is, in this repository's own words, "the process
--- most exposed to the plant network", and it held superuser on the historian: it could DROP the
--- hypertable, rewrite any observation, and read everything. The README's security-model table has
--- listed "append-only historian writes" as an ingestion-layer control the whole time, and nothing
--- in the database enforced it -- append-only was a property of the Python.
---
--- This is the same debt the stack has already paid twice on the OTHER database: Grafana moved off
--- the superuser onto grafana_reader, and the daemon moved off SUPABASE_SERVICE_ROLE_KEY onto
--- Service_Ingestor (0046-0048, 0051). This is the historian's turn.
---
--- =============================================================================================
--- THE GRANT LIST IS MEASURED, NOT REASONED. Every line below was determined by running the
--- daemon's two actual statements as a probe role and removing privileges until they broke.
+-- The grant list is measured, not reasoned: every line was determined by running the daemon's
+-- two statements as a probe role and removing privileges until they broke.
 --
 --   assets      INSERT, UPDATE, SELECT
 --   telemetry   INSERT, SELECT
 --
--- SELECT IS NOT OPTIONAL AND THAT SURPRISED ME. Both statements carry an ON CONFLICT clause --
--- `DO UPDATE` on assets, `DO NOTHING` on telemetry -- and inferring the arbiter index requires
--- SELECT on the target. With INSERT and UPDATE alone, `permission denied for table assets`. So
--- this role is APPEND-ONLY, not write-only, and the tempting specification of "INSERT on
--- telemetry, INSERT/UPDATE on assets, nothing else" was wrong about the minimum.
---
--- The distinction that matters is preserved regardless: it can add rows and it cannot change or
--- remove one. The self-check below asserts exactly that, in both directions.
---
--- THE HYPERTABLE GRANT REACHES THE CHUNKS, verified rather than assumed -- a probe insert that
--- passed the privilege check and then failed a foreign key named `_hyper_1_5_chunk`, which is the
--- chunk rather than the parent. Had it not propagated, ingestion would have broken at the moment a
--- NEW chunk was created, days after the change, with nothing connecting the two.
---
--- WHAT IT DELIBERATELY CANNOT REACH: the rollups. The daemon writes raw observations; the
--- aggregates are derived from them by TimescaleDB itself, and a writer that could read them is a
--- writer that could be talked into reporting on them.
--- =============================================================================================
+-- SELECT is required: both statements carry ON CONFLICT, and inferring the arbiter index needs
+-- SELECT on the target. So the role is append-only, not write-only: it can add rows and cannot
+-- change or remove one, which the self-check asserts in both directions. The hypertable grant
+-- reaches the chunks (verified by a probe insert failing a foreign key named on a chunk). It
+-- deliberately cannot reach the rollups.
 
 DO $$
 DECLARE
@@ -308,12 +229,8 @@ DECLARE
   v_role     CONSTANT text := 'ingest_writer';
   v_dbname   CONSTANT text := current_database();
 BEGIN
-  -- REQUIRED, UNLIKE THE TWO READERS ABOVE, and the difference is not an inconsistency. BI and
-  -- Grafana are optional consumers: a stack with neither is a stack that skips those roles and is
-  -- complete. The ingestion daemon is not optional -- it must connect to this database as
-  -- SOMETHING, and the only alternative to this role is the superuser it was created to replace.
-  -- Skipping quietly would leave the stack running with the exact property this file exists to
-  -- remove, and reporting that as a NOTICE nobody reads is how it stayed that way for months.
+  -- Required, unlike the two readers above: the daemon must connect as something, and the only
+  -- alternative is the superuser this role replaces.
   IF v_password = '' THEN
     RAISE EXCEPTION
       'roles: ingest_writer_password is empty. The ingestion daemon connects to the historian as '
@@ -336,15 +253,11 @@ BEGIN
   EXECUTE format('GRANT INSERT, UPDATE, SELECT ON public.assets TO %I', v_role);
   EXECUTE format('GRANT INSERT, SELECT ON public.telemetry TO %I', v_role);
 
-  -- COLD ARCHIVAL. The exporter runs as this role and writes the manifest, so it
-  -- needs INSERT and UPDATE there -- but note what it still does NOT get: DELETE on the manifest,
-  -- and nothing at all on telemetry beyond the INSERT above. The revokes below still stand.
-  --
-  -- Dropping an archived chunk is reached through cold_tier_drop_verified(), which is SECURITY
-  -- DEFINER for exactly this reason: it lets the daemon ASK for a drop the manifest has already
-  -- verified, without holding the DELETE that would let it remove anything else. Guarded on the
-  -- table existing because roles.sql also runs on stacks that have not applied cold_archive.sql
-  -- yet -- a first boot orders the two the other way round.
+  -- Cold archival: the exporter runs as this role and writes the manifest, so it needs INSERT and
+  -- UPDATE there, and still no DELETE on the manifest and nothing on telemetry beyond INSERT.
+  -- Dropping an archived chunk goes through cold_tier_drop_verified(), which is SECURITY DEFINER so
+  -- the daemon can ask for a drop the manifest has verified without holding DELETE. Guarded on the
+  -- table existing because a first boot orders the two files the other way round.
   IF to_regclass('public.telemetry_archive_manifest') IS NOT NULL THEN
     EXECUTE format('GRANT SELECT, INSERT, UPDATE ON public.telemetry_archive_manifest TO %I', v_role);
     EXECUTE format('REVOKE DELETE, TRUNCATE ON public.telemetry_archive_manifest FROM %I', v_role);
@@ -371,25 +284,13 @@ BEGIN
     'either.', v_role;
 END $$;
 
-
 -- ---------------------------------------------------------------------------------------------
--- fdw_reader -- what Supabase's foreign tables connect AS
+-- fdw_reader -- what Supabase's foreign tables connect as
 -- ---------------------------------------------------------------------------------------------
--- `0001` creates `USER MAPPING FOR PUBLIC` against timescaledb_server with the historian's
--- superuser. Every FDW session opened on behalf of `authenticated` or `service_role` therefore runs
--- on THIS side as superuser, and the only containment is the LOCAL grant over in Supabase --
--- SELECT on `timescale.*`. The remote end contributes nothing.
---
--- No application role can abuse that today. What makes it worth closing is that nothing stops the
--- next change from doing so: a widened local grant, or a new foreign table added against the same
--- server, silently inherits superuser reach on the historian. The mapping also parks the superuser
--- password in `pg_user_mappings`, which the backup runbook already has to warn about.
---
--- READ-ONLY, AND ONLY THE PROJECTION. The five foreign tables Supabase defines are telemetry,
--- telemetry_latest, telemetry_1m, telemetry_5m, telemetry_1h and storage_footprint. Nothing on the
--- Supabase side writes through the FDW -- `public.telemetry` is a security_invoker VIEW over a
--- foreign table and the historian is written only by the daemon -- so INSERT would be a grant with
--- no caller.
+-- Read-only, and only the projection (telemetry, telemetry_latest, the three rollups and
+-- storage_footprint). Nothing on the Supabase side writes through the FDW, so INSERT would be a
+-- grant with no caller. Without this role the public user mapping runs as the historian
+-- superuser, so a widened local grant or a new foreign table would inherit superuser reach.
 
 DO $$
 DECLARE
@@ -436,14 +337,11 @@ BEGIN
     'roles: % may SELECT the six objects Supabase projects and cannot write any of them.', v_role;
 END $$;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- Self-check: both directions, for both roles
 -- ---------------------------------------------------------------------------------------------
--- ASSERTING ONLY THE GRANTS WOULD BE HALF A CHECK. "ingest_writer can insert" passes just as well
--- on a role that is secretly superuser; "ingest_writer cannot delete" passes on a role that cannot
--- do anything at all and has silently stopped the fleet's telemetry. Both halves, or neither is
--- worth running.
+-- "ingest_writer can insert" passes on a role that is secretly superuser; "ingest_writer cannot
+-- delete" passes on a role that cannot do anything at all.
 DO $$
 BEGIN
   -- No `IF EXISTS` guard: both roles are required above, so absence is already an error.

@@ -1,7 +1,8 @@
-import { STUDIO_URL } from '../constants';
+import { GITEA_URL, STUDIO_URL } from '../constants';
 
 /**
- * End Supabase Studio's OAuth session, which is not this application's session.
+ * End the sessions the gateway holds in front of Studio and the forge, which are not this
+ * application's session.
  *
  * =================================================================================================
  * WHY THIS EXISTS
@@ -18,6 +19,11 @@ import { STUDIO_URL } from '../constants';
  * THAT IS NOT HYPOTHETICAL. It is what an admin sign-out followed by an operator sign-in did on
  * this stack: the operator reached Studio as the previous admin, because the browser still held
  * Envoy's cookie and nothing in the sign-out path had ever touched it.
+ *
+ * THE FORGE HAS THE SAME DOOR (the `forge` listener; 0094) and therefore the same cookie and the
+ * same failure, so it gets the same beacon. The two are separate calls to separate origins, and
+ * each is best-effort on its own: a deployment without a forge must still close Studio, and the
+ * other way round.
  *
  * =================================================================================================
  * WHY A FETCH AND NOT A LINK
@@ -49,20 +55,21 @@ import { STUDIO_URL } from '../constants';
  */
 const SIGNOUT_TIMEOUT_MS = 2000;
 
-export async function signOutOfStudio(fetchImpl = globalThis.fetch) {
-  if (!STUDIO_URL || typeof fetchImpl !== 'function') return false;
+/** Beacon one door's signout path. Resolves true if the request was made, false otherwise. */
+export async function signOutOfDoor(doorUrl, fetchImpl = globalThis.fetch) {
+  if (!doorUrl || typeof fetchImpl !== 'function') return false;
 
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), SIGNOUT_TIMEOUT_MS);
 
   try {
-    await fetchImpl(`${STUDIO_URL}/oauth2/signout`, {
+    await fetchImpl(`${doorUrl}/oauth2/signout`, {
       method: 'GET',
       mode: 'no-cors',
       credentials: 'include',
       signal: abort.signal,
       // The 302 is the answer, not a step on the way to one. Following it would pull the browser
-      // into Studio's login flow to no purpose, and its Set-Cookie headers have already been
+      // into the door's login flow to no purpose, and its Set-Cookie headers have already been
       // applied by the time this resolves.
       redirect: 'manual',
       cache: 'no-store',
@@ -70,10 +77,18 @@ export async function signOutOfStudio(fetchImpl = globalThis.fetch) {
     return true;
   } catch {
     // An opaque response is indistinguishable from a network failure here, so this catch cannot
-    // tell "Studio is not deployed" from "Studio did not answer" -- and must treat both the same.
-    // The abort above lands here too.
+    // tell "not deployed" from "did not answer" -- and must treat both the same. The abort above
+    // lands here too.
     return false;
   } finally {
     clearTimeout(timer);
   }
+}
+
+export function signOutOfStudio(fetchImpl = globalThis.fetch) {
+  return signOutOfDoor(STUDIO_URL, fetchImpl);
+}
+
+export function signOutOfForge(fetchImpl = globalThis.fetch) {
+  return signOutOfDoor(GITEA_URL, fetchImpl);
 }

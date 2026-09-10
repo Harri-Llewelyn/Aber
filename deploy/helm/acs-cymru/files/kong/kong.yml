@@ -1,35 +1,17 @@
 # =============================================================================================
-# Kong declarative configuration -- ACS-Cymru API gateway
+# Kong declarative configuration -- retained as the chart's revert path only.
 #
-# THIS FILE IS A TEMPLATE, and ONE TEMPLATE SERVES BOTH DEPLOYMENT TARGETS.
+# Both targets run Envoy (supabase/envoy.yaml). Compose does not read this file; the chart reads
+# it only when `supabaseKong.enabled=true` and `supabaseEnvoy.enabled=false`, in which case Helm
+# renders the `__UPPER_SNAKE__` placeholders into a Secret. The keys are not committed here.
 #
-#   * Docker Compose: `supabase-kong-init` substitutes the __PLACEHOLDERS__ with `sed` and writes
-#     the result to a volume Kong reads. Committing the literal keys here would create a second
-#     source of truth that silently disagrees with .env the first time anyone rotates a key.
-#     Kong 3.x can interpolate `${{env.VAR}}` itself, which 2.8 could not -- but that would put
-#     the service-role key in Kong's environment rather than on an internal volume, so the
-#     substituters stay by choice now rather than by necessity.
-#   * Kubernetes: Helm renders the same placeholders into a Secret mounted at the same path, and
-#     `supabase-kong-init` does not exist at all. See docs/kubernetes-architecture.md §2.3.
-#
-# EVERY PLACEHOLDER IS `__UPPER_SNAKE__`, and both substituters assert that none survive. Adding
-# one means adding it to `supabase-kong-init` in docker-compose.yml AND to the chart.
-#
-# SIX ROUTES ARE DELIBERATELY EXEMPT from `key-auth`, across FOUR exemptions, and every one of
-# them is load bearing. Both counts are stated because two of the four cover a pair, and only
-# one of the numbers used to appear here:
-#
+# Six routes are exempt from `key-auth`, across four exemptions:
 #   * `/auth/v1/`                                    -- sign-in must work before a session exists
-#   * `/functions/v1/{grafana,nodered}-userinfo`     -- an OAuth client sends client credentials,
-#                                                       never a Supabase apikey
+#   * `/functions/v1/{grafana,nodered}-userinfo`     -- an OAuth client sends client credentials
 #   * `/storage/v1/object/public/`                   -- an AAS File URL must resolve with no session
-#   * `/ping` and `/v1/`                             -- the Factory+ Directory adapter, whose
-#                                                       clients have no apikey. `/ping` is open by
-#                                                       specification; `/v1/` is authenticated by
-#                                                       the FUNCTION, not by the gateway
-#
-# Each carries a note at its own service definition. The full reasoning, and what the exemptions
-# do and do not expose:  supabase/README.md -> "API Gateway (kong.yml)"
+#   * `/ping` and `/v1/`                             -- the Factory+ Directory adapter; `/v1/` is
+#                                                       authenticated by the function
+# The reasoning is in supabase/README.md -> "API Gateway".
 # =============================================================================================
 
 _format_version: "3.0"
@@ -37,9 +19,8 @@ _format_version: "3.0"
 # ---------------------------------------------------------------------------------------------
 # API key consumers
 # ---------------------------------------------------------------------------------------------
-# The anon key is public by construction -- it ships inside the frontend bundle. The service
-# role key is not, and appears here only because the gateway must be able to recognise it; the
-# rendered file lives on an internal volume, never in the repository.
+# The anon key ships inside the frontend bundle; the service-role key appears here only so the
+# gateway can recognise it, and the rendered file never lands in the repository.
 consumers:
   - username: anon
     keyauth_credentials:
@@ -80,23 +61,9 @@ services:
           # where the service-role key appears in logs.
           hide_credentials: true
 
-  # WebSocket change feed. Two details that are easy to get wrong:
-  #   * The upstream path is /socket/ (not /), so a subscriber connecting to
-  #     /realtime/v1/websocket reaches /socket/websocket on Realtime.
-  #   * THE LEADING HOSTNAME LABEL MUST BE `realtime-dev`. Realtime reads the tenant id from it
-  #     rather than from the JWT, so addressing the service by its plain name makes every
-  #     handshake fail with a bare 403. Kong runs `preserve_host: false` (the default), which is
-  #     what makes the upstream Host header come from this URL in the first place.
-  #
-  # THIS IS THE ONE UPSTREAM THAT DIFFERS BETWEEN THE TWO TARGETS, hence the placeholder:
-  #   * Compose  -> http://realtime-dev.supabase-realtime:4000/socket/
-  #                 `realtime-dev.supabase-realtime` is a NETWORK ALIAS declared on the
-  #                 supabase-realtime service in docker-compose.yml; the two change together.
-  #   * Kubernetes -> http://realtime-dev:4000/socket/
-  #                 The Service is simply NAMED `realtime-dev`, so the leading label falls out of
-  #                 ordinary in-cluster DNS and no alias mechanism is needed. This is why Realtime
-  #                 is the single exception to keeping Service names identical to Compose service
-  #                 names -- see docs/kubernetes-architecture.md §3.4.
+  # WebSocket change feed. The upstream path is /socket/, and the leading hostname label must be
+  # `realtime-dev`: Realtime reads the tenant id from it. On Kubernetes the Service is named
+  # `realtime-dev`, which is why Realtime is the one Service whose name differs from Compose's.
   - name: realtime-v1
     url: __REALTIME_UPSTREAM_URL__
     routes:
@@ -122,22 +89,12 @@ services:
           # the tenant and evaluate RLS; stripping it breaks the handshake.
           hide_credentials: false
 
-  # Object storage. Uploads go through here rather than straight to supabase-storage so the
-  # browser talks to exactly one origin (and one CORS policy) for auth, REST and files alike --
-  # and so a public model URL embedded in an exported AAS shell names the gateway, which is the
-  # only address that is reachable from outside the compose network.
-  #
-  # storage-api serves its routes at the ROOT (/bucket, /object/...), so the /storage/v1 prefix
-  # is ours and must be stripped.
-  # PUBLIC OBJECTS ONLY, and deliberately unauthenticated -- see the header.
-  #
-  # Declared as its own service rather than as an exempt route on storage-v1 because the upstream
-  # path has to survive. With `strip_path: true` the matched prefix is removed, so pointing this
-  # at the storage root would forward `/asset-3d-models/x.glb` and lose the `/object/public/`
-  # segment storage-api routes on. Baking that segment into the service URL restores it.
-  #
-  # Kong prefers the longer prefix, so this route wins over `/storage/v1/` below for public
-  # object reads and only for those.
+  # Object storage, through the gateway so the browser talks to one origin and a public model URL
+  # names an address reachable from outside. storage-api serves its routes at the root, so the
+  # /storage/v1 prefix is stripped. Public objects only, unauthenticated (see the header). Its own
+  # service because `strip_path` removes the whole matched prefix and the `/object/public/` segment
+  # has to survive in the service URL. Kong prefers the longer prefix, so this wins over
+  # `/storage/v1/` for public reads only.
   - name: storage-v1-public
     url: http://supabase-storage:5000/object/public/
     routes:
@@ -164,20 +121,10 @@ services:
           # storage-api authorises uploads on the JWT, not the apikey.
           hide_credentials: true
 
-  # OPEN BY DESIGN. An OAuth client presents client credentials, not a Supabase apikey, and
-  # Grafana's `api_url` lands on an edge function rather than on GoTrue. Gated, it 401s and
-  # Grafana reports `[oauth.invalid_role] invalid role: Authenticated` -- an RBAC fault, not a
-  # gateway one. No Grafana setting can add a header to `api_url`, so the fix has to be here.
-  #
-  # EXACT PATHS, NOT A PREFIX: `/functions/v1/` would re-open the whole runtime, and naming the
-  # endpoints means a function added later is gated by default.
-  #
-  # ONE SERVICE PER FUNCTION, forced not stylistic: `strip_path` removes the WHOLE matched path,
-  # so an exact-path route pointing at `…:9000/` hands the runtime an empty service name and it
-  # answers 400 -- naming nothing. The upstream URL must carry the function name itself.
-  #
-  # What this exposes, and why it is narrower than the other two exemptions:
-  #   supabase/README.md -> "API Gateway (kong.yml)"
+  # Open by design: an OAuth client presents client credentials, not a Supabase apikey. Exact
+  # paths, not a prefix, so a function added later is gated by default. One service per function
+  # because `strip_path` removes the whole matched path and the upstream URL must carry the
+  # function name.
   - name: functions-v1-grafana-userinfo
     url: http://supabase-functions:9000/grafana-userinfo
     routes:
@@ -195,24 +142,10 @@ services:
           - /functions/v1/nodered-userinfo
 
   # ---------------------------------------------------------------------------------------------
-  # Factory+ Directory adapter -- the FOURTH key-auth exemption.
-  #
-  # WHY IT IS EXEMPT. A Factory+ client has no Supabase apikey and no way to acquire one; gating
-  # this route would make the adapter unreachable by exactly the clients it exists for, which is
-  # the same argument as the two userinfo endpoints above. `/ping` must additionally be reachable
-  # with no credential at all -- the component specification requires it for discovery.
-  #
-  # WHAT STANDS IN FRONT OF THE DATA IS THE FUNCTION, NOT KONG. Every `/v1/` path in
-  # fplus-directory refuses a request with no bearer token, before it routes, and then queries as
-  # the CALLER so RLS still applies. That inversion is deliberate but it is also the whole
-  # security boundary for these routes, so `validate.py` asserts the 401 rather than trusting it.
-  #
-  # `strip_path: false`, UNLIKE the userinfo routes. Those match one exact path and want it
-  # removed; these must preserve `/v1/device/<uuid>` for the function to route on. With
-  # strip_path false Kong appends the request path to the service URL, so the runtime receives
-  # `/fplus-directory/v1/device/<uuid>` -- which is also how main/index.ts learns which worker to
-  # spawn, since it reads the first path segment. Setting strip_path true here would hand it an
-  # empty service name and it would answer 400, naming nothing.
+  # Factory+ Directory adapter, the fourth exemption: a Factory+ client has no Supabase apikey,
+  # and `/ping` must be reachable with no credential by specification. Every `/v1/` path refuses a
+  # request with no bearer token and queries as the caller, so the function is the boundary and
+  # validate.py asserts the 401. `strip_path: false` so `/v1/device/<uuid>` reaches the function.
   # ---------------------------------------------------------------------------------------------
   - name: fplus-directory
     url: http://supabase-functions:9000/fplus-directory
@@ -241,49 +174,18 @@ services:
           key_in_header: true
           key_in_query: true
           key_in_body: false
-          # THE MOST IMPORTANT OF THE FOUR. The edge runtime boots with VERIFY_JWT="false"
-          # because each function performs its own role check, so before this plugin existed an
-          # unauthenticated request could reach and start any worker. Now a caller must at least
-          # present a recognised key to get that far, and the function's own check still decides
-          # what they may do.
+          # The edge runtime boots with VERIFY_JWT="false" because each function performs its own role
+          # check; this plugin is what stops an unauthenticated request starting a worker at all.
           hide_credentials: true
 
 plugins:
   # ---------------------------------------------------------------------------------------------
-  # Prometheus metrics for every route and service Kong fronts.
-  #
-  # KONG IS THE ONLY PLACE THE HTTP TIER CAN BE MEASURED FROM. PostgREST 12.2.0 exposes no metrics
-  # at all -- its admin server serves /ready and /live and nothing else -- and neither GoTrue nor
-  # storage-api ships an exporter. Because every one of their requests passes through here, Kong's
-  # per-service latency and status-code counters cover the whole API surface from one scrape.
-  #
-  # DECLARED GLOBALLY, ON PURPOSE: a per-service plugin would measure whichever services someone
-  # remembered to annotate, and the gap would look like an idle service rather than an unmeasured
-  # one.
-  #
-  # THE METRICS ARE NOT SERVED ON THE PROXY PORT. They appear on Kong's STATUS listener
-  # (`KONG_STATUS_LISTEN`, :8100/metrics), which the chart enables when
-  # `supabaseKong.metrics.enabled`. Loading the plugin without that listener is harmless and costs
-  # a shared-dict counter per request; it simply means nothing can scrape it.
-  #
-  # `prometheus` MUST ALSO APPEAR IN `KONG_PLUGINS` on both targets. Naming any plugin in that
-  # variable REPLACES the bundled set rather than adding to it, so a plugin referenced here but
-  # missing there stops Kong dead at boot with `plugin 'prometheus' not enabled; add it to the
-  # 'plugins' configuration property` -- which reads as a config-file error and is an env-var one.
-  #
-  # THE THREE FLAGS BELOW ARE THE WHOLE POINT OF THIS PLUGIN HERE, AND ON KONG 3.x THEY DEFAULT TO
-  # FALSE. Kong 2.8 emitted per-service status codes, latencies and bandwidth from a bare
-  # `- name: prometheus`; 3.0 made all three opt-in to control cardinality. The upgrade therefore
-  # SILENTLY REMOVES every series this target exists for -- `kong_http_status`, `kong_latency_*`
-  # and `kong_bandwidth` all disappear, leaving only node-level nginx and memory gauges.
-  #
-  # NOTHING FAILS WHEN THAT HAPPENS, which is why this comment is longer than the config. The
-  # scrape target stays UP, /metrics answers 200, and only a panel or an alert reading a
-  # per-service series goes quiet -- which reads as an idle gateway rather than an unmeasured one.
-  # Caught by querying the live scrape after the 2.8 -> 3.9 bump, not by reading the changelog.
-  #
-  # `upstream_health_metrics` is deliberately NOT enabled: it reports on `upstreams`/`targets`
-  # entities, and every service here is declared with a plain `url:`, so it would export nothing.
+  # Prometheus metrics for every route and service, declared globally so an unannotated service
+  # cannot read as an idle one. Served on the status listener (`KONG_STATUS_LISTEN`, :8100), not
+  # the proxy port. `prometheus` must also appear in `KONG_PLUGINS`: naming any plugin there
+  # replaces the bundled set. The three flags below default to false on Kong 3.x, and without them
+  # every per-service series disappears while the scrape stays UP. `upstream_health_metrics` is
+  # off because every service here is declared with a plain `url:`.
   # ---------------------------------------------------------------------------------------------
   - name: prometheus
     config:
@@ -291,29 +193,11 @@ plugins:
       latency_metrics: true
       bandwidth_metrics: true
   # ---------------------------------------------------------------------------------------------
-  # THE ONLY STATEMENT OF ORIGIN POLICY IN THE STACK, which is why it is substituted rather than
-  # written.
-  #
-  # `supabase/functions/_shared/cors.ts` deliberately carries NO `Access-Control-Allow-Origin`: the
-  # gateway is the only layer that sees a request before deciding to route it, so declaring the
-  # policy in two places would mean two statements to keep in step and one of them unenforceable.
-  # That makes this list load bearing on its own -- there is no second layer to fall back on.
-  #
-  # IT USED TO BE FOUR LITERAL LOCALHOST ORIGINS, and Kubernetes is where that failed. There the
-  # dashboard is served from `app.<publicBaseDomain>` and calls the API on `api.<publicBaseDomain>`
-  # -- a CROSS-ORIGIN request whose Origin appeared nowhere in the list, so Kong set no
-  # Access-Control-Allow-Origin and every browser call was blocked. Nothing caught it: `helm lint`
-  # renders a valid config, `validate.py` is server-side, and the ingress assertions use curl,
-  # which sends no Origin and does not enforce the answer. It presents as a dashboard that logs in
-  # and then shows empty tables, with the gateway reporting 200 for every request it made.
-  #
-  # SUBSTITUTED FROM THE SAME HELPERS THE INGRESS HOSTS COME FROM (`acs-cymru.corsOrigins` ->
-  # frontendUrl + docsUrl), so an origin cannot disagree with a hostname the chart actually serves
-  # -- the same single-source argument values.yaml makes for `publicUrls.grafana`.
-  #
-  # A YAML FLOW SEQUENCE, not a block list: `sed` substitutes a line, and a placeholder occupying
-  # a block-list item cannot expand into several of them. Both substituters emit a JSON array,
-  # which YAML accepts verbatim.
+  # The only statement of origin policy: `_shared/cors.ts` carries no Access-Control-Allow-Origin,
+  # so this list is load-bearing on its own. Substituted from the same helpers the ingress hosts
+  # come from (`acs-cymru.corsOrigins`), so an origin cannot disagree with a hostname the chart
+  # serves. A YAML flow sequence, because `sed` substitutes a line and both substituters emit a
+  # JSON array.
   # ---------------------------------------------------------------------------------------------
   - name: cors
     config:

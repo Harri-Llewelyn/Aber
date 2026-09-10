@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, thirteen edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, fifteen edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential - gateway-credential<br/>mint-service-token - propose-gateway-flow"]
+        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - forge-membership - forge-signout - forge-events - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential - gateway-credential<br/>mint-service-token"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -239,7 +239,7 @@ Self-registered accounts get read-only `Operator` via the `handle_new_user` trig
 `Administrator` must promote them.
 
 > **`.env.example` contains working development secrets** — the standard Supabase demo values, also
-> registered as Kong API keys. **Generate fresh secrets for any shared or hosted environment.**
+> the gateway's registered API keys. **Generate fresh secrets for any shared or hosted environment.**
 
 Teardown: `docker compose down -v` (also drops volumes, invalidating every logged-in browser).
 
@@ -294,7 +294,7 @@ so WinNAT cannot take the range again — `store=persistent` carries that across
 returns on the next boot or Docker Desktop restart.
 
 **If you cannot get an Administrator prompt**, the ports are configurable — `KONG_HTTP_PORT`,
-`SUPABASE_DB_PORT` and `STUDIO_PORT` in `.env`. Moving Kong is not a one-line change, though:
+`SUPABASE_DB_PORT` and `STUDIO_PORT` in `.env`. Moving the gateway port is not a one-line change, though:
 `SUPABASE_URL`, `AAS_MODEL_PUBLIC_BASE` and `AAS_HISTORIAN_ENDPOINT` all carry the port, the
 Node-RED and Grafana OAuth URLs are derived from `SUPABASE_URL`, and `VITE_SUPABASE_URL` is a
 **build arg** — so the frontend needs `--build`, not just a restart. Change `.env` only and leave
@@ -372,7 +372,7 @@ neither of which is HTTP and so neither of which can ride an Ingress.
 | Directory | Covers |
 | :--- | :--- |
 | **[`frontend/`](frontend/README.md)** | React 18 architecture, Vite, Realtime integration, derived state, theming |
-| **[`supabase/`](supabase/README.md)** | Migrations, RLS privilege matrix, triggers, audit immutability, edge functions, Kong |
+| **[`supabase/`](supabase/README.md)** | Migrations, RLS privilege matrix, triggers, audit immutability, edge functions, the gateway |
 | **[`ingestion/`](ingestion/README.md)** | Sparkplug B parsing, identity resolution, gateway binding, TimescaleDB mapping, `validate.py` |
 | **[`tutorial/`](tutorial/README.md)** | The walkthrough for a blank install: one cell, one gateway, its broker credential, a device, a schema, and the Node-RED flow that publishes as it |
 | **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](i3x/README.md#mcp) |
@@ -405,7 +405,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v14.12` | — |
 | `supabase-envoy-init` | `acs-cymru_supabase_envoy_init` | `alpine:3.24` | — |
-| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.39.1` | `54321:8000`, `54323:8001` (Studio, behind a login) |
+| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.39.1` | `54321:8000`, `54323:8001` (Studio, behind a login), `3003:8002` (the forge, behind a login) |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
 | `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.102.3` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.60.4` | — |
@@ -427,7 +427,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
 | `gitea-init` | `acs-cymru_gitea_init` | `gitea/gitea:1.27.3` | — |
-| `gitea` | `acs-cymru_gitea` | `gitea/gitea:1.27.3` | `3003:3000`, `2222:22` |
+| `gitea` | `acs-cymru_gitea` | `gitea/gitea:1.27.3` | `2222:22` (HTTP is behind the gateway's forge listener on `3003`) |
 | `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.2.0` | `3002:3000` |
 | `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.32.14` | `8088:8080` |
 | `prometheus` | `acs-cymru_prometheus` | `prom/prometheus:v3.14.0` | `127.0.0.1:9090:9090` |
@@ -452,7 +452,8 @@ unrecognised role produces `403`.
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `digital_thread` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
-| **Supabase Studio** | **No authentication of its own — reachable only from the host.** Bound to `127.0.0.1` on Compose and off the Ingress by default on Kubernetes |
+| **Supabase Studio** | Behind the gateway's `studio` listener: an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`). Off the Ingress by default on Kubernetes |
+| **The forge** | Behind the gateway's `forge` listener: the same login, admitting `Administrator` and `Shopfloor_Manager` (`0094`). Gitea's own HTTP port is reachable only from the gateway and the edge runtime |
 
 ### Historian roles
 
@@ -500,11 +501,9 @@ it is what a human debugging the FDW connects through.
 `timescaledb/test_historian_role_grants.py` asserts both halves for both roles — what they can do,
 and what they must not.
 
-**Supabase Studio is a database console, not a dashboard with admin features**, and it is the one
-component here with no login, no roles and no session of its own. The official Supabase stack fronts
-it with a basic-auth pair on Kong; this stack does not run that, so whatever can reach it holds the
-SQL editor, the table editor and the Vault UI **as the database owner** — for whom RLS is not
-enforced. Every control in the table above is downstream of that.
+**Supabase Studio is a database console with no login, roles or session of its own.** Whoever
+reaches it holds the SQL editor, the table editor and the Vault UI **as the database owner** — for
+whom RLS is not enforced — which is why it sits behind a door rather than a port.
 
 **On Compose it now has a door, and the gateway is it.** `supabase-envoy` publishes `54323` and
 holds a second listener there: an OAuth 2.1 authorization-code flow against this stack's own GoTrue,
@@ -569,15 +568,15 @@ write a single row directly — and every write it makes goes through a `SECURIT
 checks the caller is that principal. Its `telemetry:read` grant being insufficient is the design, not
 an oversight: it makes those gates the only route rather than the tidy one.
 
-**Tokens cannot be revoked.** PostgREST checks the signature, not a session table, so revoking means
-rotating `SUPABASE_JWT_SECRET` and invalidating every key in the stack. Expiry is therefore the only
-bound that exists — 90 days maximum for any token naming a **principal**, whether a person pasted it
-into a laptop config or a container reads it from `.env`, and ten years only for the anon and
-service-role keys, which name nobody and are the stack's API keys. The **Access Control** tab exists
-to say what is outstanding, because with no revocation an accurate inventory *is* the safety story.
+**Tokens are revocable at PostgREST** (`0074`–`0076`): `auth_pre_request` runs before every request
+and refuses a JWT whose `jti` has been revoked, and a whole service principal can be put beyond use.
+Expiry still bounds everything else — 90 days for any token naming a **principal**, ten years only
+for the anon and service-role keys, which name nobody. Storage, Realtime, the edge runtime and Studio
+verify the signature for themselves and are not reached by a revocation (see
+[Accepted risks](#accepted-risks)). The **Access Control** tab states what is outstanding.
 
-The full argument, including the three revocation designs that were checked and rejected, is in
-[`supabase/README.md`](supabase/README.md#machine-identities).
+The mechanism and its limits are in
+[`supabase/README.md`](supabase/README.md#the-access-control-page-states-what-is-outstanding).
 
 **Known issues** — things that can be worked on — are tracked as
 [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues). **Accepted risks are not**, and
@@ -619,21 +618,46 @@ evidence of access: a public or partner-facing deployment, a shared cluster, or 
 multi-tenancy. At that point the choice is dropping the three tables from the publication and
 polling instead, or waiting for upstream to authenticate before delivering the envelope.
 
-#### There is no credential revocation; expiry is the only bound
+#### Revocation reaches PostgREST and nothing else
 
-Described in full under [Machine identities](#machine-identities) — a token cannot be withdrawn without rotating
-`SUPABASE_JWT_SECRET` and invalidating every key in the stack, so expiry is the only bound that
-exists: 90 days for any token naming a principal — the ingestion and playback keys included, which
-`npm run keys:rotate` re-signs — and ten years only for the anon and service-role keys, which name
-nobody.
+`0074` made a token revocable at the one choke point PostgREST offers (`PGRST_DB_PRE_REQUEST`).
+Storage, Realtime, the edge runtime and Studio verify the HS256 signature for themselves and consult
+no table, so a revoked token still opens those doors until its own `exp` — at most 90 days for a
+token naming a principal.
 
-**Accepted because** the three revocation designs that would fix it were checked and rejected for
-reasons recorded in [`supabase/README.md`](supabase/README.md#machine-identities), and because an
-accurate inventory is the compensating control — which is what the **Access Control** tab exists to
-provide.
+**Accepted because** every write that matters goes through PostgREST and RLS, the other surfaces
+are read-side or gated by a separate login, and the ceiling bounds the exposure.
 
-**Revisit if** tokens are ever issued to parties outside the operating organisation, or if the
-ten-year infrastructure keys outlive the deployment that minted them.
+**Revisit if** tokens are issued to parties outside the operating organisation, or if a write path
+that bypasses PostgREST is ever added.
+
+#### The broker's internal CA has no revocation list
+
+There is no CRL and no OCSP for the root `mosquitto-tls-init` mints on Compose or
+`deploy/k8s/internal-ca.yaml` issues on Kubernetes. A compromised root private key has no remedy
+short of re-minting the root and re-walking the fleet. Broker *credentials* are revocable and
+immediate (archiving a gateway rotates its account); the trust anchor is the one thing that is not.
+
+**Accepted because** the key never leaves its Secret or volume, is never mounted into an application
+pod, and never reaches an appliance, which receives `ca.crt` alone; for a fleet of this size a CRL
+would add a reload-dependent mechanism nothing here consumes.
+
+**Revisit if** the root is ever exported, if client certificates replace password authentication on
+the broker, or if the fleet grows past what a re-walk can cover in a shift.
+
+#### Compose has no network policy layer
+
+On Kubernetes a default-deny NetworkPolicy (opt-in, `networkPolicy.enabled`) says which pod may
+reach which. Compose has one Docker network plus the `forge` network for Gitea, and no equivalent:
+any container can reach any other container's port.
+
+**Accepted because** a single-host Compose stack is one machine, every internal port is
+unpublished or bound to loopback, and the one service whose reachability *is* its access control
+(Gitea, which trusts the identity header from any peer) has been moved onto a network only the
+gateway and the edge runtime join.
+
+**Revisit if** a second service ever relies on "only these containers can reach me" as a control,
+or if Compose is used for anything other than a single trusted host.
 
 ---
 

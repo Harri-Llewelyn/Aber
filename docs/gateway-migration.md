@@ -13,7 +13,7 @@ authenticated probe has nothing to reach. Kubernetes still defaults to Kong. See
 and — the part that turns a preference into a deadline — the **new `sb_publishable_*` /
 `sb_secret_*` API keys are a gateway feature**. They are not JWTs, and no component downstream ever
 sees one: the gateway matches the key as a string and synthesises the `Authorization: Bearer <JWT>`
-the upstreams require. Upstream ships that translation in Envoy only. So roadmap §1's key migration,
+the upstreams require. Upstream ships that translation in Envoy only. So the roadmap's key migration (*Moving off Supabase's legacy API keys*),
 whose end date is set by someone else, runs through this work -- and since this work is done, that
 item is unblocked on both targets. **The translation is now built**: see
 [The two key formats, accepted at once](#3-the-two-key-formats-accepted-at-once).

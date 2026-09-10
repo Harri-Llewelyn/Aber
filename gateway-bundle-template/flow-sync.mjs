@@ -28,7 +28,7 @@
  * token bound to one gateway row. So this appliance knows the forge's host key BEFORE its first
  * clone, and `StrictHostKeyChecking=yes` below is a check that can actually fail rather than
  * decoration. There is deliberately no option, environment variable or flag anywhere in this file
- * that disables it: roadmap 7 and 11 both refuse that switch, and a switch that exists is a switch
+ * that disables it: this platform refuses that switch everywhere, and a switch that exists is a switch
  * that ends up set on every appliance in a plant with a proxy.
  *
  * With no known_hosts file this REFUSES TO SYNC and says so. That is the correct failure: a gateway
@@ -47,7 +47,7 @@
  * still caught up -- an appliance that was powered off when a proposal merged converges on its next
  * tick -- which is the self-healing property that matters. Local drift is a REPORTED fact rather
  * than a corrected one: the heartbeat already carries a flow hash, and comparing it to the committed
- * head is roadmap 7's drift detection, which is a dashboard concern and not this file's.
+ * head is drift detection, which is a dashboard concern and not this file's.
  *
  * -------------------------------------------------------------------------------------------------
  * THE WRITE IS AN OVERWRITE AND NOT A MERGE, AND THAT WAS PROVED BEFORE IT WAS BUILT.
@@ -73,7 +73,7 @@
  * -------------------------------------------------------------------------------------------------
  * RELATIONSHIP TO `ansible-pull`, WHICH IS WHERE THIS IS GOING.
  *
- * Roadmap 8 puts `ansible-pull` on the appliance against a SHARED platform playbook repository: the
+ * docs/roadmap.md ("The appliance itself") puts `ansible-pull` on the appliance against a SHARED platform playbook repository: the
  * OS baseline, the container versions, the CA, and this gateway's flow. When that lands, the
  * scheduling and the platform convergence become Ansible's and the transport becomes a task rather
  * than a loop. What does NOT move is everything below `deployFlow()`: the shape checks, the broker
@@ -172,7 +172,7 @@ function git(args, cwd) {
  * Bring the local checkout up to date with the tracked branch, and return both revisions.
  *
  * A FORCE-PUSH IS REFUSED RATHER THAN FOLLOWED, and that refusal belongs here rather than in the
- * dashboard. Roadmap 7 requires a revert to be a NEW COMMIT precisely because a rewritten history
+ * dashboard. A revert must be a NEW COMMIT precisely because a rewritten history
  * cannot be told from a legitimate advance by anything downstream -- this would reconcile to the
  * rewritten head and report success, having deployed something no pull request ever showed. So the
  * remote head must be a descendant of what we last saw. When it is not, this stops and says so, and

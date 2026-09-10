@@ -1,61 +1,25 @@
 -- =============================================================================================
 -- 0049 · `documents` becomes `links`, in the schema.
 -- =============================================================================================
--- Issue #62 generalised this feature from document links to links of ANY kind -- an asset register
--- in EZOfficeInventory, a file repository where measurement data belongs, anything with a URL --
--- and the user-facing vocabulary was renamed to match at the time. The storage was not. This is
--- the other half, and it is a rename rather than a redesign because nothing about the model was
--- ever document-specific: (entity_type, entity_id, display_name, url, tag) is an arbitrary
--- labelled URL against an arbitrary entity.
+-- The feature was generalised from document links to links of any kind and the user-facing
+-- vocabulary renamed; this renames the storage. A rename, not a redesign: the model was never
+-- document-specific.
 --
--- IT IS JUSTIFIED BY CLARITY, NOT BEHAVIOUR, which is exactly why it was kept out of the UI
--- commit. A table rename is a migration -- table, index, primary key, four policies, the grants
--- PostgREST resolves through, and a permission row's name -- and landing it inside a UI change
--- would have buried a schema change where nobody reviews schema changes. A table called
--- `documents` holding a link to a SharePoint folder nobody will open a document in is a name that
--- misleads the next reader about what the feature is for.
+-- The permission's uuid does not move: `role_permissions` references it by id and
+-- `PERMISSION_UUIDS.LINK_MANAGE` in the frontend is the same literal. Only the `name` changes.
 --
--- ---------------------------------------------------------------------------------------------
--- THE PERMISSION'S UUID DOES NOT MOVE, WHICH IS THE ONE THING THAT WOULD BE AN OUTAGE
---
--- `role_permissions` references it by id -- 0002 grants it to roles 1 and 2 -- and
--- `PERMISSION_UUIDS.LINK_MANAGE` in the frontend is that same literal. Only the `name` string
--- changes here. Renaming the frontend constant is an edit to a variable name, not an
--- authorisation change, and the self-check below asserts the grants survived.
---
--- ---------------------------------------------------------------------------------------------
--- WHY THIS COPIES AND DROPS RATHER THAN RENAMING, WHICH IS THE INTERESTING PART
---
--- The obvious implementation is `ALTER TABLE documents RENAME TO links`. It does not work here,
--- and the reason is the replay model rather than anything about renames.
---
--- db-init replays EVERY migration on EVERY boot, in filename order, so 0001 runs before this file
--- does. 0001 now creates `public.links` (it had to -- see its own comment, and 0004's header for
--- the precedent: a baseline that still created the old name would recreate it, empty, on the first
--- boot after the rename and leave it beside the real table forever). On the upgrade boot that
--- means `links` ALREADY EXISTS, empty, by the time this file runs -- so a RENAME collides with it.
---
--- Copying instead has two properties a rename-plus-drop does not:
---
---   1. NO TABLE HOLDING DATA IS EVER DROPPED. `documents` is dropped only after its rows are in
---      `links`, in the same transaction, so a failure anywhere leaves the original untouched.
---   2. THE SURVIVING TABLE IS DEFINITIONALLY THE ONE 0001 DEFINES. Its index, primary key,
---      policies and grants were created by 0001 under the new names and need no renaming here --
---      which removes four ALTER POLICY statements that could each drift from their definitions.
---
--- The ids are carried across, so every link keeps its identity and anything holding one still
--- resolves.
+-- Copies and drops rather than RENAME, because 0001 now creates `public.links` and runs first on
+-- every boot, so on the upgrade boot `links` already exists, empty. No table holding data is
+-- ever dropped (the copy and the drop are one transaction), and the surviving table is the one
+-- 0001 defines, index, policies and grants included. Ids are carried across.
 -- =============================================================================================
 
 SET search_path TO public;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 1. Move the rows, then retire the old table
 -- ---------------------------------------------------------------------------------------------
--- A no-op on a fresh install, where 0001 created `links` and `documents` has never existed, and a
--- no-op on every boot after the first, where `documents` is already gone. It does its work exactly
--- once, on the boot that upgrades a deployment.
+-- A no-op on a fresh install and on every boot after the first.
 DO $migrate$
 DECLARE
     v_moved   integer := 0;
@@ -97,14 +61,11 @@ BEGIN
 END;
 $migrate$;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 2. The permission's name, and only its name
 -- ---------------------------------------------------------------------------------------------
--- Matched on the id, not on the old name, so this is idempotent and stays correct even if somebody
--- has already edited the string by hand. 0002 seeds the new name for a fresh install; this exists
--- because its INSERT carries ON CONFLICT (id) DO NOTHING and therefore cannot correct a row that
--- is already there.
+-- Matched on the id, not on the old name. 0002 seeds the new name for a fresh install; its
+-- INSERT is ON CONFLICT (id) DO NOTHING and cannot correct a row that is already there.
 UPDATE public.permissions
    SET name        = 'link:manage',
        description = 'Add, edit, and remove external links attached to assets'
@@ -112,14 +73,11 @@ UPDATE public.permissions
    AND (name IS DISTINCT FROM 'link:manage'
         OR description IS DISTINCT FROM 'Add, edit, and remove external links attached to assets');
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 3. Self-check
 -- ---------------------------------------------------------------------------------------------
--- The assertions worth making are the ones whose failure is SILENT. A missing table errors on the
--- next request and gets noticed; a permission that lost its role grants presents as a button that
--- has quietly stopped working for everyone, and a leftover `documents` table presents as nothing
--- at all until somebody writes to the wrong one.
+-- The assertions whose failure is silent: a permission that lost its role grants, and a
+-- leftover `documents` table.
 DO $selfcheck$
 DECLARE
     v_perm    CONSTANT uuid := 'a012b345-6789-4c1d-8706-933e08544e38';

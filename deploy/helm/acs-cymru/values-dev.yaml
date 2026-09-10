@@ -98,6 +98,10 @@ secrets:
   # Matches .env.example, so the Compose and k3d stacks bring the forge up on the same account.
   giteaAdminPassword: gitea-admin
   giteaMachinePassword: acs-platform-machine-account
+  # The forge's door (0094). Set here because, unlike Studio's, the gitea route is on by default.
+  giteaOAuthClientSecret: change-me-gitea-oauth-client-secret
+  giteaProxyHmacSecret: change-me-gitea-proxy-hmac-secret
+  giteaWebhookSecret: change-me-gitea-webhook-secret
 
   grafanaAdminUser: admin
   grafanaAdminPassword: admin

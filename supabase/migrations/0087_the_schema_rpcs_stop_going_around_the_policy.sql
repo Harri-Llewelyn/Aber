@@ -1,60 +1,18 @@
 -- 0087: the schema RPCs stop being the way around the policy 0069 installed.
 --
--- =================================================================================================
--- THE FINDING, AND HOW IT WAS CONFIRMED
+-- 0069 withdrew `schema:manage` from `Shopfloor_Manager` and narrowed the write policies on
+-- `public.schemas` to Administrator, but `fork_schema()` and `publish_schema_version()` are
+-- SECURITY DEFINER, do not consult those policies, and went on checking
+-- `has_role(ARRAY['Administrator', 'Shopfloor_Manager'])`. Measured: a Shopfloor_Manager's direct
+-- UPDATE was refused and the RPC performed it, archiving the predecessor and repointing every
+-- attached device.
 --
--- `0069` withdrew `schema:manage` from `Shopfloor_Manager` -- "what contract ingestion validates
--- against" -- and narrowed the three write policies on `public.schemas` to Administrator alone. Its
--- own header states the principle it was applying: a revoked permission whose policy still admits
--- the role is "a frontend flag and therefore never an access control".
+-- `has_authority(ARRAY['schema:manage'])` rather than `has_role(ARRAY['Administrator'])`, so the
+-- gate is the permission that was withdrawn rather than a second spelling a later role change can
+-- put out of step again. It fails closed for a machine principal.
 --
--- IT NARROWED POLICIES. `fork_schema()` and `publish_schema_version()` are SECURITY DEFINER, so
--- they do not consult those policies at all -- they run as the owner -- and both went on checking
--- `has_role(ARRAY['Administrator', 'Shopfloor_Manager'])`. The result is that the exact write 0069
--- withdrew stayed reachable, through the RPC the UI already calls.
---
--- Measured on the shipped stack, in one transaction as a Shopfloor_Manager holding neither
--- `Administrator` nor `schema:manage`:
---
---     UPDATE public.schemas SET status = 'archived' ...   -> UPDATE 0     (0069's policy holds)
---     SELECT public.publish_schema_version(<draft>)       -> succeeded
---     SELECT status FROM public.schemas WHERE id = parent -> 'archived'
---
--- The direct write was refused and the RPC performed it. Publishing activates a draft, archives its
--- predecessor and repoints every `device_submodels` row and legacy `devices.schema_id` onto the new
--- version -- so this is not a cosmetic status flip, it changes what every attached device is judged
--- against by ingestion.
---
--- `fork_schema()` carries the same gate and the same bypass. Its comment claimed "Same allow-list as
--- the RLS write policies on `schemas`", which was TRUE WHEN WRITTEN and became false when 0069
--- moved those policies underneath it. That is the failure this repository already knows about in
--- another form -- an analysis that was right when written and wrong when read -- and the reason the
--- roadmap tells a reader to sweep back over what cited a thing as settled.
---
--- =================================================================================================
--- WHY `has_authority` AND NOT `has_role(ARRAY['Administrator'])`
---
--- The seven policies 0069 narrowed name the ROLE. These two name the PERMISSION instead, so the gate
--- is the thing that was withdrawn rather than a second spelling of it that a later role change can
--- put out of step again -- which is precisely how these two functions came to disagree with the
--- policies they were written to match. Today the two resolve identically: Administrator alone holds
--- `schema:manage`.
---
--- It also fails closed for a machine principal, on 0080's argument: a machine resolves through
--- `principal_permissions`, where none holds `schema:manage`.
---
--- =================================================================================================
--- WHAT THIS DOES NOT CHANGE
---
--- Reading. `0069` deliberately left all three SELECT policies open -- the Devices page resolves a
--- device's schema through them -- and nothing here touches a read path.
---
--- The bodies below are the baseline's, copied verbatim except for the gate and the comment above it,
--- so this file is a change to WHO MAY CALL and to nothing else. Both are recorded in
--- INTENDED_REDECLARATIONS in scripts/check-docs-drift.mjs, because the last declaration in filename
--- order is the one that runs.
--- =================================================================================================
-
+-- Reading is unchanged. The bodies are the baseline's, copied verbatim except for the gate, and
+-- both are recorded in INTENDED_REDECLARATIONS in scripts/check-docs-drift.mjs.
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. Forking a schema is a schema-management act
@@ -64,11 +22,8 @@ CREATE OR REPLACE FUNCTION public.fork_schema(parent_schema_id uuid, change_desc
     SET search_path TO 'public'
     AS $$
 DECLARE
-  -- Copied out of the parameters immediately, and the parameters never referenced again. Both are
-  -- named after columns of `schemas` -- which is what the brief specifies and what the RPC's JSON
-  -- body must use -- and plpgsql would raise "column reference is ambiguous" on the first
-  -- `WHERE id = parent_schema_id`. A DECLARE initialiser has no table in scope, so the copy is
-  -- unambiguous.
+  -- Copied out of the parameters immediately: both are named after columns of `schemas`, and
+  -- plpgsql would raise "column reference is ambiguous" on the first `WHERE id = parent_schema_id`.
   v_parent_id  UUID := parent_schema_id;
   v_change     TEXT := NULLIF(btrim(COALESCE(change_description, '')), '');
   parent       public.schemas%ROWTYPE;
@@ -78,14 +33,8 @@ DECLARE
   v_name       TEXT;
   v_suffix     INTEGER := 1;
 BEGIN
-  -- Fail closed, and check authority before anything else observable happens. NARROWED BY 0087:
-  -- this said "same allow-list as the RLS write policies on `schemas`" and named the pair, which
-  -- was true when it was written and stopped being true when 0069 narrowed those three policies to
-  -- Administrator. The comment went on asserting an agreement that no longer held.
-  --
-  -- `has_authority` rather than a role name, so the gate IS the permission 0069 withdrew rather
-  -- than a second spelling of it that the next role change can put out of step again. Today that
-  -- resolves to Administrator alone, because Administrator alone holds `schema:manage`.
+  -- Fail closed, before anything else observable happens. `has_authority` rather than a role name,
+  -- so the gate is the permission 0069 withdrew.
   IF NOT public.has_authority(ARRAY['schema:manage']) THEN
     RAISE EXCEPTION 'insufficient privileges to version a schema'
       USING ERRCODE = 'insufficient_privilege';
@@ -129,11 +78,8 @@ BEGIN
     v_name := v_base || '_v' || v_next || '_' || v_suffix;
   END LOOP;
 
-  -- THE METRIC LINKS ARE THE DEFINITION. There is no `schema_metrics` table in this database --
-  -- a schema's membership of the catalog lives in `schema_definition.properties` / `.required`,
-  -- which is what `modelledMetrics()` in deviceTags.js and its Python mirror in validate.py both
-  -- read. Copying the JSONB document IS duplicating the parent's metric links; a join table would
-  -- have to be copied row by row here instead.
+  -- The metric links are the definition: a schema's membership of the catalog lives in
+  -- `schema_definition.properties` / `.required`, which deviceTags.js and validate.py both read.
   INSERT INTO public.schemas (
     schema_name, description, schema_definition,
     semantic_id, semantic_id_type,
@@ -148,7 +94,6 @@ BEGIN
   RETURN to_jsonb(child);
 END;
 $$;
-
 
 -- -------------------------------------------------------------------------------------------------
 -- 2. So is publishing one, and this is the one with the reach
@@ -191,15 +136,9 @@ BEGIN
   IF draft.parent_schema_id IS NOT NULL THEN
     SELECT * INTO parent FROM public.schemas WHERE id = draft.parent_schema_id FOR UPDATE;
 
-    -- REBIND BEFORE ARCHIVING, so no window exists in which a device points at an archived schema.
-    -- The whole function is one transaction, so this is ordering for readability rather than for
-    -- observability -- but the read-backwards rule from the 3D-model upload applies: write the
-    -- pointer, then retire what it pointed at.
-    --
-    -- A device already carrying BOTH versions as submodels would collide on
-    -- `uq_device_submodels (device_id, schema_id)` when the old row is repointed. That is a real
-    -- state -- someone can attach a draft to a device to try it out before publishing -- so the
-    -- redundant old-version rows are dropped first rather than allowed to abort the publish.
+    -- Rebind before archiving, so no window exists in which a device points at an archived schema. A
+    -- device already carrying both versions as submodels would collide on `uq_device_submodels` when
+    -- repointed, so the redundant old-version rows are dropped first.
     DELETE FROM public.device_submodels old_link
      WHERE old_link.schema_id = parent.id
        AND EXISTS (
@@ -212,12 +151,9 @@ BEGIN
     UPDATE public.device_submodels SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_submodels = ROW_COUNT;
 
-    -- The legacy 1:1 pointer moves too. Archived migration 0034 kept `devices.schema_id` as the fallback
-    -- arm of the `device_schemas` view, and migrations 0021/0033 still write it -- a device
-    -- provisioned only through that column would otherwise stay pinned to an archived version and
-    -- start reporting the new version's metrics as Unmodelled. This UPDATE also fires
-    -- `log_digital_thread_event()`, so the rebinding lands in the audit trail per device, which is
-    -- where the history of "what was this machine judged against, when" belongs.
+    -- The legacy 1:1 pointer moves too: `devices.schema_id` is the fallback arm of the
+    -- `device_schemas` view. This UPDATE fires `log_digital_thread_event()`, so the rebinding lands in
+    -- the audit trail per device.
     UPDATE public.devices SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_legacy = ROW_COUNT;
 
@@ -240,24 +176,21 @@ BEGIN
 END;
 $$;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 3. The ACLs, restated rather than assumed
 -- -------------------------------------------------------------------------------------------------
--- `CREATE OR REPLACE FUNCTION` does not reset a function's ACL, so the baseline's grants survive
--- this file and no PUBLIC grant is reintroduced. Restated anyway because it costs one line and
--- test_anon_privilege_baseline.py exists because this exact assumption was wrong once.
+-- `CREATE OR REPLACE FUNCTION` does not reset a function's ACL, so the baseline's grants survive.
+-- Restated because it costs one line and test_anon_privilege_baseline.py exists.
 REVOKE ALL ON FUNCTION public.fork_schema(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.publish_schema_version(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.fork_schema(uuid, text) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.publish_schema_version(uuid) TO authenticated, service_role;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 4. Self-check
 -- -------------------------------------------------------------------------------------------------
--- READ-ONLY. It asserts the gate by reading the function's own source, because the property is
--- "this function no longer admits the pair" and there is no other artefact that carries it.
+-- Read-only. Asserts the gate by reading the function's own source, because no other artefact
+-- carries the property.
 DO $selfcheck$
 DECLARE
     v_problems text[] := ARRAY[]::text[];

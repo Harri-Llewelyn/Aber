@@ -2,112 +2,35 @@
 --
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.
 --
--- =================================================================================================
--- WHAT WAS WRONG
+-- The MCP reader, `Service_Ingestor` and `Service_Playback` held `Operator`, a person's role that
+-- changes whenever somebody asks for an operator to be able to do one more thing; every such
+-- change silently re-granted three machine identities. The role grants them nothing today
+-- (every read policy they depend on is `FOR SELECT TO authenticated USING (true)`), so the
+-- change is inert now and a prerequisite for the first policy that names `Operator`: the
+-- approvals queue's INSERT policy.
 --
--- `MCP read-only client` (b0000000-...-0001), `Service_Ingestor` (...-0002) and `Service_Playback`
--- (...-0003) all hold `Operator` AND NOTHING ELSE. That was a good decision when it was made and it
--- is written down as one: 0034's header says Operator was chosen OVER `Auditor` precisely so a model
--- could not read the audit trail. The role was picked for the shape it had.
+-- WHAT REPLACES IT. `principal_permissions(principal_id, permission_id)`, the join
+-- `role_permissions` models for people, scoped to one identity. `has_authority()` resolves a
+-- person through `user_roles` -> `role_permissions` and a machine through its own grants, and
+-- answers about permissions rather than role names. `has_role()` is not touched: fifty-eight
+-- policy sites call it and every one names Administrator or Shopfloor_Manager. A machine may not
+-- hold a role at all, enforced by the trigger in section 3. A permission nobody granted fails
+-- closed. Not a predicate in each policy: that patches only the policy that remembers to carry
+-- it.
 --
--- THE PROBLEM IS THAT THE SHAPE IS NOT THEIRS. `Operator` is a PERSON's role -- the read-only
--- shopfloor user -- and it is the role that changes whenever somebody asks for an operator to be
--- able to do one more thing. Every one of those requests silently re-grants three machine
--- identities.
+-- 0002 stops assigning the role in the same change (a DELETE here against an INSERT there would
+-- fight every boot, and the trigger would abort the chain at file two); the DELETE below is for
+-- databases that already have the rows.
 --
--- This has already happened once. A request to let an `Operator` read the asset lane of
--- `digital_thread` was refused by 0034's own self-check:
---
---     0034 self-check: the MCP principal read 2 digital_thread row(s). Operator was chosen over
---     Auditor precisely so it could not.
---
--- The check did its job. Note what it cost: A CHANGE ABOUT PEOPLE WAS BLOCKED BY A PROPERTY OF A
--- MACHINE, and the only reason it was caught is that somebody had written that assertion down years'
--- worth of migrations earlier.
---
--- =================================================================================================
--- THE ESCALATION IS LATENT, NOT LIVE, AND THAT IS WHY THIS SHIPS BEFORE THE THING THAT NEEDS IT
---
--- `Operator` is named in exactly three places in 0001, and NONE OF THEM IS AN RLS POLICY: the
--- allow-list in `create_service_principal()`, and the default role a new signup receives. Every read
--- policy the three principals depend on is `FOR SELECT TO authenticated USING (true)`, which 0034
--- states in as many words. So the role grants them nothing today, and removing it takes nothing
--- away.
---
--- WHAT IT GRANTS IS THE NEXT POLICY THAT NAMES `Operator`. The approvals queue is that policy: an
--- INSERT policy admitting `Operator` so a shopfloor user may PROPOSE a change would admit all three
--- of these identities at the same moment, and the per-proposer cap would then hand each of them its
--- own allowance. This migration is a prerequisite for that work rather than a hardening of this
--- one, and it is cheapest to do now, while the role still grants nothing and the change is
--- therefore provably inert.
---
--- =================================================================================================
--- WHY A SECOND MECHANISM RATHER THAN A PREDICATE IN THE POLICY
---
--- `AND NOT is_machine_principal(auth.uid())` on each new policy is the natural repair and it is
--- refused here for a reason that outlives the one originally recorded. The original reason has in
--- fact EXPIRED and is corrected here so nobody goes looking for it: 0034's self-check ran before
--- 0048 re-granted EXECUTE on the predicate, so the rule failed as `permission denied for function
--- is_machine_principal` forty migrations away. Both files are folded into 0001 now, which grants
--- that function to `authenticated` itself, and the archive directory is not copied into the image
--- (`COPY migrations/*.sql` does not recurse), so the ordering that made it fail no longer exists.
---
--- IT IS STILL THE WRONG FIX. A predicate patches the policy that remembers to carry it. The three
--- principals would still hold a person's role, the next author would still have to know to exclude
--- them, and the failure of forgetting is silent and in the permissive direction. `0048` also
--- forbids the other spelling in as many words: "a second definition of 'is this a service account'
--- would be worse than none."
---
--- =================================================================================================
--- WHAT REPLACES IT
---
--- `principal_permissions(principal_id, permission_id)` -- the join `role_permissions` already models
--- for people, scoped to one identity instead of to a role. `has_authority()` resolves a PERSON
--- through `user_roles` -> `role_permissions` and a MACHINE through its own grants, and answers about
--- PERMISSIONS rather than role names, because a permission is what a machine can be said to need.
---
--- `has_role()` IS NOT TOUCHED. Fifty-eight policy sites call it, it is what people resolve through,
--- and every one of those sites names `Administrator` or `Shopfloor_Manager` -- which no machine
--- principal has ever satisfied. Widening this file to that surface would be a rewrite of the access
--- control system in a migration whose subject is three accounts.
---
--- A MACHINE MAY NOT HOLD A ROLE AT ALL, and that is enforced rather than assumed. Allowing both is
--- how the ambiguity comes back: an identity resolving through grants AND through a role is one
--- somebody has to check twice. The trigger in section 3 is the enforcement, and it is what makes the
--- sentence above a property of the database rather than a note in a header.
---
--- A PERMISSION NOBODY GRANTED FAILS CLOSED, on 0070's argument: the safe failure is a machine that
--- cannot read something, not one that can.
---
--- =================================================================================================
--- WHY 0002 CHANGES IN THE SAME BREATH
---
--- 0002 seeds the three `user_roles` rows and runs BEFORE this file on every boot. A DELETE here
--- against an INSERT there is a fight this file would win once per boot and lose in the logs forever,
--- and the guard trigger would turn it into an ABORT: 0002 would try to give a machine a role, the
--- trigger would refuse it, and ON_ERROR_STOP would take the stack down at file two.
---
--- So 0002 stops assigning the role -- the `auth.users` rows stay exactly where they are, because the
--- identities are not what is wrong -- and the DELETE below exists for databases that already have
--- the rows. On a fresh install it removes nothing, which is the house rule for a replayed migration.
---
--- =================================================================================================
--- THE TWO RPCs ARE RENAMED RATHER THAN REDECLARED
---
--- `create_service_principal()` returns `TABLE(principal_id uuid, roles text[])` and
--- `list_service_principals()` returns `roles text[]` as its second column. Both become permissions
--- here, and a changed return type CANNOT be shipped under the same name: 0001 re-declares its own
--- version first on every boot with CREATE OR REPLACE, which cannot change a return type, so the
--- chain would abort at file one AFTER 0001 has dropped the FDW server with CASCADE. That failure is
--- invisible until the SECOND boot. scripts/check-docs-drift.mjs asserts against it and states the
--- remedy: give the new shape its own function name, as 0078 does.
-
+-- The two RPCs are renamed rather than redeclared because their return types move, and a changed
+-- return type cannot ship under the same name on a chain 0001 replays first (check-docs-drift.mjs
+-- asserts this).
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The grant table
 -- -------------------------------------------------------------------------------------------------
--- Deliberately the same two-column shape as `role_permissions`. A machine's authority should be
--- readable by the same query the human side uses, with one join swapped.
+-- The same two-column shape as `role_permissions`, so a machine's authority is readable by the
+-- same query with one join swapped.
 CREATE TABLE IF NOT EXISTS public.principal_permissions (
     principal_id  uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
     permission_id uuid NOT NULL REFERENCES public.permissions (id) ON DELETE RESTRICT,
@@ -127,12 +50,8 @@ COMMENT ON COLUMN public.principal_permissions.granted_at IS
 
 ALTER TABLE public.principal_permissions ENABLE ROW LEVEL SECURITY;
 
--- READ ONLY, AND NO WRITE POLICY -- exactly the shape user_roles and role_permissions have. Nothing
--- authenticated may write this table through PostgREST; the SECURITY DEFINER RPC below is the only
--- write path, which is what keeps "who granted a machine what" an Administrator act.
---
--- A principal may read its OWN grants, mirroring user_roles_select_own_or_privileged. It is the
--- answer to "what am I allowed to do", which a caller can already discover by trying.
+-- Read only, and no write policy, as user_roles and role_permissions: the SECURITY DEFINER RPC
+-- below is the only write path. A principal may read its own grants.
 DROP POLICY IF EXISTS principal_permissions_select_own_or_admin ON public.principal_permissions;
 CREATE POLICY principal_permissions_select_own_or_admin ON public.principal_permissions
     FOR SELECT TO authenticated
@@ -141,25 +60,17 @@ CREATE POLICY principal_permissions_select_own_or_admin ON public.principal_perm
 GRANT SELECT ON TABLE public.principal_permissions TO authenticated;
 GRANT ALL    ON TABLE public.principal_permissions TO service_role;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 2. has_authority(), which resolves a person and a machine differently on purpose
 -- -------------------------------------------------------------------------------------------------
--- It answers about PERMISSIONS, not role names. `has_role()` stays what it is for people and is not
--- redefined here -- see the header.
---
--- SECURITY DEFINER because is_machine_principal() reads auth.users, and STABLE because both arms are
--- reads within one statement.
+-- Answers about permissions, not role names. SECURITY DEFINER because is_machine_principal()
+-- reads auth.users; STABLE because both arms are reads.
 CREATE OR REPLACE FUNCTION public.has_authority(allowed_permissions text[]) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
-    -- ONE ARM OR THE OTHER, NEVER BOTH. A machine resolves through its own grants and a person
-    -- through their roles; the trigger on user_roles is what guarantees an identity cannot be in
-    -- both sets and make this a question of which arm ran first.
-    --
-    -- auth.uid() IS NULL -- an anonymous caller -- takes the person arm, matches nothing, and
-    -- returns false. Fail-closed, on 0070's argument.
+    -- One arm or the other, never both: the trigger on user_roles guarantees an identity cannot be
+    -- in both sets. An anonymous caller takes the person arm, matches nothing, and returns false.
     SELECT CASE
         WHEN public.is_machine_principal(auth.uid()) THEN EXISTS (
             SELECT 1
@@ -190,13 +101,11 @@ REVOKE ALL ON FUNCTION public.has_authority(allowed_permissions text[]) FROM PUB
 GRANT ALL  ON FUNCTION public.has_authority(allowed_permissions text[]) TO authenticated;
 GRANT ALL  ON FUNCTION public.has_authority(allowed_permissions text[]) TO service_role;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 3. The enforcement: a machine principal may not hold a role
 -- -------------------------------------------------------------------------------------------------
--- Without this, the separation is a convention and the next `create_*_principal()` re-introduces the
--- problem in one INSERT. With it, an identity that cannot sign in resolves through grants or through
--- nothing.
+-- Without this the separation is a convention the next `create_*_principal()` can undo in one
+-- INSERT.
 CREATE OR REPLACE FUNCTION public.refuse_role_for_machine_principal() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -224,11 +133,9 @@ COMMENT ON FUNCTION public.refuse_role_for_machine_principal() IS
   'sign in, which is what makes "a machine resolves through its own grants" a property of the '
   'database rather than a convention every future author has to remember.';
 
--- REVOKED FROM PUBLIC AND GRANTED TO NOBODY. A trigger body is invoked by the executor and needs no
--- EXECUTE grant on anyone's behalf, but PostgreSQL grants EXECUTE on every NEW function to PUBLIC --
--- and `anon` is a member of PUBLIC. 0001's section 6 sweep would catch it, except that the sweep
--- runs in 0001, BEFORE this file creates the function, so the leak exists on a FIRST boot and heals
--- on the second. test_anon_privilege_baseline.py exists for precisely that fault.
+-- Revoked from PUBLIC and granted to nobody: a trigger body needs no EXECUTE grant, and
+-- PostgreSQL grants EXECUTE to PUBLIC (which includes `anon`) on every new function. 0001's
+-- sweep runs before this file creates the function, so the leak would exist on a first boot.
 REVOKE ALL ON FUNCTION public.refuse_role_for_machine_principal() FROM PUBLIC;
 
 DROP TRIGGER IF EXISTS trg_user_roles_refuse_machine_principal ON public.user_roles;
@@ -236,26 +143,13 @@ CREATE TRIGGER trg_user_roles_refuse_machine_principal
     BEFORE INSERT OR UPDATE ON public.user_roles
     FOR EACH ROW EXECUTE FUNCTION public.refuse_role_for_machine_principal();
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 4. The three principals declare what they actually need
 -- -------------------------------------------------------------------------------------------------
--- `Operator` holds TWO permissions -- `telemetry:read` and `quarantine:view` -- so that is what the
--- three have been holding. Each keeps `telemetry:read`, which is the one that describes what it
--- does, and loses `quarantine:view`:
---
---   MCP read-only client  the Access Control page already states the specification -- "Read-only
---                         across the asset inventory and live telemetry. Cannot read the audit
---                         trail." There is no MCP surface for the quarantine queue and i3x/README.md
---                         records the decision that there will not be one.
---   Service_Ingestor      quarantines devices through log_device_quarantine()/the ingest_* gates,
---                         which are SECURITY DEFINER and check is_ingestion_caller(). It has never
---                         needed to SELECT the queue to write to it.
---   Service_Playback      publishes as a gateway through the playback_* gates, and touches
---                         onboarding not at all.
---
--- The grants are additive and keyed on the permission NAME rather than its uuid, following 0034's
--- rule for roles: a migration that hardcodes an id asserts a fact about a sequence.
+-- Each keeps `telemetry:read` and loses `quarantine:view`: the MCP client has no surface for the
+-- quarantine queue, Service_Ingestor quarantines devices through SECURITY DEFINER gates and never
+-- needed to SELECT the queue, and Service_Playback touches onboarding not at all. Keyed on the
+-- permission name rather than its uuid.
 DO $$
 DECLARE
     c_principals CONSTANT uuid[] := ARRAY[
@@ -282,19 +176,13 @@ BEGIN
     END LOOP;
 END $$;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 5. And stop holding the role
 -- -------------------------------------------------------------------------------------------------
--- For databases seeded before 0002 stopped assigning it. On a fresh install this removes nothing.
---
--- MATCHED ON THE PREDICATE, NOT ON THE THREE IDS. `create_service_principal()` has been mintable
--- since 0044, so a deployment may hold machine identities this file has never heard of -- and every
--- one of them was given `Operator` or `Auditor` by that function. Leaving those behind would fix the
--- three that are documented and none of the ones that are not.
---
--- Their permissions come across rather than being dropped, so a minted principal keeps the authority
--- it was created with. The role it held is the thing being taken away, not what the role granted.
+-- For databases seeded before 0002 stopped assigning it. Matched on the predicate, not on the
+-- three ids: `create_service_principal()` has minted principals this file has never heard of,
+-- each given `Operator` or `Auditor`. Their permissions come across, so a minted principal keeps
+-- the authority it was created with.
 INSERT INTO public.principal_permissions (principal_id, permission_id)
 SELECT ur.user_id::uuid, rp.permission_id
   FROM public.user_roles ur
@@ -315,13 +203,10 @@ DELETE FROM public.user_roles ur
  WHERE ur.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
    AND public.is_machine_principal(ur.user_id::uuid);
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 6. The RPCs, renamed because their return types move
 -- -------------------------------------------------------------------------------------------------
--- 0001 re-creates the old pair on every boot, so these DROPs run once per boot against a function
--- that has just been declared. That is the same shape 0069 uses when it DELETEs grants 0002 has just
--- inserted, and it is the price of a folded baseline that cannot be edited backwards.
+-- 0001 re-creates the old pair on every boot, so these DROPs run once per boot.
 DROP FUNCTION IF EXISTS public.create_service_principal(text, text);
 DROP FUNCTION IF EXISTS public.list_service_principals();
 
@@ -331,11 +216,9 @@ CREATE OR REPLACE FUNCTION public.create_machine_principal(p_permissions text[],
     SET search_path TO 'public'
     AS $$
 DECLARE
-    -- READ-ONLY PERMISSIONS ONLY, and an allow-list rather than a deny-list so that a permission
-    -- added later is refused until somebody decides otherwise. This is the same refusal
-    -- `create_service_principal()` made with ARRAY['Operator', 'Auditor'], restated one level down:
-    -- a machine identity holding a write permission becomes an unrevocable write credential the
-    -- moment a token is signed for it.
+    -- Read-only permissions only, as an allow-list so a permission added later is refused until
+    -- somebody decides otherwise: a machine identity holding a write permission becomes an
+    -- unrevocable write credential the moment a token is signed for it.
     c_allowed CONSTANT text[] := ARRAY['telemetry:read', 'quarantine:view', 'digital_thread:read'];
     v_id        uuid;
     v_bad       text[];
@@ -433,7 +316,6 @@ REVOKE ALL ON FUNCTION public.create_machine_principal(p_permissions text[], p_n
 GRANT ALL  ON FUNCTION public.create_machine_principal(p_permissions text[], p_note text) TO authenticated;
 GRANT ALL  ON FUNCTION public.create_machine_principal(p_permissions text[], p_note text) TO service_role;
 
-
 CREATE OR REPLACE FUNCTION public.list_machine_principals()
     RETURNS TABLE(principal_id uuid, permissions text[], created_at timestamp with time zone, can_sign_in boolean)
     LANGUAGE plpgsql SECURITY DEFINER
@@ -476,14 +358,11 @@ REVOKE ALL ON FUNCTION public.list_machine_principals() FROM PUBLIC;
 GRANT ALL  ON FUNCTION public.list_machine_principals() TO authenticated;
 GRANT ALL  ON FUNCTION public.list_machine_principals() TO service_role;
 
-
 -- -------------------------------------------------------------------------------------------------
 -- 7. Self-check
 -- -------------------------------------------------------------------------------------------------
--- 0034's self-check asserted that the MCP principal could not read the audit trail, and it is the
--- best test in this area. It is not deleted with the mechanism it guarded: the property it asserted
--- is re-asserted below against the new one, which is the whole point of moving rather than removing
--- it.
+-- Re-asserts, against the new mechanism, the property the MCP principal's original self-check
+-- guarded: it cannot read the audit trail.
 DO $$
 DECLARE
     c_mcp      CONSTANT uuid := 'b0000000-0000-4000-8000-000000000001';

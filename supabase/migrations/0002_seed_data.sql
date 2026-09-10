@@ -3,39 +3,25 @@
 -- ACS-Cymru Asset Tracking Platform -- consolidated baseline data (public beta)
 -- =============================================================================================
 --
--- WHAT THIS IS. Every row the platform needs in order to come up usable, squashed out of the 38
--- incremental migrations `20260101000000` .. `20260101000037` (preserved under
--- `supabase/migrations/archive/`). It is the DML counterpart of `0001_baseline_schema.sql` and
--- assumes that file has already run.
+-- Every row the platform needs to come up usable: pure DML, the counterpart of
+-- `0001_baseline_schema.sql`, which must have run.
 --
--- SCOPE: PURE DML. No CREATE, no ALTER, no structure of any kind.
---
--- IT IS IDEMPOTENT, because supabase-db-init replays every /migrations/*.sql on every boot.
--- EVERY statement carries an ON CONFLICT clause, and THE CLAUSES DIFFER PER TABLE ON PURPOSE:
---
---   * Reference vocabularies (MTConnect, ISO 22400, OPC UA) use DO UPDATE, because they are
---     maintained by editing this file -- an edit has to reach a database that already exists.
---     MTConnect re-stamps ONLY `category`: `semantic_id` is an assertion that gets corrected, and
---     re-stamping it every boot would make a hand-entered crosswalk unfixable.
+-- IDEMPOTENT, because supabase-db-init replays every /migrations/*.sql on every boot. Every
+-- statement carries an ON CONFLICT clause, and the clauses differ per table on purpose:
+--   * Reference vocabularies use DO UPDATE, because they are maintained by editing this file.
+--     MTConnect re-stamps only `category`: `semantic_id` is a hand-corrected assertion.
 --   * Everything operator-facing uses DO NOTHING. A DO UPDATE on `devices` fires
---     log_digital_thread_event() whether or not any value actually differs, which appends a row
---     to an append-only audit table on every boot, forever. That trap was hit twice in this
---     codebase before it was understood; DO NOTHING is the fix, and "pre-registration, not
---     re-provisioning" is the rule.
+--     log_digital_thread_event() whether or not a value differs, appending an audit row on
+--     every boot forever.
 --
--- WHAT IS DELIBERATELY ABSENT:
---   * `digital_thread`. Its rows are written by a trigger as a side effect of the inserts below,
---     so seeding them explicitly would duplicate the audit trail rather than restore it.
---   * `user_roles`, and the demo accounts themselves. Those belong to GoTrue and are seeded by
---     `supabase/seed.sql`, which runs after this file.
---   * `cells`. Unassigned and Site-Wide are derived lanes, never rows -- see the section below.
---   * the `storage.buckets` row, created by `scripts/storage-init.mjs`. See 0001's header.
+-- Not here: `digital_thread` (written by trigger as a side effect of the inserts below);
+-- `user_roles` and the demo accounts (GoTrue's, seeded by `supabase/seed.sql`); `cells`
+-- (Unassigned and Site-Wide are derived lanes, never rows); the `storage.buckets` row (created
+-- by `scripts/storage-init.mjs`).
 --
--- PSQL VARIABLES. `supabase-db-init` passes `-v nodered_admin_token` and
--- `-v grafana_oauth_client_secret`. Both are defaulted at the point of use, so this file stays
--- runnable standalone, and both are treated as absent-is-normal rather than as an error.
+-- PSQL VARIABLES. `-v nodered_admin_token` and `-v grafana_oauth_client_secret`, defaulted at
+-- the point of use, with an absent value treated as normal rather than as an error.
 -- =============================================================================================
-
 
 -- -------------------------------------------------------------------------------------------
 -- RBAC roles  (4 rows)
@@ -51,7 +37,6 @@ INSERT INTO public.roles VALUES (3, 'Operator', 'Operational dashboard view, liv
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.roles VALUES (4, 'Auditor', 'Read-only audit trace and digital thread access')
 ON CONFLICT (id) DO NOTHING;
-
 
 -- -------------------------------------------------------------------------------------------
 -- RBAC permissions  (13 rows)
@@ -89,22 +74,15 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'digital_thread:read', 'View continuous Digital Thread audit log entries')
 ON CONFLICT (id) DO NOTHING;
 
-
 -- -------------------------------------------------------------------------------------------
 -- RBAC role/permission grants  (26 rows)
 -- -------------------------------------------------------------------------------------------
--- 13 Administrator, 10 Shopfloor_Manager, 2 Operator, 1 Auditor.
+-- 13 Administrator, 10 Shopfloor_Manager, 2 Operator, 1 Auditor. `authz:manage`,
+-- `schema:manage` and `gitops:manage` belong to Administrator alone; 0069 withdraws them from
+-- databases seeded before the split, and its DELETE matches no rows on a new stack.
 --
--- THE TWO PRIVILEGED ROLES USED TO HOLD THE SAME THIRTEEN, which made the distinction between
--- them presentational. 0069 withdrew `authz:manage`, `schema:manage` and `gitops:manage` from
--- Shopfloor_Manager -- who has access, what contract ingestion validates against, and what gets
--- deployed to the edge -- and narrowed the write policies those gate. This file stops granting
--- them so a FRESH install never has to be corrected by a later migration; 0069 stays for the
--- databases that already ran this one, and its DELETE matches no rows on a new stack.
---
--- Mirrored by DEFAULT_ROLE_PERMISSIONS_MAP in frontend/src/hooks/usePermissions.js, which is the
--- static fallback rendered when no role_permissions rows resolve. The two are compared by
--- scripts/check-mirror-drift.mjs: a divergence would render controls the database then refuses.
+-- Mirrored by DEFAULT_ROLE_PERMISSIONS_MAP in frontend/src/hooks/usePermissions.js and
+-- compared by scripts/check-mirror-drift.mjs.
 
 INSERT INTO public.role_permissions VALUES (1, 'cb46a943-42e1-4c1d-8706-933e08544e30')
 ON CONFLICT DO NOTHING;
@@ -150,14 +128,9 @@ INSERT INTO public.role_permissions VALUES (2, 'b345c678-9012-4c1d-8706-933e0854
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (2, 'a012b345-6789-4c1d-8706-933e08544e38')
 ON CONFLICT DO NOTHING;
--- NOT GRANTED TO ROLE 2, and the gap is deliberate rather than an omission: `authz:manage`
--- (...e39), `schema:manage` (...e40) and `gitops:manage` (...e41) are the platform half of the
--- split 0069 made, and they belong to Administrator alone.
---
--- Adding one back here does not restore it. 0069 replays after this file on every boot and
--- deletes exactly these three from role 2, so the grant would exist for the length of one
--- db-init and the change would present as having no effect at all. Withdraw the split in 0069,
--- or not anywhere.
+-- Not granted to role 2: `authz:manage` (...e39), `schema:manage` (...e40) and `gitops:manage`
+-- (...e41) are Administrator's. Adding one back here does not restore it: 0069 replays after
+-- this file and deletes exactly these three from role 2.
 INSERT INTO public.role_permissions VALUES (2, 'd345e678-9012-4c1d-8706-933e08544e42')
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (3, 'f012a345-6789-4c1d-8706-933e08544e36')
@@ -167,16 +140,12 @@ ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (4, 'd345e678-9012-4c1d-8706-933e08544e42')
 ON CONFLICT DO NOTHING;
 
-
 -- -------------------------------------------------------------------------------------------
 -- Metric group registry  (132 rows)
 -- -------------------------------------------------------------------------------------------
--- A registry of approved group SPELLINGS, not of membership -- membership is always derived from
--- the first segment of a metric's name. Seeded from MTConnect's component types plus the ISO 22400
--- families and OPC UA browse-path components.
---
--- DO NOTHING, not DO UPDATE: `enforce_metric_group_spelling()` treats whatever is already
--- registered as canonical, so re-stamping a spelling an operator has settled on would fight it.
+-- A registry of approved group spellings, not of membership; membership is derived from the
+-- first segment of a metric's name. DO NOTHING: `enforce_metric_group_spelling()` treats
+-- whatever is registered as canonical.
 
 INSERT INTO public.metric_groups VALUES ('9b710249-27b1-4e37-a8df-cf7ff25196b8', 'Actuator', 'MTConnect component type', '2026-08-02 05:44:36.110595+00', 'MTConnect')
 ON CONFLICT DO NOTHING;
@@ -467,18 +436,13 @@ INSERT INTO public.metric_groups (id, name, description, standard) VALUES ('d705
 ON CONFLICT DO NOTHING;
 -- <<< END GENERATED opcua_metric_groups_companion_extensions
 
-
 -- -------------------------------------------------------------------------------------------
 -- Metric catalog  (15 rows)
 -- -------------------------------------------------------------------------------------------
--- What devices publish. `name` is IMMUTABLE -- a physical device is configured against that exact
--- string -- and `enforce_metric_catalog_immutability()` enforces it, so DO UPDATE here would be
--- rejected by the very trigger this data depends on. Changing a metric is deprecate-and-supersede:
--- set `deprecated` + `superseded_by` and add the replacement, never edit a row in place.
---
--- `OEE/PERFORMANCE` is present and deprecated, superseded by `OEE/EFFECTIVENESS`: ISO 22400-2
--- calls the second OEE factor Effectiveness. Both carry the SAME semantic_id -- two names for one
--- concept -- which is why the index on semantic_id is deliberately not unique.
+-- `name` is immutable (`enforce_metric_catalog_immutability()`), so DO UPDATE would be rejected
+-- by the trigger. Changing a metric is deprecate-and-supersede. `OEE/PERFORMANCE` is deprecated
+-- in favour of `OEE/EFFECTIVENESS` (ISO 22400-2's name); both carry the same semantic_id, which
+-- is why that index is not unique.
 
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000007', 'OEE/AVAILABILITY', 10, 'ISO 22400 availability ratio -- NOT MTConnect AVAILABILITY, which means "device connected"', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY', 'IRI')
 ON CONFLICT (name) DO NOTHING;
@@ -511,19 +475,12 @@ ON CONFLICT (name) DO NOTHING;
 INSERT INTO public.metric_catalog VALUES ('a469cb73-0d73-46b3-928e-7ecfd7fc43f0', 'max_temp_threshold', 10, 'Configured maximum temperature threshold (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, NULL, 'https://acs-cymru.local/semantics/local/max_temp_threshold', 'IRI')
 ON CONFLICT (name) DO NOTHING;
 
-
 -- -------------------------------------------------------------------------------------------
 -- MTConnect vocabulary (598 rows)  (598 rows)
 -- -------------------------------------------------------------------------------------------
--- MTConnect's controlled vocabularies: data item types with their category, subtypes, units and
--- component types. Reference data, not a catalog -- `ANGLE` is a type, `Axes/C/ANGLE` is a metric.
---
--- ONLY `category` IS RE-STAMPED, and that is the original behaviour preserved deliberately.
--- `semantic_id` is set on insert and never updated, because a semantic id is an assertion that
--- gets CORRECTED -- re-stamping it every boot would make a hand-entered crosswalk unfixable.
---
--- Generated by scripts/generate-mtconnect-vocabulary.mjs. To adopt a newer MTConnect release,
--- bump SCHEMA_VERSION there and regenerate rather than editing these rows.
+-- Reference data, not a catalog: `ANGLE` is a type, `Axes/C/ANGLE` is a metric. Only
+-- `category` is re-stamped; `semantic_id` is a hand-corrected assertion. Generated by
+-- scripts/generate-mtconnect-vocabulary.mjs: bump SCHEMA_VERSION there and regenerate.
 
 -- >>> BEGIN GENERATED mtconnect_vocabulary -- MTConnect 2.8, 598 rows, sha256:cd9b10a6858769c5
 -- GENERATED. Do not edit these rows by hand: bump SCHEMA_VERSION in
@@ -1726,16 +1683,12 @@ INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Workpiece', NULL, 
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
 -- <<< END GENERATED mtconnect_vocabulary
 
-
 -- -------------------------------------------------------------------------------------------
 -- ISO 22400 vocabulary (8 rows)  (8 rows)
 -- -------------------------------------------------------------------------------------------
--- The computed KPIs that MTConnect and OPC UA both deliberately exclude. `kpi_id` is the ISO
--- SYMBOL, not a clause number -- none are asserted, because the standard is paywalled and they
--- could not be checked.
---
--- MTConnect's `AVAILABILITY` is a trap: it is an EVENT meaning "device connected", whereas the OEE
--- availability RATIO here is ISO 22400. Never map one onto the other.
+-- The computed KPIs MTConnect and OPC UA exclude. `kpi_id` is the ISO symbol, not a clause
+-- number. MTConnect's `AVAILABILITY` is an event meaning "device connected"; the OEE
+-- availability ratio here is ISO 22400. Never map one onto the other.
 
 INSERT INTO public.iso22400_vocabulary VALUES ('AVAILABILITY', 'A', 'Availability ratio: the share of planned busy time the equipment was actually producing. ISO 22400-2 "Availability". NOT MTConnect AVAILABILITY, which is an EVENT meaning the device is connected.', 'OEE', 'PERCENT', 'A = APT / PBT', 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY')
 ON CONFLICT (name) DO UPDATE SET
@@ -1802,18 +1755,12 @@ ON CONFLICT (name) DO UPDATE SET
   formula     = EXCLUDED.formula,
   semantic_id = EXCLUDED.semantic_id;
 
-
 -- -------------------------------------------------------------------------------------------
 -- OPC UA vocabulary (25 rows)  (25 rows)
 -- -------------------------------------------------------------------------------------------
 -- Companion-specification data points from OPC 40001 (Machinery) and OPC 40010 (Robotics).
---
--- `node_id` is a BROWSE PATH, not a numeric NodeId -- `nsu=<ns>;s=<BrowsePath>`. The numeric ids
--- live in each spec's NodeSet2 XML, which is not vendored; they were not invented. The browse
--- names are transcribed and still want confirming against those files.
---
--- Keyed on (companion_spec, name) because Machinery and Robotics both define names like
--- `Manufacturer`.
+-- `node_id` is a browse path (`nsu=<ns>;s=<BrowsePath>`), not a numeric NodeId; these rows were
+-- transcribed by hand. Keyed on (companion_spec, name) because both specs define `Manufacturer`.
 
 INSERT INTO public.opcua_vocabulary VALUES ('Manufacturer', 'OPC 40001 Machinery', 'nsu=http://opcfoundation.org/UA/Machinery/;s=Machine/Identification/Manufacturer', 'Name of the machine manufacturer.', 'LocalizedText', NULL, 'http://opcfoundation.org/UA/Machinery/Manufacturer')
 ON CONFLICT (companion_spec, name) DO UPDATE SET
@@ -1991,10 +1938,9 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
   unit        = EXCLUDED.unit,
   semantic_id = EXCLUDED.semantic_id;
 
--- The rows above were transcribed by hand and still carry that caveat. The rows below were not:
--- browse names and datatypes are read out of the OPC Foundation NodeSet2 XML by
--- scripts/generate-opcua-vocabulary.mjs, which fails if the ObjectType, the member or the pinned
--- specification version is not what it expects. The selection, prose and units are still curated.
+-- The rows below are generated: browse names and datatypes are read out of the OPC Foundation
+-- NodeSet2 XML by scripts/generate-opcua-vocabulary.mjs; the selection, prose and units are
+-- curated.
 -- >>> BEGIN GENERATED opcua_vocabulary_companion_extensions -- 51 rows, sha256:ac69ec9b4fd0664e
 -- GENERATED from the OPC Foundation NodeSet2 XML by scripts/generate-opcua-vocabulary.mjs.
 -- Do not edit these rows by hand: change ENTRIES in that script and re-run it. Browse names
@@ -2359,84 +2305,30 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
   semantic_id = EXCLUDED.semantic_id;
 -- <<< END GENERATED opcua_vocabulary_companion_extensions
 
+-- -------------------------------------------------------------------------------------------
+-- Default schema  (0 rows)
+-- -------------------------------------------------------------------------------------------
+-- No schema is seeded. The demonstration CNC's schema was the last piece of the demonstration
+-- floor; 0073 removes it from databases that already have it, and the demonstrator lives in
+-- `tutorial/` as a walkthrough. A fresh install has no cells, no gateways, no devices and no
+-- schemas.
 
 -- -------------------------------------------------------------------------------------------
--- Default schema  (1 row)
+-- Factory cells, edge gateways and devices  (0 rows)
 -- -------------------------------------------------------------------------------------------
--- The single default schema, spanning all three standards.
---
--- It is a SUPERSET of what the simulator publishes, deliberately: the Unmodelled finding is
--- (declared) - (modelled), so a schema holding only the "interesting" metrics would flag the demo
--- device for publishing exactly what it was provisioned to publish.
---
--- DO NOTHING is load-bearing now that schemas are versioned. Once an operator publishes a v2, this
--- row is `archived` -- a DO UPDATE would rewrite history on every boot, and re-pinning it is what
--- used to drag the demo device back onto a superseded version each time the stack came up.
---
--- IT KEEPS THE NAME `Simulated_CNC_01_Schema` THOUGH THAT DEVICE NO LONGER EXISTS, and that is a
--- decision rather than an oversight. `schema_name` is UNIQUE and is the key `Foo` -> `Foo_v2`
--- versioning derives from, and 0001's prevent_active_schema_mutation() freezes every column but
--- `status` on an `active` schema -- so renaming it is a versioning event, not a relabelling, and
--- one that would strand any device already provisioned against the old name. A stale-looking
--- display string is the cheaper of the two.
---
--- THE SCHEMA THAT USED TO SIT HERE IS GONE. `Simulated_CNC_01_Schema` was the demonstration
--- CNC's tri-standard contract, and it was the last piece of the demonstration floor still seeded
--- into a fresh install. 0073 removes it from databases that already have it, along with 0022's
--- four class schemas; the whole demonstrator now lives in `tutorial/` as a walkthrough rather
--- than as rows. A fresh install has no cells, no gateways, no devices and no schemas.
-
--- -------------------------------------------------------------------------------------------
--- Factory cells, edge gateways and devices  (0 rows -- and that is the change)
--- -------------------------------------------------------------------------------------------
--- NO ASSETS ARE SEEDED. A fresh install comes up with an empty shopfloor. The demonstration floor
--- -- four cells, four `Sim_Gateway_*` gateways, six `Sim_*` devices -- was opt-in for a while,
--- behind `npm run provision:gateways`, and is now retired outright: `tutorial/` walks a reader
--- through building one machine instead. See
--- `0040_retire_demonstration_seed.sql`, which removes the rows this block used to write from
--- databases that already have them; deleting the statements here alone would have built a fresh
--- database correctly and left every existing one seeded with nothing to explain where from.
---
--- THE REASON THE FLOOR WAS EVER HERE, AND WHY THAT REASON EXPIRED. Provisioning is a Compose-side
--- script that the Kubernetes path never runs, so a row living only there does not exist in CI --
--- and the AAS conformance suite targeted `Sim_CNC_Mill_01` BY NAME. That made the seed load-
--- bearing for a conformance run. It is not any more: the suite provisions its own subject through
--- `tests/aas_fixture.py` and tears it down, so what the seed carried is demonstration value, and
--- demonstration value is exactly what should not be automatic.
---
--- CELLS WERE NEVER SEEDED HERE EVEN THEN, for a reason that still holds: Unassigned and Site-Wide
--- are DERIVED lanes, not rows. A magic cell would put semantics in a free-text name, and the
--- pg_cron purge runs as superuser, past any RLS guard. Provisioning creates the demonstration's
--- four cells by name, and 0040 removes them again only where the floor was their last occupant.
---
--- NO SCHEMAS ARE SEEDED EITHER, which is the change 0073 completes. The argument for keeping them
--- was that a schema is a CONTRACT rather than an asset -- it costs nothing unattached, and it made
--- putting the floor back a matter of creating rows rather than re-authoring five JSON Schemas.
--- That argument stood while the floor was something a script could rebuild. It is not: the
--- demonstrator is a walkthrough in `tutorial/` now, and a schema nothing references is a contract
--- for a machine nobody has, sitting in the Schemas table of a stack whose whole point is that it
--- starts empty. The definitions are not lost -- they are in this file's history and in 0073.
---
--- THE ATTACHMENT THAT USED TO SIT HERE went with the devices, and 0020 still attaches on replay,
--- guarded on the device existing, which no-ops on a floor that is not there.
-
+-- No assets are seeded. `0040_retire_demonstration_seed.sql` removes the demonstration floor
+-- from databases that already have it. Cells are never seeded: Unassigned and Site-Wide are
+-- derived lanes, not rows. The AAS conformance suite provisions its own subject
+-- (tests/aas_fixture.py), so nothing depends on seeded assets.
 
 -- -------------------------------------------------------------------------------------------
 -- Service directory  (12 rows)
---
--- The dashboard itself is deliberately NOT among them. A directory entry linking to the page the
--- directory is rendered on is a link to where you already are; f1111111-...0002 held it, and 0016
--- removes it from databases seeded before this. That id is retired, not reused.
+-- The dashboard itself is not among them; f1111111-...0002 held it and is retired, not reused.
 -- -------------------------------------------------------------------------------------------
 
--- SEEDED UNKNOWN, WITH NO HEARTBEAT, and that is the correction 0054 exists for. These rows used
--- to carry the literal 'ACTIVE' and the moment they were seeded, so every stack reported fifteen
--- healthy services at every age -- a green badge that would have said ACTIVE for something down a
--- week, and a timestamp that described an INSERT rather than an observation.
---
--- refresh_directory_liveness() overwrites both within a minute of boot, writing ACTIVE or DOWN for
--- the six services Prometheus scrapes and leaving the rest UNKNOWN. Seeding UNKNOWN means the gap
--- between boot and the first probe says "not yet known" instead of asserting health nobody checked.
+-- Seeded UNKNOWN with no heartbeat: refresh_directory_liveness() writes ACTIVE or DOWN for the
+-- services Prometheus scrapes within a minute of boot and leaves the rest UNKNOWN, so the gap
+-- before the first probe says "not yet known" rather than asserting health nobody checked.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000001', 'Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 -- ON CONFLICT (id), not (service_name), for this row alone: a database seeded before 0016 holds
@@ -2466,46 +2358,12 @@ INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000
 ON CONFLICT (service_name) DO NOTHING;
 
 -- ---------------------------------------------------------------------------------------------
--- The metrics tier.
---
--- ADDED TO 0002 RATHER THAN A NEW MIGRATION, and that works here where it did not for 0016: every
--- insert in this block is `ON CONFLICT (service_name) DO NOTHING`, so a row that is MISSING is
--- inserted on the next replay. 0016 needed its own file because it RENAMED and REMOVED, which
--- ON CONFLICT DO NOTHING cannot express.
---
--- THREE ROWS, AND ONLY TWO OF THEM ARE SOMEWHERE TO GO. Prometheus serves a browsable expression
--- browser, and the ingestion endpoint answers on a host port. node_exporter does not: it is
--- bound to the compose network with no host port, deliberately, because nothing outside has any
--- business reading host metrics.
---
--- BOTH OF THOSE TWO ARE NOW LOOPBACK-BOUND, which they were not when this block was written. The
--- ingestion metrics port joined Prometheus on `127.0.0.1` for the same reason Prometheus was there
--- first: neither endpoint authenticates, so who can reach the port is the whole of the control.
--- The paragraph below was written about Prometheus alone and now describes both.
---
--- `METRICS_EXPORTER` RATHER THAN `MONITORING`, so it groups with the infrastructure it describes
--- rather than beside Grafana under "Applications & User Interfaces". Grafana and Prometheus are
--- things an operator OPENS; an exporter is a component of the backend that happens to speak HTTP.
--- The type is free text and DirectoryTab's SERVICE_GROUPS decides the section.
---
--- PROMETHEUS AND THE INGESTION METRICS ENDPOINT ARE PUBLISHED ON LOOPBACK ONLY, so those two links
--- resolve for a browser running ON the deployment host and nowhere else. That is a stronger version
--- of something already true of every `http://localhost:...` row here -- they are written for someone
--- browsing on the host -- but it is worth saying, because for these two a remote browser cannot be
--- made to work by using the right hostname. It needs an SSH tunnel, which is the point of the
--- binding.
---
--- THE DIRECTORY PAGE CANNOT CURRENTLY SAY THIS. `isBrowsableEndpoint` in DirectoryTab.jsx decides
--- link-or-copy from the scheme and the host, which is the right test for "is this a web page" and
--- cannot answer "can THIS browser reach it" -- nothing in this table records reachability. Both
--- rows therefore render as links that work on the host and fail everywhere else, which is the same
--- failure the container-hostname case was given a copy button to avoid.
---
--- It is listed anyway, at the address it actually answers on. The directory is an inventory of what
--- is DEPLOYED -- `mqtt://localhost:1883` and `postgres://localhost:5433` are already here and
--- neither opens in a browser either -- and an exporter that is running and absent from the
--- inventory is the more misleading of the two options. The in-network URL is what makes the
--- distinction visible rather than hidden: a reader who tries it learns something true.
+-- The metrics tier. Prometheus and the ingestion metrics endpoint are published on loopback
+-- only, so those two links resolve for a browser on the deployment host and nowhere else;
+-- node_exporter has no host port at all. The directory is an inventory of what is deployed,
+-- listed at the address each answers on. `METRICS_EXPORTER` groups an exporter with the
+-- backend it describes rather than beside Grafana; DirectoryTab's SERVICE_GROUPS decides the
+-- section.
 -- ---------------------------------------------------------------------------------------------
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000e', 'Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
@@ -2514,56 +2372,34 @@ ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000010', 'Ingestion Metrics Endpoint', 'INGESTION', 'http://localhost:9108/metrics', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 
-
 -- -------------------------------------------------------------------------------------------
 -- Outbound webhook targets  (1 row)
 -- -------------------------------------------------------------------------------------------
--- Migration-managed and deliberately given NO write RLS policy: a writable endpoint table is an
--- SSRF primitive. `anon` is revoked at the grant level too.
---
--- pg_net has no retries, ordering or dead-letter queue. Advisory notifications only -- if delivery
--- must be guaranteed, publish over MQTT from the ingestion daemon instead.
+-- Migration-managed and given no write RLS policy: a writable endpoint table is an SSRF
+-- primitive. pg_net has no retries, ordering or dead-letter queue: advisory notifications only.
 
 INSERT INTO public.webhook_endpoints VALUES ('3484ec9d-e07f-49ee-8aa3-f95d40d38a54', 'device.quarantined', 'http://node-red:1880/hooks/quarantine', 'nodered_admin_token', true, '2026-08-02 05:44:42.806298+00')
 ON CONFLICT (event_key, url) DO NOTHING;
 
-
 -- ---------------------------------------------------------------------------------------------
 -- Sequence reconciliation
 -- ---------------------------------------------------------------------------------------------
--- FIXES A DEFECT THE INCREMENTAL CHAIN CARRIED. `roles` is seeded with explicit ids, which does
--- not advance `roles_id_seq` -- it sat at 1 while max(id) was 4, so inserting a NEW role without
--- naming an id failed on `roles_pkey`. The manual `setval` used to be documented as the
--- workaround; a squashed baseline is the right place to stop needing one.
---
--- `GREATEST(..., 1)` because setval rejects a value below the sequence minimum, which is what an
--- empty table would produce.
+-- `roles` is seeded with explicit ids, which does not advance `roles_id_seq`; without this an
+-- INSERT naming no id fails on `roles_pkey`. `GREATEST(..., 1)` because setval rejects a value
+-- below the sequence minimum.
 SELECT setval('public.roles_id_seq', GREATEST((SELECT COALESCE(max(id), 0) FROM public.roles), 1));
-
 
 -- ---------------------------------------------------------------------------------------------
 -- Scheduled maintenance jobs (pg_cron)
 -- ---------------------------------------------------------------------------------------------
--- JANITORIAL ONLY. No job derives application state -- gateway staleness is a VIEW, not a cron
--- writer, because log_digital_thread_event() fires on every UPDATE to `gateways` and a sweep
--- writing STALE would append to an append-only audit table forever, while being correct only
--- between ticks.
---
--- public.ensure_cron_job() is DDL and lives in 0001; these are the scheduling calls, which are
--- DML against cron.job. It exists because cron.schedule() appends rather than replaces, and
--- this file is replayed on every boot.
+-- Janitorial only. No job derives application state: gateway staleness is a view, because a
+-- sweep writing STALE would append to the audit table forever. public.ensure_cron_job() (0001)
+-- unschedules before scheduling, since cron.schedule() appends and this file replays every boot.
 
 -- 1. Prune pg_net's response log ------------------------------------------------------------
 --
--- pg_net records every response in net._http_response and never prunes it; left alone it grows
--- for the life of the database. Scheduled here rather than in Phase 4 so the janitor exists
--- before the thing it cleans up.
---
--- The guard matters: pg_net is not installed until Phase 4 (archived migration 0026), so an unguarded
--- DELETE would fail every 15 minutes until then and fill cron.job_run_details with errors --
--- the job would be generating exactly the noise it exists to remove. to_regclass() returns
--- NULL rather than raising for a missing relation, so this no-ops cleanly and starts working
--- by itself the moment the extension is created.
+-- pg_net never prunes net._http_response. to_regclass() returns NULL for a missing relation, so
+-- the job no-ops cleanly on a database where pg_net is not yet installed.
 SELECT public.ensure_cron_job(
   'prune_net_responses',
   '*/15 * * * *',
@@ -2587,24 +2423,10 @@ SELECT public.ensure_cron_job(
 
 -- 3. Honour the archive retention timer ------------------------------------------------------
 --
--- This does NOT invent a retention policy. public.{cells,gateways,devices}.auto_delete_at
--- (migration 0001) is set per row by the Archive dialog when the user picks a retention
--- period, and the UI already tells them it will happen -- ArchivesTab renders
--- "Purges: <date>" and CellsTab renders "Retention purge timer active (auto-purges on
--- <date>)". Nothing has ever implemented it. This job is what makes that promise true.
---
--- auto_delete_at IS NULL means PERMANENT RETENTION -- the UI says so explicitly
--- ("Permanent retention active (no auto-purge)") -- so the NOT NULL test is load-bearing.
--- Purging on archived_at age instead would silently destroy rows the user deliberately
--- marked to keep forever.
---
--- These DELETEs do fire log_digital_thread_event(), by design: a permanent deletion is
--- exactly the kind of event the audit trail should record. That is the opposite of the
--- staleness-sweep case, where the writes carried no information.
---
--- Order matters. devices reference gateways which reference cells, so children go first;
--- a parent whose child is not yet due simply fails to delete this run and is retried the
--- next, rather than cascading a child out from under its own timer.
+-- `auto_delete_at` is set per row by the Archive dialog; NULL means permanent retention, so the
+-- NOT NULL test is load-bearing. These DELETEs fire log_digital_thread_event() by design.
+-- Children go first: a parent whose child is not yet due fails to delete this run and is
+-- retried the next, rather than cascading a child out from under its own timer.
 SELECT public.ensure_cron_job(
   'purge_expired_archives',
   '30 3 * * *',
@@ -2621,11 +2443,8 @@ SELECT public.ensure_cron_job(
 -- ---------------------------------------------------------------------------------------------
 -- Vault: the Node-RED admin token
 -- ---------------------------------------------------------------------------------------------
--- Vault holds only secrets read FROM SQL -- in practice just this one, which
--- public.dispatch_device_quarantine_webhook() attaches to its outbound pg_net request.
--- MQTT_PASSWORD / DB_PASSWORD / POSTGRES_PASSWORD stay in .env: mosquitto-init and supabase-db
--- need them before the database accepts connections, so duplicating them here would create a
--- second source of truth.
+-- Vault holds only secrets read from SQL. MQTT_PASSWORD / DB_PASSWORD / POSTGRES_PASSWORD stay
+-- in .env: mosquitto-init and supabase-db need them before the database accepts connections.
 \if :{?nodered_admin_token}
 \else
 \set nodered_admin_token ''
@@ -2679,34 +2498,19 @@ SELECT set_config('acs_cymru.nodered_admin_token', '', false);
 -- ---------------------------------------------------------------------------------------------
 -- Grafana OAuth client registration
 -- ---------------------------------------------------------------------------------------------
--- Grafana is an OAuth client of GoTrue's OAuth 2.1 server. `client_secret_hash` is
--- base64url(sha256(secret)) unpadded -- NOT bcrypt -- and `token_endpoint_auth_method` must stay
--- `client_secret_basic` to match `auth_style = InHeader` in grafana.ini.
+-- `client_secret_hash` is base64url(sha256(secret)) unpadded, not bcrypt, and
+-- `token_endpoint_auth_method` must stay `client_secret_basic` to match `auth_style = InHeader`
+-- in grafana.ini.
 \if :{?grafana_oauth_client_secret}
 \else
 \set grafana_oauth_client_secret ''
 \endif
 
--- THE PUBLIC ORIGIN GRAFANA IS REACHED ON, and it MUST be a variable rather than a literal.
---
--- This row used to hardcode `http://localhost:3002`, and because the upsert below is DO UPDATE
--- (correctly -- a rotated secret has to reach an existing database), supabase-db-init REWROTE it
--- back to localhost on every single boot. Correcting the row by hand survived until the next
--- restart and then silently reverted, with no event marking the change: the worst shape this
--- failure can take. Any deployment not reached at localhost:3002 -- a Compose stack on a remote
--- host, and every Kubernetes deployment, where subdomain ingress means the origin is never
--- localhost -- had Grafana SSO fail with `invalid redirect_uri` and no way to fix it durably.
---
--- Same treatment archived migration 0003 gives Node-RED's client, with one deliberate difference: 0003 is
--- passed the WHOLE callback URL, because docker-compose builds it there from NODERED_PUBLIC_URL.
--- Grafana needs BOTH `client_uri` (the origin) and `redirect_uris` (origin + a fixed path), so the
--- ORIGIN is what is passed and the callback is derived here. /login/generic_oauth is Grafana's own
--- fixed route, exactly as /auth/strategy/callback is Node-RED's -- only the origin is
--- deployment-specific, and it is the address the BROWSER reaches Grafana on, never the
--- compose-internal or in-cluster one.
---
--- GF_SERVER_ROOT_URL is built from the same GRAFANA_PUBLIC_URL in docker-compose.yml, so this row
--- and Grafana's own idea of where it lives cannot drift apart.
+-- The public origin Grafana is reached on, as a variable: the upsert below is DO UPDATE, so a
+-- literal here would be rewritten back on every boot. Grafana needs both `client_uri` (the
+-- origin) and `redirect_uris` (origin + /login/generic_oauth), so the origin is passed and the
+-- callback derived. It is the address the browser reaches Grafana on. GF_SERVER_ROOT_URL is
+-- built from the same GRAFANA_PUBLIC_URL in docker-compose.yml.
 \if :{?grafana_public_url}
 \else
 \set grafana_public_url ''
@@ -2772,28 +2576,23 @@ END $$;
 
 SELECT set_config('acs_cymru.grafana_oauth_client_secret', '', false);
 
-
 -- -------------------------------------------------------------------------------------------
 -- ASHRAE 223P building-system concepts  (640 rows, and the one metric group they file under)
 -- -------------------------------------------------------------------------------------------
--- Folded from 0013_ashrae223_vocabulary.sql, whose table definition is now in 0001. The rows are
--- unchanged, MARKERS AND DIGEST INCLUDED: scripts/generate-ashrae223-vocabulary.mjs writes this
--- block and scripts/check-ashrae223-seed-sync.mjs verifies it, and both now name this file.
+-- scripts/generate-ashrae223-vocabulary.mjs writes this block, markers and digest included, and
+-- CI verifies it.
 
 -- ---------------------------------------------------------------------------------------------
 -- The metric group these concepts file under
 -- ---------------------------------------------------------------------------------------------
--- ONE group, not one per concept. `enforce_metric_group_spelling()` makes the first spelling of a
--- group permanent, and registering 563 of them -- for a vocabulary whose standard is not yet
--- published -- would permanently fix a naming that the standard itself may still change. A BMS
--- point is named `Building/<concept>` until there is a reason for more.
+-- One group, not one per concept: `enforce_metric_group_spelling()` makes the first spelling
+-- permanent, and the standard is not yet published. A BMS point is named `Building/<concept>`.
 
 INSERT INTO public.metric_groups (id, name, description, standard)
 VALUES ('9d3a4f2e-6b1c-4e58-9a77-2f5c8d1b4e60', 'Building',
         'ASHRAE 223P building system points -- HVAC, electrical and the sensing around them',
         'ASHRAE 223P')
 ON CONFLICT DO NOTHING;
-
 
 -- ---------------------------------------------------------------------------------------------
 -- The concepts
@@ -7284,7 +7083,6 @@ ON CONFLICT (name) DO UPDATE SET
   semantic_id  = EXCLUDED.semantic_id;
 -- <<< END GENERATED ashrae223_vocabulary
 
-
 -- -------------------------------------------------------------------------------------------
 -- IDTA 02006 Digital Nameplate submodel templates  (20 rows)
 -- -------------------------------------------------------------------------------------------
@@ -7294,14 +7092,9 @@ ON CONFLICT (name) DO UPDATE SET
 -- ---------------------------------------------------------------------------------------------
 -- Seed: IDTA 02006 Digital Nameplate v3.0, top-level elements
 -- ---------------------------------------------------------------------------------------------
--- Idempotent, because db-init replays every migration on every boot with no applied-migrations
--- ledger. DO UPDATE on the descriptive columns so a corrected transcription reaches an existing
--- database; the key (template_id, id_short) is what a row IS and is never updated.
---
--- Only the TOP-LEVEL elements are seeded. AddressInformation, Markings and AssetSpecificProperties
--- are SubmodelElementCollections with their own nested structures, and flattening them into this
--- table would misrepresent the template -- they are recorded here so the set is complete and their
--- children are deliberately out of scope until something needs them.
+-- DO UPDATE on the descriptive columns so a corrected transcription reaches an existing
+-- database; the key (template_id, id_short) is never updated. Only the top-level elements are
+-- seeded: the SubmodelElementCollections' children are out of scope until something needs them.
 
 INSERT INTO public.idta_submodel_templates
   (template_id, template_name, template_version, id_short, semantic_id, semantic_id_type, description, is_mandatory, ordinal)
@@ -7335,22 +7128,17 @@ ON CONFLICT (template_id, id_short) DO UPDATE SET
   is_mandatory     = EXCLUDED.is_mandatory,
   ordinal          = EXCLUDED.ordinal;
 
-
-
 -- -------------------------------------------------------------------------------------------
 -- Metric catalogue -- the standards seed  (32 rows)
 -- -------------------------------------------------------------------------------------------
--- Folded from 0018_metric_catalog_standards_seed.sql and 0019_bms_supply_air_flow.sql. The 15
--- rows above came from the pre-beta squash; these are the OPC UA companion specifications and
--- the one BMS point added afterwards. ON CONFLICT (name) DO NOTHING throughout: a catalogue
--- entry an operator has edited is not re-seeded over.
+-- The OPC UA companion specifications and one BMS point. ON CONFLICT (name) DO NOTHING: a
+-- catalogue entry an operator has edited is not re-seeded over.
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. MTConnect 2.x -- machine tool axes, controller and systems
 -- ---------------------------------------------------------------------------------------------
--- Joined on kind = 'DATA_ITEM_TYPE'. The vocabulary also holds COMPONENT, SUB_TYPE, UNIT and
--- NATIVE_UNIT rows under the same `name` values, so an unqualified join would multiply rows and
--- could attach a component's semantic id to a data item.
+-- Joined on kind = 'DATA_ITEM_TYPE': the vocabulary also holds COMPONENT, SUB_TYPE, UNIT and
+-- NATIVE_UNIT rows under the same `name` values.
 INSERT INTO public.metric_catalog (name, datatype, description, category, units, standard,
                                    semantic_id, semantic_id_type)
 SELECT s.name, s.datatype, s.description, v.category, s.units, 'MTConnect', v.semantic_id, 'IRI'
@@ -7373,9 +7161,8 @@ ON CONFLICT (name) DO NOTHING;
 -- ---------------------------------------------------------------------------------------------
 -- 2. OPC 40010 Robotics -- the robotic assembly cell
 -- ---------------------------------------------------------------------------------------------
--- `MotionDevice/…` and `Machine/…` continue the prefixes 0002 established. `companion_spec` is
--- part of the join because `opcua_vocabulary` is keyed (companion_spec, name) -- `Mass` and
--- `Temperature`, among others, appear under more than one specification.
+-- `companion_spec` is part of the join because `opcua_vocabulary` is keyed (companion_spec,
+-- name): `Mass` and `Temperature` appear under more than one specification.
 INSERT INTO public.metric_catalog (name, datatype, description, category, units, standard,
                                    semantic_id, semantic_id_type)
 SELECT s.name, s.datatype, s.description, s.category, s.units, 'OPC UA', v.semantic_id, 'IRI'
@@ -7414,15 +7201,9 @@ ON CONFLICT (name) DO NOTHING;
 -- ---------------------------------------------------------------------------------------------
 -- 4. ASHRAE 223P -- facility / BMS ambient telemetry
 -- ---------------------------------------------------------------------------------------------
--- THE SEMANTIC ID HERE NAMES A SENSOR CLASS, NOT A QUANTITY, and that is a real modelling
--- compromise rather than an oversight. 223P models a measurement as a Property attached to a
--- Sensor; this catalog has one flat name per series and nowhere to hang that pair. Pointing at
--- the sensor class is the closest honest statement available -- "this series comes from a
--- temperature sensor as 223P defines one" -- and it is why the ⚠ in docs/vocabularies.md about
--- 223P still being in public review matters more for this standard than for the others.
---
--- `Constituent-CO2` carries a hyphen, which 0007 forbids in a metric name; it is transliterated
--- to `BMS/CO2_CONCENTRATION`, and the join still uses the vocabulary's own unmodified key.
+-- The semantic id names a sensor class, not a quantity: 223P models a measurement as a Property
+-- attached to a Sensor, and this catalog has one flat name per series. `Constituent-CO2` carries
+-- a hyphen, which a metric name forbids; it is transliterated to `BMS/CO2_CONCENTRATION`.
 INSERT INTO public.metric_catalog (name, datatype, description, category, units, standard,
                                    semantic_id, semantic_id_type)
 SELECT s.name, s.datatype, s.description, s.category, s.units, 'ASHRAE 223P', v.semantic_id, 'IRI'
@@ -7438,15 +7219,9 @@ ON CONFLICT (name) DO NOTHING;
 -- ---------------------------------------------------------------------------------------------
 -- 5. ISO 22400 -- computed KPIs
 -- ---------------------------------------------------------------------------------------------
--- THESE ARE REGISTERED, NOT COMPUTED. Nothing in this platform derives them: docs/vocabularies.md
--- records that inferred ISO 22400 KPIs are deferred, because OEE needs planned busy time, planned
--- run time per item and good/scrap disposition, none of which are telemetry and all of which
--- would make this an MES. Registering the names means an edge device that HAS those inputs -- a
--- Node-RED aggregator accumulating PackML state times, say -- can publish them as ordinary
--- Sparkplug metrics and have them land correctly typed and correctly attributed.
---
--- `OEE/AVAILABILITY`, `OEE/PERFORMANCE`, `OEE/QUALITY` and `OEE/EFFECTIVENESS` are already seeded
--- by 0002 and are deliberately not repeated here; the ON CONFLICT would skip them in any case.
+-- Registered, not computed: nothing here derives them (docs/vocabularies.md). An edge device
+-- that has the inputs can publish them as ordinary Sparkplug metrics. The four OEE names above
+-- are not repeated.
 INSERT INTO public.metric_catalog (name, datatype, description, category, units, standard,
                                    semantic_id, semantic_id_type)
 SELECT s.name, s.datatype, v.description, 'SAMPLE', v.unit, 'ISO 22400', v.semantic_id, 'IRI'
@@ -7470,25 +7245,16 @@ SELECT s.name, s.datatype, s.description, s.category, s.units, 'ASHRAE 223P', v.
   JOIN public.ashrae223_vocabulary v ON v.name = s.concept
 ON CONFLICT (name) DO NOTHING;
 
-
-
 -- -------------------------------------------------------------------------------------------
 -- Declared settings  (6 rows)
 -- -------------------------------------------------------------------------------------------
--- Folded from 0031_system_settings.sql, 0032_alert_retention_setting.sql and
--- 0068_cold_storage.sql. THROUGH seed_setting(), NOT AS INSERTS, and that is load bearing: the
--- function refreshes a setting's label, description and bounds on every replay while leaving
--- the VALUE alone, so an operator's change survives a restart. A generated INSERT ... ON
--- CONFLICT DO UPDATE here would silently reset every setting on every boot.
+-- Through seed_setting(), not as INSERTs: the function refreshes label, description and bounds
+-- on every replay while leaving the value alone, so an operator's change survives a restart.
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. The settings this migration declares
 -- ---------------------------------------------------------------------------------------------
--- DELIBERATELY FEW, AND EVERY ONE HAS A READER. Seeding the settings a future feature might want
--- would fill this page with controls that do nothing, which is the exact failure the closed key
--- set exists to prevent -- and it would be self-inflicted rather than an operator's mistake.
---
--- Cold storage adds `archive.*` in its own migration, beside the code that reads it.
+-- Few, and every one has a reader; a setting nothing reads is a control that does nothing.
 SELECT public.seed_setting(
     'ui.digital_thread_lane_limit',
     to_jsonb(30),
@@ -7530,10 +7296,8 @@ SELECT public.seed_setting(
 -- ---------------------------------------------------------------------------------------------
 -- 3. The settings, each with a reader
 -- ---------------------------------------------------------------------------------------------
--- DISABLED BY DEFAULT, AND THAT IS NOT TIMIDITY. Turning this on changes what happens to plant
--- history when it ages out: instead of being dropped by a TimescaleDB retention policy it is
--- exported, verified and then dropped by a job. A stack that gained that behaviour from a
--- migration nobody read would be a stack whose data-lifecycle changed silently.
+-- Disabled by default: turning this on changes what happens to plant history when it ages out
+-- (exported, verified and then dropped, instead of dropped by a retention policy).
 SELECT public.seed_setting(
     'archive.enabled',
     to_jsonb(false),
@@ -7572,26 +7336,18 @@ SELECT public.seed_setting(
     'telemetry-archive'
 );
 
-
-
 -- -------------------------------------------------------------------------------------------
 -- Value domains, and the bounds on the two settings that have them
 -- -------------------------------------------------------------------------------------------
--- Folded from 0012_metric_permitted_values.sql, 0032_alert_retention_setting.sql and
--- 0068_cold_storage.sql. These are UPDATEs against rows seeded above rather than inserts, and
--- they are separate statements in the source for a reason worth keeping: seed_setting() takes
--- no bounds, deliberately, so that adding a bound to one setting does not change the signature
--- every other caller uses. Each is guarded on the value it is setting, so a replay that finds
--- the bound already applied matches no rows and writes no audit entry.
+-- UPDATEs against rows seeded above: seed_setting() takes no bounds, so adding a bound to one
+-- setting does not change the signature every caller uses. Each is guarded on the value it
+-- sets, so a replay that finds it applied writes no audit entry.
 
 -- ---------------------------------------------------------------------------------------------
 -- Backfill: the two value sets this deployment already documents in prose
 -- ---------------------------------------------------------------------------------------------
--- Idempotent by construction -- db-init replays every migration on every boot, and these are
--- unconditional assignments to two named rows.
---
--- Scoped by `standard` as well as by name so a locally-minted metric that happens to share the
--- name is not given MTConnect's vocabulary on its behalf.
+-- Scoped by `standard` as well as by name so a locally minted metric sharing the name is not
+-- given MTConnect's vocabulary.
 
 UPDATE public.metric_catalog
    SET permitted_values = ARRAY['READY', 'ACTIVE', 'INTERRUPTED', 'FEED_HOLD', 'STOPPED']
@@ -7612,171 +7368,87 @@ UPDATE public.system_settings
  WHERE key = 'alerts.retention_days'
    AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 3650);
 
--- BOUNDS SET BY UPDATE, NOT BY EXTRA ARGUMENTS -- 0032's reason, which still applies: adding
--- parameters to seed_setting() creates an OVERLOAD rather than replacing it, because CREATE OR
--- REPLACE matches on the argument list and 0031 rebuilds the seven-argument version on every boot.
---
--- MIN 1, NOT 0. Zero would mean "export every chunk the moment it closes", which defeats the
--- threshold entirely and would tier data the rollups have not finished with. The ceiling is a typo
--- guard in the same spirit as 0032's: 3650 entered as 36500 is a decade against a century.
+-- Bounds set by UPDATE, not by extra arguments: adding parameters to seed_setting() creates an
+-- overload. MIN 1, not 0: zero would export every chunk the moment it closes. The ceiling is a
+-- typo guard (3650 entered as 36500).
 UPDATE public.system_settings
    SET min_value = 1, max_value = 3650
  WHERE key = 'archive.tier_after_days'
    AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 3650);
 
-
-
 -- -------------------------------------------------------------------------------------------
--- The three machine principals  (3 auth users, 3 role assignments)
+-- The three machine principals  (3 auth users)
 -- -------------------------------------------------------------------------------------------
--- Folded from 0034_mcp_read_only_principal.sql, 0046_service_ingestor_principal.sql and
--- 0056_playback_orchestration.sql. Each is an auth user that CANNOT sign in -- no email, no
--- password, no identity provider -- holding Operator. They are seeded by migration rather than
--- by seed.sql because the RLS job applies migrations and never runs the seed, so a principal
--- defined there would not exist where its privileges are tested.
+-- Each is an auth user that cannot sign in: no email, no password, no identity provider. Seeded
+-- by migration rather than by seed.sql because the RLS job applies migrations and never runs the
+-- seed. Their grants are on `principal_permissions` (0080), not `user_roles`, whose trigger
+-- refuses a machine principal.
 
 -- =============================================================================================
--- 0034 · A dedicated read-only principal for the MCP client
+-- The MCP reader
 -- =============================================================================================
--- `i3x-mcp` takes a STATIC `I3X_TOKEN` out of its host's config file -- typically
--- `claude_desktop_config.json` -- and `GOTRUE_JWT_EXP` is 3600. A token pasted there stops working
--- within the hour, and it fails the way i3x/README.md already describes for i3X Explorer: as a
--- broken server rather than a stale credential. Nothing in the failure points at the token, which
--- is what made this worth fixing rather than documenting.
---
--- THIS MIGRATION DOES NOT MINT ANYTHING. It creates the IDENTITY the token will name.
--- `scripts/mint-mcp-token.mjs` signs a long-lived JWT for it with the same HS256 secret the rest of
--- the stack uses, so PostgREST validates it exactly as it validates a GoTrue token. The expiry is a
--- property of the token, not of this row -- GOTRUE_JWT_EXP governs what GoTrue issues and has no
--- bearing on a JWT signed outside it.
---
--- WHY NOT `service_role`, which would be the one-line answer. The i3X server passes the caller's
--- bearer straight through to PostgREST precisely so that it queries AS THEM. A key that bypasses
--- RLS would discard the single property that makes handing this to a model defensible -- that a
--- question answered through MCP returns exactly what the asker is entitled to see. It would also
--- make every read indistinguishable from the ingestion daemon's.
---
--- WHY NOT ONE OF THE DEMO PERSONAS either. A machine credential borrowing a human account conflates
--- two lifecycles: the account gets deleted when the person leaves, and the audit trail attributes
--- machine reads to somebody who was not there.
---
--- WHY `Operator` AND NOT `Auditor`, WHICH IS THE INTERESTING CHOICE. Both write nothing -- every
--- write policy in this schema names Administrator or Shopfloor_Manager. The difference is
--- `digital_thread_select_privileged_or_auditor` (0001): an Auditor can READ THE AUDIT TRAIL.
---
--- The MCP client has no surface for the Digital Thread and deliberately never will -- i3X models
--- objects, values and history and has no audit concept, and the decision not to build a second
--- server for it is recorded in i3x/README.md. So granting Auditor would hand this credential a
--- capability nothing can use, and leave it sitting there for whoever DOES later point something at
--- it. Operator reads every relation the address space is assembled from -- all five are
--- `FOR SELECT TO authenticated USING (true)` -- and reaches nothing else.
+-- `i3x-mcp` takes a static `I3X_TOKEN` from its host's config file, and a GoTrue token expires
+-- within the hour. This creates the identity; `scripts/mint-mcp-token.mjs` signs a long-lived
+-- JWT for it with the stack's HS256 secret, so PostgREST validates it as it validates a GoTrue
+-- token. Not `service_role`: the i3X server passes the caller's bearer through so that it
+-- queries as them. Not a demo persona: a machine credential borrowing a human account conflates
+-- two lifecycles. Its grant is `telemetry:read`, never `digital_thread:read`: the MCP client has
+-- no surface for the audit trail.
 -- =============================================================================================
-
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. The principal
 -- ---------------------------------------------------------------------------------------------
--- `id` is the only column on this image's `auth.users` without a default, which is what makes
--- seeding one here viable at all -- and is why this lives in a migration rather than in seed.sql.
--- CI's RLS job applies the migrations and deliberately never runs the seed, so a principal defined
--- there would not exist in the environment where its privileges are tested.
---
--- The row is deliberately minimal: no email, no password, no identity provider. THIS ACCOUNT
--- CANNOT SIGN IN. It exists so that a subject in a JWT resolves to something real, and so that
--- `digital_thread.changed_by` has a foreign key to satisfy in the event that anything ever writes
--- as it -- which nothing should, and which the self-check below proves nothing can.
+-- `id` is the only column on this image's `auth.users` without a default. The row is minimal:
+-- this account cannot sign in. It exists so a JWT subject resolves to something real and
+-- `digital_thread.changed_by` has a foreign key to satisfy.
 INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000001')
 ON CONFLICT (id) DO NOTHING;
 
--- NO ROLE IS ASSIGNED HERE ANY MORE. This block used to give the principal `Operator`, and 0080
--- moved it onto `principal_permissions` -- the grant is `telemetry:read`, which is what this
--- identity actually uses, and it no longer arrives by way of a role that changes whenever somebody
--- asks for a shopfloor user to be able to do one more thing.
---
--- THE ASSIGNMENT IS NOT MERELY REDUNDANT, IT IS NOW REFUSED. 0080 puts a BEFORE INSERT trigger on
--- `user_roles` that rejects any identity `is_machine_principal()` recognises, so leaving this INSERT
--- here would abort the chain at file two on every boot after the first. The `auth.users` row above
--- stays exactly as it was: the identity was never the thing that was wrong.
+-- No role is assigned here: 0080 grants `telemetry:read` on `principal_permissions`, and its
+-- BEFORE INSERT trigger on `user_roles` refuses any machine principal.
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. The principal
 -- ---------------------------------------------------------------------------------------------
--- The id continues 0034's block rather than starting a new one: `...0001` is the MCP reader,
--- `...0002` is this. Both are seeded machine identities that cannot sign in, and keeping them
--- adjacent means a reader who finds one in a JWT `sub` can find the other.
---
--- Minimal by construction, exactly as 0034 and 0044 are: no email, no password, no identity
--- provider. THIS ACCOUNT CANNOT SIGN IN. It also means 0042's predicate -- no email and no
--- password -- holds for it, so it appears in the Service Identities list on the Access Control
--- page beside the identities that page created itself.
+-- `...0002`, continuing the MCP reader's block. Minimal by construction: this account cannot
+-- sign in, so it appears in the Service Identities list on the Access Control page.
 INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000002')
 ON CONFLICT (id) DO NOTHING;
 
--- NO ROLE IS ASSIGNED HERE ANY MORE -- see the note under 0034's principal above. 0080 grants this
--- identity `telemetry:read` on `principal_permissions` instead, and its trigger on `user_roles`
--- would refuse this INSERT if it were left in place.
---
--- The daemon's authority was never the role in any case: every write it makes goes through an
--- `ingest_*` gate that is SECURITY DEFINER and checks `is_ingestion_caller()`, which names this
--- uuid and nothing else.
+-- No role is assigned here (see the MCP reader above). The daemon's authority was never the
+-- role: every write goes through an `ingest_*` gate that is SECURITY DEFINER and checks
+-- `is_ingestion_caller()`, which names this uuid and nothing else.
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. The principal
 -- ---------------------------------------------------------------------------------------------
--- Minimal by construction, exactly as 0046's is: no email, no password, no identity provider. THIS
--- ACCOUNT CANNOT SIGN IN, and 0042's predicate holds for it, so it appears in the Service
--- Identities list on the Access Control page beside the identities that page created itself.
---
--- SEEDED HERE RATHER THAN CREATED THROUGH `create_service_principal()`, for 0046's two reasons: the
--- RLS job applies migrations and never runs the seed, so a principal defined there would not exist
--- where its privileges are tested; and a fixed part of the deployment belongs in a migration, while
--- a thing somebody decided to create belongs behind the page that records who decided it.
+-- Minimal by construction: this account cannot sign in. Seeded here rather than through
+-- `create_service_principal()` because a fixed part of the deployment belongs in a migration.
 INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000003')
 ON CONFLICT (id) DO NOTHING;
 
--- NO ROLE IS ASSIGNED HERE ANY MORE -- see the note under 0034's principal above. 0080 grants this
--- identity `telemetry:read` on `principal_permissions` instead, and its trigger on `user_roles`
--- would refuse this INSERT if it were left in place.
---
--- THE ARGUMENT THIS BLOCK USED TO CARRY SURVIVES THE MOVE, and is worth keeping where the grant now
--- is rather than deleting with the role. It read: `Operator`, NOT `Auditor`, because the difference
--- between the two is that an Auditor can read the digital thread -- and this worker writes nothing
--- to it and reads nothing from it, so granting Auditor would hand a credential that lives in a
--- process holding BROKER PUBLISH RIGHTS the ability to read every attributed change anyone has ever
--- made to this stack, in support of a code path that does not exist.
---
--- Under 0080 that is no longer an argument about which of two roles to borrow. It is the reason
--- `digital_thread:read` is not among this principal's grants, and 0080's self-check asserts the
--- same property for the MCP reader directly.
-
-
+-- No role is assigned here (see the MCP reader above). `digital_thread:read` is deliberately
+-- not among this principal's grants: the worker holds broker publish rights and neither writes
+-- nor reads the audit trail.
 
 -- -------------------------------------------------------------------------------------------
 -- The playback gateway, and the two singleton rows that track workers
 -- -------------------------------------------------------------------------------------------
--- Folded from 0060_playback_gateway_and_shadow_devices.sql, 0057_playback_worker_reports_its
--- _reach.sql and 0054_directory_liveness.sql. The gateway is an edge node nothing else
--- publishes as: two publishers under one Sparkplug identity interleave their seq counters and
--- the daemon reads that as permanent message loss. Its flags are reconciled on every replay,
--- because they are what the playback gate tests; its NAME deliberately is not.
+-- The gateway is an edge node nothing else publishes as: two publishers under one Sparkplug
+-- identity interleave their seq counters and the daemon reads that as message loss. Its flags
+-- are reconciled on every replay, because the playback gate tests them; its name is not.
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. The gateway
 -- ---------------------------------------------------------------------------------------------
--- A PINNED UUID, following the seeded gateways' convention, because `sparkplug_id` is GENERATED
--- from the primary key: a random id would make the broker account name unpredictable, and the
--- account is configured by hand. 16000000-... continues the 12/13/14/15 series and yields
--- `gwy160000000000400080000`.
---
--- is_virtual: no appliance exists. is_simulated: its telemetry is generated rather than observed.
--- is_shadow: it publishes recordings specifically -- and gateways_shadow_is_simulated (0059)
--- requires the middle one, so all three are stated rather than inferred.
---
--- NO CELL AND NO SITE-WIDE ASSERTION. gateways_synthetic_has_no_cell forbids the first; the second
--- would be a claim that this thing is somewhere on the site, and it is not anywhere.
+-- A pinned UUID, because `sparkplug_id` is generated from the primary key and the broker
+-- account name must be predictable (`gwy160000000000400080000`). is_virtual, is_simulated and
+-- is_shadow are all stated: gateways_shadow_is_simulated requires the middle one. No cell and
+-- no site-wide assertion: it is not anywhere.
 INSERT INTO public.gateways (id, name, description, is_virtual, is_simulated, is_shadow, location_scope)
 VALUES (
     '16000000-0000-4000-8000-000000000001',
@@ -7799,40 +7471,19 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.directory_liveness_probe (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
 
-
-
 -- -------------------------------------------------------------------------------------------
 -- Scheduled maintenance  (3 jobs)
 -- -------------------------------------------------------------------------------------------
--- Folded from 0030_platform_alerts_retention.sql, 0054_directory_liveness.sql and
--- 0038_revoke_gateway_credentials.sql, joining the three already scheduled above.
--- UNSCHEDULED BEFORE SCHEDULED where the source did that: `cron.schedule` APPENDS rather than
--- reconciling, so a plain call replayed on every boot accumulates a duplicate job each time.
+-- Unscheduled before scheduled: `cron.schedule` appends rather than reconciling.
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. The schedule
 -- ---------------------------------------------------------------------------------------------
--- `ensure_cron_job` unschedules before scheduling, which is what makes this survive the every-boot
--- replay -- `cron.schedule` appends rather than replaces. Same helper the three janitorial jobs in
--- 0002 use.
---
--- DAILY, AND NOT IN 0002's ARCHIVE-RETENTION JOB. That job honours a per-row `auto_delete_at` the
--- user chose in the Archive dialog; this is a fixed platform policy. Merging an operator's explicit
--- choice with a constant would make both harder to reason about, and the Archive dialog's promise
--- ("Purges: <date>") is a promise about a date the user picked.
---
--- 03:15, between `prune_cron_history` (03:00) and `purge_expired_archives` (03:30). Deliberately
--- not concurrent with either: `platform_alerts` is REPLICA IDENTITY FULL and in the
--- `supabase_realtime` publication, so every deleted row travels the WAL at full width and reaches
--- every connected dashboard as a delete event. That is survivable -- `usePlatformAlerts` debounces
--- 250ms, so a burst collapses into one refetch, and a day's worth of occurrences is tens of rows,
--- not thousands -- but it is a reason to run this once a day at 3am rather than hourly.
---
--- No VACUUM afterwards. At this volume autovacuum reclaims the space on its own schedule, and a
--- VACUUM scheduled here would be a second thing to reason about for no measurable gain. If the
--- `alerts` tier in `public.storage_footprint` (0027) ever shows the table holding size after a
--- prune, that is the signal to revisit -- and that view exists precisely so the question is
--- answerable from a dashboard rather than by guessing.
+-- Daily, and separate from the archive-retention job: that honours a per-row date the user
+-- chose, this is a fixed platform policy. 03:15, between `prune_cron_history` (03:00) and
+-- `purge_expired_archives` (03:30): `platform_alerts` is REPLICA IDENTITY FULL and published,
+-- so every deleted row reaches every dashboard as a delete event. No VACUUM afterwards;
+-- `public.storage_footprint` is where to look if the table holds size after a prune.
 SELECT public.ensure_cron_job(
   'prune_platform_alerts',
   '15 3 * * *',
@@ -7860,44 +7511,25 @@ END $$;
 SELECT cron.schedule('sweep-gateway-credential-revocations', '*/15 * * * *',
                      'SELECT public.sweep_gateway_credential_revocations()');
 
-
-
 -- -------------------------------------------------------------------------------------------
 -- Secrets, and the clients that authenticate with them
 -- -------------------------------------------------------------------------------------------
--- Folded from 0006_nodered_oidc_auth.sql and 0038_revoke_gateway_credentials.sql -- the DML
--- halves only; the functions both files also defined are in 0001 in their final form.
--- 
--- THESE ARE THE psql VARIABLES, and the reason these blocks are carried verbatim rather than
--- generated. Every value here is interpolated from the environment at apply time, so none of
--- it can be read off a dump of a finished database -- a dump holds one stack's secrets, which
--- is the one thing a repository must not. Each is defaulted at its point of use, so this file
--- stays runnable standalone and an absent secret is a skipped registration rather than an
--- error.
+-- Every value here is interpolated from psql variables at apply time, which is why these blocks
+-- are carried verbatim rather than generated from a dump: a dump holds one stack's secrets.
+-- Each is defaulted at its point of use; an absent secret is a skipped registration.
 
 -- =============================================================================================
--- 0006_nodered_oidc_auth.sql
+-- Node-RED authentication
 --
--- Closes the unauthenticated Node-RED admin API and webhook receiver on port 1880.
---
--- The application half lives in node-red/Dockerfile, scripts/node-red-init.mjs and
--- supabase/functions/nodered-userinfo. This file provides the two things only the database can:
---
---   1. The OAuth client Node-RED authenticates HUMANS with, in auth.oauth_clients.
---   2. The signing key for the quarantine webhook's token, in Vault, plus a dispatch function
---      that MINTS a short-lived token per event rather than replaying a static one.
---
--- Idempotent: db-init replays every /migrations/*.sql on every boot. It is additive -- it does
--- not edit 0001 or 0002; the one correction it must make to 0002's seed is an explicit UPDATE,
--- because that row's ON CONFLICT is DO NOTHING and an edit there would never reach an existing
--- database.
+-- Closes the Node-RED admin API and webhook receiver on port 1880. The application half lives
+-- in node-red/Dockerfile, scripts/node-red-init.mjs and supabase/functions/nodered-userinfo.
+-- This provides the two things only the database can: the OAuth client Node-RED authenticates
+-- humans with (auth.oauth_clients), and the signing key for the quarantine webhook's token in
+-- Vault, plus a dispatch function that mints a short-lived token per event.
 --
 -- PSQL VARIABLES: `-v nodered_oauth_client_secret`, `-v nodered_webhook_jwt_secret`,
--- `-v nodered_redirect_uri`, all defaulted at the point of use so this file stays runnable
--- standalone. An absent secret leaves the corresponding path SHUT, not open -- see the WARNINGs.
---
--- What was open before this, and why the webhook token is a capability rather than a credential:
---   simulation/README.md -> "Node-RED authentication"
+-- `-v nodered_redirect_uri`. An absent secret leaves the corresponding path shut.
+-- See tutorial/README.md -> "Node-RED authentication".
 -- =============================================================================================
 
 \if :{?nodered_oauth_client_secret} \else \set nodered_oauth_client_secret '' \endif
@@ -7912,17 +7544,12 @@ SELECT set_config('acs_cymru.nodered_oauth_client_secret', :'nodered_oauth_clien
 SELECT set_config('acs_cymru.nodered_webhook_jwt_secret',  :'nodered_webhook_jwt_secret',  false);
 SELECT set_config('acs_cymru.nodered_redirect_uri',        :'nodered_redirect_uri',        false);
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 1. Node-RED OAuth client registration
 -- ---------------------------------------------------------------------------------------------
--- `client_secret_hash` is base64url(sha256(secret)) unpadded -- NOT bcrypt.
---
--- token_endpoint_auth_method IS 'client_secret_post', NOT the Grafana client's
--- 'client_secret_basic'. passport-oauth2 sends credentials in the token request body by default;
--- GoTrue enforces whichever is registered, exactly, and a mismatch is:
---   400 invalid_credentials -- "invalid authentication method: client is registered for
---   'client_secret_basic' but 'client_secret_post' was used"
+-- `client_secret_hash` is base64url(sha256(secret)) unpadded, not bcrypt.
+-- token_endpoint_auth_method is 'client_secret_post' (passport-oauth2's default), unlike the
+-- Grafana client's 'client_secret_basic'; GoTrue enforces whichever is registered, exactly.
 -- Change this and settings.js has to change with it.
 DO $$
 DECLARE
@@ -7932,12 +7559,9 @@ DECLARE
   -- Deliberately the next value after Grafana's ...0001.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000002';
   v_secret    TEXT := current_setting('acs_cymru.nodered_oauth_client_secret', true);
-  -- Derived from NODERED_PUBLIC_URL by docker-compose and passed in, so this row and the
-  -- callbackURL settings.js hands passport-oauth2 are built from ONE value. They must agree
-  -- exactly or /oauth/authorize answers "invalid redirect_uri" -- verified against a live
-  -- GoTrue. /auth/strategy/callback is Node-RED's own fixed route (@node-red/editor-api
-  -- lib/auth/index.js); only the origin is deployment-specific, and it is the address the
-  -- BROWSER reaches Node-RED on, never the compose-internal one.
+  -- Derived from NODERED_PUBLIC_URL by docker-compose, so this row and the callbackURL settings.js
+  -- hands passport-oauth2 come from one value; they must agree exactly or /oauth/authorize
+  -- answers "invalid redirect_uri". /auth/strategy/callback is Node-RED's own fixed route.
   v_redirect  TEXT := COALESCE(
                         NULLIF(current_setting('acs_cymru.nodered_redirect_uri', true), ''),
                         'http://localhost:1880/auth/strategy/callback');
@@ -7981,16 +7605,12 @@ END $$;
 
 SELECT set_config('acs_cymru.nodered_oauth_client_secret', '', false);
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 2. Vault: the quarantine webhook SIGNING KEY
 -- ---------------------------------------------------------------------------------------------
--- A SIGNING KEY, NOT A BEARER CREDENTIAL. A flow author can read msg.req.headers, so sharing the
--- admin token with the webhook would hand every flow the admin API -- remote code execution on
--- the edge host by way of a `function` node. HS256 because pgjwt implements only the HS family.
---
--- Why the two must not be merged back, and why nodered_admin_token survives as break-glass:
---   simulation/README.md -> "Node-RED authentication"
+-- A signing key, not a bearer credential: a flow author can read msg.req.headers, so sharing
+-- the admin token with the webhook would hand every flow the admin API. HS256 because pgjwt
+-- implements only the HS family. See tutorial/README.md -> "Node-RED authentication".
 DO $$
 DECLARE
   v_secret TEXT := current_setting('acs_cymru.nodered_webhook_jwt_secret', true);
@@ -8016,23 +7636,11 @@ BEGIN
       'event. NOT a bearer credential and NOT the Node-RED admin token -- see archived migration 0006.'
     );
   ELSE
-    -- update_secret rather than create: supabase-db-init replays every migration on every stack
-    -- start, and create_secret would fail the UNIQUE on name the second time.
-    --
-    -- WRAPPED, because update_secret DECRYPTS the existing row before replacing it, and that read
-    -- fails outright if the pgsodium root key no longer matches the stored ciphertext:
-    --
-    --   ERROR: pgsodium_crypto_aead_det_decrypt_by_id: invalid ciphertext
-    --
-    -- which aborts psql under ON_ERROR_STOP and takes supabase-db-init down with exit 3. The key
-    -- lives at /etc/postgresql-custom/pgsodium_root.key -- OUTSIDE PGDATA -- so before that
-    -- directory was given its own volume, any `docker compose down && up` regenerated it and
-    -- orphaned every ciphertext in the retained data volume.
-    --
-    -- RECREATING IS SAFE HERE, and that is a property of this secret rather than a general rule:
-    -- the plaintext is supplied by .env on every boot, so the vault row is a cache and never the
-    -- source of truth. A secret that could only be read back from the vault would need the key
-    -- restored instead, and losing it would be data loss.
+    -- update_secret rather than create: create_secret would fail the UNIQUE on name on the second
+    -- replay. Wrapped, because update_secret decrypts the existing row first and that read fails
+    -- when the pgsodium root key no longer matches the stored ciphertext (docs/incidents.md -> "The
+    -- pgsodium root key lived in the container, not the volume"). Recreating is safe for this
+    -- secret because the plaintext comes from .env on every boot; the vault row is a cache.
     BEGIN
       PERFORM vault.update_secret(v_id, v_secret);
     EXCEPTION WHEN OTHERS THEN
@@ -8053,17 +7661,12 @@ END $$;
 
 SELECT set_config('acs_cymru.nodered_webhook_jwt_secret', '', false);
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 3. Repoint the webhook endpoint at the new secret
 -- ---------------------------------------------------------------------------------------------
--- AN EXPLICIT UPDATE, NOT AN EDIT TO 0002. That row is seeded
--- `ON CONFLICT (event_key, url) DO NOTHING`, so changing secret_name there would only ever
--- reach a database created after the change -- every existing stack would keep pointing at
--- `nodered_admin_token` and keep sending the admin credential to a flow that can read it.
---
--- Guarded on the old value so an operator who has deliberately repointed this row is not
--- overwritten on the next boot.
+-- An explicit UPDATE, because the seeded row is `ON CONFLICT DO NOTHING` and an edit there
+-- would never reach an existing database. Guarded on the old value so an operator who has
+-- deliberately repointed this row is not overwritten.
 UPDATE public.webhook_endpoints
    SET secret_name = 'nodered_webhook_jwt_secret'
  WHERE event_key = 'device.quarantined'
@@ -8086,28 +7689,18 @@ SELECT set_config('acs_cymru.fn_url',      :'supabase_functions_url', false);
 SELECT set_config('acs_cymru.anon_key',    :'supabase_anon_key', false);
 SELECT set_config('acs_cymru.revoke_key',  :'gateway_revoke_secret', false);
 
-
 -- ---------------------------------------------------------------------------------------------
 -- 1. Where the address and the credentials live
 -- ---------------------------------------------------------------------------------------------
--- THREE VALUES IN VAULT, and only one of them is secret in the ordinary sense. Vault is this
--- database's store for things that must be READ FROM SQL and must not be readable by `anon` or
--- `authenticated` (0001 revokes both); splitting a URL into a second store would mean two places
--- to configure one outbound call.
+-- Three values in Vault, this database's store for things that must be read from SQL and must
+-- not be readable by `anon` or `authenticated`:
 --
---   supabase_functions_url        where Kong serves /functions/v1 on this target
---   supabase_anon_key             gets past the gateway's key-auth, and proves NOTHING else -- it
---                                 ships inside every browser bundle.
---
---                                 THE NAME IS THE ROLE, NOT THE FORMAT. Supabase deprecates the
---                                 anon JWT by the end of 2026 and replaces it with an opaque
---                                 `sb_publishable_*` key; the gateway accepts both at once and
---                                 matches either as a string. So this secret holds whichever
---                                 format the deployment registered -- db-init passes the
---                                 publishable key where one exists and the anon key otherwise --
---                                 and the secret is NOT renamed, because nothing in SQL parses
---                                 it and a renamed Vault entry would strand every database that
---                                 already has one.
+--   supabase_functions_url        where the gateway serves /functions/v1 on this target
+--   supabase_anon_key             gets past the gateway's key filter and proves nothing else.
+--                                 The name is the role, not the format: it holds whichever key
+--                                 format the deployment registered (db-init passes the
+--                                 publishable key where one exists), and is not renamed because
+--                                 nothing in SQL parses it.
 --   gateway_revoke_secret         what actually authorises the revocation, checked by the function
 DO $vault$
 DECLARE
@@ -8138,6 +7731,5 @@ BEGIN
     'Shared secret the revoke-gateway-credential function verifies. This is the authorisation.');
 END;
 $vault$;
-
 
 NOTIFY pgrst, 'reload schema';

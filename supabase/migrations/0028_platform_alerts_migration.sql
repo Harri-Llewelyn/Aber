@@ -5,42 +5,17 @@
 --
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.
 --
--- 0023 now DESCRIBES A FRESH DATABASE -- it creates `platform_alerts` with a generalised subject,
--- because the platform alert rules cover gateways and the platform as a whole, and neither
--- fits a table whose every row must name a device. This file is the other half: an existing
--- database still holds `device_alerts`, with rows in it, and needs them moved.
+-- 0023 describes a fresh database; this moves an existing one. The order is what makes both
+-- idempotent: 0023 creates `platform_alerts` (IF NOT EXISTS), and this file does nothing unless
+-- `device_alerts` still exists. A rename inside 0023 would fight its own CREATE TABLE IF NOT
+-- EXISTS every boot.
 --
--- ---------------------------------------------------------------------------------------------
--- WHY THIS IS A SEPARATE FILE AND NOT AN EDIT TO 0023.
---
--- The two run in filename order on every boot, and the ORDER IS WHAT MAKES BOTH IDEMPOTENT:
---
---   Fresh database          0023 creates platform_alerts; this file finds no device_alerts and
---                           does nothing.
---   First boot after this   0023 creates platform_alerts EMPTY beside the populated device_alerts;
---   change                  this file moves the rows across and drops the old table.
---   Every boot after that   0023 no-ops on IF NOT EXISTS; this file finds no device_alerts and
---                           does nothing.
---
--- Doing the rename inside 0023 instead would fight itself: `CREATE TABLE IF NOT EXISTS
--- device_alerts` earlier in the same file would recreate the very table the rename had just
--- consumed, every boot, forever.
---
--- ---------------------------------------------------------------------------------------------
--- COPY-THEN-DROP RATHER THAN `ALTER TABLE ... RENAME`.
---
--- A rename would carry the old table's indexes, constraints and publication membership under their
--- old names, and 0023 has already created the correctly-named ones on the new table. Two sets would
--- then differ only by name, and the ones a reader finds in `pg_indexes` would not be the ones the
--- repository describes. Copying the ROWS and dropping the shell leaves exactly one of everything.
---
--- The volume makes this safe to do in one statement: these are Grafana alert occurrences on a
--- demonstrator, thousands at most. A table where that assumption failed would want batching, and
--- would also want the range-partitioning issue #21 proposes for digital_thread.
+-- Copy-then-drop rather than RENAME, so the surviving table's indexes, constraints and
+-- publication membership are the ones 0023 defines under the new names. Safe in one statement at
+-- this volume (alert occurrences, thousands at most).
 -- =============================================================================================
 
 SET check_function_bodies = false;
-
 
 DO $migrate$
 DECLARE
@@ -111,7 +86,6 @@ BEGIN
     v_moved;
 END;
 $migrate$;
-
 
 -- ---------------------------------------------------------------------------------------------
 -- Self-check

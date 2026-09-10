@@ -3,25 +3,13 @@
 #
 #   docker compose up -d
 #
-# TWO SERVICES IN SEQUENCE, AND THAT ORDER IS THE WHOLE DESIGN. `bootstrap` runs ONCE, exchanges
-# the enrolment token in .env for a broker credential, and provisions /data -- the CA, the flow, the
-# encrypted credentials and a settings.js with a locally generated admin password. `node-red` then
-# starts against that /data and does the actual work.
+# `bootstrap` runs once: it exchanges the enrolment token in .env for a broker credential and
+# provisions /data (the CA, the flow, the encrypted credentials, a settings.js with a locally
+# generated admin password). `node-red` then starts against that /data. They cannot be one
+# service: Node-RED reads settings.js at load time. `node-exporter` sits outside that sequence.
 #
-# They cannot be one service: Node-RED reads settings.js at load time, and the MQTT credentials do
-# not exist until enrolment has happened. A single container would have to enrol and then restart
-# itself, which is the same two steps with nothing to look at when the first one fails.
-#
-# A THIRD SERVICE SITS OUTSIDE THAT SEQUENCE. `node-exporter` collects host metrics and depends on
-# nothing here -- not on enrolment, not on /data. The flow polls it locally and publishes a handful
-# of series on the connection it already holds; see its own block below for why it is not scraped
-# from the centre.
-#
-# WHERE THE PASSWORD GOES. `bootstrap` prints the Node-RED editor password ONCE, to its own logs:
-#
-#   docker compose logs bootstrap
-#
-# It is not written anywhere in plaintext. Lost, it is recoverable only by
+# `bootstrap` prints the Node-RED editor password once, to its own logs (`docker compose logs
+# bootstrap`). Lost, it is recoverable only by
 # `docker compose run --rm bootstrap node /bundle/bootstrap.mjs --reset-admin-password`.
 # =============================================================================================
 
@@ -29,25 +17,15 @@ services:
   bootstrap:
     build: .
     container_name: acs-gateway-bootstrap
-    # ONE-SHOT. `restart: no` matters more than it looks: the enrolment token is SINGLE-USE, so a
-    # restart loop on a genuine failure would burn the token on the first attempt and then retry
+    # One-shot. `restart: no`: the enrolment token is single-use, so a restart loop would retry
     # forever against a token the platform has already consumed. bootstrap.mjs does its own bounded
-    # retrying, in the one place that can tell a retryable failure from a permanent one.
+    # retrying.
     restart: "no"
     # ---------------------------------------------------------------------------------------------
-    # ROOT, AND IT IS NOT OPTIONAL. The node-red image SHIPS /data/flows.json owned by root:root,
-    # and Docker copies it -- with that ownership -- into a fresh named volume. Node-RED itself runs
-    # as uid 1000, so a bootstrap running as 1000 can create new files in /data (it owns the
-    # directory) and CANNOT overwrite that one:
-    #
-    #     Error: EACCES: permission denied, open '/data/flows.json'
-    #
-    # It fails AFTER enrolment has succeeded, so the token is already spent and the appliance needs
-    # a new bundle -- the worst possible place for this to surface. bootstrap.mjs chowns /data back
-    # to 1000:1000 before it exits, so the node-red service that follows owns everything it reads.
-    #
-    # Same problem and the same fix as the platform's own provisioner: see the `user: "0"` on
-    # node-red-init in the repository's docker-compose.yml.
+    # Root, because the node-red image ships /data/flows.json owned by root:root and Docker copies
+    # it into a fresh volume with that ownership; a bootstrap running as 1000 cannot overwrite it,
+    # and fails after enrolment has spent the token. bootstrap.mjs chowns /data back to 1000:1000
+    # before it exits. Same fix as `user: "0"` on node-red-init in the platform's docker-compose.yml.
     # ---------------------------------------------------------------------------------------------
     user: "0"
     env_file: .env
@@ -56,11 +34,8 @@ services:
       # The bundle itself, read-only. bootstrap.mjs and flows.template.json are inputs; nothing
       # here is written back, so a re-run always starts from the files you downloaded.
       - ./:/bundle:ro
-    # ENTRYPOINT IS OVERRIDDEN, AND IT HAS TO BE. The Node-RED base image declares
-    # `ENTRYPOINT ["./entrypoint.sh"]`, which starts Node-RED and passes `command` to it as
-    # ARGUMENTS -- so a bare `command: ["node", "/bundle/bootstrap.mjs"]` does not run bootstrap at
-    # all. It silently starts a Node-RED with no configuration, reports itself healthy, and leaves
-    # the appliance un-enrolled with `node-red` stuck waiting on a container that will never exit.
+    # The base image's ENTRYPOINT starts Node-RED and passes `command` to it as arguments, so a
+    # bare `command: ["node", ...]` would start an unconfigured Node-RED that reports healthy.
     entrypoint: ["node"]
     command: ["/bundle/bootstrap.mjs"]
 
@@ -77,13 +52,9 @@ services:
     depends_on:
       bootstrap:
         condition: service_completed_successfully
-    # THE BROKER CREDENTIALS ARRIVE THROUGH A FILE THAT DID NOT EXIST AT `compose up` TIME.
-    #
-    # `env_file:` cannot be used for them: Compose reads it when it parses this file, which is
-    # before bootstrap has run, so on a first boot it would resolve to nothing and Node-RED would
-    # start with an empty broker username. Sourcing /data/gateway.env in the command instead means
-    # it is read when the container starts -- after bootstrap completed, which `depends_on`
-    # guarantees.
+    # The broker credentials arrive through a file that did not exist at `compose up` time, so
+    # `env_file:` cannot carry them; /data/gateway.env is sourced when the container starts, after
+    # bootstrap completed.
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -97,26 +68,13 @@ services:
   # ===============================================================================================
   # flow-sync -- this appliance converges its own flow to what somebody approved.
   #
-  # OUTBOUND ONLY, LIKE EVERYTHING ELSE HERE. It fetches this gateway's own repository from the
-  # forge over SSH and calls Node-RED on this compose network. Nothing opens a connection toward
-  # the appliance, which is the same rule that keeps node_exporter unscraped below.
-  #
-  # WHY A SEPARATE SERVICE AND NOT A NODE IN THE FLOW. The thing it deploys IS the flow, so a flow
-  # that breaks would take its own repair mechanism with it -- and a `function` node with `fs` and
-  # `exec` access is a strictly larger surface on a box holding the MQTT credential. Outside the
-  # runtime it converges an appliance whose flow does not currently start.
-  #
-  # IT RUNS AS 1000, NOT ROOT. Node-RED runs as uid 1000 and bootstrap hands /data to that uid on
-  # its way out; a root sidecar would write a flows.json Node-RED could read but never rewrite from
-  # the editor. It needs no capability root would give it: git, ssh and one HTTP call.
-  #
-  # SECRETS IT HOLDS: the deploy key (READ-ONLY at the forge, so it cannot author what it deploys)
-  # and NODERED_CREDENTIAL_SECRET, which it uses only to CHECK that a committed flow's broker node
-  # ids still match the stored credentials -- see flow-sync.mjs, where that check is a refusal to
-  # converge rather than a warning.
-  #
-  # DELETING THIS SERVICE IS SUPPORTED and costs exactly one thing: approved flows stop arriving.
-  # Telemetry, the editor and the heartbeat do not depend on it.
+  # Outbound only: it fetches this gateway's repository from the forge over SSH and calls Node-RED
+  # on this compose network. A separate service, not a node in the flow, because the thing it
+  # deploys is the flow. Runs as 1000, not root, so Node-RED can rewrite what it writes. Holds the
+  # deploy key (read-only at the forge) and NODERED_CREDENTIAL_SECRET, used only to check that a
+  # committed flow's broker node ids still match the stored credentials (flow-sync.mjs refuses to
+  # converge otherwise). Deleting this service costs exactly one thing: approved flows stop
+  # arriving.
   # ===============================================================================================
   flow-sync:
     build: .
@@ -148,36 +106,13 @@ services:
     command: ["/bundle/flow-sync.mjs"]
 
   # ===============================================================================================
-  # node_exporter -- HOST metrics for the machine this appliance runs on.
-  #
-  # THE COLLECTOR IS RIGHT AND SCRAPING IT FROM THE CENTRE WOULD BE WRONG, which is the whole
-  # reason it appears here rather than in the platform's Prometheus:
-  #
-  #   * THIS APPLIANCE'S CONNECTION IS OUTBOUND ONLY. It dials <broker>:8883 and nothing anywhere
-  #     assumes traffic in the other direction. Scraping would need an inbound path through the
-  #     plant firewall, per gateway -- the exact thing an outbound-only design exists to avoid, and
-  #     a separate conversation with somebody's IT department per site.
-  #   * GATEWAYS ENROL DYNAMICALLY, with single-use tokens, so a static scrape config cannot know
-  #     them. Pull would additionally need service discovery backed by the platform's gateway
-  #     table: an endpoint to build, secure and keep correct.
-  #
-  # So it is scraped LOCALLY, over this compose network, by the Node-RED flow -- which then
-  # publishes a handful of series as Sparkplug metrics on the MQTT connection that is already open
-  # and already authenticated. No new inbound path, no new credential, no discovery.
-  #
-  # WHY node_exporter AND NOT A FUNCTION NODE READING /proc. It collects host metrics correctly,
-  # which a hand-rolled disk and memory read in a Node-RED function will not -- and a function node
-  # has no `fs` to read /proc with in the first place. It also removes the Windows question
-  # entirely: `windows_exporter` serves the same exposition format, so a Windows gateway differs
-  # only in which collector is installed and this flow does not change at all.
-  #
-  # NOT PUBLISHED. No `ports:` -- host metrics have no business leaving the appliance except as the
-  # handful of values the flow selects and publishes. Read-only mounts and no capabilities: it
-  # reads /proc and /sys and reports numbers.
-  #
-  # THE HEARTBEAT DOES NOT DEPEND ON IT. The flow polls this on its own timer and caches the
-  # result; the 30s heartbeat publishes whatever is cached. A node_exporter that is down or slow
-  # costs three metrics, never the heartbeat -- see `poll host metrics` in the flow.
+  # node_exporter -- host metrics for the machine this appliance runs on, scraped locally by the
+  # Node-RED flow and published as Sparkplug metrics on the connection already open. Scraping from
+  # the centre would need an inbound path through the plant firewall per gateway and service
+  # discovery for dynamically enrolled gateways. node_exporter rather than a function node reading
+  # /proc: a function node has no `fs`, and `windows_exporter` serves the same format. Not
+  # published, read-only mounts, no capabilities. The heartbeat does not depend on it: the flow
+  # caches the last poll.
   # ===============================================================================================
   node-exporter:
     container_name: acs-gateway-node-exporter
@@ -187,10 +122,8 @@ services:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
       - '--path.rootfs=/rootfs'
-      # Container and pseudo filesystems excluded, or every image layer and overlay mount appears
-      # as a separate "disk" and the one number that matters -- free space on the real volume -- is
-      # buried among dozens that are not disks at all. Same exclusions as the platform's own
-      # exporter, so a gateway's disk figure means what the central one means.
+      # Container and pseudo filesystems excluded, so the one number that matters (free space on the
+      # real volume) is not buried among overlay mounts. Same exclusions as the platform's exporter.
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
       - '--collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|cgroup.*|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$'
     volumes:
@@ -199,13 +132,8 @@ services:
       - /:/rootfs:ro
 
 volumes:
-  # THE APPLIANCE'S STATE, and the thing to back up. It holds the flow, the encrypted credentials,
-  # the CA and settings.js. `docker compose down -v` destroys it and the enrolment with it -- the
-  # token is already spent, so recovering means issuing a NEW bundle from the dashboard.
-  #
-  # THE FLOW'S COPY LIVES IN THIS GATEWAY'S OWN REPOSITORY, not here. Propose it from the
-  # dashboard's gateway page (Propose a flow): it becomes a pull request, and once approved this
-  # appliance pulls it back on its own timer. flows_cred.json is deliberately never committed -- it
-  # is encrypted with a secret that lives in this .env, so a copy in the forge would be either
-  # useless or dangerous.
+  # The appliance's state, and the thing to back up: the flow, the encrypted credentials, the CA
+  # and settings.js. `docker compose down -v` destroys the enrolment with it, and the token is
+  # already spent. The flow's copy lives in this gateway's own repository in the forge;
+  # flows_cred.json is never committed, because it is encrypted with a secret in this .env.
   nodered_data:

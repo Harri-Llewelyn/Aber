@@ -1,9 +1,8 @@
 // =============================================================================================
-// Grafana Alloy -- the collector, and the reason there are three new containers and not one.
+// Grafana Alloy -- the collector that ships container logs to Loki.
 //
-// Roadmap §13 said this pays "one of those three costs. The container, yes." That count was
-// wrong and this file is why. A log store needs something to PUT logs in it, and the daemon
-// pushing its own would miss the case the whole item is built around: incidents.md's first entry
+// A log store needs something to PUT logs in it, and the daemon
+// pushing its own would miss the case this exists for: incidents.md's first entry
 // is a broker password truncated in one container and only visible from another, hours later.
 // Mosquitto's lines are the ones that story needs, and only a collector gets them.
 //

@@ -2116,86 +2116,6 @@ paths:
             401 would send whoever is debugging it looking for a wrong value rather than a missing
             one.
 
-  /functions/v1/propose-gateway-flow:
-    post:
-      tags: [Edge Functions]
-      summary: Propose a Node-RED flow for a gateway as a branch and a pull request
-      description: |
-        Turns a flow **upload** into a **commit**. The `flows.json` an operator exports from Node-RED
-        is committed to a new branch in that gateway's own repository in the forge, and a pull request
-        is opened against `main` for somebody to review.
-
-        **It never writes to `main`.** The appliance converges to whatever `main` holds, so a direct
-        commit there would deploy an unreviewed flow the moment somebody pressed a button — which is
-        the `deploy-nodered` endpoint this design retired. An open pull request is *pending approval*,
-        a merge is *approved*, and a revert commit is *undo*; **merging is not reachable from this
-        endpoint** and is `gitops:manage`'s act.
-
-        Requires `Administrator`, `Shopfloor_Manager` **or `Operator`**. Including `Operator` is the
-        point of the review step: a gate whose proposals can only come from the roles that may already
-        merge them is a formality. `Auditor` reads and may not propose.
-
-        **`flows_cred.json` is refused by shape, not by filename.** The credential file sits beside
-        `flows.json` in `/data`, is encrypted with a secret that exists only on the appliance, and a
-        repository keeps forever what a bucket would let you delete.
-
-        The repository is created when an appliance **enrols with a deploy key**, so a virtual gateway —
-        or a physical one whose bundle predates the forge — answers `409` rather than failing obscurely.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [gateway_id, flow]
-              properties:
-                gateway_id:
-                  type: string
-                  format: uuid
-                  description: The gateway whose repository receives the proposal.
-                flow:
-                  type: array
-                  description: >-
-                    A Node-RED flow export: the JSON array of nodes from menu → Export → all flows.
-                    An empty array is valid — it is what a blank editor exports.
-                  items:
-                    type: object
-      responses:
-        '201':
-          description: The branch was committed and a pull request opened.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  pull_request:
-                    type: object
-                    properties:
-                      number:
-                        type: integer
-                        description: The pull request number in the forge.
-                      html_url:
-                        type: string
-                        description: Where a reviewer opens it.
-                      branch:
-                        type: string
-                        description: The branch the commit landed on.
-        '400':
-          description: Not a flow export, or a credentials file.
-        '401':
-          description: No signed-in session.
-        '403':
-          description: The caller's role may not propose.
-        '404':
-          description: No such gateway, or not one the caller may see.
-        '409':
-          description: The gateway has no repository - it has not enrolled with a deploy key.
-        '413':
-          description: The flow exceeds the 5 MiB ceiling.
-        '502':
-          description: The forge refused the commit or the pull request.
-        '503':
-          description: This deployment has no forge configured.
   /functions/v1/enroll-gateway:
     post:
       tags: [Edge Functions]
@@ -2978,6 +2898,96 @@ paths:
         '405': { description: 'Method other than POST.' }
         '503': { description: 'GRAFANA_ALERT_WEBHOOK_SECRET is not configured; refusing to accept alerts.' }
 
+  /functions/v1/forge-events:
+    post:
+      tags: [Edge Functions]
+      summary: Gitea's push webhook; records the head of main on the gateway's row
+      description: |
+        Registered on each gateway repository at enrolment (migration 0095). Gitea delivers every push
+        to `main` here, signed: `X-Gitea-Signature` is the hex HMAC-SHA256 of the raw body under
+        `GITEA_WEBHOOK_SECRET`, and the signature is the whole of the authentication -- Envoy's key-auth
+        proves only that the caller holds the anon key. On a verified push the gateway named by the
+        repository (`gateway-<sparkplug_id>`) records the commit's sha, its message's first line, who
+        pushed it, when, and the SHA-256 of `flows.json` at that commit, read through the machine account.
+
+        Pushes to other branches, repositories that are not a gateway's, deleted branches, non-push events
+        and gateways this database does not know are answered 200 with `ignored`, because a non-2xx is a
+        failed delivery on the hook's page and none of those is a failure.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - in: header
+          name: X-Gitea-Event
+          required: true
+          schema: { type: string, example: push }
+        - in: header
+          name: X-Gitea-Signature
+          required: true
+          schema: { type: string }
+          description: Hex HMAC-SHA256 of the raw request body under the hook's secret.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Gitea's push event payload.
+      responses:
+        '200':
+          description: Recorded (`recorded` names the gateway and the commit) or ignored (`ignored` says why).
+        '401':
+          description: The signature is missing or does not verify.
+        '503':
+          description: GITEA_WEBHOOK_SECRET is not configured; nothing is accepted.
+  /functions/v1/forge-membership:
+    post:
+      tags: [Edge Functions]
+      summary: Place the caller in the forge team their role warrants (the forge listener's ext_authz step)
+      description: |
+        Called by the gateway's `forge` listener on every non-static request through the forge's door,
+        carrying the verified access token (migration 0094). Resolves the caller's role from
+        `user_roles` and ensures they are in exactly the team of the `gateways` organisation that role
+        maps to -- `administrators` or `managers` -- through the machine account that owns it. A role
+        that has been removed since the token was signed is refused and taken out of both teams on the
+        same request, which is the revocation the listener's own token check cannot give.
+
+        **Acts only on the caller.** The identity is the token's subject and never a parameter; calling
+        it directly places nobody but yourself, in the team you already warrant. Any method is accepted:
+        the listener forwards the original request's method.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The caller holds an admitted role and is in its team, or is not yet registered in the forge (the first request through the door).
+        '302':
+          description: The token verified but GoTrue no longer holds its session (a sign-out, a timebox). `Location` is the door's `/oauth2/signout`, which clears the cookies and starts a fresh login.
+        '401':
+          description: No bearer token at all.
+        '403':
+          description: The caller's role does not open the forge. Any team membership they held has been removed.
+        '502':
+          description: The forge could not be reached or refused the placement. The listener lets the request through.
+        '503':
+          description: This deployment has no forge configured, or the role lookup failed. The listener lets the request through.
+  /functions/v1/forge-signout:
+    get:
+      tags: [Edge Functions]
+      summary: Gitea's own sign-out link, routed here by the forge listener; ends every session the caller holds
+      description: |
+        The forge listener routes Gitea's `GET /user/logout` here. Under reverse-proxy
+        authentication Gitea's own sign-out is a no-op -- the next request carries the identity header
+        again -- and the forge has no session of its own, so its sign-out is the platform's: every
+        GoTrue session the caller holds is revoked (`scope=global`, the dashboard's included), and the
+        browser is sent to the door's `/oauth2/signout`, which clears the door's cookies and lands on a
+        fresh login that now meets a dashboard with no session.
+
+        The token is the one the listener verified and forwarded. Called directly with a bearer it does
+        the same thing for that bearer's user; with no bearer it only redirects.
+      security:
+        - bearerAuth: []
+      responses:
+        '302':
+          description: Always. `Location` is the door's `/oauth2/signout`. The caller's sessions have been revoked if a usable token was presented.
   /functions/v1/grafana-userinfo:
     get:
       tags: [Edge Functions]

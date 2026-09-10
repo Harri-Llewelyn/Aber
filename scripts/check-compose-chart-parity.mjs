@@ -97,7 +97,7 @@ const SHAPED_DIFFERENTLY = {
 
 /** Chart components with no Compose service. */
 const CHART_ONLY = {
-  'supabase-kong': 'Compose migrated to Envoy; the chart still deploys Kong by default until its Envoy templates are fully verified. This entry retires with that migration',
+  'supabase-kong': 'both targets run Envoy; the chart keeps its Kong template off (supabaseKong.enabled=false) as the revert path, so the component exists in the chart and nowhere on Compose',
   'backup': 'the chart\'s tier-1 backup CronJob. Compose does the same job with scripts/backup-databases.sh on the host, which is a script rather than a service',
   'e2e-validate': 'a Helm test Job wrapping validate.py. On Compose CI runs the script directly, so there is nothing to declare as a service',
   'e2e-aas-export': 'a Helm test Job, for the same reason as e2e-validate',
@@ -112,7 +112,7 @@ const CHART_ONLY = {
  */
 const KNOWN_GAPS = {
   'cold-archiver': 'cold telemetry archival ships on Compose only. The chart applies cold_archive.sql so the manifest exists and db-init succeeds, but no workload exports or drops -- the catalogue is permanently empty on Kubernetes. See supabase/README.md "Cold telemetry archival"',
-  'loki': 'the log store ships on Compose only, by the same decision that gives the chart no Prometheus: Compose owns its whole observability stack, a cluster is assumed to have one already, and a second store would duplicate every line and give an operator two places to configure retention. The chart provisions the DATASOURCE either way, pointed at `grafana.lokiUrl`. See docs/roadmap.md 13',
+  'loki': 'the log store ships on Compose only, by the same decision that gives the chart no Prometheus: Compose owns its whole observability stack, a cluster is assumed to have one already, and a second store would duplicate every line and give an operator two places to configure retention. The chart provisions the DATASOURCE either way, pointed at `grafana.lokiUrl`. See the divergence table in deploy/k8s/README.md',
   'alloy': 'the log collector, absent for the same reason as loki. On Kubernetes the equivalent is a DaemonSet reading /var/log/pods, which the cluster log stack already runs -- and which needs no socket proxy, because the kubelet supplies the pod and container labels this has to ask Docker for',
   'docker-socket-proxy': 'exists only to narrow the Docker API for alloy, so it is absent wherever alloy is. It has no Kubernetes analogue at all: there is no Docker socket to front, and pod metadata comes from the kubelet rather than from a container runtime API'
 };

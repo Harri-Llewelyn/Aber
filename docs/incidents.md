@@ -102,3 +102,202 @@ definition of each function, and reports which file it read.
 **The general lesson:** *a guard that reports agreement it did not check is worse than no guard.*
 It is also why the fix was verified by retuning each side in turn and confirming the check fails in
 both directions, rather than by observing that it still passes.
+
+---
+
+## The pgsodium root key lived in the container, not the volume
+
+**Where the fix lives:** `docker-compose.yml`, the `supabase_db_config` volume on `supabase-db`.
+**Symptom:** after `docker compose down` and `up`, migration `0006` failed with
+`pgsodium_crypto_aead_det_decrypt_by_id: invalid ciphertext` and `supabase-db-init` exited 3.
+
+`pgsodium_getkey.sh` in the `supabase/postgres` image reads `/etc/postgresql-custom/pgsodium_root.key`
+and **generates a fresh one when the file is absent**. Without a volume at that path the key was
+part of the container filesystem while the ciphertext it protects was in `supabase_db_data`, so
+`down`/`up` minted a new key and every `vault.secrets` row became undecryptable. `restart` and
+`stop`/`start` keep the container, which is why it sat unnoticed. The same directory carries
+image-owned config that shadows the image's copies, so a `supabase/postgres` tag bump needs
+`docker volume rm <project>_supabase_db_config`.
+
+---
+
+## A healthcheck on the unix socket reported healthy mid-bootstrap
+
+**Where the fix lives:** `docker-compose.yml`, the `supabase-db` healthcheck (`-h 127.0.0.1`).
+**Symptom:** `supabase-db-roles-init` failed with "cannot authenticate as supabase_admin" on a stack
+where nothing was misconfigured.
+
+The postgres entrypoint runs initdb against a temporary server that listens on the unix socket
+only. A socket-only `pg_isready` therefore passes in the middle of the image's own bootstrap, before
+`supabase_admin` exists, and the dependent one-shot connects as a role that is not there yet. Its
+error message blames a `POSTGRES_PASSWORD` mismatch, because that is the fault people usually hit.
+`pg_isready -h 127.0.0.1` is false for exactly that window.
+
+---
+
+## `sh -c "a; b; echo done"` reported success having done nothing
+
+**Where the fix lives:** `docker-compose.yml`, the exec-form `entrypoint` with `-e` on
+`supabase-db-roles-init`.
+**Symptom:** the roles-init service printed "passwords set successfully", `service_completed_successfully`
+was satisfied, and GoTrue crash-looped two services away on
+`password authentication failed for user "supabase_auth_admin"`.
+
+A folded string entrypoint has no error handling: every failing `psql` is skipped and the exit status
+is the final `echo`'s. Exec form with `-e` makes a failed statement fail the service.
+
+---
+
+## The storage ceiling was below the largest bucket
+
+**Where the fix lives:** `docker-compose.yml` (`FILE_SIZE_LIMIT`) and `values.yaml`
+(`supabaseStorage.fileSizeLimit`).
+**Symptom:** `broker-captures` was never created on a default stack; capture and playback failed
+later at an upload against a bucket that did not exist.
+
+storage-api refuses `POST /bucket` with `EntityTooLarge` when a bucket's own `file_size_limit`
+exceeds the global `FILE_SIZE_LIMIT`. The ceiling was 50 MiB while the capture bucket asks for
+100 MiB. On Kubernetes the same mismatch failed the whole `helm install` on `BackoffLimitExceeded`.
+The global ceiling and the per-bucket limits are now separate values.
+
+---
+
+## The socket proxy refused `GET /networks` and the collector collected nothing
+
+**Where the fix lives:** `docker-compose.yml`, `NETWORKS: 1` on `docker-socket-proxy`.
+**Symptom:** Alloy logged "Unable to refresh target groups" and shipped no logs at all, while
+`alloy validate`, `docker compose config` and `loki -verify-config` all passed.
+
+`discovery.docker` computes network labels for every target, so it calls `GET /networks`
+immediately after `GET /containers/json`. With that path group refused the discovery failed
+wholesale rather than degrading. No static check can know what an allowlist will refuse at run time.
+
+
+---
+
+## Ingestion started before the historian and nothing retried
+
+**Where the fix lives:** `ingestion/ingestion.py`, `start_startup_healer()` and the startup connect in `main()`.
+**Symptom:** `Historian Unreachable From Ingestion` firing for hours on a quiet stack whose historian was reachable throughout; every later broker capture refused with nothing to point at.
+
+`depends_on` orders `docker compose up` and nothing else. When the Docker daemon brings `restart: always`
+containers back after a host reboot it starts them in its own order, and on this stack ingestion started
+453 ms before timescaledb and met a refused connection. Two startup steps depended on a database being up and
+neither retried: the historian connection (only a write set `_ts_conn`, and on a stack with nothing publishing
+there is no first write, so `acs_ingestion_db_connected` read 0 for ever) and `capture_worker.reconcile()`
+(a job left at RECORDING kept matching the single-flight index). The healer thread retries both, with their
+different dependencies, and stays resident so the gauge answers "can this daemon reach the historian" rather
+than "has a write succeeded since boot". The startup connection is also kept rather than closed after the
+privilege check, for the same gauge.
+
+---
+
+## paho 1.6.1 discards the broker's DISCONNECT reason
+
+**Where the fix lives:** `ingestion/ingestion.py`, `on_disconnect()`.
+**Symptom:** an involuntary disconnect logged as `MQTT_ERR_CONN_LOST` (7) even when mosquitto sent a reason.
+
+MQTT 5 lets the broker state a reason in its DISCONNECT, and mosquitto does: a session takeover arrives as
+142 `Session taken over`. paho 1.6.1 receives that packet and discards the reason, because
+`_handle_disconnect()` only decodes one when `remaining_length > 2`, and mosquitto's carries a reason code
+with zero-length properties. Its protocol log shows `Received DISCONNECT None None`, and the callback is then
+reached with paho's own `MQTT_ERR_CONN_LOST`. The branch that renders a `ReasonCodes` is kept for a newer paho
+or a broker that sends properties; the log line does not claim more than the pinned library delivers. The
+daemon is on MQTT 5 because the platform is, and it gains nothing measurable from it today.
+
+---
+
+## CI waited for a message count on a stack with no publisher
+
+**Where the fix lives:** `ingestion/ingestion.py`, `_mqtt_subscribed` and `acs_ingestion_mqtt_connected`; `scripts/wait-for-ingestion-consuming.sh`.
+**Symptom:** the Compose job deadlocked for 180 seconds with `acs_ingestion_up=1` and zero messages.
+
+The gate that waited for the ingestion daemon to be consuming polled `sum(acs_ingestion_messages_total) > 0`,
+on the reasoning that the simulators publish continuously. The simulator became opt-in, so on a stack with no
+publisher the count was unreachable and the wait ran out. The daemon was subscribed the whole time and nothing
+could say so: "the process is running" and "the daemon is receiving Sparkplug messages" are different states.
+The gauge is set after `subscribe()` returns, not after `connect()`, because a connected client that has not
+subscribed receives nothing.
+
+---
+
+## The validator's default password matched the demo credential
+
+**Where the fix lives:** `ingestion/validate.py` (refuses to start without `MQTT_VALIDATOR_USER` / `MQTT_VALIDATOR_PASSWORD`); the e2e job's `. ./.env`.
+**Symptom:** a developer running a plain `npm run setup` got nine validate.py failures about telemetry, aliases and rebirth that named nothing relevant, while CI stayed green.
+
+validate.py defaulted its broker password to the literal `acscymru123`. CI runs `setup.mjs --demo`, which
+copies `.env.example` verbatim, and `.env.example` set `MQTT_VALIDATOR_PASSWORD` to exactly that string, so the
+default matched the account by coincidence. A real setup mints a random password per principal, and the broker
+rejected the validator. The script now reads the two variables and refuses to start without them, which makes
+sourcing `.env` in the job load-bearing. In one narrow sense the suite is weaker in CI than locally: the
+published demo credentials can never diverge from the account.
+
+---
+
+## Large integers rendered in scientific notation
+
+**Where the fix lives:** every chart template that quotes a numeric value uses `| int64 | quote`; `ci.yml` asserts no rendered env value matches `e+`.
+**Symptom:** storage-api rejected every upload over five bytes; storage-init created the model bucket with a five-byte limit; the AAS exporter treated its 32 MiB bundling cap as three bytes and fell back to a URL reference for every model, producing an `.aasx` that still validated.
+
+Helm parses a bare large integer in values.yaml as a float, so `{{ .Values.x | quote }}` emits
+`"5.24288e+07"` for 52428800. Every consumer reads its environment with `parseInt`, which stops at the `.`,
+so the value arrived as 5. Compose was never affected because it reads these from `.env` as strings. The
+assertion is on the outcome, so the next value added cannot reintroduce it.
+
+---
+
+## fsGroup restated in the checker rather than measured
+
+**Where the fix lives:** `ci.yml`, the fsGroup step, and `values.yaml`'s `podSecurityContext` values.
+**Symptom:** none yet; both databases said uid 999, which belongs to neither image.
+
+The check and the values file both said 999 for `timescaledb` and `supabase-db`, with a note telling the next
+person to confirm against the pinned tag. Nobody did. `timescale/timescaledb` is Alpine with `postgres` at
+70; `supabase/postgres` 17.6.1.160 is Alpine with `postgres` at 100:101 (at 15.x it was Ubuntu, 105:106, so
+the PG17 bump changed the base distribution). It never surfaced because both entrypoints run as root and
+chown the data directory before dropping privileges, so fsGroup is decorative for them until anyone sets
+`runAsUser`. A restated constant in a checker is not a check.
+
+---
+
+## k3d image import reported success it did not achieve
+
+**Where the fix lives:** `ci.yml`, `verify_images_in_node()` in the k8s-validation job.
+**Symptom:** `helm install` timing out seventeen minutes later with `ErrImagePull` and a 403 from GHCR for images that have never been published there.
+
+`k3d image import` writes a tarball into the cluster image volume and `ctr import`s it inside the node. When
+the node cannot see the tarball the import fails per node, and k3d prints the error, then "Successfully
+imported 8 image(s)", then exits 0. The next lines removed the host copies on the strength of that exit code,
+so the only surviving copy was destroyed. Seen on `main` at fc3ac34 on a tree byte-identical to one that had
+passed ten minutes earlier; the tell was duration (eight seconds and one gigabyte instead of minutes and ten).
+The node's own image list is the check, not the exit code.
+
+---
+
+## A replayed narrowing is a retraction
+
+**Where the fix lives:** `supabase/migrations/0088_*.sql` and `0090_*.sql`, the guarded `DROP CONSTRAINT` / `ADD CONSTRAINT` blocks on `change_proposals_entity_type_known`.
+**Symptom:** `check constraint "change_proposals_entity_type_known" ... is violated by some row`, stopping the boot at 0088 on any database that had reached 0090 and held a `cells` proposal.
+
+0088 narrowed the constraint to three lanes with DROP-then-ADD, which is idempotent against its own replay and
+not against a later migration's: 0090 widens the same constraint, every file replays on every boot, and
+0088's definition was re-applied against a row 0090 legitimately admits. The rule: a migration may widen a
+domain on replay freely and may narrow one only until something later widens it again. Both files now guard
+on the lane they exist to admit rather than on the definition, and refuse to install a definition that would
+retract a row already in the table, because `ALTER TABLE` autocommits per statement and the failed boot had
+left the DROP applied and no constraint on the table at all. A fresh boot and `npm run test:db` both pass on
+this; the fault needs a row of the newer lane to exist.
+
+---
+
+## Self-checks must not count totals
+
+**Where the fix lives:** `supabase/migrations/0069_*.sql` (the self-check asserts the withdrawal, not a count); `0093_*.sql` (exercises the guard instead of counting).
+**Symptom:** the chain aborting at 0069 on the second boot after 0086 shipped, so no migration above 0069 could apply while the stack kept running on the schema it had.
+
+0069's self-check asserted Administrator held exactly 13 permissions and Shopfloor_Manager 10. 0086 granted
+`proposal:create` to three roles. On the boot where 0086 first ran, 0069 counted 13 and passed; on every boot
+after, it counted 14 and aborted. `npm run test:db` builds a database from nothing, so 0069 always runs before
+0086 grants and always counts 13; only a second boot reproduces it, which is why it shipped green. A self-check
+asserts the claim its migration makes, which stays true whatever is granted later.
