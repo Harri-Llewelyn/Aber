@@ -1091,6 +1091,25 @@ role no backup authority at all, and giving it the proposal is the whole point o
 and the receipt: the pull request comes back as a link in the drawer rather than only a toast,
 because the useful fact is that it is *not deployed yet*, and that is what somebody returns to check.
 
+**REVERSED 2026-09-10: THE PROPOSAL LANE IS TO BE RETIRED, AND THE ENDPOINT WITH IT.** The lane
+existed so that a person with no forge login could still get a flow in front of a reviewer. The
+section below on signing in gives the two roles that actually author flows a login of their own, and
+a pull request opened in the forge under the author's name is a better record than a machine-account
+commit with the name in the body. **The Operator gate is given up knowingly**, not forgotten: flow
+authors on a plant are engineers, and a review whose proposals come from managers and whose merges
+need an administrator is still two privileges rather than one. `propose-gateway-flow` and its suite
+are deleted rather than left — a role-gated write path with no caller is a door nobody watches —
+and [`FlowProposalPanel`](../frontend/src/components/common/FlowProposalPanel.jsx) becomes a link to
+the gateway's repository, gated to the same two roles the forge admits. **What must move with the
+lane is the refusal of `flows_cred.json` by shape**, which the endpoint performed before anything
+was committed and which a file uploaded through the forge's own UI now meets nowhere until
+`flow-sync.mjs` refuses the re-ided broker node on the appliance, which is late. It becomes a
+required status check on every gateway repository, run by Gitea Actions — the same mechanism the
+platform-playbook decision below already requires, so it is one runner doing two jobs rather than a
+second control. Until that runner exists the puller's refusal is the only check, and this section
+says so rather than pretending otherwise. The host-run refusal stands unchanged and for the same
+reason: there is no repository to link to.
+
 **A HOST-RUN GATEWAY IS REFUSED, AND NOT BECAUSE OF A PERMISSION.** Its connector runs in the
 platform's own Node-RED, an instance that can carry several host gateways at once, so `flows.json`
 there is the whole instance rather than one gateway's — approving a proposal "for" one would replace
@@ -1120,6 +1139,17 @@ revision marked, and the gateway's own reported flow hash beside the committed h
 stated as a fact the appliance sent rather than as something the centre inferred. A revert control,
 and an approve control gated on `gitops:manage` rather than on the approver role the records lanes
 use.
+
+**AMENDED 2026-09-10: THE LANE IS A LINK AND A DRIFT FACT, NOT A REVIEW SURFACE.** With logins in the
+forge for the two roles that review, the pull requests, the history, the approve control and the
+revert live there under the person's own name, and rendering them a second time on the dashboard is
+a second place for the same state to be read wrongly. What the lane shows per gateway is what only
+the platform knows: the link to its repository, the tracked branch, the committed head, and the
+gateway's own reported flow hash beside it — drift, stated as a fact the appliance sent. The
+constraint that the lane must not become an editor is then met by construction. **The rule that a
+revert is a new commit and never a force-push moves into the forge as branch protection on `main`**,
+and `flow-sync.mjs` already refuses a rewritten history from the other side, so it is enforced at
+both ends rather than as a convention.
 
 **A revert must be a new commit and never a force-push.** A force-push rewrites history a gateway may
 already have pulled, and the sidecar cannot distinguish that from a legitimate advance — it would
@@ -1293,70 +1323,87 @@ platform convergence become Ansible's; what does not move is everything below `d
 shape checks, the credential assertion and the reload semantics are Node-RED knowledge a playbook
 would have to call out to anyway, which is why `--once` exists.
 
-### Signing in to the forge does not work the way Grafana and Node-RED do, and HS256 is one of three reasons
+### Signing in to the forge — DECIDED 2026-09-10: Envoy fronts it the way it fronts Studio, and OIDC is not attempted
 
-**MEASURED AGAINST THE RUNNING FORGE rather than reasoned about, because the shape of the answer is
-counter-intuitive: this stack already federates two other services and neither mechanism transfers.**
-Gitea's only general-purpose authentication source is `openidConnect`, configured entirely from an
-auto-discovery URL — its custom authorize and token URL flags are, in its own help text, an "option
-for GitLab/GitHub". There is no hand-configured generic OAuth2 source, and a hand-configured generic
-OAuth2 client is precisely what `grafana.ini`'s `[auth.generic_oauth]` and `node-red-init.mjs`'s
-`passport-oauth2` are. **Those two work BECAUSE they never perform discovery and never ask for an ID
-token**, which is a property of how they were configured rather than a property of GoTrue.
+**WHO HOLDS A LOGIN IS DECIDED: Administrator and Shopfloor_Manager, and nobody else.** Operator and
+Auditor never reach the forge. The dashboard shows each physical gateway a link to its repository,
+and everything a person does to a flow — reading a diff, opening a pull request, approving one —
+happens in the forge under their own name. That reverses the proposal lane above, and it is the
+better trail: a pull request opened by the engineer who wrote the flow is a stronger record than a
+machine-account commit with the proposer's name in the body.
 
-**Wall one is the discovery document, and it fails silently in the worst direction.** GoTrue answers
-`/auth/v1/.well-known/openid-configuration` with an empty `issuer` and RELATIVE endpoint paths:
+**THE THREE WALLS ARE STILL THERE, AND THIS ROUTES AROUND THEM RATHER THAN THROUGH.** They were
+measured against the running forge and the record stands, condensed: Gitea's only general-purpose
+authentication source is `openidConnect`, configured entirely from a discovery URL. GoTrue's
+discovery document at `/auth/v1/.well-known/openid-configuration` carries an empty `issuer` and
+RELATIVE endpoint paths, so Gitea resolves `/oauth/authorize` against its own base and sends the
+browser to a 404 on itself. Its request carries `scope=openid`, which GoTrue refuses with
+`HS256 is not supported for ID token signing` — the refusal `node-red-init.mjs` records under a
+comment that says not to "fix" a login by adding it back. And whether Gitea's provider sends the
+`code_challenge` GoTrue requires is unmeasured behind the first two. **Moving off HS256 is necessary
+and not sufficient**: asymmetric signing does not repair a relative URL, and every component in this
+stack — the gateway, PostgREST, Realtime, the pre-minted key pair — verifies with the shared secret.
+Taking that on would be an item of its own, and this design does not need it.
 
-```json
-{ "issuer": "", "authorization_endpoint": "/oauth/authorize", "token_endpoint": "/oauth/token" }
-```
+**THE STACK ALREADY HAS A SERVICE THAT CANNOT SPEAK TO GoTrue AS AN OIDC CLIENT AND SITS BEHIND A
+LOGIN ANYWAY, AND IT IS STUDIO.** The `studio` listener in
+[`supabase/envoy.yaml`](../supabase/envoy.yaml) is three filters: `envoy.filters.http.oauth2` logs
+the browser into GoTrue with PKCE and never performs discovery or asks for an ID token; `jwt_authn`
+verifies the resulting access token as HS256 against the shared secret, locally; an `rbac` filter
+allows only `app_metadata.role == Administrator`. **The forge gets the same listener with the RBAC
+widened to Shopfloor_Manager**, and identity enters Gitea through its reverse-proxy authentication —
+`ENABLE_REVERSE_PROXY_AUTHENTICATION` with `ENABLE_REVERSE_PROXY_AUTO_REGISTRATION`, the user and
+email carried in headers Envoy sets from the verified token and strips from anything a client sent.
+Gitea never speaks OIDC. **Nothing in GoTrue, the JWT secret, `grafana.ini` or `node-red-init.mjs`
+changes**, which is the whole reason this is the shape rather than the one the previous version of
+this section costed.
 
-An auth source added against it is accepted without complaint — nothing is validated at
-configuration time — and the first login answers `307` to
-`http://<forge>/oauth/authorize?...&scope=openid`. **Gitea resolved the relative path against its
-own base and sent the browser to itself**, where it is a 404 on the forge. This is the failure
-[`node-red/Dockerfile`](../node-red/Dockerfile) predicted in prose when it chose `passport-oauth2`
-over `passport-openidconnect`; it is now demonstrated.
+**What it costs, and each cost is either the Studio listener's again or Gitea's own.**
 
-**Wall two is the ID token, and it is the HS256 half of the question.** Gitea's request above carries
-`scope=openid`, which is not optional for an OIDC source — and requesting it is the exact thing
-`node-red-init.mjs` records GoTrue refusing, with `HS256 is not supported for ID token signing`, under
-a comment that says not to "fix" a login problem by adding it back. The whole stack is HS256 on
-`SUPABASE_JWT_SECRET`: the gateway, PostgREST, Realtime and the pre-minted key pair all depend on it.
+* **The role comes from the token.** A revoked role lingers until the access token expires, bounded by
+  `GOTRUE_JWT_EXP`; the Studio listener records the same and caps the refresh-token lifetime for the
+  same reason. The forge inherits both settings rather than re-deciding them.
+* **Gitea's own permission model decides what a logged-in person may DO, and an auto-registered user
+  may do nothing.** They own nothing, and every gateway repository is private and owned by the machine
+  account, so the first login is a forge with no repositories in it. The forge needs an
+  **organisation** that owns the gateway repositories — which moves `enroll-gateway`'s creation call
+  from the machine account's own namespace to the organisation's, with the machine account holding
+  only the authority to create repositories there — and a **team with write** on them that every
+  auto-registered login is placed in. **`main` is protected, with approval required from an
+  administrators team.** That is where `gitops:manage` being Administrator-only, as `0069` decided,
+  is enforced inside the forge: a manager may open and review, and only an administrator's approval
+  lets a merge through. **Ensuring membership on first login is the one piece of genuine work here**,
+  and it is the entry under *Worth deciding early*.
+* **Envoy must be the only door.** Gitea's HTTP port is published directly today; it moves behind the
+  listener, Gitea's local password login is disabled, and the administrator `gitea-init.sh` creates
+  stays what that script says it is — for a human, rarely, and through the same door. The argument is
+  the one the script already makes for `INSTALL_LOCK`: a forge on a plant network is otherwise one
+  HTTP request away from anybody. **SSH on 2222 is unaffected**: deploy keys are a different
+  principal and nothing above touches them.
+* **A fourth OAuth client**, seeded through `auth.oauth_clients` the way `0081` seeded Studio's, with
+  the forge's own redirect URI — the forge is a different hostname from Studio, so it is a second
+  listener and a second client, not a second route on the first.
 
-**Wall three is unmeasured and should not be assumed away.** GoTrue's OAuth server REQUIRES PKCE —
-`node-red-init.mjs` sets `pkce: true` for that reason — and whether Gitea's provider sends a
-`code_challenge` is only reachable after the first two walls are cleared. It is a question to answer
-before anything is built on the assumption that they are the only two.
+**FOUR THINGS TO MEASURE BEFORE ANY OF IT IS BELIEVED**, because each is the kind of detail that has
+been wrong on first reading everywhere else in this item: the exact header names Gitea reads for the
+reverse-proxy user and email, and that Envoy strips them inbound; that auto-registration accepts an
+email as the username and does not send the new user to a "complete your profile" page the proxy
+cannot see past; that the `oauth2` filter's cookies are scoped to the forge's hostname and not
+shared with Studio's; and that `REQUIRE_SIGNIN_VIEW` still exempts `/assets/`, which
+`enroll-gateway` reads the host key from with no session.
 
-**SO MOVING OFF HS256 IS NECESSARY AND NOT SUFFICIENT, which is the thing to be exact about.**
-Asymmetric signing does not repair a relative URL, and the discovery document is a separate defect
-with a separate fix. The document already advertises `RS256` and `ES256`, so the algorithm is a
-configuration question rather than a Supabase limitation — but it is not a small change, because
-every component in this stack verifies with the shared secret and the pre-minted `anon` and
-`service_role` JWTs are signed with it. **§1 owns the key FORMAT migration and explicitly not this
-one**: opaque publishable and secret keys are not JWTs and no component downstream ever sees one,
-which is why that item could be built as a gateway feature. Signing is the opposite shape. If it is
-ever taken on it earns an item of its own rather than a paragraph in either.
+**NONE OF THIS RELAXES THE RULE THAT AUTHORISATION STAYS IN POSTGRES.** `user_roles` and `has_role()`
+decide who is let through the door; Gitea's teams decide what they may do inside it, and the two
+must agree by construction — the team a login is placed in is a function of the role the listener
+verified, never of anything the person chose. No group claim from any provider grants
+`gitops:manage`. The forge is still reached by the platform through one machine account, and no
+shopfloor person holds a login; what changed is that two roles now do, and the *identity store*
+paragraph under *Worth deciding early* is amended to say so.
 
-**§2 IS THE CHEAPER PATH AND IT SIDESTEPS ALL THREE WALLS.** Entra ID is a real OIDC provider with a
-valid discovery document and genuine ID tokens, so the forge can federate to it DIRECTLY rather than
-through GoTrue — no shim, no signing change, and nothing owed by this repository. What it costs is a
-second client registration and a forge login that depends on the tenant being reachable, which is
-exactly the property §2's own *"the tenant URL is the boundary, and it fails open"* is about; a forge
-that cannot be signed into during an outage is a milder failure than a dashboard that cannot, but it
-is the same failure.
-
-**NONE OF THIS RELAXES THE RULE ABOVE.** Whichever provider authenticates, **authorisation stays in
-Postgres**: `user_roles` and `has_role()` decide, the forge is still reached through one machine
-account, and a group claim arriving from an IdP must never become the thing that grants
-`gitops:manage`. SSO would change who holds a *login*, not who holds a *permission*.
-
-**AND THE HONEST ANSWER MAY BE THAT ALMOST NOBODY NEEDS ONE.** §6 puts the queue, the review and the
-approve control on the dashboard, which people already sign into; the forge UI is for the engineer
-reading a diff that the lane did not render, which is a smaller audience than "everyone who touches a
-flow". One local administrator plus the machine account is the position to hold until somebody is
-actually blocked by it.
+**§2 remains the alternative and is not withdrawn.** Entra ID is a real OIDC provider and the forge
+could federate to it directly; what that costs is a forge login that depends on the tenant being
+reachable, which the Envoy shape does not. If §2 lands first, the choice is re-opened then, on the
+evidence of both.
 
 ### What this must not touch
 
@@ -1382,6 +1429,13 @@ easier to violate rather than harder. §6 puts the queue in Postgres and reaches
 no `Operator` holds a login, and the forge never learns what `gitops:manage` means. Per-gateway
 **read-only** deploy keys are the only other principal it needs.
 
+**AMENDED 2026-09-10.** Two roles now hold logins — Administrator and Shopfloor_Manager, through the
+Envoy listener described above — and the sentence that matters survives intact: no `Operator` or
+`Auditor` holds one, no shopfloor person is a Gitea user, and the platform still reaches the forge
+through one machine account. The forge learns nothing about `gitops:manage`; it learns which team a
+verified role lands in, which is the same fact spelt in its own vocabulary.
+
+
 **Two costs that arrive with it and are not otherwise recorded.** Gitea is a durable store with
 state, so it lands inside §4's backup scope before §4 is built — and it would be the second store in
 the repository with no retention answer, which is §12's complaint arriving a second time. Neither is
@@ -1395,6 +1449,37 @@ what makes a per-appliance read-only key mean anything: a single flows repositor
 appliance's key read every other gateway's `flows.json`, and a `flows.json` is the plant's edge
 topology, broker addresses and device ids. The fleet-wide diff a shared repository would have given is
 the thing given up, and the approvals page is where that view belongs anyway.
+
+**AMENDED 2026-09-10: that repository also carries the gateway's CUSTOM playbook, and it does NOT
+carry the platform one.** §8 splits the two on trust: the platform playbook is one repository the
+whole fleet converges to, tagged, and written only by the platform; the custom playbook is the
+plant's own. Putting flows and the custom playbook in the per-gateway repository is a collapse worth
+making — one deploy key, one review gate, one link on the gateway. Putting the platform playbook there
+would give every gateway its own copy of the OS baseline, which is the drift the tag exists to
+prevent.
+
+**DECIDED: THE BROKER CREDENTIAL DOES NOT BECOME A REPOSITORY SECRET.** The suggestion is natural —
+one repository per gateway, so a secret on it is scoped to one appliance — and the scoping is right;
+the mechanism is not. Gitea's repository secrets are **Actions** secrets: write-only through the UI
+and the API, never readable back, and exposed only inside a workflow run on a runner. An appliance
+cloning with a read-only deploy key cannot fetch one, and neither can `ansible-pull`. The only way
+such a secret reaches a gateway is a workflow that pushes it there, which is the push shape this item
+and §8 refuse, and it would make the runner — the host §8 says is compromised by whatever it builds —
+the holder of every gateway's broker password. Today the credential is minted at enrolment, delivered
+once on the enrolment response, and held in plaintext nowhere central. That is the stronger position
+and it stays. Where a repository secret does fit is a per-repository CI token, such as the one that
+pushes a built adapter image to the registry.
+
+**HOW A FIRST LOGIN IS PLACED IN A TEAM.** Reverse-proxy auto-registration creates the Gitea user and
+stops; nothing native adds them to an organisation. Three candidates, in the order worth trying: an
+`ext_authz` call from the forge listener to an edge function in the pattern of `nodered-userinfo`,
+which resolves the role from `user_roles` and ensures membership through the machine account on the
+way past — one request per login, and the role decision is made by the same code that makes it for
+Node-RED; a reconciler on a timer that reads `user_roles` and converges the two teams, which is
+simpler and lags; or Gitea's own LDAP-style group synchronisation, which needs a directory this stack
+does not have. Whichever is chosen must also REMOVE: a login whose role has gone must leave the team,
+or the forge keeps a permission Postgres revoked.
+
 
 **DECIDED: THE PLATFORM PLAYBOOK IS ONE REPOSITORY THE WHOLE FLEET READS, AND GATEWAYS TRACK A TAG
 RATHER THAN `main`.** `main` is protected, a Gitea Actions run validates a commit before it may
@@ -1911,6 +1996,15 @@ constraint, so **adding a `source_repository` tag costs nothing and needs no mig
 `EntityLinksModal` already renders per-entity links with role gating and already writes through
 `/api/v1/documents`, whose writes are already audited. A "Manage Source & Docs" modal is largely that
 modal with one more tag in `TAG_LABELS`.
+
+**AMENDED 2026-09-10: neither a tag nor a column — the pointer is DERIVED, and the link is a
+configuration value.** The repository name is `gateway-<sparkplug_id>` by construction, which §7
+chose so that the name cannot disagree with the gateway it belongs to, and the forge's public URL is
+one deployment setting. The dashboard's link is those two joined, costs no migration and no row, and
+has nothing to drift. A tag on the links store would be a second copy of a derivable fact, which is
+the objection this section made against a column. If a gateway ever needs re-pointing at a repository
+that is not its own, that is the day a column is earned, and not before.
+
 
 **`target_branch` is the part that genuinely does not fit**, and it is worth separating rather than
 bundling. A branch is not a URL and has no home in a labelled-link table — so either it rides inside
