@@ -1145,7 +1145,10 @@ services:
 
         # GITEA_ROOT_URL carries a trailing slash because Gitea wants one; the redirect_uri must
         # not, or `<url>//oauth2/callback` fails as `invalid redirect_uri` at the END of a login.
-        GITEA_PUBLIC_URL="$${GITEA_PUBLIC_URL%/}"
+        # Trailing slash off, WITHOUT the shell's brace-expansion form: check-env-drift reads the
+        # variable name inside that form as a Compose variable with no default, and Compose itself
+        # refuses a dollar-brace it cannot close. printf and sed say the same thing in plain text.
+        GITEA_PUBLIC_URL="$$(printf '%s' "$$GITEA_PUBLIC_URL" | sed 's:/*$$::')"
 
         # `|` as the delimiter, because every value here contains `/`.
         sed -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \

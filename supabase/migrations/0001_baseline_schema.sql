@@ -6122,45 +6122,15 @@ COMMENT ON VIEW public.gateway_health IS 'The fleet''s current condition, one ro
 -- gateway_status :: VIEW
 --
 
-CREATE OR REPLACE VIEW public.gateway_status WITH (security_invoker='true') AS
- SELECT id,
-    name,
-    cell_id,
-    access_url,
-    status,
-    created_at,
-    is_archived,
-    archived_at,
-    auto_delete_at,
-    last_heartbeat,
-    is_virtual,
-    sparkplug_id,
-    location_scope,
-    sparkplug_group,
-    description,
-    enrolled_at,
-    agent_version,
-    health_reported_at,
-    uptime_seconds,
-    load_1m,
-    mem_available_bytes,
-    disk_free_bytes,
-    cert_expires_at,
-    flow_hash,
-    credential_revoked_at,
-    is_simulated,
-    is_shadow,
-    deployment,
-        CASE
-            WHEN (status = ANY (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text])) THEN status
-            WHEN (status = 'OFFLINE'::text) THEN 'OFFLINE'::text
-            WHEN (last_heartbeat IS NULL) THEN status
-            WHEN ((now() - last_heartbeat) > '00:01:30'::interval) THEN 'STALE'::text
-            ELSE status
-        END AS live_status,
-    ((last_heartbeat IS NOT NULL) AND ((now() - last_heartbeat) > '00:01:30'::interval)) AS is_stale,
-    (EXTRACT(epoch FROM (now() - last_heartbeat)))::bigint AS heartbeat_age_seconds
-   FROM public.gateways g;
+-- THE VIEW IS BUILT BY ITS FUNCTION, NOT BY THE DUMPED STATEMENT THAT USED TO STAND HERE. pg_dump
+-- writes a view's column list out explicitly, and CREATE OR REPLACE VIEW cannot narrow a view: once
+-- a later migration adds a gateways column and rebuilds this view through
+-- ensure_gateway_status_view() (g.* now five columns wider), the explicit list here has FEWER
+-- columns than the live view and every subsequent boot fails in this file with
+-- "cannot drop columns from view". Found by 0095, the first migration since the squash to add a
+-- gateways column. The function drops and recreates, which is the only shape that survives both a
+-- fresh database and a replay.
+SELECT public.ensure_gateway_status_view();
 
 
 
