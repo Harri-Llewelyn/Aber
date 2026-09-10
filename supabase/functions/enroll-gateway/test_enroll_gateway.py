@@ -24,6 +24,7 @@ Requires the stack up, and the service-role key (to mint tokens the way the dash
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -568,6 +569,84 @@ class TestForgeProvisioning(EnrollGatewayBase):
         self.assertEqual(status, 200, payload)
         self.assertIsNone(payload.get("repository"))
         self.assertTrue(payload.get("mqtt_password"))
+
+    def published_host_key(self):
+        """
+        The forge's host key as it serves it, WITHOUT credentials.
+
+        THAT IT NEEDS NO CREDENTIALS IS PART OF THE ASSERTION. `REQUIRE_SIGNIN_VIEW` is on, and if
+        it ever covered `/assets/` this would answer a login page -- which `validPublicKey` would
+        reject, leaving every appliance with no host key and no ability to converge. The failure
+        would be silent at the forge and visible only on the gateways.
+        """
+        with urllib.request.urlopen(
+            f"{self.forge_url}/assets/ssh_host_key.pub", timeout=15
+        ) as response:
+            return response.read().decode().strip()
+
+    def test_the_forge_publishes_its_host_key_without_a_login(self):
+        published = self.published_host_key()
+        self.assertTrue(
+            published.startswith("ssh-ed25519 "),
+            f"/assets/ssh_host_key.pub did not serve a public key: {published[:120]!r}. "
+            "gitea-init.sh publishes it on boot; a forge that has not restarted since roadmap 7's "
+            "host-key distribution landed will not have one.",
+        )
+        self.assertNotIn(
+            "PRIVATE KEY", published,
+            "the forge is serving a PRIVATE key over unauthenticated HTTP",
+        )
+
+    def test_enrolment_carries_a_known_hosts_line_for_the_forge(self):
+        """
+        THE ONE THING THAT MAKES THE PULL VERIFIABLE, and it has to ride on THIS response.
+
+        An appliance with no known_hosts entry can only trust whatever key answers on its first
+        connection -- trust on first use, decided at the moment an attacker would choose -- or be
+        told to skip verification, which roadmap 7 and 11 both refuse. This response is the
+        alternative: TLS, a single-use token bound to one row, and the forge's identity learned
+        before the first clone.
+
+        THE HOST SPEC MUST MATCH THE CLONE URL or OpenSSH never consults the line. A non-default
+        port is written `[host]:port` and matched on exactly that string, so a bare hostname beside
+        a `:2222` clone URL is a file that names the forge and verifies nothing.
+        """
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key=self.public_key)
+
+        self.assertEqual(status, 200, payload)
+        repository = payload.get("repository")
+        self.assertIsNotNone(repository, "enrolment returned no repository")
+
+        known_hosts = repository.get("known_hosts")
+        self.assertTrue(
+            known_hosts,
+            "the enrolment carried no known_hosts line, so this appliance cannot verify the forge "
+            "and flow-sync.mjs will refuse to converge",
+        )
+
+        host, algorithm, material = known_hosts.split()
+        published_algorithm, published_material = self.published_host_key().split()[:2]
+        self.assertEqual(algorithm, published_algorithm)
+        self.assertEqual(
+            material, published_material,
+            "the known_hosts line does not carry the key the forge actually publishes",
+        )
+
+        ssh_url = repository["ssh_url"]
+        match = re.match(r"^ssh://(?:[^@/]+@)?([^/:]+)(?::(\d+))?", ssh_url)
+        self.assertIsNotNone(match, f"unexpected clone URL shape: {ssh_url}")
+        expected = (
+            f"[{match.group(1)}]:{match.group(2)}"
+            if match.group(2) and match.group(2) != "22"
+            else match.group(1)
+        )
+        self.assertEqual(
+            host, expected,
+            f"known_hosts names '{host}' but the clone URL is '{ssh_url}'. OpenSSH matches the "
+            "host specification literally, so these two disagreeing means verification never "
+            "consults the line at all.",
+        )
 
 
 if __name__ == "__main__":

@@ -341,3 +341,128 @@ export async function proposeFlow(
   const opened = await pull.json() as { number: number; html_url: string };
   return { number: opened.number, html_url: opened.html_url, branch };
 }
+
+/**
+ * =================================================================================================
+ * THE FORGE'S OWN IDENTITY, so an appliance can verify it rather than trust it on sight.
+ * =================================================================================================
+ *
+ * WHAT THIS CLOSES. A gateway clones over SSH with its deploy key. Without a `known_hosts` entry it
+ * has two options and both are wrong: accept whatever key answers on the first connection, which is
+ * trust-on-first-use and puts the whole of the trust decision at the one moment an attacker would
+ * choose; or be told to skip verification, which roadmap 7 and 11 both refuse outright and which
+ * would quietly become the way every appliance is configured. An appliance that pulls unattended for
+ * years is the worst possible holder of an unverified host key.
+ *
+ * WHY THE ANSWER TRAVELS THROUGH THE ENROLMENT RESPONSE. The appliance is already talking to the
+ * platform over TLS, holding a single-use token bound to exactly one gateway row -- the one moment
+ * it is provably itself, and the same reason the deploy key is registered here rather than later.
+ * Handing it the forge's host key on that channel means it knows the forge's identity BEFORE its
+ * first clone. Nothing in the bundle fetches this URL directly: an appliance that did would be
+ * trusting the network again, which is the thing being removed.
+ *
+ * THE KEY IS PUBLIC AND ITS SECRECY IS NOT THE POINT. Anyone who can reach port 22 is handed it
+ * during the handshake -- `ssh-keyscan` is precisely that. What the platform supplies is not
+ * confidentiality but ATTESTATION: *this* is the key the forge you were told to use presents.
+ *
+ * SERVED BY GITEA ITSELF, from `custom/public/`, which it publishes at `/assets/`. `gitea-init.sh`
+ * copies the `.pub` there on every boot, so a rotated host key republishes itself. Read here over
+ * `GITEA_INTERNAL_URL`, which is the same internal path the machine account already authenticates
+ * on -- no new credential, no new route, and no new place for the forge's address to be configured.
+ */
+
+/** How long to wait for the forge's asset. Short: enrolment is a person standing at an appliance. */
+const HOST_KEY_TIMEOUT_MS = 5000;
+
+/**
+ * The `known_hosts` host specification for an SSH URL.
+ *
+ * THE BRACKET FORM IS NOT COSMETIC. OpenSSH writes a non-default port as `[host]:port` and matches
+ * on exactly that string; a bare `host` line is simply not consulted for a connection to port 2222,
+ * and the appliance is then told the host is unknown while holding a file that names it. Port 22 is
+ * the opposite case -- it must be bare, because that is what OpenSSH looks up.
+ *
+ * Gitea gives `ssh://git@host:2222/owner/repo.git` when SSH_PORT is not 22 and the scp-like
+ * `git@host:owner/repo.git` when it is, so both spellings arrive here and neither is a fault.
+ */
+export function knownHostsHost(sshUrl: string): string | null {
+  const url = sshUrl.trim();
+
+  const withScheme = /^ssh:\/\/(?:[^@/]+@)?([^/:]+)(?::(\d+))?(?:\/|$)/.exec(url);
+  if (withScheme) {
+    const host = withScheme[1];
+    const port = withScheme[2];
+    return port && port !== "22" ? `[${host}]:${port}` : host;
+  }
+
+  // ANY OTHER SCHEME IS REFUSED RATHER THAN PARSED, and this branch exists because the scp-like
+  // pattern below silently accepts one: `https://forge/x.git` matches it and yields the "host"
+  // `https`, which would be written into an appliance's known_hosts as a line that can never match.
+  // The appliance would then fail verification against a file that names the forge, which is the
+  // most confusing failure this whole path could produce. Caught by test rather than by reading.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return null;
+
+  // scp-like: user@host:path. The colon here separates the PATH, never a port -- `git@host:2222/x`
+  // means the directory `2222/x` to ssh, not a port, which is why this does not try to read one.
+  const scpLike = /^(?:[^@/]+@)?([^/:]+):/.exec(url);
+  if (scpLike) return scpLike[1];
+
+  return null;
+}
+
+/**
+ * Fetch the forge's published SSH host key and return the `known_hosts` line for this repository.
+ *
+ * NULL RATHER THAN THROWING, and non-fatal for the same reason the rest of this file is: by the time
+ * enrolment reaches here the token is spent and the broker credential is live. An appliance that
+ * gets no host key still publishes telemetry, which is what a gateway is FOR -- it simply declines
+ * to converge, which is the correct refusal rather than a degraded one.
+ *
+ * SHAPE-CHECKED BEFORE IT IS TRUSTED. `validPublicKey` is the same gate the appliance's own key
+ * passes through, and it is what stops an HTML error page, a login redirect or a truncated read
+ * being written into an appliance's known_hosts as though it were a key. The comment field is
+ * dropped: OpenSSH ignores it and it carries the forge container's hostname, which is noise on an
+ * appliance and one more thing that changes for no reason.
+ */
+export async function forgeKnownHosts(
+  cfg: ForgeConfig,
+  sshUrl: string,
+): Promise<string | null> {
+  const host = knownHostsHost(sshUrl);
+  if (!host) {
+    console.error(`could not read a host out of the forge's clone URL '${sshUrl}'`);
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${cfg.baseUrl}/assets/ssh_host_key.pub`, {
+      signal: AbortSignal.timeout(HOST_KEY_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      console.error(
+        `the forge published no SSH host key (${response.status} from /assets/ssh_host_key.pub). ` +
+          "gitea-init.sh publishes it on boot; a forge that has never restarted since this was " +
+          "added will not have one yet.",
+      );
+      return null;
+    }
+
+    const key = validPublicKey((await response.text()).trim());
+    if (!key) {
+      console.error(
+        "the forge's /assets/ssh_host_key.pub did not contain an SSH public key. Refusing to hand " +
+          "an appliance a known_hosts entry built from it.",
+      );
+      return null;
+    }
+
+    const [algorithm, material] = key.split(/\s+/);
+    return `${host} ${algorithm} ${material}`;
+  } catch (err) {
+    console.error(
+      `could not read the forge's SSH host key (${err instanceof Error ? err.message : err}). ` +
+        "The gateway will enrol and publish telemetry; it will not converge until it has one.",
+    );
+    return null;
+  }
+}

@@ -2,7 +2,12 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 import { corsHeaders } from "../_shared/cors.ts";
-import { forgeConfig, provisionGatewayRepository, validPublicKey } from "../_shared/forge.ts";
+import {
+  forgeConfig,
+  forgeKnownHosts,
+  provisionGatewayRepository,
+  validPublicKey,
+} from "../_shared/forge.ts";
 
 /**
  * Physical gateway enrolment: exchange a single-use token for a broker credential.
@@ -307,7 +312,9 @@ export default async function handler(req: Request): Promise<Response> {
   // 4. THE FORGE. Non-fatal by construction -- see the header, and forge.ts.
   // ---------------------------------------------------------------------------------------------
   const forge = forgeConfig();
-  let repository: { ssh_url: string; branch: string } | null = null;
+  let repository:
+    | { ssh_url: string; branch: string; known_hosts: string | null }
+    | null = null;
 
   if (forge && sshPublicKey) {
     const repo = await provisionGatewayRepository(
@@ -317,7 +324,27 @@ export default async function handler(req: Request): Promise<Response> {
       sshPublicKey,
     );
     if (repo) {
-      repository = { ssh_url: repo.ssh_url, branch: repo.default_branch || "main" };
+      // THE HOST KEY TRAVELS WITH THE CLONE URL, and it has to be this response rather than a later
+      // call: this is the one moment the appliance is provably itself, holding a single-use token
+      // bound to one row. An appliance that learned the forge's identity any other way would be
+      // trusting the network -- trust on first use -- which roadmap 7 and 11 both refuse.
+      //
+      // NULL IS A REAL ANSWER AND NOT AN ERROR. A forge that has not restarted since the host key
+      // began being published has none to give. The appliance then enrols, takes its broker
+      // credential and publishes telemetry; what it declines to do is converge, which is the
+      // correct refusal rather than a degraded mode. bootstrap.mjs says so in its own log.
+      const knownHosts = await forgeKnownHosts(forge, repo.ssh_url);
+      repository = {
+        ssh_url: repo.ssh_url,
+        branch: repo.default_branch || "main",
+        known_hosts: knownHosts,
+      };
+      if (!knownHosts) {
+        console.warn(
+          `${identity.sparkplug_id} has a repository but no host key to verify the forge with, ` +
+            "so it will not converge. Restart the forge to publish one.",
+        );
+      }
     }
   } else if (forge && !sshPublicKey) {
     // An appliance old enough not to send one, or a malformed key. Neither is a reason to fail an

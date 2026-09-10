@@ -1,0 +1,78 @@
+name: Feature request
+description: Something the stack should do and does not.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Check [`docs/roadmap.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/docs/roadmap.md) first.** It lists only what is
+        *not* built, and every entry names the code it would build on — so it tells you both
+        whether a thing is already planned and how far away it is. Several turned out to be much
+        closer than the person asking assumed. If your request is already there, say so below and
+        add what you need from it rather than opening a duplicate.
+
+        The design ethos is **use pre-existing components and standards; minimise custom code.** A
+        request that can be met by configuring something already deployed is much likelier to
+        happen than one that adds a service.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What you are trying to do, and where the stack stops you. Describe the situation, not the
+        solution — the shape of the fix is usually clearer from the problem than from a proposed
+        API.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+      description: If you have a specific change in mind, describe it here.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part it would touch
+      description: Your best guess is fine.
+      multiple: true
+      options:
+        - Database — schema, RLS, views
+        - Edge functions
+        - Ingestion daemon
+        - Telemetry storage and retention
+        - Mosquitto / MQTT
+        - React dashboard
+        - i3X server
+        - AAS export
+        - Grafana
+        - Node-RED / edge flows
+        - Gateway onboarding and credentials
+        - Vocabularies and the metric catalogue
+        - Helm chart / Kubernetes
+        - Docker Compose
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you are doing instead today
+      description: >
+        A workaround, however ugly, is useful evidence — it says how much the gap costs and often
+        shows which part of the stack is the natural place for the fix.
+
+  - type: textarea
+    id: standards
+    attributes:
+      label: Standards or prior art
+      description: >
+        If this is covered by a specification the stack already tracks — Sparkplug B, Factory+,
+        AAS, i3X, ISO 22400, VDA 5050 — name the part of it. Linking the spec makes the request
+        far more actionable than describing it.

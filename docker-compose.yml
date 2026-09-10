@@ -1275,6 +1275,7 @@ services:
         export GW_BUNDLE_DOCKERFILE="$$(cat $$T/Dockerfile)"
         export GW_BUNDLE_BOOTSTRAP="$$(cat $$T/bootstrap.mjs)"
         export GW_BUNDLE_FLOWS="$$(cat $$T/flows.template.json)"
+        export GW_BUNDLE_FLOW_SYNC="$$(cat $$T/flow-sync.mjs)"
         export GW_BUNDLE_README="$$(cat $$T/README.md)"
         exec edge-runtime start --main-service /home/deno/functions/main
     depends_on:

@@ -416,6 +416,26 @@ The appliance's flow lives on a Docker volume on hardware in a plant. It is the 
 (*menu → Export → all flows*) and drop it there. It is committed to a branch in **this gateway's own
 repository** in the forge and opened as a pull request; **nothing is deployed by proposing**.
 
+Once somebody approves and merges it, the appliance's own `flow-sync` service pulls it — within five
+minutes by default — and reloads Node-RED. The appliance is what reaches out; the platform never
+opens a connection to a gateway, which is the same rule that keeps `node_exporter` unscraped.
+
+### What the appliance refuses to deploy
+
+`flow-sync` is the last of three checks on a `flows.json` and the only one on the appliance, so it
+re-checks what the browser and the edge function already did and adds two of its own:
+
+| Refusal | Why it is a stop rather than a warning |
+| :--- | :--- |
+| The forge's host key is unknown | With no `known_hosts` entry the appliance could only trust whatever answers on the SSH port. There is no option to skip the check. |
+| The tracked branch's history was rewritten | A force-push cannot be told from a legitimate advance, so following one would deploy something no pull request ever showed. A revert must be a new commit. |
+| A committed `mqtt-broker` node id has no credential here | Node-RED would start, report success, and hand that node an empty username — the broker refuses it with no stated cause, and the *next* deploy destroys the credential this appliance still holds. |
+| The file is not a flow array, or looks like `flows_cred.json` | Same two shape checks the dashboard makes, made where they still matter. |
+
+The third is the one worth knowing about, because the way to cause it is convenient: the editor's
+**Import copy** re-ids every node. Commit the appliance's own `/data/flows.json`, never a flow that
+has been through an import dialog. `docker compose logs flow-sync` names the node.
+
 | Role | Proposing |
 | :--- | :--- |
 | Administrator, Shopfloor_Manager | may propose, and hold the approval authority as well |

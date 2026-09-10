@@ -166,6 +166,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GW_BUNDLE_DOCKERFILE",
     "GW_BUNDLE_BOOTSTRAP",
     "GW_BUNDLE_FLOWS",
+    "GW_BUNDLE_FLOW_SYNC",
     "GW_BUNDLE_README",
   ],
 

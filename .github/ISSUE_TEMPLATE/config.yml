@@ -1,0 +1,16 @@
+# Blank issues stay available: maintainers file plenty that fit neither form, and a contributor
+# with something genuinely shaped otherwise should not have to force it into one.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Harri-Llewelyn/ACS-Cymru/security/advisories/new
+    about: Privately, as a draft advisory — never as a public issue. See SECURITY.md for scope.
+  - name: Getting the stack running
+    url: https://github.com/Harri-Llewelyn/ACS-Cymru#readme
+    about: Prerequisites, npm run setup, and bringing it up on Compose or Kubernetes.
+  - name: Which test suite covers what
+    url: https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/docs/testing.md
+    about: Every suite, what each one needs, and the pairs that must move together.
+  - name: Faults already found and fixed
+    url: https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/docs/incidents.md
+    about: Worth a search before filing a bug — several of these recur in a new disguise.

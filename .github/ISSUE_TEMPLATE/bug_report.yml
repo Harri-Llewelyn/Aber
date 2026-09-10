@@ -1,0 +1,106 @@
+name: Bug report
+description: Something in the stack does not behave as its documentation says it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Two things are documented rather than defects**, and are listed in
+        [`SECURITY.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/SECURITY.md): `.env.example` carries working development
+        secrets on purpose, and a working tree holds secrets `git status` will not show you.
+
+        **Do not report a security vulnerability here.** Use
+        [private vulnerability reporting](https://github.com/Harri-Llewelyn/ACS-Cymru/security/advisories/new) instead.
+
+        Faults that were already found and fixed — and why their fixes look the way they do — are
+        in [`docs/incidents.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/docs/incidents.md). It is worth a search before
+        filing, because several of them recur in a new disguise.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it
+      description: >
+        The steps, from a state you can describe. If it depends on data, say what was in the
+        database — a quarantined device, a gateway that had gone stale, a metric that had been
+        superseded.
+      placeholder: |
+        1. npm run setup, then docker compose up -d
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Deployment target
+      options:
+        - Docker Compose
+        - Kubernetes (Helm chart)
+        - Both
+        - Neither / not deployed
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part
+      description: Your best guess is fine; say so in the description if you are unsure.
+      multiple: true
+      options:
+        - Database — migrations, RLS, views, digital_thread
+        - Edge functions
+        - Ingestion daemon (Sparkplug B → Postgres/TimescaleDB)
+        - TimescaleDB / telemetry hypertable
+        - Mosquitto — broker, ACLs, credentials
+        - React dashboard
+        - i3X server
+        - Grafana
+        - Node-RED / gateway simulator
+        - Gateway onboarding, bundles, credentials
+        - Helm chart / Kubernetes
+        - Docker Compose / .env
+        - Scripts, setup, or the test suites
+        - CI
+        - Documentation
+        - Something else / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release tag you are running, or `git rev-parse --short HEAD`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and error output
+      description: >
+        Paste the relevant output — `docker compose logs <service>`, `kubectl logs`, the browser
+        console, or a failing suite's output. It is rendered as a code block, so no backticks
+        needed. **Redact credentials before pasting**; a container's environment is dumped in some
+        of these.
+      render: text
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >
+        Host OS, Docker version, and anything non-default — a Postgres or Kubernetes version other
+        than what the repo pins, a stack reached across a network rather than on localhost, an
+        image built locally rather than pulled.

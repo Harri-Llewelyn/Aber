@@ -95,6 +95,59 @@ services:
         exec npm --no-update-notifier --no-fund start --cache /data/.npm -- --userDir /data
 
   # ===============================================================================================
+  # flow-sync -- this appliance converges its own flow to what somebody approved.
+  #
+  # OUTBOUND ONLY, LIKE EVERYTHING ELSE HERE. It fetches this gateway's own repository from the
+  # forge over SSH and calls Node-RED on this compose network. Nothing opens a connection toward
+  # the appliance, which is the same rule that keeps node_exporter unscraped below.
+  #
+  # WHY A SEPARATE SERVICE AND NOT A NODE IN THE FLOW. The thing it deploys IS the flow, so a flow
+  # that breaks would take its own repair mechanism with it -- and a `function` node with `fs` and
+  # `exec` access is a strictly larger surface on a box holding the MQTT credential. Outside the
+  # runtime it converges an appliance whose flow does not currently start.
+  #
+  # IT RUNS AS 1000, NOT ROOT. Node-RED runs as uid 1000 and bootstrap hands /data to that uid on
+  # its way out; a root sidecar would write a flows.json Node-RED could read but never rewrite from
+  # the editor. It needs no capability root would give it: git, ssh and one HTTP call.
+  #
+  # SECRETS IT HOLDS: the deploy key (READ-ONLY at the forge, so it cannot author what it deploys)
+  # and NODERED_CREDENTIAL_SECRET, which it uses only to CHECK that a committed flow's broker node
+  # ids still match the stored credentials -- see flow-sync.mjs, where that check is a refusal to
+  # converge rather than a warning.
+  #
+  # DELETING THIS SERVICE IS SUPPORTED and costs exactly one thing: approved flows stop arriving.
+  # Telemetry, the editor and the heartbeat do not depend on it.
+  # ===============================================================================================
+  flow-sync:
+    build: .
+    container_name: acs-gateway-flow-sync
+    restart: unless-stopped
+    user: "1000"
+    env_file: .env
+    environment:
+      # How often to look. Five minutes is a compromise between a plant link that is metered and an
+      # operator waiting to see an approval take effect; nothing here is latency-sensitive, because
+      # the approval already happened at human speed.
+      FLOW_SYNC_INTERVAL_SECONDS: "${FLOW_SYNC_INTERVAL_SECONDS:-300}"
+      NODE_RED_URL: "http://node-red:1880"
+    volumes:
+      - nodered_data:/data
+      - ./:/bundle:ro
+    depends_on:
+      # AFTER ENROLMENT, because /data/gitops -- the deploy key, the clone URL and the forge's host
+      # key -- is written by bootstrap. Starting first would mean one failed tick and a wait.
+      bootstrap:
+        condition: service_completed_successfully
+      # `service_started` and not a health condition: this retries on its own timer, so Node-RED
+      # being slow costs one tick. Waiting for healthy would couple the two restart cycles.
+      node-red:
+        condition: service_started
+    # Same override and the same reason as `bootstrap` above: a bare `command:` would be passed to
+    # the base image's entrypoint as ARGUMENTS to Node-RED and would silently start a second one.
+    entrypoint: ["node"]
+    command: ["/bundle/flow-sync.mjs"]
+
+  # ===============================================================================================
   # node_exporter -- HOST metrics for the machine this appliance runs on.
   #
   # THE COLLECTOR IS RIGHT AND SCRAPING IT FROM THE CENTRE WOULD BE WRONG, which is the whole
@@ -150,7 +203,9 @@ volumes:
   # the CA and settings.js. `docker compose down -v` destroys it and the enrolment with it -- the
   # token is already spent, so recovering means issuing a NEW bundle from the dashboard.
   #
-  # Back the FLOW up through the dashboard's gateway page (Upload flow backup), which stores
-  # flows.json only. flows_cred.json is deliberately never uploaded: it is encrypted with a secret
-  # that lives in this .env, so a copy of it in the platform would be either useless or dangerous.
+  # THE FLOW'S COPY LIVES IN THIS GATEWAY'S OWN REPOSITORY, not here. Propose it from the
+  # dashboard's gateway page (Propose a flow): it becomes a pull request, and once approved this
+  # appliance pulls it back on its own timer. flows_cred.json is deliberately never committed -- it
+  # is encrypted with a secret that lives in this .env, so a copy in the forge would be either
+  # useless or dangerous.
   nodered_data:
