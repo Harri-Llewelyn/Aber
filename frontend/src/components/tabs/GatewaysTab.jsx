@@ -47,7 +47,7 @@ import {
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter, onBugReport, activeAlerts = [] }) {
+export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, userRole, initialSearchFilter, onClearFilter, onBugReport, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [gateways, setGateways] = useState([])
@@ -294,6 +294,19 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
    */
   const canManageBackups = canManage
   const canReadBackups = canManage || hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  /**
+   * WHO MAY PROPOSE A FLOW, and it is a ROLE rather than a permission on purpose.
+   *
+   * There is no proposal permission to read: `gitops:manage` is the APPROVAL authority, and
+   * granting it here would collapse the two into one. The edge function decides by role name --
+   * Administrator, Shopfloor_Manager, Operator -- so this mirrors that list rather than inventing a
+   * second rule that could disagree with the control. Same posture as the backup gates above: the
+   * UI agrees with the boundary, it does not implement it.
+   *
+   * OPERATOR IS THE POINT. Roadmap 7 says a review step whose proposals can only come from the two
+   * roles that may already merge them is a formality rather than a gate.
+   */
+  const canProposeFlow = canManage || userRole === 'Operator'
 
   const unassignedDevices = assets.filter(a => !a.is_archived && !a.active_gateway_id)
 
@@ -1186,6 +1199,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                   gateway={selected}
                   canRead={canReadBackups}
                   canManage={canManageBackups}
+                  canPropose={canProposeFlow}
                   showToast={showToast}
                 />
               </div>

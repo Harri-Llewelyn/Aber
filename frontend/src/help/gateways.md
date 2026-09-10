@@ -7,6 +7,8 @@ An edge gateway is what actually talks to machines and publishes their data to t
 - **Add a gateway** creates the platform record, and for an appliance the enrolment it then waits for. Nothing is installed from here.
 - **The enrolment bundle** is what you carry to the machine. A remote gateway's broker credential is minted on the appliance itself and never travels through a browser -- which is why there is nothing to copy down here, and nothing that can be re-shown later.
 - **Connected Devices** lists what has published underneath this gateway. It is the short route from "this gateway is quiet" to "and these six things went quiet with it".
+- **Flow backups** keep a copy of what an appliance already runs, against a failed SD card. They are a copy and nothing else -- no diff, no history, and nobody reviews them.
+- **Propose a flow** is the other thing you can do with the same `flows.json`, and it is not a backup. It opens a pull request in that gateway's own repository, and **nothing is deployed until somebody approves it**. Operators may propose; approving is a separate authority.
 - **The Node-RED link** opens the flow editor on the gateway itself, in a new tab. It is a real link -- middle-click and copy-link work -- because the usual next step is sending it to whoever owns the appliance.
 
 ## What the states mean

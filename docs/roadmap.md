@@ -1075,6 +1075,15 @@ repository), proposes, and asserts the head of `main` is unchanged; it also asse
 `flows_cred.json` is refused **by shape** with no branch left behind, and that a gateway with no
 repository answers 409 rather than failing obscurely.
 
+**THE DASHBOARD OFFERS BOTH LANES, SEPARATELY, and the separation is the part worth keeping.** A
+backup is a copy of what an appliance already runs; a proposal is a request to CHANGE what it runs.
+One dropzone with a mode would make "which of those am I doing" a matter of remembering, so
+`FlowBackupUploader` has two, gated independently. **The comment that said "OPERATOR SEES NOTHING AT
+ALL" is now false and says so**: the storage policy still grants that role no backup authority, and
+roadmap 7 gives it the proposal, so an Operator sees the proposal lane and no part of the bucket.
+The pull request comes back as a link in the drawer rather than only a toast -- the useful fact is
+that it is *not deployed yet*, and that is what somebody returns to check.
+
 **The bucket has not moved and must not yet.** §9 sequences its removal, and until something PULLS
 these repositories a commit is not yet a backup an appliance can be rebuilt from.
 

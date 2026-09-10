@@ -10,7 +10,8 @@ vi.mock('../api', () => ({
     listGatewayBackups: vi.fn(),
     uploadGatewayBackup: vi.fn(),
     gatewayBackupUrl: vi.fn(),
-    deleteGatewayBackup: vi.fn()
+    deleteGatewayBackup: vi.fn(),
+    proposeGatewayFlow: vi.fn()
   }
 }))
 
@@ -201,5 +202,85 @@ describe('FlowBackupUploader — virtual gateways', () => {
     expect(dropzone()).toBeNull()
     // No pointless request for a prefix that will never hold anything.
     expect(api.listGatewayBackups).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * THE PROPOSAL LANE, WHICH IS NOT THE BACKUP LANE.
+ *
+ * A backup is a copy of what an appliance already runs; a proposal is a request to CHANGE what it
+ * runs, reviewed as a pull request before anything is deployed (roadmap 7). The two are gated
+ * separately, and the case that proves it is `Operator`: the storage policy grants that role no
+ * backup authority at all, and the review step exists precisely so it can propose.
+ */
+describe('FlowBackupUploader — the proposal lane', () => {
+  const PULL = { number: 7, html_url: 'https://git.example/acs_platform/gateway-x/pulls/7', branch: 'proposal/2026-09-10T09-00-00-000Z' }
+
+  const renderWith = (props) => {
+    const showToast = vi.fn()
+    const view = render(<FlowBackupUploader gateway={GATEWAY} showToast={showToast} {...props} />)
+    return { showToast, ...view }
+  }
+
+  const proposeZone = () => screen.queryByTitle(/Propose a flows.json/i)
+
+  it('shows an Operator the proposal lane and NOTHING of the backup lane', async () => {
+    renderWith({ canRead: false, canManage: false, canPropose: true })
+
+    expect(proposeZone()).toBeTruthy()
+    // The bucket's controls, all absent: an Operator holds no backup authority and the storage
+    // policy is unchanged by any of this.
+    expect(dropzone()).toBeNull()
+    expect(downloadButtons().length).toBe(0)
+    expect(deleteButtons().length).toBe(0)
+    expect(screen.queryByText(/Flow backups/i)).toBeNull()
+    // It must also not fetch a list it may not read -- an empty list would read as "no backups
+    // exist" rather than "not yours to see".
+    expect(api.listGatewayBackups).not.toHaveBeenCalled()
+  })
+
+  it('gives an Administrator both lanes', async () => {
+    renderWith({ canRead: true, canManage: true, canPropose: true })
+    await waitFor(() => expect(screen.getAllByText(/flows\.json/i).length).toBeGreaterThan(0))
+    expect(dropzone()).toBeTruthy()
+    expect(proposeZone()).toBeTruthy()
+  })
+
+  /** Read-only is the whole of the role, and proposing is a write wherever it lands. */
+  it('gives an Auditor neither dropzone', async () => {
+    renderWith({ canRead: true, canManage: false, canPropose: false })
+    await waitFor(() => expect(screen.getAllByText(/flows\.json/i).length).toBeGreaterThan(0))
+    expect(dropzone()).toBeNull()
+    expect(proposeZone()).toBeNull()
+  })
+
+  it('renders the pull request as a receipt, and says it is not deployed', async () => {
+    api.proposeGatewayFlow.mockResolvedValue(PULL)
+    const { showToast } = renderWith({ canRead: false, canManage: false, canPropose: true })
+
+    const file = new File(['[]'], 'flows.json', { type: 'application/json' })
+    const input = document.querySelector('input[type="file"]')
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() => expect(api.proposeGatewayFlow).toHaveBeenCalledWith(GATEWAY.gateway_id, file))
+    const link = await screen.findByRole('link', { name: /pull request #7/i })
+    expect(link.getAttribute('href')).toBe(PULL.html_url)
+    expect(screen.getByText(/awaiting review/i)).toBeTruthy()
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/awaiting review/i), 'success')
+  })
+
+  /**
+   * A refusal has to be VISIBLE and not merely toasted. "This deployment has no forge" and "this
+   * gateway has no repository" are both ordinary states, and both are sentences somebody can act
+   * on -- a toast is gone before they have read it.
+   */
+  it('shows the reason a proposal was refused', async () => {
+    api.proposeGatewayFlow.mockRejectedValue(new Error('This gateway has no repository'))
+    renderWith({ canRead: false, canManage: false, canPropose: true })
+
+    const file = new File(['[]'], 'flows.json', { type: 'application/json' })
+    fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [file] } })
+
+    expect(await screen.findByText(/no repository/i)).toBeTruthy()
   })
 })

@@ -1080,6 +1080,63 @@ const apiMethods = {
   },
 
   /**
+   * Propose a flow for a gateway: a branch and a pull request, never a deploy.
+   *
+   * THE DIFFERENCE FROM uploadGatewayBackup ABOVE IS THE WHOLE POINT. That one puts a copy in a
+   * private bucket, where it is a backup and nothing else -- no diff, no history, no review. This
+   * sends the same file to the gateway's own repository, where an open pull request IS "pending
+   * approval" and a merge IS "approved". Both exist for now: roadmap 9 sequences the bucket's
+   * removal, and until something PULLS these repositories a commit is not yet a backup an appliance
+   * can be rebuilt from.
+   *
+   * THE SAME SHAPE CHECKS RUN HERE AND AGAIN IN THE FUNCTION. Not redundancy: this one keeps a
+   * mistake from costing a round trip, and the function's is the boundary. `flows_cred.json` is the
+   * one that matters -- a bucket object can be deleted, and a commit is forever.
+   *
+   * A raw fetch with the CALLER's token, the same shape as mintGatewayCredential: the function
+   * resolves the caller's role and attributes the proposal to them by name, so the anon key alone
+   * would be refused and would have nobody to name if it were not.
+   */
+  proposeGatewayFlow: async (gatewayId, file) => {
+    const text = await file.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`"${file.name}" is not valid JSON. Export it from Node-RED with menu → Export → all flows.`);
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error('A Node-RED flow export is a JSON array of nodes. This file is not one.');
+    }
+    if (parsed.length && parsed.every(n => typeof n === 'object' && n && !n.type)) {
+      throw new Error('That looks like flows_cred.json, not flows.json. Credential files are never committed.');
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/propose-gateway-flow`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ gateway_id: gatewayId, flow: parsed })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      // `details` carries the sentence somebody can act on -- "this deployment has no forge",
+      // "repositories are created when an appliance enrols with a deploy key" -- where `error`
+      // alone would flatten every one of them into "the forge refused".
+      throw new Error(body?.details || body?.error || `Could not propose this flow (${res.status})`);
+    }
+
+    return body?.pull_request ?? null;
+  },
+
+  /**
    * A short-lived signed URL for one backup.
    *
    * SIGNED, because the bucket is private -- there is no public URL to compose. 60 seconds is long
