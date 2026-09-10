@@ -45,6 +45,9 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // supplied", falling back to a localhost address no cluster can reach. Every one of those paths
   // ends the same way: the beacon times out and the local sign-out proceeds.
   VITE_STUDIO_URL: %q,
+  // The forge's door: the same helper Gitea's ROOT_URL and the gitea Ingress host are built from,
+  // so the repository link in the gateway drawer names the address the login was opened on.
+  VITE_GITEA_URL: %q,
   // Storage buckets, from the same values scripts/storage-init.mjs creates them with -- so a
   // rename moves the dashboard with the bucket instead of leaving it on the old name.
   // gatewayBackupBucket is deliberately NOT among them: the browser stopped reading that bucket
@@ -60,6 +63,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   .Values.frontend.githubRepoUrl
   (include "acs-cymru.grafanaUrl" .)
   (include "acs-cymru.studioUrl" .)
+  (include "acs-cymru.giteaUrl" .)
   .Values.supabaseStorage.bucket
   .Values.supabaseStorage.captureBucket -}}
 ---

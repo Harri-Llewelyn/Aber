@@ -1,18 +1,45 @@
 /**
- * The forge: a gateway's own repository, the key it reads it with, and the branch a proposed flow
- * lands on.
+ * The forge: the organisation that holds every gateway's repository, the two teams a person may
+ * belong to in it, a gateway's own repository, and the key it reads that repository with.
  *
- * SHARED BECAUSE THE REPOSITORY NAME MUST AGREE. `enroll-gateway` creates `gateway-<sparkplug_id>`
- * and `propose-gateway-flow` commits into it; two copies of that convention are two places for it
- * to drift, and the failure is a proposal opened against a repository that does not exist -- or,
- * worse, against one belonging to a different gateway. See _shared/roles.ts on why a sibling import
- * is fine: `servicePath` decides which directory is BOOTED, not what its module graph may import.
+ * SHARED BECAUSE THE NAMES MUST AGREE. `enroll-gateway` creates `gateways/gateway-<sparkplug_id>`,
+ * `forge-membership` places a login in a team of the same organisation, and the dashboard links to
+ * the repository by the same path; three copies of that convention are three places for it to
+ * drift, and the failure is a link to a repository that does not exist -- or, worse, a person placed
+ * in a team of a different organisation. See _shared/roles.ts on why a sibling import is fine:
+ * `servicePath` decides which directory is BOOTED, not what its module graph may import.
  *
  * WHY THIS LIVES BESIDE THE BROKER CREDENTIAL rather than in a later step somebody runs. Roadmap 7
  * gives every appliance a per-gateway READ-ONLY deploy key, and enrolment is the one moment when a
  * gateway is provably itself: it holds a single-use token bound to exactly one row. A key issued
  * later would need some other proof of identity, which is the fleet-wide credential store this
  * architecture exists to avoid.
+ *
+ * -------------------------------------------------------------------------------------------------
+ * AN ORGANISATION, BECAUSE A REPOSITORY OWNED BY THE MACHINE ACCOUNT IS ONE NOBODY ELSE CAN SEE.
+ *
+ * The forge has a door now (the `forge` listener in supabase/envoy.yaml; 0094) and a person who
+ * comes through it is auto-registered owning nothing. Every gateway repository used to be private
+ * to the machine account, so the first login was a forge with no repositories in it. Gitea's own
+ * permission model decides what a logged-in person may DO, and its unit of "these people may see
+ * these repositories" is an organisation with teams -- so the machine account OWNS an organisation,
+ * creates each gateway's repository in it, and `forge-membership` places each login in the team its
+ * Postgres role maps to. The machine account is still not a site administrator: owning one
+ * organisation is exactly the authority needed to create a repository in it, attach a key to it and
+ * place a member in a team, and nothing more.
+ *
+ * TWO TEAMS, BOTH WRITE, AND THE DIFFERENCE IS BRANCH PROTECTION. `administrators` and `managers`
+ * can both open a pull request and push a branch; `main` is protected on every gateway repository
+ * with pushes disabled and one approval required from `administrators`. That is where roadmap 7's
+ * "approving is `gitops:manage`, Administrator only" is enforced INSIDE the forge: a manager may
+ * open and review, and only an administrator's approval lets a merge through. The forge never
+ * learns the name `gitops:manage`; it learns which team a verified role lands in.
+ *
+ * A LEGACY REPOSITORY IS TRANSFERRED, NOT RECREATED. Repositories created before the organisation
+ * existed live under the machine account's own namespace, with history a re-flashed appliance is
+ * entitled to get back. On re-enrolment `ensureRepository` finds one there and transfers it into
+ * the organisation -- measured: the machine account owns both ends, so the transfer completes at
+ * once with no acceptance step -- rather than creating an empty twin beside it.
  *
  * -------------------------------------------------------------------------------------------------
  * THE PRIVATE KEY IS NEVER SEEN HERE, AND THAT IS THE WHOLE SHAPE OF IT.
@@ -52,6 +79,19 @@ export interface ForgeRepository {
 }
 
 /**
+ * The organisation every gateway repository lives in, and the two teams in it.
+ *
+ * NAMED HERE AND IN frontend/src/constants.js, and the two must agree: the dashboard builds the
+ * link to a gateway's repository from its copy. Lower-case because it is a URL segment.
+ */
+export const FORGE_ORGANISATION = "gateways";
+export const FORGE_TEAMS = {
+  Administrator: "administrators",
+  Shopfloor_Manager: "managers",
+} as const;
+export type ForgeTeamRole = keyof typeof FORGE_TEAMS;
+
+/**
  * The forge's configuration, or null when this deployment has none.
  *
  * ALL THREE OR NOTHING. A half-configured forge is the case worth being loud about: it looks
@@ -84,11 +124,11 @@ export function forgeConfig(): ForgeConfig | null {
 /**
  * The repository name for a gateway.
  *
- * DERIVED, NOT STORED, and that is a decision worth stating: roadmap 9 owns where a repository
- * pointer lives -- a tag on the links store, most likely -- and has not landed. Deriving the name
- * from the `sparkplug_id` needs no column and no migration, and it cannot disagree with the gateway
- * it belongs to: that id is generated by the database, and mosquitto.acl already matches the
- * topic's edge-node segment against it.
+ * DERIVED, NOT STORED, and that is a decision worth stating: roadmap 9 records that a stored pointer
+ * would be a second copy of a derivable fact. Deriving the name from the `sparkplug_id` needs no
+ * column and no migration, and it cannot disagree with the gateway it belongs to: that id is
+ * generated by the database, and mosquitto.acl already matches the topic's edge-node segment
+ * against it.
  */
 export function repositoryNameFor(sparkplugId: string): string {
   return `gateway-${sparkplugId}`;
@@ -113,8 +153,87 @@ function authHeader(cfg: ForgeConfig): string {
   return `Basic ${btoa(`${cfg.user}:${cfg.password}`)}`;
 }
 
+/** One call to the forge's API as the machine account. */
+async function forge(
+  cfg: ForgeConfig,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  return await fetch(`${cfg.baseUrl}/api/v1${path}`, {
+    method,
+    headers: {
+      Authorization: authHeader(cfg),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+async function refused(what: string, response: Response): Promise<Error> {
+  return new Error(`${what} (${response.status}: ${(await response.text()).slice(0, 200)})`);
+}
+
 /**
- * Create the gateway's repository, or return the one that is already there.
+ * The organisation, created if it is absent, and its two teams likewise. Returns the team ids by
+ * role, which is what placing a member needs.
+ *
+ * IDEMPOTENT BY INSPECTION: a GET first, a POST only for what is missing. Both are the ordinary
+ * state on every call after the first, and neither is reported as anything.
+ *
+ * PRIVATE, so that only members see the organisation exists -- the same reason every repository in
+ * it is private. `includes_all_repositories` is what makes a team created once cover every
+ * repository created later, so enrolment never has to touch a team; `can_create_org_repo` is
+ * false because creating a repository is the machine account's act at enrolment and nobody else's.
+ */
+export async function ensureOrganisation(
+  cfg: ForgeConfig,
+): Promise<Record<ForgeTeamRole, number>> {
+  const org = await forge(cfg, "GET", `/orgs/${FORGE_ORGANISATION}`);
+  if (org.status === 404) {
+    const created = await forge(cfg, "POST", "/orgs", {
+      username: FORGE_ORGANISATION,
+      full_name: "Gateways",
+      description: "One repository per gateway. Managed by ACS-Cymru.",
+      visibility: "private",
+      repo_admin_change_team_access: false,
+    });
+    if (!created.ok) throw await refused(`could not create organisation '${FORGE_ORGANISATION}'`, created);
+    console.log(`forge: created organisation '${FORGE_ORGANISATION}'`);
+  } else if (!org.ok) {
+    throw await refused(`could not read organisation '${FORGE_ORGANISATION}'`, org);
+  }
+
+  const listed = await forge(cfg, "GET", `/orgs/${FORGE_ORGANISATION}/teams?limit=50`);
+  if (!listed.ok) throw await refused("could not list the organisation's teams", listed);
+  const teams = await listed.json() as { id: number; name: string }[];
+
+  const ids = {} as Record<ForgeTeamRole, number>;
+  for (const role of Object.keys(FORGE_TEAMS) as ForgeTeamRole[]) {
+    const name = FORGE_TEAMS[role];
+    const existing = teams.find((t) => t.name === name);
+    if (existing) {
+      ids[role] = existing.id;
+      continue;
+    }
+    const created = await forge(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/teams`, {
+      name,
+      description: `${role.replace("_", " ")}s of the ACS-Cymru dashboard, placed here by forge-membership.`,
+      permission: "write",
+      includes_all_repositories: true,
+      can_create_org_repo: false,
+      units: ["repo.code", "repo.issues", "repo.pulls", "repo.releases", "repo.wiki", "repo.projects"],
+    });
+    if (!created.ok) throw await refused(`could not create team '${name}'`, created);
+    ids[role] = ((await created.json()) as { id: number }).id;
+    console.log(`forge: created team '${name}' in '${FORGE_ORGANISATION}'`);
+  }
+  return ids;
+}
+
+/**
+ * Create the gateway's repository in the organisation, or return the one that is already there --
+ * transferring it in first if it was created before the organisation existed.
  *
  * `auto_init` MATTERS. An empty repository has no branch, and a deploy key against a repository with
  * no default branch gives the appliance nothing to clone -- git reports "remote HEAD refers to a
@@ -125,42 +244,86 @@ async function ensureRepository(
   name: string,
   gatewayName: string,
 ): Promise<ForgeRepository> {
-  const created = await fetch(`${cfg.baseUrl}/api/v1/user/repos`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: authHeader(cfg) },
-    body: JSON.stringify({
-      name,
-      description: `Node-RED flow for gateway '${gatewayName}'. Managed by ACS-Cymru.`,
-      // Belt and braces: the forge sets FORCE_PRIVATE, so a public repository cannot be created
-      // here even by mistake. Asking for private anyway means the intent is in the request rather
-      // than only in the server's configuration.
-      private: true,
-      auto_init: true,
-      default_branch: "main",
-    }),
-  });
-
-  if (created.ok) {
-    return await created.json() as ForgeRepository;
+  // THE ORGANISATION FIRST, then the machine account's own namespace, and only then create. The
+  // order is the whole correctness of this: a repository name is unique per OWNER, so creating
+  // in the organisation while `acs_platform/<name>` still exists does not conflict -- it quietly
+  // makes an empty twin, and the appliance's history stays stranded where no login can see it.
+  // Found by the suite, which planted a legacy repository and got a copy back.
+  const existing = await forge(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
+  if (existing.ok) return await existing.json() as ForgeRepository;
+  if (existing.status !== 404) {
+    throw await refused(`could not read repository '${name}'`, existing);
   }
 
-  // 409 IS THE ORDINARY STATE OF A RE-ENROLMENT, and the repository outliving the appliance is the
-  // point rather than an accident: a gateway re-flashed after a failed SD card gets its flow history
-  // back, which is the whole reason the flow is in a repository instead of on the appliance.
-  if (created.status === 409) {
-    const existing = await fetch(`${cfg.baseUrl}/api/v1/repos/${cfg.user}/${name}`, {
-      headers: { Authorization: authHeader(cfg) },
+  const legacy = await forge(cfg, "GET", `/repos/${cfg.user}/${name}`);
+  if (legacy.ok) {
+    const transferred = await forge(cfg, "POST", `/repos/${cfg.user}/${name}/transfer`, {
+      new_owner: FORGE_ORGANISATION,
     });
-    if (!existing.ok) {
-      throw new Error(`repository '${name}' exists but could not be read (${existing.status})`);
+    if (!transferred.ok) {
+      throw await refused(`could not transfer '${cfg.user}/${name}' into '${FORGE_ORGANISATION}'`, transferred);
     }
-    return await existing.json() as ForgeRepository;
+    console.log(`forge: transferred '${cfg.user}/${name}' into '${FORGE_ORGANISATION}'`);
+    return await transferred.json() as ForgeRepository;
+  }
+  if (legacy.status !== 404) {
+    throw await refused(`could not read '${cfg.user}/${name}'`, legacy);
   }
 
-  throw new Error(
-    `could not create repository '${name}' ` +
-      `(${created.status}: ${(await created.text()).slice(0, 200)})`,
-  );
+  const created = await forge(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/repos`, {
+    name,
+    description: `Node-RED flow for gateway '${gatewayName}'. Managed by ACS-Cymru.`,
+    // Belt and braces: the forge sets FORCE_PRIVATE, so a public repository cannot be created
+    // here even by mistake. Asking for private anyway means the intent is in the request rather
+    // than only in the server's configuration.
+    private: true,
+    auto_init: true,
+    default_branch: "main",
+  });
+  if (created.ok) return await created.json() as ForgeRepository;
+
+  // 409 HERE IS A RACE -- two enrolments of one gateway in the same instant -- and the loser reads
+  // what the winner made. A repository outliving its appliance is the point rather than an
+  // accident: a gateway re-flashed after a failed SD card gets its flow history back.
+  if (created.status === 409) {
+    const raced = await forge(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
+    if (raced.ok) return await raced.json() as ForgeRepository;
+  }
+  throw await refused(`could not create repository '${name}'`, created);
+}
+
+/**
+ * Protect `main`: no direct pushes, one approval from `administrators` before a merge.
+ *
+ * THIS IS THE REVIEW GATE, and it is worth being exact about what each field buys. `enable_push:
+ * false` is what makes "deploy only what is committed" mean "deploy only what was REVIEWED": the
+ * appliance converges to `main`, so a branch anyone with write could push to is a branch anyone
+ * with write could deploy from. Merging is a different act from pushing in Gitea and stays allowed
+ * to anyone with write once the approvals are met -- so a manager can merge, after an administrator
+ * has approved. `dismiss_stale_approvals` means a change pushed after the approval needs approving
+ * again, which is the difference between reviewing a diff and reviewing a branch name. A force-push
+ * is refused by `enable_push: false` too, which is the forge's half of flow-sync.mjs's refusal to
+ * follow a rewritten history.
+ *
+ * Applied once: a protection that already exists is left exactly as an administrator may have
+ * tuned it, rather than reset to this file's idea on every re-enrolment.
+ */
+async function ensureBranchProtection(cfg: ForgeConfig, name: string): Promise<void> {
+  const existing = await forge(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`);
+  if (existing.ok) return;
+  if (existing.status !== 404) {
+    throw await refused(`could not read the branch protection on '${name}'`, existing);
+  }
+  const created = await forge(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections`, {
+    branch_name: "main",
+    enable_push: false,
+    enable_approvals_whitelist: true,
+    approvals_whitelist_teams: [FORGE_TEAMS.Administrator],
+    required_approvals: 1,
+    block_on_rejected_reviews: true,
+    dismiss_stale_approvals: true,
+  });
+  if (!created.ok) throw await refused(`could not protect 'main' on '${name}'`, created);
 }
 
 /**
@@ -175,16 +338,12 @@ async function ensureDeployKey(
   sparkplugId: string,
   publicKey: string,
 ): Promise<void> {
-  const response = await fetch(`${cfg.baseUrl}/api/v1/repos/${cfg.user}/${repo}/keys`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: authHeader(cfg) },
-    body: JSON.stringify({
-      title: `gateway ${sparkplugId}`,
-      key: publicKey,
-      // NEVER false. See the header: a writable key lets an appliance author what it will later be
-      // asked to deploy.
-      read_only: true,
-    }),
+  const response = await forge(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${repo}/keys`, {
+    title: `gateway ${sparkplugId}`,
+    key: publicKey,
+    // NEVER false. See the header: a writable key lets an appliance author what it will later be
+    // asked to deploy.
+    read_only: true,
   });
 
   if (response.ok) return;
@@ -196,13 +355,10 @@ async function ensureDeployKey(
     return;
   }
 
-  throw new Error(
-    `could not register the deploy key on '${repo}' ` +
-      `(${response.status}: ${(await response.text()).slice(0, 200)})`,
-  );
+  throw await refused(`could not register the deploy key on '${repo}'`, response);
 }
 
-/** Provision the repository and the key. Returns null on any failure, having logged it. */
+/** Provision the organisation, the repository, its protection and the key. Returns null on any failure, having logged it. */
 export async function provisionGatewayRepository(
   cfg: ForgeConfig,
   sparkplugId: string,
@@ -211,7 +367,9 @@ export async function provisionGatewayRepository(
 ): Promise<ForgeRepository | null> {
   const name = repositoryNameFor(sparkplugId);
   try {
+    await ensureOrganisation(cfg);
     const repo = await ensureRepository(cfg, name, gatewayName);
+    await ensureBranchProtection(cfg, name);
     await ensureDeployKey(cfg, name, sparkplugId, publicKey);
     console.log(`forge: ${sparkplugId} reads ${repo.full_name} over ${repo.ssh_url}`);
     return repo;
@@ -226,150 +384,6 @@ export async function provisionGatewayRepository(
     return null;
   }
 }
-
-/**
- * THE PROPOSAL HALF: a flow becomes a branch and a pull request, never a direct write to `main`.
- *
- * WHY A BRANCH AND NOT A COMMIT ON main. Roadmap 7's three states are the forge's own: an open pull
- * request IS "pending approval", a merge IS "approved", and a revert commit IS "undo". Committing
- * straight to `main` would collapse all three into "deployed", and the appliance -- which converges
- * to whatever `main` says -- would deploy an unreviewed flow the moment somebody pressed Upload.
- * That is the `deploy-nodered` endpoint this item retired, rebuilt with a nicer table.
- *
- * THE PROPOSER IS NAMED IN THE COMMIT AND IN THE PULL REQUEST, because the forge cannot know them:
- * every write here is made by ONE machine account, and shopfloor people deliberately hold no login.
- * Without the name in the message the audit trail says only that the platform committed something.
- * Migration `0089` made the same decision for the approvals queue, and for the same reason.
- */
-
-/** The file every gateway repository holds, and the only one this writes. */
-export const FLOW_PATH = "flows.json";
-
-export interface ProposedFlow {
-  number: number;
-  html_url: string;
-  branch: string;
-}
-
-/** What a repository currently holds at `flows.json`, or null when it has none yet. */
-async function currentFlowSha(cfg: ForgeConfig, repo: string): Promise<string | null> {
-  const response = await fetch(
-    `${cfg.baseUrl}/api/v1/repos/${cfg.user}/${repo}/contents/${FLOW_PATH}`,
-    { headers: { Authorization: authHeader(cfg) } },
-  );
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    throw new Error(`could not read ${FLOW_PATH} in '${repo}' (${response.status})`);
-  }
-  const body = await response.json() as { sha?: string };
-  return typeof body.sha === "string" ? body.sha : null;
-}
-
-/**
- * Commit a flow onto a NEW branch and open a pull request for it.
- *
- * CREATE-OR-UPDATE, decided by whether the file is already there. Gitea's contents API is POST to
- * create and PUT to update, and PUT needs the blob's `sha` -- posting over an existing file answers
- * 422, which reads as a validation error rather than as "this repository already has a flow".
- *
- * `new_branch` DOES THE BRANCHING, so there is no separate ref call to get wrong: the commit lands
- * on a branch created from the base in one request, which also means a failure leaves no orphan
- * branch behind.
- */
-export async function proposeFlow(
-  cfg: ForgeConfig,
-  repo: string,
-  flowJson: string,
-  proposer: string,
-  gatewayName: string,
-  baseBranch = "main",
-): Promise<ProposedFlow> {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  // Branch names are a forge-visible surface, so nothing from a caller reaches one: the timestamp
-  // is generated here and the gateway is identified by the repository the branch lives in.
-  const branch = `proposal/${stamp}`;
-  const message =
-    `Proposed flow for '${gatewayName}'\n\nProposed by ${proposer} through the ACS-Cymru dashboard.`;
-
-  const sha = await currentFlowSha(cfg, repo);
-  const contents = await fetch(
-    `${cfg.baseUrl}/api/v1/repos/${cfg.user}/${repo}/contents/${FLOW_PATH}`,
-    {
-      method: sha ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json", Authorization: authHeader(cfg) },
-      body: JSON.stringify({
-        content: btoa(unescape(encodeURIComponent(flowJson))),
-        message,
-        branch: baseBranch,
-        new_branch: branch,
-        ...(sha ? { sha } : {}),
-      }),
-    },
-  );
-
-  if (!contents.ok) {
-    throw new Error(
-      `could not commit ${FLOW_PATH} to '${repo}' ` +
-        `(${contents.status}: ${(await contents.text()).slice(0, 200)})`,
-    );
-  }
-
-  const pull = await fetch(`${cfg.baseUrl}/api/v1/repos/${cfg.user}/${repo}/pulls`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: authHeader(cfg) },
-    body: JSON.stringify({
-      head: branch,
-      base: baseBranch,
-      title: `Flow proposed for '${gatewayName}'`,
-      body:
-        `Proposed by **${proposer}** through the ACS-Cymru dashboard.\n\n` +
-        "Merging this deploys it: the appliance converges to whatever `main` holds. " +
-        "Review the diff before approving.",
-    }),
-  });
-
-  if (!pull.ok) {
-    // THE BRANCH SURVIVES A FAILED PULL REQUEST, deliberately. The commit is already made and is the
-    // thing worth keeping; a proposer can open the request by hand, and deleting the branch to tidy
-    // up would throw away the only copy of what they uploaded.
-    throw new Error(
-      `committed ${FLOW_PATH} to '${branch}' but could not open a pull request ` +
-        `(${pull.status}: ${(await pull.text()).slice(0, 200)})`,
-    );
-  }
-
-  const opened = await pull.json() as { number: number; html_url: string };
-  return { number: opened.number, html_url: opened.html_url, branch };
-}
-
-/**
- * =================================================================================================
- * THE FORGE'S OWN IDENTITY, so an appliance can verify it rather than trust it on sight.
- * =================================================================================================
- *
- * WHAT THIS CLOSES. A gateway clones over SSH with its deploy key. Without a `known_hosts` entry it
- * has two options and both are wrong: accept whatever key answers on the first connection, which is
- * trust-on-first-use and puts the whole of the trust decision at the one moment an attacker would
- * choose; or be told to skip verification, which roadmap 7 and 11 both refuse outright and which
- * would quietly become the way every appliance is configured. An appliance that pulls unattended for
- * years is the worst possible holder of an unverified host key.
- *
- * WHY THE ANSWER TRAVELS THROUGH THE ENROLMENT RESPONSE. The appliance is already talking to the
- * platform over TLS, holding a single-use token bound to exactly one gateway row -- the one moment
- * it is provably itself, and the same reason the deploy key is registered here rather than later.
- * Handing it the forge's host key on that channel means it knows the forge's identity BEFORE its
- * first clone. Nothing in the bundle fetches this URL directly: an appliance that did would be
- * trusting the network again, which is the thing being removed.
- *
- * THE KEY IS PUBLIC AND ITS SECRECY IS NOT THE POINT. Anyone who can reach port 22 is handed it
- * during the handshake -- `ssh-keyscan` is precisely that. What the platform supplies is not
- * confidentiality but ATTESTATION: *this* is the key the forge you were told to use presents.
- *
- * SERVED BY GITEA ITSELF, from `custom/public/`, which it publishes at `/assets/`. `gitea-init.sh`
- * copies the `.pub` there on every boot, so a rotated host key republishes itself. Read here over
- * `GITEA_INTERNAL_URL`, which is the same internal path the machine account already authenticates
- * on -- no new credential, no new route, and no new place for the forge's address to be configured.
- */
 
 /** How long to wait for the forge's asset. Short: enrolment is a person standing at an appliance. */
 const HOST_KEY_TIMEOUT_MS = 5000;

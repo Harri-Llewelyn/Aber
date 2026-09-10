@@ -7,7 +7,7 @@ import { useToast } from './hooks/useToast'
 import { useApiActivity } from './hooks/useApiActivity'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
-import { signOutOfStudio } from './utils/studioSignOut'
+import { signOutOfForge, signOutOfStudio } from './utils/studioSignOut'
 import { TABS, tabIsVisible } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
 import AmbientPipeline from './components/common/AmbientPipeline'
@@ -885,6 +885,6 @@ export default function App() {
   // synchronously on click, which is the contract navigationShell.test.jsx asserts.
   return <Dashboard
     session={session}
-    onSignOut={() => Promise.all([signOutOfStudio(), supabase.auth.signOut()])}
+    onSignOut={() => Promise.all([signOutOfStudio(), signOutOfForge(), supabase.auth.signOut()])}
   />
 }

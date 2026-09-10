@@ -53,6 +53,8 @@ export const RUNTIME_SETTING_NAMES = [
   // browser actually used, which is why compose derives this from that one rather than repeating
   // a literal.
   'VITE_STUDIO_URL',
+  // The forge's door: a link from the gateway drawer, and a sign-out beacon like Studio's.
+  'VITE_GITEA_URL',
   // THE BUCKET NAMES, and they are settings for the same reason the URLs above are.
   //
   // Both were literals in api.js while every other consumer read them from the environment --
@@ -86,6 +88,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_GITHUB_REPO_URL: import.meta.env.VITE_GITHUB_REPO_URL,
   VITE_GRAFANA_URL: import.meta.env.VITE_GRAFANA_URL,
   VITE_STUDIO_URL: import.meta.env.VITE_STUDIO_URL,
+  VITE_GITEA_URL: import.meta.env.VITE_GITEA_URL,
   VITE_MODEL_3D_BUCKET: import.meta.env.VITE_MODEL_3D_BUCKET,
   VITE_CAPTURE_BUCKET: import.meta.env.VITE_CAPTURE_BUCKET,
 };

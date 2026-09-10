@@ -436,32 +436,32 @@ The third is the one worth knowing about, because the way to cause it is conveni
 **Import copy** re-ids every node. Commit the appliance's own `/data/flows.json`, never a flow that
 has been through an import dialog. `docker compose logs flow-sync` names the node.
 
-| Role | Proposing |
+| Role | The forge |
 | :--- | :--- |
-| Administrator, Shopfloor_Manager | may propose, and hold the approval authority as well |
-| Operator | may propose |
-| Auditor | no — read-only is the whole of the role, and a proposal is a write wherever it lands |
+| Administrator | signs in with their dashboard identity; may open, review and **approve** a pull request |
+| Shopfloor_Manager | signs in with their dashboard identity; may open and review a pull request, and merge one an administrator has approved |
+| Operator, Auditor | no login — the gateway's `forge` listener answers 403 after the OAuth flow |
 
-The gate is enforced by `propose-gateway-flow`, which resolves the caller's role for itself; the
-drawer mirrors that list rather than implementing it.
+**Proposing a change is a pull request in the forge, under the author's own name.** The drawer's
+**Repository** link opens the gateway's repository; the `flows.json` exported from the appliance's
+Node-RED editor goes in as a commit on a branch, and the pull request is the proposal. `main` is
+protected on every gateway repository — no direct pushes, one approval required from the
+`administrators` team — so an approved merge is the only way a flow reaches `main`, and `main` is
+what the appliance pulls. A dropzone in the drawer used to do the first half of this through an edge
+function; it went when the forge got a door, because a pull request opened by the person is a better
+record than one opened by the platform with their name in the body.
 
-**A host-run gateway cannot be proposed for**, and the reason is not a permission. Its connector runs
+**A host-run gateway has no repository**, and the reason is not a permission. Its connector runs
 in the platform's own Node-RED, an instance that can carry several host gateways at once, so
-`flows.json` there is the whole instance rather than one gateway's — approving a proposal "for" one
-would replace every other gateway's flow in the same file. The mechanical reason agrees: repositories
-are created when an appliance enrols with a deploy key, and a host-run gateway never enrols, so the
-function refuses it with a 409 that says so.
+`flows.json` there is the whole instance rather than one gateway's — a change "for" one would replace
+every other gateway's flow in the same file. The mechanical reason agrees: repositories are created
+when an appliance enrols with a deploy key, and a host-run gateway never enrols.
 
 **`flows_cred.json` is never committed.** It is encrypted with a secret that exists only in the
-appliance's `.env`, so a copy on the platform would be either useless or dangerous. It is rejected by
-*shape*, not by filename — both files sit side by side in `/data` and picking the wrong one is an easy
-mistake — in the browser and again in the function.
+appliance's `.env`, so a copy on the platform would be either useless or dangerous. Nothing between
+the forge's web editor and the appliance checks its shape yet — the puller's refusal above is the
+last line, and roadmap 7 records a required status check as the next one.
 
-**This replaced a flow-backup panel**, which uploaded the same file to the private `gateway-backups`
-bucket. That worked, but a copy in a bucket has no diff against what the appliance runs now, no
-history, no author and no reviewer, and nothing downstream could ever consume it. The bucket still
-exists server-side; roadmap 9 retires it, and that is the change that decides what happens to
-whatever is already stored in it.
 
 ---
 

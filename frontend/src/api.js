@@ -368,7 +368,9 @@ export const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-mod
  * Auditor, and read through a sixty-second signed URL. Nothing about it was wrong -- it was simply
  * the weakest thing the operator's effort could produce. A gateway's own repository takes the same
  * file and gives it a diff, a history, an author and a review step, so the panel that uploaded to
- * the bucket became `FlowProposalPanel` and the four storage calls that served it went with it.
+ * the bucket became a proposal dropzone and the four storage calls that served it went with it --
+ * and the dropzone then went too, when the forge got a door: a pull request opened there under the
+ * author's own name is the record, and `GatewayRepositoryPanel` is a link to where it is opened.
  *
  * THE BUCKET ITSELF STILL EXISTS. `scripts/storage-init.mjs` still creates it, `storage-policies.sql`
  * still governs it, and `GATEWAY_BACKUP_BUCKET` is still in the environment for those two -- only
@@ -1007,64 +1009,6 @@ const apiMethods = {
     const { data, error } = await supabase.rpc('revoke_service_token', { p_jti: jti });
     if (error) throw new Error(error.message);
     return data;
-  },
-
-  /**
-   * Propose a flow for a gateway: a branch and a pull request, never a deploy.
-   *
-   * THIS REPLACED AN UPLOAD TO THE `gateway-backups` BUCKET, and the replacement is the point. That
-   * one put a copy in a private bucket, where it was a backup and nothing else -- no diff, no
-   * history, no review, and nothing downstream that could ever consume it. This sends the same file
-   * to the gateway's own repository, where an open pull request IS "pending approval" and a merge IS
-   * "approved", without either state having to be modelled anywhere.
-   *
-   * VALIDATED AS A NODE-RED FLOW BEFORE IT IS SENT, not merely by extension: browsers report a
-   * hand-picked .json inconsistently, so the extension is close to no check at all. The same shape
-   * checks run again in the edge function -- not redundancy, since this one only saves a round trip
-   * and the function's is the boundary. `flows_cred.json` is the one that matters: a bucket object
-   * could be deleted, and a commit is forever.
-   *
-   * A raw fetch with the CALLER's token, the same shape as mintGatewayCredential: the function
-   * resolves the caller's role and attributes the proposal to them by name, so the anon key alone
-   * would be refused and would have nobody to name if it were not.
-   */
-  proposeGatewayFlow: async (gatewayId, file) => {
-    const text = await file.text();
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new Error(`"${file.name}" is not valid JSON. Export it from Node-RED with menu → Export → all flows.`);
-    }
-    if (!Array.isArray(parsed)) {
-      throw new Error('A Node-RED flow export is a JSON array of nodes. This file is not one.');
-    }
-    if (parsed.length && parsed.every(n => typeof n === 'object' && n && !n.type)) {
-      throw new Error('That looks like flows_cred.json, not flows.json. Credential files are never committed.');
-    }
-
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/propose-gateway-flow`, {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_GATEWAY_KEY,
-        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ gateway_id: gatewayId, flow: parsed })
-    });
-
-    let body = null;
-    try { body = await res.json(); } catch { /* non-JSON body */ }
-
-    if (!res.ok) {
-      // `details` carries the sentence somebody can act on -- "this deployment has no forge",
-      // "repositories are created when an appliance enrols with a deploy key" -- where `error`
-      // alone would flatten every one of them into "the forge refused".
-      throw new Error(body?.details || body?.error || `Could not propose this flow (${res.status})`);
-    }
-
-    return body?.pull_request ?? null;
   },
 
   /**

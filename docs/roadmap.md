@@ -702,7 +702,7 @@ does not currently have.
 role re-check inside it · `has_role()` and the write policies it gates · the `Operator` role as seeded
 in [`0002`](../supabase/migrations/0002_seed_data.sql) · `device_nameplate` · `publish_schema_version()` ·
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) ·
-[`FlowProposalPanel.jsx`](../frontend/src/components/common/FlowProposalPanel.jsx) ·
+[`GatewayRepositoryPanel.jsx`](../frontend/src/components/common/GatewayRepositoryPanel.jsx) ·
 `system_settings` and its `min_value` / `max_value` bounds · `digital_thread` and
 [`0079`](../supabase/migrations/0079_the_thread_stops_growing_without_end.sql)'s pruning ·
 [`0069`](../supabase/migrations/0069_the_two_roles_stop_being_the_same.sql)'s permission split ·
@@ -971,7 +971,7 @@ thread other than *no*.
 
 **Builds on:** the `gateway-backups` bucket in
 [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
-[`FlowProposalPanel.jsx`](../frontend/src/components/common/FlowProposalPanel.jsx) ·
+[`GatewayRepositoryPanel.jsx`](../frontend/src/components/common/GatewayRepositoryPanel.jsx) ·
 [`gateway-bundle-template/bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs) and the flow hash
 its heartbeat already reports · `digital_thread` (`0005`, `0026`) ·
 [`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts), which is now the only place
@@ -1082,16 +1082,16 @@ request to CHANGE what it runs. Seen in the drawer the distinction did not survi
 same `flows.json` from the same export menu, and the panel was asking the operator to choose a
 destination the product should have chosen. **The bucket is never the right answer to that choice** —
 a copy there has no diff, no history, no author and no reviewer — so the backup lane went the same
-day and the component became
-[`FlowProposalPanel`](../frontend/src/components/common/FlowProposalPanel.jsx). §9 records what was
-removed.
+day and the component became `FlowProposalPanel` -- since retired in its turn, for
+[`GatewayRepositoryPanel`](../frontend/src/components/common/GatewayRepositoryPanel.jsx). §9 records
+what was removed.
 
 **What survives from the two-lane version** is the Operator gate — the storage policy granted that
 role no backup authority at all, and giving it the proposal is the whole point of a review step —
 and the receipt: the pull request comes back as a link in the drawer rather than only a toast,
 because the useful fact is that it is *not deployed yet*, and that is what somebody returns to check.
 
-**REVERSED 2026-09-10: THE PROPOSAL LANE IS TO BE RETIRED, AND THE ENDPOINT WITH IT.** The lane
+**REVERSED AND RETIRED, 2026-09-10: THE PROPOSAL LANE IS GONE, AND THE ENDPOINT WITH IT.** The lane
 existed so that a person with no forge login could still get a flow in front of a reviewer. The
 section below on signing in gives the two roles that actually author flows a login of their own, and
 a pull request opened in the forge under the author's name is a better record than a machine-account
@@ -1099,8 +1099,8 @@ commit with the name in the body. **The Operator gate is given up knowingly**, n
 authors on a plant are engineers, and a review whose proposals come from managers and whose merges
 need an administrator is still two privileges rather than one. `propose-gateway-flow` and its suite
 are deleted rather than left — a role-gated write path with no caller is a door nobody watches —
-and [`FlowProposalPanel`](../frontend/src/components/common/FlowProposalPanel.jsx) becomes a link to
-the gateway's repository, gated to the same two roles the forge admits. **What must move with the
+and the panel is now [`GatewayRepositoryPanel`](../frontend/src/components/common/GatewayRepositoryPanel.jsx),
+a link to the gateway's repository, gated to the same two roles the forge admits. **What must move with the
 lane is the refusal of `flows_cred.json` by shape**, which the endpoint performed before anything
 was committed and which a file uploaded through the forge's own UI now meets nowhere until
 `flow-sync.mjs` refuses the re-ided broker node on the appliance, which is late. It becomes a
@@ -1373,7 +1373,9 @@ this section costed.
   administrators team.** That is where `gitops:manage` being Administrator-only, as `0069` decided,
   is enforced inside the forge: a manager may open and review, and only an administrator's approval
   lets a merge through. **Ensuring membership on first login is the one piece of genuine work here**,
-  and it is the entry under *Worth deciding early*.
+  and it is the entry under *Worth deciding early*. *The organisation, both teams and the protection
+  are BUILT in `_shared/forge.ts`, applied at enrolment; a repository from before the organisation
+  is transferred in, history and keys included, on re-enrolment. Membership is the change after.*
 * **Envoy must be the only door.** Gitea's HTTP port is published directly today; it moves behind the
   listener, Gitea's local password login is disabled, and the administrator `gitea-init.sh` creates
   stays what that script says it is — for a human, rarely, and through the same door. The argument is
@@ -1964,7 +1966,7 @@ other change in this file.
 
 ## 9 · Retiring the flow-backup bucket, and pointing at repositories instead
 
-**Builds on:** [`frontend/src/components/common/FlowProposalPanel.jsx`](../frontend/src/components/common/FlowProposalPanel.jsx) ·
+**Builds on:** [`frontend/src/components/common/GatewayRepositoryPanel.jsx`](../frontend/src/components/common/GatewayRepositoryPanel.jsx) ·
 the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
 [`supabase/storage-policies.sql`](../supabase/storage-policies.sql) ·
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) and its tag vocabulary ·
@@ -1975,8 +1977,8 @@ adds the pull; this removes what the push made necessary.
 
 ### The browser half is done — 2026-09-10
 
-`FlowBackupUploader` is now
-[`FlowProposalPanel`](../frontend/src/components/common/FlowProposalPanel.jsx), and it is not a
+`FlowBackupUploader` became `FlowProposalPanel`, now
+[`GatewayRepositoryPanel`](../frontend/src/components/common/GatewayRepositoryPanel.jsx), and it is not a
 rename: the list, the signed-URL download, the upload and the delete are gone, along with
 `listGatewayBackups`, `uploadGatewayBackup`, `gatewayBackupUrl`, `deleteGatewayBackup`,
 `gatewayBackupPath` and `VITE_GATEWAY_BACKUP_BUCKET`'s whole plumbing — `api.js`, `config.js`,

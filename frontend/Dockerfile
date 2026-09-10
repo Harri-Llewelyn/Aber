@@ -71,6 +71,10 @@ ARG VITE_GRAFANA_URL
 # constants.js falls back to 127.0.0.1:54323, which is right on Compose and simply unreachable
 # anywhere else. The HOST must match STUDIO_PUBLIC_URL's, not merely the port -- see constants.js.
 ARG VITE_STUDIO_URL
+# The forge's door -- the gateway drawer links to a gateway's repository under it, and sign-out ends
+# the session the gateway holds there. Unset is survivable: constants.js falls back to
+# localhost:3003, which is right on Compose and nowhere else. HOST must match GITEA_ROOT_URL's.
+ARG VITE_GITEA_URL
 # Storage bucket names, matching STORAGE_BUCKET / CAPTURE_BUCKET in scripts/storage-init.mjs. Unset
 # is the ordinary case: src/api.js defaults to the same names those default to. They are build args
 # at all so a deployment that RENAMED a bucket can move the dashboard with everything else, rather

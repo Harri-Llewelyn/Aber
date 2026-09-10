@@ -995,6 +995,7 @@ function edgeFunctionNames() {
     'VITE_GITHUB_REPO_URL',  // issue tracker URL
     'VITE_GRAFANA_URL',      // an endpoint, public
     'VITE_STUDIO_URL',       // an endpoint, public -- reached only to end Studio's own session
+    'VITE_GITEA_URL',        // an endpoint, public -- the forge's door; a link and a sign-out beacon
     'VITE_MODEL_3D_BUCKET',       // a bucket name, public -- the objects in it are public-read
     'VITE_APP_VERSION',      // a git describe string, shown in the UI on purpose
   ]);

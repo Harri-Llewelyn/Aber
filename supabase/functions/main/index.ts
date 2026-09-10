@@ -130,11 +130,6 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // owns only the per-gateway repositories. Nothing here can merge: approving is `gitops:manage`,
   // it belongs with the approvals page, and keeping it out of this worker is what keeps proposing
   // and approving two privileges rather than one.
-  "propose-gateway-flow": [
-    "GITEA_INTERNAL_URL",
-    "GITEA_MACHINE_USER",
-    "GITEA_MACHINE_PASSWORD",
-  ],
 
   // Rotates a decommissioned gateway's broker account to a password nobody records, which is how
   // this platform revokes -- the credential service is add-only by design (0038).

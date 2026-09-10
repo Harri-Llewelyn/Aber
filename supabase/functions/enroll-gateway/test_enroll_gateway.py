@@ -464,21 +464,28 @@ class TestForgeProvisioning(EnrollGatewayBase):
         cls.machine_password = os.getenv(
             "GITEA_MACHINE_PASSWORD", "acs-platform-machine-account"
         )
+        # Every gateway repository lives in this organisation (forge.ts); the machine account owns
+        # it, which is exactly the authority to create a repository in it and no more.
+        cls.organisation = os.getenv("GITEA_ORGANISATION", "gateways")
         try:
             cls.forge("/api/v1/version")
         except Exception as err:  # noqa: BLE001 -- any failure here means "no forge"
             raise unittest.SkipTest(f"no forge reachable at {cls.forge_url}: {err}")
 
     @classmethod
-    def forge(cls, path, method="GET"):
+    def forge(cls, path, method="GET", body=None):
         """The forge's API, as the machine account -- the same credential enroll-gateway holds."""
         credentials = base64.b64encode(
             f"{cls.machine_user}:{cls.machine_password}".encode()
         ).decode()
+        headers = {"Authorization": f"Basic {credentials}"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
         req = urllib.request.Request(
             f"{cls.forge_url}{path}",
             method=method,
-            headers={"Authorization": f"Basic {credentials}"},
+            data=json.dumps(body).encode() if body is not None else None,
+            headers=headers,
         )
         with urllib.request.urlopen(req, timeout=15) as response:
             raw = response.read().decode()
@@ -490,10 +497,13 @@ class TestForgeProvisioning(EnrollGatewayBase):
 
     @classmethod
     def delete_repo(cls):
-        try:
-            cls.forge(f"/api/v1/repos/{cls.machine_user}/{cls.repo_name()}", method="DELETE")
-        except urllib.error.HTTPError:
-            pass  # Never created, which is the ordinary state before the first test.
+        # Both namespaces: the organisation, and the machine account's own, where the transfer test
+        # plants a legacy repository and where every repository lived before the organisation.
+        for owner in (cls.organisation, cls.machine_user):
+            try:
+                cls.forge(f"/api/v1/repos/{owner}/{cls.repo_name()}", method="DELETE")
+            except urllib.error.HTTPError:
+                pass  # Never created, which is the ordinary state before the first test.
 
     @classmethod
     def tearDownClass(cls):
@@ -528,19 +538,73 @@ class TestForgeProvisioning(EnrollGatewayBase):
         self.assertTrue(payload["repository"]["ssh_url"].endswith(f"{self.repo_name()}.git"))
         self.assertEqual(payload["repository"]["branch"], "main")
 
-        repo = self.forge(f"/api/v1/repos/{self.machine_user}/{self.repo_name()}")
+        repo = self.forge(f"/api/v1/repos/{self.organisation}/{self.repo_name()}")
         self.assertTrue(
             repo["private"],
             "the gateway repository is PUBLIC -- a flows.json names the plant's brokers and devices",
         )
 
-        keys = self.forge(f"/api/v1/repos/{self.machine_user}/{self.repo_name()}/keys")
+        keys = self.forge(f"/api/v1/repos/{self.organisation}/{self.repo_name()}/keys")
         self.assertEqual(len(keys), 1, keys)
         self.assertTrue(
             keys[0]["read_only"],
             "the deploy key is WRITABLE -- an appliance could author the flow it is later asked "
             "to deploy, and an approved commit would stop being evidence that anyone approved it",
         )
+
+    def test_main_is_protected_and_a_merge_needs_an_administrator(self):
+        """
+        THE REVIEW GATE, in the forge's own terms. The appliance converges to `main`, so a branch
+        anyone with write could push to is a branch anyone with write could deploy from; and a
+        review whose approval can come from the same team that opened the request is a formality.
+        Both are branch protection, applied at enrolment, and both would fail silently: a repository
+        without them looks identical from a clone.
+        """
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+
+        protection = self.forge(
+            f"/api/v1/repos/{self.organisation}/{self.repo_name()}/branch_protections/main"
+        )
+        self.assertFalse(
+            protection["enable_push"],
+            "main accepts direct pushes -- anyone with write could deploy an unreviewed flow",
+        )
+        self.assertTrue(protection["enable_approvals_whitelist"])
+        self.assertEqual(
+            protection["approvals_whitelist_teams"], ["administrators"],
+            "approval is not confined to administrators -- a manager could approve a manager",
+        )
+        self.assertGreaterEqual(protection["required_approvals"], 1)
+
+    def test_a_repository_from_before_the_organisation_is_transferred_in(self):
+        """
+        Repositories created before the organisation existed live under the machine account, where
+        no login can see them. Re-enrolling such a gateway must MOVE that repository -- history,
+        keys and all -- rather than create an empty twin beside it, which would be a gateway whose
+        flow history quietly became unreachable on the day the forge got a door.
+        """
+        legacy = self.forge(
+            "/api/v1/user/repos", method="POST",
+            body={"name": self.repo_name(), "private": True, "auto_init": True, "default_branch": "main"},
+        )
+        self.assertEqual(legacy["owner"]["login"], self.machine_user)
+
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        self.assertIsNotNone(payload.get("repository"), payload)
+
+        moved = self.forge(f"/api/v1/repos/{self.organisation}/{self.repo_name()}")
+        self.assertEqual(moved["owner"]["login"], self.organisation)
+        self.assertEqual(moved["id"], legacy["id"], "the legacy repository was copied, not moved")
+        # THE OLD PATH STILL ANSWERS, AND THAT IS GITEA'S DOING RATHER THAN A COPY LEFT BEHIND: a
+        # transfer leaves a redirect from the old owner, so an appliance holding the old clone URL
+        # keeps working. What matters is that it answers with the MOVED repository, not a twin.
+        redirected = self.forge(f"/api/v1/repos/{self.machine_user}/{self.repo_name()}")
+        self.assertEqual(redirected["id"], legacy["id"])
+        self.assertEqual(redirected["owner"]["login"], self.organisation)
 
     def test_a_gateway_without_a_key_still_enrols(self):
         """

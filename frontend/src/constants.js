@@ -223,6 +223,23 @@ export const STUDIO_URL = readSetting('VITE_STUDIO_URL', 'http://127.0.0.1:54323
   .replace(/\/+$/, '');
 
 /**
+ * The forge's door, as the browser reaches it -- GITEA_ROOT_URL on the server side, host included.
+ *
+ * A LINK AS WELL AS A SIGN-OUT, unlike STUDIO_URL: the gateway drawer links to a gateway's own
+ * repository, and sign-out beacons the same origin for the same reason it beacons Studio's. The
+ * fallback is the Compose default, `localhost` and not `127.0.0.1`, matching GITEA_ROOT_URL's.
+ */
+export const GITEA_URL = readSetting('VITE_GITEA_URL', 'http://localhost:3003')
+  .replace(/\/+$/, '');
+
+/**
+ * The organisation every gateway repository lives in. NAMED HERE AND IN
+ * supabase/functions/_shared/forge.ts, and the two must agree: that file creates the repository,
+ * this builds the link to it. A repository is `<organisation>/gateway-<sparkplug_id>`.
+ */
+export const FORGE_ORGANISATION = 'gateways'
+
+/**
  * The Grafana alert page for one rule.
  *
  * BY RULE NAME ONLY. It also carried `label:sparkplug_id=<id>`, to land on the one device's instance
