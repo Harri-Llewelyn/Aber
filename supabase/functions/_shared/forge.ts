@@ -70,6 +70,9 @@ export interface ForgeConfig {
   baseUrl: string;
   user: string;
   password: string;
+  /** Where Gitea delivers a push (forge-events), and the secret it signs with. Empty: no hook. */
+  webhookUrl: string;
+  webhookSecret: string;
 }
 
 export interface ForgeRepository {
@@ -118,7 +121,20 @@ export function forgeConfig(): ForgeConfig | null {
     return null;
   }
 
-  return { baseUrl, user, password };
+  // OPTIONAL, unlike the three above: a forge without a webhook is a forge the dashboard learns
+  // about one tick late, not a forge that cannot be used. Both or neither, and enrolment logs
+  // which.
+  const webhookUrl = (Deno.env.get("GITEA_WEBHOOK_URL") ?? "").trim();
+  const webhookSecret = Deno.env.get("GITEA_WEBHOOK_SECRET") ?? "";
+  if (!!webhookUrl !== !!webhookSecret) {
+    console.warn(
+      `the forge's webhook is half-configured (${webhookUrl ? "GITEA_WEBHOOK_SECRET" : "GITEA_WEBHOOK_URL"} unset); ` +
+        "no hook will be registered on gateway repositories until both are set",
+    );
+  }
+  const webhook = webhookUrl && webhookSecret ? { webhookUrl, webhookSecret } : { webhookUrl: "", webhookSecret: "" };
+
+  return { baseUrl, user, password, ...webhook };
 }
 
 /**
@@ -496,6 +512,39 @@ async function ensureWikiHome(
   console.log(`forge: seeded the wiki of '${name}'`);
 }
 
+/**
+ * Register the push webhook on the repository, once.
+ *
+ * ONE HOOK PER REPOSITORY RATHER THAN ONE ON THE ORGANISATION, because only a gateway's repository
+ * has a gateway row to record on: a hand-made playbook repository in the organisation would deliver
+ * pushes forge-events can only ignore. Registered at enrolment beside the deploy key, found again by
+ * URL on re-enrolment. The secret is the one forge-events verifies with, so a delivery is proof it
+ * came from a hook enrolment made and not from anything else that can reach the edge runtime.
+ *
+ * `branch_filter: main` is Gitea's own filter, so pushes to a proposal branch are not delivered at
+ * all rather than delivered and ignored.
+ */
+async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<void> {
+  if (!cfg.webhookUrl) {
+    console.log(`forge: no webhook configured, so '${name}' will not report its pushes`);
+    return;
+  }
+  const listed = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/hooks`);
+  if (!listed.ok) throw await refused(`could not list the hooks on '${name}'`, listed);
+  const hooks = await listed.json() as { id: number; config?: { url?: string } }[];
+  if (hooks.some((h) => h.config?.url === cfg.webhookUrl)) return;
+
+  const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/hooks`, {
+    type: "gitea",
+    active: true,
+    events: ["push"],
+    branch_filter: "main",
+    config: { url: cfg.webhookUrl, content_type: "json", secret: cfg.webhookSecret },
+  });
+  if (!created.ok) throw await refused(`could not register the push webhook on '${name}'`, created);
+  console.log(`forge: '${name}' reports its pushes to ${cfg.webhookUrl}`);
+}
+
 /** Provision the organisation, the repository, its protection and the key. Returns null on any failure, having logged it. */
 export async function provisionGatewayRepository(
   cfg: ForgeConfig,
@@ -517,6 +566,13 @@ export async function provisionGatewayRepository(
       await ensureWikiHome(cfg, name, sparkplugId, gatewayName);
     } catch (err) {
       console.warn(`forge: the wiki of '${name}' was not seeded (${err instanceof Error ? err.message : err}); the repository is unaffected`);
+    }
+    // LIKEWISE the webhook: it is how the dashboard learns of a push before the appliance's next
+    // tick, and a repository without it is a repository the dashboard learns about one tick late.
+    try {
+      await ensureWebhook(cfg, name);
+    } catch (err) {
+      console.warn(`forge: the push webhook on '${name}' was not registered (${err instanceof Error ? err.message : err}); the repository is unaffected`);
     }
     return repo;
   } catch (err) {

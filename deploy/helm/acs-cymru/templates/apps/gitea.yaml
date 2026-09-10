@@ -96,6 +96,10 @@ shares the same block through a YAML anchor, for the same reason.
 # as the Compose file's gitea-env block.
 - name: GITEA__repository__DISABLED_REPO_UNITS
   value: "repo.projects,repo.packages"
+# Webhooks may call private addresses: the one they call is the edge runtime (forge-events), a
+# cluster-internal Service. Gitea's default admits public addresses only. See the Compose file.
+- name: GITEA__webhook__ALLOWED_HOST_LIST
+  value: "private"
 - name: GITEA__log__LEVEL
   value: {{ .Values.gitea.logLevel | quote }}
 {{- end -}}

@@ -138,6 +138,12 @@ spec:
             - name: GITEA_MACHINE_USER
               value: {{ .Values.gitea.machineUser | quote }}
             {{- include "acs-cymru.optionalSecretEnv" (dict "name" "GITEA_MACHINE_PASSWORD" "secretName" $secretName "key" "GITEA_MACHINE_PASSWORD") | nindent 12 }}
+            {{- /* The push webhook enrolment registers on each gateway repository (0095): this
+                   Service, reached by Gitea over the NetworkPolicy edge gitea -> supabase-functions,
+                   and the secret forge-events verifies deliveries with. Optional: unset is no hook. */}}
+            - name: GITEA_WEBHOOK_URL
+              value: "http://supabase-functions:9000/forge-events"
+            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "GITEA_WEBHOOK_SECRET" "secretName" $secretName "key" "GITEA_WEBHOOK_SECRET") | nindent 12 }}
             {{- end }}
             - name: MQTT_PUBLIC_HOST
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicHost

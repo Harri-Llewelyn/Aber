@@ -101,6 +101,7 @@ secrets:
   # The forge's door (0094). Set here because, unlike Studio's, the gitea route is on by default.
   giteaOAuthClientSecret: change-me-gitea-oauth-client-secret
   giteaProxyHmacSecret: change-me-gitea-proxy-hmac-secret
+  giteaWebhookSecret: change-me-gitea-webhook-secret
 
   grafanaAdminUser: admin
   grafanaAdminPassword: admin

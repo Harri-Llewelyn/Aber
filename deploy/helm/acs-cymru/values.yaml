@@ -228,6 +228,9 @@ secrets:
   # (SSH) and enroll-gateway (the API) are unaffected by either state.
   giteaOAuthClientSecret: ""
   giteaProxyHmacSecret: ""
+  # The push webhook's signing secret (0095). Empty: enrolment registers no hook, and the dashboard
+  # learns of a merge on the appliance's next tick rather than at once.
+  giteaWebhookSecret: ""
 
   grafanaAdminUser: admin
   grafanaAdminPassword: ""

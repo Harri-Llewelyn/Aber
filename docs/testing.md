@@ -116,6 +116,12 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/forge-membership/test_forge_membership.py
 
+# The forge's push webhook (0095): signature refusals, what a push to main records on the gateway
+# row, what is ignored, and one delivery sent by the forge itself for a freshly enrolled gateway.
+# GITEA_WEBHOOK_SECRET is the value in .env (the one the edge runtime holds). Skips without it.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
+  python supabase/functions/forge-events/test_forge_events.py
+
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
 # integrity, and that the embedded token is the one the database will accept.
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \

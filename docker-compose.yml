@@ -140,6 +140,12 @@ x-gitea-env: &gitea-env
   # the wiki is seeded at enrolment (forge.ts) as the unreviewed place for what people know about a
   # gateway, and issues are its incident log.
   GITEA__repository__DISABLED_REPO_UNITS: "repo.projects,repo.packages"
+  # WEBHOOKS MAY CALL PRIVATE ADDRESSES, because the one they call is the edge runtime on this
+  # stack's own network (forge-events, 0095). Gitea's default is `external` -- public addresses
+  # only -- which refuses every in-stack target as a server-side request forgery guard. `private`
+  # admits RFC 1918 and nothing public, which is the opposite of the default and the right way round
+  # here: nothing in this forge should be made to call out of the plant.
+  GITEA__webhook__ALLOWED_HOST_LIST: "private"
   # A container in a plant has no business calling home to check for releases.
   GITEA__cron.update_checker__ENABLED: "false"
   GITEA__log__LEVEL: ${GITEA_LOG_LEVEL:-info}
@@ -1331,6 +1337,11 @@ services:
       GITEA_INTERNAL_URL: ${GITEA_INTERNAL_URL:-http://gitea:3000}
       GITEA_MACHINE_USER: ${GITEA_MACHINE_USER:-acs_platform}
       GITEA_MACHINE_PASSWORD: ${GITEA_MACHINE_PASSWORD:-acs-platform-machine-account}
+      # The push webhook enrolment registers on each gateway repository (0095): where Gitea
+      # delivers -- this container, reached over the `forge` network, NOT through the gateway --
+      # and the secret Gitea signs with and forge-events verifies against. Empty secret: no hook.
+      GITEA_WEBHOOK_URL: ${GITEA_WEBHOOK_URL:-http://supabase-functions:9000/forge-events}
+      GITEA_WEBHOOK_SECRET: ${GITEA_WEBHOOK_SECRET:-}
       MQTT_PUBLIC_HOST: ${MQTT_PUBLIC_HOST:-}
       MQTT_PUBLIC_TLS_PORT: ${MQTT_PUBLIC_TLS_PORT:-8883}
       # Where an APPLIANCE reaches the platform, written into the bundle's .env.

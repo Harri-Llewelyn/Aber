@@ -1471,6 +1471,23 @@ answers 403 afterwards). A repository from before this gets no template from enr
 administrator adds one by pull request, which is the right path into a repository with a history.
 The gateway drawer now links the repository, its issues and its wiki as three acts rather than one.
 
+**THE FORGE SAYS WHEN `main` MOVED (0095, 2026-09-10).** Until this, the dashboard learned nothing
+between a merge and the appliance's next tick -- the row carries what the appliance REPORTS -- so a
+person who had just approved a pull request looked at a gateway that showed nothing new. Enrolment
+now registers a push webhook on each gateway repository (`branch_filter: main`, one per repository
+rather than one on the organisation, because only a gateway's repository has a row to record on),
+and `forge-events` verifies each delivery's HMAC and records the head of `main` on the gateway: sha,
+first line, who, when, and the SHA-256 of `flows.json` at that head. The signature is the whole of
+the authentication; the delivery travels over the forge network (Compose) or the new NetworkPolicy
+edge gitea → supabase-functions (Kubernetes), never through the gateway. Gitea's
+`ALLOWED_HOST_LIST` had to be set to `private`: its default admits public addresses only, which
+refuses every in-stack target. **What this is not yet: a drift check.** The appliance's heartbeat
+carries the hash of the flow it was ENROLLED with (bootstrap writes it into gateway.env once), not
+the one flow-sync last deployed, so the two hashes now sit side by side on the row and the dashboard
+does not call their difference drift. Making the appliance report what it deployed is the other half,
+and it is an appliance-side change (the heartbeat reads the hash from the process environment, which
+a reload does not refresh) -- recorded here rather than done, because it changes the bundle.
+
 **NONE OF THIS RELAXES THE RULE THAT AUTHORISATION STAYS IN POSTGRES.** `user_roles` and `has_role()`
 decide who is let through the door; Gitea's teams decide what they may do inside it, and the two
 must agree by construction — the team a login is placed in is a function of the role the listener

@@ -954,6 +954,24 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + 'provisioned with. Identifies which bundle\'s flow is installed; it does NOT '
                 + 'detect edits made afterwards in the Node-RED editor.'
             },
+            /**
+             * WHERE main IS, from the forge rather than from the appliance. forge-events records
+             * it on every push (0095), so a merge shows here at once rather than on the
+             * appliance's next tick. Not yet a drift check against the Flow row above: that hash
+             * is the flow the appliance was ENROLLED with, not the one it last deployed.
+             */
+            {
+              label: 'Committed',
+              value: selected.forge_head_sha
+                ? `${selected.forge_head_sha.slice(0, 12)} · ${formatHeartbeat(selected.forge_head_at)}`
+                : null,
+              title: 'The head of main in this gateway\'s repository, as the forge reported it on '
+                + 'the last push'
+                + (selected.forge_head_message ? `: "${selected.forge_head_message}"` : '')
+                + (selected.forge_head_by ? ` by ${selected.forge_head_by}` : '')
+                + '. The appliance deploys it on its next tick. Empty until the first push after '
+                + 'the repository got its webhook.'
+            },
           ] : []),
           {
             label: 'Description',

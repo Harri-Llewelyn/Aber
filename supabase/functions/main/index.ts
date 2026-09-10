@@ -119,6 +119,10 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_INTERNAL_URL",
     "GITEA_MACHINE_USER",
     "GITEA_MACHINE_PASSWORD",
+    // The push webhook enrolment registers on each repository (0095): where Gitea should deliver,
+    // and the secret it signs with. Both optional -- unset means no hook, and enrolment says so.
+    "GITEA_WEBHOOK_URL",
+    "GITEA_WEBHOOK_SECRET",
   ],
 
   // Commits a proposed flow to a BRANCH in the gateway's repository and opens a pull request for
@@ -236,6 +240,16 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // caller holds, then sends the browser through the door's sign-out. Needs the service key to
   // revoke; touches the forge not at all.
   "forge-signout": ["SUPABASE_SERVICE_ROLE_KEY"],
+  // Gitea's push webhook (0095): verifies the delivery's HMAC against GITEA_WEBHOOK_SECRET, records
+  // the head of main on the gateway row, and reads flows.json at that head through the machine
+  // account for its hash. The service key writes the row; the forge credential reads the file.
+  "forge-events": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "GITEA_WEBHOOK_SECRET",
+    "GITEA_INTERNAL_URL",
+    "GITEA_MACHINE_USER",
+    "GITEA_MACHINE_PASSWORD",
+  ],
 
   // Factory+ Directory adapter. NO SERVICE-ROLE KEY, and that is the point: it is a live read
   // API over the whole address space, so it authenticates the caller and then queries AS them,

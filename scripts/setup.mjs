@@ -238,6 +238,10 @@ const generated = {
   // healthy.
   GITEA_OAUTH_CLIENT_SECRET: hex(32),
   GITEA_PROXY_HMAC_SECRET: hex(32),
+  // The forge's push webhook (0095): what Gitea signs each delivery with and forge-events verifies.
+  // Unset does not disable access, only the dashboard's early word of a merge -- but a secret
+  // nobody chose is a secret nobody can leak, so it is generated with the rest.
+  GITEA_WEBHOOK_SECRET: hex(32),
   // The bearer token supabase-functions presents to the gateway-credential service. Its own value
   // for the same reason as the one above: that service can mint a Mosquitto account for any edge
   // node, and mosquitto.acl makes an account the ability to publish telemetry as that gateway --

@@ -161,6 +161,8 @@ secrets:
   # unaffected. openssl rand -hex 32, both.
   giteaOAuthClientSecret: ""
   giteaProxyHmacSecret: ""
+  # The push webhook's signing secret (0095). openssl rand -hex 32. Empty registers no hook.
+  giteaWebhookSecret: ""
 
   grafanaAdminUser: admin
   grafanaAdminPassword: ""

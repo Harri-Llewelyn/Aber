@@ -2898,6 +2898,47 @@ paths:
         '405': { description: 'Method other than POST.' }
         '503': { description: 'GRAFANA_ALERT_WEBHOOK_SECRET is not configured; refusing to accept alerts.' }
 
+  /functions/v1/forge-events:
+    post:
+      tags: [Edge Functions]
+      summary: Gitea's push webhook; records the head of main on the gateway's row
+      description: |
+        Registered on each gateway repository at enrolment (migration 0095). Gitea delivers every push
+        to `main` here, signed: `X-Gitea-Signature` is the hex HMAC-SHA256 of the raw body under
+        `GITEA_WEBHOOK_SECRET`, and the signature is the whole of the authentication -- Envoy's key-auth
+        proves only that the caller holds the anon key. On a verified push the gateway named by the
+        repository (`gateway-<sparkplug_id>`) records the commit's sha, its message's first line, who
+        pushed it, when, and the SHA-256 of `flows.json` at that commit, read through the machine account.
+
+        Pushes to other branches, repositories that are not a gateway's, deleted branches, non-push events
+        and gateways this database does not know are answered 200 with `ignored`, because a non-2xx is a
+        failed delivery on the hook's page and none of those is a failure.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - in: header
+          name: X-Gitea-Event
+          required: true
+          schema: { type: string, example: push }
+        - in: header
+          name: X-Gitea-Signature
+          required: true
+          schema: { type: string }
+          description: Hex HMAC-SHA256 of the raw request body under the hook's secret.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Gitea's push event payload.
+      responses:
+        '200':
+          description: Recorded (`recorded` names the gateway and the commit) or ignored (`ignored` says why).
+        '401':
+          description: The signature is missing or does not verify.
+        '503':
+          description: GITEA_WEBHOOK_SECRET is not configured; nothing is accepted.
   /functions/v1/forge-membership:
     post:
       tags: [Edge Functions]
