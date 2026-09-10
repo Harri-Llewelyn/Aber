@@ -47,7 +47,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   VITE_STUDIO_URL: %q,
   // Storage buckets, from the same values scripts/storage-init.mjs creates them with -- so a
   // rename moves the dashboard with the bucket instead of leaving it on the old name.
-  // `gatewayBackupBucket` is deliberately NOT among them: the browser stopped reading that bucket
+  // gatewayBackupBucket is deliberately NOT among them: the browser stopped reading that bucket
   // when flow backups became flow proposals, and storage-init still creates it (roadmap 9).
   VITE_MODEL_3D_BUCKET: %q,
   VITE_CAPTURE_BUCKET: %q,
