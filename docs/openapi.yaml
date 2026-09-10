@@ -2116,6 +2116,86 @@ paths:
             401 would send whoever is debugging it looking for a wrong value rather than a missing
             one.
 
+  /functions/v1/propose-gateway-flow:
+    post:
+      tags: [Edge Functions]
+      summary: Propose a Node-RED flow for a gateway as a branch and a pull request
+      description: |
+        Turns a flow **upload** into a **commit**. The `flows.json` an operator exports from Node-RED
+        is committed to a new branch in that gateway's own repository in the forge, and a pull request
+        is opened against `main` for somebody to review.
+
+        **It never writes to `main`.** The appliance converges to whatever `main` holds, so a direct
+        commit there would deploy an unreviewed flow the moment somebody pressed a button — which is
+        the `deploy-nodered` endpoint this design retired. An open pull request is *pending approval*,
+        a merge is *approved*, and a revert commit is *undo*; **merging is not reachable from this
+        endpoint** and is `gitops:manage`'s act.
+
+        Requires `Administrator`, `Shopfloor_Manager` **or `Operator`**. Including `Operator` is the
+        point of the review step: a gate whose proposals can only come from the roles that may already
+        merge them is a formality. `Auditor` reads and may not propose.
+
+        **`flows_cred.json` is refused by shape, not by filename.** The credential file sits beside
+        `flows.json` in `/data`, is encrypted with a secret that exists only on the appliance, and a
+        repository keeps forever what a bucket would let you delete.
+
+        The repository is created when an appliance **enrols with a deploy key**, so a virtual gateway —
+        or a physical one whose bundle predates the forge — answers `409` rather than failing obscurely.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gateway_id, flow]
+              properties:
+                gateway_id:
+                  type: string
+                  format: uuid
+                  description: The gateway whose repository receives the proposal.
+                flow:
+                  type: array
+                  description: >-
+                    A Node-RED flow export: the JSON array of nodes from menu → Export → all flows.
+                    An empty array is valid — it is what a blank editor exports.
+                  items:
+                    type: object
+      responses:
+        '201':
+          description: The branch was committed and a pull request opened.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pull_request:
+                    type: object
+                    properties:
+                      number:
+                        type: integer
+                        description: The pull request number in the forge.
+                      html_url:
+                        type: string
+                        description: Where a reviewer opens it.
+                      branch:
+                        type: string
+                        description: The branch the commit landed on.
+        '400':
+          description: Not a flow export, or a credentials file.
+        '401':
+          description: No signed-in session.
+        '403':
+          description: The caller's role may not propose.
+        '404':
+          description: No such gateway, or not one the caller may see.
+        '409':
+          description: The gateway has no repository - it has not enrolled with a deploy key.
+        '413':
+          description: The flow exceeds the 5 MiB ceiling.
+        '502':
+          description: The forge refused the commit or the pull request.
+        '503':
+          description: This deployment has no forge configured.
   /functions/v1/enroll-gateway:
     post:
       tags: [Edge Functions]

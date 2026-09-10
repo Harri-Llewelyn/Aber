@@ -355,6 +355,47 @@ spec:
           port: 8883
         {{- end }}
 {{- end }}
+{{- if and .Values.gitea.enabled .Values.gitea.ssh.external.enabled }}
+---
+{{/*
+Git over SSH from OUTSIDE the cluster.
+
+THE SAME SHAPE AS THE MQTT RULE ABOVE AND FOR THE SAME REASON: appliances are not pods, have no
+namespace, and no selector describes them -- so this has to be an ipBlock, and the default is open
+because guessing a plant CIDR would silently stop the fleet converging.
+
+WHAT AUTHENTICATES HERE IS THE KEY, NOT THE CIDR, and that is a stronger position than the broker
+rule has. Every repository is private, every appliance holds a per-gateway deploy key that is
+READ-ONLY, and SSH authenticates the server to the client by host key. Traffic also arrives SNAT'd
+by ServiceLB, so the address seen here is the node's rather than the gateway's -- which is why a
+narrowed CIDR is defence in depth behind the key and never the control itself.
+
+THE PORT IS THE SERVICE'S, NOT THE CONTAINER'S, because a NodePort deployment moves it into the
+30000+ range. Reading it from the same value the Service takes means a policy that cannot describe
+a port nothing is listening on.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-ingress-gitea-ssh" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" "gitea") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" "gitea") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.giteaSshAllowedCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 22
+{{- end }}
 {{- if and .Values.e2e.enabled .Values.networkPolicy.apiServerCidr }}
 ---
 {{/*

@@ -39,6 +39,76 @@ x-nodered-auth-env: &nodered-auth-env
   # disable_login_form = false in grafana/grafana.ini.
   NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
 
+# =============================================================================================
+# Gitea configuration -- shared by gitea-init (which CREATES app.ini and the administrator) and
+# gitea (which serves from it).
+#
+# THE TWO MUST AGREE EXACTLY, and the reason is the same one the Node-RED anchor above gives, one
+# file along. Gitea's own entrypoint builds /data/gitea/conf/app.ini from these `GITEA__section__KEY`
+# variables; a variable set on one container and not the other means the init step writes an app.ini
+# the server then rewrites -- so the database the administrator was created in and the database the
+# server opens can genuinely differ.
+#
+# WHAT THESE SETTINGS ARE FOR is argued at the `gitea` service below rather than here, so the
+# reasoning sits with the thing it describes.
+# =============================================================================================
+x-gitea-env: &gitea-env
+  # The uid/gid the container runs Gitea as, and the owner it writes /data as. 1000 for the same
+  # reason the node-red services use it: a volume written as root is a volume the next container
+  # cannot read.
+  USER_UID: "1000"
+  USER_GID: "1000"
+  GITEA__server__PROTOCOL: http
+  GITEA__server__HTTP_PORT: "3000"
+  GITEA__server__DOMAIN: ${GITEA_DOMAIN:-localhost}
+  # WHAT A CLONE URL SAYS, and it is appliance-facing rather than internal. A ROOT_URL that does not
+  # match how the forge is actually reached produces clone commands naming a host nobody can resolve
+  # -- copied off the repository page onto an appliance, where it fails as a network error rather
+  # than as a configuration one.
+  GITEA__server__ROOT_URL: ${GITEA_ROOT_URL:-http://localhost:${GITEA_HTTP_PORT:-3003}/}
+  # SSH IS THE TRANSPORT THE CREDENTIAL MODEL NEEDS. Roadmap 7 gives each appliance a per-gateway
+  # READ-ONLY key, and a Gitea deploy key IS an SSH key -- there is no per-repository read-only HTTP
+  # token to use instead.
+  #
+  # SERVED BY THE IMAGE'S OWN sshd, AND THE `false` BELOW IS ASSERTED RATHER THAN LEFT UNSET.
+  # This image ships an OpenSSH daemon on 22 for exactly this job, with Gitea writing the git
+  # user's authorized_keys. Gitea also has a built-in SSH server, and turning it on while leaving
+  # the daemon in place is a port collision INSIDE the container: sshd binds 22 first, Gitea logs
+  # "address already in use" and exits, and the restart policy turns that into a crash loop on a
+  # container whose configuration is otherwise correct.
+  #
+  # It is the CONTAINER'S sshd and never the host's: a deploy key here grants a git operation on
+  # one repository, and no account on the machine the forge runs on.
+  #
+  # UNSETTING A VARIABLE DOES NOT UNSET THE SETTING, which is the part that costs an afternoon.
+  # `environment-to-ini` MERGES into an existing app.ini, so a key written on one boot survives
+  # every later boot that simply stops mentioning it -- the container then crash-loops on a
+  # configuration this file no longer contains, which is unreadable from here. Stating the value
+  # is what makes this file the whole answer.
+  GITEA__server__START_SSH_SERVER: "false"
+  # The port a clone URL ADVERTISES, which is the published one rather than the listener.
+  GITEA__server__SSH_PORT: "${GITEA_SSH_PORT:-2222}"
+  GITEA__server__SSH_DOMAIN: ${GITEA_SSH_DOMAIN:-${GITEA_DOMAIN:-localhost}}
+  GITEA__database__DB_TYPE: sqlite3
+  GITEA__database__PATH: /data/gitea/gitea.db
+  # No web installer. The other half of gitea-init's decision below.
+  GITEA__security__INSTALL_LOCK: "true"
+  # THE FOUR LINES THAT KEEP IT OFF THE IDENTITY PLANE. Nobody signs themselves up, nobody reads a
+  # repository without an account, and no repository is public by accident: a flows.json names the
+  # plant's brokers and devices, so FORCE_PRIVATE means even a machine account cannot publish one by
+  # mistake.
+  GITEA__service__DISABLE_REGISTRATION: "true"
+  GITEA__service__REQUIRE_SIGNIN_VIEW: "true"
+  GITEA__repository__FORCE_PRIVATE: "true"
+  GITEA__repository__DEFAULT_PRIVATE: private
+  # OFF UNTIL ROADMAP 8 ARGUES THEM ON: a runner executes whatever a repository tells it to, and a
+  # registry is a fourth credential plane.
+  GITEA__actions__ENABLED: "false"
+  GITEA__packages__ENABLED: "false"
+  # A container in a plant has no business calling home to check for releases.
+  GITEA__cron.update_checker__ENABLED: "false"
+  GITEA__log__LEVEL: ${GITEA_LOG_LEVEL:-info}
+
 services:
   # ---------------------------------------------------------------------------
   # Standalone TimescaleDB (Telemetry Hypertable Storage)
@@ -1156,6 +1226,17 @@ services:
       # `mosquitto` DEFAULT ON PURPOSE: that resolves on this network and nowhere a gateway lives,
       # so a default would produce bundles that enrol perfectly and then connect to nothing.
       # enroll-gateway answers 503 rather than consume a token when this is unset or internal.
+      # THE FORGE, for enrolment's fourth step (roadmap 7). An IN-STACK address deliberately: the
+      # clone URL an appliance is handed comes from the forge's own answer, built from
+      # GITEA_ROOT_URL and GITEA_SSH_DOMAIN, so these two never have to agree. Using one address
+      # for both is the classic way this breaks -- the same note Node-RED's OAuth URLs carry.
+      #
+      # ALL THREE OR NONE. Unset means a gateway enrols, gets its broker credential, and is told it
+      # has no repository; half-set means the function logs what it could not reach rather than
+      # answering 401 once per appliance.
+      GITEA_INTERNAL_URL: ${GITEA_INTERNAL_URL:-http://gitea:3000}
+      GITEA_MACHINE_USER: ${GITEA_MACHINE_USER:-acs_platform}
+      GITEA_MACHINE_PASSWORD: ${GITEA_MACHINE_PASSWORD:-acs-platform-machine-account}
       MQTT_PUBLIC_HOST: ${MQTT_PUBLIC_HOST:-}
       MQTT_PUBLIC_TLS_PORT: ${MQTT_PUBLIC_TLS_PORT:-8883}
       # Where an APPLIANCE reaches the platform, written into the bundle's .env.
@@ -1194,6 +1275,7 @@ services:
         export GW_BUNDLE_DOCKERFILE="$$(cat $$T/Dockerfile)"
         export GW_BUNDLE_BOOTSTRAP="$$(cat $$T/bootstrap.mjs)"
         export GW_BUNDLE_FLOWS="$$(cat $$T/flows.template.json)"
+        export GW_BUNDLE_FLOW_SYNC="$$(cat $$T/flow-sync.mjs)"
         export GW_BUNDLE_README="$$(cat $$T/README.md)"
         exec edge-runtime start --main-service /home/deno/functions/main
     depends_on:
@@ -1614,7 +1696,6 @@ services:
         # Only needed if a bucket was renamed; src/api.js defaults to the same names
         # storage-init.mjs does, so the two agree without either being set.
         VITE_MODEL_3D_BUCKET: ${STORAGE_BUCKET:-asset-3d-models}
-        VITE_GATEWAY_BACKUP_BUCKET: ${GATEWAY_BACKUP_BUCKET:-gateway-backups}
         VITE_CAPTURE_BUCKET: ${CAPTURE_BUCKET:-broker-captures}
         # The version the account menu reports (issue #57). Compose cannot run a command, and this
         # build's context is ./frontend so there is no .git inside it either -- so labelling a
@@ -2090,6 +2171,127 @@ services:
         condition: service_started
 
   # ===============================================================================================
+  # GITEA -- the forge roadmap 7-9 are built on, and the first half of it to exist.
+  #
+  # WHAT IT IS FOR, so the shape below is readable. Three repositories' worth of work, none of it
+  # here yet: ONE platform playbook the whole fleet pulls (roadmap 8, `ansible-pull`), ONE
+  # repository PER GATEWAY holding that appliance's flows.json (roadmap 7), and the review step
+  # that a private storage bucket cannot give either -- an open pull request is "pending approval",
+  # a merge is "approved", a revert commit is "undo".
+  #
+  # SELF-HOSTED, AND THAT IS THE DECISION RATHER THAN A DEFAULT. A hosted forge would put the
+  # plant's edge topology -- broker addresses, device ids, the shape of the line -- on somebody
+  # else's infrastructure, and would make deploying to an appliance depend on the site's internet
+  # link. A machine shop cannot assume one.
+  #
+  # -----------------------------------------------------------------------------------------------
+  # IT IS NOT AN IDENTITY STORE, AND THE CONFIGURATION BELOW IS WHAT KEEPS IT FROM BECOMING ONE.
+  #
+  # Gitea ships a full user model -- users, organisations, teams, per-repository permissions -- and
+  # having it available is exactly what makes it easy to start authorising people here. Roles live
+  # in Postgres (`user_roles`, `has_role()`), the approvals queue lives in Postgres, and this forge
+  # is reached through ONE machine account. No Operator holds a login, and Gitea never learns what
+  # `gitops:manage` means. `DISABLE_REGISTRATION` and `REQUIRE_SIGNIN_VIEW` below are that decision
+  # in enforceable form; the second is what stops an unauthenticated reader browsing every
+  # gateway's flow.
+  #
+  # SQLITE, NOT THE PLATFORM DATABASE, and it is the same call Grafana's backend already makes here.
+  # Pointing Gitea at supabase-db would put a forge's tables, migrations and connection pool inside
+  # the database the platform's own RLS is defined in, for a store whose write rate is a handful of
+  # commits a day. The cost is single-writer -- one replica, `Recreate` on the chart side -- which
+  # is what this is anyway.
+  #
+  # ACTIONS AND THE PACKAGE REGISTRY ARE OFF, AND THEY ARE THE NEXT THING TO TURN ON RATHER THAN AN
+  # OMISSION. Roadmap 8 needs both: a runner to validate a playbook commit before it may merge, and
+  # a registry for the adapter images an appliance pulls. A build runner executes arbitrary code out
+  # of a repository, which is a real thing to own and not a free one, so it arrives as its own
+  # decision and its own change -- not as a default that was already on.
+  #
+  # BACKUP AND RETENTION ARE OWED AND DELIBERATELY NOT ANSWERED HERE. Once roadmap 9 retires the
+  # `gateway-backups` bucket, this volume holds the ONLY copy of every gateway's flow -- the
+  # opposite of `loki_data` below, which is excluded from backup on purpose. Both questions are
+  # deferred until the services roadmap 7-9 plan are all present, so retention is decided once
+  # across them rather than piecemeal.
+  # ===============================================================================================
+  gitea-init:
+    container_name: acs-cymru_gitea_init
+    image: gitea/gitea:1.27.3
+    # THE ADMIN ACCOUNT, CREATED HERE BECAUSE `INSTALL_LOCK` CLOSES THE OTHER DOOR. Gitea's web
+    # installer is what normally creates the first user, and leaving it open means a freshly started
+    # forge on a plant network is one HTTP request away from anybody making themselves its
+    # administrator. Locking it means the first account has to be created out of band, which is what
+    # this container is.
+    #
+    # IT RUNS THE IMAGE'S OWN SETUP SCRIPT RATHER THAN WRITING app.ini ITSELF, and that is the part
+    # worth not re-deriving. Every `gitea` subcommand refuses to run without a config file -- the
+    # error names `--config` and reads as a broken image -- and app.ini is built from the
+    # environment by /etc/s6/gitea/setup, which the SERVER's entrypoint runs. Calling the same
+    # script here means the two containers cannot disagree about what they built, and it re-runs
+    # harmlessly: the template is only expanded when the file is absent, and environment-to-ini
+    # merges rather than replaces.
+    #
+    # IDEMPOTENT BY INSPECTION, not by `|| true`. Creating an account that already exists is the
+    # ordinary state on every boot after the first and exits non-zero; every OTHER non-zero exit --
+    # an unwritable volume, a corrupt database -- must still stop the stack. Swallowing the exit
+    # code would report "provisioned" for both.
+    environment:
+      <<: *gitea-env
+      # Read by /etc/s6/gitea/setup, which chowns what it writes to this account.
+      USER: git
+      GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-gitea_admin}
+      GITEA_ADMIN_PASSWORD: ${GITEA_ADMIN_PASSWORD:-gitea-admin}
+      GITEA_ADMIN_EMAIL: ${GITEA_ADMIN_EMAIL:-gitea-admin@acs-cymru.invalid}
+      # THE ACCOUNT THE PLATFORM AUTHENTICATES AS, and deliberately not an admin -- it owns the
+      # per-gateway repositories and can attach a read-only deploy key to one, which is all the
+      # authority enroll-gateway needs. Empty means no machine account and no gateway
+      # repositories, which is a deployment without the forge integration rather than a broken one.
+      GITEA_MACHINE_USER: ${GITEA_MACHINE_USER:-acs_platform}
+      GITEA_MACHINE_PASSWORD: ${GITEA_MACHINE_PASSWORD:-acs-platform-machine-account}
+      GITEA_MACHINE_EMAIL: ${GITEA_MACHINE_EMAIL:-acs-platform@acs-cymru.invalid}
+    volumes:
+      - gitea_data:/data
+      # THE SAME FILE THE CHART MOUNTS, mirrored into it by scripts/sync-helm-chart-files.mjs.
+      # Provisioning policy in one place; see the header on the script itself.
+      - ./scripts/gitea-init.sh:/seed/gitea-init.sh:ro
+    # ROOT, AND IT IS NOT OPTIONAL: the setup script the init calls chowns /data to the `git`
+    # user, which is the whole reason the server can read what this wrote. Every gitea command
+    # inside runs through `su-exec` as that user.
+    entrypoint: ["/bin/bash", "/seed/gitea-init.sh"]
+
+  gitea:
+    container_name: acs-cymru_gitea
+    # PINNED, like every other image in this file, and the pin becomes a coupling rather than a
+    # preference once roadmap 7 lands: the appliance's puller clones with a per-gateway read-only
+    # DEPLOY KEY, whose semantics are the forge's behaviour and not git's.
+    image: gitea/gitea:1.27.3
+    restart: always
+    environment:
+      <<: *gitea-env
+    volumes:
+      - gitea_data:/data
+    ports:
+      # 3000 in the container, published on 3003: the frontend holds 3000 on the host and Grafana
+      # took 3002.
+      - "${GITEA_HTTP_PORT:-3003}:3000"
+      # NOT LOOPBACK, unlike Prometheus and Loki below, and the difference is who the client is.
+      # Those are read by an engineer, who can tunnel; this is dialled by appliances on the plant
+      # network, which is the entire point of it. What protects it is that every repository is
+      # private and every key is per-gateway and read-only -- not that the port is hidden.
+      - "${GITEA_SSH_PORT:-2222}:22"
+    healthcheck:
+      # /api/healthz reports the database and the internal caches rather than merely that a socket
+      # is open -- which matters here because the SQLite file lives on the volume this mounts, so
+      # "listening" and "working" can genuinely differ.
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      gitea-init:
+        condition: service_completed_successfully
+
+  # ===============================================================================================
   # Prometheus -- the metrics store the alert rules read.
   #
   # COMPOSE ONLY. On Kubernetes the chart renders ServiceMonitor objects and defers to the cluster's
@@ -2455,6 +2657,22 @@ volumes:
   pgdata:
   nodered_data:
   grafana_data:
+  # Gitea: the SQLite database, every repository, and the SSH host keys its clients pin.
+  #
+  # A NAMED VOLUME AND NOT A BIND MOUNT, for the reason prometheus_data below gives -- it is a
+  # database rather than configuration. What is different here, and what makes this the volume in
+  # this list to be most careful with, is that once roadmap 9 retires the gateway-backups bucket it
+  # holds the ONLY copy of every gateway's edge flow. `docker volume rm <project>_gitea_data` is
+  # then exactly the loss FlowBackupUploader exists to prevent, not an inconvenience -- read that
+  # against loki_data below, which is deliberately NOT backed up and comes back empty with nothing
+  # lost. Backup and retention for this one are owed, and are deferred with the rest of roadmap 7-9
+  # so they are decided once across all of those services rather than piecemeal.
+  #
+  # THE SSH HOST KEYS ARE A SECOND REASON, AND A QUIETER ONE. Appliances will carry them in
+  # known_hosts; regenerating them makes every gateway refuse to clone with a host-key mismatch,
+  # which reads as an attack rather than as a restore.
+  gitea_data:
+
   # Prometheus' TSDB. A named volume rather than a bind mount because it is a database, not
   # configuration -- and because it shares a disk with two Postgres data directories, which is
   # exactly why `--storage.tsdb.retention.time` below is set rather than left at the 15-day

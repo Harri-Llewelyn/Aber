@@ -407,28 +407,61 @@ telemetry.
 
 ---
 
-## 11. Flow backups
+## 11. Proposing a flow
 
 The appliance's flow lives on a Docker volume on hardware in a plant. It is the only copy, and
 `docker compose down -v` or a failed SD card takes the plant's edge logic with it.
 
-**Gateways → select the gateway → Flow backups.** Export `flows.json` from the appliance's editor
-(*menu → Export → all flows*) and upload it there.
+**Gateways → select the gateway → Propose a flow.** Export `flows.json` from the appliance's editor
+(*menu → Export → all flows*) and drop it there. It is committed to a branch in **this gateway's own
+repository** in the forge and opened as a pull request; **nothing is deployed by proposing**.
 
-| Role | Backups |
+Once somebody approves and merges it, the appliance's own `flow-sync` service pulls it — within five
+minutes by default — and reloads Node-RED. The appliance is what reaches out; the platform never
+opens a connection to a gateway, which is the same rule that keeps `node_exporter` unscraped.
+
+### What the appliance refuses to deploy
+
+`flow-sync` is the last of three checks on a `flows.json` and the only one on the appliance, so it
+re-checks what the browser and the edge function already did and adds two of its own:
+
+| Refusal | Why it is a stop rather than a warning |
 | :--- | :--- |
-| Administrator, Shopfloor_Manager | list, download, upload, delete |
-| Auditor | list and download only |
-| Operator | no access at all |
+| The forge's host key is unknown | With no `known_hosts` entry the appliance could only trust whatever answers on the SSH port. There is no option to skip the check. |
+| The tracked branch's history was rewritten | A force-push cannot be told from a legitimate advance, so following one would deploy something no pull request ever showed. A revert must be a new commit. |
+| A committed `mqtt-broker` node id has no credential here | Node-RED would start, report success, and hand that node an empty username — the broker refuses it with no stated cause, and the *next* deploy destroys the credential this appliance still holds. |
+| The file is not a flow array, or looks like `flows_cred.json` | Same two shape checks the dashboard makes, made where they still matter. |
 
-Stored in the **private** `gateway-backups` bucket under `<sparkplug_id>/`, a prefix enforced by
-row-level security rather than by the uploader. Reads go through a 60-second signed URL; there is no
-public URL for this bucket and there must never be one.
+The third is the one worth knowing about, because the way to cause it is convenient: the editor's
+**Import copy** re-ids every node. Commit the appliance's own `/data/flows.json`, never a flow that
+has been through an import dialog. `docker compose logs flow-sync` names the node.
 
-**`flows_cred.json` is never backed up.** It is encrypted with a secret that exists only in the
-appliance's `.env`, so a copy on the platform would be either useless or dangerous. The uploader
-rejects it by *shape*, not by filename — both files sit side by side in `/data` and picking the wrong
-one is an easy mistake.
+| Role | Proposing |
+| :--- | :--- |
+| Administrator, Shopfloor_Manager | may propose, and hold the approval authority as well |
+| Operator | may propose |
+| Auditor | no — read-only is the whole of the role, and a proposal is a write wherever it lands |
+
+The gate is enforced by `propose-gateway-flow`, which resolves the caller's role for itself; the
+drawer mirrors that list rather than implementing it.
+
+**A host-run gateway cannot be proposed for**, and the reason is not a permission. Its connector runs
+in the platform's own Node-RED, an instance that can carry several host gateways at once, so
+`flows.json` there is the whole instance rather than one gateway's — approving a proposal "for" one
+would replace every other gateway's flow in the same file. The mechanical reason agrees: repositories
+are created when an appliance enrols with a deploy key, and a host-run gateway never enrols, so the
+function refuses it with a 409 that says so.
+
+**`flows_cred.json` is never committed.** It is encrypted with a secret that exists only in the
+appliance's `.env`, so a copy on the platform would be either useless or dangerous. It is rejected by
+*shape*, not by filename — both files sit side by side in `/data` and picking the wrong one is an easy
+mistake — in the browser and again in the function.
+
+**This replaced a flow-backup panel**, which uploaded the same file to the private `gateway-backups`
+bucket. That worked, but a copy in a bucket has no diff against what the appliance runs now, no
+history, no author and no reviewer, and nothing downstream could ever consume it. The bucket still
+exists server-side; roadmap 9 retires it, and that is the change that decides what happens to
+whatever is already stored in it.
 
 ---
 

@@ -33,10 +33,16 @@ Then open `http://<this-appliance>:1880` and sign in as `admin`.
    broker rather than trusting whatever answers on port 8883;
 3. wrote the sample flow with this gateway's Sparkplug identity substituted in;
 4. wrote the broker password into `flows_cred.json`, **encrypted** with the secret in `.env`;
-5. generated the editor password and wrote its bcrypt hash into `settings.js`.
+5. generated the editor password and wrote its bcrypt hash into `settings.js`;
+6. generated this appliance's **own SSH keypair** and registered the public half against this
+   gateway's repository in the forge, **read-only** — so the appliance can read the flow it is meant
+   to run and can never author one;
+7. wrote the **forge's SSH host key** to `/data/gitops/known_hosts`, which arrived in the enrolment
+   response. That is what lets `flow-sync` *verify* the forge rather than trusting whatever answers
+   on the SSH port — the same decision as the broker CA in step 2, one credential plane along.
 
-`node-red` then started against that configuration. Within about a minute the gateway shows
-**ONLINE** in the dashboard.
+`node-red` then started against that configuration, and `flow-sync` began watching for approved
+flows. Within about a minute the gateway shows **ONLINE** in the dashboard.
 
 ## The sample flow
 
@@ -97,14 +103,31 @@ A message published under any *other* edge node is **dropped by the broker witho
 forging another's telemetry, and it is enforced independently of anything in this flow. If a
 message seems to vanish, check the edge-node segment of your topic first.
 
-## Backing up your flow
+## Changing this appliance's flow
 
-Export `flows.json` from the Node-RED editor (**menu → Export → all flows**) and upload it on the
-gateway's page in the dashboard.
+Export `flows.json` from the Node-RED editor (**menu → Export → all flows**) and drop it on the
+gateway's page in the dashboard, under **Propose a flow**. That opens a pull request in this
+gateway's own repository. **Nothing reaches this appliance until somebody approves it** — and once
+they do, `flow-sync` pulls it within five minutes and reloads Node-RED. The commit is also the copy
+that survives a failed SD card, so there is no separate backup step.
 
-**`flows_cred.json` is deliberately not part of a backup.** It is encrypted with the secret in this
-`.env`; stored on the platform it would be either useless (without the secret) or dangerous (with
-it). A restored appliance gets its credentials from a fresh enrolment, not from a backup.
+**Export from *this* appliance, and never re-import a flow into an editor that already holds it.**
+Node-RED keys credentials by node id. The editor's **Import copy** option re-ids every node, and a
+flow whose broker node has a new id would authenticate with an empty username — the broker refuses
+it and the editor reports only *"Connection failed to broker"*. `flow-sync` refuses to deploy such
+a commit for exactly that reason, and names the offending node in its log:
+
+```
+docker compose logs flow-sync
+```
+
+**`flows_cred.json` is deliberately never committed.** It is encrypted with the secret in this
+`.env`; stored anywhere else it would be either useless (without the secret) or dangerous (with it).
+A rebuilt appliance gets its credentials from a fresh enrolment, not from the repository.
+
+**If `flow-sync` says it is refusing to sync**, read the reason. `known_hosts does not exist` means
+the forge had not published its host key when this appliance enrolled — restart the forge and
+re-enrol. There is deliberately no option to skip that check.
 
 ## Troubleshooting
 

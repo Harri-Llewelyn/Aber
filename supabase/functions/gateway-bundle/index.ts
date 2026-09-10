@@ -49,7 +49,7 @@ const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
  * appliance running" has to be answerable from the dashboard rather than by getting a shell on it.
  * Bump this when the template changes in a way an already-deployed appliance would care about.
  */
-const BUNDLE_VERSION = "1.0.0";
+const BUNDLE_VERSION = "1.1.0";
 
 /**
  * The template files, delivered through the environment.
@@ -67,6 +67,10 @@ const TEMPLATE_ENV: Record<string, string> = {
   "Dockerfile": "GW_BUNDLE_DOCKERFILE",
   "bootstrap.mjs": "GW_BUNDLE_BOOTSTRAP",
   "flows.template.json": "GW_BUNDLE_FLOWS",
+  // ROADMAP 7'S PULLER. Without it in this map the appliance's compose file names a service whose
+  // script is not in the archive, and `docker compose up` fails on a bundle that looks complete --
+  // so this entry, the entrypoint that exports it and main's allowlist move together or not at all.
+  "flow-sync.mjs": "GW_BUNDLE_FLOW_SYNC",
   "README.md": "GW_BUNDLE_README",
 };
 

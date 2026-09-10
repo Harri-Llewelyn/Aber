@@ -144,6 +144,16 @@ const MIRRORS = [
   },
   {
     source: 'scripts',
+    dest: 'gitea-scripts',
+    // The provisioning script BOTH targets run: Compose bind-mounts it into a one-shot service,
+    // the chart projects it onto an initContainer. It decides which accounts the forge has and
+    // what they may do -- the machine account is deliberately not an admin -- and that is policy
+    // rather than plumbing, so a hand-copied second version is exactly the drift this exists for.
+    match: (name) => name === 'gitea-init.sh',
+    why: 'Builds app.ini through the setup script the image ships, migrates the schema, and creates the administrator and the platform machine account. Runs as an initContainer',
+  },
+  {
+    source: 'scripts',
     dest: 'node-red-scripts',
     match: (name) => name === 'node-red-init.mjs',
     why: 'Provisions /data -- settings.js, the credentials and a blank flow. Runs as an initContainer',

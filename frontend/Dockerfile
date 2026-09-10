@@ -71,12 +71,14 @@ ARG VITE_GRAFANA_URL
 # constants.js falls back to 127.0.0.1:54323, which is right on Compose and simply unreachable
 # anywhere else. The HOST must match STUDIO_PUBLIC_URL's, not merely the port -- see constants.js.
 ARG VITE_STUDIO_URL
-# Storage bucket names, matching STORAGE_BUCKET / GATEWAY_BACKUP_BUCKET in scripts/storage-init.mjs.
-# Unset is the ordinary case: src/api.js defaults to the same two names those default to. They are
-# build args at all so a deployment that RENAMED a bucket can move the dashboard with everything
-# else, rather than leaving it reading the old name and 404ing on upload.
+# Storage bucket names, matching STORAGE_BUCKET / CAPTURE_BUCKET in scripts/storage-init.mjs. Unset
+# is the ordinary case: src/api.js defaults to the same names those default to. They are build args
+# at all so a deployment that RENAMED a bucket can move the dashboard with everything else, rather
+# than leaving it reading the old name and 404ing on upload.
+#
+# VITE_GATEWAY_BACKUP_BUCKET was here and is gone with the flow-backup panel -- the browser no
+# longer reaches for `gateway-backups`, and roadmap 9 retires the bucket itself.
 ARG VITE_MODEL_3D_BUCKET
-ARG VITE_GATEWAY_BACKUP_BUCKET
 # The version shown in the account menu (issue #57). UNLIKE EVERY OTHER ARG HERE, this one has no
 # runtime-config twin: a version is a property of this artefact, not of the environment it is
 # deployed into, so allowing a ConfigMap to override it would let an install claim a version its

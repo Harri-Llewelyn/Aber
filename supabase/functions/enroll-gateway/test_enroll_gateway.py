@@ -21,9 +21,13 @@ Requires the stack up, and the service-role key (to mint tokens the way the dash
     SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... python \
         supabase/functions/enroll-gateway/test_enroll_gateway.py
 """
+import base64
 import json
 import os
+import re
+import shutil
 import subprocess
+import tempfile
 import unittest
 import urllib.error
 import urllib.request
@@ -91,7 +95,7 @@ def sign_in(email=ADMIN_EMAIL, password=ADMIN_PASSWORD):
         return json.loads(response.read().decode())["access_token"]
 
 
-def enroll(token, agent_version=None, key=None):
+def enroll(token, agent_version=None, key=None, ssh_public_key=None):
     """
     Call the function the way an APPLIANCE does: the anon key, and no user JWT.
 
@@ -102,6 +106,10 @@ def enroll(token, agent_version=None, key=None):
     payload = {"token": token}
     if agent_version:
         payload["agent_version"] = agent_version
+    if ssh_public_key is not None:
+        # The PUBLIC half of a key the appliance generated. bootstrap.mjs sends this; the platform
+        # registers it read-only against the gateway repository and never sees the private half.
+        payload["ssh_public_key"] = ssh_public_key
 
     req = urllib.request.Request(
         f"{SUPABASE_URL}/functions/v1/enroll-gateway",
@@ -425,6 +433,220 @@ class TestAuthContract(EnrollGatewayBase):
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(req, timeout=15)
         self.assertEqual(caught.exception.code, 405)
+
+
+
+class TestForgeProvisioning(EnrollGatewayBase):
+    """
+    Roadmap 7's third credential plane: the gateway's own repository, and the READ-ONLY deploy key
+    it reads that repository with.
+
+    WHAT MAKES THIS WORTH TESTING RATHER THAN EYEBALLING. Three of its properties fail silently:
+
+      * a deploy key registered WRITABLE lets an appliance author the flow it will later be asked to
+        deploy, which empties the review step of its meaning -- and nothing about a working clone
+        would reveal it;
+      * a repository created PUBLIC exposes the plant's edge topology, and reads identically to a
+        private one from the appliance's side;
+      * a forge failure that is treated as fatal would refuse an enrolment whose token is already
+        spent and whose broker credential already exists, turning a forge outage into a manual
+        re-issue per appliance.
+
+    SKIPPED, NOT FAILED, where no forge is configured. The integration is optional at both ends by
+    design -- an install predating roadmap 7 enrols exactly as it did before.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.forge_url = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
+        cls.machine_user = os.getenv("GITEA_MACHINE_USER", "acs_platform")
+        cls.machine_password = os.getenv(
+            "GITEA_MACHINE_PASSWORD", "acs-platform-machine-account"
+        )
+        try:
+            cls.forge("/api/v1/version")
+        except Exception as err:  # noqa: BLE001 -- any failure here means "no forge"
+            raise unittest.SkipTest(f"no forge reachable at {cls.forge_url}: {err}")
+
+    @classmethod
+    def forge(cls, path, method="GET"):
+        """The forge's API, as the machine account -- the same credential enroll-gateway holds."""
+        credentials = base64.b64encode(
+            f"{cls.machine_user}:{cls.machine_password}".encode()
+        ).decode()
+        req = urllib.request.Request(
+            f"{cls.forge_url}{path}",
+            method=method,
+            headers={"Authorization": f"Basic {credentials}"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
+            raw = response.read().decode()
+            return json.loads(raw) if raw.strip() else None
+
+    @classmethod
+    def repo_name(cls):
+        return f"gateway-{cls.sparkplug_id}"
+
+    @classmethod
+    def delete_repo(cls):
+        try:
+            cls.forge(f"/api/v1/repos/{cls.machine_user}/{cls.repo_name()}", method="DELETE")
+        except urllib.error.HTTPError:
+            pass  # Never created, which is the ordinary state before the first test.
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.delete_repo()
+        super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        self.delete_repo()
+        # A throwaway keypair per test, so one test's key cannot satisfy another's assertion.
+        self.key_dir = tempfile.mkdtemp(prefix="acs-deploy-key-")
+        self.key_path = os.path.join(self.key_dir, "id_ed25519")
+        subprocess.run(
+            ["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "test", "-f", self.key_path],
+            check=True, capture_output=True,
+        )
+        with open(f"{self.key_path}.pub", encoding="utf-8") as handle:
+            self.public_key = handle.read().strip()
+
+    def tearDown(self):
+        shutil.rmtree(self.key_dir, ignore_errors=True)
+
+    def test_enrolment_creates_a_private_repository_and_a_read_only_key(self):
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key=self.public_key)
+
+        self.assertEqual(status, 200, payload)
+        self.assertIsNotNone(
+            payload.get("repository"),
+            "enrolment returned no repository -- the appliance has nothing to converge to",
+        )
+        self.assertTrue(payload["repository"]["ssh_url"].endswith(f"{self.repo_name()}.git"))
+        self.assertEqual(payload["repository"]["branch"], "main")
+
+        repo = self.forge(f"/api/v1/repos/{self.machine_user}/{self.repo_name()}")
+        self.assertTrue(
+            repo["private"],
+            "the gateway repository is PUBLIC -- a flows.json names the plant's brokers and devices",
+        )
+
+        keys = self.forge(f"/api/v1/repos/{self.machine_user}/{self.repo_name()}/keys")
+        self.assertEqual(len(keys), 1, keys)
+        self.assertTrue(
+            keys[0]["read_only"],
+            "the deploy key is WRITABLE -- an appliance could author the flow it is later asked "
+            "to deploy, and an approved commit would stop being evidence that anyone approved it",
+        )
+
+    def test_a_gateway_without_a_key_still_enrols(self):
+        """
+        An appliance whose bundle predates the forge, or whose ssh-keygen failed.
+
+        THE GATEWAY IS THE POINT, NOT THE REPOSITORY. Telemetry needs nothing from the forge, so a
+        missing key must cost the repository and nothing else.
+        """
+        token = self.issue_token()
+        status, payload = enroll(token)
+
+        self.assertEqual(status, 200, payload)
+        self.assertIsNone(payload.get("repository"))
+        self.assertTrue(payload.get("mqtt_password"), "the broker credential was not issued")
+        self.assertEqual(self.gateway()["status"], "AWAITING_BIRTH")
+
+    def test_a_malformed_key_is_refused_without_failing_the_enrolment(self):
+        """
+        Shape-checking happens before the forge is called, and its failure mode is a gateway with no
+        repository -- never a rejected enrolment, and never an arbitrary string written into another
+        system's authorised-keys list.
+        """
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key="not-a-key; rm -rf /")
+
+        self.assertEqual(status, 200, payload)
+        self.assertIsNone(payload.get("repository"))
+        self.assertTrue(payload.get("mqtt_password"))
+
+    def published_host_key(self):
+        """
+        The forge's host key as it serves it, WITHOUT credentials.
+
+        THAT IT NEEDS NO CREDENTIALS IS PART OF THE ASSERTION. `REQUIRE_SIGNIN_VIEW` is on, and if
+        it ever covered `/assets/` this would answer a login page -- which `validPublicKey` would
+        reject, leaving every appliance with no host key and no ability to converge. The failure
+        would be silent at the forge and visible only on the gateways.
+        """
+        with urllib.request.urlopen(
+            f"{self.forge_url}/assets/ssh_host_key.pub", timeout=15
+        ) as response:
+            return response.read().decode().strip()
+
+    def test_the_forge_publishes_its_host_key_without_a_login(self):
+        published = self.published_host_key()
+        self.assertTrue(
+            published.startswith("ssh-ed25519 "),
+            f"/assets/ssh_host_key.pub did not serve a public key: {published[:120]!r}. "
+            "gitea-init.sh publishes it on boot; a forge that has not restarted since roadmap 7's "
+            "host-key distribution landed will not have one.",
+        )
+        self.assertNotIn(
+            "PRIVATE KEY", published,
+            "the forge is serving a PRIVATE key over unauthenticated HTTP",
+        )
+
+    def test_enrolment_carries_a_known_hosts_line_for_the_forge(self):
+        """
+        THE ONE THING THAT MAKES THE PULL VERIFIABLE, and it has to ride on THIS response.
+
+        An appliance with no known_hosts entry can only trust whatever key answers on its first
+        connection -- trust on first use, decided at the moment an attacker would choose -- or be
+        told to skip verification, which roadmap 7 and 11 both refuse. This response is the
+        alternative: TLS, a single-use token bound to one row, and the forge's identity learned
+        before the first clone.
+
+        THE HOST SPEC MUST MATCH THE CLONE URL or OpenSSH never consults the line. A non-default
+        port is written `[host]:port` and matched on exactly that string, so a bare hostname beside
+        a `:2222` clone URL is a file that names the forge and verifies nothing.
+        """
+        token = self.issue_token()
+        status, payload = enroll(token, ssh_public_key=self.public_key)
+
+        self.assertEqual(status, 200, payload)
+        repository = payload.get("repository")
+        self.assertIsNotNone(repository, "enrolment returned no repository")
+
+        known_hosts = repository.get("known_hosts")
+        self.assertTrue(
+            known_hosts,
+            "the enrolment carried no known_hosts line, so this appliance cannot verify the forge "
+            "and flow-sync.mjs will refuse to converge",
+        )
+
+        host, algorithm, material = known_hosts.split()
+        published_algorithm, published_material = self.published_host_key().split()[:2]
+        self.assertEqual(algorithm, published_algorithm)
+        self.assertEqual(
+            material, published_material,
+            "the known_hosts line does not carry the key the forge actually publishes",
+        )
+
+        ssh_url = repository["ssh_url"]
+        match = re.match(r"^ssh://(?:[^@/]+@)?([^/:]+)(?::(\d+))?", ssh_url)
+        self.assertIsNotNone(match, f"unexpected clone URL shape: {ssh_url}")
+        expected = (
+            f"[{match.group(1)}]:{match.group(2)}"
+            if match.group(2) and match.group(2) != "22"
+            else match.group(1)
+        )
+        self.assertEqual(
+            host, expected,
+            f"known_hosts names '{host}' but the clone URL is '{ssh_url}'. OpenSSH matches the "
+            "host specification literally, so these two disagreeing means verification never "
+            "consults the line at all.",
+        )
 
 
 if __name__ == "__main__":

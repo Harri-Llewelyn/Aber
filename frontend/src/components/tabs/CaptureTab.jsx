@@ -1360,7 +1360,8 @@ function SubjectRow({ row, selected, onSelect }) {
   )
 }
 
-/** Bytes → a short human string. Local, for the same reason FlowBackupUploader's is. */
+/** Bytes → a short human string. Local rather than shared: the only other one is the 3D uploader's,
+ *  and that is tuned for megabyte models. */
 export function formatSize(bytes) {
   if (bytes === null || bytes === undefined) return '—'
   if (bytes < 1024) return `${bytes} B`

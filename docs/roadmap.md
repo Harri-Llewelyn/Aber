@@ -223,6 +223,12 @@ would prove the chain works end to end. It is the one item on this list whose re
 operational rather than editorial, and shortening it to "done" while every install still accepts the
 deprecated format would be exactly the kind of entry the header of this file warns about.
 
+**THE SIGNING ALGORITHM IS A DIFFERENT QUESTION AND IS NOT IN THIS ITEM.** This is the key FORMAT,
+and it could be built as a gateway feature precisely because the new keys are not JWTs. HS256 on
+`SUPABASE_JWT_SECRET` is untouched by everything above, and it is load-bearing in a way that only
+shows up when something asks GoTrue for an ID token — which is where §7 ran into it trying to sign
+in to the forge, and where the measurements are.
+
 **The divergence argument still applies to anyone re-enabling Kong.** Kong cannot translate an
 opaque key, so a stack that turns it back on accepts only the legacy format — a stack whose
 authentication differs by deployment target is the class of divergence the shared gateway template
@@ -696,7 +702,7 @@ does not currently have.
 role re-check inside it · `has_role()` and the write policies it gates · the `Operator` role as seeded
 in [`0002`](../supabase/migrations/0002_seed_data.sql) · `device_nameplate` · `publish_schema_version()` ·
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) ·
-[`FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
+[`FlowProposalPanel.jsx`](../frontend/src/components/common/FlowProposalPanel.jsx) ·
 `system_settings` and its `min_value` / `max_value` bounds · `digital_thread` and
 [`0079`](../supabase/migrations/0079_the_thread_stops_growing_without_end.sql)'s pruning ·
 [`0069`](../supabase/migrations/0069_the_two_roles_stop_being_the_same.sql)'s permission split ·
@@ -965,7 +971,7 @@ thread other than *no*.
 
 **Builds on:** the `gateway-backups` bucket in
 [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
-[`FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
+[`FlowProposalPanel.jsx`](../frontend/src/components/common/FlowProposalPanel.jsx) ·
 [`gateway-bundle-template/bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs) and the flow hash
 its heartbeat already reports · `digital_thread` (`0005`, `0026`) ·
 [`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts), which is now the only place
@@ -1040,12 +1046,62 @@ being merely the transport: *pending approval* is an open pull request, *approve
 blob rebuilds a worse version of what the forge already does, and splits the audit record across two
 systems that will disagree.
 
-**So the upload becomes a commit.** `FlowBackupUploader` already takes `flows.json` from an operator
-and already refuses `flows_cred.json` **by shape rather than by filename**; what changes is its
+**So the upload becomes a commit.** The flow-backup panel already took `flows.json` from an operator
+and already refused `flows_cred.json` **by shape rather than by filename**; what changed is its
 destination — a branch and a pull request in the gateway's source repository instead of an object in
 a private bucket. The upload is then the backup and the proposed deployment in one artefact, which
 also removes the awkward sequencing between this item and §9: the bucket stops being load-bearing at
 the moment the first flow lands in a repository, not before.
+
+**THE PROPOSAL HALF HAS LANDED, and it is a branch and a pull request rather than a write.**
+`propose-gateway-flow` takes the same `flows.json` an operator exports from Node-RED, commits it to a
+new `proposal/<timestamp>` branch in that gateway's repository, and opens a pull request against
+`main` — so the three states above are the forge's own rather than a workflow modelled beside a
+stored blob. **Nothing in it can merge**: approving is `gitops:manage`'s act and is not reachable from
+the endpoint, which is what keeps proposing and approving two privileges instead of one.
+
+**`Operator` may propose, which is the whole point of the gate.** This item says a review step whose
+proposals can only come from the two roles that may already merge them is a formality; the function
+therefore admits Administrator, Shopfloor_Manager and Operator, and refuses Auditor. **The proposer is
+named in the commit and in the pull request body** — the forge is reached through one machine account
+and shopfloor people hold no login there, so without the name the trail would say only that the
+platform committed something. `0089` made the same call for the approvals queue.
+
+**`main` NOT MOVING is the assertion the suite is built around.** Every other property could hold
+against a function that committed straight to `main`, and that function would deploy an unreviewed
+flow while reporting success — the `deploy-nodered` endpoint this item retired, rebuilt with a
+friendlier name. `test_propose_gateway_flow.py` enrols a gateway (which is what creates its
+repository), proposes, and asserts the head of `main` is unchanged; it also asserts that
+`flows_cred.json` is refused **by shape** with no branch left behind, and that a gateway with no
+repository answers 409 rather than failing obscurely.
+
+**THE DASHBOARD OFFERED BOTH LANES FOR ONE DAY, AND ONE OF THEM WAS THE ANSWER.** The panel shipped
+on 2026-09-10 with a backup dropzone and a proposal dropzone side by side, gated independently,
+on the argument that a backup is a copy of what an appliance already runs while a proposal is a
+request to CHANGE what it runs. Seen in the drawer the distinction did not survive: both took the
+same `flows.json` from the same export menu, and the panel was asking the operator to choose a
+destination the product should have chosen. **The bucket is never the right answer to that choice** —
+a copy there has no diff, no history, no author and no reviewer — so the backup lane went the same
+day and the component became
+[`FlowProposalPanel`](../frontend/src/components/common/FlowProposalPanel.jsx). §9 records what was
+removed.
+
+**What survives from the two-lane version** is the Operator gate — the storage policy granted that
+role no backup authority at all, and giving it the proposal is the whole point of a review step —
+and the receipt: the pull request comes back as a link in the drawer rather than only a toast,
+because the useful fact is that it is *not deployed yet*, and that is what somebody returns to check.
+
+**A HOST-RUN GATEWAY IS REFUSED, AND NOT BECAUSE OF A PERMISSION.** Its connector runs in the
+platform's own Node-RED, an instance that can carry several host gateways at once, so `flows.json`
+there is the whole instance rather than one gateway's — approving a proposal "for" one would replace
+every other gateway's flow in the same file. One repository per gateway cannot express that and
+should not try: the platform's Node-RED is the platform's to version, not a fleet member's. The
+mechanical reason agrees, which is the reassuring part — repositories are created at enrolment and a
+host-run gateway never enrols, so the function already answers 409 and the drawer is only agreeing
+with a boundary that exists.
+
+**The bucket itself has not moved.** §9 sequences that, and it is the change that has to say what
+happens to whatever is already stored in one.
 
 **`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
 place — `nodered-userinfo`'s `ALLOWED_ROLES`, as `0069` records — and the merge is the control it was
@@ -1081,26 +1137,226 @@ share a submit path and should not be generalised into one.
 ### The credential store is the hazard that can invalidate the shape
 
 **Node-RED keys credentials by node id**, and holds them in `flows_cred.json`, encrypted separately
-and deliberately not in the flow file. A flow round-tripped through export, repository and pull can
-come back with the broker node re-created under a new id; the credential then keys to a node that no
-longer exists, the sidecar reconciles successfully, and the gateway drops off the broker immediately
-afterwards. **This constrains the design more than the transport does and should be proved before
-anything else is built** — if a round trip cannot preserve credential binding, the puller needs a
-merge strategy rather than an overwrite, and that is a different piece of work.
+and deliberately not in the flow file. This section asked for that to be proved before anything else
+was built. **IT HAS BEEN, against `nodered/node-red:5.0.2` — the tag both Dockerfiles pin — and the
+result NARROWS this item rather than widening it.**
 
-### A third credential plane arrives with this item, and it should be named now
+**THE PULL PATH IS SAFE, SO THE PULLER IS AN OVERWRITE AND NOT A MERGE.** A byte-identical
+`flows.json` written back over `/data` and restarted leaves `flows_cred.json` *untouched* — not
+rewritten and not re-encrypted — and the broker node keeps its credential. The branch this section
+held open, where a round trip cannot preserve binding and the sidecar needs a merge strategy, does
+not arrive.
+
+**THE HAZARD IS REAL, AND IT IS THE HUMAN PATH RATHER THAN THE TRANSPORT.** With the broker node's id
+changed and the old `flows_cred.json` kept, Node-RED logs `Started flows` and the runtime answers
+`{}` for that node's credential — no warning, no failed check. The gateway then authenticates with an
+empty username, which Mosquitto refuses with CONNACK 5 and Node-RED reports as *"Connection failed to
+broker"* with no cause, the ambiguity `node-red-init.mjs` already exists to remove.
+
+**AND IT IS DESTRUCTIVE ON THE FIRST DEPLOY, WHICH IS THE PART THAT WAS NOT ANTICIPATED HERE.** The
+orphaned credential survives a restart, so the appliance looks recoverable; the next deploy prunes it
+and rewrites the file to an encrypted `{}`. The ciphertext is then gone, `bootstrap.mjs` will not
+re-mint behind its once-only `/data/.enrolled.json` guard, and the enrolment token is already spent —
+so the recovery is a new bundle, which is the loss the flow panel exists to prevent.
+
+**WHAT RE-IDS A NODE IS ONE BUTTON, AND IT IS THE ONE AN OPERATOR REACHES FOR.** The editor imports
+with `generateIds: false`, so ids survive a paste into an empty workspace. They change only on an
+import *conflict* — pasted nodes whose ids are already present — where the offered choices are
+per-node replace/copy and a one-click **Import copy** that re-ids everything. Restoring a backup into
+the appliance that still holds `acs-broker` is exactly that conflict, and the destructive option is
+the convenient one.
+
+**Three things this obliges, and none of them is a merge strategy.** What is committed must be the
+appliance's OWN `/data/flows.json`, never an editor export that has passed through an import dialog.
+The bundle should carry the `acsCredentialsEnv` convention `node-red-init.mjs` already uses on the
+platform side — the credential re-derived from a prefix DECLARED ON THE NODE, and rewritten whenever a
+broker node holds none — because `bootstrap.mjs` hardcodes `acs-broker` and runs once, so an appliance
+today cannot heal itself. And the sidecar should refuse a commit whose `mqtt-broker` node ids do not
+match the keys in `flows_cred.json`, which turns a silent drop off the broker into a visible refusal
+to converge.
+
+### A third credential plane arrives with this item — BUILT
 
 **The appliance needs a way to authenticate to the repository**, which is neither the broker plane
-(§5) nor the database one. It should be **per gateway and read-only** — a shared key across the
-fleet makes one compromised appliance a fleet-wide read, and a writable one lets an appliance author
-what it will later be asked to deploy. `enroll-gateway` already mints a per-gateway broker credential
-at bundle time and is the natural place to issue this one, which also means revocation has a home
-alongside the credential it sits beside.
+(§5) nor the database one. It is **per gateway and read-only** — a shared key across the fleet makes
+one compromised appliance a fleet-wide read, and a writable one lets an appliance author what it
+will later be asked to deploy. `enroll-gateway` already minted a per-gateway broker credential, and
+issuing this one beside it means revocation has a home alongside the credential it sits next to.
+
+**What has landed, and it is the whole plane rather than a piece of it.** Enrolment gained a fourth
+step: `bootstrap.mjs` generates an **ed25519 keypair on the appliance** and sends the public half up
+with its enrolment request; the platform creates that gateway's repository in the forge and registers
+the key against it, read-only; the response carries the clone URL, which `bootstrap` records in
+`/data/gitops/repository.json`. **The private half never leaves the plant** — the same decision as the
+editor password, one plane along — and revoking a gateway is deleting one key from one repository.
+
+**The refusal was measured, not assumed.** A key issued this way clones the repository and, on
+`git push`, is refused by the forge in as many words:
+
+```
+Deploy Key: 2:gateway gwy… is not authorized to write to acs_platform/gateway-gwy…
+```
+
+`test_enroll_gateway.py`'s forge lane asserts the three properties that would otherwise fail
+silently: the repository is **private** (a public one leaks the plant's edge topology and reads
+identically from the appliance), the key is **read-only**, and a gateway whose bundle sends no key
+still enrols and still receives its broker credential.
+
+**FAILURE HERE IS NON-FATAL, AND THAT IS THE OPPOSITE DECISION FROM THE CREDENTIAL SERVICE'S.** By
+step 4 the token is spent and the broker credential exists; refusing over a forge outage would leave
+a working broker account no bundle can claim, punishing an appliance for something it did not cause.
+Telemetry — which is what a gateway is *for* — needs nothing from the forge. So the response carries
+`repository: null`, the log names the gateway, and the appliance publishes as it always did.
+
+**The machine account is not an administrator, and that is load-bearing rather than tidy.** It owns
+the per-gateway repositories, which is exactly the authority needed to create one and attach a key to
+it, and it can do nothing to the platform playbook the whole fleet converges to. An admin credential
+in an edge function reachable through the gateway would put that playbook one compromise away.
+
+**Three things this deliberately did NOT do at first, and two of them are now done.** The repository
+name is **derived** from the `sparkplug_id` rather than stored, so this needed no migration and no
+column — §9 still owns where a repository pointer lives, and deriving it means the name cannot
+disagree with the gateway it belongs to. Nothing **wrote a flow** into that repository; *that
+became the proposal lane, and the bucket lane went with it.* And **the forge's SSH host key was not
+distributed** — *now done, below.*
 
 **Verifying the commit is what makes the transport untrusted-safe.** If the sidecar checks a signature
 over the revision it is about to apply, the forge and the network between are no longer things that
 have to be trusted — a much stronger position than TLS to the host alone, and the one that makes a
 hosted forge an acceptable answer to the question below.
+
+### The forge's identity, and the puller — BUILT, 2026-09-10
+
+**THE HOST KEY TRAVELS ON THE ENROLMENT RESPONSE, which is the only channel that removes trust on
+first use.** `gitea-init.sh` copies the ed25519 public host key into Gitea's `custom/public/`, which
+it serves at `/assets/ssh_host_key.pub`; `enroll-gateway` reads that over the internal network and
+returns a `known_hosts` line with the repository. The appliance is holding a single-use token bound
+to one row at that moment — the one moment it is provably itself, and the same reason the deploy key
+is registered there — so it learns the forge's identity **before its first clone**. Nothing in the
+bundle fetches that URL directly: an appliance that did would be trusting the network again.
+
+**FOUR THINGS HAD TO BE MEASURED RATHER THAN ASSUMED, and two of them were wrong on the first
+reading.** `custom/public/` is served at `/assets/` and, importantly, is **not** covered by
+`REQUIRE_SIGNIN_VIEW` — checked with no credentials, from outside the container. The host keys are
+generated by `/etc/s6/openssh/setup`, which runs when the SSHD SERVICE starts — *after* the init
+container has exited — so on a fresh volume there was nothing to publish and every appliance
+enrolling before the next restart would have got none; `gitea-init.sh` now calls that script itself,
+the same argument it already made for calling Gitea's. `knownHostsHost` accepted `https://forge/x`
+and returned the "host" `https`, which would have written a line into an appliance's `known_hosts`
+that could never match — the most confusing failure this path could produce, found by test. And the
+bracket form is load-bearing: OpenSSH writes a non-default port as `[host]:port` and matches it
+literally, so a bare hostname beside a `:2222` clone URL verifies nothing.
+
+**THE PULLER IS `flow-sync.mjs`, a fourth service in the bundle.** It fetches this gateway's own
+repository over SSH with the read-only deploy key, deploys `flows.json` to `/data` and reloads
+Node-RED. Both Node-RED contracts it depends on were measured against `nodered/node-red:5.0.2`: the
+`credentials` adminAuth password grant at `POST /auth/token`, and `POST /flows` with
+`Node-RED-Deployment-Type: reload`, which answers **204**, re-reads the flow file **from disk**, and
+ignores the request body — which is what keeps this from becoming a second inbound path for a flow.
+
+**IT CONVERGES ON A NEW REVISION AND DOES NOT FIGHT THE EDITOR, which is a decision rather than a
+limitation.** The appliance's editor is deliberately reachable, and a sidecar re-imposing the
+committed flow every five minutes would discard somebody's work mid-edit. So the trigger is the
+tracked branch advancing; a missed deploy is still caught up on the next tick, which is the
+self-healing property that matters. **Local drift is reported, not corrected** — the heartbeat
+already carries a flow hash, and comparing it to the committed head is the drift detection still
+outstanding below.
+
+**THE THREE REFUSALS ARE THE PART WORTH REVIEWING, and each was proved end to end against the
+running forge** — clone, deploy and reload; a second run as a no-op; then each refusal in turn, with
+the appliance verified afterwards to be running the flow it had before:
+
+* **A rewritten history.** A genuine `git push --force` of an orphan commit was refused with the
+  remote head not being a descendant of what the appliance holds. This is what makes §6's *revert
+  must be a new commit* enforceable rather than a convention.
+* **An unverifiable forge.** With `known_hosts` removed it declines to sync and says why; with the
+  wrong key in it, git fails with `Host key verification failed`. There is no flag anywhere in the
+  file that relaxes either — a switch that exists is a switch that ends up set.
+* **A re-ided broker node.** A commit whose `mqtt-broker` id is not a key in `flows_cred.json` is
+  refused, naming the node. This is the hazard the credential round-trip proof found: Node-RED would
+  start, report success, hand that node `{}`, and the NEXT deploy would prune the ciphertext for
+  good. Reading the credential store needs the key supplied through
+  `settings.get('credentialSecret')` and **not** `setKey()` — the obvious reading, and the mirror of
+  what `bootstrap.mjs` does to write, makes the runtime conclude encryption is disabled and throw
+  against a perfectly good file.
+
+**A SECOND NODE-RED ACCOUNT ARRIVES WITH IT.** Reloading is an API call, so the agent needs a login;
+the human's password is printed once and stored nowhere, which is a property worth keeping. So
+`bootstrap.mjs` writes an `acs-flow-sync` account into `settings.js` and its password to
+`/data/gitops/nodered.json`, 0600. It grants nothing the volume mount does not already grant —
+the agent writes `flows.json` directly — and `--reset-admin-password` re-issues it, which is also
+the repair path for an appliance enrolled before this existed.
+
+**WHAT THIS IS NOT.** It is not `ansible-pull`, which §8 owns and which brings the OS baseline, the
+container versions and the shared platform playbook with it. When that lands, the scheduling and the
+platform convergence become Ansible's; what does not move is everything below `deployFlow()` — the
+shape checks, the credential assertion and the reload semantics are Node-RED knowledge a playbook
+would have to call out to anyway, which is why `--once` exists.
+
+### Signing in to the forge does not work the way Grafana and Node-RED do, and HS256 is one of three reasons
+
+**MEASURED AGAINST THE RUNNING FORGE rather than reasoned about, because the shape of the answer is
+counter-intuitive: this stack already federates two other services and neither mechanism transfers.**
+Gitea's only general-purpose authentication source is `openidConnect`, configured entirely from an
+auto-discovery URL — its custom authorize and token URL flags are, in its own help text, an "option
+for GitLab/GitHub". There is no hand-configured generic OAuth2 source, and a hand-configured generic
+OAuth2 client is precisely what `grafana.ini`'s `[auth.generic_oauth]` and `node-red-init.mjs`'s
+`passport-oauth2` are. **Those two work BECAUSE they never perform discovery and never ask for an ID
+token**, which is a property of how they were configured rather than a property of GoTrue.
+
+**Wall one is the discovery document, and it fails silently in the worst direction.** GoTrue answers
+`/auth/v1/.well-known/openid-configuration` with an empty `issuer` and RELATIVE endpoint paths:
+
+```json
+{ "issuer": "", "authorization_endpoint": "/oauth/authorize", "token_endpoint": "/oauth/token" }
+```
+
+An auth source added against it is accepted without complaint — nothing is validated at
+configuration time — and the first login answers `307` to
+`http://<forge>/oauth/authorize?...&scope=openid`. **Gitea resolved the relative path against its
+own base and sent the browser to itself**, where it is a 404 on the forge. This is the failure
+[`node-red/Dockerfile`](../node-red/Dockerfile) predicted in prose when it chose `passport-oauth2`
+over `passport-openidconnect`; it is now demonstrated.
+
+**Wall two is the ID token, and it is the HS256 half of the question.** Gitea's request above carries
+`scope=openid`, which is not optional for an OIDC source — and requesting it is the exact thing
+`node-red-init.mjs` records GoTrue refusing, with `HS256 is not supported for ID token signing`, under
+a comment that says not to "fix" a login problem by adding it back. The whole stack is HS256 on
+`SUPABASE_JWT_SECRET`: the gateway, PostgREST, Realtime and the pre-minted key pair all depend on it.
+
+**Wall three is unmeasured and should not be assumed away.** GoTrue's OAuth server REQUIRES PKCE —
+`node-red-init.mjs` sets `pkce: true` for that reason — and whether Gitea's provider sends a
+`code_challenge` is only reachable after the first two walls are cleared. It is a question to answer
+before anything is built on the assumption that they are the only two.
+
+**SO MOVING OFF HS256 IS NECESSARY AND NOT SUFFICIENT, which is the thing to be exact about.**
+Asymmetric signing does not repair a relative URL, and the discovery document is a separate defect
+with a separate fix. The document already advertises `RS256` and `ES256`, so the algorithm is a
+configuration question rather than a Supabase limitation — but it is not a small change, because
+every component in this stack verifies with the shared secret and the pre-minted `anon` and
+`service_role` JWTs are signed with it. **§1 owns the key FORMAT migration and explicitly not this
+one**: opaque publishable and secret keys are not JWTs and no component downstream ever sees one,
+which is why that item could be built as a gateway feature. Signing is the opposite shape. If it is
+ever taken on it earns an item of its own rather than a paragraph in either.
+
+**§2 IS THE CHEAPER PATH AND IT SIDESTEPS ALL THREE WALLS.** Entra ID is a real OIDC provider with a
+valid discovery document and genuine ID tokens, so the forge can federate to it DIRECTLY rather than
+through GoTrue — no shim, no signing change, and nothing owed by this repository. What it costs is a
+second client registration and a forge login that depends on the tenant being reachable, which is
+exactly the property §2's own *"the tenant URL is the boundary, and it fails open"* is about; a forge
+that cannot be signed into during an outage is a milder failure than a dashboard that cannot, but it
+is the same failure.
+
+**NONE OF THIS RELAXES THE RULE ABOVE.** Whichever provider authenticates, **authorisation stays in
+Postgres**: `user_roles` and `has_role()` decide, the forge is still reached through one machine
+account, and a group claim arriving from an IdP must never become the thing that grants
+`gitops:manage`. SSO would change who holds a *login*, not who holds a *permission*.
+
+**AND THE HONEST ANSWER MAY BE THAT ALMOST NOBODY NEEDS ONE.** §6 puts the queue, the review and the
+approve control on the dashboard, which people already sign into; the forge UI is for the engineer
+reading a diff that the lane did not render, which is a smaller audience than "everyone who touches a
+flow". One local administrator plus the machine account is the position to hold until somebody is
+actually blocked by it.
 
 ### What this must not touch
 
@@ -1129,11 +1385,24 @@ no `Operator` holds a login, and the forge never learns what `gitops:manage` mea
 **Two costs that arrive with it and are not otherwise recorded.** Gitea is a durable store with
 state, so it lands inside §4's backup scope before §4 is built — and it would be the second store in
 the repository with no retention answer, which is §12's complaint arriving a second time. Neither is
-a reason to choose differently; both are reasons to decide them in the change that adds it.
+a reason to choose differently. **Both are DEFERRED until the services §§7–9 plan are all present**,
+so that retention is decided once across them rather than per service; what is recorded here is that
+they are owed, and that a Gitea holding every gateway's only flow copy is the opposite of
+`loki_data`, which `docker-compose.yml` deliberately excludes from backup.
 
-**One repository or one per gateway.** A repository per gateway gives clean per-appliance deploy keys
-and independent history; one repository with a branch per gateway gives a fleet-wide diff and one
-place to review. The deploy key granularity is the deciding constraint, not the ergonomics.
+**DECIDED: ONE REPOSITORY PER GATEWAY for flows.** Gitea's deploy keys are per-repository, so this is
+what makes a per-appliance read-only key mean anything: a single flows repository would let every
+appliance's key read every other gateway's `flows.json`, and a `flows.json` is the plant's edge
+topology, broker addresses and device ids. The fleet-wide diff a shared repository would have given is
+the thing given up, and the approvals page is where that view belongs anyway.
+
+**DECIDED: THE PLATFORM PLAYBOOK IS ONE REPOSITORY THE WHOLE FLEET READS, AND GATEWAYS TRACK A TAG
+RATHER THAN `main`.** `main` is protected, a Gitea Actions run validates a commit before it may
+merge, and **naming a new tag off `main` is a separate manual act** — which is what keeps one merge
+from converging every appliance on the next timer. Without it the shared repository has no staged
+rollout at all, and the appliance is the one component whose downtime a machine operator sees rather
+than an engineer. It is the same review gate this item argues for the flow lane, applied to the
+appliance instead.
 
 **Where `target_branch` lives** — deferred to §9, which owns the links-store question, but this item
 is what makes it load-bearing rather than cosmetic.
@@ -1582,18 +1851,49 @@ other change in this file.
 
 ## 9 · Retiring the flow-backup bucket, and pointing at repositories instead
 
-**Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
+**Builds on:** [`frontend/src/components/common/FlowProposalPanel.jsx`](../frontend/src/components/common/FlowProposalPanel.jsx) ·
 the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
 [`supabase/storage-policies.sql`](../supabase/storage-policies.sql) ·
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) and its tag vocabulary ·
 `digital_thread` (`0005`) · **not yet filed as an issue**
 
 **The other end of §7, and it should be sequenced against it rather than planned beside it.** §7
-adds the pull; this removes what the push made necessary. Doing the removal first would leave a
-physical gateway with no copy of its flow anywhere, which is the exact loss `FlowBackupUploader`
-exists to prevent — its header states the case plainly: the appliance is the only copy, and a failed
-SD card takes the plant's edge logic with it, after the enrolment token is already spent. **The bucket
-is not dead weight until the pull half replaces what it does.**
+adds the pull; this removes what the push made necessary.
+
+### The browser half is done — 2026-09-10
+
+`FlowBackupUploader` is now
+[`FlowProposalPanel`](../frontend/src/components/common/FlowProposalPanel.jsx), and it is not a
+rename: the list, the signed-URL download, the upload and the delete are gone, along with
+`listGatewayBackups`, `uploadGatewayBackup`, `gatewayBackupUrl`, `deleteGatewayBackup`,
+`gatewayBackupPath` and `VITE_GATEWAY_BACKUP_BUCKET`'s whole plumbing — `api.js`, `config.js`,
+`public/config.js`, the Dockerfile ARG, the Compose build arg, the chart's runtime ConfigMap and
+`check-docs-drift`'s allowlist. **Nothing in a browser reaches that bucket any more.**
+
+**Two lanes side by side did not survive contact with the drawer.** Both took the same `flows.json`
+from the same export menu and differed only in destination, so the panel was asking the operator to
+decide something the product should have decided for them — and the answer is never "the bucket": a
+copy there has no diff against what the appliance runs now, no history, no author, no reviewer and
+nothing downstream that could ever consume it. The proposal is a strict superset of what the backup
+did, so keeping both meant every upload was one that could have been a proposal instead.
+
+**The ordering objection this section used to make was right and is now spent.** It said removing the
+bucket first would leave a physical gateway with no copy of its flow anywhere. That was true while
+the proposal lane did not exist; a proposal now puts the same file in a durable, versioned place that
+a human can retrieve without the appliance. What a proposal still is not is an *automatic* capture —
+nobody is committing the flow on the gateway's behalf until §8's puller runs, exactly as nobody was
+uploading it to the bucket on their behalf before. The manual act is unchanged; only its destination
+improved.
+
+### What remains
+
+The bucket itself, and it is deliberately still there: `scripts/storage-init.mjs` still creates it,
+`storage-policies.sql` still governs it, `GATEWAY_BACKUP_BUCKET` is still in `.env.example`, Compose
+and `values.yaml`, and `test_gateway_enrollment.py` still asserts against it. **Removing it is one
+change that has to decide what happens to whatever is already stored in one**, which is a retention
+question, and the answer this repository keeps reaching is that retention is decided once for every
+service rather than per-bucket. Deleting the browser's plumbing first is not half a job: it means
+nothing can quietly start writing to a bucket that is on its way out.
 
 **Two premises need correcting before the security argument is scoped.** The bucket takes
 **`flows.json`, not zips**: JSON only, 5 MiB, private, MIME-restricted, keyed `<sparkplug_id>/`, and
@@ -1765,16 +2065,22 @@ Postgres port, and neither is claimed here to be wrong — what is missing is th
 a decision beside every port that was narrowed and beside none of the ports that were not, which is
 the same asymmetry this item complains about between the two targets.
 
-### Compose publishes eight ports where Kubernetes publishes seven hostnames
+### Compose publishes ten ports where Kubernetes publishes nine hostnames
 
 The two targets do not disagree about security here so much as about **shape**, and this is the last
 place where a Compose stack looks nothing like the chart.
 
 `templates/ingress.yaml` gives Kubernetes one entry point and routes by hostname:
-`grafana.<publicBaseDomain>`, `nodered.<…>`, `app.<…>`, `studio.<…>`, `docs.<…>`, `mqtt.<…>` and the
-gateway, every host derived from the same helper the service itself is configured from. **No port
-numbers anywhere.** Compose reaches the same services on eight published ports, and a URL carrying
-`:3002` is a URL that only works if the reader knows which machine to put in front of it.
+`grafana.<publicBaseDomain>`, `nodered.<…>`, `app.<…>`, `studio.<…>`, `docs.<…>`, `i3x.<…>`,
+`git.<…>`, `mqtt.<…>` and the gateway, every host derived from the same helper the service itself is
+configured from. **No port numbers anywhere.** Compose reaches the same services on ten published
+ports, and a URL carrying `:3002` is a URL that only works if the reader knows which machine to put
+in front of it.
+
+**The forge adds the one route that cannot be solved this way, and it should be said here rather
+than discovered.** Git over SSH is TCP, so `git.<domain>` covers the web UI and nothing an appliance
+actually clones with — the chart publishes a second LoadBalancer for it exactly as raw MQTT has one.
+A Compose proxy would inherit the same split.
 
 **This extends `supabase-envoy`; it does not add a proxy.** The instinct is to reach for Caddy or
 Traefik, and it is the wrong one — the stack already runs Envoy, with a gateway listener on 8000 and
@@ -1797,7 +2103,7 @@ documentation says "now ask IT", which nobody does. The chart's own dev path sho
 `e2e.ingressIp` and the `127.0.0.1.nip.io` domain exist precisely because a real record was not
 available — and a Compose equivalent should be designed in from the start rather than discovered.
 
-**What it does and does not buy.** It gets one port to firewall instead of eight, one TLS
+**What it does and does not buy.** It gets one port to firewall instead of ten, one TLS
 certificate instead of none, and URLs that survive being pasted into a message. It does **not** fix
 what the Directory displays: `directory_services.endpoint_url` is a stored string, and a proxy in
 front of Node-RED does not change it. That is `0085`'s job and it is sequenced first for this reason —

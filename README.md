@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, twelve edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, thirteen edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential - gateway-credential<br/>mint-service-token"]
+        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential - gateway-credential<br/>mint-service-token - propose-gateway-flow"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -353,8 +353,9 @@ done
 helm test acs-cymru -n acs-cymru          # the postgres_fdw gate
 ```
 
-Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`,
-`mqtt.`) plus a LoadBalancer for **raw MQTT on 1883**, which is TCP and cannot ride an HTTP Ingress.
+Serves nine subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`,
+`i3x.`, `git.`, `mqtt.`) plus a LoadBalancer for **raw MQTT on 1883** and a second for **git over SSH**,
+neither of which is HTTP and so neither of which can ride an Ingress.
 
 - **`values-dev.yaml` carries the published demo credentials from `.env.example`, and they are in
   git.** For anything another person can reach, start from `values-prod.yaml.example` and point
@@ -425,6 +426,8 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
+| `gitea-init` | `acs-cymru_gitea_init` | `gitea/gitea:1.27.3` | — |
+| `gitea` | `acs-cymru_gitea` | `gitea/gitea:1.27.3` | `3003:3000`, `2222:22` |
 | `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.2.0` | `3002:3000` |
 | `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.32.14` | `8088:8080` |
 | `prometheus` | `acs-cymru_prometheus` | `prom/prometheus:v3.14.0` | `127.0.0.1:9090:9090` |

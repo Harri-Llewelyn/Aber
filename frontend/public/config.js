@@ -34,10 +34,10 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // the server side, HOST INCLUDED. Used only to end Studio's own session at sign-out; cookies
   // ignore the port but not the host, so localhost and 127.0.0.1 are two different sessions.
   VITE_STUDIO_URL: '',
-  // Storage buckets, as named by scripts/storage-init.mjs (STORAGE_BUCKET, GATEWAY_BACKUP_BUCKET
-  // and CAPTURE_BUCKET). Blank falls through to the defaults in src/api.js, which are the same
-  // three names -- so a deployment only sets these if it renamed a bucket.
+  // Storage buckets, as named by scripts/storage-init.mjs (STORAGE_BUCKET and CAPTURE_BUCKET).
+  // Blank falls through to the defaults in src/api.js, which are the same two names -- so a
+  // deployment only sets these if it renamed a bucket. `gateway-backups` is no longer among them:
+  // the browser stopped reading that bucket when flow backups became flow proposals.
   VITE_MODEL_3D_BUCKET: '',
-  VITE_GATEWAY_BACKUP_BUCKET: '',
   VITE_CAPTURE_BUCKET: '',
 };

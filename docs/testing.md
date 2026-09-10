@@ -106,6 +106,14 @@ python supabase/functions/fplus-directory/test_fplus_directory.py
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/enroll-gateway/test_enroll_gateway.py
 
+# A flow proposed as a branch and a pull request rather than an upload. The assertion that carries
+# the rest is that `main` DOES NOT MOVE: the appliance converges to main, so a proposal committed
+# there would deploy an unreviewed flow while reporting success. Also that an Operator MAY propose
+# (the role the review step exists for), and that flows_cred.json is refused by shape. Needs a
+# forge, and skips without one.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/propose-gateway-flow/test_propose_gateway_flow.py
+
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
 # integrity, and that the embedded token is the one the database will accept.
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \

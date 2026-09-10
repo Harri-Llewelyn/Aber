@@ -124,6 +124,21 @@ spec:
             {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
                    already derives for the external broker route, which is the address the
                    certificate's SAN carries -- see mosquitto.tls in values.yaml. */}}
+            {{- /* THE FORGE, for enrolment's fourth step (roadmap 7). The in-cluster Service, not
+                   the ingress hostname: the clone URL an appliance is handed comes from the forge's
+                   own answer, which is built from its ROOT_URL and SSH_DOMAIN, so these two never
+                   have to agree.
+
+                   Rendered only when the forge is deployed. With no machine-account password the
+                   function skips its fourth step and says so in the response -- a gateway still
+                   enrols and still gets its broker credential. */}}
+            {{- if .Values.gitea.enabled }}
+            - name: GITEA_INTERNAL_URL
+              value: "http://gitea:3000"
+            - name: GITEA_MACHINE_USER
+              value: {{ .Values.gitea.machineUser | quote }}
+            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "GITEA_MACHINE_PASSWORD" "secretName" $secretName "key" "GITEA_MACHINE_PASSWORD") | nindent 12 }}
+            {{- end }}
             - name: MQTT_PUBLIC_HOST
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicHost
                         | default (include "acs-cymru.hostOf" (dict "ctx" . "name" "mqtt")) | quote }}
