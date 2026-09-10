@@ -552,6 +552,28 @@ class TestForgeProvisioning(EnrollGatewayBase):
             "to deploy, and an approved commit would stop being evidence that anyone approved it",
         )
 
+    def test_the_wiki_is_seeded_with_the_gateway_and_never_overwritten(self):
+        """
+        THE WIKI IS THE UNREVIEWED HALF, seeded so the first person to open it finds the gateway
+        named rather than an empty "create the first page" prompt, and told what does not belong
+        there. Seeded ONCE: a re-enrolment (a re-flashed appliance) must leave what people wrote.
+        """
+        status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        home = f"/api/v1/repos/{self.organisation}/{self.repo_name()}/wiki/page/Home"
+        text = base64.b64decode(self.forge(home)["content_base64"]).decode()
+        self.assertIn(self.sparkplug_id, text)
+        self.assertIn("not reviewed", text, "the page does not say the wiki is unreviewed")
+
+        edited = base64.b64encode(b"# Edited by a person\n").decode()
+        self.forge(home, method="PATCH", body={"title": "Home", "content_base64": edited})
+        status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(
+            self.forge(home)["content_base64"], edited,
+            "re-enrolment overwrote a wiki page a person had edited",
+        )
+
     def test_main_is_protected_and_a_merge_needs_an_administrator(self):
         """
         THE REVIEW GATE, in the forge's own terms. The appliance converges to `main`, so a branch

@@ -239,7 +239,8 @@ export async function ensureOrganisation(
       permission: "write",
       includes_all_repositories: true,
       can_create_org_repo: true,
-      units: ["repo.code", "repo.issues", "repo.pulls", "repo.releases", "repo.wiki", "repo.projects"],
+      // No repo.projects: the unit is disabled forge-wide (DISABLED_REPO_UNITS in the Gitea env).
+      units: ["repo.code", "repo.issues", "repo.pulls", "repo.releases", "repo.wiki"],
     });
     if (!created.ok) throw await refused(`could not create team '${name}'`, created);
     ids[role] = ((await created.json()) as { id: number }).id;
@@ -375,6 +376,53 @@ async function ensureDeployKey(
   throw await refused(`could not register the deploy key on '${repo}'`, response);
 }
 
+/**
+ * Seed the wiki's Home page, once.
+ *
+ * THE WIKI IS THE UNREVIEWED HALF OF THE REPOSITORY, AND THAT IS WHAT IT IS FOR. It is a second git
+ * repository beside the first (`<name>.wiki.git`), edited in place by anyone in either team, with no
+ * branch protection and no pull request -- the right shape for what a person needs to know about a
+ * gateway and the appliance never reads: where it is, what it is wired to, who to call, what changed
+ * and why. It is the wrong shape for anything the appliance deploys, and the page says so, because
+ * the first person to find a wiki tab beside a `flows.json` will wonder which one counts.
+ *
+ * SEEDED ONCE. A Home page that exists is left exactly as people have edited it; Gitea would answer
+ * 400 to a second creation, and this never asks. A wiki with no page at all greets its first visitor
+ * with "create the first page", which is an empty room where the gateway's name should be.
+ */
+async function ensureWikiHome(
+  cfg: ForgeConfig,
+  name: string,
+  sparkplugId: string,
+  gatewayName: string,
+): Promise<void> {
+  const existing = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/wiki/page/Home`);
+  if (existing.ok) return;
+  if (existing.status !== 404) throw await refused(`could not read the wiki of '${name}'`, existing);
+
+  const content = [
+    `# ${gatewayName}`,
+    "",
+    `Gateway \`${sparkplugId}\`, enrolled ${new Date().toISOString().slice(0, 10)}.`,
+    "",
+    "This wiki is for what a person needs to know about this gateway and the appliance never reads:",
+    "where it is, what it is wired to, who to call, what changed and why. Pages here are edited",
+    "directly and are not reviewed.",
+    "",
+    "The repository beside it is the reverse. `flows.json` there is what the appliance deploys,",
+    "`main` is protected, and a change to it goes through a pull request that an administrator",
+    "approves. Nothing the appliance deploys belongs in this wiki.",
+    "",
+  ].join("\n");
+  const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/wiki/new`, {
+    title: "Home",
+    content_base64: btoa(String.fromCharCode(...new TextEncoder().encode(content))),
+    message: `Seed the wiki for gateway ${sparkplugId}`,
+  });
+  if (!created.ok) throw await refused(`could not seed the wiki of '${name}'`, created);
+  console.log(`forge: seeded the wiki of '${name}'`);
+}
+
 /** Provision the organisation, the repository, its protection and the key. Returns null on any failure, having logged it. */
 export async function provisionGatewayRepository(
   cfg: ForgeConfig,
@@ -389,6 +437,14 @@ export async function provisionGatewayRepository(
     await ensureBranchProtection(cfg, name);
     await ensureDeployKey(cfg, name, sparkplugId, publicKey);
     console.log(`forge: ${sparkplugId} reads ${repo.full_name} over ${repo.ssh_url}`);
+    // AFTER THE KEY, AND NOT ON THE PATH TO `return null`: the wiki is for people and is no part of
+    // the appliance's contract, so a wiki the forge could not seed costs a log line, never the
+    // repository the appliance is about to be told to clone.
+    try {
+      await ensureWikiHome(cfg, name, sparkplugId, gatewayName);
+    } catch (err) {
+      console.warn(`forge: the wiki of '${name}' was not seeded (${err instanceof Error ? err.message : err}); the repository is unaffected`);
+    }
     return repo;
   } catch (err) {
     // LOUD, because nothing else will say so. The appliance sees `repository: null` and carries on

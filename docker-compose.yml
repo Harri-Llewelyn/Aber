@@ -134,6 +134,12 @@ x-gitea-env: &gitea-env
   # registry is a fourth credential plane.
   GITEA__actions__ENABLED: "false"
   GITEA__packages__ENABLED: "false"
+  # PROJECTS AND PACKAGES ARE HIDDEN FROM EVERY REPOSITORY, hand-made ones included. Packages is
+  # off above and this removes its tab too; Projects is a kanban on a repository whose whole content
+  # is one flow, and every tab a person has to learn to ignore is a cost. The wiki and issues stay:
+  # the wiki is seeded at enrolment (forge.ts) as the unreviewed place for what people know about a
+  # gateway, and issues are its incident log.
+  GITEA__repository__DISABLED_REPO_UNITS: "repo.projects,repo.packages"
   # A container in a plant has no business calling home to check for releases.
   GITEA__cron.update_checker__ENABLED: "false"
   GITEA__log__LEVEL: ${GITEA_LOG_LEVEL:-info}

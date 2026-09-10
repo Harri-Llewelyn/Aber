@@ -1450,6 +1450,18 @@ the door's sign-out -- landing on a fresh login that meets a dashboard with nobo
 the mirror of what the dashboard's sign-out already does to the forge, and the suite asserts both
 halves: the dashboard token dies, and the door's cookie goes.
 
+**THE WIKI IS SEEDED AT ENROLMENT, AND IT IS THE UNREVIEWED HALF ON PURPOSE (2026-09-10).** Every
+gateway repository has a wiki: a second git repository beside the first, edited in place by either
+team, with no protection and no pull request. That is the right shape for what a person needs to
+know about a gateway and the appliance never reads (where it is, what it is wired to, who to call,
+what changed and why) and the wrong shape for anything the appliance deploys, which is why the seeded
+Home page says so. Named for the gateway, seeded once, never overwritten; a wiki the forge could not
+seed costs a log line and not the repository, because the wiki is no part of the appliance's
+contract. The Projects tab is hidden from every repository (`DISABLED_REPO_UNITS`, with Packages): a
+kanban on a repository whose whole content is one flow is a tab to learn to ignore. Issues stay, as
+the gateway's incident log. The runner stays off: it is §8's decision, and it is a host that
+executes untrusted code rather than a setting.
+
 **NONE OF THIS RELAXES THE RULE THAT AUTHORISATION STAYS IN POSTGRES.** `user_roles` and `has_role()`
 decide who is let through the door; Gitea's teams decide what they may do inside it, and the two
 must agree by construction — the team a login is placed in is a function of the role the listener

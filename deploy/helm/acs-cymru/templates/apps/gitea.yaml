@@ -92,6 +92,10 @@ shares the same block through a YAML anchor, for the same reason.
   value: {{ .Values.gitea.packages.enabled | quote }}
 - name: GITEA__cron.update_checker__ENABLED
   value: "false"
+# Projects and Packages are hidden from every repository; the wiki and issues stay. Same rationale
+# as the Compose file's gitea-env block.
+- name: GITEA__repository__DISABLED_REPO_UNITS
+  value: "repo.projects,repo.packages"
 - name: GITEA__log__LEVEL
   value: {{ .Values.gitea.logLevel | quote }}
 {{- end -}}
