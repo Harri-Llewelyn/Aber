@@ -1,5 +1,12 @@
 /**
- * The forge half of enrolment: a gateway's own repository, and the key it reads it with.
+ * The forge: a gateway's own repository, the key it reads it with, and the branch a proposed flow
+ * lands on.
+ *
+ * SHARED BECAUSE THE REPOSITORY NAME MUST AGREE. `enroll-gateway` creates `gateway-<sparkplug_id>`
+ * and `propose-gateway-flow` commits into it; two copies of that convention are two places for it
+ * to drift, and the failure is a proposal opened against a repository that does not exist -- or,
+ * worse, against one belonging to a different gateway. See _shared/roles.ts on why a sibling import
+ * is fine: `servicePath` decides which directory is BOOTED, not what its module graph may import.
  *
  * WHY THIS LIVES BESIDE THE BROKER CREDENTIAL rather than in a later step somebody runs. Roadmap 7
  * gives every appliance a per-gateway READ-ONLY deploy key, and enrolment is the one moment when a
@@ -218,4 +225,119 @@ export async function provisionGatewayRepository(
     );
     return null;
   }
+}
+
+/**
+ * THE PROPOSAL HALF: a flow becomes a branch and a pull request, never a direct write to `main`.
+ *
+ * WHY A BRANCH AND NOT A COMMIT ON main. Roadmap 7's three states are the forge's own: an open pull
+ * request IS "pending approval", a merge IS "approved", and a revert commit IS "undo". Committing
+ * straight to `main` would collapse all three into "deployed", and the appliance -- which converges
+ * to whatever `main` says -- would deploy an unreviewed flow the moment somebody pressed Upload.
+ * That is the `deploy-nodered` endpoint this item retired, rebuilt with a nicer table.
+ *
+ * THE PROPOSER IS NAMED IN THE COMMIT AND IN THE PULL REQUEST, because the forge cannot know them:
+ * every write here is made by ONE machine account, and shopfloor people deliberately hold no login.
+ * Without the name in the message the audit trail says only that the platform committed something.
+ * Migration `0089` made the same decision for the approvals queue, and for the same reason.
+ */
+
+/** The file every gateway repository holds, and the only one this writes. */
+export const FLOW_PATH = "flows.json";
+
+export interface ProposedFlow {
+  number: number;
+  html_url: string;
+  branch: string;
+}
+
+/** What a repository currently holds at `flows.json`, or null when it has none yet. */
+async function currentFlowSha(cfg: ForgeConfig, repo: string): Promise<string | null> {
+  const response = await fetch(
+    `${cfg.baseUrl}/api/v1/repos/${cfg.user}/${repo}/contents/${FLOW_PATH}`,
+    { headers: { Authorization: authHeader(cfg) } },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`could not read ${FLOW_PATH} in '${repo}' (${response.status})`);
+  }
+  const body = await response.json() as { sha?: string };
+  return typeof body.sha === "string" ? body.sha : null;
+}
+
+/**
+ * Commit a flow onto a NEW branch and open a pull request for it.
+ *
+ * CREATE-OR-UPDATE, decided by whether the file is already there. Gitea's contents API is POST to
+ * create and PUT to update, and PUT needs the blob's `sha` -- posting over an existing file answers
+ * 422, which reads as a validation error rather than as "this repository already has a flow".
+ *
+ * `new_branch` DOES THE BRANCHING, so there is no separate ref call to get wrong: the commit lands
+ * on a branch created from the base in one request, which also means a failure leaves no orphan
+ * branch behind.
+ */
+export async function proposeFlow(
+  cfg: ForgeConfig,
+  repo: string,
+  flowJson: string,
+  proposer: string,
+  gatewayName: string,
+  baseBranch = "main",
+): Promise<ProposedFlow> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  // Branch names are a forge-visible surface, so nothing from a caller reaches one: the timestamp
+  // is generated here and the gateway is identified by the repository the branch lives in.
+  const branch = `proposal/${stamp}`;
+  const message =
+    `Proposed flow for '${gatewayName}'\n\nProposed by ${proposer} through the ACS-Cymru dashboard.`;
+
+  const sha = await currentFlowSha(cfg, repo);
+  const contents = await fetch(
+    `${cfg.baseUrl}/api/v1/repos/${cfg.user}/${repo}/contents/${FLOW_PATH}`,
+    {
+      method: sha ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json", Authorization: authHeader(cfg) },
+      body: JSON.stringify({
+        content: btoa(unescape(encodeURIComponent(flowJson))),
+        message,
+        branch: baseBranch,
+        new_branch: branch,
+        ...(sha ? { sha } : {}),
+      }),
+    },
+  );
+
+  if (!contents.ok) {
+    throw new Error(
+      `could not commit ${FLOW_PATH} to '${repo}' ` +
+        `(${contents.status}: ${(await contents.text()).slice(0, 200)})`,
+    );
+  }
+
+  const pull = await fetch(`${cfg.baseUrl}/api/v1/repos/${cfg.user}/${repo}/pulls`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: authHeader(cfg) },
+    body: JSON.stringify({
+      head: branch,
+      base: baseBranch,
+      title: `Flow proposed for '${gatewayName}'`,
+      body:
+        `Proposed by **${proposer}** through the ACS-Cymru dashboard.\n\n` +
+        "Merging this deploys it: the appliance converges to whatever `main` holds. " +
+        "Review the diff before approving.",
+    }),
+  });
+
+  if (!pull.ok) {
+    // THE BRANCH SURVIVES A FAILED PULL REQUEST, deliberately. The commit is already made and is the
+    // thing worth keeping; a proposer can open the request by hand, and deleting the branch to tidy
+    // up would throw away the only copy of what they uploaded.
+    throw new Error(
+      `committed ${FLOW_PATH} to '${branch}' but could not open a pull request ` +
+        `(${pull.status}: ${(await pull.text()).slice(0, 200)})`,
+    );
+  }
+
+  const opened = await pull.json() as { number: number; html_url: string };
+  return { number: opened.number, html_url: opened.html_url, branch };
 }

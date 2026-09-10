@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 import { corsHeaders } from "../_shared/cors.ts";
-import { forgeConfig, provisionGatewayRepository, validPublicKey } from "./forge.ts";
+import { forgeConfig, provisionGatewayRepository, validPublicKey } from "../_shared/forge.ts";
 
 /**
  * Physical gateway enrolment: exchange a single-use token for a broker credential.

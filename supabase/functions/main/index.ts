@@ -121,6 +121,21 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_MACHINE_PASSWORD",
   ],
 
+  // Commits a proposed flow to a BRANCH in the gateway's repository and opens a pull request for
+  // it (roadmap 7). NO SERVICE-ROLE KEY, and that is the entry's point: it reads the gateway row
+  // AS THE CALLER, so RLS decides what is visible, and it makes no privileged database write at
+  // all -- the only thing it changes is in the forge.
+  //
+  // The forge credential it holds is the machine account, which is not a Gitea administrator and
+  // owns only the per-gateway repositories. Nothing here can merge: approving is `gitops:manage`,
+  // it belongs with the approvals page, and keeping it out of this worker is what keeps proposing
+  // and approving two privileges rather than one.
+  "propose-gateway-flow": [
+    "GITEA_INTERNAL_URL",
+    "GITEA_MACHINE_USER",
+    "GITEA_MACHINE_PASSWORD",
+  ],
+
   // Rotates a decommissioned gateway's broker account to a password nobody records, which is how
   // this platform revokes -- the credential service is add-only by design (0038).
   //

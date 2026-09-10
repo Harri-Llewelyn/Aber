@@ -1053,6 +1053,31 @@ a private bucket. The upload is then the backup and the proposed deployment in o
 also removes the awkward sequencing between this item and §9: the bucket stops being load-bearing at
 the moment the first flow lands in a repository, not before.
 
+**THE PROPOSAL HALF HAS LANDED, and it is a branch and a pull request rather than a write.**
+`propose-gateway-flow` takes the same `flows.json` an operator exports from Node-RED, commits it to a
+new `proposal/<timestamp>` branch in that gateway's repository, and opens a pull request against
+`main` — so the three states above are the forge's own rather than a workflow modelled beside a
+stored blob. **Nothing in it can merge**: approving is `gitops:manage`'s act and is not reachable from
+the endpoint, which is what keeps proposing and approving two privileges instead of one.
+
+**`Operator` may propose, which is the whole point of the gate.** This item says a review step whose
+proposals can only come from the two roles that may already merge them is a formality; the function
+therefore admits Administrator, Shopfloor_Manager and Operator, and refuses Auditor. **The proposer is
+named in the commit and in the pull request body** — the forge is reached through one machine account
+and shopfloor people hold no login there, so without the name the trail would say only that the
+platform committed something. `0089` made the same call for the approvals queue.
+
+**`main` NOT MOVING is the assertion the suite is built around.** Every other property could hold
+against a function that committed straight to `main`, and that function would deploy an unreviewed
+flow while reporting success — the `deploy-nodered` endpoint this item retired, rebuilt with a
+friendlier name. `test_propose_gateway_flow.py` enrols a gateway (which is what creates its
+repository), proposes, and asserts the head of `main` is unchanged; it also asserts that
+`flows_cred.json` is refused **by shape** with no branch left behind, and that a gateway with no
+repository answers 409 rather than failing obscurely.
+
+**The bucket has not moved and must not yet.** §9 sequences its removal, and until something PULLS
+these repositories a commit is not yet a backup an appliance can be rebuilt from.
+
 **`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
 place — `nodered-userinfo`'s `ALLOWED_ROLES`, as `0069` records — and the merge is the control it was
 named for. **Authoring a proposal and approving one are different privileges** and should not collapse

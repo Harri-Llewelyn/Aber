@@ -572,8 +572,19 @@ export const SUITES = {
       'Physical gateway enrolment. Signs in as Administrator to mint tokens (issuing is a ' +
       "USER's act, gated on has_role, so the service key cannot do it), then redeems them the way " +
       'an appliance does: the anon key and no user JWT. Stops the credential service to exercise ' +
-      'the 503 rollback path. SKIPS ALL FOURTEEN CHECKS without a stack, which is why it is not ' +
+      'the 503 rollback path. SKIPS ALL SEVENTEEN CHECKS without a stack, which is why it is not ' +
       'in the unit lane.',
+  },
+  'supabase/functions/propose-gateway-flow/test_propose_gateway_flow.py': {
+    lanes: ['stack'],
+    why:
+      'Roadmap 7 flow proposal: an upload becomes a branch and a pull request in the '
+      + 'gateway repository. It ENROLS a gateway first, because enrolment is what creates that '
+      + 'repository and the name is derived in _shared/forge.ts so the two functions cannot '
+      + 'disagree -- a hand-made repository would stop checking that. The load-bearing '
+      + 'assertion is that `main` does not move: the appliance converges to main, so a '
+      + 'proposal committed there would deploy an unreviewed flow while every response still '
+      + 'looked correct. Needs the stack AND a forge, and skips entirely without either.',
   },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],
