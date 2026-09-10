@@ -56,13 +56,17 @@ export const RUNTIME_SETTING_NAMES = [
   // THE BUCKET NAMES, and they are settings for the same reason the URLs above are.
   //
   // Both were literals in api.js while every other consumer read them from the environment --
-  // scripts/storage-init.mjs creates them from STORAGE_BUCKET / GATEWAY_BACKUP_BUCKET,
-  // docker-compose and values.yaml pass those through, and storage-policies.sql names them. So a
-  // deployment that renamed a bucket moved the creation, the policies and the server-side readers
-  // together and left the dashboard reading the old name -- a 404 on upload, from the one
-  // component nobody had listed as a consumer.
+  // scripts/storage-init.mjs creates them from STORAGE_BUCKET / CAPTURE_BUCKET, docker-compose and
+  // values.yaml pass those through, and storage-policies.sql names them. So a deployment that
+  // renamed a bucket moved the creation, the policies and the server-side readers together and left
+  // the dashboard reading the old name -- a 404 on upload, from the one component nobody had listed
+  // as a consumer.
+  //
+  // VITE_GATEWAY_BACKUP_BUCKET WAS THE THIRD OF THESE AND IS GONE. The browser no longer reads the
+  // `gateway-backups` bucket at all: a flow now goes to the gateway's repository as a proposal. The
+  // bucket, its policies and its server-side GATEWAY_BACKUP_BUCKET are untouched -- roadmap 9
+  // retires those together, and only then can it say what happens to what is already stored.
   'VITE_MODEL_3D_BUCKET',
-  'VITE_GATEWAY_BACKUP_BUCKET',
   'VITE_CAPTURE_BUCKET',
 ];
 
@@ -83,7 +87,6 @@ const BUILD_TIME_SETTINGS = {
   VITE_GRAFANA_URL: import.meta.env.VITE_GRAFANA_URL,
   VITE_STUDIO_URL: import.meta.env.VITE_STUDIO_URL,
   VITE_MODEL_3D_BUCKET: import.meta.env.VITE_MODEL_3D_BUCKET,
-  VITE_GATEWAY_BACKUP_BUCKET: import.meta.env.VITE_GATEWAY_BACKUP_BUCKET,
   VITE_CAPTURE_BUCKET: import.meta.env.VITE_CAPTURE_BUCKET,
 };
 

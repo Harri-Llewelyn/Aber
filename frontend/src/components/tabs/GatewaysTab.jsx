@@ -27,7 +27,7 @@ import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
-import { FlowBackupUploader } from '../common/FlowBackupUploader'
+import { FlowProposalPanel } from '../common/FlowProposalPanel'
 import {
   IconRadio,
   IconPlus,
@@ -284,27 +284,22 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       : null
   )
   /**
-   * Flow-backup authority, mirroring supabase/storage-policies.sql rather than reimplementing it.
-   *
-   * WRITE is GATEWAY_MANAGE, which only Administrator and Shopfloor_Manager hold. READ additionally
-   * admits DIGITAL_THREAD_READ, which is the AUDITOR's single permission -- seeing what the edge was
-   * configured to do, and when it changed, is the whole of that role. Operator holds neither
-   * (QUARANTINE_VIEW and TELEMETRY_READ only), so they get nothing, which is what the bucket's RLS
-   * grants them too.
-   */
-  const canManageBackups = canManage
-  const canReadBackups = canManage || hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
-  /**
    * WHO MAY PROPOSE A FLOW, and it is a ROLE rather than a permission on purpose.
    *
    * There is no proposal permission to read: `gitops:manage` is the APPROVAL authority, and
    * granting it here would collapse the two into one. The edge function decides by role name --
    * Administrator, Shopfloor_Manager, Operator -- so this mirrors that list rather than inventing a
-   * second rule that could disagree with the control. Same posture as the backup gates above: the
-   * UI agrees with the boundary, it does not implement it.
+   * second rule that could disagree with the control: the UI agrees with the boundary, it does not
+   * implement it.
    *
    * OPERATOR IS THE POINT. Roadmap 7 says a review step whose proposals can only come from the two
    * roles that may already merge them is a formality rather than a gate.
+   *
+   * THE FLOW-BACKUP GATES USED TO SIT HERE and were the mirror of supabase/storage-policies.sql:
+   * GATEWAY_MANAGE to write, plus the Auditor's DIGITAL_THREAD_READ to read. They went with the
+   * backup panel -- a copy in a bucket has no diff, no history and no reviewer, and every upload to
+   * it was an upload that could have been a proposal. The bucket's RLS is untouched; roadmap 9
+   * retires the bucket itself.
    */
   const canProposeFlow = canManage || userRole === 'Operator'
 
@@ -1189,16 +1184,14 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 </div>
               )}
 
-            {/* WITH THE METADATA FOR THE SAME REASON AS THE DEVICE LIST: "what is saved for this
-                appliance" is a fact about the gateway, and it is the question the AWAITING SETUP
-                badge raises. Hidden entirely from a role with no read authority -- see the
-                component's header for why an empty list cannot stand in for a denial. */}
+            {/* WITH THE DEVICE LIST FOR THE SAME REASON: "what this appliance is asked to run" is a
+                fact about the gateway, and it is next to "what has published underneath it".
+                Withheld from an archived gateway, which is not a thing to be proposing changes to,
+                and rendered as nothing at all for a role that may not propose. */}
             {!selected.is_archived && (
               <div style={{ marginTop: '14px' }}>
-                <FlowBackupUploader
+                <FlowProposalPanel
                   gateway={selected}
-                  canRead={canReadBackups}
-                  canManage={canManageBackups}
                   canPropose={canProposeFlow}
                   showToast={showToast}
                 />

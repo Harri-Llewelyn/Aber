@@ -407,28 +407,41 @@ telemetry.
 
 ---
 
-## 11. Flow backups
+## 11. Proposing a flow
 
 The appliance's flow lives on a Docker volume on hardware in a plant. It is the only copy, and
 `docker compose down -v` or a failed SD card takes the plant's edge logic with it.
 
-**Gateways → select the gateway → Flow backups.** Export `flows.json` from the appliance's editor
-(*menu → Export → all flows*) and upload it there.
+**Gateways → select the gateway → Propose a flow.** Export `flows.json` from the appliance's editor
+(*menu → Export → all flows*) and drop it there. It is committed to a branch in **this gateway's own
+repository** in the forge and opened as a pull request; **nothing is deployed by proposing**.
 
-| Role | Backups |
+| Role | Proposing |
 | :--- | :--- |
-| Administrator, Shopfloor_Manager | list, download, upload, delete |
-| Auditor | list and download only |
-| Operator | no access at all |
+| Administrator, Shopfloor_Manager | may propose, and hold the approval authority as well |
+| Operator | may propose |
+| Auditor | no — read-only is the whole of the role, and a proposal is a write wherever it lands |
 
-Stored in the **private** `gateway-backups` bucket under `<sparkplug_id>/`, a prefix enforced by
-row-level security rather than by the uploader. Reads go through a 60-second signed URL; there is no
-public URL for this bucket and there must never be one.
+The gate is enforced by `propose-gateway-flow`, which resolves the caller's role for itself; the
+drawer mirrors that list rather than implementing it.
 
-**`flows_cred.json` is never backed up.** It is encrypted with a secret that exists only in the
-appliance's `.env`, so a copy on the platform would be either useless or dangerous. The uploader
-rejects it by *shape*, not by filename — both files sit side by side in `/data` and picking the wrong
-one is an easy mistake.
+**A host-run gateway cannot be proposed for**, and the reason is not a permission. Its connector runs
+in the platform's own Node-RED, an instance that can carry several host gateways at once, so
+`flows.json` there is the whole instance rather than one gateway's — approving a proposal "for" one
+would replace every other gateway's flow in the same file. The mechanical reason agrees: repositories
+are created when an appliance enrols with a deploy key, and a host-run gateway never enrols, so the
+function refuses it with a 409 that says so.
+
+**`flows_cred.json` is never committed.** It is encrypted with a secret that exists only in the
+appliance's `.env`, so a copy on the platform would be either useless or dangerous. It is rejected by
+*shape*, not by filename — both files sit side by side in `/data` and picking the wrong one is an easy
+mistake — in the browser and again in the function.
+
+**This replaced a flow-backup panel**, which uploaded the same file to the private `gateway-backups`
+bucket. That worked, but a copy in a bucket has no diff against what the appliance runs now, no
+history, no author and no reviewer, and nothing downstream could ever consume it. The bucket still
+exists server-side; roadmap 9 retires it, and that is the change that decides what happens to
+whatever is already stored in it.
 
 ---
 

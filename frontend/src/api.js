@@ -362,17 +362,21 @@ const mapDigitalThreadRow = (t) => ({
 export const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-models');
 
 /**
- * The PRIVATE bucket holding Node-RED flow backups from physical gateway appliances.
+ * THE `gateway-backups` BUCKET WAS RESOLVED HERE, AND THE BROWSER NO LONGER TOUCHES IT.
  *
- * THE OPPOSITE OF THE BUCKET ABOVE IN EVERY RESPECT THAT MATTERS. There is no `getPublicUrl()` path
- * for it and there must never be one: a `flows.json` describes the plant's edge topology, its broker
- * addresses, its device ids and its processing logic. Reads go through a SIGNED URL minted for a
- * caller whose role the database has already checked.
+ * It held uploaded copies of `flows.json`: private, RLS-scoped to `<sparkplug_id>/`, read-only to an
+ * Auditor, and read through a sixty-second signed URL. Nothing about it was wrong -- it was simply
+ * the weakest thing the operator's effort could produce. A gateway's own repository takes the same
+ * file and gives it a diff, a history, an author and a review step, so the panel that uploaded to
+ * the bucket became `FlowProposalPanel` and the four storage calls that served it went with it.
  *
- * Objects live under `<sparkplug_id>/`, and that prefix is enforced by RLS rather than by this
- * client (supabase/storage-policies.sql). The paths below follow the rule; they do not implement it.
+ * THE BUCKET ITSELF STILL EXISTS. `scripts/storage-init.mjs` still creates it, `storage-policies.sql`
+ * still governs it, and `GATEWAY_BACKUP_BUCKET` is still in the environment for those two -- only
+ * `VITE_GATEWAY_BACKUP_BUCKET` and the calls below are gone. Roadmap 9 retires the bucket as one
+ * piece, and that is the change that has to decide what happens to anything already stored in it.
+ * Deleting the plumbing here first is deliberate: it means nothing can quietly start writing to a
+ * bucket that is on its way out.
  */
-export const GATEWAY_BACKUP_BUCKET = readSetting('VITE_GATEWAY_BACKUP_BUCKET', 'gateway-backups');
 
 /**
  * Broker captures -- recorded Sparkplug traffic, for playback through `ingestion/capture.py`.
@@ -507,14 +511,6 @@ export function captureManifest(parsed) {
   };
 }
 
-/** `<sparkplug_id>/<iso-timestamp>-flows.json`, sortable by name so the newest is last. */
-export function gatewayBackupPath(sparkplugId, when = new Date()) {
-  // Colons are legal in an S3 key but awkward in every shell and on Windows, where an operator may
-  // well download one. `-` keeps the timestamp sortable and the filename portable.
-  const stamp = when.toISOString().replace(/[:.]/g, '-');
-  return `${sparkplugId}/${stamp}-flows.json`;
-}
-
 /**
  * A signed storage URL that a NEW TAB can actually open.
  *
@@ -526,9 +522,10 @@ export function gatewayBackupPath(sparkplugId, when = new Date()) {
  *     GET …/object/sign/broker-captures/gwy…/capture.json?token=…
  *     -> 401 {"message":"No API key found in request"}
  *
- * So every "Download" on this stack that opened a signed URL in a tab was broken -- captures and
- * gateway flow backups both -- and the message points at an API key when what is missing is a query
- * parameter. Measured, not inferred; appending the key returns 200 with the file.
+ * So every "Download" on this stack that opened a signed URL in a tab was broken -- captures and the
+ * gateway flow backups that used to sit beside them -- and the message points at an API key when
+ * what is missing is a query parameter. Measured, not inferred; appending the key returns 200 with
+ * the file.
  *
  * PUTTING THE ANON KEY IN A URL IS NOT A LEAK. It is in the bundle every visitor already downloads;
  * the gateway's filter is a ROUTING check rather than an authorisation one. What authorises this
@@ -1013,85 +1010,19 @@ const apiMethods = {
   },
 
   /**
-   * Flow backups for one gateway, newest first.
-   *
-   * Storage `list()` is scoped to the gateway's own prefix, which is where RLS confines writes
-   * anyway. A caller without read authority gets an EMPTY LIST rather than an error -- storage-api
-   * applies the SELECT policy and simply returns nothing -- so the UI must decide what to show from
-   * the caller's role, not from the length of this array.
-   */
-  listGatewayBackups: async (sparkplugId) => {
-    const { data, error } = await supabase.storage
-      .from(GATEWAY_BACKUP_BUCKET)
-      .list(sparkplugId, { limit: 100, sortBy: { column: 'name', order: 'desc' } });
-
-    if (error) throw new Error(error.message || 'Could not list backups');
-    return (data || [])
-      // `.emptyFolderPlaceholder` is a zero-byte object storage-api creates for an empty prefix.
-      .filter(o => o.name && !o.name.startsWith('.'))
-      .map(o => ({
-        name: o.name,
-        path: `${sparkplugId}/${o.name}`,
-        size: o.metadata?.size ?? null,
-        createdAt: o.created_at || o.updated_at || null
-      }));
-  },
-
-  /**
-   * Upload a `flows.json` backup.
-   *
-   * VALIDATED AS A NODE-RED FLOW BEFORE IT IS SENT, not merely by extension. The bucket accepts
-   * `application/json` and a few fallbacks because browsers report a hand-picked .json
-   * inconsistently, so the extension is close to no check at all -- and a backup that turns out not
-   * to be a flow is discovered at RESTORE time, which is the worst moment for it.
-   */
-  uploadGatewayBackup: async (sparkplugId, file) => {
-    const text = await file.text();
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new Error(`"${file.name}" is not valid JSON. Export it from Node-RED with menu → Export → all flows.`);
-    }
-    if (!Array.isArray(parsed)) {
-      throw new Error('A Node-RED flow export is a JSON array of nodes. This file is not one.');
-    }
-    // THE CREDENTIAL FILE IS REFUSED OUTRIGHT. flows_cred.json is encrypted with a secret that lives
-    // only in the appliance's .env, so a copy here would be either useless or dangerous -- and it is
-    // an easy mistake to make, both files sitting side by side in /data.
-    if (parsed.length && parsed.every(n => typeof n === 'object' && n && !n.type)) {
-      throw new Error('That looks like flows_cred.json, not flows.json. Credential files are never backed up.');
-    }
-
-    const path = gatewayBackupPath(sparkplugId);
-    const { error } = await supabase.storage
-      .from(GATEWAY_BACKUP_BUCKET)
-      // upsert FALSE: the path carries a timestamp, so every upload is a new version and an
-      // accidental double-click cannot overwrite the previous one.
-      .upload(path, file, { upsert: false, contentType: 'application/json' });
-
-    if (error) {
-      if (/row-level security|Unauthorized/i.test(error.message || '')) {
-        throw new Error('You do not have permission to upload a backup for this gateway.');
-      }
-      throw new Error(error.message || 'Upload failed');
-    }
-    return { path };
-  },
-
-  /**
    * Propose a flow for a gateway: a branch and a pull request, never a deploy.
    *
-   * THE DIFFERENCE FROM uploadGatewayBackup ABOVE IS THE WHOLE POINT. That one puts a copy in a
-   * private bucket, where it is a backup and nothing else -- no diff, no history, no review. This
-   * sends the same file to the gateway's own repository, where an open pull request IS "pending
-   * approval" and a merge IS "approved". Both exist for now: roadmap 9 sequences the bucket's
-   * removal, and until something PULLS these repositories a commit is not yet a backup an appliance
-   * can be rebuilt from.
+   * THIS REPLACED AN UPLOAD TO THE `gateway-backups` BUCKET, and the replacement is the point. That
+   * one put a copy in a private bucket, where it was a backup and nothing else -- no diff, no
+   * history, no review, and nothing downstream that could ever consume it. This sends the same file
+   * to the gateway's own repository, where an open pull request IS "pending approval" and a merge IS
+   * "approved", without either state having to be modelled anywhere.
    *
-   * THE SAME SHAPE CHECKS RUN HERE AND AGAIN IN THE FUNCTION. Not redundancy: this one keeps a
-   * mistake from costing a round trip, and the function's is the boundary. `flows_cred.json` is the
-   * one that matters -- a bucket object can be deleted, and a commit is forever.
+   * VALIDATED AS A NODE-RED FLOW BEFORE IT IS SENT, not merely by extension: browsers report a
+   * hand-picked .json inconsistently, so the extension is close to no check at all. The same shape
+   * checks run again in the edge function -- not redundancy, since this one only saves a round trip
+   * and the function's is the boundary. `flows_cred.json` is the one that matters: a bucket object
+   * could be deleted, and a commit is forever.
    *
    * A raw fetch with the CALLER's token, the same shape as mintGatewayCredential: the function
    * resolves the caller's role and attributes the proposal to them by name, so the anon key alone
@@ -1134,33 +1065,6 @@ const apiMethods = {
     }
 
     return body?.pull_request ?? null;
-  },
-
-  /**
-   * A short-lived signed URL for one backup.
-   *
-   * SIGNED, because the bucket is private -- there is no public URL to compose. 60 seconds is long
-   * enough for the browser to follow the link and short enough that a URL pasted into a ticket is
-   * dead before anyone reads it.
-   */
-  gatewayBackupUrl: async (path) => {
-    const { data, error } = await supabase.storage
-      .from(GATEWAY_BACKUP_BUCKET)
-      // Same two fixes as captureUrl: the gateway refuses a headerless request without an apikey,
-      // and a flows.json renders in the tab rather than saving without `download`.
-      .createSignedUrl(path, 60, { download: path.split('/').pop() || 'flows.json' });
-    if (error) throw new Error(error.message || 'Could not create a download link');
-    return withApiKey(data.signedUrl);
-  },
-
-  deleteGatewayBackup: async (path) => {
-    const { error } = await supabase.storage.from(GATEWAY_BACKUP_BUCKET).remove([path]);
-    if (error) {
-      if (/row-level security|Unauthorized/i.test(error.message || '')) {
-        throw new Error('You do not have permission to delete backups.');
-      }
-      throw new Error(error.message || 'Delete failed');
-    }
   },
 
   /**

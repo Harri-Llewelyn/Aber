@@ -1695,7 +1695,6 @@ services:
         # Only needed if a bucket was renamed; src/api.js defaults to the same names
         # storage-init.mjs does, so the two agree without either being set.
         VITE_MODEL_3D_BUCKET: ${STORAGE_BUCKET:-asset-3d-models}
-        VITE_GATEWAY_BACKUP_BUCKET: ${GATEWAY_BACKUP_BUCKET:-gateway-backups}
         VITE_CAPTURE_BUCKET: ${CAPTURE_BUCKET:-broker-captures}
         # The version the account menu reports (issue #57). Compose cannot run a command, and this
         # build's context is ./frontend so there is no .git inside it either -- so labelling a

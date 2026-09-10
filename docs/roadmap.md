@@ -702,7 +702,7 @@ does not currently have.
 role re-check inside it · `has_role()` and the write policies it gates · the `Operator` role as seeded
 in [`0002`](../supabase/migrations/0002_seed_data.sql) · `device_nameplate` · `publish_schema_version()` ·
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) ·
-[`FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
+[`FlowProposalPanel.jsx`](../frontend/src/components/common/FlowProposalPanel.jsx) ·
 `system_settings` and its `min_value` / `max_value` bounds · `digital_thread` and
 [`0079`](../supabase/migrations/0079_the_thread_stops_growing_without_end.sql)'s pruning ·
 [`0069`](../supabase/migrations/0069_the_two_roles_stop_being_the_same.sql)'s permission split ·
@@ -971,7 +971,7 @@ thread other than *no*.
 
 **Builds on:** the `gateway-backups` bucket in
 [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
-[`FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
+[`FlowProposalPanel.jsx`](../frontend/src/components/common/FlowProposalPanel.jsx) ·
 [`gateway-bundle-template/bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs) and the flow hash
 its heartbeat already reports · `digital_thread` (`0005`, `0026`) ·
 [`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts), which is now the only place
@@ -1046,8 +1046,8 @@ being merely the transport: *pending approval* is an open pull request, *approve
 blob rebuilds a worse version of what the forge already does, and splits the audit record across two
 systems that will disagree.
 
-**So the upload becomes a commit.** `FlowBackupUploader` already takes `flows.json` from an operator
-and already refuses `flows_cred.json` **by shape rather than by filename**; what changes is its
+**So the upload becomes a commit.** The flow-backup panel already took `flows.json` from an operator
+and already refused `flows_cred.json` **by shape rather than by filename**; what changed is its
 destination — a branch and a pull request in the gateway's source repository instead of an object in
 a private bucket. The upload is then the backup and the proposed deployment in one artefact, which
 also removes the awkward sequencing between this item and §9: the bucket stops being load-bearing at
@@ -1075,17 +1075,33 @@ repository), proposes, and asserts the head of `main` is unchanged; it also asse
 `flows_cred.json` is refused **by shape** with no branch left behind, and that a gateway with no
 repository answers 409 rather than failing obscurely.
 
-**THE DASHBOARD OFFERS BOTH LANES, SEPARATELY, and the separation is the part worth keeping.** A
-backup is a copy of what an appliance already runs; a proposal is a request to CHANGE what it runs.
-One dropzone with a mode would make "which of those am I doing" a matter of remembering, so
-`FlowBackupUploader` has two, gated independently. **The comment that said "OPERATOR SEES NOTHING AT
-ALL" is now false and says so**: the storage policy still grants that role no backup authority, and
-roadmap 7 gives it the proposal, so an Operator sees the proposal lane and no part of the bucket.
-The pull request comes back as a link in the drawer rather than only a toast -- the useful fact is
-that it is *not deployed yet*, and that is what somebody returns to check.
+**THE DASHBOARD OFFERED BOTH LANES FOR ONE DAY, AND ONE OF THEM WAS THE ANSWER.** The panel shipped
+on 2026-09-10 with a backup dropzone and a proposal dropzone side by side, gated independently,
+on the argument that a backup is a copy of what an appliance already runs while a proposal is a
+request to CHANGE what it runs. Seen in the drawer the distinction did not survive: both took the
+same `flows.json` from the same export menu, and the panel was asking the operator to choose a
+destination the product should have chosen. **The bucket is never the right answer to that choice** —
+a copy there has no diff, no history, no author and no reviewer — so the backup lane went the same
+day and the component became
+[`FlowProposalPanel`](../frontend/src/components/common/FlowProposalPanel.jsx). §9 records what was
+removed.
 
-**The bucket has not moved and must not yet.** §9 sequences its removal, and until something PULLS
-these repositories a commit is not yet a backup an appliance can be rebuilt from.
+**What survives from the two-lane version** is the Operator gate — the storage policy granted that
+role no backup authority at all, and giving it the proposal is the whole point of a review step —
+and the receipt: the pull request comes back as a link in the drawer rather than only a toast,
+because the useful fact is that it is *not deployed yet*, and that is what somebody returns to check.
+
+**A HOST-RUN GATEWAY IS REFUSED, AND NOT BECAUSE OF A PERMISSION.** Its connector runs in the
+platform's own Node-RED, an instance that can carry several host gateways at once, so `flows.json`
+there is the whole instance rather than one gateway's — approving a proposal "for" one would replace
+every other gateway's flow in the same file. One repository per gateway cannot express that and
+should not try: the platform's Node-RED is the platform's to version, not a fleet member's. The
+mechanical reason agrees, which is the reassuring part — repositories are created at enrolment and a
+host-run gateway never enrols, so the function already answers 409 and the drawer is only agreeing
+with a boundary that exists.
+
+**The bucket itself has not moved.** §9 sequences that, and it is the change that has to say what
+happens to whatever is already stored in one.
 
 **`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
 place — `nodered-userinfo`'s `ALLOWED_ROLES`, as `0069` records — and the merge is the control it was
@@ -1141,7 +1157,7 @@ broker"* with no cause, the ambiguity `node-red-init.mjs` already exists to remo
 orphaned credential survives a restart, so the appliance looks recoverable; the next deploy prunes it
 and rewrites the file to an encrypted `{}`. The ciphertext is then gone, `bootstrap.mjs` will not
 re-mint behind its once-only `/data/.enrolled.json` guard, and the enrolment token is already spent —
-so the recovery is a new bundle, which is the loss `FlowBackupUploader` exists to prevent.
+so the recovery is a new bundle, which is the loss the flow panel exists to prevent.
 
 **WHAT RE-IDS A NODE IS ONE BUTTON, AND IT IS THE ONE AN OPERATOR REACHES FOR.** The editor imports
 with `generateIds: false`, so ids survive a paste into an empty workspace. They change only on an
@@ -1201,7 +1217,8 @@ in an edge function reachable through the gateway would put that playbook one co
 `sparkplug_id` rather than stored, so this needed no migration and no column — §9 still owns where a
 repository pointer lives, and deriving it means the name cannot disagree with the gateway it belongs
 to. Nothing yet **writes a flow** into that repository; the repositories are created empty with an
-initial commit, and `FlowBackupUploader`'s move from bucket to branch is the next piece. And **the
+initial commit, and the panel's move from bucket to branch is the next piece — *since done, and the
+bucket lane went with it*. And **the
 forge's SSH host key is not distributed**, which the puller needs: an appliance with no `known_hosts`
 entry cannot verify the forge, and the answer must not be to skip verification — §11 and this item
 both refuse that switch, and §8 owns where it lands.
@@ -1769,18 +1786,49 @@ other change in this file.
 
 ## 9 · Retiring the flow-backup bucket, and pointing at repositories instead
 
-**Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
+**Builds on:** [`frontend/src/components/common/FlowProposalPanel.jsx`](../frontend/src/components/common/FlowProposalPanel.jsx) ·
 the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
 [`supabase/storage-policies.sql`](../supabase/storage-policies.sql) ·
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) and its tag vocabulary ·
 `digital_thread` (`0005`) · **not yet filed as an issue**
 
 **The other end of §7, and it should be sequenced against it rather than planned beside it.** §7
-adds the pull; this removes what the push made necessary. Doing the removal first would leave a
-physical gateway with no copy of its flow anywhere, which is the exact loss `FlowBackupUploader`
-exists to prevent — its header states the case plainly: the appliance is the only copy, and a failed
-SD card takes the plant's edge logic with it, after the enrolment token is already spent. **The bucket
-is not dead weight until the pull half replaces what it does.**
+adds the pull; this removes what the push made necessary.
+
+### The browser half is done — 2026-09-10
+
+`FlowBackupUploader` is now
+[`FlowProposalPanel`](../frontend/src/components/common/FlowProposalPanel.jsx), and it is not a
+rename: the list, the signed-URL download, the upload and the delete are gone, along with
+`listGatewayBackups`, `uploadGatewayBackup`, `gatewayBackupUrl`, `deleteGatewayBackup`,
+`gatewayBackupPath` and `VITE_GATEWAY_BACKUP_BUCKET`'s whole plumbing — `api.js`, `config.js`,
+`public/config.js`, the Dockerfile ARG, the Compose build arg, the chart's runtime ConfigMap and
+`check-docs-drift`'s allowlist. **Nothing in a browser reaches that bucket any more.**
+
+**Two lanes side by side did not survive contact with the drawer.** Both took the same `flows.json`
+from the same export menu and differed only in destination, so the panel was asking the operator to
+decide something the product should have decided for them — and the answer is never "the bucket": a
+copy there has no diff against what the appliance runs now, no history, no author, no reviewer and
+nothing downstream that could ever consume it. The proposal is a strict superset of what the backup
+did, so keeping both meant every upload was one that could have been a proposal instead.
+
+**The ordering objection this section used to make was right and is now spent.** It said removing the
+bucket first would leave a physical gateway with no copy of its flow anywhere. That was true while
+the proposal lane did not exist; a proposal now puts the same file in a durable, versioned place that
+a human can retrieve without the appliance. What a proposal still is not is an *automatic* capture —
+nobody is committing the flow on the gateway's behalf until §8's puller runs, exactly as nobody was
+uploading it to the bucket on their behalf before. The manual act is unchanged; only its destination
+improved.
+
+### What remains
+
+The bucket itself, and it is deliberately still there: `scripts/storage-init.mjs` still creates it,
+`storage-policies.sql` still governs it, `GATEWAY_BACKUP_BUCKET` is still in `.env.example`, Compose
+and `values.yaml`, and `test_gateway_enrollment.py` still asserts against it. **Removing it is one
+change that has to decide what happens to whatever is already stored in one**, which is a retention
+question, and the answer this repository keeps reaching is that retention is decided once for every
+service rather than per-bucket. Deleting the browser's plumbing first is not half a job: it means
+nothing can quietly start writing to a bucket that is on its way out.
 
 **Two premises need correcting before the security argument is scoped.** The bucket takes
 **`flows.json`, not zips**: JSON only, 5 MiB, private, MIME-restricted, keyed `<sparkplug_id>/`, and
