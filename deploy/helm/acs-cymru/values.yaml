@@ -126,6 +126,10 @@ secrets:
   # the minting token above. Empty leaves revocation inert.
   gatewayRevokeSecret: ""
 
+  # Authorises pg_cron's fifteen-minute call to forge-sweep (0099), which reconciles the forge's
+  # teams with user_roles and re-furnishes its repositories. Empty leaves the sweep inert.
+  forgeSweepSecret: ""
+
   # The forge administrator. Empty makes the initContainer refuse rather than create an
   # account with a blank password.
   giteaAdminPassword: ""

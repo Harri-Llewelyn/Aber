@@ -15,10 +15,9 @@
 -- enrolment), and these columns are what it records: the head of `main` -- its sha, its message,
 -- who pushed it, when -- and the SHA-256 of `flows.json` at that head. The hash is the other half
 -- of the drift check flow-sync.mjs calls "a dashboard concern": the appliance reports a flow hash,
--- the forge's head has one, and comparing them becomes a read of one row. TODAY THE APPLIANCE'S
--- HASH IS THE FLOW AS DELIVERED AT ENROLMENT (see the comment on flow_hash), not what flow-sync
--- last deployed, so the comparison is not yet a drift check; the column is here so that when the
--- appliance reports what it deployed, nothing else has to change.
+-- the forge's head has one, and comparing them is a read of one row. The appliance's hash is the
+-- flow flow-sync.mjs last deployed, read from /data/gitops/deployed.json by the flow every minute
+-- and reported on the heartbeat; the gateway drawer makes the comparison.
 --
 -- COLUMNS ON gateways RATHER THAN A TABLE OF PUSHES. The dashboard reads `select *` on gateways,
 -- one repository is one gateway, and "where is main" is a property of the gateway rather than an
@@ -41,7 +40,7 @@ COMMENT ON COLUMN public.gateways.forge_head_by IS
 COMMENT ON COLUMN public.gateways.forge_head_at IS
     'When that commit was made. The appliance deploys it on its next tick after this.';
 COMMENT ON COLUMN public.gateways.forge_head_flow_sha256 IS
-    'SHA-256 of flows.json at that head, or null if main carries none. flow_hash is what the appliance reports; equal means the appliance holds what main holds, once the appliance reports what it last deployed rather than what it was enrolled with.';
+    'SHA-256 of flows.json at that head, or null if main carries none. flow_hash is the same digest for the flow the appliance last deployed, reported on its heartbeat; equal means the appliance has deployed what main holds.';
 
 -- `gateway_status` is `SELECT g.*`, which Postgres froze at the view's creation: without this the
 -- new columns exist on the table and are invisible through the view, silently. check-docs-drift

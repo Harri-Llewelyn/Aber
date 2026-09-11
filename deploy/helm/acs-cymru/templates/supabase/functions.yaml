@@ -160,6 +160,8 @@ spec:
                    VERIFY_JWT=false, so a function that does not check its own secret is an open
                    endpoint -- Kong's key-auth proves only that the caller holds the anon key. */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "GATEWAY_REVOKE_SECRET" "secretName" $secretName "key" "GATEWAY_REVOKE_SECRET") | nindent 12 }}
+            {{- /* Verified by forge-sweep, for the same reason (0099). */}}
+            {{- include "acs-cymru.secretEnv" (dict "name" "FORGE_SWEEP_SECRET" "secretName" $secretName "key" "FORGE_SWEEP_SECRET") | nindent 12 }}
           # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
           # supabase/edge-runtime:v1.74.2 by probing it directly:
           #

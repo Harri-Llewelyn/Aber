@@ -130,6 +130,13 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
   python supabase/functions/forge-events/test_forge_events.py
 
+# The forge sweep (0099): the secret is checked; a role changed in user_roles behind the door is
+# unseated by one sweep and seated again when it returns; a member seated by hand is left alone; a
+# deleted push webhook comes back; a repository made by hand gets main protected; and the
+# database's own sweep_forge() answers true. FORGE_SWEEP_SECRET is the value in .env. Skips without it.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
+  python supabase/functions/forge-sweep/test_forge_sweep.py
+
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
 # integrity, and that the embedded token is the one the database will accept.
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
@@ -231,6 +238,7 @@ python supabase/migrations/test_playback_credential_delivery.py
 # default grants instead, and TRUNCATE raises no row trigger.
 python supabase/migrations/test_digital_thread_partitioning.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
+python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
 python supabase/migrations/test_relocate_devices.py

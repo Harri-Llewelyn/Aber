@@ -10,8 +10,8 @@
  * no known_hosts file this refuses to sync and says so.
  *
  * The trigger is the tracked branch advancing, not the working copy differing, so an editor session
- * on the box is not discarded every tick; local drift is reported by the heartbeat's flow hash, not
- * corrected here.
+ * on the box is not discarded every tick. What this last deployed is recorded in deployed.json, and
+ * the flow reports its hash on the heartbeat, so the dashboard can compare it with the head of main.
  *
  * The write is an overwrite, not a merge: measured against nodered/node-red:5.0.2, a flows.json
  * written back and reloaded leaves flows_cred.json untouched. A commit whose broker node has a
@@ -42,6 +42,7 @@ const KNOWN_HOSTS = join(GITOPS_DIR, 'known_hosts');
 const DEPLOY_KEY = join(GITOPS_DIR, 'id_ed25519');
 const SYNC_CREDENTIAL = join(GITOPS_DIR, 'nodered.json');
 const CHECKOUT = join(GITOPS_DIR, 'repo');
+/** Written after every deploy and read by the flow every minute. Must agree with bootstrap.mjs. */
 const DEPLOYED = join(GITOPS_DIR, 'deployed.json');
 
 const FLOWS = join(DATA_DIR, 'flows.json');
@@ -307,6 +308,10 @@ function deployFlow(text) {
   renameSync(temporary, FLOWS);
 }
 
+/**
+ * The last record written here, or by bootstrap.mjs for the enrolment flow, whose `revision` is
+ * null so the first tick converges. Missing or unreadable is the same as never deployed.
+ */
 function readDeployed() {
   try {
     return JSON.parse(readFileSync(DEPLOYED, 'utf8'));
@@ -383,6 +388,8 @@ async function syncOnce() {
     log(`deployed ${revision.slice(0, 12)} and reloaded Node-RED`);
   }
 
+  // `flow_sha256` is what the heartbeat reports as Flow_Hash: the flow's `read deployed.json`
+  // branch reads this file every minute. The platform holds the same digest for the head of main.
   writeFileSync(
     DEPLOYED,
     JSON.stringify({
@@ -390,6 +397,7 @@ async function syncOnce() {
       branch: repository.branch || 'main',
       flow_sha256: sha256(text),
       deployed_at: new Date().toISOString(),
+      source: 'flow-sync',
     }, null, 2),
     { mode: 0o644 },
   );

@@ -61,6 +61,10 @@ export const DIGITAL_THREAD_ACTIONS = {
   // Named rather than INSERT/DELETE because what happened is that somebody became an Administrator.
   ROLE_GRANTED:      'Role granted',
   ROLE_REVOKED:      'Role revoked',
+  // Written by `ingest_record_gateway_health()` (0100) when an appliance reports a different flow
+  // hash: the digest before and after, and what the forge's main held at that moment. Actor
+  // `ingestion`, no user: the daemon witnessed what the appliance reported.
+  FLOW_DEPLOYED:     'Flow deployed',
 };
 
 /**

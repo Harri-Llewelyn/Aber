@@ -7686,15 +7686,20 @@ UPDATE public.webhook_endpoints
 \else
 \set gateway_revoke_secret ''
 \endif
+\if :{?forge_sweep_secret}
+\else
+\set forge_sweep_secret ''
+\endif
 
 SELECT set_config('acs_cymru.fn_url',      :'supabase_functions_url', false);
 SELECT set_config('acs_cymru.anon_key',    :'supabase_anon_key', false);
 SELECT set_config('acs_cymru.revoke_key',  :'gateway_revoke_secret', false);
+SELECT set_config('acs_cymru.sweep_key',   :'forge_sweep_secret', false);
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. Where the address and the credentials live
 -- ---------------------------------------------------------------------------------------------
--- Three values in Vault, this database's store for things that must be read from SQL and must
+-- Four values in Vault, this database's store for things that must be read from SQL and must
 -- not be readable by `anon` or `authenticated`:
 --
 --   supabase_functions_url        where the gateway serves /functions/v1 on this target
@@ -7704,11 +7709,13 @@ SELECT set_config('acs_cymru.revoke_key',  :'gateway_revoke_secret', false);
 --                                 publishable key where one exists), and is not renamed because
 --                                 nothing in SQL parses it.
 --   gateway_revoke_secret         what actually authorises the revocation, checked by the function
+--   forge_sweep_secret            what authorises the forge sweep (0099), checked by forge-sweep
 DO $vault$
 DECLARE
   v_url    text := btrim(coalesce(current_setting('acs_cymru.fn_url', true), ''));
   v_anon   text := btrim(coalesce(current_setting('acs_cymru.anon_key', true), ''));
   v_secret text := btrim(coalesce(current_setting('acs_cymru.revoke_key', true), ''));
+  v_sweep  text := btrim(coalesce(current_setting('acs_cymru.sweep_key', true), ''));
   v_id     uuid;
 BEGIN
   IF v_secret = '' OR v_anon = '' THEN
@@ -7716,11 +7723,17 @@ BEGIN
       '0038: GATEWAY_REVOKE_SECRET or SUPABASE_ANON_KEY is unset; credential revocation is INERT '
       'on this stack. Archiving will not revoke, and the sweep will do nothing.';
   END IF;
+  IF v_sweep = '' OR v_anon = '' THEN
+    RAISE NOTICE
+      '0099: FORGE_SWEEP_SECRET or SUPABASE_ANON_KEY is unset; the forge sweep is INERT on this '
+      'stack. A revoked login keeps its forge team membership until it next passes the door.';
+  END IF;
 
   -- REPLACED, NOT MERGED. A rotated value must overwrite the stored one and vault.create_secret
   -- refuses a duplicate name, so the old row goes first. Same shape 0006 uses.
   FOR v_id IN SELECT id FROM vault.secrets
-               WHERE name IN ('supabase_functions_url', 'supabase_anon_key', 'gateway_revoke_secret')
+               WHERE name IN ('supabase_functions_url', 'supabase_anon_key', 'gateway_revoke_secret',
+                              'forge_sweep_secret')
   LOOP
     DELETE FROM vault.secrets WHERE id = v_id;
   END LOOP;
@@ -7731,6 +7744,8 @@ BEGIN
     'Anon key, used only to pass the gateway key check on the revocation call. Not authorisation.');
   PERFORM vault.create_secret(v_secret, 'gateway_revoke_secret',
     'Shared secret the revoke-gateway-credential function verifies. This is the authorisation.');
+  PERFORM vault.create_secret(v_sweep, 'forge_sweep_secret',
+    'Shared secret the forge-sweep function verifies (0099). This is the authorisation.');
 END;
 $vault$;
 

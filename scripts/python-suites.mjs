@@ -408,6 +408,14 @@ export const SUITES = {
       'simulated JWT claims, because the immutability guard deliberately exempts the owner -- a ' +
       'suite connecting as `postgres` would pass against a database with the trigger dropped.',
   },
+  'supabase/migrations/test_gateway_flow_deployed.py': {
+    lanes: ['db'],
+    why:
+      "0100's two halves: a heartbeat that only moves the health readings writes no audit row " +
+      '(it used to write one every thirty seconds per appliance), and an appliance reporting a ' +
+      'different flow hash writes exactly one FLOW_DEPLOYED row, pinned to ingestion and to no ' +
+      "user, carrying the digest before and after and whether it matched the forge's main.",
+  },
   'supabase/migrations/test_ingestion_rejection_rpc.py': {
     lanes: ['db'],
     why:
@@ -636,6 +644,16 @@ export const SUITES = {
       'every session the person holds, the dashboard included. ' +
       'Needs the stack, the forge, the seeded personas AND the gateways organisation (one enrolment ' +
       'creates it), and skips without any of them.',
+  },
+  'supabase/functions/forge-sweep/test_forge_sweep.py': {
+    lanes: ['stack'],
+    why:
+      "The forge's fifteen-minute sweep (0099): a call without the secret is refused; a role " +
+      'changed in user_roles behind the door is unseated by one sweep and seated again when it ' +
+      'returns; a member seated by hand is left alone; a gateway repository whose push webhook ' +
+      'was deleted gets it back; a repository made by hand in the organisation has main protected ' +
+      "without the incident template; and the database's sweep_forge() answers true. Needs the " +
+      'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',
   },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],

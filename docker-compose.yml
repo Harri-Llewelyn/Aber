@@ -301,6 +301,8 @@ services:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
       GATEWAY_REVOKE_SECRET: ${GATEWAY_REVOKE_SECRET:-}
+      # Likewise, so pg_cron can ask forge-sweep for a pass (0099).
+      FORGE_SWEEP_SECRET: ${FORGE_SWEEP_SECRET:-}
       # OAuth client secrets, hashed into auth.oauth_clients. Each client's public URL is what
       # its redirect_uri is registered against; the upserts are DO UPDATE, so the value must be
       # passed here or a hand correction is rewritten on the next boot.
@@ -336,7 +338,7 @@ services:
           echo \"Executing migration $$f...\";
           attempt=1;
           while :; do
-            if PGOPTIONS=\"-c lock_timeout=5s\" psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v studio_oauth_client_secret=\"$$STUDIO_OAUTH_CLIENT_SECRET\" -v studio_public_url=\"$$STUDIO_PUBLIC_URL\" -v gitea_oauth_client_secret=\"$$GITEA_OAUTH_CLIENT_SECRET\" -v gitea_public_url=\"$$GITEA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$${SUPABASE_PUBLISHABLE_KEY:-$$SUPABASE_ANON_KEY}\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
+            if PGOPTIONS=\"-c lock_timeout=5s\" psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v studio_oauth_client_secret=\"$$STUDIO_OAUTH_CLIENT_SECRET\" -v studio_public_url=\"$$STUDIO_PUBLIC_URL\" -v gitea_oauth_client_secret=\"$$GITEA_OAUTH_CLIENT_SECRET\" -v gitea_public_url=\"$$GITEA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$${SUPABASE_PUBLISHABLE_KEY:-$$SUPABASE_ANON_KEY}\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -v forge_sweep_secret=\"$$FORGE_SWEEP_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
             cat /tmp/migration.log;
             # Retried on lock contention only. Migrations take DDL locks on tables Realtime is
             # reading; `lock_timeout=5s` makes db-init the predictable loser instead of Realtime.
@@ -837,6 +839,8 @@ services:
       # Verified by revoke-gateway-credential. VERIFY_JWT is false, so a function that does not
       # check its own secret is an open endpoint.
       GATEWAY_REVOKE_SECRET: ${GATEWAY_REVOKE_SECRET:-}
+      # Verified by forge-sweep, for the same reason (0099).
+      FORGE_SWEEP_SECRET: ${FORGE_SWEEP_SECRET:-}
       # The forge, for enrolment's fourth step. In-stack address: the clone URL an appliance is
       # handed comes from the forge's own ROOT_URL/SSH_DOMAIN. All three or none.
       GITEA_INTERNAL_URL: ${GITEA_INTERNAL_URL:-http://gitea:3000}

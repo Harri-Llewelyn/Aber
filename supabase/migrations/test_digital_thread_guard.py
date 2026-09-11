@@ -139,7 +139,13 @@ class TestFunctionShape(AuditGuardTestCase):
         self.assertIn("TG_OP = 'UPDATE'", self.function_source)
 
     def test_guard_subtracts_last_heartbeat(self):
-        self.assertIn("last_heartbeat", self.function_source)
+        """
+        Through audit_telemetry_columns() since 0100, which names last_heartbeat and the six
+        health columns a heartbeat also rewrites; the property 0005 established is unchanged.
+        """
+        self.assertIn("audit_telemetry_columns()", self.function_source)
+        self.cur.execute("SELECT public.audit_telemetry_columns()")
+        self.assertIn("last_heartbeat", self.cur.fetchone()[0])
 
     def test_actor_resolution_is_preserved(self):
         """Both arms: auth.uid() first, then the SET LOCAL GUC that attributes RPC writes."""

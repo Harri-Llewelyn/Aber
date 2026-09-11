@@ -45,6 +45,8 @@ const REPOSITORY = join(GITOPS_DIR, 'repository.json');
 // The forge's own public key, written from the enrolment response, so `git` verifies the host
 // rather than trusting the first connection. See step 5b.
 const KNOWN_HOSTS = join(GITOPS_DIR, 'known_hosts');
+/** What flow-sync.mjs last deployed, and what the heartbeat reports. Must agree with flow-sync.mjs. */
+const DEPLOYED = join(GITOPS_DIR, 'deployed.json');
 // What flow-sync.mjs authenticates to the LOCAL Node-RED admin API with. See syncCredential().
 const SYNC_CREDENTIAL = join(GITOPS_DIR, 'nodered.json');
 
@@ -398,7 +400,9 @@ const flow = template
   // verifies the broker against the system trust store and reports only "Connection failed to
   // broker", the same line a wrong password produces. scripts/node-red-init.mjs guards the
   // identical failure with MQTT_TLS_CA_FILE.
-  .replaceAll('__CA_FILE__', CA_PATH);
+  .replaceAll('__CA_FILE__', CA_PATH)
+  // Read every minute by the flow's `read deployed.json` branch; see the record written below.
+  .replaceAll('__DEPLOYED_FILE__', DEPLOYED);
 
 if (flow.includes('__')) {
   const leftover = [...new Set(flow.match(/__[A-Z0-9_]+__/g) || [])];
@@ -415,15 +419,29 @@ JSON.parse(flow); // Refuse to write a flow Node-RED cannot parse; it would star
 writeFileSync(FLOWS, flow);
 log(`wrote ${FLOWS}`);
 
-// The three facts the heartbeat reports that Node-RED cannot work out for itself. A function node
-// runs in a sandbox with no `require`, `fs` or `process`, so these are resolved here and handed to
-// the flow as environment variables that `env.get()` reads. All three are fixed for the life of an
-// enrolment; an operator who replaces the CA or edits the flow in the editor without re-enrolling
-// keeps reporting the values recorded here.
+// The flow as installed, recorded where flow-sync.mjs records every flow it deploys and in the same
+// shape, so the heartbeat reports this hash until the first convergence replaces it. The dashboard
+// compares it with the hash at the head of main; the enrolment flow is never on main, so a fresh
+// appliance reads as differing until its first deploy, which is true. `revision: null` also makes
+// flow-sync reconverge on its next tick after a --force re-enrolment.
+mkdirSync(GITOPS_DIR, { recursive: true, mode: 0o700 });
+writeFileSync(
+  DEPLOYED,
+  JSON.stringify({
+    revision: null,
+    branch: null,
+    flow_sha256: createHash('sha256').update(flow).digest('hex'),
+    deployed_at: new Date().toISOString(),
+    source: 'enrolment',
+  }, null, 2),
+  { mode: 0o644 },
+);
+log(`wrote ${DEPLOYED} for the enrolment flow`);
 
-// The flow AS DELIVERED. Identifies which bundle's flow was installed -- not whether it has since
-// been edited in the editor, which would need the admin API and a credential to ask.
-const FLOW_HASH = createHash('sha256').update(flow).digest('hex');
+// Two facts the heartbeat reports that Node-RED cannot work out for itself. A function node runs in
+// a sandbox with no `require`, `fs` or `process`, so these are resolved here and handed to the flow
+// as environment variables that `env.get()` reads. Both are fixed for the life of an enrolment; an
+// operator who replaces the CA without re-enrolling keeps reporting the date recorded here.
 
 /**
  * `ACS_AGENT_VERSION` comes from the operator's .env and is about to enter a shell file:
@@ -479,7 +497,6 @@ writeFileSync(
     // Read by the flow's `build node-level message` function through env.get(), and reported on
     // the heartbeat. See the block above for why they are resolved here rather than in the flow.
     `export GATEWAY_AGENT_VERSION='${SAFE_AGENT_VERSION}'`,
-    `export GATEWAY_FLOW_HASH='${FLOW_HASH}'`,
     `export GATEWAY_CA_EXPIRES_MS='${caExpiresMs}'`,
     `export NODERED_CREDENTIAL_SECRET='${CREDENTIAL_SECRET}'`,
     '',

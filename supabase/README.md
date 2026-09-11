@@ -2640,12 +2640,45 @@ dumped copy of that view became a call to the same function, because `CREATE OR 
 cannot narrow a view the function has just widened and every boot after the first was failing in
 `0001`.
 
-**Not yet a drift check.** The heartbeat's flow hash is the one `bootstrap.mjs` wrote into
-`gateway.env` at enrolment, not what `flow-sync.mjs` last deployed, so `forge_head_flow_sha256`
-and `flow_hash` sit side by side and the dashboard does not call their difference drift. The
-appliance-side half is in [`docs/roadmap.md`](../docs/roadmap.md), *GitOps edge sync*.
-`test_forge_events.py` covers the signature, what is recorded and ignored, and one delivery sent by
-the forge itself for a freshly enrolled gateway.
+**The drift check.** `flow_hash` is the same digest from the other side: `flow-sync.mjs` records
+the SHA-256 of every flow it deploys in `/data/gitops/deployed.json` (and `bootstrap.mjs` records
+the enrolment flow there in the same shape), a `file in` node in the appliance's flow reads that
+record every minute into the flow cache, and the heartbeat reports it as `Flow_Hash`. It is a file
+and not an environment variable because a reload does not re-source `gateway.env`; an appliance
+enrolled before this reports its enrolment hash until it is re-enrolled, and reads as differing.
+The drawer's **Flow** row compares the two: equal is *matches main*; different within two sync
+intervals of the push is *main moved, deploying*; different past that is *differs from main*, in
+red, and the appliance's `flow-sync` log says why. An edit made in the Node-RED editor is in
+neither digest; the next approved deploy overwrites it. `frontend/src/utils/flowDrift.js` holds the
+states and `scripts/check-gateway-flow-template.mjs` asserts the flow reads the file both scripts
+name. `test_forge_events.py` covers the signature, what is recorded and ignored, and one delivery
+sent by the forge itself for a freshly enrolled gateway.
+
+**A deployed flow is an event, and a reading is not (`0100`).** The audit trigger compared whole
+rows minus `last_heartbeat`, and an appliance rewrites six more columns on every heartbeat, so
+each one that carried health appended an UPDATE row: 2,880 a day per appliance, none an event.
+`audit_telemetry_columns()` names those columns and the trigger subtracts them all. The one
+reading that is an event, the flow hash, is in that list too, and `ingest_record_gateway_health()`
+records its change itself as a `FLOW_DEPLOYED` row: the digest before and after, the gateway's
+identity at the time, and what the forge's `main` held at that moment as `matches_main`. Actor
+`ingestion`, no user, as a schema rejection is: the puller never touches this database, the
+heartbeat is its only channel, and the daemon is the witness, so no fourth actor kind was needed
+and the approvals queue's expiry timer stays `service`. `cert_expires_at` and `agent_version` stay
+in the generic comparison, since a re-enrolment or an in-place upgrade is an event.
+`test_gateway_flow_deployed.py` proves both halves on the throwaway database.
+
+**The forge is swept on a timer (`0099`).** `forge-membership` acts on the way through the door,
+so a login whose role was revoked and who never returns keeps its team membership, usable over SSH
+if they had added a key. `sweep_forge()` asks the `forge-sweep` function for one pass every fifteen
+minutes through pg_net, authorised by `FORGE_SWEEP_SECRET` from Vault and nothing else: every
+member of either team whose `user_roles` row no longer maps to it is removed, every login the forge
+knows that holds an admitted role is seated, every gateway repository gets its push webhook and
+branch protection back, and a repository somebody made by hand in the organisation has `main`
+protected the same way, without the incident template, because a playbook a gateway later adopts
+should have been reviewed from the start. A member who is not a dashboard identity was seated by
+hand and is left alone. Nothing is created that enrolment would not create, and nothing is deleted.
+An empty secret leaves the sweep inert, and `0002` says so at boot. `test_forge_sweep.py` drives a
+role changed behind the door, a deleted hook and a hand-made repository.
 
 ## A replay lane is minted, not assigned (`0083`)
 

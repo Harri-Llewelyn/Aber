@@ -13,7 +13,7 @@ management.
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
 > Node-RED. The custom surface is one Python ingestion service — a daemon and the modules beside it:
 > the constraint engine, the metrics registry, capture and playback, the Directory and UNS publishers,
-> cold archival — fifteen edge functions, an i3X server and a React dashboard.
+> cold archival — sixteen edge functions, an i3X server and a React dashboard.
 
 ---
 
@@ -41,7 +41,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - forge-membership - forge-signout - forge-events - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential - gateway-credential<br/>mint-service-token"]
+        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - forge-membership - forge-signout - forge-events - forge-sweep - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential - gateway-credential<br/>mint-service-token"]
     end
 
     subgraph Supabase ["Supabase BaaS"]

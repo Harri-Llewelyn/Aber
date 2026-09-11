@@ -17,6 +17,7 @@ import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceD
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { isShadowGateway } from '../../utils/fleetCounts'
+import { flowDriftState, flowDriftLabel, isFlowDrift, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
@@ -835,16 +836,31 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + '0035, so an appliance upgraded in place shows its new version without '
                 + 're-enrolling.'
             },
+            /**
+             * The drift check. `flow_hash` is what the appliance last deployed, reported on every
+             * heartbeat from the record flow-sync.mjs writes; `forge_head_flow_sha256` is the
+             * same digest at the head of main, recorded by forge-events on every push. Equal is
+             * convergence; different inside two sync intervals of the push is the puller not
+             * having ticked yet; beyond that it is drift, and `docker compose logs flow-sync` on
+             * the appliance says why (a refused commit, an unreachable forge).
+             */
             {
               label: 'Flow',
-              value: selected.flow_hash ? selected.flow_hash.slice(0, 12) : null,
-              title: 'First 12 characters of the SHA-256 of the flow this appliance was '
-                + 'provisioned with. Identifies which bundle\'s flow is installed; it does NOT '
-                + 'detect edits made afterwards in the Node-RED editor.'
+              value: selected.flow_hash
+                ? [selected.flow_hash.slice(0, 12), flowDriftLabel(flowDriftState(selected))].filter(Boolean).join(' · ')
+                : null,
+              danger: isFlowDrift(flowDriftState(selected)),
+              title: 'First 12 characters of the SHA-256 of the flow this appliance last deployed, '
+                + 'compared with the same digest at the head of main. "matches main" is '
+                + 'convergence. "main moved, deploying" is a push younger than '
+                + `${FLOW_DRIFT_GRACE_MS / 60000} minutes that the appliance has not pulled yet. `
+                + '"differs from main" past that is drift: the appliance refused the commit or '
+                + 'cannot reach the forge, and its flow-sync log says which. An edit made in the '
+                + 'Node-RED editor is not reflected here; the next approved deploy overwrites it.'
             },
             /**
-             * Where main is, from the forge: forge-events records it on every push. Not yet a drift
-             * check against the Flow row above, which is the hash the appliance was enrolled with.
+             * Where main is, from the forge: forge-events records it on every push. The Flow row
+             * above is the comparison against it.
              */
             {
               label: 'Committed',

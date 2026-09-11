@@ -20,7 +20,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  * the request through on the role the token carries, losing only placement.
  *
  * The machine account is the only Gitea credential here, and the identity acted on is always the
- * verified token's `sub`, never a parameter.
+ * verified token's `sub`, never a parameter. A person who never returns is unseated by
+ * `forge-sweep`, which re-does this placement over the forge's own member lists on a timer (0099).
  */
 
 import { resolveUserRole } from "../_shared/roles.ts";
