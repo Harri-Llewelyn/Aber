@@ -3090,6 +3090,11 @@ docker compose start gitea
 On Kubernetes the same files are under `/backups/<stamp>` on the backup PVC, with `.dump` files by
 default (`backupService.format`), restored with `pg_restore` as the cluster runbook shows.
 
+**Not yet rehearsed.** The service's backups have been taken and their digests checked; no restore
+has yet run from one, and the weekly CI rehearsal still restores the CronJob's files. That is the
+roadmap entry *A restore is rehearsed from a backup the service took*, and until it lands the line
+at the end of this section applies to these backups as much as to any.
+
 ### Tier 2: infrastructure snapshots
 
 For the Kubernetes target — CSI `VolumeSnapshot`, Velero, and the storage-PVC gap — see

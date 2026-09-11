@@ -10,12 +10,13 @@ it leaves this file and its substance moves into the documentation of the compon
 (`CONTRIBUTING.md` says why), so retiring an entry and renumbering the rest costs one grep of
 `§[0-9]` in this file.
 
-**Ordering.** 1–4 are the platform's own: the one item somebody else sets the deadline for, then
-the identity and operations chain. 5–7 are the edge chain, in dependency order: 5 makes a gateway's
-flow reviewable, 6 makes the appliance a managed artefact and shares 5's puller, 7 removes what 5
-replaced. 8 runs under every other item. 9 is a rename and sits second to last because nothing
-depends on it. 10 is last by rule: it folds the migration chain, so every entry that changes the
-schema must have landed before it.
+**Ordering.** 1–5 are the platform's own: the one item somebody else sets the deadline for, then
+the identity and operations chain, ending with the rehearsal that turns the backup into a
+capability. 6–8 are the edge chain, in dependency order: 6 makes a gateway's flow reviewable, 7
+makes the appliance a managed artefact and shares 6's puller, 8 removes what 6 replaced. 9 runs
+under every other item. 10 is a rename and sits second to last because nothing depends on it. 11
+is last by rule: it folds the migration chain, so every entry that changes the schema must have
+landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -29,7 +30,7 @@ schema must have landed before it.
 | Contextual help | [`frontend/README.md`](../frontend/README.md#contextual-help) |
 | The Directory's MQTT half | [`ingestion/README.md`](../ingestion/README.md#the-directory-on-mqtt) |
 | The log store, structured logging and the drop drill-down | [`ingestion/README.md`](../ingestion/README.md#log-fields), `loki/loki.yaml`, `alloy/config.alloy` |
-| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 6 |
+| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 7 |
 | Kong → Envoy, and the new API key translation | [`docs/gateway-migration.md`](gateway-migration.md) |
 | The demonstration floor and simulator | Removed; [`tutorial/README.md`](../tutorial/README.md) builds one machine by hand |
 | Horizontal ingestion scaling | Answered, not built: [The single-writer ceiling](../ingestion/README.md#the-single-writer-ceiling). The write path since moved to [the historian writer](../ingestion/README.md#the-historian-writer), one thread and one transaction per batch |
@@ -163,7 +164,48 @@ account to an unguessable password and bouncing that one session may be cheaper.
 
 ---
 
-## 5 · GitOps edge sync
+## 5 · A restore is rehearsed from a backup the service took
+
+**Builds on:** [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) ·
+[`scripts/restore-databases.sh`](../scripts/restore-databases.sh) ·
+[`scripts/backup-service.mjs`](../scripts/backup-service.mjs) and
+[Backups from the dashboard](../supabase/README.md#backups-from-the-dashboard-0101) (`0101`) ·
+issue [#155](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/155)
+
+The backup an Administrator takes on the Backups page has been taken and its digests checked, and
+nothing has yet restored from one. The weekly rehearsal in CI restores the CronJob's flat dumps
+into a disposable cluster and compares row counts; it has been failing since the Actions
+allowance ran out, and it knows nothing of the service's per-stamp directory, the forge archive,
+or a Compose stack. Until one restore has run end to end from a service-made directory, the
+README's own line applies: an untested backup is a belief, not a capability.
+
+**What remains.**
+
+- **Make the weekly rehearsal pass again** (#155), then move its backup step onto the service:
+  install with `backupService.enabled`, call `request_backup()` as the seeded Administrator,
+  wait for the `backups` row, and restore from the directory it names rather than from the
+  CronJob's files.
+- **Rehearse the forge.** Restore `forge-<stamp>.tar.gz` into an empty forge volume and assert
+  that every gateway repository is back, that `main` is still protected, and that the SSH host
+  key is byte-identical to the one an enrolled appliance pinned, because a forge restored without
+  it is a fleet-wide re-enrolment.
+- **Rehearse on Compose**, which the CI job does not touch: `docker cp` the directory out of
+  `backup_data`, `restore-databases.sh` with `BACKUP_DIR` pointed at it, and the forge steps
+  from the README, against a stack brought up once so the nine roles exist.
+
+**Decided:** restore stays a runbook and a rehearsal, never a button; the rehearsal is CI's and
+weekly, not the service's; and a rehearsal that restores the data layer alone is reported as
+that, as the workflow's header already insists.
+
+**Worth deciding early.** Whether the broker's CA and password file (`mosquitto_certs`,
+`mosquitto_data`) join the tier 1 backup. Neither is in it today; losing the root is a
+fleet-wide re-enrolment, and on Compose only a tier 2 snapshot saves them. Whether the platform's
+own Node-RED data joins for the same reason. Whether the rehearsal should also prove the
+retention prune removes exactly the directory the row named and nothing beside it.
+
+---
+
+## 6 · GitOps edge sync
 
 **Builds on:** the forge (`gitea`, `gitea-init.sh`), one private repository per enrolled gateway
 in the `gateways` organisation ([`_shared/forge.ts`](../supabase/functions/_shared/forge.ts)) ·
@@ -198,7 +240,7 @@ from the heartbeat as `ingestion`; the puller never touches the database, so no 
 
 - **A required status check refusing `flows_cred.json` by shape.** The endpoint that used to refuse
   it is gone, and a file uploaded through the forge's own UI meets no check until the puller
-  refuses it on the appliance, which is late. It needs a Gitea Actions runner, which 6 argues on;
+  refuses it on the appliance, which is late. It needs a Gitea Actions runner, which 7 argues on;
   until then the puller's refusal is the only check.
 - **A failed webhook delivery does not alert.** It is visible on the hook's page in the forge and
   nowhere else. A repository from before `0095` gets its hook back from the sweep but not its
@@ -214,14 +256,14 @@ and the choice re-opens on the evidence of both.
 
 ---
 
-## 6 · The appliance itself, and the code somebody wants to run on it
+## 7 · The appliance itself, and the code somebody wants to run on it
 
 **Builds on:** [`gateway-bundle`](../supabase/functions/gateway-bundle/index.ts) ·
 [`gateway-bundle-template/`](../gateway-bundle-template) · `bootstrap.mjs`'s once-only guard ·
 [`docs/physical-gateways.md`](physical-gateways.md) · the `apikey` gate and its four exemptions ·
 [`check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) · the clock offset gauge and its
-alert · 5, whose forge and puller this reuses · arrives from a request to run custom data-gathering
+alert · 6, whose forge and puller this reuses · arrives from a request to run custom data-gathering
 software on gateways, for legacy machinery
 
 Three subjects that are one appliance: commissioning as a pasted command, the operating system as
@@ -301,7 +343,7 @@ does.
 
 ---
 
-## 7 · Retiring the flow-backup bucket
+## 8 · Retiring the flow-backup bucket
 
 **Builds on:** the `gateway-backups` bucket in [`storage-init.mjs`](../scripts/storage-init.mjs) ·
 [`storage-policies.sql`](../supabase/storage-policies.sql) · `GATEWAY_BACKUP_BUCKET` in
@@ -325,7 +367,7 @@ backup now, so a deleted repository is recoverable from one for as long as the b
 
 ---
 
-## 8 · The transport between services
+## 9 · The transport between services
 
 **Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
 [`internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
@@ -372,7 +414,7 @@ in separate changes.
 
 ---
 
-## 9 · Cells become work centers
+## 10 · Cells become work centers
 
 **Builds on:** `public.cells` and everything that names it · `public.areas` (`0097`) ·
 [The Unified Namespace](../ingestion/README.md#the-unified-namespace) ·
@@ -397,7 +439,7 @@ wire.
 
 **Must not touch:** the `uns/` topic shape, which already uses the cell's name and not the table's.
 
-## 10 · The migration chain folds back into the baseline, and the codebase is audited
+## 11 · The migration chain folds back into the baseline, and the codebase is audited
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)

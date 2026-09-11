@@ -4,8 +4,9 @@ import { usePolling } from '../../hooks/usePolling'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { ConfirmModal } from '../modals/ConfirmModal'
+import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { HelpTip } from '../common/HelpTip'
-import { IconDrive, IconShieldAlert, IconX } from '../common/Icons'
+import { IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
 import { formatBytes } from '../../utils/coldStorage'
 
 /**
@@ -24,10 +25,9 @@ export function BackupsTab({ showToast }) {
   const [recentJobs, setRecentJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [note, setNote] = useState('')
+  const [asking, setAsking] = useState(false)
   const [releaseFor, setReleaseFor] = useState(null)
 
-  const [requestPending, runRequest] = usePendingAction()
   const [cancelPending, runCancel] = usePendingAction()
   const [pendingKey, runKeyed] = usePendingKey()
 
@@ -53,16 +53,14 @@ export function BackupsTab({ showToast }) {
   // in flight so the card settles when the service finishes.
   usePolling(refresh, activeJob ? 5000 : 30000, !loading)
 
-  const onRequest = () => runRequest(async () => {
-    try {
-      await api.requestBackup(note.trim())
-      setNote('')
-      showToast('Backup queued. The service will take it shortly.', 'success')
-      await refresh()
-    } catch (err) {
-      showToast(err.message, 'error')
-    }
-  })
+  // The dialog shows a refusal itself, so a throw here stays in it: the gate names the backup in
+  // the way, and a toast would vanish before the sentence was read.
+  const onRequest = async ({ note }) => {
+    await api.requestBackup(note)
+    setAsking(false)
+    showToast('Backup queued. The service will take it shortly.', 'success')
+    await refresh()
+  }
 
   const onCancel = () => runCancel(async () => {
     try {
@@ -104,6 +102,18 @@ export function BackupsTab({ showToast }) {
                 text="Both databases, the 3D model objects and the forge, taken by the backup service onto its own volume. A backup you ask for is kept until you release it; scheduled ones are pruned by the retention window. Nothing here downloads a backup: restoring is a runbook run from a shell."
               />
             </h3>
+            {/* The primary action in the header, where every card keeps its. Disabled rather than
+                hidden while one is in flight: the gate refuses a second anyway, and the card
+                above the table says why. */}
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ marginLeft: 'auto' }}
+              disabled={!!activeJob}
+              onClick={() => setAsking(true)}
+              title={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}
+            >
+              <IconHardDrive size={14} /> Take a backup
+            </button>
           </div>
 
           <div className="card-body">
@@ -113,31 +123,6 @@ export function BackupsTab({ showToast }) {
                 <div>{error}</div>
               </div>
             )}
-
-            {/* The request row. Disabled rather than hidden while one is in flight: the gate
-                refuses a second anyway, and the card above the table says why. */}
-            <div className="filter-bar" style={{ alignItems: 'center' }}>
-              <input
-                className="form-control"
-                style={{ flex: 1, minWidth: '220px' }}
-                value={note}
-                onChange={e => setNote(e.target.value)}
-                placeholder="Why this backup is being taken (kept with it)"
-                aria-label="Backup note"
-                maxLength={200}
-                disabled={!!activeJob}
-              />
-              <ActionButton
-                pending={requestPending}
-                pendingLabel="Queuing…"
-                onClick={onRequest}
-                disabled={!!activeJob}
-                title={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}
-              >
-                <IconDrive size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
-                Take a backup
-              </ActionButton>
-            </div>
 
             <RunningCard job={activeJob} onCancel={onCancel} cancelPending={cancelPending} />
             <RecentFailures jobs={recentJobs} />
@@ -201,6 +186,10 @@ export function BackupsTab({ showToast }) {
         </div>
       </div>
 
+      {asking && (
+        <TakeBackupModal onConfirm={onRequest} onCancel={() => setAsking(false)} />
+      )}
+
       {releaseFor && (
         <ConfirmModal
           message={`Release the backup from ${formatWhen(releaseFor.taken_at)}${releaseFor.note ? ` (${releaseFor.note})` : ''}? Nothing is deleted now: the service prunes it once it is older than the retention window.`}
@@ -224,7 +213,7 @@ function RunningCard({ job, onCancel, cancelPending }) {
 
   return (
     <div className="callout" style={{ borderColor: stale ? 'var(--warning)' : 'var(--accent)', margin: '12px 0' }}>
-      <IconDrive size={14} className="callout-icon" />
+      <IconHardDrive size={14} className="callout-icon" />
       <div style={{ flex: 1 }}>
         <div>
           <strong>{pending ? 'Queued' : 'Running'}</strong>

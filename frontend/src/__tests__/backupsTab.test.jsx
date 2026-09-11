@@ -85,26 +85,46 @@ describe('what exists', () => {
   })
 })
 
+/** The header button opens the dialog; the dialog's own button is the one that asks. */
+function openDialog() {
+  fireEvent.click(screen.getByRole('button', { name: /Take a backup/ }))
+  return screen.getByLabelText('Note (optional)').closest('.modal')
+}
+
 describe('asking', () => {
-  it('queues a backup with the note and clears the field', async () => {
+  it('asks for the note in a dialog, queues with it, and closes', async () => {
     api.requestBackup.mockResolvedValue('j-1')
     const { props } = renderTab()
     await screen.findByTestId('backup-20260911T143000Z')
 
-    fireEvent.change(screen.getByLabelText('Backup note'), { target: { value: '  pre-upgrade  ' } })
-    fireEvent.click(screen.getByRole('button', { name: /Take a backup/ }))
+    const modal = openDialog()
+    expect(modal).toHaveTextContent(/pinned/)
+    fireEvent.change(within(modal).getByLabelText('Note (optional)'), { target: { value: '  pre-upgrade  ' } })
+    fireEvent.click(within(modal).getByRole('button', { name: /Take a backup/ }))
 
     await waitFor(() => expect(api.requestBackup).toHaveBeenCalledWith('pre-upgrade'))
     expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/queued/i), 'success')
-    await waitFor(() => expect(screen.getByLabelText('Backup note')).toHaveValue(''))
+    await waitFor(() => expect(screen.queryByLabelText('Note (optional)')).toBeNull())
   })
 
-  it("surfaces the gate's refusal verbatim", async () => {
+  it("keeps the dialog open and shows the gate's refusal verbatim", async () => {
     api.requestBackup.mockRejectedValue(new Error('request_backup: a scheduled backup is running. One backup runs at a time; wait for it to finish.'))
     const { props } = renderTab()
     await screen.findByTestId('backup-20260911T143000Z')
-    fireEvent.click(screen.getByRole('button', { name: /Take a backup/ }))
-    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/One backup runs at a time/), 'error'))
+    const modal = openDialog()
+    fireEvent.click(within(modal).getByRole('button', { name: /Take a backup/ }))
+    await waitFor(() => expect(modal).toHaveTextContent(/One backup runs at a time/))
+    expect(props.showToast).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Note (optional)')).toBeInTheDocument()
+  })
+
+  it('cancels the dialog without asking', async () => {
+    renderTab()
+    await screen.findByTestId('backup-20260911T143000Z')
+    const modal = openDialog()
+    fireEvent.click(within(modal).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByLabelText('Note (optional)')).toBeNull()
+    expect(api.requestBackup).not.toHaveBeenCalled()
   })
 
   it('disables the request while one is in flight, and offers Cancel only while it is queued', async () => {

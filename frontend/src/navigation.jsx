@@ -13,7 +13,7 @@ import {
   IconHistory,
   IconRecord,
   IconDatabase,
-  IconDrive,
+  IconHardDrive,
   IconLock,
   IconSettings,
   IconShieldCheck
@@ -96,7 +96,7 @@ export const TABS = [
   { id: 'access-control', label: 'Access Control', group: 'admin',   icon: <IconLock size={16} />, role: 'Administrator' },
   // Administrator alone, as request_backup() and the two tables' SELECT policies are: a backup
   // is an act on the whole database, and reading what exists sizes the security lane.
-  { id: 'backups',        label: 'Backups',        group: 'admin',   icon: <IconDrive size={16} />, role: 'Administrator' },
+  { id: 'backups',        label: 'Backups',        group: 'admin',   icon: <IconHardDrive size={16} />, role: 'Administrator' },
   { id: 'settings',       label: 'Settings',       group: 'admin',   icon: <IconSettings size={16} />, role: 'Administrator' }
 ]
 
