@@ -1,20 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Regression tests for the asset relationship + telemetry read/write paths:
- *  - cells -> gateways arrive as a nested embed; a cell's DEVICES are bucketed by their
- *    effective cell instead, since an explicit devices.cell_id can override the data path
- *  - `cell_id` on a mapped device row is the explicit override; `effective_cell_id` is resolved
- *  - a device's gateway is written from `active_gateway_id`, the key the UI actually sends
- *  - telemetry is read from the TimescaleDB-backed `telemetry` view with real filters
+ * Regression tests for the asset relationship and telemetry read/write paths: cells -> gateways
+ * arrive as a nested embed and a cell's devices are bucketed by effective cell; `cell_id` on a
+ * device row is the explicit override and `effective_cell_id` is resolved; a device's gateway is
+ * written from `active_gateway_id`; telemetry is read from the `telemetry` view with real filters.
  */
 
-// Recording stub for the PostgREST query builder. Each `from()` starts a fresh chain and
-// pushes the resulting call record onto `calls`.
-// `rpcCalls` is separate from `calls` because they answer different questions: `calls` records
-// PostgREST table access, `rpcCalls` records the digital_thread_page function the Digital Thread
-// moved to in 0039. Keeping them apart means `callFor('digital_thread')` still means "the table
-// was queried", which is the assertion that would otherwise quietly start passing again.
+// Recording stub for the PostgREST query builder. Each `from()` starts a fresh chain and pushes the
+// call record onto `calls`. `rpcCalls` is separate so `callFor('digital_thread')` still means the
+// table was queried.
 const state = { calls: [], rpcCalls: [], responses: {} };
 
 function makeBuilder(table) {
@@ -100,9 +95,8 @@ describe('cell -> gateway -> device relationships', () => {
     expect(cell.gateways[0].device_count).toBe(2);
     expect(cell.gateways[0].devices[0].gateway_name).toBe('GW One');
 
-    // A cell's device MEMBERSHIP is not returned: it is the resolved effective cell, which no
-    // embed can express, and fetching every device here made each consumer read the device
-    // table twice per refresh. Callers group what they already hold, via groupDevicesByCell().
+    // A cell's device membership is not returned: it is the resolved effective cell, which no embed
+    // can express. Callers group what they hold via groupDevicesByCell().
     expect(cell.devices).toBeUndefined();
     expect(cell.device_count).toBeUndefined();
     expect(callFor('devices')).toBeUndefined();
@@ -136,9 +130,8 @@ describe('cell -> gateway -> device relationships', () => {
 
     expect(device.effective_cell_id).toBe('cell-1');
     expect(device.location_source).toBe('inherited');
-    // The explicit column stays null. It used to be overwritten with the gateway's cell after
-    // the row spread, which would now discard the very column it is named after -- and a form
-    // round-trip would write the inherited value back as an explicit override.
+    // The explicit column stays null; overwriting it with the gateway's cell would make a form
+    // round-trip write the inherited value back as an override.
     expect(device.cell_id).toBeNull();
     expect(device.gateway_name).toBe('GW One');
     expect(device.active_gateway_id).toBe('gw-1');
@@ -229,9 +222,8 @@ describe('device gateway assignment', () => {
 });
 
 describe('device DBIRTH parameters', () => {
-  // asset_config is keyed by sparkplug_id. That value is a generated column derived from the
-  // device's UUID primary key, so the UI derives it locally instead of querying for it --
-  // 'ccd19944-8805-4c11-ae66-ea0d2c50f40c' -> 'dev' + the first 21 unhyphenated hex chars.
+  // asset_config is keyed by sparkplug_id, a generated column derived from the device's UUID, so
+  // the UI derives it locally: 'dev' + the first 21 unhyphenated hex chars.
   const DEVICE_UUID = 'ccd19944-8805-4c11-ae66-ea0d2c50f40c';
   const DEVICE_SPARKPLUG_ID = 'devccd1994488054c11ae66e';
 
@@ -288,11 +280,8 @@ describe('telemetry queries', () => {
     expect(callFor('telemetry').filters).toContainEqual(['eq', 'asset_id', 'Simulated_CNC_01']);
   });
 
-  // THE COLLAPSE MOVED INTO THE DATABASE. `public.telemetry_latest` is a view over a remote
-  // DISTINCT ON, so the endpoint no longer fetches a window and keeps the first row per key --
-  // that transferred a day of rows through postgres_fdw to end up with about ten. What is asserted
-  // now is that it reads the right relation and still bounds staleness; asserting a local collapse
-  // would be asserting logic that should no longer exist.
+  // The collapse lives in the database: `public.telemetry_latest` is a view over a remote DISTINCT
+  // ON. What is asserted is that the endpoint reads the right relation and still bounds staleness.
   it('reads the latest endpoint from telemetry_latest, not from a raw window', async () => {
     state.responses.telemetry_latest = {
       data: [
@@ -366,13 +355,8 @@ describe('telemetry filtering by device tag', () => {
 });
 
 describe('digital thread filtering', () => {
-  /*
-   * THE FILTERS ARE RPC ARGUMENTS NOW, not query-builder calls. archived migration 0039 moved this page to
-   * `digital_thread_page()` because hiding deleted assets is an anti-join PostgREST cannot
-   * express -- and doing it in the browser instead spent the row limit on rows that were then
-   * discarded, which is how a cleared filter bar came to list four assets on a stack of
-   * twenty-six. What each test asks is unchanged; where it looks is not.
-   */
+  /* The filters are RPC arguments: `digital_thread_page()` hides deleted assets with an anti-join
+     PostgREST cannot express. */
   const rpcArgs = () => state.rpcCalls.find(c => c.fn === 'digital_thread_page')?.args;
 
   it('normalises the UI entity type to the table name the trigger records', async () => {
@@ -402,18 +386,10 @@ describe('digital thread filtering', () => {
     expect(rpcArgs().p_include_purged).toBe(true);
   });
 
-  /*
-   * THE KEYSET CURSOR (0077), AND THE COMPATIBILITY RULE AROUND IT.
-   *
-   * PostgREST resolves an RPC by the argument NAMES it is given, so naming the two cursor
-   * arguments against a database that has not applied 0077 does not fall back -- it fails with
-   * "function public.digital_thread_page(...) does not exist" and takes the whole Digital Thread
-   * page down. Measured against this stack before the omission was added.
-   *
-   * A stack mid-deploy is exactly when that would happen: the bundle ships before db-init replays.
-   * Omitted, the call matches the seven-argument form, the page renders unpaged, and `truncated`
-   * still tells the reader the view is cut off.
-   */
+  /* The keyset cursor and the compatibility rule around it. PostgREST resolves an RPC by the
+     argument names given, so naming the cursor arguments against a database without them fails with
+     "function does not exist" rather than falling back. Omitted, the call matches the
+     seven-argument form and the page renders unpaged. */
   it('omits the cursor arguments entirely when there is no cursor', async () => {
     await api.get('/api/v1/digital-thread');
     expect(rpcArgs()).not.toHaveProperty('p_before_recorded_at');

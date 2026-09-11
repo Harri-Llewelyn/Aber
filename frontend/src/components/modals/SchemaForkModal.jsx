@@ -5,23 +5,12 @@ import { nextVersion, nextVersionName, schemaVersion } from '../../utils/schemaV
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
- * Prompt for the change description that a new schema version carries.
- *
- * IT IS A PROMPT, NOT A FORM. The only thing the operator supplies is *why* -- the version number
- * is computed by `fork_schema()` from the parent and there is no field for it, because a field
- * would imply it were negotiable. The brief's "no manual version input permitted" is enforced in
- * the database (`enforce_schema_version_provenance()` refuses a directly-inserted version); this
- * modal simply never asks.
- *
- * The description is optional, and the modal says so rather than blocking on it. A required field
- * on a fork is the kind of gate that gets satisfied with "update" -- an empty change_description is
- * more honest than a coerced one, and the version row itself already records what changed by
- * existing beside its parent.
+ * Prompt for the change description a new schema version carries. The version number is computed by
+ * `fork_schema()` and `enforce_schema_version_provenance()` refuses a directly inserted one, so
+ * there is no field for it. The description is optional and the modal says so.
  */
 export function SchemaForkModal({ schema, deviceCount = 0, onConfirm, onCancel }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onCancel)
 
   const [changeDescription, setChangeDescription] = useState('')

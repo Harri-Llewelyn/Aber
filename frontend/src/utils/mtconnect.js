@@ -1,15 +1,10 @@
 /**
- * The MTConnect controlled vocabularies, as served from `mtconnect_vocabulary`.
- *
- * Reference data generated into the database from the Apache-2.0 mtconnect/schema repository
- * (seeded by 0002_seed_data.sql; regenerate with scripts/generate-mtconnect-vocabulary.mjs). The app
- * only ever reads it.
- *
- * A metric name is composed, not picked whole: MTConnect identifies an observation by component
- * path plus data item type, so `Axes` + `C` + `ANGULAR_VELOCITY` + `ACTUAL` becomes the Sparkplug
- * metric name `Axes/C/ANGULAR_VELOCITY/ACTUAL`. The subType goes into the name as well as its own
- * column because Sparkplug has only a name to key on -- ACTUAL and COMMANDED readings of the same
- * type would otherwise collide on metric_catalog's UNIQUE(name).
+ * The MTConnect controlled vocabularies, as served from `mtconnect_vocabulary`: reference data
+ * generated from the Apache-2.0 mtconnect/schema repository (seeded by 0002_seed_data.sql;
+ * regenerate with scripts/generate-mtconnect-vocabulary.mjs). A metric name is composed from
+ * component path, data item type and subType, e.g. `Axes/C/ANGULAR_VELOCITY/ACTUAL`; the subType is
+ * in the name because ACTUAL and COMMANDED readings would otherwise collide on metric_catalog's
+ * UNIQUE(name).
  */
 
 import { METRIC_GROUP_SEPARATOR, composeMetricName } from './metricGroup'
@@ -24,9 +19,8 @@ const VOCABULARY_KINDS = {
 }
 
 /**
- * Provenance recorded on a catalog entry built from the standard vocabulary.
- * Re-exported from the standards registry rather than repeated, so the string that ends up in
- * `metric_catalog.standard` has exactly one definition.
+ * Provenance recorded on a catalog entry built from the standard vocabulary. Re-exported from the
+ * standards registry so `metric_catalog.standard` has one definition.
  */
 export const MTCONNECT_STANDARD = STANDARDS.MTCONNECT
 
@@ -41,8 +35,7 @@ export const subTypes = (vocabulary) => byKind(vocabulary, VOCABULARY_KINDS.SUB_
 
 /**
  * Units offered for a data item. NATIVE_UNIT values are the ones MTConnect allows a device to
- * report in before conversion (INCH, FAHRENHEIT...), so they belong in the list too, after the
- * preferred UNIT values.
+ * report in before conversion, so they follow the preferred UNIT values.
  */
 export const unitNames = (vocabulary) => [
   ...byKind(vocabulary, VOCABULARY_KINDS.UNIT).map(v => v.name),
@@ -73,14 +66,8 @@ export function typesByCategory(vocabulary) {
 
 /**
  * The path segments used by catalog metrics, for marking which parts of the vocabulary this
- * deployment has actually adopted.
- *
- * Splitting on the separator rather than trying to identify the type segment precisely is
- * deliberate: `Axes/DISPLACEMENT` yields both `Axes` and `DISPLACEMENT`, which correctly marks the
- * component *and* the data item type as in use, in their respective sections. Approximate in
- * principle -- a component sharing a name with a data item type would light up both -- but the two
- * MTConnect vocabularies do not overlap, and the alternative needs the sub_type column to
- * disambiguate the last segment for no practical gain.
+ * deployment has adopted. Splits on the separator so `Axes/DISPLACEMENT` marks both the component
+ * and the data item type; the two vocabularies do not overlap.
  */
 export function adoptedVocabulary(catalog) {
   const segments = new Set()
@@ -93,12 +80,8 @@ export function adoptedVocabulary(catalog) {
 }
 
 /**
- * The vocabulary arranged into browsable sections.
- *
- * Data item types are split by category rather than listed as one block of 249: the category is
- * the first thing that decides whether a type is even applicable (a SAMPLE is a continuous
- * measurement, an EVENT a discrete state, a CONDITION a fault), and 147 EVENT types are unreadable
- * undivided. The remaining kinds are single sections -- they have no comparable sub-structure.
+ * The vocabulary arranged into browsable sections. Data item types are split by category (SAMPLE,
+ * EVENT, CONDITION); the remaining kinds are single sections.
  */
 export function vocabularySections(vocabulary) {
   const sections = typesByCategory(vocabulary).map(g => ({
@@ -127,8 +110,6 @@ export function vocabularySections(vocabulary) {
   return sections
 }
 
-// Name composition lives in utils/metricGroup.js as composeMetricName(). There is deliberately no
-// MTConnect-specific composer: it was a wrapper that only fixed the part order
-// (component, instance, type, subType), and two composers is exactly the drift risk the single
-// derivation exists to avoid -- ISO 22400 and OPC UA names have to group identically. The order is
-// spelled out at the one call site that needs it, in SchemasTab's Add Metric form.
+// Name composition lives in utils/metricGroup.js as composeMetricName(). There is no
+// MTConnect-specific composer; the part order (component, instance, type, subType) is spelled out
+// at the call site in SchemasTab's Add Metric form.

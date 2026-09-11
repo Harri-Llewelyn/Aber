@@ -1,18 +1,9 @@
 /**
- * Devices with a firing alert read red (issue #34), and why that does not contradict the rule
- * against red device states.
- *
- * `deviceStatus.test.js` asserts that NO status yields a danger treatment, on the stated grounds
- * that "red on this dashboard would assert a process condition it has no authority over". That is
- * why threshold evaluation moved to Grafana in the first place, and it is unchanged: the helpers
- * that take a *status* still never return red.
- *
- * AN ALERT IS THE ONE CASE THAT IS NOT A DERIVATION. Grafana evaluated its own rules against the
- * historian, posted the verdict to `grafana-alert-webhook`, and it landed in `platform_alerts`.
- * Painting that red RELAYS a judgement rather than making one -- so `deviceChipClass` and
- * `deviceDotColor` take an ALERT, never a threshold, and there is no path through either that turns
- * a telemetry value into a colour. These tests pin both halves: red appears for an alert, and the
- * status-only helpers still cannot produce it.
+ * Devices with a firing alert read red, and why that does not contradict the rule against red
+ * device states. The status helpers never return a danger treatment, because the dashboard has no
+ * authority over process conditions. An alert is Grafana's verdict relayed through
+ * `platform_alerts`, so `deviceChipClass` and `deviceDotColor` take an alert, never a threshold.
+ * These pin both halves.
  */
 import { describe, it, expect } from 'vitest'
 import {
@@ -53,9 +44,8 @@ describe('matching an alert to the device it is about', () => {
   })
 
   it('resolves on the row UUID when the alert carries no wire id', () => {
-    // `platform_alerts.entity_id` is resolved by the webhook at write time and is nullable: an
-    // alert can arrive for an id no row matches. It carries no foreign key, so a purge leaves the
-    // alert intact with an id that now points at nothing -- which is the intended trade.
+    // `platform_alerts.entity_id` is resolved by the webhook at write time, is nullable, and
+    // carries no foreign key, so a purge leaves the alert intact with an id pointing at nothing.
     const index = alertIndex([alert({ sparkplug_id: null })])
     expect(alertForDevice(index, device())?.alert_name).toBe('Thermal Excursion')
   })
@@ -82,12 +72,9 @@ describe('matching an alert to the device it is about', () => {
 
 
 describe('only DEVICE alerts can redden a device', () => {
-  /*
-   * The platform alert rules put gateway and platform alerts in the same feed. The shopfloor map uses this
-   * index to paint a device chip, so without a filter a gateway fault could colour a machine --
-   * not today, because the two id spaces do not collide, but on the day a re-provision makes them.
-   * The map would then be asserting something no rule said.
-   */
+  /* Gateway and platform alerts share the feed. The shopfloor map paints a device chip from this
+     index, so without the filter a gateway fault could colour a machine the day the id spaces
+     collide. */
   const gatewayAlert = alert({
     entity_type: 'gateway',
     sparkplug_id: 'gwy120000000000400080000',
@@ -136,21 +123,16 @@ describe('the colour a device gets', () => {
   })
 
   it('is red even when the device is offline', () => {
-    /*
-     * ALERT BEATS STATUS, and this is the case that decides the ordering. An offline device with a
-     * firing alert is the most urgent thing on the page, not the least -- grey would bury it.
-     */
+    /* Alert beats status: an offline device with a firing alert is the most urgent thing on the
+       page. */
     const offline = device({ status: DEVICE_STATUS.OFFLINE })
     expect(deviceChipClass(offline, alert())).toBe('chip-danger')
     expect(deviceDotColor(offline, alert())).toBe('var(--danger)')
   })
 
   it('is inert when the device is archived, alert or not', () => {
-    /*
-     * ARCHIVED BEATS EVERYTHING. An alert still firing against something taken out of service is
-     * noise about a decision already made, and OverviewTab already dimmed archived rows on exactly
-     * that reasoning.
-     */
+    /* Archived beats everything: an alert still firing against something taken out of service is
+       noise about a decision already made. */
     const archived = device({ is_archived: true })
     expect(deviceChipClass(archived, alert())).toBe('chip-offline')
     expect(deviceDotColor(archived, alert())).toBe('var(--text-muted)')
@@ -168,11 +150,8 @@ describe('the colour a device gets', () => {
 
 describe('the rule against red device STATES is intact', () => {
   it('no status alone produces red, on either surface', () => {
-    /*
-     * The guard `deviceStatus.test.js` already carries, restated here against the NEW helpers --
-     * because the obvious way to implement #34 is to add a red status, and that is the thing this
-     * codebase decided not to have. Red must arrive with an alert or not at all.
-     */
+    /* The guard deviceStatus.test.js carries, restated against the new helpers: red must arrive
+       with an alert or not at all. */
     for (const status of Object.values(DEVICE_STATUS)) {
       const d = device({ status, is_quarantined: status === DEVICE_STATUS.QUARANTINED })
       expect(deviceChipClass(d, null)).not.toBe('chip-danger')

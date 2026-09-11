@@ -31,9 +31,8 @@ const show = async (rows, userRole = 'Administrator') => {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  // The page reads `archive.enabled` through useSetting, which calls api.get. Defaulted to an empty
-  // list -- no row means the fallback, which is `false`, so every test that is not ABOUT the switch
-  // gets the same state it had before the switch was read.
+  // The page reads `archive.enabled` through useSetting, which calls api.get. An empty list means
+  // the fallback, `false`, so tests not about the switch get the same state.
   api.get.mockResolvedValue([])
 })
 
@@ -84,12 +83,9 @@ describe('the cold storage catalogue', () => {
   })
 
   /**
-   * AN EMPTY LIST IS GENUINELY AMBIGUOUS HERE, and resolving it wrongly is a lie in one direction.
-   *
-   * `cold_storage_rows()` gates on the role in its BODY, so a caller without one gets zero rows
-   * rather than a refusal -- exactly as every RLS-protected read on this schema behaves. Rendering
-   * "nothing is archived" at somebody who simply cannot see it would be a claim the page has no
-   * basis for making.
+   * An empty list is ambiguous: `cold_storage_rows()` gates on the role in its body, so a caller
+   * without one gets zero rows rather than a refusal, and "nothing is archived" would be a claim
+   * the page has no basis for.
    */
   it('tells an unprivileged reader the list is empty because of their role', async () => {
     await show([], 'Operator')
@@ -171,11 +167,8 @@ describe('state vocabulary', () => {
 
 
 /**
- * THE STATE AN OPERATOR ACTUALLY HITS FIRST, and the one the page originally had no wording for.
- *
- * Turning `archive.enabled` on ARMS the exporter; it does not run it, and nothing on a Compose
- * stack schedules it. So the ordinary first experience is: switch it on, open this page, see
- * nothing -- and be told "cold storage is off", which is both wrong and the opposite of actionable.
+ * The state an operator hits first: turning `archive.enabled` on arms the exporter and does not run
+ * it, so the empty state must not say cold storage is off.
  */
 describe('the empty state distinguishes off from on-and-idle', () => {
 
@@ -187,17 +180,8 @@ describe('the empty state distinguishes off from on-and-idle', () => {
   })
 
   it('says it runs by itself, because it does', async () => {
-    /*
-     * THE COPY THIS REPLACES WAS STALE AND MISLED A READER INTO ASKING FOR A CRON JOB.
-     *
-     * It said "nothing schedules it, so on this stack it is a command somebody runs", which was
-     * true when written and stopped being true one commit later when the `cold-archiver` service
-     * landed. Nobody reading it could tell -- which is the failure this repository calls out by
-     * name: a stale claim is worse than none, because it will be acted on.
-     *
-     * The empty state now attributes the emptiness to the right cause: not a missing scheduler, but
-     * nothing being ELIGIBLE yet.
-     */
+    /* The empty state attributes the emptiness to nothing being eligible yet, not to a missing
+       scheduler; the `cold-archiver` service schedules it. */
     api.get.mockResolvedValue([{ key: 'archive.enabled', value: true }])
     await show([])
     await waitFor(() => expect(screen.getByText(/runs by itself/i)).toBeInTheDocument())
@@ -215,9 +199,9 @@ describe('the empty state distinguishes off from on-and-idle', () => {
   })
 
   it('assumes off when the settings read fails, rather than claiming archiving is running', async () => {
-    // useSetting swallows read errors by design. The cautious default matters here: telling
-    // somebody archiving is on when the page could not find out would send them looking for a
-    // command to run instead of a switch to flip.
+    // useSetting swallows read errors by design, so the cautious default matters: claiming
+    // archiving is on when the page could not find out would send somebody looking for a command
+    // instead of a switch.
     api.get.mockRejectedValue(new Error('offline'))
     await show([])
     await waitFor(() => expect(screen.getByText(/Cold storage is off/i)).toBeInTheDocument())

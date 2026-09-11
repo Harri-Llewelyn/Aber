@@ -26,10 +26,8 @@ const svc = (name, type, url) => ({
   last_heartbeat: HEARTBEAT
 })
 
-// The seeded stack, in the order /api/v1/directory actually returns it -- alphabetical by name,
-// which is the order the page has to REGROUP rather than the order it renders. Kept whole rather
-// than trimmed to two rows because the interleaving is the thing under test: Kong, Mosquitto and
-// PostgREST land alphabetically adjacent and belong to three different sections.
+// The seeded stack in the order /api/v1/directory returns it, alphabetical by name, which the page
+// has to regroup. Kept whole because the interleaving is what is under test.
 const SERVICES = [
   svc('API Reference (Swagger UI)', 'DOCUMENTATION', 'http://localhost:8088'),
   svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'),
@@ -54,19 +52,8 @@ async function renderTab() {
 }
 
 /**
- * THE PANEL THIS SUITE USED TO GUARD IS GONE, and these are the assertions that outlived it.
- *
- * The Directory page carried an "Edge GitOps Deployment Manager" whose button posted to
- * `/api/v1/gitops/deploy-flow`, which invoked the `deploy-nodered` edge function, which
- * overwrote the running flows with `node_red_flow.json` as committed. The demonstrator
- * retirement removed the flow AND the function, so what was left was a button that could only
- * ever report a failure -- and five tests here that would have kept passing against it, because
- * they mocked the edge function they were meant to be reaching.
- *
- * WHAT IS KEPT rather than deleted with it: the page must still make no claim about what
- * Node-RED is running. That was never a property of the button -- it is a property of the page,
- * which has no way to observe the editor, and it is the assertion most likely to be undone by
- * somebody adding a status badge back.
+ * The page must make no claim about what Node-RED is running: it has no way to observe the editor,
+ * and this is the assertion most likely to be undone by somebody adding a status badge.
  */
 describe('DirectoryTab claims nothing it cannot observe', () => {
   beforeEach(() => {
@@ -96,14 +83,7 @@ describe('DirectoryTab claims nothing it cannot observe', () => {
   })
 })
 
-/**
- * Categorised groups, replacing the flat table and the filter bar that made it usable.
- *
- * The search box and the service-type picker were solving the flat list's problem -- a dozen
- * rows in registry order, with no cue as to which of them matters to the question being asked --
- * and they solved it only for someone who knew what to type. Three named sections solve it for
- * everyone at rest, so the controls came out with the list they were propping up.
- */
+/** Three named sections replace a flat table with a search box and a type picker. */
 describe('DirectoryTab service groups', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -152,9 +132,8 @@ describe('DirectoryTab service groups', () => {
     ])
   })
 
-  // Grouping is keyed on service_type, and directory_services is a registry anything can
-  // register into. A type nobody anticipated must still reach the page -- a service silently
-  // missing from the directory is worse than one under a vague heading.
+  // Grouping is keyed on service_type, and directory_services is a registry anything can register
+  // into, so an unanticipated type must still reach the page.
   it('still lists a service whose type belongs to no category', async () => {
     api.get.mockResolvedValue([...SERVICES, svc('Some Future Broker', 'AMQP_BROKER', 'amqp://localhost:5672')])
     await renderTab()
@@ -187,9 +166,8 @@ describe('DirectoryTab service groups', () => {
   it('opens a browsable endpoint in a new tab, with the opener not reachable from it', async () => {
     await renderTab()
 
-    // The eight http fixtures. The other four are mqtt:// and postgres:// and are copy buttons
-    // below -- this used to assert every row was a link, which is what made the broker address
-    // a tab that failed to load.
+    // The eight http fixtures. The other four are mqtt:// and postgres:// and render as copy
+    // buttons below.
     const links = [...document.querySelectorAll('tbody a')]
     const browsable = SERVICES.filter(s => isBrowsableEndpoint(s.endpoint_url))
     expect(links).toHaveLength(browsable.length)
@@ -201,14 +179,8 @@ describe('DirectoryTab service groups', () => {
     }
   })
 
-  /*
-   * Endpoints that are not web pages (issue raised in review).
-   *
-   * WHAT WAS REPORTED: clicking `mqtt://localhost:1883` opened a tab that could not load it, when
-   * what a person wants from that row is the address itself. Both affordances are now
-   * button-shaped and visually distinct, so which rows can be opened is answerable by looking
-   * rather than by clicking and finding out.
-   */
+  /* Endpoints that are not web pages render as copy buttons, visually distinct from links, so which
+     rows can be opened is answerable by looking. */
   describe('endpoints that a browser cannot open', () => {
     it('renders them as copy buttons rather than links', async () => {
       await renderTab()
@@ -223,9 +195,8 @@ describe('DirectoryTab service groups', () => {
     })
 
     it('copies the address and says so', async () => {
-      // navigator.clipboard is undefined outside a secure context, which is the case the app's
-      // own copyText() has an execCommand fallback for. Stubbed here so the assertion is about
-      // THIS component rather than about which path the helper took.
+      // navigator.clipboard is stubbed so the assertion is about this component rather than which
+      // path copyText() took.
       const writeText = vi.fn().mockResolvedValue(undefined)
       const original = navigator.clipboard
       Object.defineProperty(navigator, 'clipboard', {
@@ -248,11 +219,9 @@ describe('DirectoryTab service groups', () => {
     })
 
     it('treats a container hostname as unopenable even though it is http', async () => {
-      /*
-       * THE CASE A SCHEME TEST ALONE GETS WRONG, and the reason this predicate looks at the host.
-       * `node-exporter` resolves on the compose network and nowhere else, so rendering it as a
-       * link would produce a failed tab that reads as the service being down.
-       */
+      /* The case a scheme test alone gets wrong: `node-exporter` resolves on the compose network
+         and nowhere else, so a link would produce a failed tab that reads as the service being
+         down. */
       expect(isBrowsableEndpoint('http://node-exporter:9100/metrics')).toBe(false)
       expect(isBrowsableEndpoint('http://supabase-kong:8000')).toBe(false)
     })
@@ -276,22 +245,9 @@ describe('DirectoryTab service groups', () => {
     })
   })
 
-  /*
-   * THE LIVENESS COLUMN, AND THE DISTINCTION IT HAS TO MAKE.
-   *
-   * This test was once the inverse of itself: it asserted the page claimed NO liveness, because
-   * nothing wrote `directory_services.status` and the pill said ACTIVE on all fifteen rows
-   * unconditionally -- it would have said ACTIVE for a service down for a week.
-   *
-   * `refresh_directory_liveness()` (archived migration 0054) writes it now, from Prometheus's `up` series.
-   * So the column is back, and what these tests protect is no longer "claims nothing" but "claims
-   * only what was observed".
-   *
-   * THE DISTINCTION THAT MATTERS IS NOT HEALTHY-VS-UNHEALTHY, IT IS OBSERVED-VS-UNOBSERVED. Six of
-   * the fifteen services are scraped; nine are not, and a service can be perfectly fine while
-   * unobserved. A page that rendered the nine as a blank or a dash would let a reader assume they
-   * are fine -- the same fabrication as the old green pill, in a quieter font.
-   */
+  /* The liveness column, written by `refresh_directory_liveness()` from Prometheus's `up` series.
+     The distinction that matters is observed versus unobserved, not healthy versus unhealthy: a
+     service can be fine while unobserved, and a blank cell would let a reader assume it is. */
   it('shows an observed service as ACTIVE', async () => {
     await renderTab()
     expect(screen.getAllByText('ACTIVE').length).toBeGreaterThan(0)
@@ -307,9 +263,8 @@ describe('DirectoryTab service groups', () => {
   })
 
   it('says "not observed" rather than leaving a blank', async () => {
-    // THE ONE THAT CARRIES THE DESIGN. A dash or an empty cell reads as "no data yet" or as a
-    // rendering gap, and either reading lets somebody conclude the service is fine. The honest
-    // answer to "is it up?" for these nine is "nobody is looking", and it has to be in words.
+    // The answer for an unscraped service is "nobody is looking", in words; a dash reads as no data
+    // yet.
     api.get.mockResolvedValue([
       { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
         status: 'UNKNOWN', last_heartbeat: null }
@@ -322,9 +277,9 @@ describe('DirectoryTab service groups', () => {
   })
 
   it('explains WHY an unobserved service cannot be probed', async () => {
-    // Otherwise "not observed" reads as a gap somebody should close, and the next person adds a
-    // probe against endpoint_url -- which is a browser address, so from inside a container it
-    // would answer about the wrong host and report that as service health.
+    // Otherwise "not observed" reads as a gap somebody should close with a probe against
+    // endpoint_url, a browser address that would answer about the wrong host from inside a
+    // container.
     api.get.mockResolvedValue([
       { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
         status: 'UNKNOWN', last_heartbeat: null }
@@ -335,9 +290,8 @@ describe('DirectoryTab service groups', () => {
   })
 
   it('does not show a heartbeat beside a service that is not up', async () => {
-    // 0054 clears last_heartbeat for DOWN and UNKNOWN precisely so a timestamp cannot linger
-    // beside a red badge and read as "last seen at" -- a different, more reassuring claim than
-    // the row is making. The UI must not reintroduce it from a stale cached row either.
+    // last_heartbeat is cleared for DOWN and UNKNOWN so a timestamp cannot linger beside a red
+    // badge as "last seen at". The UI must not reintroduce it from a stale row.
     api.get.mockResolvedValue([
       { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'),
         status: 'DOWN', last_heartbeat: HEARTBEAT }
@@ -381,11 +335,8 @@ describe('DirectoryTab service groups', () => {
 })
 
 /**
- * What replaced the manual Refresh button.
- *
- * Removing it without a background refresh would have left the page showing whatever the
- * heartbeats were at mount, for as long as the tab stayed open -- which is the one failure this
- * page cannot have, since a stale heartbeat and a dead service look identical here.
+ * The background refresh. A stale heartbeat and a dead service look identical here, so the page
+ * cannot show what the heartbeats were at mount for as long as the tab stays open.
  */
 describe('DirectoryTab refresh', () => {
   beforeEach(() => {
@@ -404,10 +355,8 @@ describe('DirectoryTab refresh', () => {
     expect(screen.queryByPlaceholderText(/Search services/)).not.toBeInTheDocument()
     expect(screen.queryByTitle(/Show only one kind of service/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Refresh Directory/i })).not.toBeInTheDocument()
-    // NO CONTROLS AT ALL now that the GitOps sync button has gone with the flow it deployed --
-    // the page is a read-only directory. The endpoint cells are still buttons, one per row a
-    // browser cannot open, so this counts what is not an endpoint rather than every button,
-    // which would otherwise re-fail whenever a fixture changed scheme.
+    // The page is a read-only directory with no controls of its own. The endpoint cells are still
+    // buttons, one per row a browser cannot open, so this counts what is not an endpoint.
     const buttons = screen.getAllByRole('button')
       .filter(b => !b.classList.contains('endpoint-action') && !b.classList.contains('help-tip'))
     expect(buttons).toHaveLength(0)
@@ -416,12 +365,8 @@ describe('DirectoryTab refresh', () => {
   // The poll is a setTimeout chain (see usePolling), so a fresh response only reaches the
   // component once the clock is advanced past the interval.
   it('picks up a changed registration on the background poll, with nothing to press', async () => {
-    /*
-     * THE SUBJECT IS THE POLL, not what changed. This watched `status` flip to OFFLINE until that
-     * column was removed for being fabricated; the observable is now the endpoint, which is real
-     * data that a re-registration genuinely changes. Rewritten rather than deleted, because the
-     * behaviour under test -- the table refreshes itself with no button -- is unaffected.
-     */
+    /* The subject is the poll, not what changed: the endpoint is real data that a re-registration
+       changes. */
     await renderTab()
     expect(api.get).toHaveBeenCalledTimes(1)
 
@@ -437,13 +382,9 @@ describe('DirectoryTab refresh', () => {
 })
 
 /**
- * WHAT THIS SUITE GUARDS, and why the ones above did not catch it.
- *
- * Every fixture in SERVICES carries a `localhost` or `127.0.0.1` address, and jsdom serves tests
- * from `http://localhost:3000` -- so `viewerIsOnDeploymentHost` is true for all of them and every
- * row renders exactly as it did before 0084. That is the correct behaviour and it is also the
- * REASON those tests kept passing: the case the exposure column exists for is the one jsdom's
- * default location hides. It has to be asked for explicitly.
+ * Every fixture carries a `localhost` address and jsdom serves tests from `http://localhost:3000`,
+ * so `viewerIsOnDeploymentHost` is true for all of them and the exposure column's case has to be
+ * asked for explicitly.
  */
 describe('Directory reachability (migration 0084)', () => {
   describe('viewerIsOnDeploymentHost', () => {
@@ -478,12 +419,8 @@ describe('Directory reachability (migration 0084)', () => {
       expect(endpointReach('http://localhost:9090', 'HOST', true).open).toBe(true)
     })
 
-    /*
-     * THE CASE THE TWO FACTS DISAGREE ON, and the reason the address is tested as well as the
-     * column. Studio's port is published on every interface -- exposure NETWORK -- while its URL
-     * is still the STUDIO_PUBLIC_URL default. A remote browser cannot use that ADDRESS however
-     * broadly the PORT is published.
-     */
+    /* The case the two facts disagree on: Studio's port is published on every interface (NETWORK)
+       while its URL is still the loopback default, which a remote browser cannot use. */
     it('withholds a loopback ADDRESS from a remote reader even when the PORT is NETWORK', () => {
       expect(endpointReach('http://127.0.0.1:54323', 'NETWORK', false).open).toBe(false)
       expect(endpointReach('http://127.0.0.1:54323', 'NETWORK', true).open).toBe(true)
@@ -494,11 +431,8 @@ describe('Directory reachability (migration 0084)', () => {
       expect(endpointReach('http://localhost:9100/metrics', 'INTERNAL', false).open).toBe(false)
     })
 
-    /*
-     * UNKNOWN BEHAVES AS NETWORK, deliberately. Anything registering into `directory_services`
-     * that predates this column reads UNKNOWN, and demoting those rows to copy buttons would make
-     * adding the column a regression for services that are perfectly reachable.
-     */
+    /* UNKNOWN behaves as NETWORK: rows registered before the column existed must not be demoted to
+       copy buttons. */
     it('does not demote a row that predates the column', () => {
       expect(endpointReach('http://grafana.plant.local:3002', undefined, false).open).toBe(true)
       expect(endpointReach('http://grafana.plant.local:3002', 'UNKNOWN', false).open).toBe(true)
@@ -536,9 +470,7 @@ describe('Directory reachability (migration 0084)', () => {
       expect(screen.getByText('network')).toBeInTheDocument()
       expect(screen.getByText('host only')).toBeInTheDocument()
       expect(screen.getByText('internal')).toBeInTheDocument()
-      // The row with no exposure at all. A dash here would read as a rendering gap, and a
-      // rendering gap invites the assumption that it is fine -- the same argument LivenessCell
-      // makes for `not observed`.
+      // The row with no exposure at all says so in words; a dash reads as a rendering gap.
       expect(screen.getByText('not recorded')).toBeInTheDocument()
     })
 

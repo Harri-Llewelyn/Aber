@@ -7,18 +7,11 @@ import { REALTIME_ENABLED } from '../constants'
 const POLL_INTERVAL_MS = 10000
 
 /**
- * Toast when a device newly appears in the quarantine queue.
+ * Toast when a device newly appears in the quarantine queue. Event-driven with Realtime (a filtered
+ * subscription on devices where is_quarantined = true), polled otherwise. The initial fetch primes
+ * the set of already-known quarantined devices so a page load does not re-toast the queue.
  *
- * With Realtime enabled this is event-driven: a filtered subscription on
- * devices where is_quarantined = true. Ingestion auto-quarantines an unknown device the
- * moment its first message arrives, so the alert now fires on arrival rather than up to
- * 10 seconds later.
- *
- * The initial fetch is kept in BOTH modes and is load-bearing: it primes the set of already
- * known quarantined devices. Without it every device sitting in the queue would re-toast on
- * page load, which is what makes this an alert rather than a list.
- *
- * @param {Function} showToast - Toast notification function
+ * @param {Function} showToast Toast notification function
  */
 export function useQuarantineAlerts(showToast) {
   const knownQuarantineIds = useRef(new Set())
@@ -43,9 +36,8 @@ export function useQuarantineAlerts(showToast) {
       }
     }
 
-    // A device is identified to an operator by its Sparkplug id -- that is what appears in the
-    // MQTT topic and in TimescaleDB. `asset_id` is the internal UUID (api.js maps devices with
-    // asset_id: d.id), which matches nothing an operator can see on the wire.
+    // Operators know a device by its Sparkplug id, the thing on the wire and in TimescaleDB;
+    // `asset_id` is the internal UUID.
     const describe = (device) =>
       device?.sparkplug_id || device?.asset_id || device?.id || 'unknown'
 
@@ -69,12 +61,9 @@ export function useQuarantineAlerts(showToast) {
       .catch(err => reportError(err, 'Initial quarantine fetch error'))
 
     if (REALTIME_ENABLED) {
-      // Server-side filter: only rows that are quarantined reach this client at all, rather
-      // than every device write being delivered and discarded here.
-      //
-      // The filter matches on the CURRENT row, so an UPDATE that clears the flag (an approval)
-      // does not arrive -- which is correct for an arrival alert. Removal from the known set
-      // is handled by the reconciliation below.
+      // Server-side filter, so only quarantined rows reach this client. It matches the current row,
+      // so an UPDATE that clears the flag does not arrive; removal from the known set is handled by
+      // the reconciliation below.
       channel = supabase
         .channel('quarantine-alerts')
         .on(
@@ -92,9 +81,8 @@ export function useQuarantineAlerts(showToast) {
           }
         })
 
-      // Re-sync the known set periodically so approved devices can alert again if they are
-      // ever re-quarantined, and so anything missed while the socket was down still surfaces.
-      // Much slower than the old 10s alert poll -- this is reconciliation, not detection.
+      // Re-sync the known set periodically so re-quarantined devices alert again and anything
+      // missed while the socket was down still surfaces. Reconciliation, not detection.
       timer = setInterval(async () => {
         if (isCancelled) return
         if (abortController) abortController.abort()

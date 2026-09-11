@@ -14,9 +14,8 @@ import {
 const DEVICE = '20000000-0000-4000-8000-000000000002'
 
 /**
- * The regex `devices.model_3d_path`'s CHECK constraint enforces (archived migration 0035). Mirrored here so
- * a change to path composition that the database would reject fails in the unit tests instead of
- * at the first upload against a real stack.
+ * The regex `devices.model_3d_path`'s CHECK constraint enforces, mirrored so a change to path
+ * composition the database would reject fails here.
  */
 const CHECK_CONSTRAINT =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[^/]+\.(gltf|glb|obj|stl)$/i

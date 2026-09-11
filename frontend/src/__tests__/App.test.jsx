@@ -70,18 +70,17 @@ describe('App Component', () => {
     })
 
     expect(screen.getByText('Shopfloor to Digital Twin Pipeline')).toBeInTheDocument()
-    // The account control prints nothing at all now -- it is a 28px icon button -- so its `title` is
-    // both the hover text AND its accessible name. That is why the address stays verifiable without
-    // opening anything, and why this asserts the attribute rather than rendered text.
+    // The account control is an icon button with no text, so its `title` is both the hover text and
+    // its accessible name; the address is asserted on the attribute.
     expect(screen.getByRole('button', { name: /account menu/i })).toHaveAttribute(
       'title', expect.stringContaining('admin@acs-cymru.local')
     )
   })
 
   it('returns to the login screen when the stored session no longer exists on the server', async () => {
-    // The browser still holds a signature-valid JWT, but auth.sessions was wiped (e.g.
-    // `docker compose down -v`). PostgREST would still serve reads, so without this
-    // check the dashboard renders as if signed in and only Edge Functions fail.
+    // The browser holds a signature-valid JWT but auth.sessions was wiped. PostgREST would still
+    // serve reads, so without the getUser() check the dashboard renders as signed in and only Edge
+    // Functions fail.
     supabase.auth.getSession.mockResolvedValue({ data: { session: mockSession } })
     supabase.auth.getUser.mockResolvedValue({
       data: { user: null },

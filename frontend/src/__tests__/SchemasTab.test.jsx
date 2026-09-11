@@ -74,12 +74,8 @@ const renderTab = () => render(
 
 /** The catalog table is the first one on the page; the vocabulary panel below it is not a table. */
 /**
- * Located by its heading, not by its position on the page.
- *
- * These used to be `document.querySelector('table')` and `tables[tables.length - 1]` -- the first
- * table was the catalog and the last was the registry. Then the two cards swapped order, and every
- * assertion in both files silently pointed at the wrong table. Naming what is wanted costs one
- * helper and cannot rot that way.
+ * Located by its heading, not by its position: the two cards have swapped order before, and a
+ * positional query silently points at the wrong table.
  */
 const cardTable = (heading) => {
   const title = [...document.querySelectorAll('.card-header .section-title')]
@@ -90,15 +86,9 @@ const cardTable = (heading) => {
 const catalogTable = () => cardTable('Metric Catalog')
 
 /**
- * Waits for the catalog to render, then opens every group.
- *
- * The catalog's groups now default to COLLAPSED, so `getByText('Axes/DISPLACEMENT')` -- which
- * this suite used throughout as its "page is ready" gate -- no longer resolves on arrival. The
- * group HEADERS render first and stay visible when shut, so the gate waits on one of those and
- * then expands the sections the assertions below read.
- *
- * Scoped to the catalog table: the vocabulary panel underneath has its own collapsible sections
- * ("Expand this section"), and a loose title match would drive those too.
+ * Waits for the catalog to render, then opens every group. The groups default to collapsed, so the
+ * gate waits on a group header and then expands the sections the assertions read. Scoped to the
+ * catalog table because the vocabulary panel has its own collapsible sections.
  */
 const waitForCatalog = async () => {
   await waitFor(() => expect(catalogTable()).toBeTruthy())
@@ -118,9 +108,8 @@ beforeEach(() => {
 
 describe('Metric Catalog — collapsible groups', () => {
   it('opens COLLAPSED, showing each group header and its count rather than every row', async () => {
-    // Inverted from the original default. The catalog outgrew being unrolled on arrival: it
-    // pushed the schema registry below the fold, and the header count already says what is
-    // inside. The vocabulary panel below has always defaulted this way.
+    // Collapsed on arrival: the catalog outgrew being unrolled, and the header count says what is
+    // inside.
     renderTab()
 
     await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
@@ -293,9 +282,7 @@ describe('Metric Catalog — Add Metric toggle', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
 // Multi-standard metric builder (MTConnect / ISO 22400 / OPC UA) and semantic ids
-// ---------------------------------------------------------------------------
 
 const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is named from/)
 const semanticIdInput = () => screen.getByPlaceholderText(/opcfoundation\.org\/UA\/Robotics\/ActualPosition/)
@@ -310,11 +297,8 @@ const unitsSelect = () =>
 const cardFor = (heading) => screen.getByRole('heading', { name: heading }).closest('.card')
 
 /**
- * The "Devices will publish this metric as …" line.
- *
- * Scoped because every vocabulary panel's own description quotes example metric names in the same
- * <span class="mono"> markup — `OEE/AVAILABILITY` appears in the ISO panel's blurb as well as in
- * the preview, so an unscoped getByText finds both.
+ * The "Devices will publish this metric as …" line. Scoped because every vocabulary panel's
+ * description quotes example metric names in the same mono markup.
  */
 const namePreview = () => screen.getByText(/Devices will publish this metric as/)
 
@@ -559,9 +543,8 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
 })
 
 describe('Vocabulary handover — arriving from the Vocabulary page', () => {
-  // The panel itself now lives on the Vocabulary page (see VocabularyTab.test.jsx). What this page
-  // still owns is the rule that turns a vocabulary row into a metric, so the handover is resolved
-  // HERE rather than being sent over as a filled-in form -- one copy of that rule, not two.
+  // The panel lives on the Vocabulary page (see VocabularyTab.test.jsx). This page owns the rule
+  // that turns a vocabulary row into a metric, so the handover is resolved here.
   const renderWith = (entry, onConsume = vi.fn()) => render(
     <SchemasTab
       showToast={vi.fn()}
@@ -616,9 +599,8 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
 
 describe('Schema actions', () => {
   it('offers Build Schema from Catalog as the only way to create a schema', async () => {
-    // Register New Schema took a raw JSON Schema document as free text, which could name metrics
-    // that were not in the catalog, had no standard and carried no semantic id - and every derived
-    // feature reads schemas.
+    // Register New Schema no longer takes a raw JSON Schema document as free text, which could name
+    // metrics outside the catalog with no standard and no semantic id.
     renderTab()
     await waitForCatalog()
 
@@ -634,9 +616,9 @@ describe('Schema actions', () => {
   })
 })
 
-// The Group picker follows the Standard selector. Offering ISO 22400's KPI families while the
-// form is set to MTConnect invites a group that contradicts the metric's own provenance -- and
-// `standard` is what an AAS export reads to choose a namespace.
+// The Group picker follows the Standard selector: offering ISO 22400's KPI families under MTConnect
+// invites a group that contradicts the metric's provenance, and `standard` is what an AAS export
+// reads to choose a namespace.
 describe('Add Metric — Group picker follows the Standard', () => {
   const openForm = async () => {
     renderTab()
@@ -677,8 +659,7 @@ describe('Add Metric — Group picker follows the Standard', () => {
   })
 
   // Without this the selected group survives into a standard that does not offer it: the select
-  // renders blank while the composed name silently keeps the old prefix, so the metric is created
-  // under a group the form appears not to have selected.
+  // renders blank while the composed name keeps the old prefix.
   it('clears a group the new standard does not offer', async () => {
     await openForm()
     fireEvent.change(groupSelect(), { target: { value: 'Axes' } })

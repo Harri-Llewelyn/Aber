@@ -3,17 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 /**
- * WCAG contrast guard for the theme tokens.
- *
- * Three separate colour bugs reached the browser in this codebase, all of the same shape: a
- * token that looked right in the theme it was authored in and was unreadable in the other.
- *   * the sign-in card referenced variables that did not exist and fell back to near-white
- *   * `.form-control::placeholder` had no rule and inherited a browser default
- *   * `.stat-sub` used --text-dim, which measured 2.15:1 in dark mode against --bg-card
- *
- * None of them were visible to a rendering test, because each renders *something*. Only a
- * contrast measurement catches them, so this computes the real ratios from App.css and holds
- * every text token to WCAG AA in BOTH themes.
+ * WCAG contrast guard for the theme tokens. A token that looks right in the theme it was authored
+ * in and is unreadable in the other is invisible to a rendering test, because each renders
+ * something. This computes the real ratios from App.css and holds every text token to WCAG AA in
+ * both themes.
  */
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
@@ -49,14 +42,10 @@ const AA_TEXT = 4.5      // body text
 const AA_LARGE = 3.0     // >=18px text, and graphical objects such as icons
 
 /**
- * APCA 0.98G-4g -- the perceptual contrast algorithm proposed for WCAG 3.
- *
- * WCAG 2's ratio is a poor predictor for dark text on mid-tone saturated fills, and this
- * codebase hit exactly that case: black on the light theme's accent measures 5.13:1 (a
- * comfortable WCAG 2 pass) while APCA scores it Lc 36.6, and it was reported as hard to read.
- * Filled buttons are therefore held to BOTH metrics.
- *
- * Thresholds on |Lc|: 45 large/bold minimum, 60 body text, 75 preferred for small text.
+ * APCA 0.98G-4g, the perceptual contrast algorithm proposed for WCAG 3. WCAG 2's ratio is a poor
+ * predictor for dark text on mid-tone saturated fills (black on the light accent passes WCAG 2 at
+ * 5.13:1 and scores Lc 36.6), so filled buttons are held to both metrics. Thresholds on |Lc|: 45
+ * large/bold minimum, 60 body text, 75 preferred for small text.
  */
 const Ys = ([r, g, b]) =>
   0.2126729 * Math.pow(r / 255, 2.4) + 0.7151522 * Math.pow(g / 255, 2.4) + 0.0721750 * Math.pow(b / 255, 2.4)
@@ -88,12 +77,10 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
   const alertCard = tint([255, 179, 0], 0.07, card)
 
   /**
-   * --bg-glass composited onto whatever it sits on.
-   *
-   * It is the hover ground for CopyableId, .btn-ghost, .btn-danger-reveal and every hovered
-   * table row -- and it is NOT the same overlay in both themes: white at 0.04 in dark, black at
-   * 0.02 in light. So it moves the surface in opposite directions, and a colour that is safe on
-   * a resting card is not automatically safe once something is pointed at.
+   * --bg-glass composited onto whatever it sits on. It is the hover ground for CopyableId,
+   * .btn-ghost, .btn-danger-reveal and every hovered row, and it is a different overlay in each
+   * theme (white at 0.04 in dark, black at 0.02 in light), so a colour safe on a resting card is
+   * not automatically safe once pointed at.
    */
   const glass = (base) => themeName === 'dark'
     ? tint([255, 255, 255], 0.04, base)
@@ -112,12 +99,9 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     // The alert card tints its background, which costs contrast; its sub-text is stepped up
     // to --text-muted precisely so this still clears AA.
     ['--text-muted on alert card',   '--text-muted',   alertCard, AA_TEXT],
-    // Warning used as TEXT must clear AA; --warning itself is only safe for borders/icons.
-    //
-    // Warning text almost always sits on an amber-tinted fill rather than the bare card --
-    // .badge-warning uses rgba(255,179,0,0.15), the inline banners 0.08 and 0.12. The tint
-    // lightens the surface and costs contrast, so each level is checked rather than assuming
-    // the bare-card figure carries over.
+    // Warning used as text must clear AA; --warning itself is only safe for borders and icons.
+    // Warning text sits on an amber-tinted fill (.badge-warning at 0.15, the banners at 0.08 and
+    // 0.12), which costs contrast, so each level is checked.
     ['--warning-text on card',        '--warning-text', card,                              AA_TEXT],
     ['--warning-text on alert card',  '--warning-text', alertCard,                         AA_TEXT],
     ['--warning-text on 0.08 tint',   '--warning-text', tint([255,179,0], 0.08, card),     AA_TEXT],
@@ -128,10 +112,8 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--success-text on 0.12 tint',   '--success-text', tint([0,232,150], 0.12, card),     AA_TEXT],
     ['--success-text on 0.15 tint',   '--success-text', tint([0,232,150], 0.15, card),     AA_TEXT],
     ['--success-text on base',        '--success-text', base,                              AA_TEXT],
-    // And again for danger. --danger clears AA on a bare card in both themes, which is why it was
-    // used as toast text -- but the error toast paints rgba(255,77,109,0.15) underneath it, and on
-    // that fill the light theme measured 3.94:1. --danger-text is the readable equivalent, and the
-    // tinted case is the one that actually renders.
+    // And again for danger: the error toast paints rgba(255,77,109,0.15) underneath its text, and
+    // on that fill --danger measured 3.94:1 in light. --danger-text is the readable equivalent.
     ['--danger-text on card',         '--danger-text',  card,                              AA_TEXT],
     ['--danger-text on base',         '--danger-text',  base,                              AA_TEXT],
     ['--danger-text on 0.15 tint',    '--danger-text',  tint([255,77,109], 0.15, card),    AA_TEXT],
@@ -141,29 +123,20 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger as text on card',      '--danger',       card,                              AA_TEXT],
     ['--danger border on card',       '--danger',       card,                              AA_LARGE],
     ['--accent on card',              '--accent',       card,                              AA_LARGE],
-    // The two derived lanes in the shopfloor grid tint their own ground -- .shopfloor-lane-site
-    // with rgba(0,212,255,0.05), .shopfloor-lane-queue with rgba(255,179,0,0.06). `.zone-empty`
-    // is the only text that sits directly on it rather than on a chip, and it is the text that
-    // matters most there: it is what an empty lane says instead of listing assets.
-    //
-    // It is set in --text-muted rather than --text-dim precisely because of these two rows.
-    // --text-dim measures exactly 4.50:1 on a bare card, so ANY tint pushes it under AA -- which
-    // is what these cases exist to catch if someone tunes the lane fills up.
+    // The two derived lanes tint their own ground, and `.zone-empty` is the only text that sits
+    // directly on it. It is set in --text-muted because --text-dim measures exactly 4.50:1 on a
+    // bare card, so any tint pushes it under AA.
     ['--text-muted on site-wide lane', '--text-muted',  tint([0,212,255], 0.05, card),     AA_TEXT],
     ['--text-muted on unassigned lane','--text-muted',  tint([255,179,0], 0.06, card),     AA_TEXT],
 
-    // ===== The components added across phases 2-5 =====
-    //
-    // .context-panel sits on --bg-surface, NOT --bg-card, so none of the card figures above
-    // describe it. Its field labels are the smallest text in the drawer and the first thing to
-    // become unreadable if a surface token is retuned.
+    // .context-panel sits on --bg-surface, not --bg-card, so none of the card figures describe it.
+    // Its field labels are the smallest text in the drawer.
     ['--text-muted on panel surface',  '--text-muted',  surface,                           AA_TEXT],
     ['--text-dim on panel surface',    '--text-dim',    surface,                           AA_TEXT],
     ['--text-primary on panel surface','--text-primary', surface,                          AA_TEXT],
-    // CopyableId is the pattern every identifier in the app now uses -- ids in tables (on the
-    // card), in the drawer (on the surface), and in the digital thread. It reveals a --bg-glass
-    // hover ground under itself, which lightens the surface in dark mode and darkens it in
-    // light, so the hover state is measured rather than assumed to be safe because the rest is.
+    // CopyableId is the pattern every identifier uses, on the card, on the surface and in the
+    // digital thread. It reveals a --bg-glass hover ground, so the hover state is measured rather
+    // than assumed.
     ['--accent id on card',            '--accent',      card,                              AA_LARGE],
     ['--accent id on glass hover',     '--accent',      glass(card),                       AA_LARGE],
     ['--text-muted id on glass hover', '--text-muted',  glass(card),                       AA_TEXT],
@@ -220,19 +193,10 @@ describe.each(Object.keys(THEMES))('filled buttons: %s', (themeName) => {
     ).toBeGreaterThanOrEqual(APCA_BODY)
   })
 
-  /*
-   * The count pill inside a selected filter button (issue #32).
-   *
-   * `.section-count` paints --accent on --accent-dim, which disappears once its button becomes
-   * `.btn-primary` -- an --accent-strong fill. Reported on the Vocabulary filter bar, and reported
-   * as WORSE IN DARK MODE, which is the tell: it was never measured in either.
-   *
-   * The fix inverts the button's own pairing -- the pill takes --accent-contrast as its fill and
-   * --accent-strong as its ink -- so it is the same two colours as the button label with the roles
-   * swapped. Contrast is symmetric, so this passes exactly where the label above it passes. That
-   * is the point of asserting it rather than eyeballing it: it cannot now be fixed in one theme
-   * and left broken in the other.
-   */
+  /* The count pill inside a selected filter button. `.section-count` paints --accent on
+     --accent-dim, which disappears on a `.btn-primary` fill; the pill takes --accent-contrast as
+     its fill and --accent-strong as its ink, the button's own pairing with the roles swapped, so it
+     passes exactly where the label passes. */
   it('count pill ink clears WCAG 2 AA on a selected filter button', () => {
     const ratio = contrast(rgb(t['--accent-strong']), rgb(t['--accent-contrast']))
     expect(
@@ -251,9 +215,8 @@ describe.each(Object.keys(THEMES))('filled buttons: %s', (themeName) => {
        the palette moved and .btn-primary .section-count may no longer be needed`
     ).toBeLessThan(AA_TEXT)
   })
-  // The amber counterpart. Archive and Deprecate paint a button filled with --warning, and both
-  // hardcoded `color: '#000'` for its ink -- a guess that happened to land, rather than a
-  // measured pairing, and the one thing the theme rules rule out.
+  // The amber counterpart: Archive and Deprecate paint a button filled with --warning, and its ink
+  // must be a measured pairing rather than a hardcoded black.
   it('warning button ink clears WCAG 2 AA on its fill', () => {
     const ratio = contrast(rgb(t['--warning-contrast']), rgb(t['--warning']))
     expect(
@@ -285,12 +248,8 @@ describe.each(Object.keys(THEMES))('filled buttons: %s', (themeName) => {
 })
 
 /**
- * No component writes a colour of its own.
- *
- * Every colour bug in the header comment above began as a literal in a component -- a value that
- * looked right in whichever theme its author had open, and could not follow the other. App.css is
- * the one place a colour is allowed to be written down, so this walks the component tree rather
- * than trusting review to catch the next one.
+ * No component writes a colour of its own. App.css is the one place a colour is written down, so
+ * this walks the component tree rather than trusting review.
  */
 describe('colours resolve through theme tokens', () => {
   const SRC = path.resolve(__dirname, '..')
@@ -307,10 +266,8 @@ describe('colours resolve through theme tokens', () => {
     for (const p of jsxFiles(SRC)) {
       const src = fs.readFileSync(p, 'utf8')
       for (const m of src.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
-        // Only colours in a style position count -- `#` appears in URLs and copy too. Comments
-        // are excluded deliberately: several of them QUOTE the literals that caused the original
-        // bugs ("the inputs were worse: a literal color: '#fff'"), and that record is the reason
-        // those bugs have not come back.
+        // Only colours in a style position count: `#` appears in URLs and copy too. Comments are
+        // excluded because some quote the literals that caused earlier bugs.
         const line = src.slice(src.lastIndexOf('\n', m.index) + 1, src.indexOf('\n', m.index))
         const trimmed = line.trim()
         if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue
@@ -322,9 +279,8 @@ describe('colours resolve through theme tokens', () => {
     expect(offenders, 'colours belong in App.css as tokens, not inline in a component').toEqual([])
   })
 
-  // The brand marks are the deliberate exception to "a token per theme": SharePoint blue is
-  // Microsoft's, not this app's, and must NOT flip with the theme. Asserted so the exception is
-  // recorded rather than looking like an oversight in the light block.
+  // The brand marks are the deliberate exception to a token per theme: SharePoint blue is
+  // Microsoft's and must not flip with the theme.
   it('keeps the brand marks identical across both themes', () => {
     for (const token of ['--brand-sharepoint', '--brand-drive']) {
       expect(THEMES.dark[token], `${token} must be defined`).toBeTruthy()
@@ -352,12 +308,9 @@ describe('colours resolve through theme tokens', () => {
 })
 
 /**
- * The type scale.
- *
- * Raised a step for shopfloor kiosk displays. The floor is the part worth guarding: 9px and 10px
- * text was scattered through the app in badges and captions, and it is unreadable at the distance
- * these screens are actually read from. Guarded in BOTH App.css and the components, because the
- * majority of the offenders were inline styles rather than rules.
+ * The type scale, raised for shopfloor kiosk displays. The floor is the part worth guarding: 9px
+ * and 10px text is unreadable at the distance these screens are read from. Guarded in App.css and
+ * the components, because most offenders were inline styles.
  */
 describe('type scale floor', () => {
   const SRC = path.resolve(__dirname, '..')
@@ -422,10 +375,9 @@ describe('type scale floor', () => {
 })
 
 /**
- * The toast is the one surface in the app that floats over arbitrary content, so a translucent
- * background there does not composite against a known colour -- it composites against whatever
- * table happened to be underneath. Every contrast figure computed in this file assumes an opaque
- * base, so these guard the assumption rather than the appearance.
+ * The toast floats over arbitrary content, so a translucent background there composites against
+ * whatever is underneath. Every contrast figure in this file assumes an opaque base, so these guard
+ * the assumption.
  */
 describe('toast opacity', () => {
   const ruleFor = (selector) => {

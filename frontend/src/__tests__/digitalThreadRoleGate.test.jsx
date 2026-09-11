@@ -26,8 +26,8 @@ beforeEach(() => {
 
 /**
  * The filter offers what the database will answer. `digital_thread_select_security` admits two
- * roles to the security domain; every other role that can read the thread sees the asset domain
- * only, and offering them Role assignments produced a filter that always read "no events".
+ * roles to the security domain; every other role sees the asset domain only, and offering them Role
+ * assignments produced a filter that always read "no events".
  */
 describe('which entity types a role is offered', () => {
   it('every kind names its audit domain', () => {

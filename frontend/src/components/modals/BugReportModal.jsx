@@ -4,9 +4,7 @@ import { IconBug, IconExternalLink } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 export function BugReportModal({ onClose, showToast, persona, activeTab }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onClose)
 
   const [title, setTitle]       = useState('')

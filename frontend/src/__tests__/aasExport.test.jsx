@@ -48,12 +48,8 @@ const routeGet = (path) => {
 }
 
 /**
- * Both export formats are actions on the device's context panel.
- *
- * They have moved twice: from a <select> that faked a menu (value="" plus a self-resetting
- * onChange), to a real overflow menu on the row, to the drawer -- which is where every other
- * per-device action ended up when the ACTIONS column was removed. What is asserted below is the
- * request each one issues and the file it writes, none of which changed.
+ * Both export formats are actions on the device's context panel. What is asserted is the request
+ * each one issues and the file it writes.
  */
 const openPanel = () => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(DEVICE.asset_name))

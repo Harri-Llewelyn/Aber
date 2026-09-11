@@ -6,19 +6,11 @@ import { assignableSchemas, isAssignableSchema } from '../utils/schemaVersion'
 import { api } from '../api'
 
 /**
- * Issue #167: an archived schema was still assignable to a device from Edit Details.
- *
- * WHAT MADE IT CRITICAL rather than untidy. Publishing v2 archives v1 and repoints every device
- * onto v2 in one transaction, so that no machine is judged against a contract the platform has
- * moved past. The dropdown offered v1 back afterwards -- one device at a time, with nothing that
- * would ever sweep it forward again -- and on a device set to `enforce`, being judged against the
- * superseded version means the daemon DROPS readings from a healthy machine.
- *
- * TWO ASSERTIONS, AND THE SECOND IS THE ONE A NAIVE FIX BREAKS. Filtering archived versions out of
- * the list is easy; keeping the one the device is ALREADY on is what stops the select falling back
- * to its first entry, showing a schema the device does not have, and reassigning it on the next
- * unrelated save. `0093` refuses the write as well -- these tests cover the half that stops the
- * mistake being offered.
+ * An archived schema must not be assignable from Edit Details: publishing v2 archives v1 and
+ * repoints every device, and a device set to `enforce` judged against the superseded version has
+ * readings dropped. Two assertions: archived versions are filtered out, and the version the device
+ * is already on is kept so the select does not fall back to its first entry and reassign on the
+ * next save. The database refuses the write as well.
  */
 
 vi.mock('../api', async () => {
@@ -83,8 +75,8 @@ const openEdit = () => {
 }
 
 /**
- * The schema picker, found by its "no schema" option rather than by position -- the modal holds
- * several selects and the tab holds a schema FILTER that legitimately lists archived versions.
+ * The schema picker, found by its "no schema" option rather than by position: the modal holds
+ * several selects and the tab holds a schema filter that legitimately lists archived versions.
  */
 const schemaSelect = () =>
   [...document.querySelectorAll('.modal select')].find(

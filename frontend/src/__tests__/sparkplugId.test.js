@@ -8,9 +8,8 @@ import {
 } from '../utils/sparkplugId';
 
 // These must stay in step with the generated column in
-// supabase/migrations/0001_baseline_schema.sql:
-//   'dev' || substr(encode(uuid_send(id), 'hex'), 1, 21)
-// If the two ever diverge, the UI silently queries telemetry for a device that does not exist.
+// supabase/migrations/0001_baseline_schema.sql: 'dev' || substr(encode(uuid_send(id), 'hex'), 1,
+// 21). If the two diverge, the UI queries telemetry for a device that does not exist.
 describe('sparkplug wire identifiers', () => {
   const UUID = 'ccd19944-8805-4c11-ae66-ea0d2c50f40c';
 

@@ -13,16 +13,11 @@ function schemaRequiredOverlap(schema, reportedMetrics) {
 }
 
 /**
- * Rank provisioned-but-never-seen devices as possible matches for a quarantined device.
- * A schema-based metric match (when the candidate has one assigned) is a stronger signal than
- * name similarity alone, so it's weighted into the upper half of the score range -- any real
- * metric overlap outranks a pure name coincidence.
- *
- * Since identity moved onto sparkplug_id, a device that publishes a valid id resolves exactly
- * and never reaches the queue at all. What is left here is the case fuzzy matching was always
- * for: a device provisioned in the dashboard, whose gateway then came online announcing
- * something else. The name to compare is the quarantined device's reported label -- `asset_id`
- * is the UUID of its own quarantine row and would match nothing.
+ * Rank provisioned-but-never-seen devices as possible matches for a quarantined device. A
+ * schema-based metric match is weighted into the upper half of the score range, so any real metric
+ * overlap outranks a name coincidence. A device that publishes a valid sparkplug_id resolves
+ * exactly and never reaches the queue; what is compared here is the quarantined device's reported
+ * label, since `asset_id` is the UUID of its own quarantine row.
  */
 export function suggestMatches(quarantineItem, assets, schemas, { limit = 1 } = {}) {
   const candidates = (assets || []).filter(isNeverSeen)

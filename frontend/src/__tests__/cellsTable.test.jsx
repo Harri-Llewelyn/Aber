@@ -5,17 +5,9 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
 
 /**
- * The Cells page as a table (issue #61).
- *
- * WHAT IT WAS. One card per cell, each carrying a header plus two full sub-tables -- gateways with
- * Sparkplug ID, status and heartbeat, devices with Sparkplug ID, status and gateway. Three cells
- * filled the viewport, so the page could not be scanned, and every cell added made it worse.
- *
- * WHAT MADE THAT SAFE TO DELETE rather than rearrange: the context drawer this page has carried
- * since its per-card actions moved into it already held the UUID, both membership lists as linking
- * chips, and every action. The card body was a second copy. So the fix is mostly subtraction, and
- * these tests pin the two halves of the result -- that the row carries enough to scan by, and that
- * what the row no longer carries is reachable in one click rather than gone.
+ * The Cells page as a table. The context drawer holds the UUID, both membership lists as linking
+ * chips, and every action; these tests pin that the row carries enough to scan by, and that what
+ * the row does not carry is reachable in one click.
  */
 
 vi.mock('../api', async () => {
@@ -69,9 +61,7 @@ const ready = async () => waitFor(() => expect(table()).toBeTruthy())
 
 beforeEach(() => { vi.clearAllMocks() })
 
-// ---------------------------------------------------------------------------------------------
 // The shape of the list
-// ---------------------------------------------------------------------------------------------
 
 describe('the cells table', () => {
   it('renders one row per cell with the five columns', async () => {
@@ -83,12 +73,9 @@ describe('the cells table', () => {
     expect(table().querySelectorAll('tbody tr')).toHaveLength(1)
   })
 
-  /*
-   * THE ICON EARNS ITS COLUMN. It is chosen in the New Cell form and was visible only on the
-   * shopfloor map; in a list where every other column is text it is the thing that makes a row
-   * recognisable without reading it. Its header is a screen-reader label because a 32px column
-   * cannot carry a word and a blank `th` announces as nothing at all.
-   */
+  /* The icon earns its column: in a list where every other column is text it makes a row
+     recognisable without reading. Its header is a screen-reader label because a blank `th`
+     announces as nothing. */
   it('draws the cell icon, and names the column for assistive technology only', async () => {
     renderCells()
     await ready()
@@ -111,9 +98,7 @@ describe('the cells table', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // The two membership columns
-// ---------------------------------------------------------------------------------------------
 
 describe('assigned gateways and devices', () => {
   it('names the gateways assigned to the cell', async () => {
@@ -123,11 +108,8 @@ describe('assigned gateways and devices', () => {
     expect(within(rowFor('Assembly Line 1')).getByText('Line_A_Gateway')).toBeTruthy()
   })
 
-  /*
-   * THE SAME COLUMN AS THE GATEWAYS PAGE'S Connected Devices, deliberately: it answers the same
-   * question about a different container, and a summary hidden behind a "+N" would defeat the
-   * column it summarises.
-   */
+  /* The same column as the Gateways page's Connected Devices: a summary hidden behind a "+N" would
+     defeat the column it summarises. */
   it('pins an Online/Offline summary ahead of the devices themselves', async () => {
     renderCells({}, { devices: [device(), device({ asset_id: 'dev-2', asset_name: 'CNC_Mill_02', status: 'OFFLINE' })] })
     await ready()
@@ -148,10 +130,8 @@ describe('assigned gateways and devices', () => {
     expect(within(row).getByRole('button', { name: /^\+/ })).toBeTruthy()
   })
 
-  /*
-   * A QUARANTINED DEVICE IS PINNED, for the reason Unmodelled is pinned on the Devices page: it is
-   * the one entry that calls for action, so it must not be the entry that gets collapsed away.
-   */
+  /* A quarantined device is pinned, as Unmodelled is on the Devices page: it is the entry that
+     calls for action. */
   it('keeps a quarantined device visible however many healthy ones surround it', async () => {
     renderCells({}, {
       devices: [
@@ -179,9 +159,7 @@ describe('assigned gateways and devices', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
-// The drawer, which is where the card body went
-// ---------------------------------------------------------------------------------------------
+// The drawer
 
 describe('the row and its drawer', () => {
   it('opens the drawer on a row click and marks the row', async () => {
@@ -210,12 +188,8 @@ describe('the row and its drawer', () => {
     expect(within(panel()).getByText('Archive Cell')).toBeTruthy()
   })
 
-  /*
-   * THE RETENTION DEADLINE MOVED, IT DID NOT GO. The card body carried a banner on every archived
-   * cell saying whether a purge timer was running and when it fires. That banner is gone with the
-   * body, and this was the one fact in it that lives nowhere else -- a retention deadline is not
-   * something to find out about by its passing.
-   */
+  /* A retention deadline is not something to find out about by its passing, so the drawer reports
+     it for an archived cell. */
   it('reports an archived cell’s retention deadline in the drawer', async () => {
     renderCells({}, {
       cells: [{ ...CELL, is_archived: true, auto_delete_at: '2026-12-01T00:00:00Z' }]
@@ -248,9 +222,7 @@ describe('the row and its drawer', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
-// The filters, which the table did not change
-// ---------------------------------------------------------------------------------------------
+// The filters
 
 describe('filters still narrow the table', () => {
   it('filters rows by name', async () => {

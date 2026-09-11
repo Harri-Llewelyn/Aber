@@ -1,27 +1,10 @@
 /**
- * Digital Thread: the action filter, and the two vocabularies this page speaks (issue #37).
- *
- * WHAT WAS REPORTED. "The Any Event filter field shows three options: Created, Updated and Deleted.
- * The graph below shows four events: Created, Operational, Configuration and Lifecycle. Some of the
- * events show a pill stating Inserted also, is this an event?"
- *
- * That is one screen carrying TWO OVERLAPPING TAXONOMIES and labelling them as if they were one:
- *
- *   * `digital_thread.action` -- what the database did. INSERT / UPDATE / DELETE, plus
- *     SCHEMA_REJECTION since archived migration 0026. This is what the drawer's badge shows.
- *   * `MARKERS` -- what it MEANT, derived client-side from the diff. Created / Operational /
- *     Configuration / Lifecycle, which is what colours the timeline.
- *
- * They are not the same partition. The filter's "Created" was INSERT, and the legend's "Lifecycle"
- * spans a DELETE *and* any UPDATE that archived or quarantined a row. Reusing two of the legend's
- * words for a different axis is what made them look like one taxonomy with a missing option.
- *
- * AND A SECOND BUG, NOT REPORTED, FOUND WHILE FIXING THE FIRST. `api.js` turned the choice into a
- * SQL predicate behind a hand-written allow-list, `['INSERT', 'UPDATE', 'DELETE']`. When 0026 added
- * SCHEMA_REJECTION the filter could not select it -- and it did not fail loudly. An unlisted action
- * fell through the `if` and applied NO predicate, so asking for one kind of event returned EVERY
- * kind. The tests below pin the refusal, because "returns everything" is the failure mode a caller
- * cannot see.
+ * Digital Thread: the action filter, and the two vocabularies this page speaks.
+ * `digital_thread.action` is what the database did (INSERT / UPDATE / DELETE plus the
+ * trigger-written kinds), shown on the drawer's badge; `MARKERS` is what it meant, derived
+ * client-side and colouring the timeline. The filter must use the first vocabulary. The allow-list
+ * in api.js must refuse an unknown action rather than apply no predicate, because "returns
+ * everything" is a failure a caller cannot see.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
@@ -64,24 +47,13 @@ const threadUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.include
 
 
 describe('the action filter offers every action the database can record', () => {
-  /*
-   * FIVE OF THESE ARE NOT WRITTEN BY THE GENERIC AUDIT TRIGGER, and each arrived with a feature
-   * that would have been unfilterable without an entry here: SCHEMA_REJECTION with 0026,
-   * CREDENTIAL_ISSUED with 0041, TOKEN_MINTED with 0043, and ROLE_GRANTED / ROLE_REVOKED with
-   * 0070 -- written by `log_role_assignment()`, which `user_roles` needs because it has no `id`
-   * column for the generic function to read.
-   *
-   * This assertion is spelled out rather than derived so that adding a sixth is a deliberate edit.
-   * The test below already proves the list cannot drift from the enum, and a check that only
-   * compared them to each other would pass while both were wrong.
-   */
+  /* Several of these are not written by the generic audit trigger. Spelled out rather than derived,
+     so adding one is a deliberate edit; the test below proves the list cannot drift from the enum. */
   it('lists every action, including the seven the generic trigger does not write', async () => {
     await show()
     const values = [...filter().querySelectorAll('option')].map(o => o.value)
 
-    // PROPOSAL_APPLIED and PROPOSAL_EXPIRED joined with 0086/0088. Pinned in ORDER as well as by
-    // membership, because this select is what a reader scans -- an action appended in the wrong
-    // place reads as a different kind of event from the ones it belongs beside.
+    // Pinned in order as well as by membership, because this select is what a reader scans.
     expect(values).toEqual([
       '', 'INSERT', 'UPDATE', 'DELETE', 'SCHEMA_REJECTION', 'CREDENTIAL_ISSUED', 'TOKEN_MINTED',
       'TOKEN_REVOKED', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'ROLE_GRANTED', 'ROLE_REVOKED'
@@ -89,11 +61,8 @@ describe('the action filter offers every action the database can record', () => 
   })
 
   it('is generated from the shared enum, so it cannot drift from the API allow-list', async () => {
-    /*
-     * THE POINT OF THE SHARED CONSTANT. The options and `api.js`'s allow-list were two hand-written
-     * lists that no test compared, which is exactly how 0026 could add an action that the filter
-     * silently could not select.
-     */
+    /* The point of the shared constant: the options and `api.js`'s allow-list must not be two
+       hand-written lists. */
     await show()
     const values = [...filter().querySelectorAll('option')].map(o => o.value).filter(Boolean)
 
@@ -112,11 +81,7 @@ describe('the action filter offers every action the database can record', () => 
 
 describe('the two vocabularies are kept apart', () => {
   it('the filter labels name the database action, not the marker classes', async () => {
-    /*
-     * The specific confusion in #37. "Created" appeared in BOTH the filter and the legend meaning
-     * different things, and "Updated"/"Deleted" had no legend counterpart at all. The filter now
-     * matches the raw badge shown in the event drawer instead.
-     */
+    /* The filter matches the raw badge shown in the event drawer, not the legend's derived words. */
     await show()
     const labels = [...filter().querySelectorAll('option')].map(o => o.textContent)
     const markerLabels = Object.values(MARKERS).map(m => m.label)
@@ -142,11 +107,8 @@ describe('the two vocabularies are kept apart', () => {
 
 
 describe('an unrecognised action must not widen the query', () => {
-  /*
-   * Exercised against the REAL api module, not the mock, because this is the branch that decides
-   * whether an unknown filter returns nothing or everything -- and the mocked `api.get` above is
-   * precisely the layer that would hide it.
-   */
+  /* Exercised against the real api module, because this branch decides whether an unknown filter
+     returns nothing or everything. */
   it('returns no rows rather than every row', async () => {
     const { api: realApi } = await vi.importActual('../api')
     const rows = await realApi.get('/api/v1/digital-thread?action=NOT_AN_ACTION')
@@ -155,25 +117,12 @@ describe('an unrecognised action must not widen the query', () => {
   })
 
   it('sends a recognised action to the database instead of short-circuiting', async () => {
-    /*
-     * THE OTHER DIRECTION, and the allow-list must not be narrower than the filter: if it were, a
-     * legitimate option would return an empty list and read as "no such events ever happened" --
-     * the same invisible failure in reverse.
-     *
-     * ASSERTED ON WHETHER A QUERY WAS BUILT, not on what came back. The first version of this test
-     * ran each valid action for real and expected it to REJECT, on the reasoning that a request
-     * reaching a dead backend fails fast. It does locally. In CI there is no Supabase at all, so
-     * the fetch hung and the test died on a 5s timeout -- a test that passed or failed on network
-     * timing rather than on the branch it was written to cover. Stubbing the client makes the
-     * question deterministic and offline: did the recognised action reach `.from()`, and did the
-     * unrecognised one not?
-     */
+    /* The other direction: the allow-list must not be narrower than the filter, or a legitimate
+       option reads as "no such events". Asserted on whether a query was built, not on what came
+       back, so the test is deterministic offline. */
     vi.resetModules()
-    // THE STUB FOLLOWS THE MECHANISM. This page is served by the `digital_thread_page` RPC since
-    // archived migration 0039 -- the deleted-asset filter is an anti-join PostgREST cannot express -- so the
-    // recognised action now has to arrive as an ARGUMENT rather than as a `.eq()` on a builder.
-    // The question the test asks is unchanged: did it reach the database, and did the unrecognised
-    // one stop here?
+    // The stub follows the mechanism: this page is served by the `digital_thread_page` RPC, so the
+    // recognised action arrives as an argument rather than a `.eq()` on a builder.
     const built = []
     vi.doMock('../lib/supabaseClient', () => ({
       supabase: {

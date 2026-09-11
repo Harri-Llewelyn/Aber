@@ -3,16 +3,9 @@ import { vocabularySections, adoptedVocabulary } from '../../utils/mtconnect'
 import { STANDARDS } from '../../utils/standards'
 
 /**
- * The MTConnect tab of the unified Standard Vocabulary Reference card.
- *
- * No longer a card of its own: all three vocabularies now share one container (common/VocabularyPanel).
- * What lives here is only the MTConnect-specific data -- how sections are derived, what an entry's
- * tooltip says, and what counts as adopted.
- *
- * The Metric Catalog above the card lists what this deployment's devices actually publish, a handful
- * of entries. That made the standard behind them invisible: 249 data item types were reachable only
- * by scrolling a dropdown inside the Add Metric form, so the page looked like it had no vocabulary
- * at all. This is the reference view; it never writes anything.
+ * The MTConnect tab of the Standard Vocabulary Reference card (common/VocabularyPanel): how
+ * sections are derived, what an entry's tooltip says, and what counts as adopted. A reference view;
+ * it never writes anything.
  */
 export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
   // vocabularySections() returns plain name lists; the panel takes item objects, so each section is

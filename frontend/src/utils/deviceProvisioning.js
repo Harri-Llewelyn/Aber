@@ -1,10 +1,7 @@
 /**
- * Provisioned-device staleness helpers.
- *
- * A device created via the manual "add device" form has no way to distinguish "just fine,
- * sitting idle" from "was supposed to report in by now and hasn't" -- status defaults to
- * OFFLINE either way. first_dbirth_at (set once, by ingestion.py, on the device's real first
- * birth) is the signal; this mirrors gatewayStatus.js's client-side, no-backend-cron pattern.
+ * Provisioned-device staleness helpers. A manually added device defaults to OFFLINE whether idle or
+ * overdue; `first_dbirth_at`, set once by ingestion on the real first birth, is the signal.
+ * Client-side, like gatewayStatus.js.
  */
 
 const PROVISIONING_OVERDUE_MS = 24 * 60 * 60 * 1000 // 24h

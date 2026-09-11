@@ -7,9 +7,8 @@ import { usePendingAction } from '../../hooks/usePendingAction'
 export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, onCancel }) {
   const [deprecating, runDeprecate] = usePendingAction()
 
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both. Inert mid-flight -- see ConfirmModal.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
+  // Inert mid-flight; see ConfirmModal.
   useEscapeKey(deprecating ? () => {} : onCancel)
 
   const [supersededBy, setSupersededBy] = useState('')

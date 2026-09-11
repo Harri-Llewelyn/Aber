@@ -1,18 +1,8 @@
 /**
- * The appliance-health helpers on the Gateways page (archived migration 0035).
- *
- * WHY EACH OF THESE IS WORTH A TEST. Every one of them, broken, is wrong in the quiet direction --
- * a plausible number on a page an operator acts on:
- *
- *   * A ZERO READING AND AN UNREPORTED ONE MUST NOT RENDER THE SAME. Every column here is NULL on a
- *     virtual gateway and on any appliance running a bundle older than 0035. "0 B free" and "we
- *     have not been told" call for opposite responses, and the second is the common case.
- *   * AN EXPIRED CA MUST READ AS EXPIRED. It is the failure the whole item exists for, and a signed
- *     day count ("in -3d") is a number somebody has to decode at the moment they are least likely
- *     to bother.
- *   * THE WARNING WINDOW MUST MATCH THE ALERT. CERT_EXPIRY_WARN_DAYS mirrors the `lt 30` threshold
- *     in the Grafana rule; a UI warning on a different horizon sends an operator looking for a rule
- *     that has not fired.
+ * The appliance-health helpers on the Gateways page. Each, broken, is wrong in the quiet direction:
+ * a zero reading and an unreported one must not render the same (every column is NULL on a virtual
+ * gateway); an expired CA must read as expired rather than as a negative day count; and
+ * CERT_EXPIRY_WARN_DAYS mirrors the Grafana rule's threshold so the UI warning and the alert agree.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -39,9 +29,8 @@ describe('certificate expiry', () => {
   });
 
   it('treats an unreported certificate as absent, not as expired', () => {
-    // THE DISTINCTION THAT MATTERS MOST. A gateway that has not told us is not a gateway whose
-    // certificate has gone -- and null is what the panel turns into "Not set" rather than a
-    // warning colour.
+    // The distinction that matters most: a gateway that has not told us is not one whose
+    // certificate has gone, and null becomes "Not set" rather than a warning colour.
     expect(certExpiryDays(null, NOW)).toBeNull();
     expect(formatCertExpiry(null, NOW)).toBeNull();
     expect(isCertExpiring(null, NOW)).toBe(false);

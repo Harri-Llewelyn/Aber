@@ -19,17 +19,12 @@ vi.mock('../api', async () => {
 })
 
 /**
- * Feedback for asynchronous mutations.
- *
- * The complaint these answer is precise: a click on Save, Archive or Approve produced NOTHING
- * until the request came back. On a slow link that is indistinguishable from a dead button, and
- * the reliable operator response to a dead button is to click it again -- which is how one save
- * became two writes.
+ * Feedback for asynchronous mutations: a click on Save, Archive or Approve must show something
+ * before the request returns, because a dead-looking button gets clicked again and one save becomes
+ * two writes.
  */
 
-// ---------------------------------------------------------------------------------------------
 // The button
-// ---------------------------------------------------------------------------------------------
 
 describe('ActionButton pending state', () => {
   it('is an ordinary button at rest', () => {
@@ -83,14 +78,10 @@ describe('ActionButton pending state', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // The double-submit guard
-// ---------------------------------------------------------------------------------------------
 
-// `run` propagates whatever the action threw rather than swallowing it -- an error that vanishes
-// with no toast and no console entry is the worst outcome available. Every real call site passes a
-// handler that catches internally and toasts, so nothing floats a rejection there; this probe
-// deliberately passes one that does NOT, so the catch belongs here.
+// `run` propagates whatever the action threw. Every real call site catches and toasts; this probe
+// deliberately passes one that does not, so the catch belongs here.
 function DoubleClickProbe({ action }) {
   const [pending, run] = usePendingAction()
   return (
@@ -141,9 +132,7 @@ describe('usePendingAction', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // The top bar's activity line
-// ---------------------------------------------------------------------------------------------
 
 function ActivityProbe() {
   const busy = useApiActivity()
@@ -159,10 +148,8 @@ describe('topbar activity indicator', () => {
 
   const state = () => screen.getByTestId('activity').textContent
 
-  // THE POINT OF THE DELAY. Every list tab polls -- every 3s with Realtime off -- and those reads
-  // settle in tens of milliseconds. Without this the bar would blink several times a minute on an
-  // idle screen, and a light that is always flickering says nothing about whether YOUR click is
-  // being worked on.
+  // The point of the delay: every list tab polls and those reads settle in tens of milliseconds, so
+  // without it the bar would blink on an idle screen.
   it('stays dark for a request that settles inside the delay', () => {
     render(<ActivityProbe />)
 
@@ -238,9 +225,7 @@ describe('topbar activity indicator', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // Modals
-// ---------------------------------------------------------------------------------------------
 
 describe('ConfirmModal while its action runs', () => {
   it('reports the wait on the confirming button and locks Cancel', async () => {
@@ -259,9 +244,8 @@ describe('ConfirmModal while its action runs', () => {
     await act(async () => { release() })
   })
 
-  // Escape mid-flight must not reach the dialog UNDERNEATH -- which is what popping this layer off
-  // the shared stack would do, dismissing the form that asked the question while its own mutation
-  // was still running.
+  // Escape mid-flight must not reach the dialog underneath, which is what popping this layer off
+  // the shared stack would do.
   it('ignores Escape while the action is in flight, without handing it to the layer below', async () => {
     const onCancel = vi.fn()
     const belowCancel = vi.fn()
@@ -330,9 +314,7 @@ describe('ArchiveModal while the archive runs', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // The form that is not a modal component of its own
-// ---------------------------------------------------------------------------------------------
 
 const cell = { cell_id: 'cell-1', cell_name: 'Assembly Line 1', is_archived: false, gateways: [], gateway_count: 0 }
 
@@ -370,9 +352,7 @@ describe('CellsTab save button', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // Drag and drop
-// ---------------------------------------------------------------------------------------------
 
 const dropGateway = {
   gateway_id: 'gw-1', gateway_name: 'Virtual_Gateway_NodeRED', cell_id: 'cell-1',
@@ -407,21 +387,9 @@ describe('shopfloor drop feedback', () => {
     dataTransfer: { getData: () => JSON.stringify(dropDevice) }
   })
 
-  /*
-   * WHAT THE PENDING MARK MEANS NOW.
-   *
-   * It used to mean "an api.put for this tile is in flight", because a drop WAS a write and the
-   * map showed nothing at all until it came back -- indistinguishable from a refused drop, and
-   * the reliable response to a refused drop is to drag it again, which is how one move became two
-   * writes.
-   *
-   * A drop is no longer a write. Moves are staged and applied as one transaction (migration
-   * 0033), so the chip moves the instant it is released and there is no in-flight request to
-   * report. The problem inverts: the risk is no longer that a real move looks like it failed, it
-   * is that a STAGED move looks like it succeeded. So the mark now says "this tile holds moves
-   * that have not been written", which is the question an operator actually has to answer before
-   * leaving the page.
-   */
+  /* What the pending mark means: a drop is staged, not written, so the chip moves at once and the
+     risk is that a staged move looks like it succeeded. The mark says the tile holds moves that
+     have not been written. */
   it('marks the destination tile as holding unapplied moves, and writes nothing', async () => {
     renderMap()
 
@@ -504,9 +472,8 @@ describe('shopfloor drop feedback', () => {
 
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: /Apply 1 move/ })) })
 
-    // THE WORK SURVIVES ITS OWN FAILURE. The RPC refuses a batch in full, so the floor is exactly
-    // as it was -- discarding the operator's staged moves here would lose work the database never
-    // touched, which is the outcome staging exists to prevent.
+    // The work survives its own failure: the RPC refuses a batch in full, so the staged moves are
+    // kept rather than discarded.
     expect(await screen.findByRole('button', { name: /Apply 1 move/ })).toBeInTheDocument()
     expect(zone.className).toMatch(/shopfloor-zone-pending/)
     // The exact failure, not a generic one -- an RLS refusal and a dropped connection need
@@ -531,9 +498,7 @@ describe('shopfloor drop feedback', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // The styles the markup above depends on
-// ---------------------------------------------------------------------------------------------
 
 describe('App.css carries the states the components ask for', () => {
   const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
@@ -578,9 +543,8 @@ describe('App.css carries the states the components ask for', () => {
     expect(block.slice(0, 400)).toMatch(/animation:\s*none/)
   })
 
-  // The lesson this file has learned three times: `.shopfloor-zone:hover` (0-2-0) repaints
-  // border-color on every tile, and the pointer is BY DEFINITION on a tile that was just dropped
-  // onto. A single-class rule would never once be seen.
+  // `.shopfloor-zone:hover` (0-2-0) repaints border-color on every tile, and the pointer is by
+  // definition on the tile just dropped onto, so a single-class pending rule would never be seen.
   it('states the pending tile at a specificity hover cannot take away', () => {
     expect(APP_CSS).toMatch(/\.shopfloor-zone\.shopfloor-zone-pending \{/)
     expect(APP_CSS).toMatch(/\.shopfloor-zone\.shopfloor-zone-pending:hover \{/)

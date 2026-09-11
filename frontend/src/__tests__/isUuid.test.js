@@ -45,9 +45,7 @@ describe('isUuid helper and injection prevention', () => {
 
     const queryBuilder = supabase.from('devices');
 
-    // Assert exact equality matching rather than raw template interpolation. The column is
-    // always `id` now: devices used to be addressable by Sparkplug B name as well, which is
-    // why this call site had to sniff the id's format first.
+    // Exact equality matching on `id`, the only column devices are addressed by.
     expect(queryBuilder.eq).toHaveBeenCalledWith('id', maliciousId);
     expect(queryBuilder.or).not.toHaveBeenCalled();
   });

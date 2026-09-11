@@ -3,31 +3,11 @@ import { FORGE_ORGANISATION, GITEA_URL } from '../../constants'
 import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch } from './Icons'
 
 /**
- * Where a gateway's flow lives, and where a change to it is proposed: its own repository in the
- * forge. This panel is a link, and the link is the whole of it.
- *
- * ---------------------------------------------------------------------------------------------
- * THIS REPLACED A PROPOSAL DROPZONE, AND THE REPLACEMENT IS A REMOVAL RATHER THAN A RENAME.
- *
- * `FlowProposalPanel` took a `flows.json` here and had an edge function commit it to a branch and
- * open a pull request, because the forge had no login of its own and the proposer's name could only
- * reach it in a commit message. The forge has a door now -- the same two roles that review a flow
- * sign in with their dashboard identity (supabase/README.md, "The forge's door") -- so a pull request opened THERE, under the
- * author's own name, is the better record, and a second way to open one from here would be a second
- * path to the same state. The endpoint went with the dropzone.
- *
- * THE OPERATOR GATE WENT WITH IT, KNOWINGLY. The dropzone admitted Operators on the argument that a
- * review step whose proposals can only come from the roles that may merge them is a formality. The
- * roles that author flows on a plant are the two the forge admits, and a review whose proposals come
- * from managers and whose merges need an administrator's approval is still two privileges rather
- * than one. `main` is protected in every gateway repository; the forge enforces that, not this.
- *
- * ---------------------------------------------------------------------------------------------
- * THE PATH IS DERIVED, NOT FETCHED. The repository is named from the `sparkplug_id` in
- * _shared/forge.ts and lives in the organisation named there and in constants.js; nothing is
- * stored and nothing can drift, which is the argument against a pointer column. The
- * address is the forge's door, so an Operator who somehow followed it would meet the gateway's
- * 403 rather than a repository.
+ * Where a gateway's flow lives and where a change to it is proposed: its own repository in the
+ * forge, reached by the forge's door (supabase/README.md, "The forge's door"). The path is derived,
+ * not stored: the repository is named from the `sparkplug_id` in _shared/forge.ts and lives in the
+ * organisation named there and in constants.js. Pull requests are opened in the forge under the
+ * author's own name; `main` is protected there.
  */
 export function gatewayRepositoryUrl(gateway) {
   return `${GITEA_URL}/${FORGE_ORGANISATION}/gateway-${gateway.sparkplug_id}`
@@ -39,11 +19,9 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
   if (!canOpenForge) return null
 
   /**
-   * A HOST-RUN GATEWAY HAS NO REPOSITORY OF ITS OWN, and the reason is worth stating rather than
-   * hiding the panel silently. Its connector runs in THIS stack's Node-RED, and one instance can
-   * carry several host gateways at once -- `flows.json` there is the whole instance, not one
-   * gateway's. Repositories are created when an appliance enrols with a deploy key, and a host-run
-   * gateway never enrols, so there is nothing to link to and nothing that should be.
+   * A host-run gateway has no repository: its connector runs in this stack's Node-RED, whose
+   * `flows.json` is the whole instance, and repositories are created only when an appliance enrols
+   * with a deploy key. The panel says so rather than hiding.
    */
   if (gateway?.deployment === 'host') {
     return (
@@ -71,11 +49,9 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
         issues are the gateway's incident log, and its wiki is for what a person needs to know
         and the appliance never reads.
       </div>
-      {/* REAL LINKS, for the reason the Node-RED link is one: middle-click and copy-link work,
-          and the usual next step is sending one to whoever is reviewing. Three, not one, because
-          the repository, its issues and its wiki are three different acts -- change the flow,
-          record an incident, write down what is known -- and a person arriving from an alert
-          should not have to find the Issues tab in another product. */}
+      {/* Real links, so middle-click and copy-link work. Three because the repository, its issues
+          and its wiki are three different acts: change the flow, record an incident, write down
+          what is known. */}
       <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
         <a
           className="btn btn-ghost"

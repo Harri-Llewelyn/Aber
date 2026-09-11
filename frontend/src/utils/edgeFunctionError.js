@@ -1,17 +1,13 @@
 /**
- * Extracts the real error message from a failed supabase.functions.invoke() call.
+ * Extracts the real error message from a failed supabase.functions.invoke() call. supabase-js v2
+ * rejects any non-2xx response with the generic "Edge Function returned a non-2xx status code"; the
+ * server's JSON body is only reachable through `error.context`, the raw Response. Our functions
+ * return `{ error, details? }` and the runtime router returns `{ msg }`; both are handled.
  *
- * supabase-js v2 rejects any non-2xx response as a FunctionsHttpError whose
- * `.message` is always the generic "Edge Function returned a non-2xx status code".
- * The server's JSON body is only reachable via `error.context`, which is the raw
- * Response. Without unwrapping it, a 403 "Forbidden: Insufficient privileges"
- * reaches the user as that opaque generic string.
+ * @param {unknown} error The error returned by supabase.functions.invoke().
  *
- * Our Edge Functions return `{ error, details? }`; the runtime router returns
- * `{ msg }`. Both shapes are handled.
+ * @param {string} fallback Message to use when nothing better can be extracted.
  *
- * @param {unknown} error - The error returned by supabase.functions.invoke().
- * @param {string} fallback - Message to use when nothing better can be extracted.
  * @returns {Promise<string>} The most specific message available.
  */
 export async function edgeFunctionErrorMessage(error, fallback = 'Edge Function call failed') {

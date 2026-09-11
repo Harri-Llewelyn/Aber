@@ -13,11 +13,10 @@ const virtual = (over = {}) => ({ deployment: 'host', is_archived: false, status
 
 describe('credentialState', () => {
   /**
-   * THE STATE THE WHOLE PAGE TURNS ON. A demonstration stack has four working credentials issued
-   * by `provision-gateways.mjs`, and the platform has no record of any of them --
-   * `record_gateway_credential_issued()` cannot be called for a script, because has_role()
-   * resolves through auth.uid(). Reporting that as "no credential" would be a claim about the
-   * broker that nothing in the frontend is in a position to make.
+   * The state the whole page turns on: a demonstration stack has working credentials issued by
+   * `provision-gateways.mjs` with no record of them, because `record_gateway_credential_issued()`
+   * cannot be called for a script. Reporting that as "no credential" would be a claim about the
+   * broker the frontend cannot make.
    */
   it('reports an unrecorded credential as unrecorded, not as absent', () => {
     const state = credentialState(virtual(), null)
@@ -27,9 +26,8 @@ describe('credentialState', () => {
   })
 
   /**
-   * REVOKED OUTRANKS ISSUED. 0038 rotates the account to a password nobody records, and its sweep
-   * can clear an optimistic stamp -- so a gateway carrying both is one whose issue came first.
-   * Checking issue first would show a decommissioned gateway as credentialled.
+   * Revoked outranks issued: archiving rotates the account to a password nobody records, so a
+   * gateway carrying both is one whose issue came first.
    */
   it('ranks revocation above an earlier issue record', () => {
     const g = physical({
@@ -45,9 +43,8 @@ describe('credentialState', () => {
   })
 
   /**
-   * A virtual gateway has no enrolment by construction -- enroll-gateway refuses one -- so its
-   * only record is the audit row. Reading enrolled_at for it would be reading a column that is
-   * NULL by design and calling the result an answer.
+   * A virtual gateway has no enrolment by construction, so its only record is the audit row;
+   * enrolled_at is NULL by design.
    */
   it('reads a virtual gateway from its audit row', () => {
     expect(credentialState(virtual(), '2026-08-26T00:00:00Z')).toBe(CREDENTIAL_STATES.ISSUED)
@@ -55,8 +52,8 @@ describe('credentialState', () => {
   })
 
   /**
-   * PENDING_ENROLLMENT means a bundle is out and unredeemed. AWAITING_BIRTH means it WAS redeemed
-   * -- a credential exists on the appliance -- so it must not read as outstanding.
+   * PENDING_ENROLLMENT means a bundle is out and unredeemed. AWAITING_BIRTH means it was redeemed,
+   * so a credential exists on the appliance.
    */
   it('separates a bundle that is outstanding from one already redeemed', () => {
     expect(credentialState(physical({ status: 'PENDING_ENROLLMENT' }), null))
@@ -80,9 +77,8 @@ describe('credentialAction', () => {
   })
 
   /**
-   * Mirrors 0041's refusal and 0037's reason: a bundle downloaded before archiving stayed
-   * redeemable afterwards and resurrected the row, and minting directly is the same hole in one
-   * step. A button the API then refuses is worse than no button.
+   * Nothing is offered on an archived gateway: a bundle downloaded before archiving must not stay
+   * redeemable, and the API refuses a direct mint.
    */
   it('offers nothing on an archived gateway, of either kind', () => {
     expect(credentialAction(virtual({ is_archived: true }))).toBeNull()

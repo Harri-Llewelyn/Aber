@@ -1,19 +1,16 @@
 import { isGatewayOnline, isGatewayPending } from './gatewayStatus'
 
 /**
- * The Overview ribbon's figures. A shadow row is not part of the fleet, and this is the only place
- * that rule is written: the playback gateway is neither archived nor pending, so counted raw it
- * lands in the OFFLINE bucket and reports a permanent fault. The shadow count is returned
- * separately for a tooltip, outside the four buckets, which stay mutually exclusive and sum to
- * `total`.
+ * The Overview ribbon's figures. A shadow row is not part of the fleet: the playback gateway is
+ * neither archived nor pending, so counted raw it lands in OFFLINE. The shadow count is returned
+ * separately; the four buckets stay mutually exclusive and sum to `total`.
  */
 
 /** The playback gateway (0060). One row per stack, seeded rather than created. */
 export const isShadowGateway = (g) => !!(g && g.is_shadow)
 
 /**
- * A shadow device: a stand-in minted per device a capture recorded. `shadow_of` names the original,
- * so its presence is what makes the row a shadow.
+ * A shadow device: a stand-in minted per device a capture recorded. `shadow_of` names the original.
  */
 export const isShadowDevice = (d) => !!(d && d.shadow_of)
 
@@ -38,8 +35,7 @@ export function gatewayFleetCounts(gateways = []) {
 
 /**
  * Device buckets over the real fleet. Quarantined is its own bucket, excluded from online and
- * offline, so a pending device is not reported twice. A missing `status` reads as online: a device
- * before its first birth has none.
+ * offline. A missing `status` reads as online: a device before its first birth has none.
  */
 export function deviceFleetCounts(devices = []) {
   const real = devices.filter((d) => !isShadowDevice(d))

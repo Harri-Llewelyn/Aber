@@ -20,18 +20,10 @@ vi.mock('../api', () => ({
 }))
 
 /**
- * The Approvals page.
- *
- * THE PROPERTY WORTH GUARDING HERE IS THE ASYMMETRY, and it is invisible in a screenshot: a
- * `Shopfloor_Manager` decides the asset lanes and an `Administrator` alone decides a schema
- * publication, because `0069` withdrew `schema:manage` from that role and `0087` made the RPC
- * enforce it. A page that offered Approve on a schema proposal to a manager would not be a
- * security hole -- the RPC refuses it -- but it would be a button that always fails, which is how
- * people learn to distrust a control rather than a permission.
- *
- * THE SECOND IS THE CAP'S REPAIR. The per-asset cap is only livable if editing the proposal you
- * already have is one click from the refusal; otherwise the constraint reads as a wall and people
- * propose against a neighbouring asset instead, or stop proposing.
+ * The Approvals page. The property worth guarding is the asymmetry: a `Shopfloor_Manager` decides
+ * the asset lanes and only an `Administrator` decides a schema publication, and the page must not
+ * offer a button the RPC will refuse. The second is the cap's repair: editing the proposal you
+ * already have must be one click from the refusal.
  */
 
 const OPERATOR_ID = 'aaaaaaaa-0000-4000-8000-000000000001'
@@ -88,12 +80,8 @@ function mockLoad(proposals) {
 }
 
 /**
- * Select a row, which is what opens the drawer the actions live in.
- *
- * THE ACTIONS ARE NOT ON THE ROW, and that is the app's own convention rather than this page's
- * invention: Cells, Gateways and Devices all moved their actions into the context drawer, because
- * a card per row put three proposals in a viewport and made the list unscannable at the size a
- * queue actually reaches.
+ * Select a row, which opens the drawer the actions live in. The actions are not on the row, by the
+ * app's convention.
  */
 async function selectRow(index = 0) {
   const rows = await screen.findAllByTestId('proposal-row')
@@ -124,9 +112,8 @@ describe('who may decide which lane', () => {
   })
 
   it('does NOT let a manager decide a schema publication', () => {
-    // 0069 withdrew schema:manage from this role; 0087 made publish_schema_version() enforce it.
-    // 0090 WITHDREW THE LANE. It is false for an Administrator too -- nothing new can be filed in
-    // it and nothing left in it can be decided, so a button here would lead to a refusal.
+    // The schema lane is withdrawn: nothing can be filed in it and nothing left in it can be
+    // decided, so it is false for an Administrator too.
     expect(canDecide('schemas', 'Shopfloor_Manager')).toBe(false)
     expect(canDecide('schemas', 'Administrator')).toBe(false)
   })
@@ -169,9 +156,8 @@ describe('the page draws the gate it was given', () => {
   })
 
   it('offers nobody a decision on a proposal in the withdrawn schema lane', async () => {
-    // 0090 withdrew it. Historical rows still render -- the CHECK constraint still admits the
-    // string so the record survives -- but there is no decision left to make on one, and a button
-    // here would lead straight to a refusal.
+    // The schema lane is withdrawn. Historical rows still render, but there is no decision left to
+    // make on one.
     mockLoad([schemaProposal()])
     renderTab({ userRole: 'Administrator' })
     await selectRow()
@@ -180,9 +166,8 @@ describe('the page draws the gate it was given', () => {
   })
 
   it('offers a proposer Withdraw on their own open proposal, and no decision', async () => {
-    // EDIT IS NOT A BUTTON HERE ANY MORE. Extending a proposal means changing the same fields the
-    // asset's own dialog owns, so it is a hand-over to that page rather than a second form on this
-    // one -- and it only appears when the caller supplied somewhere to hand over to.
+    // Edit is not a button here: extending a proposal is a hand-over to the asset's own dialog, and
+    // appears only when the caller supplied somewhere to hand over to.
     mockLoad([deviceProposal()])
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
     await selectRow()
@@ -268,9 +253,7 @@ describe('rejecting', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
     const heading = await screen.findByText('Reject this proposal')
-    // SCOPED TO THE DIALOG. The card's Reject and the dialog's confirm are both `btn-danger`, so a
-    // query over the whole document finds the one that opened the dialog rather than the one that
-    // sends it -- and the assertion would then be about the wrong button entirely.
+    // Scoped to the dialog: the card's Reject and the dialog's confirm are both `btn-danger`.
     const dialog = heading.closest('.modal')
     const confirm = within(dialog).getByRole('button', { name: 'Reject' })
 
@@ -409,9 +392,8 @@ describe('finding a decision again', () => {
   })
 
   it('does not filter the queue that is still waiting', async () => {
-    // THE TWO FILTER BARS ARE INDEPENDENT, which matters more now that the queue has one of its
-    // own: a single shared filter would hide something waiting for a decision behind a control
-    // somebody set while reading the record and then forgot.
+    // The two filter bars are independent, so a filter set while reading the record cannot hide
+    // something waiting for a decision.
     mockLoad([
       deviceProposal({ id: 'open-1', target_label: 'Waiting_Device' }),
       schemaProposal({

@@ -6,22 +6,12 @@ import { IconDownload, IconAlertTriangle, IconX } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
- * CSV export for a selection of one device's metrics over a chosen time range.
- *
- * PAGINATED, AND BOUNDED. `postgres_fdw` pushes WHERE clauses down to TimescaleDB but not LIMIT,
- * so an unbounded range materialises the whole matching set inside Supabase before trimming it
- * (README known issue #4). A 30-day export across several metrics has no natural size, so this
- * pages in TELEMETRY_PAGE_SIZE batches and stops at TELEMETRY_EXPORT_MAX_ROWS.
- *
- * ON HITTING THE CEILING IT STILL DOWNLOADS, carrying the most recent rows, and says so -- in the
- * dialog and again in a comment line at the top of the file. A button labelled "Export" that
- * silently hands over a partial file is worse than one that admits the range was too wide: the
- * partial file looks complete, and the gap is at the far end where nobody checks.
- *
- * ONE METRIC PER REQUEST, RUN SEQUENTIALLY. `metric_name` is an equality filter, so N selected
- * metrics are N paged sequences. They are not run in parallel: concurrent range scans over the
- * FDW are precisely the load pattern issue #4 warns about, and an export is not urgent enough to
- * justify it.
+ * CSV export for a selection of one device's metrics over a chosen time range. Paginated and
+ * bounded: `postgres_fdw` pushes WHERE down to TimescaleDB but not LIMIT, so this pages in
+ * TELEMETRY_PAGE_SIZE batches and stops at TELEMETRY_EXPORT_MAX_ROWS. On hitting the ceiling it
+ * still downloads the most recent rows and says so, in the dialog and in a comment line at the top
+ * of the file. One metric per request, run sequentially, since concurrent range scans over the FDW
+ * are the load pattern to avoid.
  */
 
 const PRESETS = [
@@ -40,9 +30,7 @@ function toLocalInputValue(date) {
 }
 
 export function TelemetryExportModal({ device, metricNames, onClose, showToast }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onClose)
 
   const [mode, setMode]       = useState('preset')   // 'preset' | 'custom'
@@ -123,9 +111,8 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
         return
       }
 
-      // Flattened deliberately: the three val_* columns are an implementation detail of the
-      // hypertable, and a CSV with two empty columns on every row is worse to read than one
-      // `value` column plus the type that produced it.
+      // Flattened: the three val_* columns are an implementation detail of the hypertable, so the
+      // CSV carries one `value` column plus the type that produced it.
       const flat = rows.map(r => ({
         time: r.time,
         asset_id: r.asset_id,

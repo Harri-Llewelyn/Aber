@@ -6,35 +6,13 @@ import { IconActivity, IconDownload, IconLock, IconX } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
- * Per-device telemetry inspector: what each of this device's metrics last read, and when.
- *
- * THIRD HOME FOR THIS TABLE, and each move was for the same reason -- it is a four-column table
- * and it kept being given somewhere too narrow to be one:
- *
- *   * a standalone Telemetry PAGE browsed the whole fleet and made you pick a device from a
- *     dropdown, so looking at one machine cost a tab switch and a filter;
- *   * an inline row ACCORDION fixed that but reflowed the device table under the cursor;
- *   * the context PANEL fixed that and is 360px wide, which is not a table.
- *
- * A modal is the shape that fits: as wide as the screen allows, over a list that is not being
- * read while it is open, dismissed with Escape.
- *
- * DELIBERATELY NOT REALTIME, and this is inherited rather than an oversight. `public.telemetry`
- * is a postgres_fdw view over the standalone TimescaleDB: its rows enter TimescaleDB's WAL, never
- * Supabase's, so a postgres_changes subscription on it emits nothing at all. Adding it to the
- * publication does not error -- it silently delivers no events, which is the worse failure. Read
- * once on open instead.
- *
- * THE METRIC LIST IS DECLARED UNION OBSERVED:
- *   * declared -- `devices.last_birth_metrics`, the names announced in the most recent DBIRTH.
- *     Already on the device row; costs no request.
- *   * observed -- distinct metric names in the historian inside the lookback window.
- *
- * The union matters. Observed-only would drop a metric the moment it stopped reporting, which is
- * exactly the fault an operator is looking for -- a silent sensor would simply vanish from the
- * list rather than show as stale. Declared-only would miss anything the device publishes without
- * having declared it. A declared metric with no rows reads "— no data —", which is a statement,
- * not an absence.
+ * Per-device telemetry inspector: what each of this device's metrics last read, and when. A modal
+ * because it is a four-column table and needs the width. Not realtime: `public.telemetry` is a
+ * postgres_fdw view over the standalone TimescaleDB, whose rows never enter Supabase's WAL, so a
+ * postgres_changes subscription on it silently delivers nothing. Read once on open. The metric list
+ * is declared (`devices.last_birth_metrics`) union observed (distinct names in the historian inside
+ * the lookback window), so a metric that stopped reporting shows as "— no data —" rather than
+ * vanishing.
  */
 
 const LOOKBACK_MINUTES = 1440
@@ -48,9 +26,7 @@ function sortMetrics(a, b) {
 }
 
 export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onClose)
 
   const [metrics, setMetrics]   = useState([])
@@ -77,8 +53,9 @@ export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
         setLoading(false)
       })
       .catch(e => { setError(e.message || 'Telemetry query failed'); setLoading(false) })
-    // `declared` is derived from the device row each render; keying on its content rather than
-    // its identity avoids refetching on every parent poll.
+    // `declared` is derived from the device row each render; keying on its content rather than its
+    // identity avoids refetching on every parent poll.
+    //
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId, declared.join('|')])
 

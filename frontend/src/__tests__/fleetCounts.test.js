@@ -8,12 +8,8 @@ import {
 import { HEARTBEAT_STALE_MS } from '../utils/gatewayStatus'
 
 /**
- * The Overview ribbon's arithmetic.
- *
- * The bug this was written for: a stack with one playback gateway and one shadow device reported
- * `4/5` gateways and `6/7` devices while the Gateways and Devices pages both showed four and six,
- * and the playback gateway -- neither archived nor pending -- was counted as OFFLINE, so the
- * summary showed a permanent fault on the one row behaving exactly as designed.
+ * The Overview ribbon's arithmetic. A playback gateway and its shadow device must not be counted in
+ * the fleet; counted raw, the playback gateway lands in OFFLINE and reports a permanent fault.
  */
 
 const fresh = () => new Date(Date.now() - 1000).toISOString()
@@ -41,9 +37,8 @@ const device = (over = {}) => ({
 
 describe('the shadow predicates', () => {
   it('reads a gateway shadow off is_shadow and a device shadow off shadow_of', () => {
-    // Different columns on purpose, and the reason a single `isShadow(row)` would be wrong: a
-    // device has no is_shadow flag -- `shadow_of` names the ORIGINAL it stands in for, so its
-    // presence is what makes the row a shadow.
+    // Different columns on purpose: a device has no is_shadow flag, and `shadow_of` names the
+    // original it stands in for.
     expect(isShadowGateway({ is_shadow: true })).toBe(true)
     expect(isShadowGateway({ is_shadow: false })).toBe(false)
     expect(isShadowDevice({ shadow_of: 'dev-abc' })).toBe(true)
@@ -71,9 +66,8 @@ describe('gatewayFleetCounts', () => {
   })
 
   it('does not report the playback gateway as a fault', () => {
-    // THE ACTUAL DEFECT. A shadow gateway is not archived and not pending, so the offline arm --
-    // "not pending and not online" -- swallowed it, and the ribbon showed one offline gateway on a
-    // stack where every connector was up.
+    // The defect: a shadow gateway is neither archived nor pending, so the offline arm swallowed
+    // it.
     const counts = gatewayFleetCounts([
       gateway(),
       gateway({ is_shadow: true, last_heartbeat: null, enrolled_at: null })

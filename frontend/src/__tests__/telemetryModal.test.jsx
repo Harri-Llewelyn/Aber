@@ -1,14 +1,7 @@
 /**
- * The per-device telemetry inspector and its CSV export, which together replaced the standalone
- * Telemetry page.
- *
- * The inspector has moved twice since -- row accordion, then context panel, now a modal -- for the
- * same reason each time: it is a four-column table and kept being given somewhere too narrow to be
- * one. None of that changes what it MEANS, which is what these pin.
- *
- * The behaviour worth pinning is the metric list: DECLARED UNION OBSERVED. Observed-only would
- * drop a metric the moment it stopped reporting -- which is precisely the fault an operator is
- * looking for, so a silent sensor would vanish from the list rather than show as stale.
+ * The per-device telemetry inspector and its CSV export. The behaviour worth pinning is the metric
+ * list: declared union observed. Observed-only would drop a metric the moment it stopped reporting,
+ * which is the fault an operator is looking for.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'

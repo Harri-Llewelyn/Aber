@@ -35,15 +35,9 @@ describe('the rail expands and, crucially, collapses again', () => {
   })
 
   /**
-   * THE REGRESSION THIS FILE EXISTS FOR.
-   *
-   * Clicking a nav item focuses that button, and the rail expanded on focus so a keyboard user could
-   * see the labels. So after a click the rail was still "focused" once the pointer left, and stayed
-   * open across the page it had just navigated to -- with nothing to close it but clicking elsewhere.
-   *
-   * Blurring on click would fix this and break the keyboard case, since Enter activates the same
-   * button. The fix is that a focus event arriving WHILE HOVERED is a click, and needs to do nothing:
-   * the rail is open already and the mouse leaving will close it.
+   * The regression this file exists for: clicking a nav item focuses that button, and the rail
+   * expanded on focus, so after a click it stayed open across the page it had navigated to. A focus
+   * event arriving while hovered is a click and does nothing; the pointer leaving closes the rail.
    */
   it('collapses after a click, once the pointer moves away', () => {
     const onNavigate = renderRail()
@@ -61,9 +55,8 @@ describe('the rail expands and, crucially, collapses again', () => {
   })
 
   /**
-   * The half that must survive the fix. Tab is the only way to reach the rail without a mouse, and
-   * the labels are transparent until it expands -- so a keyboard user who lost this would be left
-   * tabbing through thirteen unlabelled buttons.
+   * The half that must survive the fix: Tab is the only way to reach the rail without a mouse, and
+   * the labels are transparent until it expands.
    */
   it('still expands on a keyboard focus, which arrives with no pointer over it', () => {
     renderRail()
@@ -85,13 +78,8 @@ describe('the grouping', () => {
     expect(groups.length).toBeGreaterThanOrEqual(4)
     expect(document.querySelectorAll('.sidebar-divider')).toHaveLength(groups.length - 1)
 
-    /*
-     * NO CAPTIONS, and their absence is the point rather than an omission. Assets / Modelling /
-     * History / Administration were rendered as headings and each had to hold its box in the
-     * COLLAPSED state so the items below did not jump on hover -- so the resting rail, which is what
-     * it looks like almost all of the time, carried four blank strips whose only purpose was to be
-     * somewhere for text to appear later.
-     */
+    /* No captions: a heading would have to hold its box in the collapsed state, leaving blank
+       strips in the resting rail. */
     expect(document.querySelector('.sidebar-group-label')).toBeNull()
     for (const caption of ['Assets', 'Modelling', 'History', 'Administration']) {
       expect(screen.queryByText(caption), `the "${caption}" heading came back`).toBeNull()
@@ -135,15 +123,9 @@ describe('the shortcuts dialog', () => {
   })
 
   /**
-   * EVERY ROW IS A SHORTCUT THAT EXISTS, which is the only rule this dialog has and the only one
-   * worth guarding. A shortcuts list is the easiest document in an application to write
-   * optimistically -- a row costs nothing to add for a binding somebody intends to implement, and
-   * the reader cannot tell an aspiration from a fact until they press the key. A wrong row spends
-   * the reader's trust in the whole list.
-   *
-   * Only the bindings this application actually installs are checked. Tab, Shift+Tab, Enter and
-   * Space are the browser's, listed because the rail's response to Tab is this app's own behaviour
-   * and cannot be discovered anywhere else.
+   * Every row is a shortcut that exists. Only the bindings this application installs are checked;
+   * Tab, Shift+Tab, Enter and Space are the browser's, listed because the rail's response to Tab
+   * cannot be discovered anywhere else.
    */
   it('lists the palette bindings the search box actually installs', () => {
     const flat = shortcutGroups().flatMap(g => g.items)

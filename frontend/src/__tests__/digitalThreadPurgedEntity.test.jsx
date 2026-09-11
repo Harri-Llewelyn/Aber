@@ -1,19 +1,9 @@
 /**
  * Digital Thread: naming an entity that no longer exists, and the SCHEMA_REJECTION event class.
- *
- * WHY THE NAMING HALF MATTERS. `digital_thread` holds only `entity_id` -- names live on the entity
- * and carry no identity of their own -- so the page joins client-side against the live cell,
- * gateway and device lists. That join CANNOT resolve a hard-purged entity, and hard purge is a
- * shipped feature: the Archives tab offers it, and archived migration 0003 is what makes it safe, because
- * audit rows are immutable and independent of the row they describe.
- *
- * So the rows most worth reading are precisely the ones the join fails on. The fallback reads the
- * identity back out of the audit payload -- `name` first, then the immutable `sparkplug_id`, which
- * is what the historian keyed telemetry by and what every Grafana alert about the asset names.
- *
- * THE CSV EXPORT IS TESTED SEPARATELY FROM THE LANE LABEL because they were not the same code and
- * only one of them worked: the lane fell back to the snapshot while the export wrote an empty
- * `entity_name` for every purged entity, which is the column an auditor opens the file for.
+ * `digital_thread` holds only `entity_id`, so the page joins client-side against the live lists,
+ * and that join cannot resolve a hard-purged entity. The fallback reads `name` and then
+ * `sparkplug_id` out of the audit payload. The CSV export is tested separately from the lane label
+ * because they are separate code.
  */
 import React from 'react'
 import { describe, it, expect } from 'vitest'
@@ -93,9 +83,8 @@ describe('resolveLaneName', () => {
 
 describe('SCHEMA_REJECTION events', () => {
   /**
-   * Written by record_ingestion_rejection() (archived migration 0026), NOT by the audit trigger -- so it is
-   * the first `action` value that is not a TG_OP, and the first row in the table that records an
-   * observation rather than a row mutation.
+   * Written by record_ingestion_rejection(), not the audit trigger, so it is the first `action`
+   * value that is not a TG_OP and records an observation rather than a row mutation.
    */
   const rejection = {
     event_id: 11, entity_type: 'devices', entity_id: 'dev-1', event_type: 'SCHEMA_REJECTION',
@@ -114,10 +103,9 @@ describe('SCHEMA_REJECTION events', () => {
   }
 
   it('classifies as governance rather than operational', () => {
-    // It says the asset is publishing something its declared model does not account for, which is
-    // the same category as a schema being rebound. Falling through to `operational` -- which it
-    // would, since no GOVERNANCE_FIELDS key appears in the payload -- paints a conformance breach
-    // the same colour as a routine status change.
+    // A rejection says the asset is publishing something its declared model does not account for,
+    // the same category as a schema rebinding. Falling through to `operational` would paint a
+    // conformance breach the colour of a routine status change.
     expect(classifyEvent(rejection, diffFields(null, rejection.new_data))).toBe('governance')
   })
 

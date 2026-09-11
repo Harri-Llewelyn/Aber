@@ -20,12 +20,8 @@ beforeEach(() => {
 })
 
 /**
- * The translation layer between a form and a lane.
- *
- * This module exists because the approvals page used to carry a SECOND form listing the same
- * columns as each asset's Edit Details dialog. Two forms describing one device is a drift
- * generator, and the drift is silent -- so there is one form now, and this is what lets it end in
- * a proposal instead of a write.
+ * The translation layer between a form and a lane: there is one form per asset, and this is what
+ * lets it end in a proposal instead of a write.
  */
 describe('what a form would change', () => {
   const current = {
@@ -37,9 +33,8 @@ describe('what a form would change', () => {
   }
 
   it('sends only what actually moved', () => {
-    // A form is seeded from the current row, so sending every field would make a patch of five
-    // columns where the person changed one -- and an approver reading the diff could not tell
-    // which. It would also be a row snapshot, reverting whatever moved underneath it.
+    // A form is seeded from the current row, so the patch carries only what changed; sending every
+    // field would make a row snapshot that reverts whatever moved underneath it.
     const patch = patchFromForm('device', current, { ...current, asset_name: 'CNC_01_renamed' })
     expect(patch).toEqual({ name: 'CNC_01_renamed' })
   })
@@ -96,9 +91,7 @@ describe('what a form would change', () => {
 
 describe('seeding a form from a proposal already open', () => {
   it('puts the earlier request back in the boxes', () => {
-    // 0086 allows one open proposal per asset per person, so a second field EXTENDS the request
-    // that exists. Without this the new proposal would silently drop the first -- and the cap
-    // would refuse it anyway.
+    // One open proposal per asset per person, so a second field extends the request that exists.
     expect(formFromPatch('device', { name: 'CNC_01_renamed' }))
       .toEqual({ asset_name: 'CNC_01_renamed' })
   })

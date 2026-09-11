@@ -5,24 +5,17 @@ import { DigitalThreadTab } from '../components/tabs/DigitalThreadTab';
 import { api } from '../api';
 
 /**
- * The Devices page no longer opens a Digital Thread dialog; it navigates here with the device it
- * was on. These tests cover the handover itself -- that the filters actually narrow to that
- * device, and that the page stays a normal page afterwards, which was the whole reason for
- * replacing the modal.
+ * The Devices page navigates here with the device it was on. These cover the handover itself: the
+ * filters narrow to that device, and the page stays a normal page afterwards.
  */
 vi.mock('../api', () => ({ api: { get: vi.fn() } }));
 
 const DEVICE_ID = '11111111-2222-3333-4444-555555555555';
 
 /**
- * Post-mapping shape, which is what the component actually receives.
- *
- * These rows used to carry the RAW column names -- `id`, `action`, `recorded_at` -- which are
- * what PostgREST returns and what `mapDigitalThreadRow` in api.js renames on the way out. But
- * api.get is mocked here, so the mapper never runs and the component was reading `event_id`,
- * `event_type` and `timestamp` off rows that had none of them: an undefined React key on every
- * row (the console warning this fixture was producing), an "Invalid Date", and a blank event
- * badge. Nothing asserted on any of that, so the tests passed on a shape that cannot occur.
+ * Post-mapping shape, which is what the component receives. api.get is mocked here, so
+ * `mapDigitalThreadRow` never runs and the fixture must carry `event_id`, `event_type` and
+ * `timestamp` rather than the raw column names.
  */
 const events = [
   {
@@ -95,10 +88,8 @@ describe('DigitalThreadTab handover', () => {
       expect(screen.getByPlaceholderText(/Search by entity name or ID/).value).toBe(other));
   });
 
-  // The fixture above is now the shape api.js emits, so the row it produces has to render
-  // completely. Asserted so the fixture cannot quietly drift back to raw column names -- the
-  // previous version produced an undefined key, an Invalid Date and a blank badge, and no test
-  // noticed.
+  // The fixture is the shape api.js emits, so the row it produces has to render completely.
+  // Asserted so the fixture cannot drift back to raw column names.
   it('renders the handed-over event in full', async () => {
     render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
 
@@ -116,14 +107,8 @@ describe('DigitalThreadTab handover', () => {
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
   });
 
-  /*
-    The reason the default range is All time.
-
-    This fixture is dated 2026-08-10 and is never refreshed. Under a rolling default -- "Last 24
-    Hours" was the obvious choice -- the handover would answer an explicit "show me this asset's
-    history" click with an empty timeline for any device not edited today, which is most of them.
-    An operator asking for one asset's history means all of it.
-  */
+  /* The reason the default range is All time: this fixture is dated 2026-08-10 and never refreshed,
+     and an operator asking for one asset's history means all of it. */
   it('requests an unbounded window, so an old asset history is not silently empty', async () => {
     render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
 

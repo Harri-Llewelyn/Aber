@@ -5,18 +5,10 @@ import { OverviewTab } from '../components/tabs/OverviewTab'
 import { api } from '../api'
 
 /**
- * The Shopfloor Dashboard legend, and the alert category it was missing (issue #59).
- *
- * WHAT WENT WRONG, BECAUSE IT EXPLAINS EVERY ASSERTION BELOW. Issue #34 taught this map to paint a
- * device chip red when Grafana has an alert firing against it. The legend was not touched, so it
- * went on describing three tile-dot states and the one colour on the page that means "somebody act
- * now" was the only one it did not name. Worse, that red was carried by COLOUR ALONE -- the chip
- * had no flag, while archived, quarantined, offline and staged all had one -- so a reader who
- * could not separate the hues had nothing to read at all.
- *
- * The two halves are tested together on purpose: a legend entry promising a red chip is only true
- * while the chip is also legible without colour, and either half regressing alone would leave the
- * page stating something it does not do.
+ * The Shopfloor Dashboard legend and its alert category. The map paints a device chip red when
+ * Grafana has an alert firing against it, and the legend must name that colour. The two halves are
+ * tested together: a legend entry promising a red chip is only true while the chip is also legible
+ * without colour.
  */
 
 vi.mock('../api', async () => {
@@ -81,9 +73,7 @@ const chip = async () => {
 
 beforeEach(() => { vi.clearAllMocks() })
 
-// ---------------------------------------------------------------------------------------------
 // The legend
-// ---------------------------------------------------------------------------------------------
 
 describe('shopfloor legend categories', () => {
   it('names four categories, the fourth being the alert state', async () => {
@@ -97,13 +87,9 @@ describe('shopfloor legend categories', () => {
     }
   })
 
-  /*
-   * THE SWATCH IS A CHIP, NOT A DOT, and that is the substance of the entry rather than styling.
-   * The three dots roll up CONNECTIVITY for a whole tile; an alert belongs to one device inside
-   * one tile. Drawing a fourth dot would promise a tile-level state rollupDeviceStatus() has no
-   * input for and deliberately never computes -- so the legend would be describing a colour the
-   * grid cannot produce.
-   */
+  /* The swatch is a chip, not a dot: the three dots roll up connectivity for a whole tile, and an
+     alert belongs to one device inside one tile. A fourth dot would promise a tile-level state
+     rollupDeviceStatus() never computes. */
   it('draws the alert entry as a chip swatch, leaving the tile dots at three', async () => {
     renderMap()
 
@@ -127,9 +113,7 @@ describe('shopfloor legend categories', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
-// The chip the legend now describes
-// ---------------------------------------------------------------------------------------------
+// The chip the legend describes
 
 describe('alerting device chip', () => {
   it('carries no alert flag when nothing is firing', async () => {
@@ -154,11 +138,8 @@ describe('alerting device chip', () => {
     expect(await chip()).toHaveTextContent('ALARM')
   })
 
-  /*
-   * ARCHIVED WINS, exactly as deviceChipClass() resolves it. An alert still firing against a
-   * decommissioned machine is noise about a decision already made -- and since the chip is grey by
-   * then, an ALARM flag beside it would contradict its own colour, which is worse than no flag.
-   */
+  /* Archived wins, as deviceChipClass() resolves it: the chip is grey by then, and an ALARM flag
+     beside it would contradict its own colour. */
   it('shows ARCH and no alert flag on an archived device with an alert firing', async () => {
     renderMap({
       devices: [device({ is_archived: true })],

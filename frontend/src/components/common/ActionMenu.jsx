@@ -3,20 +3,10 @@ import { createPortal } from 'react-dom'
 import { IconChevronDown } from './Icons'
 
 /**
- * An overflow ("...") menu for table row actions.
- *
- * RENDERED THROUGH A PORTAL, and that is the whole reason this is a component rather than a few
- * lines of inline JSX. `.table-wrap` is `overflow-x: auto`, so a menu positioned inside the row is
- * CLIPPED by that scroll container -- it opens and you see a sliver of it. Portalling to
- * document.body with `position: fixed` puts it outside the clipping context. The cost is that the
- * menu no longer moves with the row, which is why it closes on scroll and on resize rather than
- * trying to follow.
- *
- * This is the same family of bug the Devices row has hit twice before, both times because a cell's
- * contents were assumed to be free to overflow when the wrapper says otherwise.
- *
- * The menu is uncontrolled: it owns `open` and closes itself after any item fires, since every
- * action here either navigates, opens a modal, or mutates a row.
+ * An overflow ("...") menu for table row actions. Rendered through a portal with `position: fixed`
+ * because `.table-wrap` is `overflow-x: auto` and would clip a menu positioned inside the row; the
+ * cost is that it closes on scroll and resize rather than following. Uncontrolled: it owns `open`
+ * and closes after any item fires.
  */
 export function ActionMenu({ items, label = 'More actions', disabled = false, testId }) {
   const [open, setOpen] = useState(false)
@@ -24,9 +14,8 @@ export function ActionMenu({ items, label = 'More actions', disabled = false, te
   const triggerRef = useRef(null)
   const menuRef = useRef(null)
 
-  // Callers build the item list with conditionals (`!archived && {...}`), so a separator can end
-  // up leading, trailing, or doubled once its neighbours drop out. Collapse those rather than
-  // rendering a stray rule, which reads as a missing item.
+  // Callers build the item list with conditionals, so a separator can end up leading, trailing or
+  // doubled; collapse those.
   const visible = items
     .filter(Boolean)
     .reduce((acc, item) => {
@@ -63,9 +52,8 @@ export function ActionMenu({ items, label = 'More actions', disabled = false, te
         triggerRef.current?.focus()
       }
     }
-    // Closed rather than repositioned on scroll: a fixed-position menu detached from its row would
-    // otherwise drift away from the button that opened it. `true` captures scroll on the
-    // .table-wrap container too, which does not bubble.
+    // Closed rather than repositioned on scroll. `true` captures scroll on the .table-wrap
+    // container, which does not bubble.
     const onScrollOrResize = () => setOpen(false)
 
     document.addEventListener('mousedown', onPointerDown)

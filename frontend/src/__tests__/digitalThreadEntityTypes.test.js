@@ -1,21 +1,8 @@
 /**
- * The three lists that describe one fact, and the invariant that keeps them one (#141).
- *
- * A Digital Thread entity type has to be three things at once, and each was written separately:
- *
- *   DRAWABLE    -- `SECTIONS` in DigitalThreadTab decides which kinds get a lane.
- *   ASKABLE     -- the filter dropdown decides which kinds a reader can request.
- *   RESOLVABLE  -- the map in api.js turns the dropdown's spelling into the stored entity_type.
- *
- * MISSING FROM ANY ONE OF THEM FAILS SILENTLY, AND IN THE THREE DIFFERENT WAYS THAT MADE THIS
- * HARD TO SEE. Not drawable: counted by the header and never rendered -- 27 of 28 lanes on the
- * stack that found it. Not askable: reachable only by clearing the filter entirely. Not
- * resolvable: the query runs, matches no stored row, and the page answers "no events" to a filter
- * that is simply broken -- which is the worst of the three, because it looks like an answer.
- *
- * The first was fixed on its own and the other two survived it, so these assert the RELATIONSHIP
- * rather than the seven kinds that exist today. A kind added to the shared table must arrive in
- * all three places or fail here.
+ * A Digital Thread entity type has to be drawable (`SECTIONS` in DigitalThreadTab), askable (the
+ * filter dropdown) and resolvable (the map in api.js), and missing from any one fails silently in a
+ * different way. These assert the relationship rather than the kinds that exist today, so a kind
+ * added to the shared table must arrive in all three places or fail here.
  */
 import { describe, it, expect } from 'vitest'
 import {

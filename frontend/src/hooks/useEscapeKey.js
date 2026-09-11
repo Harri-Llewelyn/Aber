@@ -1,21 +1,10 @@
 import { useEffect, useRef } from 'react'
 
 /**
- * Escape closes the TOPMOST dismissible layer, and only that one.
- *
- * Every modal binding its own `document` keydown listener would be simpler, and wrong: modals
- * stack here. ConfirmModal sits at z-index 1100 precisely so it can open ON TOP of another
- * dialog -- Directory's GitOps sync confirmation over the directory page, Archives' purge
- * confirmation over the archives table -- and if both layers listened independently, one Escape
- * would dismiss the confirmation AND the dialog that asked for it. The user would be answering
- * "no" to a question and losing their unsaved form as well.
- *
- * So handlers go on a stack and only the last one registered is called. The stack is module
- * scope rather than context because the layers are not in one React tree: ActionMenu and the
- * modals portal to <body>, and a provider would have to wrap them all to see them.
- *
- * A single listener serves the whole stack, so the page carries one keydown handler regardless
- * of how many layers are open.
+ * Escape closes the topmost dismissible layer only. Modals stack here (ConfirmModal opens over
+ * another dialog), so handlers go on a stack and only the last registered is called. Module scope
+ * rather than context because the layers portal to <body> and are not in one React tree. One
+ * document listener serves the whole stack.
  */
 const stack = []
 
@@ -42,8 +31,9 @@ function pop(ref) {
 
 /**
  * @param {Function} onEscape Called when Escape is pressed and this is the topmost layer.
- * @param {boolean}  active   Pass false to sit out -- a layer that is mounted but not shown must
- *                            not take the top of the stack away from one that is.
+ *
+ * @param {boolean} active Pass false to sit out: a layer that is mounted but not shown must not
+ * take the top of the stack.
  */
 export function useEscapeKey(onEscape, active = true) {
   // The callback is held in a ref so a parent that re-creates its `onClose` inline on every

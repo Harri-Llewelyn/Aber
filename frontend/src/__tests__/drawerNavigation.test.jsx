@@ -10,21 +10,10 @@ import { useArrivalSelection } from '../hooks/useArrivalSelection'
 import { api } from '../api'
 
 /**
- * CROSS-DRAWER NAVIGATION -- the four hops between the pages' context drawers.
- *
- * Each drawer names its neighbours: a cell lists its gateways and devices, a gateway lists its
- * devices, a device names its schema, a schema lists the devices provisioned with it. Every one of
- * those was TEXT, so the panel answered "which" and then stranded the reader -- the next question is
- * always "and what about that one", and the only way through was to read a name, switch tab and
- * search for it by hand.
- *
- * TWO HALVES HAVE TO WORK FOR THE HOP TO BE WORTH ANYTHING, and they fail independently:
- *
- *   1. The chip has to CALL the hand-over with the right identifier. That is what the first block
- *      below covers, per drawer.
- *   2. The destination has to OPEN that entity, not merely filter to it. That is useArrivalSelection,
- *      covered in its own block -- and it is the half that did not exist before: every page put the
- *      arriving id in its search box and left a one-row table to be clicked.
+ * Cross-drawer navigation: the hops between the pages' context drawers. Two halves have to work and
+ * fail independently: the chip has to call the hand-over with the right identifier (the first
+ * block, per drawer), and the destination has to open that entity rather than merely filter to it
+ * (useArrivalSelection, in its own block).
  */
 
 vi.mock('../api', async () => {
@@ -60,11 +49,9 @@ const gateway = {
 }
 
 /**
- * The device carries its schema through `submodel_schema_ids` and NOT through `schema_id`.
- *
- * That is the shape the retired class-schema migration produced for every device on the demo floor, and the exact
- * shape the drawer used to render as "Not set" -- so the fixture is chosen to be the broken case
- * rather than the convenient one.
+ * The device carries its schema through `submodel_schema_ids` and not `schema_id`, the shape the
+ * drawer used to render as "Not set", so the fixture is the broken case rather than the convenient
+ * one.
  */
 const device = {
   asset_id: 'dev-1',
@@ -176,9 +163,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
   })
 })
 
-/**
- * The device drawer's schema field, which was the actual DEFECT rather than a missing convenience.
- */
+/** The device drawer's schema field, which was the defect rather than a missing convenience. */
 describe('the device drawer resolves a schema by either route', () => {
   const renderDevices = (extra = {}) => render(
     <DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
@@ -186,10 +171,9 @@ describe('the device drawer resolves a schema by either route', () => {
   )
 
   it('finds a schema attached through device_submodels, not only through schema_id', async () => {
-    // The fixture carries schema_id: null and submodel_schema_ids: ['sch-machining'] -- the shape
-    // the retired class-schema migration produced. The field read `selectedDevice.schema_id` alone and rendered
-    // "Not set" for every device on the demo floor, while the table beside it listed the schema's
-    // tags from the same row. Two views of one device disagreeing.
+    // The fixture carries schema_id: null and submodel_schema_ids: ['sch-machining']. Reading
+    // `schema_id` alone rendered "Not set" while the table beside it listed the schema's tags from
+    // the same row.
     renderDevices()
     await openRow('Sim_CNC_Mill_01')
     expect(chip('Machining_Cell_Schema')).toBeTruthy()
@@ -226,12 +210,9 @@ describe('the device drawer resolves a schema by either route', () => {
   })
 
   /**
-   * CONNECTION METHOD is gone from the drawer as well as from the form.
-   *
-   * Removing the picker but keeping the read-only field left the panel stating a transport as
-   * though it were a fact. It is not one: ingestion is a Sparkplug B MQTT subscriber with no other
-   * transport, so a row reading "Modbus TCP" -- which this fixture carries deliberately -- describes
-   * nothing that happens.
+   * Connection method is gone from the drawer as well as the form: ingestion is a Sparkplug B MQTT
+   * subscriber with no other transport, so a row reading "Modbus TCP" describes nothing that
+   * happens.
    */
   it('does not state a connection method the platform contradicts', async () => {
     renderDevices()
@@ -241,9 +222,8 @@ describe('the device drawer resolves a schema by either route', () => {
   })
 
   it('pre-selects the attached schema when the edit form opens', async () => {
-    // `setForm(device)` copied schema_id straight across -- null here -- so the dropdown read
-    // "No schema assigned" for a device the rest of the page showed as schema'd, and saving any
-    // other field silently confirmed that wrong answer.
+    // Copying schema_id straight into the form read "No schema assigned" for a device the rest of
+    // the page showed as schema'd, and any other save confirmed it.
     renderDevices()
     await openRow('Sim_CNC_Mill_01')
 
@@ -255,10 +235,9 @@ describe('the device drawer resolves a schema by either route', () => {
   })
 
   it('does not overrule an explicit schema_id with a submodel', async () => {
-    // The conservative precedence, and not the obvious one. This control edits `devices.schema_id`,
-    // so a device that already carries a value there has answered the question the dropdown asks.
-    // Seeding from the submodel instead would show a different schema and then WRITE it on the next
-    // save -- silently reassigning a device because somebody edited its description.
+    // The conservative precedence: this control edits `devices.schema_id`, so a device that already
+    // carries a value there has answered the question. Seeding from the submodel would write a
+    // different schema on the next save.
     const second = { ...SCHEMA, schema_uuid: 'sch-oee', schema_name: 'ISO22400_OEE_Schema' }
     api.get.mockImplementation(routeGet({
       schemas: [SCHEMA, second],

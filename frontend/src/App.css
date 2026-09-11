@@ -20,76 +20,38 @@
   --warning:      #ffb300;
   --danger:       #ff4d6d;
   --text-primary: #e8eaf0;
-  /* Both secondary tiers were lifted one notch. Measured against --bg-card (#161d2a), the
-     old --text-dim (#4a5168) was 2.15:1 -- less than half the 4.5:1 WCAG AA needs for body
-     text -- which is why card sub-text was legible in light mode and not in dark. --text-muted
-     sat exactly on the 4.5:1 floor, leaving no room for a dimmer tier beneath it at all.
-     These values keep three distinguishable tiers with every one of them passing AA. */
+  /* Three distinguishable secondary tiers, every one clearing WCAG AA against --bg-card. */
   --text-muted:   #858ea3;  /* 5.14:1 on --bg-card */
   --text-dim:     #7b8498;  /* 4.50:1 on --bg-card */
-  /* --warning and --success are tuned for borders, icons and tinted fills (3:1 suffices for
-     those). The -text variants are the same signals at a contrast that is safe for TEXT.
-     In the dark theme both already cleared AA, so these are deliberately identical -- the
-     tokens exist so call sites express intent and the light theme can diverge. */
+  /* --warning and --success are tuned for borders, icons and tinted fills. The -text variants are
+     the same signals at a contrast safe for text; identical in the dark theme, diverging in the
+     light one. */
   --warning-text: #ffb300;
   --success-text: #00e896;
-  /* The ink for a button FILLED with --warning, the amber counterpart to --accent-contrast.
-     Archive and Deprecate both painted `color: '#000'` inline for this, which is the one thing
-     Phase 1 ruled out -- and it was a guess that happened to be right rather than a measured
-     choice. White on amber is 3.18:1 in the light theme; dark ink is 6.59:1. */
+  /* The ink for a button filled with --warning, the amber counterpart to --accent-contrast. Dark
+     ink measures 6.59:1 in the light theme; white would be 3.18:1. */
   --warning-contrast: #0b0e14;
-  /* ===== Brand marks =====
-     A document provider's own colour, used to make a SharePoint link recognisable at a glance
-     as a SharePoint link. Deliberately IDENTICAL in both themes and deliberately not derived
-     from anything: it is Microsoft's blue and Google's green, and a theme has no opinion on
-     those. They are tokens rather than inline hex only so this file remains the one place any
-     colour is written down.
-
-     TINT AND BORDER ONLY -- never text. #0078d4 as a label on the dark card measures 3.73:1,
-     which is why the badge label is --text-primary and the brand colour is the surround. */
+  /* Brand marks: a document provider's own colour, identical in both themes and not derived from
+     anything. Tokens so this file remains the one place any colour is written. Tint and border
+     only, never text: #0078d4 as a label on the dark card measures 3.73:1. */
   --brand-sharepoint: #0078d4;
   --brand-drive:      #0f9d58;
-  /* Completes the trio. --danger (#ff4d6d) clears AA on a bare card (6.6:1) but only 4.45:1 on
-     the 0.15 rose tint the error toast and .badge-offline sit on -- just under the bar, and the
-     error toast is the message a user most needs to read. One step lighter clears it at 5.3:1
-     while staying the same signal hue. */
+  /* --danger clears AA on a bare card but only 4.45:1 on the 0.15 rose tint the error toast and
+     .badge-offline sit on; one step lighter clears it at 5.3:1. */
   --danger-text:  #ff6b85;
-  /* ===== The cluster badge =====
-     A FIFTH COLOUR, DELIBERATELY OUTSIDE THE FOUR-COLOUR CLASSIFICATION. Green/blue/amber/red say
-     what KIND of event a marker is; a cluster badge says how MANY events are here, which is not a
-     kind at all -- and a group routinely holds two or three of the four, so painting it in any one
-     of them would assert a classification the group does not have. Violet is the nearest unused
-     hue to the accent without being mistakable for it.
-     The -text variant exists for the same reason --danger-text does: #a855f7 is a border tone, and
-     the fill is a 0.18 tint of it, so the label needs its own value. #d8b4fe on that tint over
-     --bg-surface measures 7.8:1. */
+  /* The cluster badge: a fifth colour outside the four-colour event classification, because a badge
+     says how many events are here, not what kind. Violet is the nearest unused hue to the accent.
+     The -text variant is the label ink on the 0.18 tint, 7.8:1 over --bg-surface. */
   --cluster:      #a855f7;
   --cluster-bg:   rgba(168, 85, 247, 0.18);
   --cluster-text: #d8b4fe;
-  /* The monospace stack, as a token. Every rule in this file spelled it out literally, which was
-     fine until a call site wanted `var(--font-mono, monospace)` -- with no token defined that
-     silently falls back to the bare generic and drops JetBrains Mono. Structural, not colour, so
-     the light theme does not restate it. */
+  /* The monospace stack as a token, so `var(--font-mono, monospace)` resolves to JetBrains Mono
+     rather than the bare generic. Structural, so the light theme does not restate it. */
   --font-mono:    'JetBrains Mono', monospace;
-  /* ===== Spacing =====
-     THE INSET FROM A CONTAINER'S EDGE TO ITS CONTENT, and there were four of them: the page used
-     24px, a card 20px, the filter bar and the context panel 14px, and a table cell 16px. Four
-     values for one relationship is not a scale, it is an accumulation -- each was chosen against
-     whatever was beside it at the time, and nothing said they should agree.
-
-     THE SURVIVOR IS 16px, AND IT IS THE ONE THAT WAS ALREADY RIGHT. `th`/`td` have used it since
-     the type scale was raised, and a table is the densest thing this app draws, so it is the value
-     that has actually been read at a metre on a shopfloor terminal. The page and the card were the
-     outliers; they now agree with it, which is why a card's title starts at the same distance from
-     its own edge as a cell's text does from the card's.
-
-     --inset-tight IS FOR CHROME THAT IS ALREADY ON A PANEL. A filter bar inside a card and the
-     context panel's own header are nested one level further in, so repeating the full inset reads
-     as a box inside a box. It is a step down rather than a second opinion.
-
-     VERTICAL IS DELIBERATELY NOT A TOKEN. Horizontal inset is one relationship repeated everywhere;
-     vertical rhythm is a different question per element -- a card header holds a 34px button, a
-     table row holds text -- and one number for both would be a scale in name only. */
+  /* Spacing. --inset is the horizontal inset from a container's edge to its content, one value
+     shared by the page, the card, the card header and the table cell, so their left edges align.
+     --inset-tight is for chrome already on a panel (a filter bar inside a card, the context panel's
+     header). Vertical rhythm is deliberately not a token: it differs per element. */
   --inset:        16px;
   --inset-tight:  12px;
   /* Between stacked blocks: card to card, banner to card. Was 24px inline on three pages, 16px in
@@ -111,10 +73,8 @@
   --accent:       #0284c7;
   --accent-dim:   rgba(2, 132, 199, 0.12);
   --accent-glow:  rgba(2, 132, 199, 0.25);
-  /* Filled buttons take a darker fill (sky-700) than --accent so WHITE ink clears both
-     metrics: 5.93:1 WCAG and APCA Lc 84.3. On --accent itself (#0284c7) neither ink is
-     clean -- black measures 5.13:1 WCAG but only Lc 36.6 APCA, which is the "passes the
-     old maths, unreadable in practice" case that made these buttons hard to read. */
+  /* Filled buttons take a darker fill than --accent so white ink clears both metrics: 5.93:1 WCAG
+     and APCA Lc 84.3. On --accent itself neither ink is clean. */
   --accent-strong:   #0369a1;
   --accent-contrast: #ffffff;
   --success:      #059669;
@@ -122,16 +82,12 @@
   --danger:       #e11d48;
   --text-primary: #0f172a;
   --text-muted:   #475569;  /* 7.58:1 on --bg-card */
-  /* Was #64748b. That cleared AA on a white card (4.76:1) but only reached 4.34:1 on
-     --bg-base (#f1f5f9), the slightly grey page background -- so the same token was readable
-     inside a card and marginal outside one. This clears both (5.25:1 / 4.80:1) and stays
-     comfortably dimmer than --text-muted's 7.58:1, preserving the tier. */
+  /* Clears AA on both a white card (5.25:1) and --bg-base (4.80:1), and stays dimmer than
+     --text-muted. */
   --text-dim:     #5f6d82;
-  /* The light-theme --warning (#d97706) is only 3.19:1 on a white card, and --success
-     (#059669) only 3.77:1 -- fine for a border or an icon, below AA for text. These are the
-     readable equivalents, one step darker on the same hue (amber-700 / emerald-700).
-     Worst case for each is the 0.15 tinted badge fill they usually sit on: 4.59:1 and
-     4.99:1 respectively. */
+  /* The light-theme --warning and --success are below AA for text. These are the readable
+     equivalents, one step darker on the same hue; worst case is the 0.15 tinted badge fill: 4.59:1
+     and 4.99:1. */
   --warning-text: #b45309;
   --success-text: #047857;
   /* Amber-600 is 3.18:1 under white and 5.35:1 under slate-900, so the ink stays dark here too
@@ -148,25 +104,10 @@
   --shadow:       0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
-/* ===== The type scale =====
-   Raised a step throughout for shopfloor kiosk displays, which are read standing up at a metre
-   or more rather than sitting at a desk.
-
-   BE AWARE OF WHAT THIS LINE DOES AND DOES NOT DO. Almost every rule in this file sets its own
-   font-size in px, so changing the root alone moves only the handful of elements that inherit --
-   it is not the global control it looks like. The scale was raised at each of those rules to
-   match, and the steps are now:
-
-     9px, 10px  -- GONE. Nothing in the app is below 11px.
-     11px       -- the floor: dense chrome only (field labels, chips, ids in the drawer)
-     12px       -- secondary metadata and captions: .cell-meta, .kpi-label, .badge, th
-     13px       -- small controls (.btn-sm, filter-bar inputs), monospace values
-     14px       -- body: table cells, form inputs, buttons, nav
-     15px       -- the root, inherited by prose that sets nothing of its own
-
-   Table row heights were HELD, not allowed to grow with the text: `td` padding came down 13px to
-   12px as its text went 13px to 14px, so a hundred-device list occupies the same screen it did.
-   The point of the phase was legibility, not fewer rows per screen. */
+/* The type scale, raised a step for shopfloor kiosk displays read standing at a metre. Almost every
+   rule sets its own font-size in px, so changing the root moves only what inherits. The steps: 11px
+   is the floor, dense chrome only; 12px secondary metadata and captions; 13px small controls and
+   monospace values; 14px body; 15px the root. Table row heights were held as the text grew. */
 html, body, #root {
   height: 100%;
   background: var(--bg-base);
@@ -184,10 +125,7 @@ html, body, #root {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
 
-/* ===== Layout =====
-   A column holding the bar and then a ROW: the navigation rail and the page beside it. The rail was
-   in the bar until it became a sidebar, so `.app-body` is the one structural element the change
-   added -- everything else it does is undone CSS. */
+/* Layout: a column holding the bar and then a row, the navigation rail and the page beside it. */
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -204,18 +142,9 @@ html, body, #root {
   min-height: 0;
 }
 
-/* ===== Top Bar =====
-   ONE row carries the brand, the global search and the session controls. Navigation left it for
-   the rail below -- see .sidebar for the measurement that forced that.
-   These used to be two stacked bars -- a 60px header and a 54px tab strip -- which cost 114px of
-   every viewport before the page had said anything. On a 1366x768 shopfloor terminal that, plus
-   the page heading and description each tab repeated, pushed the Overview map's first cell card
-   entirely below the fold. Merging them recovers 62px on every page at once.
-
-   The three regions do not share the space equally. Nav and controls are fixed-size and must
-   never be clipped -- a navigation item you cannot see is a page you cannot reach -- so the BRAND
-   is the flexible one and truncates first (see .brand-name). That is also the right thing to
-   sacrifice: it says the same thing on every page, and the tab bar beside it does not. */
+/* Top bar: one row carries the brand, the global search and the session controls; navigation is in
+   the rail. The brand is the flexible region and truncates first (see .brand-name), since it says
+   the same thing on every page. */
 .topbar {
   display: flex;
   align-items: center;
@@ -232,21 +161,10 @@ html, body, #root {
   position: relative;
 }
 
-/* ===== Global activity line =====
-   A 2px indeterminate line on the bar's bottom edge, up whenever API work has been outstanding
-   long enough to be worth mentioning (see useApiActivity for what "long enough" means and why
-   the 3s poll must not trip it).
-
-   IT IS INDETERMINATE ON PURPOSE. Nothing here knows how far along a request is -- there is no
-   progress event to read -- so a filling bar would be inventing a number. A moving band says
-   "working" and claims nothing else.
-
-   Bottom edge of the bar rather than the top of the page: it reads as belonging to the chrome
-   rather than to whichever tab happens to be mounted, which is right, because the work it
-   reports is often not the visible tab's.
-
-   `bottom: -1px` puts it OVER the 1px border-bottom rather than above it, so the bar does not
-   grow by a pixel when the line appears and the layout below never shifts. */
+/* Global activity line: a 2px indeterminate line on the bar's bottom edge, up whenever API work has
+   been outstanding long enough to show (see useApiActivity). Indeterminate on purpose, since
+   nothing knows how far along a request is. `bottom: -1px` puts it over the border-bottom so the
+   bar does not grow when it appears. */
 .topbar-progress {
   position: absolute;
   left: 0;
@@ -286,21 +204,10 @@ html, body, #root {
   }
 }
 
-/* THE BRAND AND THE RIGHT-HAND GROUP ARE EQUAL-WEIGHT SIDES, and that is what centres the nav.
-
-   This was `flex: 0 1 auto` here and `margin: 0 auto` on the nav, which centres the nav in the
-   space LEFT OVER between the two -- not in the bar. The two sides are nowhere near the same
-   width (a two-line brand against an alert pill and a 28px avatar), so the nav sat left of the
-   true centre by half their difference. Giving both sides `flex: 1 1 0` makes them claim equal
-   shares of the free space whatever their content measures, which puts the nav's midpoint on the
-   bar's midpoint.
-
-   THE ASYMMETRY THAT REMAINS IS DELIBERATE: only the brand carries `min-width: 0`. That is what
-   lets a flex item shrink below its content, so when the bar runs out of room the brand is the
-   one region that yields -- `.brand-name` truncates and the nav keeps its width. The right-hand
-   group keeps the default `min-width: auto` and so holds at its content size. Past that point the
-   nav is no longer exactly centred, which is correct: nothing here should become unreachable to
-   keep a symmetry. */
+/* The brand and the right-hand group are equal-weight sides, which is what centres the search box:
+   both take `flex: 1 1 0` so they claim equal shares of free space whatever their content measures.
+   Only the brand carries `min-width: 0`, so when the bar runs out of room the brand truncates and
+   the right-hand group holds at content size. */
 .topbar-brand {
   display: flex;
   align-items: center;
@@ -387,11 +294,8 @@ html, body, #root {
   flex: 1 1 0;
 }
 
-/* ===== A bare icon control in the bar =====
-   The shortcuts key, and the shape anything else added here should take. 28px square to match the
-   account avatar exactly -- the right-hand group is three controls now, and three sizes would read
-   as three unrelated things rather than as a row. Square rather than round: the avatar's circle is
-   what marks it as the identity control, and borrowing it here would blur that. */
+/* A bare icon control in the bar: 28px square to match the account avatar, square rather than round
+   so the avatar's circle stays the mark of the identity control. */
 .topbar-icon-button {
   display: inline-flex;
   align-items: center;
@@ -420,14 +324,8 @@ html, body, #root {
   background: var(--accent-dim);
 }
 
-/* ===== Account avatar and menu =====
-   Replaces the icon + email + role badge + Sign Out button that used to sit side by side in the bar,
-   about 330px of it -- and, since the topbar declutter, the theme toggle and Report Bug as well. See
-   the UserMenu comment in App.jsx for what the collapse gave up and why.
-
-   FIXED SQUARE, NOT PADDING. A round button sized by its padding goes oval the moment the glyph
-   inside it changes metrics, and this one is 28px at every viewport -- there is no responsive band
-   for it to shrink in, because there is no text left to drop. */
+/* Account avatar and menu. A fixed square, not padding: a round button sized by its padding goes
+   oval when the glyph's metrics change, and this one is 28px at every viewport. */
 .user-menu { position: relative; }
 
 .user-avatar {
@@ -492,10 +390,8 @@ html, body, #root {
   margin-top: 3px;
 }
 
-/* The build this bundle came from (issue #57).
-   Quieter than the role above it, because it is reference rather than identity -- it is read once,
-   when somebody is reporting a fault, and should not compete with the address every time the menu
-   is opened. `user-select: text` is deliberate: the next thing done with this string is pasting it
+/* The build this bundle came from. Quieter than the role above it, because it is reference rather
+   than identity. `user-select: text` because the next thing done with this string is pasting it
    into a bug report. */
 .user-popover-version {
   display: flex;
@@ -547,10 +443,8 @@ html, body, #root {
 .user-popover-action:hover { background: var(--bg-glass); }
 .user-popover-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* THE DESTRUCTIVE ITEM IS THE ONLY ONE THAT GOES RED ON HOVER. Every item in this menu used to,
-   back when Sign Out was the only item in it -- which made "Theme: Dark" light up in the danger
-   colour for changing a colour scheme. Separated by a rule as well as by colour, because the two
-   items above it are now one keystroke away from it. */
+/* The destructive item is the only one that goes red on hover, and is separated by a rule as well
+   as by colour. */
 .user-popover-action-danger {
   border-top: 1px solid var(--border);
   color: var(--text-primary);
@@ -558,22 +452,11 @@ html, body, #root {
 
 .user-popover-action-danger:hover { background: var(--bg-glass); color: var(--danger-text); }
 
-/* ===== Sidebar =====
-   THE PRIMARY NAVIGATION. It was thirteen tabs in the top bar, and the bar had a measured ceiling:
-   the nav was rigid and the brand and session controls split what was left, so brand space came to
-   (viewport - 72px of chrome - nav width) / 2 against a brand wanting ~290px. Eleven tabs fit at
-   1920, twelve clipped, thirteen left ~134px, and fourteen left ~24px -- less than the abbreviated
-   wordmark. The density ladder that managed that decline, its two count-keyed bands and the
-   media queries behind them are all gone with it.
-
-   A rail spends the OTHER axis. Pages cost vertical space, of which a 1080px display has plenty and
-   which does not have to be shared with a wordmark, and the icon-only state stops being the
-   degradation the old bar fell into below 1400px and becomes the resting state this is drawn for.
-
-   TWO ELEMENTS, AND THE SPLIT IS THE WHOLE MECHANISM. `.sidebar` is a 52px gutter that never
-   changes width; `.sidebar-panel` is absolutely positioned inside it and is what grows to 232px.
-   So expanding paints OVER the page and reflows nothing -- which matters most on Overview, whose
-   shopfloor grid would otherwise re-lay out for as long as a pointer rested in the corner. */
+/* Sidebar: the primary navigation, a rail of icons with a labelled panel. Two elements, and the
+   split is the mechanism: `.sidebar` is a 52px gutter that does not change width in hover mode, and
+   `.sidebar-panel` is absolutely positioned inside it and grows to 232px, painting over the page
+   without reflowing it. Expanded mode widens the gutter instead; see the modes block at the end of
+   the file. */
 .sidebar {
   position: relative;
   flex: 0 0 52px;
@@ -673,14 +556,8 @@ html, body, #root {
   outline-offset: 1px;
 }
 
-/* ===== Global search =====
-   The centre of the top bar, where the tab strip was. A search box is the right thing to put in a
-   horizontal strip and a page list was not: its width is fixed however many pages exist.
-
-   `flex: 0 1 480px` against two `flex: 1 1 0` flanks. The flanks claim equal shares of what is
-   left, so this sits on the bar's true centre rather than in the space left over between a
-   two-line brand and a 28px avatar. It shrinks before the brand does, down to a floor at which the
-   placeholder is gone but the icon and the field are not. */
+/* Global search, the centre of the top bar. `flex: 0 1 480px` against two `flex: 1 1 0` flanks, so
+   it sits on the bar's true centre and shrinks before the brand does. */
 .global-search {
   position: relative;
   flex: 0 1 480px;
@@ -805,18 +682,10 @@ html, body, #root {
   color: var(--text-dim);
 }
 
-/* ===== Top Bar Responsive Collapse =====
-   What is left of the ladder now that the nav is not in the bar. The brand is still the region that
-   yields -- it says the same thing on every page -- but there are two steps rather than five,
-   because the thing that used to consume the bar no longer sits in it.
-
-     < 1400px  the strapline goes and the wordmark shortens; button labels go
-     < 1100px  the brand text goes entirely, leaving the mark
-
-   THE WORDMARK SHORTENS RATHER THAN DISAPPEARING, and the measurement behind that is unobvious:
-   `.brand-text` is a stacked block and so is as wide as the WIDER line, and the strapline (~251px)
-   is wider than the full wordmark (~242px). Hiding the strapline alone reclaims about nine pixels.
-   The wordmark is the lever, and it gives by getting shorter -- "ACS Cymru", ~75px. */
+/* Top bar responsive collapse. Below 1400px the strapline goes and the wordmark shortens, and
+   button labels go; below 1100px the brand text goes entirely. The wordmark shortens rather than
+   disappearing because `.brand-text` is a stacked block as wide as its wider line, and the
+   strapline is wider than the full wordmark, so hiding the strapline alone reclaims almost nothing. */
 @media (max-width: 1399px) {
   .brand-sub { display: none; }
   .brand-name-full { display: none; }
@@ -842,29 +711,15 @@ html, body, #root {
      widen this item rather than scrolling inside it, and push the rail off the screen. */
   min-width: 0;
   overflow-y: auto;
-  /* THE VARIABLE RIGHT-HAND MARGIN, AND WHERE IT CAME FROM. The custom scrollbar is 6px wide and
-     is taken OUT of this element's content box, so a page long enough to scroll drew its cards 6px
-     narrower than one that was not -- and the gap on the right therefore changed as you navigated,
-     which is exactly what it looked like: Schemas inset further than Vocabulary for no reason
-     either page could explain.
-
-     `stable` reserves the track whether or not it is occupied, so the right edge is now the same
-     on every page. It costs 6px permanently on the pages that do not scroll, which is a worse deal
-     than it sounds only if you have not seen the alternative -- a layout that moves under you is
-     more expensive than one that is 6px narrower.
-
-     Browsers without support (Safari before 18.2) ignore it and get today's behaviour, which is
-     the right way round for a progressive enhancement. */
+  /* The custom scrollbar is taken out of this element's content box, so without a reserved gutter a
+     page that scrolls draws its cards narrower than one that does not. `stable` reserves the track
+     on every page. Browsers without support ignore it. */
   scrollbar-gutter: stable;
   padding: 12px var(--inset) var(--inset);
 }
 
-/* ===== Section Header =====
-   `.section-header` -- a full-width heading row above a card -- is gone. Every page-level use of it
-   was a heading restating the name of the tab already highlighted in the top bar, and the two
-   in-card uses that were left (Archives, Directory) moved into `.card-header`, which rides an edge
-   the card had anyway. `.section-title` and `.section-count` survive because the card headers,
-   which still exist, are built from them. */
+/* Section header. `.section-header` as a full-width heading row above a card is gone;
+   `.section-title` and `.section-count` survive because the card headers are built from them. */
 .section-title {
   font-size: 20px;
   font-weight: 600;
@@ -896,11 +751,9 @@ html, body, #root {
   transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
-/* A section header *inside* a card.
-   `.card` deliberately carries no padding so tables can run edge to edge, which means a plain
-   `.section-header` placed inside one sits flush against the card's borders. This inset variant
-   gives the title and its action the same breathing room the page-level headers have, and rules
-   itself off from the table below. */
+/* A section header inside a card. `.card` carries no padding so tables can run edge to edge; this
+   inset variant gives the title and its action their breathing room and rules itself off from the
+   table below. */
 .card-header {
   display: flex;
   align-items: center;
@@ -916,21 +769,14 @@ html, body, #root {
   line-height: 1.3;
 }
 
-/* Body padding for a card whose contents are not a table.
-   `.card` deliberately has none of its own -- a `.table-wrap` fills it edge to edge, and the cells
-   carry their own padding -- so prose or a control row placed directly in a card sits flush against
-   the border and reads as a rendering fault. The Capture page was the first to need it and found
-   this the way you would expect: it looked wrong.
-   The same inset as `.card-header`, so the header's text and the body's line up -- and the same as
-   a table cell's, so a card with a header, a body and a table has one left edge rather than three. */
+/* Body padding for a card whose contents are not a table. The same inset as `.card-header` and as a
+   table cell, so a card with a header, a body and a table has one left edge. */
 .card-body {
   padding: 12px var(--inset);
 }
 
-/* A filter bar inside a card, rather than at page level between cards.
-   The page-level one carries its own background, border and bottom margin because it floats on the
-   page background. Inside a card it is already on a panel, and repeating the frame draws a box
-   inside a box -- so it keeps the layout and drops the chrome. */
+/* A filter bar inside a card. The page-level one carries its own frame because it floats on the
+   page background; inside a card it keeps the layout and drops the chrome. */
 .card-body > .filter-bar {
   margin-bottom: 0;
   padding: 0;
@@ -938,21 +784,15 @@ html, body, #root {
   border: none;
 }
 
-/* The seam between a card's body and the table it introduces.
-   Dropping the filter bar's own frame (above) removed the only thing separating a row of controls
-   from the header row of the table beneath it -- most visible in light mode, where both sit on
-   near-white and the boundary reads as a blur rather than an edge. The same 1px the card header
-   already uses on its own underside, so a card with a body reads as header / body / table rather
-   than as one continuous surface. */
+/* The seam between a card's body and the table it introduces: the same 1px the card header uses on
+   its underside, so the card reads as header / body / table. */
 .card-body + .table-wrap,
 .card-body + .card-body {
   border-top: 1px solid var(--border);
 }
 
-/* ===== Filter Bar =====
-   The list pages outgrew a single header row once schema/status/relationship filters arrived.
-   Filters live on their own row so the header keeps only the title and primary actions, and so
-   the controls wrap predictably instead of pushing the "New ..." button off screen. */
+/* Filter bar: filters live on their own row so the header keeps only the title and primary actions,
+   and the controls wrap predictably. */
 .filter-bar {
   display: flex;
   align-items: center;
@@ -975,10 +815,9 @@ html, body, #root {
 /* Pushes everything after it to the right-hand end of the bar. */
 .filter-bar-spacer { margin-left: auto; }
 
-/* A GROUP at the right-hand end, for pages whose export and refresh controls fold into the
-   filter row rather than sitting on a row of their own above it. Carrying the
-   spacer on the group rather than on its first child keeps the right-hand end stable when one
-   of the controls is conditional. */
+/* A group at the right-hand end, for export and refresh controls that fold into the filter row. The
+   spacer is on the group rather than its first child, so the end stays stable when a control is
+   conditional. */
 .filter-bar-actions {
   display: flex;
   align-items: center;
@@ -1007,27 +846,12 @@ html, body, #root {
   color: var(--accent);
 }
 
-/* ===== KPI Ribbon =====
-   Three 126px stat cards in a 154px grid row became one 48px bar -- ~106px back on the page every
-   operator lands on.
-
-   The cards spent that height on a 32px accent numeral each. It was the loudest thing on the
-   Overview page and it was reporting a figure that changes a handful of times a week, sitting
-   directly above a live map of the floor. The ribbon keeps every number and every click target and
-   drops only the size.
-
-   What the cards' sub-line carried -- the Offline/Archived split -- moves onto each item's
-   `title`. The headline is now "n/N Active", because the question this bar answers at a glance is
-   "is everything up?", which a bare total cannot answer at all. */
-/* THREE EQUAL COLUMNS, not three centred items.
-   Centring a flex row put the three metrics in the middle as one clump whose segments were as wide
-   as their own text, so "Gateways" occupied more of the bar than "Cells" and the dividers landed at
-   arbitrary places. An equal grid gives each metric an identical third of the width, which is what
-   makes the dividers read as structure rather than as punctuation.
-
-   `align-items: stretch`, NOT `center`. The items must run the full 48px or their right borders
-   collapse into 20px stubs floating in the middle of the bar. The content is still vertically
-   centred -- each item centres its own, see .kpi-item. */
+/* KPI ribbon: one 48px bar of figures above the shopfloor map. The headline is "n/N Active", since
+   the question this bar answers is whether everything is up; the Offline/Archived split is on each
+   item's `title`. */
+/* Three equal columns, not three centred items, so the dividers read as structure. `align-items:
+   stretch`, not `center`: the items must run the full height or their right borders collapse into
+   stubs. Each item centres its own content. */
 .kpi-ribbon {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1044,11 +868,8 @@ html, body, #root {
 
 .kpi-item {
   display: flex;
-  /* `center`, not `baseline`. Baseline lined the label, the figure and the unit up on a common
-     baseline -- correct typographically -- but in a stretched 48px item it also pinned that
-     baseline to the TOP of the bar, so the whole group sat high with all the slack beneath it.
-     Centring costs a little optical alignment between the 15px figure and the 11px label, and
-     buys the group sitting where it belongs in the bar. */
+  /* `center`, not `baseline`: in a stretched item a common baseline pins the group to the top of
+     the bar. */
   align-items: center;
   justify-content: center;
   height: 100%;
@@ -1066,10 +887,9 @@ html, body, #root {
   min-width: 0;
 }
 
-/* Rules between the columns rather than gaps: the ribbon is one object, and gaps between three
-   floating groups read as three objects again -- which is what it stopped being. The items stretch
-   to the bar's height, so each border runs its full 48px. Last item excluded so the ribbon does not
-   grow a redundant inner edge against its own right border. */
+/* Rules between the columns rather than gaps, so the ribbon is one object. The items stretch, so
+   each border runs the full height; the last item is excluded so there is no inner edge against the
+   ribbon's own border. */
 .kpi-item:not(:last-child) { border-right: 1px solid var(--border); }
 
 .kpi-item:hover { background: var(--bg-glass); }
@@ -1097,16 +917,11 @@ html, body, #root {
 
 .kpi-unit { font-size: 11px; color: var(--text-muted); }
 
-/* Raised on the item whose figure needs an operator to act -- currently Devices, while any device
-   is held in quarantine. Inherited wholesale from the stat card this replaced, including the
-   0.07 amber overlay, so the contrast case themeContrast.test.js already measures
-   ("--warning-text on alert card") still describes what ships.
-
-   COLOUR IS NEVER THE ONLY SIGNAL: the item also grows an icon and the word "Quarantined". */
-/* The amber bar is an INSET SHADOW, not a border-left. As a border it sat immediately beside the
-   1px divider on the item before it, and the two painted as one confused 4px line. An inset shadow
-   occupies no layout, so the divider stays a clean 1px and the bar reads as belonging to this
-   item. */
+/* Raised on the item whose figure needs an operator to act: Devices, while any device is held in
+   quarantine. themeContrast.test.js measures this fill as "--warning-text on alert card". Colour is
+   never the only signal: the item also grows an icon and the word "Quarantined". */
+/* The amber bar is an inset shadow, not a border-left, so it occupies no layout and the 1px divider
+   beside it stays clean. */
 .kpi-item-alert {
   box-shadow: inset 3px 0 0 var(--warning);
   background: linear-gradient(to right, rgba(255, 179, 0, 0.07), var(--bg-card) 70%);
@@ -1128,18 +943,10 @@ html, body, #root {
   overflow-x: auto;
 }
 
-/* ===== Capped, scrolling table =====
-   A modifier on `.table-wrap`, for lists that grow without an upper bound and sit above other
-   content the page still needs to reach. The schema registry is the first (issue #60): it gains a
-   row per PUBLISH rather than per schema, so a floor with a few versioned schemas pushed the
-   metric catalog -- the thing schemas are built FROM -- off the bottom of the page.
-
-   THE HEADER IS PINNED, which is the half that makes the cap usable rather than merely shorter.
-   Five columns of UUIDs and version badges are unreadable once the row naming them has scrolled
-   away, and a capped table without a sticky header just moves that problem inside the box.
-
-   `overscroll-behavior: contain` stops a flick that bottoms out here from carrying on down the
-   page, the same reason `.zone-chips` carries it. */
+/* Capped, scrolling table: a modifier on `.table-wrap` for lists that grow without bound above
+   content the page still needs, such as the schema registry. The header is pinned, since a capped
+   table without one moves the problem inside the box. `overscroll-behavior: contain` stops a flick
+   that bottoms out here from scrolling the page. */
 .table-scroll {
   max-height: 420px;
   overflow-y: auto;
@@ -1200,13 +1007,8 @@ tbody tr {
 
 tbody tr:hover { background: var(--bg-glass); }
 
-/* ===== Table summary footer =====
-   A counts bar pinned under a table, for the totals that describe the WHOLE list rather than any
-   row of it. It sat above the table as loose text in a filter bar, which put a summary of the rows
-   before the rows and left the header holding two unrelated jobs.
-
-   `--bg-glass` matches `thead tr`, so the table is bracketed by the same tint at both ends and the
-   footer reads as part of the table rather than as another card that happens to touch it. */
+/* Table summary footer: a counts bar under a table, for totals that describe the whole list.
+   `--bg-glass` matches `thead tr`, so the table is bracketed by the same tint at both ends. */
 .table-summary {
   display: flex;
   align-items: center;
@@ -1247,12 +1049,8 @@ tbody tr:hover { background: var(--bg-glass); }
    compete with a count that is not zero. */
 .table-summary-pill-zero strong { color: var(--text-dim); font-weight: 500; }
 
-/* ===== Callout =====
-   A banner for a caveat the reader must not miss, inside the card it qualifies. This started as a
-   red paragraph, which is the weakest form the warning can take: colour alone carries it, so it is
-   invisible to anyone who cannot distinguish it and merely looks like emphasis to everyone else.
-
-   A bordered, tinted block is a shape as well as a colour, which is what makes it survive both. */
+/* Callout: a bordered, tinted banner for a caveat the reader must not miss, inside the card it
+   qualifies. A shape as well as a colour, so it survives a reader who cannot distinguish the hue. */
 .callout {
   display: flex;
   gap: 10px;
@@ -1280,16 +1078,9 @@ tbody tr:hover { background: var(--bg-glass); }
 .callout-warning .callout-icon { color: var(--warning); }
 .callout strong { color: var(--text-primary); }
 
-/* ===== Group header row =====
-   A collapsible category inside a table body -- the Metric Catalog's AXES / BMS / CONTROLLER rows.
-   Extracted from an inline style so the CONTRAST PROBLEM could be fixed in one place:
-
-   IT USED `--bg-glass`, WHICH IS EXACTLY THE HOVER COLOUR. So a category header looked permanently
-   hovered, a hovered data row looked like a category header, and a run of collapsed categories
-   merged into one slab with nothing separating the rows. Three symptoms, one cause.
-
-   `--bg-card` mixed toward the text colour instead: separated from the row background, and
-   separated from hover, which is what lets both mean something. */
+/* Group header row: a collapsible category inside a table body. `--bg-card` mixed toward the text
+   colour, separated from both the row background and the `--bg-glass` hover colour, so a category
+   header does not look permanently hovered. */
 .table-group-row > td {
   padding: 0;
   border-top: 1px solid var(--border);
@@ -1300,11 +1091,8 @@ tbody tr:hover { background: var(--bg-glass); }
    would also fire when the pointer is over the gap beside it. */
 .table-group-row:hover > td { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
 
-/* PADDED LIKE A TABLE CELL, because it is standing in for one. `td` is `12px 16px`, and this was
-   `7px 12px` -- so a category label started four pixels left of every value in the column beneath
-   it, and its row stood ten pixels shorter than the rows it groups. In a collapsed catalog that is
-   eleven short, misaligned bands against a registry of tall, aligned ones, which is what read as
-   "a different table" even though both are the same card, the same tokens and the same markup. */
+/* Padded like a table cell (`td` is `12px 16px`), because it stands in for one, so the label aligns
+   with the column beneath it and the row stands as tall as the rows it groups. */
 .table-group-button {
   width: 100%;
   display: flex;
@@ -1336,12 +1124,9 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-muted);
 }
 
-/* The retention deadline on an archived row. Danger-coloured because it is a date on which
-   data disappears, not merely a date.
-
-   Compounded with .mono, which it is always used alongside: .mono sets its own colour and size,
-   and relying on source order to beat it is the specificity trap that cost the shopfloor lanes
-   their borders twice. */
+/* The retention deadline on an archived row. Danger-coloured because it is a date on which data
+   disappears. Compounded with .mono, which sets its own colour and size, so this does not depend on
+   source order. */
 .mono.cell-purge-date {
   font-size: 11px;
   color: var(--danger);
@@ -1355,16 +1140,9 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .row-actions .btn + .btn { margin-left: 8px; }
 
-/* ===== Directory service tables =====
-   The Directory page renders one table PER CATEGORY -- applications, ingestion, backend -- rather
-   than one list of everything. That is three separate <table> elements, and three tables sized
-   from their own content pick three different sets of column widths: SERVICE TYPE would start at
-   a different x on each card and the page would read as three unrelated tables rather than one
-   list broken into sections. `table-layout: fixed` plus the widths below pins all three to the
-   same grid.
-
-   The widths are set on the header cells only; under `table-layout: fixed` the first row decides
-   every column, so repeating them on the body cells would be inert duplication. */
+/* Directory service tables: one table per category, so `table-layout: fixed` plus the widths below
+   pin all three to the same column grid. Widths are set on the header cells only; under fixed
+   layout the first row decides every column. */
 .table-directory {
   table-layout: fixed;
   /* Below this the fixed columns crush rather than wrap, so `.table-wrap` scrolls instead. */
@@ -1377,10 +1155,8 @@ tbody tr:hover { background: var(--bg-glass); }
 .table-directory th:nth-child(4) { width: 14%; }  /* Status */
 .table-directory th:nth-child(5) { width: 14%; }  /* Last heartbeat */
 
-/* Compact rows. The directory is a reference list read top to bottom, not a work surface with
-   per-row actions, so the 12px the action tables need is dead vertical space here -- at the
-   default padding the three cards do not fit one screen and the grouping stops paying for
-   itself. */
+/* Compact rows: the directory is a reference list read top to bottom, not a work surface with
+   per-row actions. */
 .table-directory th { padding: 9px 16px; }
 
 .table-directory td {
@@ -1392,12 +1168,8 @@ tbody tr:hover { background: var(--bg-glass); }
    column cannot break at a space. Without this it overruns its cell into STATUS. */
 .table-directory .cell-endpoint { overflow-wrap: anywhere; }
 
-/* An endpoint reads as a CONTROL, and its shape says which control it is.
-
-   The two used to render identically -- a bare monospace anchor -- so the only way to discover
-   that `mqtt://localhost:1883` was not a web page was to click it and watch a tab fail to load.
-   Both are now button-shaped, and the two variants differ in colour and icon: an accent-bordered
-   one opens, a muted one copies. Which of these can I open is answerable by looking. */
+/* An endpoint reads as a control, and its shape says which: an accent-bordered one opens, a muted
+   one copies. */
 .endpoint-action {
   display: inline-flex;
   align-items: center;
@@ -1434,10 +1206,8 @@ tbody tr:hover { background: var(--bg-glass); }
    are meant to sit tight against each other. */
 .directory-group + .directory-group { margin-top: var(--stack); }
 
-/* ===== Copyable identifiers =====
-   Sparkplug ids are opaque 24-character strings that engineers have to transcribe into
-   gateway configuration, so every one shown in the UI is click-to-copy. Styled to read as
-   inline text rather than a control, while still being a real <button> for keyboard use. */
+/* Copyable identifiers: every Sparkplug id shown is click-to-copy, styled to read as inline text
+   while still being a real <button>. */
 .copyable-id {
   display: inline-flex;
   align-items: center;
@@ -1511,18 +1281,10 @@ tbody tr:hover { background: var(--bg-glass); }
 .badge-warning { background: rgba(255, 179, 0, 0.15);  color: var(--warning-text); }
 .badge-neutral { background: var(--bg-glass); color: var(--text-muted); border: 1px solid var(--border); }
 
-/* ---------------------------------------------------------------------------------------------
-   The two REMOTE GATEWAY ENROLMENT states.
-
-   NEITHER EXISTING VARIANT FITS. `badge-warning` (amber) means "look at this", and a gateway
-   waiting for somebody to carry a bundle to a machine is an unfinished task rather than a fault --
-   amber there turns the whole Cells page into a warning the moment a few appliances are ordered.
-   `badge-neutral` (grey) reads as decommissioned, which says the opposite of what is true.
-
-   THEY DIFFER BY BORDER, NOT ONLY BY TINT. Solid = waiting on a person (go install it); dashed =
-   waiting on a machine that already has everything it needs (just wait). Two states an operator
-   acts on differently must be tellable apart without relying on a colour difference this small.
-   --------------------------------------------------------------------------------------------- */
+/* The two remote gateway enrolment states. Neither existing variant fits: `badge-warning` means
+   look at this, and `badge-neutral` reads as decommissioned. They differ by border, not only tint:
+   solid is waiting on a person (go install it), dashed is waiting on a machine that already has
+   everything it needs. */
 .badge-pending {
   background: rgba(0, 212, 255, 0.15);
   color: var(--accent);
@@ -1556,10 +1318,7 @@ tbody tr:hover { background: var(--bg-glass); }
   cursor: pointer;
   transition: var(--transition);
   white-space: nowrap;
-  /* A `.btn` is sometimes an <a> -- a link that navigates to a file, like the model
-     download. Without this it renders underlined, so the row reads as one button and one
-     link rather than three controls. Previously worked around inline at the one call site
-     that hit it. */
+  /* A `.btn` is sometimes an <a>, such as the model download, and must not render underlined. */
   text-decoration: none;
 }
 
@@ -1580,26 +1339,17 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 .btn-ghost:hover { border-color: var(--border-hover); color: var(--accent); }
 
-/* The count pill inside a SELECTED filter button (issue #32).
- *
- * `.section-count` paints --accent on --accent-dim, which is legible on a card and nearly invisible
- * once the button it sits in turns into `.btn-primary` -- an --accent-strong fill. Reported on the
- * Vocabulary filter bar, where every tab carries its own count.
- *
- * INVERTED FROM THE BUTTON'S OWN PAIRING rather than given colours of its own: the pill takes the
- * button's ink as its fill and the button's fill as its ink. That yields exactly the contrast ratio
- * of the button's label, which themeContrast.test.js already measures against AA and APCA in both
- * themes -- so this cannot be legible in one theme and not the other, which is how the original
- * got through. */
+/* The count pill inside a selected filter button. `.section-count` paints --accent on --accent-dim,
+   which is invisible on a `.btn-primary` fill, so the pill takes the button's ink as its fill and
+   the button's fill as its ink: the same contrast ratio as the label, which themeContrast.test.js
+   measures in both themes. */
 .btn-primary .section-count {
   background: var(--accent-contrast);
   color: var(--accent-strong);
 }
 
-/* --danger-text, not --danger. This is TEXT on a rose-tinted fill, which is the exact case the
-   -text tier exists for: --danger on the 0.2 hover tint measures 4.09:1 in dark and 3.69:1 in
-   light, both under AA. The toast and .badge-offline were moved off --danger for this reason;
-   the button was missed because it reads as a control rather than as text. */
+/* --danger-text, not --danger: this is text on a rose-tinted fill, on which --danger measures under
+   AA in both themes. */
 .btn-danger {
   background: rgba(255, 77, 109, 0.12);
   color: var(--danger-text);
@@ -1607,15 +1357,9 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 .btn-danger:hover { background: rgba(255, 77, 109, 0.2); box-shadow: 0 0 12px rgba(255, 77, 109, 0.2); }
 
-/* A destructive action that sits in a table row rather than in a dialog, where a permanently
-   red button would be the loudest thing on a page of otherwise routine rows and would pull the
-   eye to the one control nobody should reach for by accident. It rests as an ordinary ghost
-   button and takes on the danger colour once pointed at -- by which point the pointer is
-   already there and the colour is a warning rather than an advertisement.
-   --text-muted, not --text-dim: this still has to be readable at rest.
-
-   Compounded with .btn-danger for the same reason .mono.cell-purge-date is: .btn-danger declares
-   the same three properties and source order is not a guarantee worth resting on. */
+/* A destructive action in a table row: it rests as an ordinary ghost button and takes the danger
+   colour once pointed at. --text-muted so it is readable at rest. Compounded with .btn-danger,
+   which declares the same three properties, so this does not rest on source order. */
 .btn-danger.btn-danger-reveal {
   background: var(--bg-glass);
   color: var(--text-muted);
@@ -1644,16 +1388,10 @@ tbody tr:hover { background: var(--bg-glass); }
   transform: none !important;
 }
 
-/* ===== Button pending state =====
-   A button whose action is in flight. DELIBERATELY NOT `.btn-disabled`: that state means "you may
-   not do this" and greys the control out, whereas this one means "this is happening" and has to
-   stay legible while it says so. Greying it would read as the click having been refused.
-
-   The `disabled` attribute is set alongside this class by ActionButton -- the class is the
-   appearance, the attribute is the double-submit guard, and neither substitutes for the other.
-
-   `cursor: wait` still applies on a disabled button: pointer EVENTS are suppressed, the cursor
-   property is not. */
+/* Button pending state: a button whose action is in flight. Not `.btn-disabled`, which means not
+   permitted and greys the control; this one has to stay legible. ActionButton sets the `disabled`
+   attribute alongside this class as the double-submit guard. `cursor: wait` still applies on a
+   disabled button. */
 .btn-loading {
   cursor: wait;
   /* Enough to read as inactive without losing the label. */
@@ -1669,10 +1407,8 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .btn-group { display: flex; gap: 8px; }
 
-/* ===== Overflow action menu =====
-   Portalled to <body> because .table-wrap is overflow-x:auto and would clip it. That means the
-   z-index has to clear the page but stay UNDER .modal-overlay (1000) -- a menu floating over an
-   open modal would be unreachable and would look like a rendering fault. */
+/* Overflow action menu, portalled to <body> because .table-wrap is overflow-x:auto and would clip
+   it. The z-index clears the page but stays under .modal-overlay (1000). */
 .action-menu {
   z-index: 900;
   min-width: 200px;
@@ -1733,11 +1469,9 @@ tbody tr:hover { background: var(--bg-glass); }
   background: var(--border);
 }
 
-/* A document provider's badge. The provider's own colour tints the fill and draws the border --
-   enough to make a SharePoint link recognisable as one across a list -- while the LABEL takes
-   --text-primary, because the brand colours are not legible as text: #0078d4 on the dark card is
-   3.73:1 against a 4.5:1 bar. The icon beside the label carries the identity that the ink used
-   to try to. `color-mix` keeps the tint derived from the one place the colour is written. */
+/* A document provider's badge: the provider's colour tints the fill and draws the border, while the
+   label takes --text-primary, because the brand colours are not legible as text. `color-mix` keeps
+   the tint derived from the one place the colour is written. */
 .badge-brand {
   color: var(--text-primary);
   background: color-mix(in srgb, var(--badge-brand-color) 15%, transparent);
@@ -1789,14 +1523,8 @@ tbody tr:hover { background: var(--bg-glass); }
   animation: slideUp 0.2s ease;
   color: var(--text-primary);
 
-  /* A modal whose content is longer than the viewport used to grow past both edges: the overlay
-     centres it, so the overflow went off the TOP as well as the bottom and the title scrolled
-     out of reach entirely -- no scrollbar, nothing to grab, and on the Configuration Parameters
-     dialog (one row per modelled metric) that is the normal case rather than an edge case.
-     Capping the height here fixes every modal at once, which is right: none of them can predict
-     how much content they will be given.
-     ActionMenu portals itself to <body> precisely so a scroll container cannot clip it, so this
-     does not trap the one popup that would have been at risk. */
+  /* Caps the height of every modal so a long dialog scrolls inside itself rather than growing past
+     both edges of the viewport. ActionMenu portals to <body>, so this cannot clip it. */
   max-height: calc(100vh - 48px);
   overflow-y: auto;
 }
@@ -1806,18 +1534,9 @@ tbody tr:hover { background: var(--bg-glass); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ===== The modal width scale =====
-   Every dialog used to carry its own `style={{ maxWidth: N }}`, and the fifteen of them landed
-   on 400, 460, 480, 520, 560, 640, 720 and 900 -- six of which were the same size wearing
-   different numbers, and none of which said what the size was FOR. The steps below are named
-   after the kind of content that earns them, so a new dialog picks a category rather than a
-   number, and two dialogs showing the same kind of thing cannot drift 20px apart.
-
-   `.modal` itself is the default step (480px): a column of stacked form fields, which is what
-   most dialogs here are. Nothing needs a class to get it.
-
-   Every step inherits `.modal`'s height cap and internal scrolling, so widening a dialog can
-   never be what makes its title scroll off the top of the viewport. */
+/* The modal width scale. `.modal` itself is the default step (480px), a column of stacked form
+   fields; the steps below are named after the kind of content that earns them. Every step inherits
+   `.modal`'s height cap and internal scrolling. */
 
 /* A yes/no question and nothing else. Narrower than a form on purpose: a short line of text set
    across 480px reads as an unfinished dialog. */
@@ -1892,14 +1611,8 @@ tbody tr:hover { background: var(--bg-glass); }
   box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
-/* Placeholders had no rule at all, so they fell to the browser default -- which derives from
-   the input's own colour and is not guaranteed to stay legible when the theme flips.
-   Bind them to the theme explicitly.
-
-   --text-muted, not --text-dim: measured against --bg-base, --text-dim gives 2.45:1 in dark
-   mode, which fails WCAG AA (and even the 3:1 large-text floor). --text-muted is 5.15:1 dark
-   and 6.92:1 light. It is still clearly dimmer than --text-primary input text, so the visual
-   hierarchy holds without the contrast cost. */
+/* Placeholders bound to the theme explicitly rather than the browser default. --text-muted, not
+   --text-dim, which measures 2.45:1 against --bg-base in dark mode. */
 .form-control::placeholder {
   color: var(--text-muted);
   opacity: 1; /* Firefox dims placeholders by default, compounding the contrast problem. */
@@ -1946,21 +1659,10 @@ tbody tr:hover { background: var(--bg-glass); }
 .val-bool-false { color: var(--danger); }
 
 /* ===== Toast ===== */
-/*
- * THE BACKGROUND MUST BE OPAQUE. A toast is `position: fixed` over whatever the user happens to
- * be looking at, so the 15% tint these variants use was compositing against a data table, not
- * against a surface -- 85% of the row behind it showed through and the message became unreadable.
- *
- * The tint itself is right and is kept: it is the same 0.15 fill the badges use, and the
- * --success-text / --danger-text tokens are calibrated against exactly that fill. What was missing
- * is something for it to composite ONTO. Painting it as a background-image over an opaque
- * background-color of --bg-card reproduces the colour the contrast analysis assumed, so the
- * measured ratios in __tests__/themeContrast.test.js are the ratios that actually render.
- *
- * Keep them as separate background-image / background-color properties rather than folding them
- * into a `background:` shorthand -- the shorthand resets background-color, which is how the
- * transparency would come straight back.
- */
+/* The background must be opaque: a toast is `position: fixed` over arbitrary content, so the 0.15
+   tint is painted as a background-image over an opaque background-color of --bg-card, which is the
+   base the ratios in themeContrast.test.js assume. Keep them as separate properties: the
+   `background:` shorthand resets background-color. */
 .toast {
   position: fixed;
   bottom: 28px;
@@ -2009,13 +1711,9 @@ tbody tr:hover { background: var(--bg-glass); }
   animation: spin 0.7s linear infinite;
 }
 
-/* The in-button size. Sits on the text baseline of a 14px label, so it is sized to the cap height
-   rather than to the 18px the page-level spinner uses -- an 18px ring inside a 34px button forces
-   the row taller and the button visibly grows the moment it is clicked.
-
-   The rest track is currentColor at low alpha rather than --border: this spins on --accent-strong
-   (primary), on --bg-glass (ghost) and on a rose tint (danger), and a fixed grey ring disappears
-   entirely against the first of those. */
+/* The in-button spinner, sized to the cap height of a 14px label so the button does not grow when
+   clicked. The rest track is currentColor at low alpha rather than --border, since this spins on
+   primary, ghost and danger fills alike. */
 .spinner-sm {
   width: 12px;
   height: 12px;
@@ -2078,29 +1776,15 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-muted);
 }
 
-/* A FLOOR PLAN, NOT A LIST OF CARDS.
-   320px minimums gave five columns on a 1080p screen and pushed everything past the third cell
-   below the fold.
-
-   280px is the minimum, but ~296px is what actually renders at 1920: the map card offers 1838px of
-   inner width, which fits exactly SIX 280px tracks plus their gaps and then distributes the
-   remainder back through `1fr`. So the minimum sets the column COUNT and the fraction sets the
-   width -- 6 substantial tiles rather than 7 tight ones, without a media query pinning a count that
-   would break on a 1366px laptop. That degrades cleanly: 5 columns at 1600, 4 at 1366, all of them
-   ~295-310px.
-
-   `auto-fill`, not `auto-fit`: with `auto-fit` the tracks COLLAPSE when there are fewer cells than
-   columns, so a floor with three bays would stretch each one across a third of the display and the
-   grid would change shape as cells are added. `auto-fill` keeps the track width stable, which is
-   what makes this read as a plan of a floor rather than as however many cards happen to exist. */
+/* A floor plan, not a list of cards. 280px is the minimum track; at 1920 that gives six columns
+   with the remainder distributed through `1fr`, and it degrades to five at 1600 and four at 1366.
+   `auto-fill`, not `auto-fit`: with `auto-fit` the tracks collapse when there are fewer cells than
+   columns, and the grid would change shape as cells are added. */
 .shopfloor-grid {
   display: grid;
-  /* `min(280px, 100%)` RATHER THAN A BARE 280px, and the rail is what forced it. A grid track with
-     a fixed minimum larger than its container does not shrink -- it overflows -- and at 360px the
-     container is now 360 less the rail, the page inset and the scrollbar gutter, which is under
-     280. The idiom caps the track at the container's own width, so the narrowest case degrades to
-     one full-width column instead of a horizontal scrollbar. It changes nothing at any width where
-     280px already fitted. */
+  /* `min(280px, 100%)` rather than a bare 280px: a grid track with a fixed minimum larger than its
+     container overflows, and at 360px the container is narrower than 280 once the rail, the inset
+     and the scrollbar gutter are taken. The idiom degrades to one full-width column. */
   grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 12px;
   align-items: start;
@@ -2117,54 +1801,18 @@ tbody tr:hover { background: var(--bg-glass); }
   margin-bottom: 12px;
 }
 
-/* THE DERIVED LANES GET A ROW OF THEIR OWN, ABOVE THE CELLS.
-   Site-Wide, Simulated and Unassigned are not cells -- a permanent home for facility-scoped
-   assets, a lane for telemetry that was generated rather than observed, and a queue that should
-   drain. None has a row in `cells`.
-
-   They were pinned to the front of the single cell grid by `order`, which held their POSITION but
-   not their SEPARATION: at most widths they shared a row with the first bays, so the map read as
-   one run of tiles of which three happened to be coloured differently, and the boundary was
-   visible only to a reader who already knew where it was.
-
-   A grid of their own draws it structurally. `auto-fit` with the same 280px minimum as the cell
-   grid keeps the tiles identical in size and lets the three collapse to two rows on a narrow
-   viewport rather than overflowing -- they are the same kind of object, just not in the plant.
-
-   THIS REVERSES THE MERGE INTO ONE GRID, and what changed is the count: the merge traded a section
-   of its own for height when there were two lanes, and three fill a row on their own, so there is
-   no longer any height to buy. `order` is gone with it -- position in a grid of exactly the lanes
-   is the DOM order of the LANES array, which is where that decision is already written down.
-
-   EACH LANE GETS ITS OWN HUE, not one shared "derived" treatment. They are not two of a kind: one
-   is a permanent home and the other is a queue that should drain, and colouring them alike made
-   the pair read as a single category the cells were not in. Blue is the system/infrastructure
-   signal used elsewhere in the app; amber is the same "needs a decision" signal the quarantine
-   ribbon item and the Unassigned drop-hint already use.
-
-   The tints are single rgba literals rather than per-theme tokens, matching the .chip-* fills: a coloured overlay at this alpha reads correctly over both the dark card and
-   the white one, and one value means one contrast case to measure rather than two.
-   themeContrast.test.js measures --text-muted over both of these, which is what .zone-empty --
-   the only text sitting directly on a lane's ground -- is set in. */
-/* A 4px coloured cap along the top of each lane, on top of the 1px border and the fill.
-   THE CAP IS DOING MOST OF THE WORK, and that is forced rather than chosen: the fills below are
-   already at the strongest alpha that keeps `.zone-empty` clear of WCAG AA (see the note there and
-   the cases in themeContrast.test.js), so "make the lanes stand out more" cannot come from a
-   darker tint. A solid 4px edge costs no contrast at all, reads from across a room, and survives
-   both themes -- and it is the one part of the tile a physical cell never has.
-
-   Only the top edge thickens, so the lanes stay the same shape as the cells beside them. They are
-   the same kind of object in the grid; they are just not cells.
-
-   EVERY RULE HERE IS COMPOUNDED WITH .shopfloor-zone, AND MUST STAY THAT WAY.
-   These were single class selectors, which tie 0-1-0 with `.shopfloor-zone` below -- and that rule
-   is declared LATER, so it won the tie and the lanes rendered as ordinary tiles. It was not only
-   the border: `.shopfloor-zone` sets `background` and the `border` SHORTHAND, and a shorthand
-   resets colour, width and style together, so a single-class lane rule lost its cap, its border
-   colour and its tint in one go.
-
-   Compounding takes these to 0-2-0, which wins on specificity and therefore no longer depends on
-   where in the file anyone happens to move them. Do not "simplify" these back to one class. */
+/* The derived lanes get a row of their own above the cells. Site-Wide, Simulated and Unassigned are
+   not cells; a grid of their own draws the boundary structurally, and `auto-fit` with the same
+   280px minimum keeps the tiles the same size as the cells. Position is the DOM order of the LANES
+   array. Each lane gets its own hue: blue is the infrastructure signal, amber the needs-a-decision
+   signal. The tints are single rgba literals, matching the .chip-* fills; themeContrast.test.js
+   measures --text-muted over both, which is what .zone-empty is set in. */
+/* A 4px coloured cap along the top of each lane. The cap does most of the work: the fills are
+   already at the strongest alpha that keeps `.zone-empty` clear of WCAG AA, so a darker tint is not
+   available. Only the top edge thickens, so the lanes keep the cells' shape. Every rule here is
+   compounded with .shopfloor-zone and must stay that way: that rule sets `background` and the
+   `border` shorthand and is declared later, so a single-class lane rule loses its cap, border
+   colour and tint on the tie. */
 .shopfloor-zone.shopfloor-lane {
   border-style: solid;
   border-width: 1px;
@@ -2176,14 +1824,9 @@ tbody tr:hover { background: var(--bg-glass); }
   background: rgba(0, 212, 255, 0.05);
 }
 
-/* Simulated sits between the two, by its position in the LANES array and nothing else now that the
-   lanes have a grid to themselves.
-
-   DELIBERATELY GREY RATHER THAN A FIFTH HUE. --accent and --warning are carrying "infrastructure"
-   and "act on this"; a third colour beside them would read as a third kind of urgency. Synthetic
-   assets are the one thing on this map that wants LESS attention than a real cell, and neutral is
-   how a map says that. It is also the only choice that needs no new token, so it stays correct in
-   both themes for free. */
+/* Simulated is grey rather than a fifth hue: --accent and --warning carry infrastructure and
+   act-on-this, and synthetic assets are the one thing on this map that wants less attention than a
+   real cell. */
 .shopfloor-zone.shopfloor-lane-simulated {
   border-color: var(--text-dim);
   background: rgba(133, 142, 163, 0.07);
@@ -2233,14 +1876,9 @@ tbody tr:hover { background: var(--bg-glass); }
   box-shadow: 0 0 14px var(--accent-dim);
 }
 
-/* An archived cell is still on the plan -- the bay exists and may still hold assets -- but it is
-   out of commission, so it recedes rather than disappearing. The header also carries an "ARCH"
-   flag, so this is not colour on its own.
-
-   Compounded for the same reason as the lanes above. This one did render, but only by being
-   declared after `.shopfloor-zone` -- and it still lost its amber border to `.shopfloor-zone:hover`
-   (0-2-0) the moment anyone pointed at it. Both variants now state their identity at a specificity
-   that hover cannot take away. */
+/* An archived cell is still on the plan but out of commission, so it recedes rather than
+   disappearing; the header also carries an "ARCH" flag. Compounded so it keeps its border under
+   `.shopfloor-zone:hover` (0-2-0). */
 .shopfloor-zone.shopfloor-zone-archived {
   border-color: var(--warning);
   border-style: dashed;
@@ -2251,18 +1889,10 @@ tbody tr:hover { background: var(--bg-glass); }
   border-color: var(--warning);
 }
 
-/* ===== A tile with a drop still in flight =====
-   Between releasing a device over a tile and the api.put resolving, the tile shows nothing: the
-   device is still drawn in the zone it came from, because the reload has not happened yet. On a
-   slow link that is indistinguishable from a drop that was refused, and the reliable operator
-   response is to drag it again -- which is how one move became two writes.
-
-   `pointer-events: none` is the functional half and not merely a cursor nicety: it makes the
-   destination refuse a second drop for exactly as long as the first one is outstanding.
-
-   Compounded, and repeated for :hover, for the reason the two blocks above spell out -- the
-   pointer is by definition ON this tile, having just dropped something there, so a state that
-   loses to `.shopfloor-zone:hover` (0-2-0) would never once be seen. */
+/* A tile holding moves that have not been applied. `pointer-events: none` makes the destination
+   refuse a second drop while the first is outstanding. Compounded and repeated for :hover, because
+   the pointer is by definition on this tile and a state that loses to `.shopfloor-zone:hover` would
+   never be seen. */
 .shopfloor-zone.shopfloor-zone-pending {
   border-color: var(--accent);
   pointer-events: none;
@@ -2327,13 +1957,8 @@ tbody tr:hover { background: var(--bg-glass); }
   letter-spacing: -0.2px;
 }
 
-/* ===== Cell health rollup dot =====
-   One dot per tile, the worst state of the devices resolving to it. It is what makes eight
-   columns scannable: without it you have to read the chips inside every tile to find the one
-   that needs attention.
-
-   Never colour alone -- the dot carries a `title` naming the state, and the chips below it keep
-   their own icons and text. */
+/* Cell health rollup dot: one per tile, the worst state of the devices resolving to it. Never
+   colour alone: the dot carries a `title` naming the state. */
 .tile-dot {
   width: 8px;
   height: 8px;
@@ -2342,24 +1967,16 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .tile-dot-normal    { background: var(--success); box-shadow: 0 0 6px var(--success); }
-/* Quarantined -- something here is waiting to be admitted. Amber, because it is a decision
-   somebody has to make rather than a fault.
-
-   THERE IS NO LONGER A RED `tile-dot-alarm`. The map used to derive one from telemetry values
-   against hardcoded thresholds; see utils/deviceStatus.js for why that was withdrawn. A red dot on
-   this page would now be asserting a process condition the dashboard has no authority over --
-   metric alerting is Grafana's, which has evaluation intervals, state history and silences. */
+/* Quarantined: something here is waiting to be admitted. Amber, because it is a decision rather
+   than a fault. There is no red tile dot: the dashboard has no authority over process conditions;
+   see utils/deviceStatus.js. */
 .tile-dot-attention { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
 /* No glow: "nothing live in here" should not draw the eye the way something actionable does. */
 .tile-dot-idle      { background: var(--text-dim); }
 
-/* ===== Legend chip swatch =====
-   The legend's fourth entry (issue #59) describes a CHIP, not a dot: an alert fires against one
-   device, while the dots above roll up a whole tile. A rounded rectangle rather than a circle is
-   what makes that readable without a sentence -- it is the shape of the thing it stands for, so
-   the eye matches it to a chip in the grid and not to a dot in a tile header.
-
-   Sized to sit on the same 8px optical line as `.tile-dot` so the row does not step. */
+/* Legend chip swatch: the alert entry describes a chip, not a dot, since an alert fires against one
+   device while the dots roll up a whole tile. Sized to sit on the same 8px optical line as
+   `.tile-dot`. */
 .legend-chip {
   width: 14px;
   height: 9px;
@@ -2379,11 +1996,9 @@ tbody tr:hover { background: var(--bg-glass); }
   flex: 1;
 }
 
-/* --text-muted, not --text-dim. This is the one piece of text that sits directly on a tile's
-   ground rather than on a chip, and the lane tints lighten that ground -- which costs contrast.
-   --text-dim measures exactly 4.50:1 on a bare card, so any tint at all drops it below AA;
-   --text-muted keeps it clear over both lane fills (4.70:1 and 4.63:1 in dark, 7.3:1 in light).
-   See the cases in themeContrast.test.js. */
+/* --text-muted, not --text-dim: this is the one text that sits directly on a tile's ground, and the
+   lane tints cost contrast. --text-dim measures exactly 4.50:1 on a bare card; --text-muted stays
+   clear over both lane fills. See themeContrast.test.js. */
 .zone-empty {
   font-size: 11px;
   color: var(--text-muted);
@@ -2391,18 +2006,9 @@ tbody tr:hover { background: var(--bg-glass); }
   line-height: 1.35;
 }
 
-/* BOUNDED HEIGHT, SO ONE BUSY CELL DOES NOT SET THE ROW HEIGHT FOR ALL OF THEM.
-   `.shopfloor-grid` uses `align-items: start`, so tiles are only as tall as their content -- which
-   is right until one cell holds three devices and its neighbours hold one, at which point the row
-   is ragged and the map stops reading as a grid. Capping the scrollable list keeps every tile
-   within one card-height of its neighbours however many assets a cell accumulates.
-
-   240px is chosen against the chip height below (~26px + 4px gap = ~30px a row): it shows seven
-   whole and clips the eighth, so a list that scrolls always LOOKS like it scrolls. A cap that
-   happened to land flush on a chip boundary is the one mistaken for the end of the list.
-
-   `overscroll-behavior: contain` stops a flick inside a full cell from scrolling the page once the
-   list bottoms out -- on a map of tiles that reads as the whole view lurching. */
+/* Bounded height, so one busy cell does not set the row height for all of them. 240px shows seven
+   whole chips and clips the eighth, so a list that scrolls looks like it scrolls.
+   `overscroll-behavior: contain` stops a flick inside a full cell from scrolling the page. */
 .zone-chips {
   display: flex;
   flex-direction: column;
@@ -2412,12 +2018,8 @@ tbody tr:hover { background: var(--bg-glass); }
   overscroll-behavior: contain;
 }
 
-/* The scrollbar is drawn in the card's own hairline colour rather than the platform default, which
-   on Windows is a light-grey trough that glows against the dark tile. Firefox takes the two-value
-   `scrollbar-color`; WebKit needs the pseudo-elements, so both are given.
-
-   TRANSPARENT TROUGH, not `--surface`: the lanes tint their background (see .shopfloor-lane-site),
-   so a solid trough would show as a pale stripe over the tint on exactly those two tiles. */
+/* The scrollbar is drawn in the card's own hairline colour. Firefox takes `scrollbar-color`; WebKit
+   needs the pseudo-elements. Transparent trough, because the lanes tint their background. */
 .zone-chips {
   scrollbar-width: thin;
   scrollbar-color: var(--rule) transparent;
@@ -2440,25 +2042,17 @@ tbody tr:hover { background: var(--bg-glass); }
   background: var(--text-dim);
 }
 
-/* Slightly roomier chips INSIDE A ZONE ONLY. `.chip` is shared with the filter bar and the context
-   panel, where 3px is right against their smaller type; a global bump would have quietly reflowed
-   both. Scoping it costs one selector and keeps the change where it was asked for.
-
-   NO `margin-bottom` -- `.zone-chips` already spaces these with `gap: 4px`, and adding a margin as
-   well would double the spacing AND leave a trailing gap under the last chip, which inside a
-   scroll container reads as a stray blank row at the bottom of the list. */
+/* Slightly roomier chips inside a zone only; `.chip` is shared with the filter bar and the context
+   panel. No `margin-bottom`: `.zone-chips` already spaces these with `gap`, and a margin would
+   leave a trailing gap under the last chip. */
 .zone-chips .chip {
   padding: 5px 8px;
 }
 
-/* A chip that navigates. Used in the context drawers for Serving Gateway, Cell Zone and Schema.
-
-   A <button> rather than an <a>, because these are in-app tab switches with filter state, not URLs --
-   an anchor would promise middle-click and "copy link address", neither of which this app can honour.
-   It inherits `.chip` so it sits at the same weight as the read-only chips beside it, and adds only
-   the affordance: a pointer, an accent on hover, and the accent border that says this one does
-   something. `text-align: left` because a button centres its text by default and every other value in
-   the field list is left-aligned. */
+/* A chip that navigates, used in the context drawers for Serving Gateway, Cell Zone and Schema. A
+   <button> rather than an <a>, because these are in-app tab switches with filter state, not URLs.
+   Inherits `.chip` and adds only the affordance. `text-align: left` because a button centres its
+   text by default. */
 .chip-link {
   cursor: pointer;
   text-align: left;
@@ -2552,13 +2146,9 @@ tbody tr:hover { background: var(--bg-glass); }
 .context-alert-link:hover { color: var(--text-primary); }
 .context-alert-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* The Topbar's alert counter and the list behind it.
-   PERMANENT in all three states -- see AlertPill.jsx for why a pill that vanished when healthy was
-   indistinguishable from a pill that had broken.
-
-   `position: relative` on the wrapper anchors the panel, so the panel is positioned against the pill
-   rather than against the topbar. Anchoring to the topbar would put it under the account button at
-   one window width and off-screen at another. */
+/* The top bar's alert counter and the list behind it. Permanent in all three states; see
+   AlertPill.jsx. `position: relative` on the wrapper anchors the panel to the pill rather than the
+   top bar. */
 .alert-pill-wrap { position: relative; display: flex; }
 
 .alert-pill {
@@ -2577,10 +2167,8 @@ tbody tr:hover { background: var(--bg-glass); }
   border: 1px solid transparent;
   background: none;
   font-family: 'Outfit', sans-serif;
-  /* A FIXED FLOOR, so the bar does not resize as the count arrives, clears, or crosses 9. It was
-     78px when the control read `0 Alerts`; the word is gone and only the glyph plus at most two
-     digits remain, but the reason for a floor did not change -- without it the account button
-     beside it steps sideways every time an alarm fires. */
+  /* A fixed floor, so the bar does not resize as the count arrives, clears or crosses 9, and the
+     account button beside it does not step sideways. */
   min-width: 34px;
   justify-content: center;
 }
@@ -2604,14 +2192,9 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--warning-text);
 }
 
-/* --- Healthy. DELIBERATELY THE QUIETEST THING IN THE BAR: muted text, the plain border, no tint and
-       no motion. It is a permanent element, so anything louder would be a permanent claim on
-       attention -- and the whole reason the firing states read as urgent is that this one does not.
-
-       NOT GREEN. Green on a fixed element is the Live dot's mistake repeated: a colour that never
-       changes stops being read, and it also spends the success colour on "nothing is happening",
-       which leaves nothing left over for a state that IS good news. The tick inside the shield
-       carries the reassurance; the colour stays out of it. */
+/* Healthy: the quietest thing in the bar, with no tint and no motion, so the firing states read as
+   urgent. Not green: a colour that never changes stops being read, and it would spend the success
+   colour on nothing happening. The tick inside the shield carries the reassurance. */
 .alert-pill-healthy {
   border-color: var(--border);
   color: var(--text-muted);
@@ -2719,16 +2302,10 @@ tbody tr:hover { background: var(--bg-glass); }
 .alert-pill-item-link:hover { background: var(--bg-glass); }
 .alert-pill-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* NO UNDERLINE, AND THE COLOUR CARRIES THE AFFORDANCE INSTEAD.
-   Two variants render this class: a <button> for an alert that navigates to an asset page, and an
-   <a> for a platform-wide one that opens the rule in Grafana. Only the anchor picked up the
-   browser's default underline, so one row in a list of otherwise identical rows was struck through
-   at every line -- the name, the summary and the meta -- which reads as emphasis or as strike-out
-   long before it reads as a link.
-   The app signals "this goes somewhere" with accent text everywhere else (.endpoint-open on the
-   Directory page is the same rule), so the anchor's TITLE takes the accent and the underline goes.
-   The summary and meta keep their muted colours: the row is the hit target, and colouring all
-   three would make the panel three shades of blue. */
+/* No underline; the colour carries the affordance. Two variants render this class, a <button> for
+   an asset alert and an <a> for a platform alert that opens Grafana, and only the anchor picked up
+   the browser underline. The title takes the accent, as .endpoint-open does; the summary and meta
+   keep their muted colours. */
 .alert-pill-item-link { text-decoration: none; }
 a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 
@@ -2775,15 +2352,9 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   color: var(--text-muted);
 }
 
-/* The 3D model preview in the device drawer.
-
-   ONE CLASS ON ALL THREE STATES -- the <model-viewer> element, the loading line and the error line
-   -- so the panel does not resize as the viewer module loads or fails. A frame that collapsed to
-   nothing and then sprang to 200px would push the uploader, the size and the Remove button down
-   under the cursor at the exact moment someone is reaching for them.
-
-   The background is `--bg-base` rather than the card surface: a glTF is lit against whatever is
-   behind it, and the recessed ground is what stops a pale model from disappearing into the panel. */
+/* The 3D model preview in the device drawer. One class on all three states (the element, the
+   loading line and the error line) so the panel does not resize as the viewer loads or fails.
+   `--bg-base` rather than the card surface, so a pale model does not disappear into the panel. */
 .model-viewer-frame {
   display: block;
   width: 100%;
@@ -2794,12 +2365,9 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   overflow: hidden;
 }
 
-/* The custom element fills the frame rather than carrying it -- see the note in Model3DViewer.jsx
-   for why the class cannot go on the element itself.
-
-   `touch-action: none` is what makes drag-to-orbit work on a touchscreen: without it the browser
-   claims the drag for scrolling and the model never moves. Scoped to the element, so the drawer
-   around it still scrolls normally. */
+/* The custom element fills the frame rather than carrying it; see Model3DViewer.jsx for why the
+   class cannot go on the element. `touch-action: none` makes drag-to-orbit work on a touchscreen,
+   scoped so the drawer still scrolls. */
 .model-viewer-frame > model-viewer {
   display: block;
   width: 100%;
@@ -2823,13 +2391,9 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   color: var(--text-muted);
 }
 
-/* The cell icon picker: a grid of labelled buttons, not a <select>.
-   The operator is choosing what the card will LOOK like on the map, and a dropdown of eight words
-   asks them to imagine the result instead of showing it.
-
-   `auto-fit` rather than a fixed column count so the grid reflows in the modal at any width; each
-   option carries its label because the glyphs alone do not distinguish "metrology" from "energy"
-   to someone who has not seen the set before. */
+/* The cell icon picker: a grid of labelled buttons rather than a <select>, because the operator is
+   choosing what the card will look like on the map. `auto-fit` so the grid reflows at any modal
+   width; each option carries its label. */
 .icon-picker {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
@@ -2894,11 +2458,8 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   min-width: 0;
 }
 
-/* The name gets the whole chip. It used to share it with a truncated UUID, which is not enough of
-   an identifier to recognise anything by and was the reason a name as ordinary as
-   "Simulated_CNC_01" clipped. Ids now live on the chip's `title` only.
-   The ellipsis rules stay: a name long enough to overrun a tile still has to end somewhere,
-   and the title is where it leads. */
+/* The name gets the whole chip; ids live on the chip's `title`. The ellipsis rules stay for a name
+   long enough to overrun a tile. */
 .chip-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2924,15 +2485,10 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 .chip-danger  { border-color: var(--danger);  background: rgba(255, 77, 109, 0.15); color: var(--danger); font-weight: 600; }
 .chip-offline { border-color: rgba(123, 132, 152, 0.4); background: rgba(255, 255, 255, 0.05); color: var(--text-muted); font-weight: 500; }
 
-/* ===== Context Panel =====
-   The right-hand drawer, and the flex row that lets it PUSH rather than cover.
-
-   `.page-layout` is the row; `.page-main` is the list. `min-width: 0` on the main column is what
-   actually lets it give up width -- a flex item defaults to `min-width: auto` and refuses to
-   shrink below its content, so without it a wide table would simply overflow the viewport and the
-   panel would be pushed off screen instead of the table narrowing.
-
-   `align-items: flex-start` so the panel does not stretch to the height of a thousand-row table. */
+/* Context panel: the right-hand drawer, and the flex row that lets it push rather than cover.
+   `min-width: 0` on the main column is what lets it give up width: a flex item defaults to
+   `min-width: auto` and refuses to shrink below its content. `align-items: flex-start` so the panel
+   does not stretch to the height of a long table. */
 .page-layout {
   display: flex;
   align-items: flex-start;
@@ -2944,26 +2500,15 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   min-width: 0;
 }
 
-/* The drawer collapses by WIDTH, which is what animates the table getting its space back. The
-   inner element keeps a fixed width so the content does not reflow while the outer collapses --
-   text re-wrapping through a 250ms transition is what makes a sliding panel look broken.
-
-   `visibility: hidden` on the closed state (not `display: none`) keeps the transition alive while
-   still taking the panel out of the accessibility tree and hit testing. It is delayed until the
-   width transition finishes so the panel does not vanish before it has finished sliding. */
-/* The context drawer's width, declared ONCE and referenced by both rules that need it.
- *
- * IT IS IN ITS OWN :root BLOCK, deliberately, and not in the themed one above. themeContrast.test.js
- * builds its palette by scraping every `--x: y` out of `:root, [data-theme="dark"]` and comparing
- * the result against the light block -- a layout length landing in that scrape would be measured
- * for contrast, which is meaningless, and would read as a token missing from the light theme.
- *
- * clamp() RATHER THAN A FIXED 360px (issue #35). The drawer showed the same column on a 13-inch
- * laptop and a 34-inch monitor, so the tables inside it -- the Digital Thread diff, the document
- * list -- wrapped on hardware with room to spare. The floor is what the diff table needs to stay
- * three readable columns; the ceiling stops it from eating the list it is meant to sit beside on a
- * very wide screen, because a drawer that dominates the page has stopped being a drawer.
- */
+/* The drawer collapses by width, which animates the table getting its space back; the inner element
+   keeps a fixed width so the content does not reflow mid-transition. `visibility: hidden` on the
+   closed state keeps the transition alive while taking the panel out of the accessibility tree,
+   delayed until the width transition finishes. */
+/* The context drawer's width, declared once and referenced by both rules that need it. In its own
+   :root block, not the themed one: themeContrast.test.js scrapes every token out of the themed
+   block and compares it against the light theme, and a layout length there would read as a missing
+   token. clamp() rather than a fixed width, so the drawer's tables get room on a wide monitor
+   without the drawer dominating the page. */
 :root {
   --context-panel-width: clamp(320px, 28vw, 560px);
 }
@@ -3093,10 +2638,9 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   color: var(--text-primary);
 }
 
-/* A field whose VALUE is the problem -- a gateway CA inside its expiry window. Colour only, no
-   weight change and no icon: this list is scanned, and a second visual language for "bad" beside
-   the alert block at the top of the panel would compete with it. The label stays neutral because
-   the field is not at fault, the reading is. */
+/* A field whose value is the problem, such as a gateway CA inside its expiry window. Colour only,
+   no weight change and no icon, so it does not compete with the alert block at the top of the
+   panel; the label stays neutral because the field is not at fault. */
 .context-field-value.context-field-danger { color: var(--danger); }
 
 .context-field-empty { color: var(--text-muted); font-style: italic; }
@@ -3193,15 +2737,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .row-selectable { cursor: pointer; }
 
-/* ===== The app-level drawer, which is the help panel =====
-   The per-page drawers sit inside `.page-layout` and stick to the scroll of `.content`. This one
-   is a sibling of `.content` itself, so `.app-body` is its row and there is no scrolling ancestor
-   for `position: sticky` to stick to -- left as sticky it would simply sit at the top of a column
-   it already fills. It takes the full height of the body instead and scrolls inside itself.
-
-   SINGLE-CLASS SPECIFICITY, ON PURPOSE, and it is placed above the 1100px block below so that the
-   overlay treatment still wins on a narrow viewport: help on a laptop should take the same
-   dismissible overlay every other drawer takes, not half of a page that is already too narrow. */
+/* The app-level drawer, which is the help panel. It is a sibling of `.content` rather than inside
+   `.page-layout`, so there is no scrolling ancestor for `position: sticky`; it takes the full
+   height of the body and scrolls inside itself. Single-class specificity on purpose, placed above
+   the 1100px block so the overlay treatment still wins on a narrow viewport. */
 .context-panel-app {
   position: relative;
   top: auto;
@@ -3224,10 +2763,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border-top: none;
 }
 
-/* ===== Help prose =====
-   Measured for a 320-560px column, which is narrower than anything else in this app that carries
-   running text. The line height is looser than the panel's metadata for the same reason: this is
-   the one place a reader reads sentences rather than scans values. */
+/* Help prose, measured for a 320-560px column. The line height is looser than the panel's metadata
+   because this is the one place a reader reads sentences rather than scans values. */
 .help-prose {
   font-size: 12.5px;
   line-height: 1.65;
@@ -3299,13 +2836,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   }
 }
 
-/* ===== A table inside a modal =====
-   Auto layout sizes columns to their content, which sounds like the helpful default and is the
-   opposite here: four columns of badges, datatypes and timestamps each take a fixed amount, and
-   whatever is left goes to the one column holding variable-length text. So the metric name -- the
-   only column whose width actually matters -- ends up with the leftovers, and the table overflows
-   its `.table-wrap` sideways instead. Fixed layout plus a `<colgroup>` inverts that: the
-   proportions are declared, the table fits its container, and nothing scrolls horizontally. */
+/* A table inside a modal. Auto layout gives the one variable-length column the leftovers and
+   overflows sideways; fixed layout plus a `<colgroup>` declares the proportions and fits the
+   container. */
 .modal-table {
   table-layout: fixed;
   width: 100%;
@@ -3315,11 +2848,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
    here -- and under fixed layout it would clip a heading rather than widen its column. */
 .modal-table th { white-space: normal; }
 
-/* Sparkplug metric names are paths -- `Axes/X/DISPLACEMENT`, `Controller/EMERGENCY_STOP` -- with
-   no spaces to break at, so without this they are one unbreakable 30-character word that either
-   overflows the cell or forces the column wider.
-   Wrapped rather than ellipsised, because these names differ in the MIDDLE: truncating
-   `Axes/X/DISPLACEMENT` and `Axes/Y/DISPLACEMENT` produces two identical rows. */
+/* Sparkplug metric names are paths with no spaces to break at. Wrapped rather than ellipsised,
+   because they differ in the middle: truncating `Axes/X/DISPLACEMENT` and `Axes/Y/DISPLACEMENT`
+   produces two identical rows. */
 .modal-table .config-metric-name {
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -3342,10 +2873,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   color: var(--text-muted);
   margin-top: 3px;
   line-height: 1.5;
-  /* Deliberately UNCAPPED. A measure cap (this was 90ch) is the right instinct for a column of
-     body copy, but this is two or three sentences at the top of a full-width card: capping it
-     wrapped them into six stacked lines with the rest of the row left empty, which cost more
-     vertical space than the long line cost in readability. The card's own width is the limit. */
+  /* Deliberately uncapped: a measure cap on two or three sentences at the top of a full-width card
+     stacks them into short lines with the rest of the row empty. */
   max-width: none;
   width: 100%;
 }
@@ -3367,15 +2896,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .vocab-note-label { color: var(--text-primary); font-weight: 600; }
 
-/* ===== Cells table =====
-   The Cells page rendered a card per cell, each with its own header and two full sub-tables, and
-   three cells filled the viewport (issue #61). It is one table now, the same shape Gateways and
-   Devices use, so all that layout went with it. What is left is the one column those pages have
-   no equivalent for.
-
-   THE ICON COLUMN IS FIXED AND NARROW. It carries a 16px glyph and nothing else, so left to the
-   auto table layout it would take an equal share of the row and push the name away from the edge
-   the eye scans down. */
+/* Cells table, the same shape Gateways and Devices use. The icon column is fixed and narrow: it
+   carries a 16px glyph, and under auto layout it would take an equal share of the row. */
 .cell-icon-col {
   width: 32px;
   text-align: center;
@@ -3398,12 +2920,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border: 0;
 }
 
-/* ===== Digital Thread Swimlanes =====
-
-   This replaced a vertical list of ~200 bordered cards, each printing its own JSON payload. The
-   list was honest but it was not a TIMELINE: two changes a fortnight apart and two a second
-   apart looked identical, and an asset's history was only legible by scrolling past every other
-   asset's. One lane per entity puts time on the x-axis, where it can be compared. */
+/* Digital Thread swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
+   apart and two a second apart look different. */
 
 /* The colour key. `.dt-node-dot` shares the `.dt-node-<kind>` fills with the markers themselves,
    so the legend cannot drift away from what it describes. */
@@ -3442,13 +2960,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   min-width: 620px;
 }
 
-/* A lane is a ROW OF TWO CARDS, not a ruled line.
-
-   It used to be separated from its neighbours by `border-bottom`, which made the page a stack of
-   table rows: the eye followed the horizontal rules rather than the tracks, and a marker sitting
-   near a divider read as belonging to the boundary rather than to its lane. Giving the label and
-   the track each a container, and separating lanes by SPACE, makes each asset's history a thing
-   with edges. */
+/* A lane is a row of two cards, not a ruled line, so each asset's history is a thing with edges and
+   a marker near a boundary reads as belonging to its lane. */
 .dt-lane {
   display: flex;
   align-items: stretch;
@@ -3456,12 +2969,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 3px 0;
 }
 
-/* The section rule: Cells, then Gateways, then Devices -- a plant's own containment order.
-
-   STICKY LIKE THE LABELS BESIDE IT, and for the same reason: the heading is what tells you which
-   kind of asset the row under your cursor is, and a heading that scrolled out horizontally would
-   leave the icon doing that work alone. It spans only the label column, so it never rides over
-   the markers. */
+/* The section rule: Cells, then Gateways, then Devices, a plant's own containment order. Sticky
+   like the labels beside it, spanning only the label column so it never rides over the markers. */
 .dt-section {
   position: sticky;
   left: 0;
@@ -3511,14 +3020,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
    them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
    here would let a dozen dots slide through the text. */
-/* THE LABEL IS A PILL, and it has two jobs that pull in opposite directions.
-
-   It is STICKY, so markers scroll underneath it -- which needs an opaque background in the CARD's
-   colour, or dots show through the name as they pass. It should also read as a container, which
-   wants a lighter surface and a border, inset from the edges.
-
-   So the element stays opaque and the pill is drawn by `::before` inside it. The children sit
-   above that layer; nothing else changes. */
+/* The label is a pill with two jobs: it is sticky, so it needs an opaque background in the card's
+   colour or dots show through the name as they pass, and it should read as a container. So the
+   element stays opaque and the pill is drawn by `::before` inside it. */
 .dt-lane-label {
   position: sticky;
   left: 0;
@@ -3583,10 +3087,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   opacity: 0.85;
 }
 
-/* THE TRACK IS A CONTAINER, not an area of card background with a line through it.
-
-   Given edges, a lane reads as one asset's stretch of time, and a marker is unambiguously IN that
-   lane rather than floating between two rows of card background. */
+/* The track is a container with edges, so a lane reads as one asset's stretch of time and a marker
+   is unambiguously in it. */
 .dt-track {
   position: relative;
   flex: 1;
@@ -3613,10 +3115,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   top: 50%;
   height: 1px;
   margin-top: -0.5px;
-  /* ONE PIXEL, AND LIGHTER THAN THE BORDER IT SITS INSIDE. At 2px in the border colour the
-     guideline was the same weight as the container edge, so a track read as three stacked rules.
-     It exists to say where the timeline runs, which a hairline does; the markers on it are what the
-     eye should be finding. */
+  /* One pixel, and lighter than the border it sits inside, so a track does not read as three
+     stacked rules; the markers are what the eye should find. */
   background: var(--border);
   opacity: 0.7;
 }
@@ -3662,10 +3162,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   height: 13px;
   padding: 0;
   border-radius: 50%;
-  /* The ring is what keeps two ADJACENT markers from reading as one blob. Clustering removes the
-     overlapping case, but not the near miss -- two events 20px apart are separate dots that still
-     touch. In the CARD's colour rather than the track's: it has to separate a marker from its
-     NEIGHBOUR, and a ring matching the surface behind would only separate it from the background. */
+  /* The ring keeps two adjacent markers from reading as one blob. In the card's colour rather than
+     the track's, because it has to separate a marker from its neighbour. */
   border: 2px solid var(--bg-card);
   cursor: pointer;
   transform: translate(-50%, -50%);
@@ -3681,17 +3179,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   z-index: 3;
 }
 
-/* THE ACTIVE MARKER, and it has to survive being surrounded.
-
-   `--accent-glow` is a translucent halo, which reads well against the card background and almost
-   disappears against the neighbours a dense stretch of the track puts either side of it. A solid
-   accent ring with a dark gap inside it separates the selected marker from whatever it sits among
-   -- which is the point, because this is the one the drawer is showing.
-
-   SHARED WITH `.dt-cluster`, not a `.dt-node` compound, and that is what lets a badge carry the
-   ring while the drawer steps through the events inside it. `box-shadow` follows the element's own
-   border-radius, so the same rule draws a circle round a dot and a rounded rectangle round a
-   pill. */
+/* The active marker has to survive being surrounded: a solid accent ring with a gap inside it in
+   the card colour, since `--accent-glow` alone almost disappears in a dense stretch. Shared with
+   `.dt-cluster`, not a `.dt-node` compound, so a badge can carry the ring while the drawer steps
+   through the events inside it; `box-shadow` follows the element's own border-radius. */
 .dt-node-selected {
   box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
   z-index: 4;
@@ -3702,16 +3193,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .dt-node-governance,  .dt-node-dot.dt-node-governance  { background: var(--warning); }
 .dt-node-critical,    .dt-node-dot.dt-node-critical    { background: var(--danger); }
 
-/* THE CLUSTER BADGE: several events too close together to draw separately, replaced by their
-   count. See the header on clusterEvents() in DigitalThreadTab.jsx for why this replaced a
-   vertical fan -- briefly, a fan held three and could not be counted.
-
-   VIOLET, which is not one of the four classification fills, because a badge is not a KIND of
-   event. See --cluster in the token block.
-
-   POSITIONING IS SEPARATE FROM THE LOOK. This rule is the pill; the `.dt-track` rule below places
-   it. That split is what lets the legend render a real `.dt-cluster` as an inline sample instead
-   of describing the badge in a second, driftable set of values. */
+/* The cluster badge: several events too close together to draw separately, replaced by their count.
+   Violet, because a badge is not a kind of event; see --cluster. Positioning is separate from the
+   look: this rule is the pill and the `.dt-track` rule places it, so the legend can render a real
+   `.dt-cluster` as an inline sample. */
 .dt-cluster {
   display: inline-flex;
   align-items: center;
@@ -3763,10 +3248,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .dt-lane-toggle { margin-top: 10px; }
 
-/* ===== Digital Thread: the foot of the timeline =====
-   Where the reader finds out whether they are looking at everything. Separated by a rule rather
-   than by space alone, because it makes a claim about the data above it and has to read as a
-   statement about the timeline rather than as one more control beside the lane toggles. */
+/* The foot of the timeline, where the reader finds out whether they are looking at everything.
+   Separated by a rule, because it makes a claim about the data above it. */
 .dt-pagination {
   display: flex;
   align-items: center;
@@ -3798,10 +3281,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .dt-badge-governance  { background: rgba(255, 179, 0, 0.15); color: var(--warning-text); }
 .dt-badge-critical    { background: rgba(255, 77, 109, 0.15); color: var(--danger-text); }
 
-/* ===== Digital Thread: stepping through one asset's history =====
-   Full width of the subtitle row it occupies, stacked, because the position line and the two
-   buttons are three things at three sizes and wrapping them into one row puts the count and the
-   buttons on different lines at unpredictable widths. */
+/* Stepping through one asset's history: full width of the subtitle row, stacked, because the
+   position line and the two buttons are three things at three sizes. */
 .dt-drawer-nav {
   width: 100%;
   display: flex;
@@ -3838,20 +3319,16 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   margin-top: 2px;
 }
 
-/* ===== Digital Thread: the other changes one transaction made =====
-   Sits ABOVE the diff in the drawer, so the reader learns this row was part of a larger act before
-   they finish reading the row. Same top border and rhythm as .dt-diff, because the two are peers:
-   one says what THIS change did, the other says what else the same act did. */
+/* The other changes one transaction made. Above the diff in the drawer, with the same top border
+   and rhythm as .dt-diff, because the two are peers. */
 .dt-causation {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
 
-/* THE CAVEAT IS PART OF THE CONTROL, not a tooltip. The sibling list is drawn from the fetched and
-   filtered set, so it is a lower bound rather than a count -- and a reader who takes it for a count
-   will conclude a transaction did less than it did. That is exactly the kind of claim this page
-   exists to get right, so it is on screen rather than on hover. */
+/* The caveat is part of the control, not a tooltip: the sibling list is a lower bound rather than a
+   count. */
 .dt-causation-hint {
   font-size: 11px;
   line-height: 1.45;
@@ -3868,10 +3345,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   gap: 4px;
 }
 
-/* A BUTTON, not a link or a bare row. It changes what the drawer is showing without navigating,
-   so it must be reachable and activatable from the keyboard -- and `button` gets Enter, Space and
-   the focus ring for free, where a click-handled <div> gets none of them and needs three
-   attributes to imitate each one badly. */
+/* A button, not a link or a bare row: it changes what the drawer shows without navigating, and
+   `button` gets Enter, Space and the focus ring for free. */
 .dt-causation-item {
   width: 100%;
   display: flex;
@@ -3936,20 +3411,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   margin-top: 8px;
   border-collapse: collapse;
   font-size: 11px;
-  /* FIXED, so the columns are decided by the rule below rather than by whichever row happens to
-     hold the longest UUID. With `auto`, one 36-character value takes the width it wants and
-     squeezes the other two columns into a character apiece -- which is what made adjacent values
-     read as one run of text. */
+  /* Fixed, so the columns are decided by the rule below rather than by whichever row holds the
+     longest UUID. */
   table-layout: fixed;
 }
 
-/* THE COLLISION WAS `white-space`, INHERITED, and the reset below is the actual fix.
-   The global `th` rule near the top of this file sets `white-space: nowrap` (plus uppercase and
-   0.8px letter-spacing) for every table header in the app. Each property name here is a
-   `<th scope="row">`, so it took all three: `last_birth_metrics_at` rendered as
-   LAST_BIRTH_METRICS_AT, on one unbreakable line, straight across the value beside it. Wrapping
-   rules cannot help while `nowrap` stands -- there is nothing for them to act on -- which is why
-   this resets the inherited three before setting anything of its own. */
+/* The global `th` rule sets `white-space: nowrap`, uppercase and letter-spacing for every table
+   header, and each property name here is a `<th scope="row">`. This resets the inherited three
+   before setting anything of its own; wrapping rules cannot help while `nowrap` stands. */
 .dt-diff-table th,
 .dt-diff-table td {
   text-align: left;
@@ -3963,11 +3432,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 6px 12px;
   box-sizing: border-box;
   border-bottom: 1px solid var(--border);
-  /* `anywhere` rather than `break-word`: an underscore is not a break opportunity, so a 21-
-     character column name has no legal place to wrap and overflows its cell however narrow the
-     column gets. Both are declared -- `anywhere` does the work, `break-word` is the fallback for
-     engines that do not take it. Values wrap; they are never ellipsed, because a truncated UUID
-     is useless and a truncated topic path is worse -- it looks like a shorter path. */
+  /* `anywhere` rather than `break-word`: an underscore is not a break opportunity, so a long column
+     name has no legal place to wrap. Both are declared, `break-word` as the fallback. Values wrap
+     and are never ellipsed, because a truncated UUID is useless and a truncated topic path looks
+     like a shorter path. */
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -3987,10 +3455,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .dt-diff-table th:nth-child(2),
 .dt-diff-table td:nth-child(2) { width: 33.33%; }
 
-/* Vertical dividers, and the one between Previous and New is the load-bearing one: those two
-   columns hold the SAME property's two values, often differing by a character, and a reader
-   comparing them needs to know which side they are on. Drawn on the cell rather than the column
-   so it stops at the last row instead of running into the section below. */
+/* Vertical dividers, and the one between Previous and New is the load-bearing one: those columns
+   hold the same property's two values, often differing by a character. Drawn on the cell so it
+   stops at the last row. */
 .dt-diff-table tbody th:nth-child(1),
 .dt-diff-table tbody td:nth-child(1),
 .dt-diff-table tbody td:nth-child(2) { border-right: 1px solid var(--border); }
@@ -4087,10 +3554,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* ===== Settings ============================================================================= */
 
-/* THE PREAMBLE IS NOT DECORATION. Two things about this page surprise people, and both are
-   cheaper to say here than to discover: the list cannot be added to, and nothing secret may be
-   stored in it. Someone hunting for where to put an S3 key should meet that sentence BEFORE
-   putting it somewhere every signed-in user can read. */
+/* The preamble states the two things about this page that surprise people: the list cannot be added
+   to, and nothing secret may be stored in it. */
 /* The padding moved to `.card-body`, which every card now uses. What is left is the type: this
    preamble reads at 12px rather than the 13px a table description uses, because it is two
    paragraphs rather than one and the second is a warning. */
@@ -4218,19 +3683,11 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 
-/* ---------------------------------------------------------------------------------------------
-   The sign-in screen's theme toggle.
-   ---------------------------------------------------------------------------------------------
-   In App.css rather than inline, unlike the rest of the sign-in screen, because it needs :hover
-   and :focus-visible and an inline style object cannot express either.
-
-   EVERY COLOUR IS A TOKEN AND NONE HAS A FALLBACK LITERAL. That is the rule authScreenTheme.test
-   enforces on this screen, and the reason is a real bug: a fallback is exactly what let a typo'd
-   variable name render correctly in dark mode and invisibly in light. An unknown token here
-   inherits something obviously wrong instead of quietly looking fine in one theme.
-
-   --bg-card and not --bg-glass for the resting fill: this button sits on the animated canvas
-   rather than on the page, and a translucent chip over moving strokes shimmers. */
+/* The sign-in screen's theme toggle. In App.css rather than inline because it needs :hover and
+   :focus-visible. Every colour is a token and none has a fallback literal, the rule
+   authScreenTheme.test enforces on this screen: a fallback is what lets a typo'd variable render
+   correctly in one theme and invisibly in the other. --bg-card rather than --bg-glass for the
+   resting fill, because a translucent chip over the animated canvas shimmers. */
 .auth-theme-toggle {
   position: absolute;
   top: 20px;
@@ -4263,11 +3720,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   outline-offset: 2px;
 }
 
-/* ===== Keyboard shortcuts dialog =====
-   A definition list in all but markup: a column of keys against a column of prose. The keys column
-   is fixed rather than sized to its content, so the descriptions start on one line down the whole
-   dialog -- with `auto` the widest row ("Shift + Tab") sets the column and every other description
-   is pushed away from the key it belongs to. */
+/* Keyboard shortcuts dialog: a column of keys against a column of prose. The keys column is fixed
+   rather than sized to content, so the descriptions start on one line down the whole dialog. */
 .shortcut-group { margin-top: var(--stack); }
 .shortcut-group:first-of-type { margin-top: 12px; }
 
@@ -4329,21 +3783,15 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   line-height: 1.45;
 }
 
-/* ===== Approvals =====
-   A card's own prose, and the hint under a control that explains itself. Both are `--text-muted`
-   at 13px, which is what every other card description on the app already is -- named here rather
-   than repeated as an inline style on six elements, because the next page that needs one should
-   inherit the decision instead of copying the numbers. */
+/* Approvals: a card's own prose, and the hint under a control that explains itself. Both
+   `--text-muted` at 13px, like every other card description. */
 /* Between the approvals cards. Deliberately not `.card + .card`, for the reason the directory
    groups give: several pages stack cards that are meant to sit tight against each other. */
 .approvals-card + .approvals-card { margin-top: var(--stack); }
 
-/* The "you are reading this" banner at the top of a dialog somebody may not save.
-   NEUTRAL, NOT A WARNING. Nothing has gone wrong -- the reader is doing the thing this dialog
-   supports for their role -- so it takes the muted surface every other explanatory strip in the
-   app takes, rather than the amber that means "something needs your attention". The button is
-   pushed to the far end by the span's own flex, so the sentence and the way out read as one
-   line rather than as a notice with an unrelated control beside it. */
+/* The banner at the top of a dialog somebody may not save. Neutral, not a warning: nothing has gone
+   wrong, so it takes the muted surface every other explanatory strip takes. The button is pushed to
+   the far end by the span's own flex. */
 .readonly-notice {
   display: flex;
   align-items: center;
@@ -4460,10 +3908,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .auth-link:hover { color: var(--accent-strong); }
 .auth-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
-/* ===== Sidebar behaviour modes =====
-   `hover` is the rules above: a rigid gutter and a panel that paints over the page. `expanded`
-   widens the gutter itself so the page makes room, and drops the shadow because nothing is being
-   painted over. `collapsed` is the resting state with the pointer ignored -- see Sidebar.jsx. */
+/* Sidebar behaviour modes. `hover` is the rules above: a rigid gutter and a panel that paints over
+   the page. `expanded` widens the gutter itself so the page makes room, and drops the shadow.
+   `collapsed` is the resting state with the pointer ignored; see Sidebar.jsx. */
 .sidebar-mode-expanded {
   flex-basis: 232px;
   width: 232px;

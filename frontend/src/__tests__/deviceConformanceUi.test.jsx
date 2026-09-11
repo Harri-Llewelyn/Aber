@@ -5,16 +5,10 @@ import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 
 /**
- * The Devices tab's Schema Conformance control (archived migration 0050).
- *
- * THIS IS THE ONE FIELD ON THE FORM THAT CAN DESTROY DATA. Setting it to `enforce` makes the
- * ingestion daemon drop a metric whose value contradicts the device's bound schema, and telemetry
- * that was never written cannot be fetched back from anywhere -- unlike a schema edit, which can
- * be reverted.
- *
- * So the assertions here are about the two ways the control can mislead rather than about it
- * rendering: choosing `enforce` on a device with no schema attached does nothing at all, and
- * choosing it on a device that has one starts discarding readings on the next message.
+ * The Devices tab's Schema Conformance control, the one field on the form that can destroy data:
+ * `enforce` makes the ingestion daemon drop a metric that contradicts the bound schema. The
+ * assertions are about the two ways it can mislead: `enforce` with no schema does nothing, and
+ * `enforce` with one starts discarding readings.
  */
 
 vi.mock('../api', async () => {
@@ -108,9 +102,8 @@ describe('the Schema Conformance control', () => {
   })
 
   it('warns that enforcing does nothing when no schema is attached', async () => {
-    // THE STATE THAT LOOKS LIKE IT WORKED. With nothing bound the daemon has nothing to judge
-    // against, so `enforce` is inert -- and an operator who set it would reasonably believe they
-    // had switched something on.
+    // The state that looks like it worked: with nothing bound the daemon has nothing to judge
+    // against, so `enforce` is inert.
     await show([device({ schema_id: null })], [])
     openEdit()
     fireEvent.change(policySelect(), { target: { value: 'enforce' } })

@@ -7,17 +7,10 @@ import { useEscapeKey, escapeStackDepth } from '../hooks/useEscapeKey'
 import { ConfirmModal } from '../components/modals/ConfirmModal'
 
 /**
- * Escape closes the topmost dismissible layer, and only that one.
- *
- * The rule exists because modals stack. ConfirmModal sits at z-index 1100 so it can open ON TOP
- * of another dialog -- the GitOps sync confirmation over the Directory page, the purge
- * confirmation over the Archives table, the delete confirmation inside EntityLinksModal. If
- * each layer bound its own `document` keydown listener, one Escape would dismiss the
- * confirmation AND the dialog that asked for it: the user answers "no" to a question and loses
- * their unsaved form as a bonus.
- *
- * These are unit tests on the hook rather than on any one modal, because the invariant is about
- * the RELATIONSHIP between layers and no single component can hold it.
+ * Escape closes the topmost dismissible layer only. Modals stack (ConfirmModal opens over another
+ * dialog), and if each bound its own keydown listener one Escape would dismiss the confirmation and
+ * the form that asked for it. Unit tests on the hook, because the invariant is about the
+ * relationship between layers.
  */
 
 const Layer = ({ onEscape, active = true, label }) => {
@@ -122,12 +115,8 @@ describe('useEscapeKey', () => {
   })
 
   /**
-   * The reason the handler is held in a ref.
-   *
-   * Callers pass inline arrows -- `onCancel={() => setThing(null)}` is the shape of every call
-   * site in the app -- so the callback identity changes on every render of the parent. If the
-   * effect depended on it, each of those renders would pop and re-push the layer, re-ordering
-   * the stack underneath a dialog that never moved.
+   * The handler is held in a ref: callers pass inline arrows, so if the effect depended on callback
+   * identity every parent render would pop and re-push the layer.
    */
   it('does not re-order the stack when a parent re-renders with a new callback', () => {
     const parent = vi.fn()
@@ -211,12 +200,8 @@ describe('ConfirmModal — Escape is Cancel, never Confirm', () => {
 })
 
 /**
- * Coverage, asserted against the source.
- *
- * A per-modal rendering test would prove Escape works in the modals someone remembered to write
- * one for, which is the wrong guarantee: the failure mode here is a NEW dialog that never gets
- * the hook, and no test of the existing ones can see that. So this walks every file that paints
- * a `.modal-overlay` and requires it to be on the stack.
+ * Coverage, asserted against the source: the failure mode is a new dialog that never gets the hook,
+ * which no test of the existing ones can see. This walks every file that paints a `.modal-overlay`.
  */
 describe('every modal is dismissible', () => {
   const SRC = path.resolve(__dirname, '..')
@@ -243,9 +228,8 @@ describe('every modal is dismissible', () => {
     expect(source).toMatch(/useEscapeKey\(/)
   })
 
-  // The whole reason the hook exists. A file reaching for `document.addEventListener('keydown'`
-  // directly is opting out of the ordering, and the bug it reintroduces -- one keypress closing
-  // two layers -- is invisible until two of them are open at once.
+  // A file reaching for `document.addEventListener('keydown'` directly is opting out of the
+  // ordering, and the bug is invisible until two layers are open at once.
   it('binds no keydown listeners of its own', () => {
     const offenders = renderers
       .filter(([, s]) => /addEventListener\(\s*'keydown'/.test(s))
@@ -256,12 +240,8 @@ describe('every modal is dismissible', () => {
 })
 
 /**
- * The modal width scale.
- *
- * Fifteen dialogs each carried their own `style={{ maxWidth: N }}` and between them used 400,
- * 460, 480, 520, 560, 640, 720 and 900 -- six of those being the same size wearing different
- * numbers. The steps are named after the content that earns them so a new dialog picks a
- * category, not a number.
+ * The modal width scale. The steps are named after the content that earns them, so a new dialog
+ * picks a category rather than an inline number.
  */
 describe('modal widths come from the scale, not from inline numbers', () => {
   const SRC = path.resolve(__dirname, '..')

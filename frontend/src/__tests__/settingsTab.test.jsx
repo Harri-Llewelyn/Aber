@@ -1,19 +1,8 @@
 /**
- * The Settings page.
- *
- * WHAT THESE TESTS ARE ACTUALLY FOR. "An admin can type in a box and click Save" is the easy half
- * and only one test below covers it. The rest defend three things that are easy to break and whose
- * breakage is silent:
- *
- *   1. A NON-ADMINISTRATOR'S SAVE MUST NOT LOOK LIKE A SUCCESS. RLS makes their UPDATE affect zero
- *      rows WITHOUT erroring -- the row is invisible to the policy, not rejected by it -- so a page
- *      that only checked for a thrown error would show a green toast over a write that did nothing.
- *   2. THE PAGE OFFERS NO WAY TO ADD OR DELETE A SETTING, because the key set is closed in the
- *      database. The absence of that button is the feature; a future tidy-up that adds one would
- *      produce rows no code reads.
- *   3. THE VALUE IS COERCED TO ITS DECLARED TYPE before it is sent. A number field that posts the
- *      string "30" gets a CHECK violation from Postgres, which is correct but arrives as a database
- *      error for something the page could have got right.
+ * The Settings page. Three things are easy to break silently: a non-Administrator's save must not
+ * look like a success, since RLS makes their UPDATE affect zero rows without erroring; the page
+ * offers no way to add or delete a setting, because the key set is closed in the database; and the
+ * value is coerced to its declared type before it is sent.
  */
 import React from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -58,23 +47,14 @@ describe('value coercion', () => {
   })
 
   it('refuses a number field that is not a number', () => {
-    /*
-     * NOT parseFloat, WHICH IS THE TRAP. parseFloat('30abc') is 30, so a typo would be accepted
-     * silently as a DIFFERENT number than the operator typed -- and the value would be stored,
-     * pass the CHECK, and be wrong. Number() returns NaN and this refuses.
-     */
+    /* Not parseFloat, which accepts '30abc' as 30. Number() returns NaN and this refuses. */
     expect(() => coerceValue('30abc', 'number')).toThrow(/number/i)
     expect(() => coerceValue('', 'number')).toThrow(/number/i)
   })
 
   it('refuses a number below its floor or above its ceiling', () => {
-    /*
-     * CHECKED HERE *AND* BY A CHECK CONSTRAINT, and neither is redundant. The constraint is what
-     * makes the rule true -- curl never reaches this function. This exists so the operator is told
-     * before the round trip, in the setting's own words, rather than reading
-     * `violates check constraint "system_settings_value_within_bounds"` and working out which
-     * number was wrong.
-     */
+    /* Checked here and by a CHECK constraint: the constraint makes the rule true, and this tells
+       the operator before the round trip in the setting's own words. */
     const bounds = { min_value: 1, max_value: 3650 }
     expect(() => coerceValue('0', 'number', bounds)).toThrow(/1 or more/)
     expect(() => coerceValue('-5', 'number', bounds)).toThrow(/1 or more/)
@@ -86,10 +66,7 @@ describe('value coercion', () => {
   })
 
   it('treats a floor of zero as a floor, not as an absent bound', () => {
-    /*
-     * `if (min)` would be falsy for 0 and let a negative through -- and zero is the one value a
-     * floor most often needs to express. The check is `!= null`.
-     */
+    /* `if (min)` would be falsy for 0 and let a negative through; the check is `!= null`. */
     expect(() => coerceValue('-1', 'number', { min_value: 0 })).toThrow(/0 or more/)
     expect(coerceValue('0', 'number', { min_value: 0 })).toBe(0)
   })
@@ -153,21 +130,14 @@ describe('the page', () => {
   })
 
   it('names what applies when a setting has never been changed', async () => {
-    /*
-     * AN ABSENT ROW IS NOT AN ABSENT VALUE. The fallback is what makes a local boot
-     * zero-configuration, and it is the first thing to check when a setting appears to do
-     * nothing -- so the page names it rather than leaving it to be inferred.
-     */
+    /* An absent row is not an absent value: the fallback is the first thing to check when a setting
+       appears to do nothing, so the page names it. */
     await show()
     expect(screen.getByText('DEFAULT_LANE_LIMIT in DigitalThreadTab.jsx')).toBeInTheDocument()
   })
 
   it('offers no way to add or delete a setting', async () => {
-    /*
-     * THE ABSENCE IS THE FEATURE. The key set is closed in the database -- RLS grants UPDATE and
-     * nothing else -- so a New Setting button could only produce a row no code reads, and the page
-     * would have no way to say so.
-     */
+    /* The absence is the feature: a New Setting button could only produce a row no code reads. */
     await show()
     expect(screen.queryByRole('button', { name: /new setting|add setting|delete/i })).toBeNull()
   })
@@ -179,24 +149,9 @@ describe('the page', () => {
 
     fireEvent.change(screen.getByLabelText('Lanes drawn before folding'), { target: { value: '45' } })
 
-    /*
-     * AWAITED, AND THIS WAS THE ONLY SYNCHRONOUS POST-fireEvent ASSERTION IN THE FILE.
-     *
-     * It flaked three times across a long session -- always in a full run, never alone, and always
-     * while Docker builds were competing for the CPU. It was NOT reproducible: 17 consecutive clean
-     * runs, six of them with two suites deliberately racing each other.
-     *
-     * So this is not a diagnosis, and the comment should not pretend otherwise. What it is: the one
-     * structural difference between this test and its twenty-one passing siblings, every one of
-     * which awaits a re-render rather than asserting on it synchronously. `fireEvent` is wrapped in
-     * act() and normally flushes before returning, which is why this reads as safe -- but nothing
-     * in the page's contract promises the button appears in the same tick, and a test should not
-     * assert a timing property it does not mean to require.
-     *
-     * THE GUARANTEE IS UNCHANGED. findBy* still fails if Save never appears, so a real regression --
-     * a Save rendered unconditionally, or one that never renders -- fails here exactly as before.
-     * The only thing given up is an incidental claim about WHEN, which no requirement makes.
-     */
+    /* Awaited, like every other post-fireEvent assertion in the file: nothing in the page's
+       contract promises the button appears in the same tick, and the guarantee (Save must appear)
+       is unchanged. */
     expect(await screen.findByRole('button', { name: /^Save$/ })).toBeInTheDocument()
   })
 
@@ -221,11 +176,8 @@ describe('the page', () => {
   })
 
   it('surfaces the reason a save failed rather than a generic message', async () => {
-    /*
-     * THE CASE THIS PAGE MOST HAS TO GET RIGHT. api.patchSetting turns "zero rows affected" into
-     * an error precisely because RLS does not raise one -- a non-Administrator's write silently
-     * matches nothing. The page must show that, not swallow it.
-     */
+    /* The case this page most has to get right: api.patchSetting turns zero rows affected into an
+       error because RLS does not raise one. */
     api.patchSetting.mockRejectedValue(
       new Error('That setting was not updated. Changing settings requires the Administrator role.')
     )
@@ -248,10 +200,7 @@ describe('the page', () => {
   })
 
   it('shows the permitted range rather than hiding it in the input attributes', async () => {
-    /*
-     * `min`/`max` give a browser its spinner limits and a reader nothing. An operator who types 0
-     * and is told "Must be 1 or more" should have been able to know that beforehand.
-     */
+    /* `min`/`max` give a browser its spinner limits and a reader nothing. */
     await show()
     expect(screen.getByText('Between 1 and 3650')).toBeInTheDocument()
   })
@@ -273,11 +222,8 @@ describe('the page', () => {
   })
 
   it('says plainly that nothing secret belongs here', async () => {
-    /*
-     * Every authenticated user can read this table, which is a deliberate consequence of settings
-     * shaping what pages render. The rule that follows is only useful if someone meets it BEFORE
-     * pasting an S3 key into a box.
-     */
+    /* Every authenticated user can read this table, so the rule against storing secrets here is
+       only useful if someone meets it before pasting an S3 key. */
     await show()
     expect(screen.getByText(/Nothing secret is stored here/i)).toBeInTheDocument()
   })

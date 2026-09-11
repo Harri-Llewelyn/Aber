@@ -8,9 +8,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 // showToast/hasPermission are gone with the 3D uploader: this modal now only reads. Everything
 // it displays comes from asset_config and the device's own row.
 export function AssetConfigModal({ asset, schemas, onClose }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onClose)
 
   const [config, setConfig]   = useState([])
@@ -36,13 +34,9 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
   const attachedSchemas = schemasForDevice(asset, schemas)
 
   // Expected-vs-actual: every metric the schema models (present or missing), plus anything the
-  // device reported that the schema doesn't account for.
-  //
-  // "Reported" is the union of asset_config and devices.last_birth_metrics, because the two
-  // differ deliberately: asset_config holds birth parameter *values* and so omits any metric
-  // declared without one, while last_birth_metrics is the full declared name set. Taking only
-  // the former would let a valueless unmodelled metric show as a badge on the Devices list and
-  // then be missing from this table.
+  // device reported that the schema does not account for. "Reported" is the union of asset_config
+  // (birth parameter values, so it omits a metric declared without one) and
+  // devices.last_birth_metrics (the full declared name set).
   let comparisonRows = []
   if (attachedSchemas.length > 0) {
     const configByName = new Map(config.map(row => [row.metric_name, row]))
@@ -81,11 +75,9 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
 
   return (
     <div className="modal-overlay">
-      {/* Wide, for the same reason TelemetryModal is: this is a five-column table, not a form.
-          At the 640px step the metric-name column was down to ~190px, which clips exactly the
-          part of a Sparkplug name that distinguishes one metric from another -- `Axes/X/...`
-          and `Axes/Y/...` differ in the middle, so a truncated path is not merely shortened,
-          it is ambiguous. Height cap and internal scrolling come from `.modal` either way. */}
+      {/* Wide, like TelemetryModal: a five-column table, and at 640px the metric-name column
+          clipped the middle of a Sparkplug path, which is the part that distinguishes `Axes/X/...`
+          from `Axes/Y/...`. */}
       <div className="modal modal-wide">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconClipboardList size={18} />
@@ -126,10 +118,8 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
           ) : (
             <div className="table-wrap">
               <table className="modal-table">
-                {/* Proportions, not content-sizing. Left to itself the browser gives the name
-                    column whatever is left after four columns of fixed-width badges and
-                    timestamps have taken theirs -- which is how the one column that needs the
-                    room ended up with the least of it. */}
+                {/* Proportions, not content-sizing, so the name column is not left with whatever
+                    the fixed-width badges leave. */}
                 <colgroup>
                   <col style={{ width: '35%' }} />
                   <col style={{ width: '15%' }} />
@@ -143,9 +133,8 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
                 <tbody>
                   {comparisonRows.map(row => (
                     <tr key={row.metric_name}>
-                      {/* Wraps at the path separators rather than truncating, and carries the
-                          full name in `title` regardless -- a wrapped name is still readable,
-                          but the tooltip is what survives a column squeezed by a narrow window. */}
+                      {/* Wraps at the path separators rather than truncating, and carries the full
+                          name in `title` for a squeezed column. */}
                       <td className="config-metric-name"><strong title={row.metric_name}>{row.metric_name}</strong></td>
                       <td>{statusBadge(row.status)}</td>
                       <td className="telemetry-value" title={String(fmtVal(row.reported))}>{fmtVal(row.reported)}</td>
@@ -194,10 +183,8 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
           </div>
         )}
 
-        {/* The 3D model uploader moved to the device row's Attached Document Links accordion.
-            It is an attachment alongside the document links, and it was the only control in
-            this modal that WROTE anything -- everything else here is a read-only view of what
-            the device reported at birth. */}
+        {/* The 3D model uploader lives in the device row's Attached Document Links accordion;
+            everything here is a read-only view of what the device reported at birth. */}
 
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onClose} title="Close modal">Close</button>

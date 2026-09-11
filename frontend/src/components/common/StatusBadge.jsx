@@ -2,27 +2,18 @@ import React from 'react'
 import { GATEWAY_STATUS_LABELS } from '../../utils/gatewayStatus'
 
 /**
- * The one status chip, shared by cells, gateways and devices.
- *
- * FOUR VISUAL CLASSES, not one per status. `badge-warning` is the default for anything unrecognised,
- * which is what lets a status this component has never heard of still render legibly rather than
- * unstyled -- `gateways.status` is free text by design (an NBIRTH payload can override it), so the
- * set is genuinely open and must not be treated as an enum here.
+ * The one status chip, shared by cells, gateways and devices. Four visual classes, with
+ * `badge-warning` as the default for anything unrecognised: `gateways.status` is free text (an
+ * NBIRTH payload can override it), so the set is open.
  */
 export function StatusBadge({ status }) {
   const isOnline = status === 'ONLINE' || status === 'ACTIVE'
   const isOffline = status === 'OFFLINE'
 
   /**
-   * THE ENROLMENT STATES GET THEIR OWN VARIANT, and the reason is that neither of the existing two
-   * fits without saying something false.
-   *
-   * `badge-warning` (amber) is what an unrecognised status falls through to, and amber on this page
-   * means "look at this" -- but a gateway waiting for someone to carry a USB stick to a machine is
-   * not a problem, it is an unfinished task. `badge-neutral` (grey) is the other option and reads as
-   * decommissioned, which is worse: it suggests the gateway is out of service rather than on its way
-   * in. So: a distinct informational variant, and a label that says what is actually being waited
-   * for rather than repeating the wire value.
+   * The enrolment states get their own informational variant: amber means look at this and grey
+   * reads as decommissioned, and a gateway waiting for its bundle is neither. The label says what
+   * is being waited for.
    */
   // Two variants, not one: solid for "waiting on a person", dashed for "waiting on a machine". See
   // the .badge-pending / .badge-provisioned block in App.css.

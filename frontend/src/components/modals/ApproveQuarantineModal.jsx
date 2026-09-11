@@ -7,15 +7,12 @@ import { usePendingKey } from '../../hooks/usePendingAction'
 import { gatewayAcceptsDevices } from '../../utils/gatewayType'
 
 export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onApprove, onMerge, onCancel }) {
-  // One key space across BOTH buttons: approving as new and merging into the suggested match are
-  // two answers to the same question, and only one of them can be the answer. Running one must
-  // therefore lock the other, which two independent booleans would not do.
+  // One key space across both buttons: approving as new and merging into the suggested match are
+  // two answers to the same question, so running one locks the other.
   const [busy, runBusy] = usePendingKey()
 
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both. Inert while a decision is in flight -- see ConfirmModal
-  // for why the layer stays on the stack rather than sitting out.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
+  // Inert while a decision is in flight; see ConfirmModal for why the layer stays on the stack.
   useEscapeKey(busy ? () => {} : onCancel)
 
   const isGateway = item.entity_type === 'GATEWAY'
@@ -23,14 +20,9 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
   const [connMethod, setConnMethod] = useState('Sparkplug B')
   const [gatewayId, setGatewayId] = useState(item.gateway_id || (gateways[0] ? gateways[0].gateway_id : ''))
 
-  // The cell IS chosen here again (archived migration 0036). It was removed with the note that "the old
-  // cell picker wrote a value nothing could store" -- devices had no cell_id column. They do
-  // now, and this is the one moment an operator is already looking at the device, so making
-  // them find it again on the Devices page afterwards is the worse workflow.
-  //
-  // Empty still means inherit, exactly as on the Devices form: a device approved onto a gateway
-  // that has a cell needs no answer here, and forcing one would store an override nobody asked
-  // for -- which would then stop tracking the gateway.
+  // The cell is chosen here because the operator is already looking at the device. Empty means
+  // inherit from the gateway, as on the Devices form; forcing a value would store an override that
+  // stops tracking the gateway.
   const [cellId, setCellId] = useState('')
   const [siteWide, setSiteWide] = useState(false)
 
@@ -39,9 +31,8 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
     ? (cells.find(c => c.cell_id === selectedGateway.cell_id)?.cell_name || null)
     : null
 
-  // What the device will resolve to once approved. A gateway with no cell -- which every
-  // virtual, host-run gateway has -- cannot supply one, so this is where the operator is told
-  // that leaving the picker alone lands the device in the Unassigned queue.
+  // What the device will resolve to once approved. A gateway with no cell cannot supply one, so the
+  // operator is told that leaving the picker alone lands the device in the Unassigned queue.
   const willBeUnassigned = !siteWide && !cellId && !selectedGateway?.cell_id
 
   const handleSave = () => runBusy('approve', () => onApprove(item.asset_id, {
@@ -62,9 +53,8 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
           <span>Approve Discovered {isGateway ? 'Gateway' : 'Device'} <span className="mono">[{item.asset_name}]</span></span>
         </div>
 
-        {/* What the device actually put on the wire, and why it was held. For a malformed
-            identifier this is the whole diagnosis -- the id below is what the gateway sent,
-            and the reason says how it failed the format contract. */}
+        {/* What the device put on the wire, and why it was held. For a malformed identifier this is
+            the whole diagnosis. */}
         <div className="form-group">
           <label className="form-label">Published Sparkplug ID</label>
           <CopyableId value={item.reported_identity} label="published device id" />
@@ -105,9 +95,8 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
           <input className="form-control" value={assetName} onChange={e => setAssetName(e.target.value)} title={`Enter human-readable ${isGateway ? 'gateway' : 'device'} name`} />
         </div>
 
-        {/* A gateway needs nothing further here. It used to be asked for an IP address, which
-            0004 removed -- nothing in the monitoring flow read it. A device still needs its
-            serving gateway and its location, neither of which applies to a gateway itself. */}
+        {/* A gateway needs nothing further here. A device still needs its serving gateway and its
+            location. */}
         {!isGateway && (
           <>
             <div className="form-group">

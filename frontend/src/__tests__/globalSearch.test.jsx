@@ -6,19 +6,10 @@ import { buildTargets, matchTargets, scoreTarget, CARDS } from '../searchIndex'
 import { TABS, tabIsVisible } from '../navigation'
 
 /**
- * The global search.
- *
- * IT ANSWERS THREE QUESTIONS AND THEY FAIL IN THREE DIFFERENT WAYS, which is why this suite is
- * split the way it is:
- *
- *   The RANKING is pure and is tested as arithmetic. Its failure is silent -- a result list that is
- *   merely in a worse order still looks like it works, and only stops being useful.
- *
- *   The ID LOOKUP is asynchronous and races itself. Its failure is a palette showing the asset for
- *   an id that is no longer in the box, which is worse than showing nothing.
- *
- *   The VISIBILITY of what can be found has to match the rail exactly. Its failure is offering an
- *   Operator a page the rail does not, which is a signpost to a blank screen.
+ * The global search answers three questions that fail in three different ways: the ranking is pure
+ * and tested as arithmetic (its failure is a worse order that still looks like it works); the id
+ * lookup is asynchronous and races itself (its failure is showing an asset for an id no longer in
+ * the box); and the visibility of what can be found has to match the rail exactly.
  */
 
 vi.mock('../api', () => ({
@@ -37,9 +28,8 @@ const labels = (query, limit) => matchTargets(query, targets(), limit).map(t => 
 describe('what the index holds', () => {
 
   it('takes the pages it is given rather than filtering them again', () => {
-    // ONE PREDICATE DECIDES VISIBILITY, and it is `tabIsVisible` in navigation.jsx. A second copy
-    // here would be a second answer to the same question, and the day the two disagree the palette
-    // offers a page the rail does not.
+    // One predicate decides visibility, `tabIsVisible` in navigation.jsx; a second copy here would
+    // be a second answer to the same question.
     const operator = TABS.filter(t => tabIsVisible(t, () => false, 'Operator'))
     const found = buildTargets(operator).map(t => t.tabId)
 
@@ -68,9 +58,8 @@ describe('what the index holds', () => {
 describe('ranking', () => {
 
   /**
-   * THE CASE THE FEATURE WAS ASKED FOR. "Metric Catalog" is a card on the Schemas page, and nothing
-   * about the word "Schemas" says so -- which is exactly why a reader who wants it cannot find it
-   * from the navigation alone.
+   * The case the feature was asked for: "Metric Catalog" is a card on the Schemas page, and nothing
+   * about the word "Schemas" says so.
    */
   it('finds a card by its own name, from a prefix', () => {
     expect(labels('metric')[0]).toBe('Metric Catalog')
@@ -86,8 +75,7 @@ describe('ranking', () => {
   })
 
   /**
-   * A word-start beats a mid-word substring, and the ordering is the whole design of the bands:
-   * "cat" must offer Metric Catalog above Access Control even though the letters appear in both.
+   * A word-start beats a mid-word substring: "cat" must offer Metric Catalog above Access Control.
    */
   it('prefers a word boundary to a match buried inside a word', () => {
     const catalog = targets().find(t => t.label === 'Metric Catalog')
@@ -104,8 +92,8 @@ describe('ranking', () => {
   })
 
   /**
-   * The keywords earn their place on the pages nobody guesses the name of. "Digital Thread" is a
-   * phrase a first-time reader does not have; "audit" is the word they arrive with.
+   * The keywords earn their place on the pages nobody guesses the name of: "audit" is the word a
+   * first-time reader arrives with.
    */
   it('finds a page by the word the job uses rather than the word the UI uses', () => {
     expect(labels('audit')).toContain('Digital Thread')
@@ -125,10 +113,8 @@ describe('ranking', () => {
   })
 
   /**
-   * The initials band cannot misfire on a single letter, and the reason is worth stating because it
-   * looks like it needs a guard and does not: a label's first initial IS its first character, so
-   * any one-letter query that matches the initials matches the higher-scoring prefix band first.
-   * The band only ever decides anything from two letters on.
+   * The initials band cannot misfire on a single letter: a label's first initial is its first
+   * character, so a one-letter query matches the higher-scoring prefix band first.
    */
   it('scores a single letter as a prefix, never as initials', () => {
     const thread = targets().find(t => t.label === 'Digital Thread')
@@ -256,10 +242,8 @@ describe('the palette', () => {
     })
 
     /**
-     * A MISS AND A REFUSAL READ THE SAME, DELIBERATELY. RLS returns no rows rather than an error, so
-     * "no such device" and "not a device you may see" are indistinguishable from the browser --
-     * and asserting the first would tell an Operator that an id they are not cleared for does not
-     * exist.
+     * A miss and a refusal read the same: RLS returns no rows rather than an error, so asserting
+     * "no such device" would tell an Operator that an id they are not cleared for does not exist.
      */
     it('says what was searched and does not claim the id is unknown', async () => {
       api.resolveId.mockResolvedValue([])
@@ -286,18 +270,15 @@ describe('the palette', () => {
       type(UUID.slice(0, 20))
 
       await waitFor(() => expect(screen.queryByRole('listbox')).toBeTruthy())
-      // `isUuid` passes only a COMPLETE id, so the primary-key probe does not run. What does run
-      // is the name search -- a partial id is a perfectly well-formed thing to type, and it simply
-      // matches nothing. Asserted rather than left implied, because "no lookup at all" was true
-      // before the estate could be searched by name and quietly stopped being so.
+      // `isUuid` passes only a complete id, so the primary-key probe does not run; the name search
+      // does, and matches nothing.
       expect(api.resolveId).not.toHaveBeenCalled()
       await waitFor(() => expect(api.searchAssets).toHaveBeenCalled())
     })
 
     /**
-     * THE RACE. Four table reads run per lookup and two lookups can be in flight when somebody
-     * corrects a digit. Without the staleness guard the slower FIRST reply lands after the second
-     * and leaves the palette showing an asset for an id that is no longer in the box.
+     * The race: two lookups can be in flight when somebody corrects a digit, and without the
+     * staleness guard the slower first reply lands after the second.
      */
     it('ignores a reply for an id that is no longer being asked about', async () => {
       const OTHER = '11111111-2222-4333-8444-555555555555'
@@ -363,8 +344,7 @@ describe('the palette', () => {
 
     it('puts pages and cards above assets', async () => {
       // The static index answers instantly and the estate lookup arrives after a debounce, so
-      // assets on top would push a result the user was already reaching for out from under the
-      // cursor. Navigation is also the commoner intent.
+      // assets on top would move under the cursor.
       api.searchAssets.mockResolvedValue([hit('device', 'Devices Rig', '55555555-5555-4555-8555-555555555555')])
       render(<GlobalSearch {...props()} />)
       type('device')
@@ -392,12 +372,9 @@ describe('the palette', () => {
 describe('the card index', () => {
 
   /**
-   * A CARD IS A HEADING IN A 90KB COMPONENT WITH NO REGISTRY BEHIND IT, so nothing can assert that
-   * the heading still exists. What CAN be asserted is that the index still points at real pages and
-   * has no duplicate entries -- and that this file is read by somebody renaming a card, which is
-   * most of what the guard is for.
-   *
-   * The page-agreement half lives in navigation.test.js, beside the other three id lists.
+   * A card is a heading in a large component with no registry behind it, so nothing can assert the
+   * heading still exists. What can be asserted is that the index points at real pages and has no
+   * duplicates. The page-agreement half lives in navigation.test.js.
    */
   it('carries the card the feature was requested for', () => {
     const catalog = CARDS.find(c => c.label === 'Metric Catalog')

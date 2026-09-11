@@ -33,12 +33,9 @@ describe('the two physical-gateway enrolment states', () => {
   });
 
   /**
-   * THE BUG THIS PINS, and the reason the short-circuit is ordered ahead of the staleness check.
-   *
-   * A gateway being RE-ENROLLED -- replaced hardware, a rotated credential -- carries the OLD
-   * heartbeat from its previous life. Under the naive ordering that heartbeat is months stale, so
-   * the badge said STALE while the truth was "waiting for its first message from the new appliance".
-   * PENDING_ENROLLMENT survived by luck (its heartbeat is NULL); AWAITING_BIRTH did not.
+   * The short-circuit is ordered ahead of the staleness check: a gateway being re-enrolled carries
+   * the old heartbeat from its previous life, and under the naive ordering AWAITING_BIRTH read as
+   * STALE.
    */
   it('does NOT downgrade a re-enrolled gateway to STALE on its old heartbeat', () => {
     const reEnrolled = {
@@ -58,10 +55,9 @@ describe('the two physical-gateway enrolment states', () => {
 
 describe('gatewayNeedsAttention', () => {
   /**
-   * The Cells page turns a cell amber when a gateway in it needs attention. Before the enrolment
-   * states existed the test was `live_status !== 'ONLINE'`, which flags every appliance still in its
-   * box -- so ordering four gateways on a Monday lit up every cell they belong to, which is exactly
-   * when the signal needs to still mean something.
+   * The Cells page turns a cell amber when a gateway in it needs attention. A gateway mid-enrolment
+   * is not one: flagging every appliance still in its box would light up every cell on the day they
+   * were ordered.
    */
   it('does not flag a gateway that is merely mid-enrolment', () => {
     expect(gatewayNeedsAttention({ status: GATEWAY_STATUS_PENDING_ENROLMENT }, NOW)).toBe(false);

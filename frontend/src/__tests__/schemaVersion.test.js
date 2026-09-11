@@ -52,9 +52,8 @@ describe('schemaVersion — name derivation (mirrors public.schema_version_base_
   })
 
   it('only strips the trailing suffix, never one in the middle', () => {
-    // Matches the SQL regexp's `$` anchor. A schema legitimately called `Foo_v2_v3` has base
-    // `Foo_v2`, and the two implementations have to agree on that or the button predicts a name
-    // the server will not choose.
+    // Matches the SQL regexp's `$` anchor: a schema called `Foo_v2_v3` has base `Foo_v2`, and the
+    // two implementations have to agree.
     expect(baseSchemaName('Foo_v2_v3')).toBe('Foo_v2')
     expect(baseSchemaName('Simulated_CNC_01_Schema')).toBe('Simulated_CNC_01_Schema')
   })

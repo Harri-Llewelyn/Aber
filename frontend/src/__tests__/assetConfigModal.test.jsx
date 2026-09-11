@@ -7,17 +7,10 @@ import { AssetConfigModal } from '../components/modals/AssetConfigModal'
 import { api } from '../api'
 
 /**
- * Device Configuration Parameters.
- *
- * A five-column table living in a dialog sized for a form. At the 640px step the metric-name
- * column came out around 190px, which is not enough for a Sparkplug name -- and the clipping was
- * not merely cosmetic: these names are PATHS that differ in the middle, so `Axes/X/DISPLACEMENT`
- * and `Axes/Y/DISPLACEMENT` truncate to the same string. Two rows describing different metrics
- * became indistinguishable.
- *
- * jsdom computes no layout, so column widths cannot be measured here. What can be asserted is
- * everything the layout is BUILT from -- the width step, the declared proportions, the wrapping
- * rule and the tooltips -- and those are the parts a refactor silently drops.
+ * Device Configuration Parameters: a five-column table whose metric names are paths that differ in
+ * the middle, so clipping makes two rows indistinguishable. jsdom computes no layout, so what is
+ * asserted is what the layout is built from: the width step, the declared proportions, the wrapping
+ * rule and the tooltips.
  */
 vi.mock('../api', () => ({ api: { get: vi.fn() } }))
 
@@ -81,8 +74,7 @@ describe('Configuration Parameters modal width', () => {
   })
 
   // Widening a dialog is only safe because the height cap is on `.modal`, which every step
-  // inherits -- otherwise a device with 60 modelled metrics would push the title off the top of
-  // the viewport with no scrollbar to grab.
+  // inherits.
   it('still inherits the height cap and internal scrolling', () => {
     const base = APP_CSS.match(/\n\.modal \{([\s\S]*?)\n\}/)[1]
     expect(base).toMatch(/max-height:\s*calc\(100vh - 48px\)/)
@@ -154,12 +146,8 @@ describe('Configuration Parameters long metric names', () => {
   })
 
   /**
-   * Wrapped, not ellipsised -- and this is the one that matters.
-   *
-   * A Sparkplug metric name is a path with no spaces to break at, so it is one unbreakable
-   * 30-character word unless told otherwise. Truncating it from the right is worse than useless
-   * here: the fixture holds `Axes/X/DISPLACEMENT` and `Axes/Y/DISPLACEMENT`, which share their
-   * first six characters and their last twelve, so an ellipsis leaves two rows reading the same.
+   * Wrapped, not ellipsised: a Sparkplug name is one unbreakable word, and `Axes/X/DISPLACEMENT`
+   * and `Axes/Y/DISPLACEMENT` share their first six and last twelve characters.
    */
   it('breaks long paths instead of truncating them', () => {
     const rule = APP_CSS.match(/\n\.modal-table \.config-metric-name \{([\s\S]*?)\n\}/)[1]

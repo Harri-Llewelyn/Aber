@@ -1,22 +1,11 @@
 import React, { useState } from 'react'
 
 /**
- * A tag list that collapses past `limit`, with a "+N" control to reveal the rest.
- *
- * A device's tags are one per metric group its schema models, so a schema spanning three standards
- * gives six or more -- enough to make the row three lines tall on its own. They are useful for
- * scanning but rarely all needed at once, which is what makes them a good candidate for
- * collapsing where the status badge, say, would not be.
- *
- * PRIORITY TAGS ARE NEVER COLLAPSED. `deviceTagList()` appends `Unmodelled` LAST, so a plain
- * truncation would hide precisely the tag that requires action and keep the six that are merely
- * descriptive. Priority entries are floated to the front before the cut instead; the relative
- * order of everything else is preserved.
- *
- * Each entry is `{ key, content, className?, style?, title?, priority?, label? }`. `key` is React
- * identity and `label` is what a human reads in the overflow tooltip -- they differ wherever the
- * identity is not a name, as on the Gateways row where entries are keyed by device UUID and a
- * tooltip full of UUIDs would be worse than no tooltip at all.
+ * A tag list that collapses past `limit`, with a "+N" control to reveal the rest. Priority tags are
+ * floated to the front before the cut and never collapsed: `deviceTagList()` appends `Unmodelled`
+ * last, and that is the tag that requires action. Each entry is `{ key, content, className?,
+ * style?, title?, priority?, label? }`; `label` is what the overflow tooltip reads, and differs
+ * from `key` where the identity is a UUID.
  */
 export function TagList({ tags, limit = 2, emptyLabel = '—' }) {
   const [expanded, setExpanded] = useState(false)

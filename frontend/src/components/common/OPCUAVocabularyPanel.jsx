@@ -3,15 +3,9 @@ import { opcuaSections, dataPointTooltip, browsePath } from '../../utils/opcua'
 import { STANDARDS } from '../../utils/standards'
 
 /**
- * The OPC UA tab of the unified Standard Vocabulary Reference card.
- *
- * This is the vocabulary for the assets MTConnect does not cover. MTConnect is a machine-tool
- * standard; articulated arms, AGVs and general machinery identification are modelled in OPC UA
- * companion specs, and a mixed research fleet needs both.
- *
- * Sections are companion specifications rather than components, because which spec a point comes
- * from is the first thing that decides whether it applies to an asset at all -- a CNC has
- * Machinery points and no Robotics ones.
+ * The OPC UA tab of the Standard Vocabulary Reference card: the vocabulary for the assets MTConnect
+ * does not cover (articulated arms, AGVs, general machinery identification). Sections are companion
+ * specifications, because which spec a point comes from decides whether it applies to an asset.
  */
 export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
   const sections = opcuaSections(vocabulary).map(s => ({
@@ -23,9 +17,8 @@ export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
     }))
   }))
 
-  // Matched on semantic id first -- the browse name alone is ambiguous, since Machinery and
-  // Robotics both define names like Manufacturer, and a catalog metric may be named anything. The
-  // name-segment fallback covers metrics created before semantic ids were recorded.
+  // Matched on semantic id first, since Machinery and Robotics both define names like Manufacturer.
+  // The name-segment fallback covers metrics created before semantic ids were recorded.
   const semanticIds = new Set()
   const nameSegments = new Set()
   for (const metric of catalog || []) {

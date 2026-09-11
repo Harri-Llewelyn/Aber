@@ -58,9 +58,7 @@ describe('gateway connected devices column', () => {
   })
 
   it('collapses a large fleet instead of rendering one chip per device', async () => {
-    // Twenty devices previously meant twenty-one chips and a row several lines tall. Unlike the
-    // Devices Type column this count is unbounded -- it grows with the fleet, not with a
-    // fixed vocabulary.
+    // Unlike the Devices Type column this count is unbounded, so it collapses past a limit.
     await show(twenty)
 
     expect(screen.getByText('CNC_01')).toBeInTheDocument()

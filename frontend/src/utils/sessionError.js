@@ -1,18 +1,10 @@
 import { supabase } from '../lib/supabaseClient';
 
 /**
- * Detecting and recovering from a session that the auth server no longer recognises.
- *
- * `supabase.auth.getSession()` only reads localStorage -- it never asks GoTrue whether
- * the session is still real. PostgREST likewise verifies nothing but the JWT signature.
- * So a token whose `auth.sessions` row has gone (the database volume was recreated, an
- * administrator revoked the session, the JWT secret rotated) still reads data happily,
- * and the user looks signed in.
- *
- * Edge Functions are the odd one out: they call `auth.getUser()`, which validates the
- * session server-side and fails with "Session from session_id claim in JWT does not
- * exist". Without this module that surfaces as an opaque error on an otherwise
- * working-looking dashboard.
+ * Detecting and recovering from a session the auth server no longer recognises. `getSession()` only
+ * reads localStorage and PostgREST only checks the JWT signature, so a token whose `auth.sessions`
+ * row has gone still reads data. Edge Functions call `auth.getUser()` and fail with "Session from
+ * session_id claim in JWT does not exist"; this module turns that into a sign-out.
  */
 
 const INVALID_SESSION_SIGNATURES = [
@@ -34,12 +26,9 @@ export function isInvalidSessionError(error) {
 }
 
 /**
- * True only when the auth server actively *rejected* the session.
- *
- * A network failure must not be treated as a rejection: signing someone out because
- * their wifi dropped for a second would be worse than the stale session this guards
- * against. supabase-js reports unreachable-server as a retryable fetch error with no
- * HTTP status, so an explicit 401/403 (or an unmistakable message) is required.
+ * True only when the auth server actively rejected the session. A network failure is not a
+ * rejection: supabase-js reports an unreachable server as a fetch error with no HTTP status, so an
+ * explicit 401/403 or an unmistakable message is required.
  */
 export function isSessionRejected(error) {
   if (!error) return false;
@@ -49,12 +38,9 @@ export function isSessionRejected(error) {
 }
 
 /**
- * Clear a session the server has already rejected and return the message to show.
- *
- * Signs out with `scope: 'local'` on purpose: the server-side session is already gone,
- * so asking it to revoke would just fail again. This drops the stale tokens from
- * storage, which makes onAuthStateChange fire SIGNED_OUT and return the app to the
- * login screen instead of leaving it half-authenticated.
+ * Clear a session the server has already rejected and return the message to show. Signs out with
+ * `scope: 'local'` because the server-side session is already gone; dropping the stored tokens
+ * makes onAuthStateChange fire SIGNED_OUT.
  */
 export async function clearInvalidSession() {
   try {
@@ -66,11 +52,13 @@ export async function clearInvalidSession() {
 }
 
 /**
- * Map an error from a privileged call to a message for the user, signing out first when
- * the session itself is the problem.
+ * Map an error from a privileged call to a message for the user, signing out first when the session
+ * itself is the problem.
  *
- * @param {unknown} error - Error or message from the failed call.
- * @param {string} fallback - Message to show when the session is fine and something else broke.
+ * @param {unknown} error Error or message from the failed call.
+ *
+ * @param {string} fallback Message to show when the session is fine and something else broke.
+ *
  * @returns {Promise<string>}
  */
 export async function describeAuthFailure(error, fallback) {

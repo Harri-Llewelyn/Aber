@@ -8,28 +8,11 @@ const RECONCILE_MS = 60000
 const POLL_INTERVAL_MS = 15000
 
 /**
- * The live set of firing Grafana alerts, and a toast on each transition.
- *
- * MACHINE AND PLATFORM ALIKE. It was `useDeviceAlerts` while every rule was a machine condition;
- * the platform alert rules added rules about a gateway going stale and about the fleet as a whole, so the
- * row it reads now carries `entity_type` and the hook is named for what it actually holds. What a
- * CONSUMER does with a non-device alert is the consumer's decision -- notably, the shopfloor map
- * reddens a device only for a `device` alert; see utils/deviceAlerts.js.
- *
- * WHERE THESE COME FROM. Grafana evaluates the rules in grafana/provisioning/alerting/ against the
- * historian, posts to the grafana-alert-webhook edge function, and that writes an occurrence into
- * `public.platform_alerts`. This hook reads the `platform_alerts_active` view and subscribes to the
- * table. Nothing here evaluates anything -- the dashboard deliberately stopped deriving alarm state
- * from telemetry values (see utils/deviceStatus.js), and this is the other half of that change.
- *
- * SUBSCRIBES TO THE TABLE, READS THE VIEW. Postgres logical replication publishes TABLES; a view has
- * no replica identity and cannot be in a publication. So the socket watches `platform_alerts` for any
- * change and the authoritative "what is firing now" answer comes from re-reading the view, which
- * applies the newest-occurrence-wins rule a client would otherwise have to reimplement.
- *
- * THE INITIAL FETCH IS LOAD-BEARING, exactly as it is in useQuarantineAlerts: it primes the set of
- * already-known alerts so a page load does not toast everything that was already firing. Without it
- * this is a list, not an alert.
+ * The live set of firing Grafana alerts, machine and platform alike, with a toast on each
+ * transition. Grafana posts to the grafana-alert-webhook function, which writes
+ * `public.platform_alerts`; this hook reads the `platform_alerts_active` view and subscribes to the
+ * table, because a view cannot be in a publication. The initial fetch primes the known set so a
+ * page load does not toast everything already firing.
  */
 export function usePlatformAlerts(showToast) {
   const [active, setActive] = useState([])
@@ -40,13 +23,9 @@ export function usePlatformAlerts(showToast) {
   useEffect(() => { showToastRef.current = showToast }, [showToast])
 
   /**
-   * Re-read the active view and announce the difference.
-   *
-   * DIFFING AGAINST A REMEMBERED MAP rather than trusting the change payload. A single webhook can
-   * carry six instances, the debounce coalesces them, and a resolve arrives as an UPDATE rather than
-   * a delete -- so "what changed" is far more reliably computed from two snapshots than assembled
-   * from events. It also makes the realtime and polling paths identical, so the fallback is not a
-   * second implementation that drifts.
+   * Re-read the active view and announce the difference. Diffs two snapshots rather than trusting
+   * change payloads (a webhook can carry six instances and a resolve arrives as an UPDATE), which
+   * also makes the realtime and polling paths identical.
    */
   const refresh = useCallback(async () => {
     const { data, error } = await supabase
@@ -67,11 +46,7 @@ export function usePlatformAlerts(showToast) {
     if (primedRef.current) {
       for (const [fingerprint, row] of next) {
         if (!knownRef.current.has(fingerprint)) {
-          // NO EMOJI PREFIX. Toast already draws its own stroked SVG from `type`, so `🚨` and `✅`
-          // put a second icon beside the first -- and in the resolve case that second icon was a
-          // green tick next to a green tick. An emoji also renders in whatever font, weight and
-          // colour the operating system picked, which is the one thing in the app that cannot be
-          // made to match the palette.
+          // No emoji prefix: Toast draws its own icon from `type`.
           showToastRef.current?.(
             `${row.alert_name}${row.summary ? ` — ${row.summary}` : ''}`,
             row.severity === 'critical' ? 'error' : 'warning'
@@ -112,9 +87,8 @@ export function usePlatformAlerts(showToast) {
 
     ;(async () => {
       const { data: { session } } = await supabase.auth.getSession()
-      // No session means the login screen: RLS grants SELECT to `authenticated` only, so a fetch
-      // here would 401 and a socket would be opened for the lifetime of a page nobody is signed in
-      // to. Both paths wait.
+      // No session means the login screen: RLS grants SELECT to `authenticated` only, so both the
+      // fetch and the socket wait.
       if (cancelled || !session) return
 
       await refresh()

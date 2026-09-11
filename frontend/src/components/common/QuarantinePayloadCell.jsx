@@ -5,17 +5,9 @@ import { IconChevronDown, IconChevronUp } from './Icons'
 const COLLAPSED_LIMIT = 3
 
 /**
- * The birth payload of a quarantined device, as a width-constrained cell.
- *
- * This column used to render `JSON.stringify(reported_metrics)` in an unconstrained cell. A device
- * announcing eight metrics produced a ~200-character line, which widened the table past the
- * viewport and pushed **Approve & Assign** off the right-hand edge — so approving a device, the
- * one action this queue exists for, required scrolling first. Adopting MTConnect names made it
- * worse, since they are longer than the ad-hoc ones they replaced.
- *
- * Rendering the names rather than the JSON is the other half of the fix: the payload is a list of
- * metric names, so the collapsed state can show what the device actually reported instead of a
- * clipped fragment of syntax.
+ * The birth payload of a quarantined device, as a width-constrained cell showing metric names
+ * rather than raw JSON, so a device announcing many metrics cannot push Approve & Assign off the
+ * right-hand edge.
  */
 export function QuarantinePayloadCell({ metrics, fallbackJson }) {
   const [expanded, setExpanded] = useState(false)

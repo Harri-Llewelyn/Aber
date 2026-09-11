@@ -1,26 +1,9 @@
 /**
- * Digital Thread: reading one operator action back as one act.
- *
- * WHAT THIS IS FOR. `digital_thread` holds only `entity_id` and `recorded_at`, so before migration
- * 0026 the several rows one action produced were indistinguishable from several unrelated actions
- * that happened in the same second. That is not a hypothetical shape: approving a quarantined
- * device updates the device and rebinds its schema, the schema-version rebinding at
- * `0001_baseline_schema.sql:779` touches every device on the superseded version in ONE statement,
- * and a cell deletion cascades to its gateways. Read a row at a time, each of those looks like an
- * isolated edit.
- *
- * `causation_id` is `txid_current()`, so every row a transaction writes shares it. This suite pins
- * the two claims the UI makes on top of that, and BOTH are claims about what the page must NOT say:
- *
- *   1. A NULL causation is not a group. Every row written before 0026 carries NULL and there is no
- *      honest backfill, so matching NULL to NULL would collect an entire pre-0026 history into one
- *      imaginary transaction -- a fabricated causal link in the one table the platform offers as
- *      evidence. That is the worst failure available here, which is why it is tested first.
- *
- *   2. Absence asserts nothing. The sibling list is drawn from the FETCHED, FILTERED set, so it is
- *      a lower bound and not a count. The control therefore renders only when siblings exist and
- *      says on screen that it is limited -- rather than printing "0 related changes", which the
- *      page cannot actually know.
+ * Digital Thread: reading one operator action back as one act. `causation_id` is `txid_current()`,
+ * so every row a transaction writes shares it. This suite pins two claims about what the page must
+ * not say: a NULL causation is not a group (legacy rows carry NULL, and matching NULL to NULL would
+ * fabricate a causal link), and absence asserts nothing (the sibling list is drawn from the
+ * fetched, filtered set, so it is a lower bound and renders only when siblings exist).
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
@@ -41,11 +24,8 @@ const DEVICES = [
 ]
 
 /**
- * A schema rebinding across two devices, plus one unrelated edit a second later.
- *
- * THE UNRELATED EVENT IS THE POINT OF THE FIXTURE. Events 1 and 2 share a transaction; event 3 is a
- * different act on an entity that is already in the group. Without it, a broken implementation that
- * grouped by entity, or by timestamp, or by nothing at all, would still pass.
+ * A schema rebinding across two devices, plus one unrelated edit a second later. The unrelated
+ * event is the point: without it, grouping by entity or by timestamp would still pass.
  */
 const TXN = 4471
 const EVENTS = [
@@ -99,9 +79,7 @@ const selectEvent = async (pattern) => {
 const group = () => document.querySelector('.dt-causation')
 
 
-// =================================================================================================
 // The derivation
-// =================================================================================================
 describe('causationSiblings', () => {
   it('returns the other rows written by the same transaction', () => {
     const siblings = causationSiblings(EVENTS[0], EVENTS)
@@ -119,12 +97,8 @@ describe('causationSiblings', () => {
   })
 
   it('treats a NULL causation as no group at all', () => {
-    /*
-     * THE FABRICATION GUARD. Every row written before 0026 carries NULL, deliberately -- there is
-     * no honest value to backfill for a transaction that is long over. If NULL matched NULL, an
-     * entire year of unrelated history would render as one act, in the table this platform offers
-     * as evidence. A wrong causal claim is far worse than no causal claim.
-     */
+    /* The fabrication guard: rows written before causation existed carry NULL, and if NULL matched
+       NULL a year of unrelated history would render as one act. */
     const legacy = [
       { event_id: 10, entity_id: 'dev-1', causation_id: null },
       { event_id: 11, entity_id: 'dev-2', causation_id: null },
@@ -135,11 +109,8 @@ describe('causationSiblings', () => {
   })
 
   it('orders by write order within the transaction, not by timestamp', () => {
-    /*
-     * `recorded_at` is NOW(), which in PostgreSQL is the TRANSACTION start time -- so every row in
-     * a group carries an identical timestamp and sorting by it yields an arbitrary order that looks
-     * meaningful. `event_id` ascending is the order the act actually performed them in.
-     */
+    /* `recorded_at` is NOW(), the transaction start time, so every row in a group carries an
+       identical timestamp. `event_id` ascending is the order the act performed them in. */
     const scrambled = [
       { event_id: 9, entity_id: 'c', causation_id: TXN },
       { event_id: 4, entity_id: 'a', causation_id: TXN },
@@ -156,9 +127,7 @@ describe('causationSiblings', () => {
 })
 
 
-// =================================================================================================
 // The drawer
-// =================================================================================================
 describe('the Same transaction control', () => {
   it('names the other entity the same act changed', async () => {
     await show()
@@ -169,11 +138,8 @@ describe('the Same transaction control', () => {
   })
 
   it('states that it is limited to what is loaded and filtered', async () => {
-    /*
-     * The caveat is ON SCREEN rather than in a tooltip, and that is the whole reason this test
-     * exists. The list is drawn from the fetched, filtered set, so it is a LOWER BOUND -- a reader
-     * who takes it for a count will conclude a transaction did less than it did.
-     */
+    /* The caveat is on screen rather than in a tooltip: the list is a lower bound, and a reader who
+       takes it for a count would conclude a transaction did less than it did. */
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
@@ -183,10 +149,8 @@ describe('the Same transaction control', () => {
   })
 
   it('steps the drawer across to the sibling, which is a DIFFERENT entity', async () => {
-    /*
-     * The axis Previous/Next cannot reach. Those step through one asset over time and never leave
-     * the lane; a transaction crosses assets, which is exactly what makes it worth showing.
-     */
+    /* The axis Previous/Next cannot reach: those step through one asset over time, while a
+       transaction crosses assets. */
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
     await waitFor(() => expect(group()).toBeTruthy())
@@ -198,12 +162,8 @@ describe('the Same transaction control', () => {
   })
 
   it('is absent on an event whose transaction wrote nothing else', async () => {
-    /*
-     * Not "0 related changes". Because the set is filtered, the page cannot tell a single-row act
-     * from one whose siblings are outside the filter -- so it asserts neither. Absence is the only
-     * honest rendering, and most operator edits touch exactly one row, so a permanent empty line
-     * would also be clutter on almost every event.
-     */
+    /* Not "0 related changes": because the set is filtered, the page cannot tell a single-row act
+       from one whose siblings are outside the filter, so it asserts neither. */
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 

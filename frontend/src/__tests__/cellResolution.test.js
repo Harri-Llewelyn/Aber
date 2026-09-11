@@ -25,10 +25,8 @@ import {
 } from '../utils/cellResolution';
 
 /**
- * These mirror the DO probe at the end of
- * supabase/migrations/0001_baseline_schema.sql case for case. Both sides assert the
- * same four resolution branches against the same shaped data, which is what makes a drift
- * between public.device_locations and this module fail somewhere rather than nowhere.
+ * These mirror the DO probe at the end of supabase/migrations/0001_baseline_schema.sql case for
+ * case, so a drift between public.device_locations and this module fails somewhere.
  */
 
 const CELL_A = 'aaaaaaaa-0000-4000-8000-000000000000';
@@ -210,13 +208,9 @@ describe('labels and bulk resolution', () => {
 });
 
 /**
- * Staged, uncommitted relocations (Rearrange mode's deferred commit, archived migration 0033).
- *
- * The case that actually needed a test is the FIRST one: every device on the Overview page
- * carries `location_source` merged from `device_locations`, and deviceLocationOf() prefers that
- * server answer over local derivation. So overwriting `cell_id` alone leaves the stale resolution
- * in place and the chip does not move -- which looks exactly like a drop that was refused, the
- * one failure this whole mode was reshaped to avoid.
+ * Staged, uncommitted relocations. Every device on the Overview page carries `location_source`
+ * merged from `device_locations`, and deviceLocationOf() prefers that server answer, so overwriting
+ * `cell_id` alone leaves the stale resolution in place and the chip does not move.
  */
 describe('applyStagedMoves', () => {
   const withServerAnswer = (overrides = {}) => ({
@@ -267,12 +261,8 @@ describe('applyStagedMoves', () => {
   });
 
   it('springs a device back to its gateway cell when staged onto Unassigned', () => {
-    /*
-     * UNASSIGNED IS NOT SETTABLE. Dropping there clears the explicit cell and lets resolution
-     * run, so a device whose gateway serves a cell re-inherits it. Under immediate writes this
-     * only became visible once the reload landed; staged, it is visible at the moment of the
-     * drop, which is the honest version of the same behaviour.
-     */
+    /* Unassigned is not settable: dropping there clears the explicit cell and lets resolution run,
+       so a device whose gateway serves a cell re-inherits it, visibly at the drop. */
     const device = withServerAnswer({ cell_id: CELL_B, location_source: SOURCE_EXPLICIT, effective_cell_id: CELL_B });
     const staged = new Map([['d1', { cell_id: null, location_scope: SCOPE_CELL }]]);
     const [moved] = applyStagedMoves([device], gateways, staged);

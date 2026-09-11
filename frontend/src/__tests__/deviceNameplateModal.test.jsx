@@ -4,9 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DeviceNameplateModal } from '../components/modals/DeviceNameplateModal';
 import { api } from '../api';
 
-// The modal talks only to `api`, so that is what is mocked -- not supabase underneath it. The
-// resolution rule this file is really about (device-published beats stored) lives in api.js and in
-// the exporter; here the question is whether the FORM honours it, which is a rendering question.
+// The modal talks only to `api`, so that is what is mocked. The resolution rule (device-published
+// beats stored) lives in api.js and the exporter; here the question is whether the form honours it.
 vi.mock('../api', () => ({
   api: { get: vi.fn(), put: vi.fn(), post: vi.fn() }
 }));
@@ -116,11 +115,8 @@ describe('DeviceNameplateModal', () => {
   });
 
   it('offers one primary control, and it says what it will actually do', async () => {
-    // THE FOOTER NEVER LIES AND IS NEVER DEAD. A disabled Save is right for a TEMPORARY refusal --
-    // an invalid year, a save in flight -- because the button becomes yours once you fix the
-    // thing. For a permanent one it leaves the dialog's primary action sitting there dead, and
-    // the reader's conclusion is that the app is broken. (It never even LOOKED disabled: nothing
-    // styles `.btn:disabled`.) Swapping the label is what makes the control honest.
+    // The footer never lies and is never dead: a disabled Save is right for a temporary refusal,
+    // but for a permanent one the label is swapped, since nothing styles `.btn:disabled`.
     respond({ stored: { device_id: 'dev-123' } });
     render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={vi.fn()} />);
     await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument());
@@ -181,9 +177,8 @@ describe('DeviceNameplateModal', () => {
   });
 
   it('explains itself when there is no route to offer at all', async () => {
-    // A role holding neither `device:manage` nor `proposal:create` -- an Auditor. The footer has
-    // nothing to say for them, and a form whose only control is Cancel has to explain itself
-    // somewhere.
+    // A role holding neither `device:manage` nor `proposal:create`, an Auditor. A form whose only
+    // control is Cancel has to explain itself.
     respond({ stored: { device_id: 'dev-123' } });
     render(<DeviceNameplateModal asset={asset} canManage={false} onClose={vi.fn()} />);
     await waitFor(() => expect(screen.getByText(/you are reading this nameplate/i)).toBeInTheDocument());

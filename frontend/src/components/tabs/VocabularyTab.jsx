@@ -9,22 +9,11 @@ import { opcuaVocabularyTab } from '../common/OPCUAVocabularyPanel'
 import { ashrae223VocabularyTab } from '../common/ASHRAE223VocabularyPanel'
 
 /**
- * The standard vocabularies, as a page of their own.
- *
- * WHY THIS LEFT THE SCHEMAS PAGE. Schemas carried three stacked concerns -- the schema registry,
- * the metric catalog, and this -- and was the largest tab in the app. The seam is between things
- * you DO and things you LOOK UP: the registry and the catalog are this deployment's state and get
- * edited, while the vocabularies are reference material that is only ever read. The reference half
- * was also the half that grows without anyone here deciding it does: MTConnect alone is ~600
- * entries, the OPC UA tab went from 25 rows to 76 as four companion specifications were added,
- * and ASHRAE 223P -- 563 concepts -- is queued behind them.
- *
- * `onUseEntry` is what keeps the split from costing anything. Clicking Use on an entry still
- * starts a catalog entry from it -- the Schemas page just receives the selection and opens its
- * Add Metric form, rather than the form being on this page. The handover carries IDENTIFIERS, not
- * a prefilled form: the Schemas page holds the vocabularies anyway for its type picker, so it
- * resolves the entry itself and there is exactly one place that knows how a vocabulary row becomes
- * a metric.
+ * The standard vocabularies as a page of their own: reference material that is only read, separate
+ * from the Schemas page's registry and catalog, which are edited. Clicking Use on an entry still
+ * starts a catalog entry: `onUseEntry` hands identifiers to the Schemas page, which holds the
+ * vocabularies for its type picker and resolves the entry itself, so one place knows how a
+ * vocabulary row becomes a metric.
  */
 export function VocabularyTab({ onUseEntry, hasPermission }) {
   const [vocabulary, setVocabulary] = useState([])
@@ -41,9 +30,8 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
       api.get('/api/v1/iso22400-vocabulary'),
       api.get('/api/v1/opcua-vocabulary'),
       api.get('/api/v1/ashrae223-vocabulary'),
-      // The catalog is read only to mark which entries are already in use. A failure there should
-      // leave the reference readable rather than blanking the page, so it is defaulted rather
-      // than being allowed to reject the whole batch.
+      // The catalog is read only to mark which entries are in use, so a failure there is defaulted
+      // rather than blanking the reference.
       api.get('/api/v1/metric-catalog').catch(() => [])
     ])
       .then(([mt, iso, opcua, s223, cat]) => {
@@ -65,10 +53,8 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
 
   return (
     <>
-      {/* The page heading was a word-for-word duplicate of the panel's own card title, so it went
-          with the rest of them. The explanation below it did NOT: the Vocabulary page and the
-          Schemas page's Metric Catalog look alike and mean different things, and that sentence is
-          the only place the difference is stated. It moved into the panel header as a subtitle. */}
+      {/* No page heading: the panel's card title carries it, and the sentence distinguishing this
+          page from the Metric Catalog is the panel's subtitle. */}
       {loading && <div style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Loading vocabularies…</div>}
 
       {!loading && (
