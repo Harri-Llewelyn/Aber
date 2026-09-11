@@ -163,6 +163,7 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             {{- include "acs-cymru.optionalSecretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "GATEWAY_REVOKE_SECRET" "secretName" $secretName "key" "GATEWAY_REVOKE_SECRET") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "FORGE_SWEEP_SECRET" "secretName" $secretName "key" "FORGE_SWEEP_SECRET") | nindent 12 }}
           command:
             - /bin/sh
             - -e
@@ -262,6 +263,7 @@ spec:
                     -v supabase_functions_url="http://{{ include "acs-cymru.fullname" . }}-supabase-kong:8000/functions/v1" \
                     -v supabase_anon_key="${SUPABASE_PUBLISHABLE_KEY:-$SUPABASE_ANON_KEY}" \
                     -v gateway_revoke_secret="$GATEWAY_REVOKE_SECRET" \
+                    -v forge_sweep_secret="$FORGE_SWEEP_SECRET" \
                     -f "$f" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi
                   cat /tmp/migration.log
                   if [ "$attempt" -ge 3 ] || ! grep -qE "deadlock detected|due to lock timeout" /tmp/migration.log; then

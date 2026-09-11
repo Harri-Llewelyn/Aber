@@ -637,6 +637,16 @@ export const SUITES = {
       'Needs the stack, the forge, the seeded personas AND the gateways organisation (one enrolment ' +
       'creates it), and skips without any of them.',
   },
+  'supabase/functions/forge-sweep/test_forge_sweep.py': {
+    lanes: ['stack'],
+    why:
+      "The forge's fifteen-minute sweep (0099): a call without the secret is refused; a role " +
+      'changed in user_roles behind the door is unseated by one sweep and seated again when it ' +
+      'returns; a member seated by hand is left alone; a gateway repository whose push webhook ' +
+      'was deleted gets it back; a repository made by hand in the organisation has main protected ' +
+      "without the incident template; and the database's sweep_forge() answers true. Needs the " +
+      'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',
+  },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],
     why:

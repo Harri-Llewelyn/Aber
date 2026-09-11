@@ -19,14 +19,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  * these is a failure.
  */
 
-import { FORGE_ORGANISATION, forgeApi, forgeConfig } from "../_shared/forge.ts";
+import { FORGE_ORGANISATION, forgeApi, forgeConfig, GATEWAY_REPOSITORY } from "../_shared/forge.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("GITEA_WEBHOOK_SECRET") ?? "";
 
-/** The name enrolment gives a gateway's repository (forge.ts repositoryNameFor), and the id in it. */
-const REPOSITORY_NAME = /^gateway-(gwy[0-9a-f]{21})$/;
 const NO_COMMIT = /^0+$/;
 const FLOW_FILE = "flows.json";
 
@@ -138,7 +136,7 @@ export default async function handler(req: Request): Promise<Response> {
   if (owner !== FORGE_ORGANISATION) {
     return json({ ignored: `repository '${owner}/${repository}' is outside the '${FORGE_ORGANISATION}' organisation` }, 200);
   }
-  const named = REPOSITORY_NAME.exec(repository);
+  const named = GATEWAY_REPOSITORY.exec(repository);
   if (!named) return json({ ignored: `repository '${repository}' is not a gateway's` }, 200);
   const sparkplugId = named[1];
 

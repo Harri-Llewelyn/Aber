@@ -44,6 +44,7 @@
 export const MIGRATION_VARS = {
   supabase_anon_key: 'test-anon-key-not-a-real-jwt',
   gateway_revoke_secret: 'test-revoke-secret',
+  forge_sweep_secret: 'test-sweep-secret',
   supabase_functions_url: 'http://localhost:9999/functions/v1',
 }
 

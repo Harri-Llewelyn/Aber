@@ -2654,6 +2654,19 @@ states and `scripts/check-gateway-flow-template.mjs` asserts the flow reads the 
 name. `test_forge_events.py` covers the signature, what is recorded and ignored, and one delivery
 sent by the forge itself for a freshly enrolled gateway.
 
+**The forge is swept on a timer (`0099`).** `forge-membership` acts on the way through the door,
+so a login whose role was revoked and who never returns keeps its team membership, usable over SSH
+if they had added a key. `sweep_forge()` asks the `forge-sweep` function for one pass every fifteen
+minutes through pg_net, authorised by `FORGE_SWEEP_SECRET` from Vault and nothing else: every
+member of either team whose `user_roles` row no longer maps to it is removed, every login the forge
+knows that holds an admitted role is seated, every gateway repository gets its push webhook and
+branch protection back, and a repository somebody made by hand in the organisation has `main`
+protected the same way, without the incident template, because a playbook a gateway later adopts
+should have been reviewed from the start. A member who is not a dashboard identity was seated by
+hand and is left alone. Nothing is created that enrolment would not create, and nothing is deleted.
+An empty secret leaves the sweep inert, and `0002` says so at boot. `test_forge_sweep.py` drives a
+role changed behind the door, a deleted hook and a hand-made repository.
+
 ## A replay lane is minted, not assigned (`0083`)
 
 The Playback gateway's devices are **replay lanes**. Each stands in for one real machine, records

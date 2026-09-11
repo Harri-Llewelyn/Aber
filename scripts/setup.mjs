@@ -173,6 +173,10 @@ const generated = {
   // Separate from the token above: that authorises minting for any edge node, this only rotating
   // a decommissioned gateway's account. Generated because an unset value makes revocation inert.
   GATEWAY_REVOKE_SECRET: hex(32),
+  // The secret pg_cron presents to forge-sweep every fifteen minutes (0099). Its own value: it
+  // authorises one reconciliation of the forge's teams and repositories and nothing else.
+  // Generated because an unset value makes the sweep inert.
+  FORGE_SWEEP_SECRET: hex(32),
   // The read-only historian role external BI tools connect as, and the one Grafana uses. Generated
   // like the rest so a local stack never runs a reporting tool as the `postgres` superuser, which
   // is what the Grafana datasource did before this existed.

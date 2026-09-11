@@ -220,24 +220,19 @@ page naming the gateway (the unreviewed half, by design), an *Incident* issue te
 webhook that records the head of `main` on the gateway row so a merge shows in the drawer at once
 ([What a gateway's repository comes with](../supabase/README.md#what-a-gateways-repository-comes-with-and-how-the-forge-reports-back-0095)).
 Both teams may create repositories in the organisation. Gitea's own sign-out is the platform's.
+A sweep on a timer (`0099`) reconciles team membership with `user_roles`, re-registers a missing
+push webhook, and protects `main` on any repository made by hand in the organisation.
 
 **What remains.**
 
-- **A membership sweep on a timer.** `forge-membership` places and removes people as they pass the
-  door, so a revoked login that never returns keeps its team membership, usable over SSH if they
-  had added a key. The sweep is the same placement logic over Gitea's user list.
 - **A required status check refusing `flows_cred.json` by shape.** The endpoint that used to refuse
   it is gone, and a file uploaded through the forge's own UI meets no check until the puller
   refuses it on the appliance, which is late. It needs a Gitea Actions runner, which 7 argues on;
   until then the puller's refusal is the only check.
-- **A status check does not alert.** A failed webhook delivery is visible on the hook's page in
-  the forge and nowhere else; a repository from before `0095` has no hook and no template until
-  somebody re-enrols the gateway or adds them by hand. Both are small and neither is urgent.
-- **Protection for hand-made repositories.** A playbook repository created by an administrator
-  in the organisation is unprotected until a gateway enrols under its name. Decide whether every
-  repository in the organisation should be protected on creation (an organisation-level hook, or
-  the membership step noticing a new repository), or whether an unreviewed playbook is acceptable
-  until it is assigned. Belongs with 7's platform-playbook decision.
+- **A failed webhook delivery does not alert.** It is visible on the hook's page in the forge and
+  nowhere else. A repository from before `0095` gets its hook back from the sweep but not its
+  incident template, which the machine account cannot commit to a protected `main`; an
+  administrator adds it by pull request. Small, and not urgent.
 - **An actor kind for the audit row.** Recording a deployed revision in `digital_thread` needs an
   actor: the trigger accepts `ingestion`, `service` and `migration`, and a puller on a timer is a
   fourth kind. The approvals queue's expiry timer declares `service`; decide the two together.

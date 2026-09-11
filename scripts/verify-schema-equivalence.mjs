@@ -112,6 +112,7 @@ const PSQL_VARS = {
   supabase_functions_url: 'http://supabase-kong:8000/functions/v1',
   supabase_anon_key: 'probe-anon-key',
   gateway_revoke_secret: 'probe-revoke-secret',
+  forge_sweep_secret: 'probe-sweep-secret',
 };
 
 /** Blocking sleep. The whole script is synchronous by design -- it is a sequence of long docker

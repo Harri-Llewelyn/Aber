@@ -5,8 +5,8 @@
  * link.
  *
  * The machine account owns an organisation, creates each gateway's repository in it, and
- * `forge-membership` places each login in the team its Postgres role maps to; it is not a site
- * administrator. Both teams have write; `main` is protected on every gateway repository with pushes
+ * `forge-membership` places each login in the team its Postgres role maps to, with `forge-sweep`
+ * re-doing both over the forge's own lists every fifteen minutes; it is not a site administrator. Both teams have write; `main` is protected on every gateway repository with pushes
  * disabled and one approval required from `administrators`, which is where gitops:manage is
  * enforced inside the forge. A repository created before the organisation existed is transferred in
  * on re-enrolment, not recreated.
@@ -92,6 +92,9 @@ export function forgeConfig(): ForgeConfig | null {
 export function repositoryNameFor(sparkplugId: string): string {
   return `gateway-${sparkplugId}`;
 }
+
+/** The inverse: a gateway's repository, and the sparkplug_id in its name. Must agree with the above. */
+export const GATEWAY_REPOSITORY = /^gateway-(gwy[0-9a-f]{21})$/;
 
 /**
  * The public half of an OpenSSH key, or null. Shape-checked and confined to the two algorithms
@@ -307,17 +310,22 @@ async function seedIssueTemplate(cfg: ForgeConfig, name: string): Promise<void> 
  * reviewed"; merging stays allowed to anyone with write once approvals are met, so a manager can
  * merge after an administrator approves. `dismiss_stale_approvals` means a change pushed after
  * approval needs approving again. Applied once: an existing protection is left as an administrator
- * may have tuned it.
+ * may have tuned it. Returns whether it was applied now. `seedTemplate` is for a gateway's
+ * repository; a playbook made by hand is protected the same way and is not a gateway's incident log.
  */
-async function ensureBranchProtection(cfg: ForgeConfig, name: string): Promise<void> {
+export async function ensureBranchProtection(
+  cfg: ForgeConfig,
+  name: string,
+  options: { seedTemplate: boolean } = { seedTemplate: true },
+): Promise<boolean> {
   const existing = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`);
-  if (existing.ok) return;
+  if (existing.ok) return false;
   if (existing.status !== 404) {
     throw await refused(`could not read the branch protection on '${name}'`, existing);
   }
   // THE LAST MOMENT ANYTHING CAN BE COMMITTED TO `main` DIRECTLY. The protection below binds the
   // machine account too, so what the repository is to carry from the start goes in here, first.
-  await seedIssueTemplate(cfg, name);
+  if (options.seedTemplate) await seedIssueTemplate(cfg, name);
   const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections`, {
     branch_name: "main",
     enable_push: false,
@@ -328,6 +336,8 @@ async function ensureBranchProtection(cfg: ForgeConfig, name: string): Promise<v
     dismiss_stale_approvals: true,
   });
   if (!created.ok) throw await refused(`could not protect 'main' on '${name}'`, created);
+  console.log(`forge: 'main' on '${name}' is protected`);
+  return true;
 }
 
 /**
@@ -402,18 +412,19 @@ async function ensureWikiHome(
 /**
  * Register the push webhook on the repository, once. One hook per repository rather than one on the
  * organisation, because only a gateway's repository has a gateway row to record on. Found again by
- * URL on re-enrolment. The secret is the one forge-events verifies with. `branch_filter: main` so
- * pushes to a proposal branch are not delivered.
+ * URL on re-enrolment and by the sweep. The secret is the one forge-events verifies with.
+ * `branch_filter: main` so pushes to a proposal branch are not delivered. Returns whether it was
+ * registered now.
  */
-async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<void> {
+export async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<boolean> {
   if (!cfg.webhookUrl) {
     console.log(`forge: no webhook configured, so '${name}' will not report its pushes`);
-    return;
+    return false;
   }
   const listed = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/hooks`);
   if (!listed.ok) throw await refused(`could not list the hooks on '${name}'`, listed);
   const hooks = await listed.json() as { id: number; config?: { url?: string } }[];
-  if (hooks.some((h) => h.config?.url === cfg.webhookUrl)) return;
+  if (hooks.some((h) => h.config?.url === cfg.webhookUrl)) return false;
 
   const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/hooks`, {
     type: "gitea",
@@ -424,6 +435,7 @@ async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<void> {
   });
   if (!created.ok) throw await refused(`could not register the push webhook on '${name}'`, created);
   console.log(`forge: '${name}' reports its pushes to ${cfg.webhookUrl}`);
+  return true;
 }
 
 /** Provision the organisation, the repository, its protection and the key. Returns null on any failure, having logged it. */

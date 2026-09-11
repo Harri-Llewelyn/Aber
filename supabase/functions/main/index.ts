@@ -154,6 +154,18 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_MACHINE_USER",
     "GITEA_MACHINE_PASSWORD",
   ],
+  // The forge reconciled on a timer (0099): pg_cron asks through the gateway with
+  // FORGE_SWEEP_SECRET, and the function walks the teams and repositories through the machine
+  // account. The webhook pair is what lets it re-register a hook a repository lost.
+  "forge-sweep": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "FORGE_SWEEP_SECRET",
+    "GITEA_INTERNAL_URL",
+    "GITEA_MACHINE_USER",
+    "GITEA_MACHINE_PASSWORD",
+    "GITEA_WEBHOOK_URL",
+    "GITEA_WEBHOOK_SECRET",
+  ],
 
   // Factory+ Directory adapter. No service-role key: it authenticates the caller and queries as
   // them, letting RLS decide what they see. The common env is all it needs.
