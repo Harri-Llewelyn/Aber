@@ -173,12 +173,15 @@ describe('DirectoryTab service groups', () => {
     expect(card(INGEST)).toBeTruthy()
   })
 
-  it('counts each category on its own heading', async () => {
+  it('explains each category behind a tip on its heading, and counts nothing', async () => {
     await renderTab()
 
-    expect(screen.getByRole('heading', { name: new RegExp(APPS) }).textContent).toContain('4')
-    expect(screen.getByRole('heading', { name: new RegExp(INGEST) }).textContent).toContain('3')
-    expect(screen.getByRole('heading', { name: new RegExp(DATA) }).textContent).toContain('5')
+    for (const title of [APPS, INGEST, DATA]) {
+      const heading = screen.getByRole('heading', { name: new RegExp(title) })
+      // No badge: the rows below are the count.
+      expect(heading.querySelector('.section-count')).toBeNull()
+      expect(heading.querySelector('.help-tip')).toHaveAttribute('aria-label', `About ${title}`)
+    }
   })
 
   it('opens a browsable endpoint in a new tab, with the opener not reachable from it', async () => {
@@ -406,7 +409,7 @@ describe('DirectoryTab refresh', () => {
     // browser cannot open, so this counts what is not an endpoint rather than every button,
     // which would otherwise re-fail whenever a fixture changed scheme.
     const buttons = screen.getAllByRole('button')
-      .filter(b => !b.classList.contains('endpoint-action'))
+      .filter(b => !b.classList.contains('endpoint-action') && !b.classList.contains('help-tip'))
     expect(buttons).toHaveLength(0)
   })
 

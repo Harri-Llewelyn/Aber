@@ -1,77 +1,47 @@
 import React, { useState } from 'react'
 import { groupedNav } from '../../navigation'
+import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { IconPanelLeft, IconCheck } from './Icons'
 
 /**
- * ==================================================================================================
- * THE PRIMARY NAVIGATION, AS A RAIL THAT EXPANDS OVER THE PAGE.
- * ==================================================================================================
+ * The primary navigation: a 52px rail of icons with a labelled panel.
  *
- * WHAT IT REPLACES, AND WHY THE BAR RAN OUT. Thirteen pages lived in the top bar as one flat strip.
- * That strip had a measured ceiling written into `App.css`: the nav is rigid and the brand and the
- * session controls split what is left, so a fourteenth page left the wordmark ~24px and the ladder
- * of density bands that kept it legible had nowhere further to go. The strip also collapsed to
- * icon-only below 1400px -- thirteen anonymous glyphs in a row, which is where a shopfloor terminal
- * lives.
+ * Three behaviours, chosen from the control at the foot of the rail and persisted per browser:
  *
- * A vertical rail inverts the constraint. Pages cost VERTICAL space, of which there is far more and
- * which grows rather than shrinking as the estate does, and the icon-only state stops being a
- * degradation to apologise for and becomes the resting state the design is drawn for.
+ *   hover      the panel paints OVER the page while the pointer is on the rail, and reflows nothing.
+ *   expanded   the rail is 232px wide and the page makes room for it.
+ *   collapsed  icons only; the pointer does nothing.
  *
- * IT OVERLAYS RATHER THAN PUSHING. The rail is 52px of gutter that never moves; the expanded panel
- * is painted on top of the page. A pushing sidebar reflows every table and chart underneath it on
- * mouse-over, which is motion the user did not ask for and, on the Overview shopfloor grid, re-lays
- * out the whole map for as long as the pointer is in the corner.
- *
- * NO EXPANDED/COLLAPSED/HOVER PREFERENCE CONTROL, unlike the design this borrows from. Three
- * behaviours behind a button is a setting to discover, store per user, and reason about in every
- * layout rule; hover covers what the button's three modes were for, and a preference nobody changes
- * is a control that only ever costs.
- *
- * IT ALSO EXPANDS ON FOCUS, and that is not a bonus feature -- it is what makes the rail usable
- * without a mouse. Hover alone would leave a keyboard user tabbing through thirteen buttons whose
- * labels are transparent, and a touch panel has no hover state at all.
- *
- * WHICH IS WHAT MADE IT STICK OPEN AFTER A CLICK. Clicking a nav item focuses that button, so the
- * rail was still "focused" once the pointer left and stayed expanded over the page the click had
- * just navigated to -- with nothing to close it but clicking somewhere else. Blurring on click
- * would fix the symptom and break the keyboard case, since a keyboard user activates the same
- * button with Enter and would be thrown out of the rail every time they used it.
- *
- * THE TEST IS WHETHER THE POINTER IS ALREADY HERE. Hover covers the mouse completely, so a focus
- * event arriving WHILE HOVERED is a click and needs to do nothing -- the rail is open already and
- * will close when the mouse leaves. A focus event arriving while NOT hovered is a Tab, and is the
- * only case focus-expansion exists for. No blur hack, no pointer-tracking ref, and the two inputs
- * stop fighting over one piece of state.
+ * In every mode keyboard focus inside the rail shows the labels, because a Tab through thirteen
+ * transparent labels is not navigation. A focus that arrives while the pointer is already on the
+ * rail is a click, and is ignored so the panel does not stay open over the page it navigated to.
  */
-export function Sidebar({ tabs, currentTab, onNavigate }) {
+export function Sidebar({ tabs, currentTab, onNavigate, mode = 'hover', onChangeMode }) {
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
-  const expanded = hovered || focused
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useClickOutside(() => setMenuOpen(false), menuOpen)
+  useEscapeKey(() => setMenuOpen(false), menuOpen)
 
+  const expanded = mode === 'expanded' || (mode === 'hover' && hovered) || focused
   const groups = groupedNav(tabs)
+  const current = SIDEBAR_MODES.find(m => m.id === mode) || SIDEBAR_MODES[0]
 
   return (
     <aside
-      className={`sidebar${expanded ? ' sidebar-expanded' : ''}`}
+      className={`sidebar sidebar-mode-${mode}${expanded ? ' sidebar-expanded' : ''}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      // `focusin`/`focusout` rather than focus/blur: these bubble, so one handler on the container
-      // covers every button inside it. React's onFocus/onBlur are already the bubbling pair.
-      //
-      // Ignored while the pointer is here -- see the header. That focus came from a click, and the
-      // click is about to navigate.
       onFocus={() => { if (!hovered) setFocused(true) }}
       onBlur={() => setFocused(false)}
       data-expanded={expanded ? 'true' : 'false'}
+      data-mode={mode}
     >
-      {/* The panel that grows. Absolutely positioned inside a fixed-width gutter, so expanding it
-          changes nothing about the layout of the page beside it. */}
       <nav className="sidebar-panel" aria-label="Primary">
         {groups.map((group, index) => (
           <div className="sidebar-group" key={group.id}>
-            {/* THE SEPARATOR IS THE WHOLE OF THE GROUPING, in both states. It used to be joined by a
-                caption -- see NAV_GROUPS for why that went -- and a divider on its own says the one
-                thing a reader needs from a rail of thirteen icons: these belong together. */}
             {index > 0 && <div className="sidebar-divider" role="presentation" />}
 
             {group.tabs.map(t => (
@@ -79,13 +49,7 @@ export function Sidebar({ tabs, currentTab, onNavigate }) {
                 key={t.id}
                 className={`sidebar-item${currentTab === t.id ? ' active' : ''}`}
                 onClick={() => onNavigate(t.id)}
-                // The label is transparent while the rail is collapsed, so `title` is what names
-                // the icon under a pointer that has not yet triggered the expansion.
                 title={`Navigate to ${t.label} page`}
-                // NOT `title` ALONE. A title is a weak accessible name -- some screen readers
-                // ignore it when another source is present -- and this button's other source is
-                // text that is present but invisible. Naming it explicitly means the announcement
-                // does not depend on which state the rail happens to be in.
                 aria-label={t.label}
                 aria-current={currentTab === t.id ? 'page' : undefined}
               >
@@ -95,6 +59,45 @@ export function Sidebar({ tabs, currentTab, onNavigate }) {
             ))}
           </div>
         ))}
+
+        {onChangeMode && (
+          <div className="sidebar-foot" ref={menuRef}>
+            <button
+              type="button"
+              className="sidebar-mode-button"
+              onClick={() => setMenuOpen(v => !v)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label={`Sidebar behaviour: ${current.label}`}
+              title={`Sidebar behaviour: ${current.label}`}
+            >
+              <span className="sidebar-item-icon"><IconPanelLeft size={16} /></span>
+              <span className="sidebar-item-label">{current.label}</span>
+            </button>
+
+            {menuOpen && (
+              <div className="sidebar-mode-menu" role="menu" aria-label="Sidebar behaviour">
+                {SIDEBAR_MODES.map(m => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={m.id === mode}
+                    className={`sidebar-mode-option${m.id === mode ? ' active' : ''}`}
+                    onClick={() => { onChangeMode(m.id); setMenuOpen(false) }}
+                    title={m.description}
+                  >
+                    <span className="sidebar-mode-option-tick">{m.id === mode && <IconCheck size={12} />}</span>
+                    <span>
+                      <span className="sidebar-mode-option-label">{m.label}</span>
+                      <span className="sidebar-mode-option-desc">{m.description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </nav>
     </aside>
   )

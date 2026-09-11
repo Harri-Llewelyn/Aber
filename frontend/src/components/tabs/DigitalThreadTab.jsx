@@ -6,8 +6,9 @@ import {
   IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconFileCode, IconSettings
 } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import {
-  DIGITAL_THREAD_ACTIONS, DIGITAL_THREAD_ENTITY_TYPES, ENTITY_KIND_BY_TABLE
+  DIGITAL_THREAD_ACTIONS, DIGITAL_THREAD_ENTITY_TYPES, ENTITY_KIND_BY_TABLE, digitalThreadEntityTypesFor
 } from '../../constants'
 import { useSetting } from '../../hooks/useSettings'
 
@@ -24,7 +25,7 @@ const ACTOR_LABELS = {
 }
 
 /** The actor badge's text and hover title, from the pair of columns that describe one actor. */
-export function actorLabel(event) {
+function actorLabel(event) {
   if (event.actor_source === 'user' || event.changed_by) return ACTOR_LABELS.user.label
   return ACTOR_LABELS[event.actor_source]?.label || '⚠ Unattributed'
 }
@@ -51,9 +52,9 @@ const ENTITY_KIND = ENTITY_KIND_BY_TABLE
  * Absence from `entityNames` means DELETED only for these. For anything else it means the lookup
  * never covered it, which is not the same fact and must not be rendered as though it were.
  */
-export const ASSET_ENTITY_KINDS = new Set(['CELL', 'GATEWAY', 'DEVICE'])
+const ASSET_ENTITY_KINDS = new Set(['CELL', 'GATEWAY', 'DEVICE'])
 
-export const entityKind = (t) =>
+const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
 
 /**
@@ -206,7 +207,7 @@ export function classifyEvent(event, diff) {
  * resolution the range control could not reach. `24h` was the narrowest option and the custom
  * pickers were date-only, which meant the narrowest expressible window was a whole day.
  */
-export const TIME_PRESETS = [
+const TIME_PRESETS = [
   { value: 'all', label: 'All time',       ms: null },
   { value: '15m', label: 'Last 15 minutes', ms: 15 * 60 * 1000 },
   { value: '1h',  label: 'Last 1 hour',     ms: 60 * 60 * 1000 },
@@ -847,7 +848,11 @@ function RawSnapshots({ event }) {
  * because that filter already matches on id as well as name (see namedEntityIds), which makes the
  * handover exact: two devices may share a name, but the id is the row.
  */
-export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
+export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showToast }) {
+  // The kinds this role may ask for. The database policy decides what comes back; this decides
+  // what is offered, so the two agree on which lanes exist for a Shopfloor_Manager.
+  const entityTypes = useMemo(() => digitalThreadEntityTypesFor(userRole), [userRole])
+  const allowedKinds = useMemo(() => new Set(entityTypes.map(e => e.kind)), [entityTypes])
   // RAW, straight from the API. `events` below is the DISPLAYED set, derived from this one.
   // Every consumer on this page -- the lanes, the domain, the drawer, the causation siblings, the
   // CSV -- reads `events`, so deriving it is what keeps the purged filter from applying to some of
@@ -1246,6 +1251,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
    */
   const sections = useMemo(() => {
     const known = SECTIONS
+      .filter(s => allowedKinds.has(s.kind))
       .map(s => ({ ...s, lanes: visibleLanes.filter(l => l.kind === s.kind) }))
       .filter(s => s.lanes.length > 0)
 
@@ -1263,7 +1269,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
       }))
 
     return [...known, ...leftovers]
-  }, [visibleLanes])
+  }, [visibleLanes, allowedKinds])
 
   /**
    * The x-axis extent, taken from the events themselves rather than from the range control.
@@ -1476,7 +1482,11 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
-              Digital Thread <span className="section-count">{events.length}</span>
+              Digital Thread
+              <HelpTip
+                label="About the Digital Thread"
+                text="Every attributed change to a cell, gateway, device, schema or proposal, in order and with its cause. Append-only and unprunable by any application role. Administrators and Auditors also see the security lane: role assignments, service identities and settings."
+              />
             </h3>
             <button
               className="btn btn-ghost btn-sm"
@@ -1489,12 +1499,6 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
           </div>
 
           <div className="card-body">
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-              Every attributed change to a cell, gateway or device, in the order it happened and
-              with what caused it. Append-only and unprunable by any application role — which is
-              what makes it evidence rather than a log. It records asset lifecycle, not privileged
-              acts: a role grant leaves no row here.
-            </p>
 
         <div className="filter-bar">
           <select
@@ -1510,7 +1514,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                 the section list one screen up and outlived the fix to it: the security lane became
                 drawable and stayed unaskable, reachable only by clearing the filter entirely.
                 Deriving it means a kind cannot be drawable and unfilterable again. */}
-            {DIGITAL_THREAD_ENTITY_TYPES.map(({ kind, label }) => (
+            {entityTypes.map(({ kind, label }) => (
               <option key={kind} value={kind}>{label}</option>
             ))}
           </select>

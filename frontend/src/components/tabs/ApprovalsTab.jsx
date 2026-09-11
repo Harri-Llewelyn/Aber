@@ -5,6 +5,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { IconPlus, IconPencil, IconCheck, IconX, IconArchive, IconHistory } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 
 /**
  * ==================================================================================================
@@ -81,7 +82,7 @@ export const LANES = [
   }
 ]
 
-export const LANE_BY_ID = new Map(LANES.map(l => [l.id, l]))
+const LANE_BY_ID = new Map(LANES.map(l => [l.id, l]))
 
 /**
  * A readable label for a proposable key.
@@ -685,16 +686,14 @@ export function ApprovalsTab({
         <div className="card approvals-card">
           <div className="card-header">
             <h3 className="section-title">
-              Awaiting a decision <span className="section-count">{open.length}</span>
+              Awaiting a decision
+              <HelpTip
+                label="About the open queue"
+                text="The working queue, oldest first. Select a row to see exactly what would change and to decide it. Approving applies the change immediately in one transaction, so a proposal that would break a rule fails here rather than later."
+              />
             </h3>
           </div>
           <div className="card-body">
-            <p className="approvals-blurb">
-              The working queue, oldest first, because a queue is worked from the front. Select a
-              row to see exactly what would change and to decide it. Approving applies the change
-              immediately, in one transaction — so a proposal that would break a rule fails here
-              rather than being accepted and going wrong later.
-            </p>
             <ProposalFilters
               rows={open} lane={openLane} onLane={setOpenLane}
               query={openQuery} onQuery={setOpenQuery}
@@ -715,16 +714,14 @@ export function ApprovalsTab({
         <div className="card approvals-card">
           <div className="card-header">
             <h3 className="section-title">
-              Decided <span className="section-count">{decidedFiltered.length}</span>
+              Decided
+              <HelpTip
+                label="About decided proposals"
+                text="What was applied, rejected, withdrawn or left to expire, kept for the retention period an Administrator sets. What an approval actually changed lives in the Digital Thread, so pruning here destroys no record."
+              />
             </h3>
           </div>
           <div className="card-body">
-            <p className="approvals-blurb">
-              What was applied, rejected, withdrawn or left to expire. Kept for as long as the
-              retention setting an Administrator owns; what an approval actually CHANGED lives in
-              the Digital Thread under its own policy, so pruning here destroys no record of what
-              happened.
-            </p>
             <ProposalFilters
               rows={decided} lane={decidedLane} onLane={setDecidedLane}
               query={decidedQuery} onQuery={setDecidedQuery}

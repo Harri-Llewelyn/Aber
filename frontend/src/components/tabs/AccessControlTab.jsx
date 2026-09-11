@@ -7,6 +7,7 @@ import { ServiceTokenModal } from '../modals/ServiceTokenModal'
 import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal'
 import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevocationModal'
 import { IconArchive, IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import {
   CREDENTIAL_STATES,
   credentialAction,
@@ -427,25 +428,12 @@ export function AccessControlTab({ showToast }) {
         <div className="card" style={{ marginTop: 'var(--stack)' }}>
           <div className="card-header">
             <h3 className="section-title">
-              Database principals{' '}
-              <span
-                className="section-count"
-                title={`${principals.length} machine ${principals.length === 1 ? 'identity' : 'identities'} that cannot sign in`}
-              >
-                {principals.length}
-              </span>
+              Database principals
+              <HelpTip
+                label="About database principals"
+                text="The identities the stack's own processes authenticate as. None has an email or password, so none can sign in: each is named by a token, holds permissions of its own rather than a person's role, and writes only through gates that check which one is calling."
+              />
             </h3>
-          </div>
-
-          <div className="card-body">
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
-              The identities the stack's own processes authenticate as. Each has no email and no
-              password, so none of them can sign in — they exist to be named by a token, and every
-              write they make goes through a gate that checks which one is calling. They hold
-              <strong> permissions of their own</strong> rather than a person's role, and can write
-              nothing directly, which is what makes the gates the whole of their authority rather
-              than a convention they follow.
-            </p>
           </div>
 
           {principalError && (
@@ -725,16 +713,11 @@ export function AccessControlTab({ showToast }) {
         <div className="card" style={{ marginTop: 'var(--stack)' }}>
           <div className="card-header">
             <h3 className="section-title">
-              Broker principals{' '}
-              {/* THE PATTERN COUNTS. It is not an account -- there is no principal by that name --
-                  but it IS a rule in the same file granting the same kind of access, and a count
-                  that excluded it would disagree with the rows a reader can see. */}
-              <span
-                className="section-count"
-                title={`${BROKER_PRINCIPALS.length} named principals and the pattern every gateway connects under`}
-              >
-                {BROKER_PRINCIPALS.length + 1}
-              </span>
+              Broker principals
+              <HelpTip
+                label="About broker principals"
+                text="The named accounts the platform's own processes connect to the broker as, plus the pattern rule every enrolled gateway connects under. Declared in mosquitto.acl and checked against it at build time; the broker has no API that lists them."
+              />
             </h3>
           </div>
           {/* DECLARED IN THE REPOSITORY, NOT FETCHED, and the page says so rather than implying a

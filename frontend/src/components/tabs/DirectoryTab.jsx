@@ -4,6 +4,7 @@ import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { describeAuthFailure } from '../../utils/sessionError'
 import { IconExternalLink, IconCopy, IconCheck } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import { copyText } from '../common/CopyableId'
 
 /**
@@ -224,7 +225,7 @@ const SERVICE_GROUPS = [
 const UNGROUPED_TITLE = 'Other Registered Services'
 
 /** Splits the flat directory into the sections above, dropping any that came back empty. */
-export function groupServices(services) {
+function groupServices(services) {
   // service_type -> [group index, position within that group].
   const rank = new Map()
   SERVICE_GROUPS.forEach((g, gi) => g.types.forEach((t, ti) => rank.set(t, [gi, ti])))
@@ -476,13 +477,11 @@ export function DirectoryTab({ showToast }) {
         groups.map(g => (
           <div className="card directory-group" key={g.title}>
             <div className="card-header">
-              <h3 className="section-title">{g.title} <span className="section-count">{g.rows.length}</span></h3>
+              <h3 className="section-title">
+                {g.title}
+                {g.description && <HelpTip label={`About ${g.title}`} text={g.description} />}
+              </h3>
             </div>
-            {g.description && (
-              <div className="card-body">
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>{g.description}</p>
-              </div>
-            )}
             <ServiceTable rows={g.rows} onNotify={showToast} />
           </div>
         ))

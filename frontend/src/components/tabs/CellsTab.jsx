@@ -27,6 +27,7 @@ import {
   IconShieldAlert,
   IconX
 } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
@@ -302,7 +303,11 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">
-            Shopfloor Cells <span className="section-count">{cells.length}</span>
+            Shopfloor Cells
+            <HelpTip
+              label="About cells"
+              text="A cell is a zone of the shopfloor and what groups the assets in it. A gateway belongs to one, and a device inherits its gateway's unless it names its own. The dashboard, the alerts and the Grafana folders are all organised by cell."
+            />
           </h3>
           {/* The primary action moves into the header, where every other card keeps its. It sat at
               the far end of the filter bar behind `.filter-bar-spacer`, which put "create a thing"
@@ -319,12 +324,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         </div>
 
         <div className="card-body">
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-            A cell is a zone of the shopfloor, and what groups the assets in it. A gateway belongs
-            to one, and a device inherits its gateway's unless it names its own — so a cell is the
-            unit the dashboard, the alerts and the Grafana folders are all organised by.
-          </p>
-
       <div className="filter-bar">
         {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
             a filter like the rest, and having two filter surfaces on one page meant the header

@@ -198,7 +198,7 @@ export function composeMetricName(...parts) {
  * It subsumes the empty-segment checks this used to make by hand: a leading, trailing or doubled
  * separator all leave a segment with nothing in it, which `[A-Za-z0-9_]+` rejects.
  */
-export const METRIC_NAME_PATTERN = /^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+)*$/
+const METRIC_NAME_PATTERN = /^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+)*$/
 
 /**
  * Whether a composed name is a usable metric name.

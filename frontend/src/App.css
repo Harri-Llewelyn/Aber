@@ -438,7 +438,9 @@ html, body, #root {
   height: 28px;
   padding: 0;
   flex-shrink: 0;
-  background: var(--bg-glass);
+  /* No fill: the shortcuts key, the help key and the resting alert pill all sit on the bar's own
+     ground, and this is one row of four controls. Round is what marks it as the identity control. */
+  background: none;
   border: 1px solid var(--border);
   border-radius: 50%;
   color: var(--text-muted);
@@ -819,9 +821,6 @@ html, body, #root {
   .brand-sub { display: none; }
   .brand-name-full { display: none; }
   .brand-name-short { display: inline; }
-  /* The right-hand controls are what would overflow next. The icons stay, so nothing becomes
-     unreachable -- each keeps the `title` it already had. */
-  .btn-label { display: none; }
   /* The alert count keeps its NUMBER and loses only the word. Dropping the label costs ~40px and
      leaves a shape and a figure -- whereas dropping the pill would hide the only changing thing in
      the bar at exactly the widths a kiosk display uses. */
@@ -860,26 +859,12 @@ html, body, #root {
   padding: 12px var(--inset) var(--inset);
 }
 
-/* ===== Page Action Row =====
-   What is left of `.section-header` on a tab once its heading and description moved out. The top
-   bar already names the current page, so the h2 restated it and the paragraph under it was ~40px
-   of prose read once and scrolled past forever. The actions still need a home; this is that row
-   and nothing else. Pages with no actions render no row at all. */
-.page-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-
 /* ===== Section Header =====
    `.section-header` -- a full-width heading row above a card -- is gone. Every page-level use of it
    was a heading restating the name of the tab already highlighted in the top bar, and the two
    in-card uses that were left (Archives, Directory) moved into `.card-header`, which rides an edge
    the card had anyway. `.section-title` and `.section-count` survive because the card headers,
-   which still exist, are built from them. See `.page-actions` for what replaced the action half. */
+   which still exist, are built from them. */
 .section-title {
   font-size: 20px;
   font-weight: 600;
@@ -946,8 +931,7 @@ html, body, #root {
    The page-level one carries its own background, border and bottom margin because it floats on the
    page background. Inside a card it is already on a panel, and repeating the frame draws a box
    inside a box -- so it keeps the layout and drops the chrome. */
-.card-body > .filter-bar,
-.card-filter-bar {
+.card-body > .filter-bar {
   margin-bottom: 0;
   padding: 0;
   background: none;
@@ -992,7 +976,7 @@ html, body, #root {
 .filter-bar-spacer { margin-left: auto; }
 
 /* A GROUP at the right-hand end, for pages whose export and refresh controls fold into the
-   filter row rather than sitting on a `.page-actions` row of their own above it. Carrying the
+   filter row rather than sitting on a row of their own above it. Carrying the
    spacer on the group rather than on its first child keeps the right-hand end stable when one
    of the controls is conditional. */
 .filter-bar-actions {
@@ -1880,21 +1864,6 @@ tbody tr:hover { background: var(--bg-glass); }
   margin-bottom: 16px;
 }
 
-/* A checkbox and its label on one line. The label carries `.form-label`, which is a block with
-   its own bottom margin -- correct above an input, wrong beside one -- so the two rules that
-   turn it into a row live here rather than being written inline at each call site. */
-.form-group-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.form-group-check input,
-.form-group-check .form-label {
-  margin-bottom: 0;
-  cursor: pointer;
-}
-
 .form-label {
   display: block;
   font-size: 12px;
@@ -2173,8 +2142,7 @@ tbody tr:hover { background: var(--bg-glass); }
    signal used elsewhere in the app; amber is the same "needs a decision" signal the quarantine
    ribbon item and the Unassigned drop-hint already use.
 
-   The tints are single rgba literals rather than per-theme tokens, matching .stat-card-alert and
-   the .chip-* fills: a coloured overlay at this alpha reads correctly over both the dark card and
+   The tints are single rgba literals rather than per-theme tokens, matching the .chip-* fills: a coloured overlay at this alpha reads correctly over both the dark card and
    the white one, and one value means one contrast case to measure rather than two.
    themeContrast.test.js measures --text-muted over both of these, which is what .zone-empty --
    the only text sitting directly on a lane's ground -- is set in. */
@@ -2718,12 +2686,6 @@ tbody tr:hover { background: var(--bg-glass); }
   font-weight: 600;
   color: var(--text-primary);
   margin-top: 8px;
-}
-
-.alert-pill-empty-sub {
-  font-size: 11px;
-  line-height: 1.45;
-  margin-top: 5px;
 }
 
 .alert-pill-list { list-style: none; margin: 0; padding: 0; }
@@ -3442,13 +3404,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
    list was honest but it was not a TIMELINE: two changes a fortnight apart and two a second
    apart looked identical, and an asset's history was only legible by scrolling past every other
    asset's. One lane per entity puts time on the x-axis, where it can be compared. */
-
-/* The identifier on a lane label. A `CopyableId` button, so it needs the size and colour the
-   plain span it replaced was carrying inline. */
-.timeline-id {
-  font-size: 11px;
-  color: var(--accent);
-}
 
 /* The colour key. `.dt-node-dot` shares the `.dt-node-<kind>` fills with the markers themselves,
    so the legend cannot drift away from what it describes. */
@@ -4197,19 +4152,19 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .setting-meta { flex: 1 1 320px; min-width: 0; }
 
+/* The label and its "?" on one line. The tip is outside the <label> so the label names the
+   input alone; a button nested in a label is labelled by it too. */
+.setting-label-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 3px;
+}
+
 .setting-label {
   display: block;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 3px;
-}
-
-.setting-description {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.5;
-  margin-bottom: 6px;
 }
 
 .setting-provenance {
@@ -4379,51 +4334,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
    at 13px, which is what every other card description on the app already is -- named here rather
    than repeated as an inline style on six elements, because the next page that needs one should
    inherit the decision instead of copying the numbers. */
-.approvals-blurb {
-  color: var(--text-muted);
-  font-size: 13px;
-  margin: 0 0 12px;
-}
-
-.approvals-hint {
-  color: var(--text-muted);
-  font-size: 12px;
-  margin: 6px 0 0;
-}
-
-/* The composer's footer. `.modal-actions` is the right ROW -- right-aligned, 10px gap -- and the
-   wrong box here: inside a card it inherits no horizontal padding, so the buttons sat flush
-   against the card's edge while every other control in the form was inset. This keeps the row and
-   gives it the inset, and holds the "what is still missing" hint at the left of the same line so
-   the explanation is beside the disabled button rather than above the form. */
-.approvals-composer-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.approvals-composer-actions .approvals-hint {
-  margin: 0 auto 0 0;
-}
-
 /* Between the approvals cards. Deliberately not `.card + .card`, for the reason the directory
    groups give: several pages stack cards that are meant to sit tight against each other. */
 .approvals-card + .approvals-card { margin-top: var(--stack); }
-
-/* The composer's refusal. An error rather than a hint: the first cut greyed the button out and
-   explained itself in muted 12px beside it, which the eye never reaches -- it goes to the button,
-   finds it dead, and stops. Weight and colour are what make the sentence arrive at the same moment
-   the disabled control does. */
-.approvals-blocked {
-  color: var(--danger-text);
-  font-size: 12px;
-  font-weight: 600;
-  margin: 0 auto 0 0;
-}
 
 /* The "you are reading this" banner at the top of a dialog somebody may not save.
    NEUTRAL, NOT A WARNING. Nothing has gone wrong -- the reader is doing the thing this dialog
@@ -4456,3 +4369,188 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .readonly-notice > span { flex: 1; min-width: 0; }
 .readonly-notice > svg { flex-shrink: 0; }
+
+/* ===== Help tip =====
+   The "?" beside a label. The bubble is portalled to <body> and positioned by HelpTip.jsx, because
+   most triggers live inside a `.card`, whose overflow is hidden. */
+.help-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-left: 6px;
+  vertical-align: middle;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: help;
+  transition: var(--transition);
+}
+
+.help-tip:hover,
+.help-tip:focus-visible,
+.help-tip-pinned { color: var(--accent); }
+.help-tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.help-tip-bubble {
+  position: fixed;
+  z-index: 1200;
+  width: max-content;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  pointer-events: none;
+}
+
+/* ===== Password field with a hold-to-reveal button ===== */
+.password-field { position: relative; }
+.password-field .form-control { padding-right: 40px; }
+
+.password-reveal {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.password-reveal:hover,
+.password-reveal[aria-pressed="true"] { color: var(--accent); }
+.password-reveal:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A text-styled button on the sign-in card: forgot password, back to sign in. */
+.auth-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.auth-link:hover { color: var(--accent-strong); }
+.auth-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+/* ===== Sidebar behaviour modes =====
+   `hover` is the rules above: a rigid gutter and a panel that paints over the page. `expanded`
+   widens the gutter itself so the page makes room, and drops the shadow because nothing is being
+   painted over. `collapsed` is the resting state with the pointer ignored -- see Sidebar.jsx. */
+.sidebar-mode-expanded {
+  flex-basis: 232px;
+  width: 232px;
+}
+
+.sidebar-mode-expanded .sidebar-panel {
+  width: 232px;
+  box-shadow: none;
+  transition: none;
+}
+
+/* The control at the foot of the rail. Same shape as an item, so the rail reads as one column. */
+.sidebar-foot {
+  position: relative;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sidebar-mode-button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.sidebar-mode-button:hover,
+.sidebar-mode-button[aria-expanded="true"] { color: var(--text-primary); background: var(--bg-glass); }
+.sidebar-mode-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Opens upward from the foot, beside the rail rather than inside it, so it is never clipped by
+   the panel's overflow and is readable in the collapsed state. */
+.sidebar-mode-menu {
+  position: fixed;
+  left: 60px;
+  bottom: 12px;
+  min-width: 260px;
+  padding: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 200;
+}
+
+.sidebar-mode-expanded .sidebar-mode-menu { left: 240px; }
+
+.sidebar-mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.sidebar-mode-option:hover { background: var(--bg-glass); }
+.sidebar-mode-option.active { color: var(--accent); }
+.sidebar-mode-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.sidebar-mode-option-tick {
+  display: inline-flex;
+  width: 12px;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.sidebar-mode-option-label { display: block; font-weight: 600; }
+.sidebar-mode-option-desc { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }

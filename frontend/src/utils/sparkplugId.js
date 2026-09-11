@@ -17,8 +17,8 @@
 import { isUuid } from './isUuid';
 
 export const SPARKPLUG_ID_LENGTH = 24;
-export const DEVICE_ID_PREFIX = 'dev';
-export const GATEWAY_ID_PREFIX = 'gwy';
+const DEVICE_ID_PREFIX = 'dev';
+const GATEWAY_ID_PREFIX = 'gwy';
 
 const HEX_CHARS = 21;
 const SPARKPLUG_ID_REGEX = /^(dev|gwy)[0-9a-f]{21}$/;

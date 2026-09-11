@@ -44,16 +44,6 @@ export function cellIconComponent(key) {
   return (BY_KEY.get(key) || BY_KEY.get(DEFAULT_CELL_ICON)).Icon
 }
 
-/** The picker's label for a key, for a title attribute or a summary line. */
-export function cellIconLabel(key) {
-  return (BY_KEY.get(key) || BY_KEY.get(DEFAULT_CELL_ICON)).label
-}
-
-/** Whether a key is one this build can render. */
-export function isKnownCellIcon(key) {
-  return BY_KEY.has(key)
-}
-
 /**
  * Render a cell's icon.
  *

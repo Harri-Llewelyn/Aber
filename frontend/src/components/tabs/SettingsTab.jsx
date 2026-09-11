@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { IconSettings, IconX } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 
 /**
  * The runtime configuration plane (archived migration 0031), as a page.
@@ -111,8 +112,10 @@ function SettingRow({ setting, onSaved, showToast }) {
   return (
     <div className="setting-row">
       <div className="setting-meta">
-        <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>
-        {setting.description && <p className="setting-description">{setting.description}</p>}
+        <div className="setting-label-row">
+          <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>
+          {setting.description && <HelpTip label={`About ${setting.label}`} text={setting.description} />}
+        </div>
         <div className="setting-provenance">
           <span className="mono setting-key" title="The key the code reads. Immutable.">{setting.key}</span>
           {/* NAMED, BECAUSE AN ABSENT ROW IS NOT AN ABSENT VALUE. What applies when this has never

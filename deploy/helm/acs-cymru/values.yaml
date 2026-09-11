@@ -78,6 +78,9 @@ secrets:
   # roles-init Job.
   postgresPassword: ""
 
+  # The SMTP relay's password, for supabaseAuth.smtp. Empty is valid: the relay is optional.
+  smtpPassword: ""
+
   # TimescaleDB (the historian): a separate database with its own credentials.
   timescalePassword: ""
 
@@ -325,6 +328,15 @@ supabaseAuth:
   # seed.sql, an admin invite, or an upstream identity provider.
   disableSignup: true
   jwtExpiry: 3600
+  # The relay GoTrue sends "forgot your password" links through. Empty host: a reset request
+  # fails and the sign-in card tells the user to ask an administrator. The password is
+  # secrets.smtpPassword. Sign-up confirmation is off, so this is the only mail the stack sends.
+  smtp:
+    host: ""
+    port: 587
+    user: ""
+    from: ""
+    senderName: ACS Cymru
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }

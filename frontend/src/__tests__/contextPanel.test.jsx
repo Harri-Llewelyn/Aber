@@ -655,10 +655,11 @@ describe('A card is a composition: header, description, filters, table', () => {
     const btn = within(header).getByRole('button', { name: label })
     expect(btn.className).toMatch(/btn-primary/)
 
-    // The description and the filters are in the body, and the body is inside the card.
+    // The description is behind a "?" on the title; the filters are in the body, inside the card.
+    expect(header.querySelector('.section-title .help-tip')).toBeTruthy()
     const body = card.querySelector('.card-body')
     expect(body).toBeTruthy()
-    expect(body.querySelector('p')).toBeTruthy()
+    expect(body.querySelector('p')).toBeNull()
     expect(body.querySelector('.filter-bar')).toBeTruthy()
 
     // Nothing floats outside the card any more.

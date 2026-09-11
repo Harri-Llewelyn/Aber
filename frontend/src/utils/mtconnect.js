@@ -15,7 +15,7 @@
 import { METRIC_GROUP_SEPARATOR, composeMetricName } from './metricGroup'
 import { STANDARDS } from './standards'
 
-export const VOCABULARY_KINDS = {
+const VOCABULARY_KINDS = {
   DATA_ITEM_TYPE: 'DATA_ITEM_TYPE',
   SUB_TYPE: 'SUB_TYPE',
   UNIT: 'UNIT',

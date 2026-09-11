@@ -69,6 +69,7 @@ import {
   IconDownload,
   IconX
 } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
@@ -795,7 +796,11 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">
-            Devices <span className="section-count">{assets.length}</span>
+            Devices
+            <HelpTip
+              label="About devices"
+              text="A device is an asset that publishes telemetry through a gateway. What it is modelled to publish comes from its schema; what it actually publishes is what the historian records. This page surfaces the two disagreeing: a quarantine, an unmodelled metric, or a device that has never birthed."
+            />
           </h3>
           <button
             className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
@@ -809,13 +814,6 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         </div>
 
         <div className="card-body">
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-            A device is an asset that publishes telemetry through a gateway. What it is MODELLED to
-            publish comes from its schema; what it actually publishes is what the historian records,
-            and the two disagreeing is the thing this page exists to surface — as a quarantine, an
-            unmodelled metric, or a device that has never birthed at all.
-          </p>
-
       {/* Filters live on their own row within the card: the header outgrew a single line once
           schema, status and relationship filters arrived. */}
       <div className="filter-bar">
@@ -926,7 +924,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--warning-text)', fontWeight: 600 }}>
               <IconShieldAlert size={20} />
-              <span>Zero-Touch Onboarding Quarantine Queue <span className="section-count">{quarantine.length}</span></span>
+              <span>Zero-Touch Onboarding Quarantine Queue</span>
             </div>
             {!canApprove && (
               <span style={{ fontSize: '11px', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>

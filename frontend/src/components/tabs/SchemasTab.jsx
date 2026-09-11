@@ -66,6 +66,7 @@ import {
   IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive, IconCpu,
   IconChevronDown, IconChevronUp, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
 } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 /**
@@ -825,17 +826,19 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           {/* FILTERED OF TOTAL, not a bare count. A narrowed registry would otherwise read as a
               short one, which is the wrong thing to believe about a version history. */}
           <h3 className="section-title">
-            Registered Schemas{' '}
-            <span
-              className="section-count"
-              title={visibleSchemas.length === schemas.length
-                ? `${schemas.length} schema version${schemas.length === 1 ? '' : 's'} registered`
-                : `${visibleSchemas.length} of ${schemas.length} versions match the current filters`}
-            >
-              {visibleSchemas.length === schemas.length
-                ? schemas.length
-                : `${visibleSchemas.length}/${schemas.length}`}
-            </span>
+            Registered Schemas
+            <HelpTip
+              label="About schemas"
+              text="A schema declares what a device is modelled to publish. A published schema is read-only: changes are made by creating the next version, which forks it into an editable draft. Publishing a draft activates it, archives its predecessor and moves every device across in one transaction. Version numbers are assigned by the database."
+            />
+            {visibleSchemas.length !== schemas.length && (
+              <span
+                className="section-count"
+                title={`${visibleSchemas.length} of ${schemas.length} versions match the current filters`}
+              >
+                {`${visibleSchemas.length}/${schemas.length}`}
+              </span>
+            )}
           </h3>
           {/* The page's primary action, in the header of the card it acts on. It had a row of its
               own above the catalog, which put "Build Schema from Catalog" nowhere near the schemas
@@ -870,21 +873,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         </div>
 
         <div className="card-body">
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-            A schema declares what a device is modelled to publish. Versions are a lineage: a draft
-            is editable, publishing it supersedes its parent, and the devices provisioned against
-            each version are what make a supersession worth doing carefully.
-          </p>
-          {/* THE SECOND HALF OF THE DESCRIPTION, and it was left below the filter bar when the bar
-              came inside -- so the description read as two paragraphs with a row of controls
-              wedged between them. A description is one block; the filters come after all of it. */}
-          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '0 0 12px' }}>
-            A published schema is <strong>read-only</strong>. Devices are provisioned against the exact metric names it
-            models, so changing one in place would silently redefine the contract a fleet is judged against. Changes are
-            made by creating the next version — <span className="mono">v1 → v2 → v3</span> — which forks the definition into
-            an editable draft. Publishing a draft activates it, archives its predecessor, and moves every device across in
-            one transaction. Version numbers are assigned by the database and cannot be chosen.
-          </p>
       {/* THE PAGE'S FIRST FILTER BAR (issue #60), and the shape the other five list pages already
           use. The registry gains a row per PUBLISH rather than per schema, so it outgrows a plain
           list faster than anything else here, and it had no search at all -- while the metric
@@ -1025,7 +1013,13 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         {/* `.card-header`, not `.section-header`: the card has no padding of its own, so a plain
             section header would sit flush against its borders. */}
         <div className="card-header">
-          <h3 className="section-title">Metric Catalog <span className="section-count">{activeCatalog.length}</span></h3>
+          <h3 className="section-title">
+            Metric Catalog
+            <HelpTip
+              label="About the metric catalog"
+              text="The metrics a schema can be built from, grouped by name prefix. Search reaches a known metric without opening every group; Use on the Vocabulary page starts a new one from a standard's entry."
+            />
+          </h3>
           {/* Sits beside Add Metric because the groups now start collapsed: search is how you
               reach a known metric without opening every section. Typing auto-expands the groups
               that matched -- see isGroupOpen(). */}

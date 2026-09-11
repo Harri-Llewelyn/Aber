@@ -96,6 +96,31 @@ spec:
               value: "true"
             - name: GOTRUE_DISABLE_SIGNUP
               value: {{ .Values.supabaseAuth.disableSignup | quote }}
+            # Password reset (frontend/src/pages/ResetPassword.jsx). The link's target must be on
+            # the allow list, or GoTrue sends the browser to GOTRUE_SITE_URL and the dashboard opens
+            # instead of the reset form. SMTP is optional: with no host a reset request fails and
+            # the sign-in card tells the user to ask an administrator. The password is read through
+            # an optional secretKeyRef so an externally-managed Secret without it still starts.
+            - name: GOTRUE_URI_ALLOW_LIST
+              value: {{ printf "%s/reset-password" (include "acs-cymru.frontendUrl" .) | quote }}
+            - name: GOTRUE_SMTP_HOST
+              value: {{ .Values.supabaseAuth.smtp.host | default "" | quote }}
+            - name: GOTRUE_SMTP_PORT
+              value: {{ .Values.supabaseAuth.smtp.port | default 587 | quote }}
+            - name: GOTRUE_SMTP_USER
+              value: {{ .Values.supabaseAuth.smtp.user | default "" | quote }}
+            - name: GOTRUE_SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: SMTP_PASSWORD
+                  optional: true
+            - name: GOTRUE_SMTP_ADMIN_EMAIL
+              value: {{ .Values.supabaseAuth.smtp.from | default "" | quote }}
+            - name: GOTRUE_SMTP_SENDER_NAME
+              value: {{ .Values.supabaseAuth.smtp.senderName | default "ACS Cymru" | quote }}
+            - name: GOTRUE_MAILER_SUBJECTS_RECOVERY
+              value: "Reset your ACS Cymru password"
             - name: GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED
               value: "true"
             - name: GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI

@@ -44,6 +44,7 @@ import {
   IconDownload,
   IconLock
 } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
@@ -386,7 +387,11 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">
-            Edge Gateways <span className="section-count">{gateways.length}</span>
+            Edge Gateways
+            <HelpTip
+              label="About gateways"
+              text="A gateway is an edge node: the thing that publishes to the broker, and the identity every topic beneath it is pinned to. Its devices reach the platform through it, so status here is derived from the last heartbeat rather than from anything the gateway asserts about itself."
+            />
           </h3>
           <button
             className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
@@ -400,13 +405,6 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         </div>
 
         <div className="card-body">
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-            A gateway is an edge node: the thing that publishes to the broker, and the identity every
-            topic beneath it is pinned to. Its devices reach the platform through it, so a gateway
-            that goes quiet takes their telemetry with it — which is why status here is derived from
-            the last heartbeat rather than from anything the gateway asserts about itself.
-          </p>
-
       <div className="filter-bar">
         {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
             a filter like the rest, and having two filter surfaces on one page meant the header

@@ -142,10 +142,14 @@ describe('the page', () => {
     await waitFor(() => expect(screen.getByText('Lanes drawn before folding')).toBeInTheDocument())
   }
 
-  it('renders each setting with its label and description', async () => {
+  it('renders each setting with its label, and its description behind a tip', async () => {
     await show()
     expect(screen.getByText('Refresh interval (seconds)')).toBeInTheDocument()
-    expect(screen.getByText(/How many asset lanes/)).toBeInTheDocument()
+    // The description is read on demand from the "?" beside the label rather than printed under
+    // every row: the page is a list of controls, not a manual.
+    const tip = screen.getByRole('button', { name: 'About Lanes drawn before folding' })
+    fireEvent.mouseEnter(tip)
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/How many asset lanes/)
   })
 
   it('names what applies when a setting has never been changed', async () => {

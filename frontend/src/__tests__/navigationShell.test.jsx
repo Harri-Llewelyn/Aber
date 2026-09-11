@@ -499,10 +499,10 @@ describe('Merged navigation shell', () => {
     expect(narrow, 'the <1400px band is missing').toBeTruthy()
     expect(narrowest, 'the <1100px band is missing').toBeTruthy()
 
-    // <1400: the strapline goes, the wordmark shortens, button labels go.
+    // <1400: the strapline goes and the wordmark shortens. The bar's remaining controls are
+    // icons already, so there is no button label left to shed.
     expect(narrow).toMatch(/\.brand-sub\s*\{\s*display:\s*none/)
     expect(narrow).toMatch(/\.brand-name-short\s*\{\s*display:\s*inline/)
-    expect(narrow).toMatch(/\.btn-label\s*\{\s*display:\s*none/)
 
     // <1100: the brand text entirely, leaving the mark.
     expect(narrowest).toMatch(/\.brand-text\s*\{\s*display:\s*none/)

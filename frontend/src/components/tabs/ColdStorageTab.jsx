@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { useSetting } from '../../hooks/useSettings'
 import CopyableId from '../common/CopyableId'
 import { IconArchive, IconAlertTriangle } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import {
   COLD_STATES,
   coldStateLabel,
@@ -36,7 +37,7 @@ import {
  * issuing one should cost more than a click." Dropping a chunk is the stronger case.
  */
 /** The roles `cold_storage_rows()` returns rows to — kept in step with the function's own WHERE. */
-export const COLD_STORAGE_ROLES = ['Administrator', 'Shopfloor_Manager', 'Auditor']
+const COLD_STORAGE_ROLES = ['Administrator', 'Shopfloor_Manager', 'Auditor']
 
 export function ColdStorageTab({ showToast, userRole }) {
   const [rows, setRows] = useState([])
@@ -75,17 +76,12 @@ export function ColdStorageTab({ showToast, userRole }) {
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
-              Cold telemetry <span className="section-count">{summary.total}</span>
+              Cold telemetry
+              <HelpTip
+                label="About cold telemetry"
+                text="Telemetry past the retention threshold is exported to Apache Parquet on object storage, read back and checked, and only then dropped from the hypertable. Each row is one chunk. Nothing is deleted by this page: export and drop are run by the cold_archive process."
+              />
             </h3>
-          </div>
-
-          <div className="card-body">
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
-              Telemetry past the retention threshold is exported to Apache Parquet on object
-              storage, read back and checked, and only then dropped from the hypertable. Each row
-              below is one chunk. <strong>Nothing here is deleted by this page</strong> — export and
-              drop are run by <code>python -m cold_archive</code>.
-            </p>
           </div>
 
           {error && (

@@ -41,7 +41,7 @@ export const SOURCE_INHERITED = 'inherited'
 export const SOURCE_SITE_WIDE = 'site_wide'
 export const SOURCE_UNASSIGNED = 'unassigned'
 export const SOURCE_SIMULATED = 'simulated'
-export const SOURCE_SHADOW = 'shadow'
+const SOURCE_SHADOW = 'shadow'
 
 const SOURCE_LABELS = {
   [SOURCE_EXPLICIT]: 'Set on device',
@@ -189,23 +189,6 @@ export function isSiteWide(device, gateway) {
 
 export function isUnassigned(device, gateway) {
   return deviceLocationOf(device, gateway).location_source === SOURCE_UNASSIGNED
-}
-
-/** Telemetry generated rather than observed -- a simulator, or a playback target. */
-export function isSimulatedAsset(device, gateway) {
-  const source = deviceLocationOf(device, gateway).location_source
-  return source === SOURCE_SIMULATED || source === SOURCE_SHADOW
-}
-
-/**
- * A replay lane: real readings, recorded from a real machine, republished under a stand-in.
- *
- * Narrower than isSimulatedAsset() on purpose. "Invented" and "recorded from your own plant" are
- * both synthetic in provenance and opposite in truth, and a caller asking whether a number ever
- * happened wants this one.
- */
-export function isShadowAsset(device, gateway) {
-  return deviceLocationOf(device, gateway).location_source === SOURCE_SHADOW
 }
 
 /**

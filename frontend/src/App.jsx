@@ -10,7 +10,13 @@ import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { signOutOfForge, signOutOfStudio } from './utils/studioSignOut'
 import { TABS, tabIsVisible } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
-import AmbientPipeline from './components/common/AmbientPipeline'
+import { AuthShell } from './components/auth/AuthShell'
+import { HoldToReveal } from './components/common/HoldToReveal'
+import { ResetPasswordScreen } from './pages/ResetPassword'
+import { describeResetError } from './utils/authErrors'
+import { useClickOutside } from './hooks/useClickOutside'
+import { useEscapeKey } from './hooks/useEscapeKey'
+import { useSidebarMode } from './hooks/useSidebarMode'
 import { Sidebar } from './components/common/Sidebar'
 import { GlobalSearch } from './components/common/GlobalSearch'
 
@@ -36,6 +42,8 @@ import { GlobalSearch } from './components/common/GlobalSearch'
 // Must match GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH in docker-compose.yml. GoTrue appends it
 // to GOTRUE_SITE_URL when redirecting an OAuth client's user here to grant consent.
 const OAUTH_CONSENT_PATH = '/oauth/consent'
+// Where a password-reset email sends the browser. Must be allowed by GOTRUE_URI_ALLOW_LIST.
+const RESET_PASSWORD_PATH = '/reset-password'
 
 import {
   IconFactory,
@@ -96,38 +104,23 @@ const ApprovalsTab     = lazy(() => import('./components/tabs/ApprovalsTab').the
 export { TABS, tabIsVisible, NAV_GROUPS, groupedNav } from './navigation'
 
 function AuthScreen({ onLoginSuccess, notice }) {
-  // AuthScreen owns a theme handle of its own because it renders INSTEAD of Dashboard, never
-  // beside it -- the two hook instances are never mounted at the same time and cannot diverge.
-  // Before this the toggle lived only in UserMenu, behind the login: a light-mode operator got
-  // the dark default on the one screen they see before authenticating, every single time.
+  // Its own theme handle: this renders instead of Dashboard, never beside it.
   const { theme, toggleTheme } = useTheme()
-  /**
-   * EMPTY, AND THEY MUST STAY EMPTY.
-   *
-   * These two fields shipped pre-filled with `admin@acs-cymru.local` / the seeded Administrator
-   * password. That was a debugging convenience during development and it is a credential
-   * disclosure in a deployed stack: the values are baked into the production JavaScript bundle,
-   * which is served to ANYONE who can reach the page -- before authenticating, and regardless of
-   * whether they ever sign in. Reading them takes no more than opening the login screen, and the
-   * account they unlock is the one that can edit settings, manage devices and read every table
-   * the dashboard exposes.
-   *
-   * It is worth being precise about why this is not merely untidy. The seeded password is public
-   * -- it is in `supabase/seed.sql` and in the README, deliberately, because a demo stack needs
-   * reproducible accounts. The defect is not that the string exists; it is that the LOGIN FORM
-   * offered it, so a stack whose seeded accounts had never been rotated was one click from
-   * administrator access by design rather than by oversight. Rotating the seeded password would
-   * not have fixed this, and leaving these blank does fix it even when the password has not been
-   * rotated.
-   *
+  /*
+   * EMPTY, AND THEY MUST STAY EMPTY. These once shipped pre-filled with the seeded Administrator
+   * credentials, which put them in the production bundle for anyone who could load the page.
    * `__tests__/authScreenCredentials.test.jsx` asserts both fields render empty, and
-   * scripts/check-docs-drift.mjs refuses the seeded password anywhere under frontend/src --
-   * because a comment is not a control.
+   * scripts/check-docs-drift.mjs refuses the seeded password anywhere under frontend/src.
    */
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [revealed, setRevealed] = useState(false)
   const [authError, setAuthError] = useState(null)
   const [loading, setLoading] = useState(false)
+  // 'signin' or 'forgot'. `resetSent` holds the address a reset link was requested for.
+  const [mode, setMode] = useState('signin')
+  const [resetSent, setResetSent] = useState(null)
+  const passwordRef = useRef(null)
 
   const handleAuth = async (e) => {
     e.preventDefault()
@@ -140,85 +133,76 @@ function AuthScreen({ onLoginSuccess, notice }) {
       if (data.session) onLoginSuccess(data.session)
     } catch (err) {
       setAuthError(err.message || 'Authentication failed')
+      // A failed attempt clears the password and puts the cursor back on it.
+      setPassword('')
+      setRevealed(false)
+      passwordRef.current?.focus()
     } finally {
       setLoading(false)
     }
   }
 
-  // Colours come from the theme variables in App.css (:root / [data-theme="light"]).
-  //
-  // This card used to read var(--text-main) and var(--bg-main). NEITHER VARIABLE EXISTS --
-  // the real names are --text-primary and --bg-base -- so both silently fell through to the
-  // hardcoded near-white literals they were given as fallbacks, in BOTH themes. The card
-  // background used --bg-card, which does exist and is #ffffff in light mode, so the result
-  // was white text on a white card. The inputs were worse: a literal color: '#fff'.
-  //
-  // Do not reintroduce fallback literals here. A CSS variable fallback is exactly what let a
-  // typo'd variable name look correct in dark mode and fail silently in light mode; without
-  // one, an unknown variable renders as an obviously-wrong inherited colour instead.
+  const handleForgot = async (e) => {
+    e.preventDefault()
+    setAuthError(null)
+    setLoading(true)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}${RESET_PASSWORD_PATH}`
+      })
+      if (error) throw error
+      setResetSent(email)
+    } catch (err) {
+      setAuthError(describeResetError(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const switchMode = (next) => {
+    setMode(next)
+    setAuthError(null)
+    setResetSent(null)
+    setPassword('')
+    setRevealed(false)
+  }
+
+  // Colours come from the theme variables in App.css. No fallback literals: a mistyped variable
+  // must render obviously wrong rather than pass in one theme and fail in the other.
   return (
-    <div style={{ position: 'relative', display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: '20px', overflow: 'hidden' }}>
-      {/* Decoration, and it is allowed to fail. The canvas paints --bg-base as its own ground, so
-          a browser that gives back no 2d context leaves the page looking exactly as it did before
-          this was added rather than leaving a hole. It is aria-hidden and pointer-events:none
-          throughout, and it renders a single still frame under prefers-reduced-motion. */}
-      <AmbientPipeline theme={theme} />
-
-      {/* The theme control, ABOVE the canvas and the only interactive thing outside the card.
-          Same convention as the one in UserMenu: the label states where the theme IS and the icon
-          shows where the button GOES, which is why the icon and the word disagree on purpose. */}
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="auth-theme-toggle"
-        title={`Switch to the ${theme === 'dark' ? 'light' : 'dark'} theme`}
-        aria-label={`Theme: ${theme === 'dark' ? 'dark' : 'light'}. Switch to the ${theme === 'dark' ? 'light' : 'dark'} theme.`}
-      >
-        {theme === 'dark' ? <IconSun size={16} /> : <IconMoon size={16} />}
-      </button>
-
-      <div className="card" style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: '420px', padding: '32px', borderRadius: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}>
-        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-          <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '12px', background: 'var(--accent-dim)', color: 'var(--accent)', marginBottom: '12px' }}>
-            <IconFactory size={36} />
-          </div>
-          <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 6px 0', color: 'var(--text-primary)' }}>ACS-Cymru Supabase Portal</h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>Sign in with your Supabase BaaS credentials</p>
+    <AuthShell
+      theme={theme}
+      onToggleTheme={toggleTheme}
+      title="ACS-Cymru Supabase Portal"
+      subtitle={mode === 'forgot'
+        ? 'Enter your email address and a link to choose a new password will be sent to it'
+        : 'Sign in with your platform account'}
+    >
+      {notice && !authError && (
+        <div role="status" style={{ background: 'rgba(255,179,0,0.15)', border: '1px solid var(--warning)', color: 'var(--warning-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
+          {notice}
         </div>
+      )}
 
-        {notice && !authError && (
-          <div style={{ background: 'rgba(255,179,0,0.15)', border: '1px solid var(--warning)', color: 'var(--warning-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
-            {notice}
-          </div>
-        )}
+      {authError && (
+        <div role="alert" style={{ background: 'rgba(255,77,109,0.15)', border: '1px solid var(--danger)', color: 'var(--danger-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
+          {authError}
+        </div>
+      )}
 
-        {authError && (
-          <div style={{ background: 'rgba(255,77,109,0.15)', border: '1px solid var(--danger)', color: 'var(--danger-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
-            {authError}
-          </div>
-        )}
-
+      {mode === 'signin' ? (
         <form onSubmit={handleAuth}>
           <div className="form-group" style={{ marginBottom: '16px' }}>
-            {/* htmlFor/id, because the label was associated with NOTHING. A screen reader
-                announced two unlabelled text boxes, and clicking the word "Password" did not
-                focus the field under it. Added here rather than filed separately because the
-                empty fields make it matter more: there is now nothing in either box to
-                disambiguate them by. */}
             <label className="form-label" htmlFor="auth-email" style={{ marginBottom: '6px' }}>Email Address</label>
-            {/* autoComplete and autoFocus are what REPLACE the pre-filled value, rather than
-                simply doing without it. The prefill's only legitimate purpose was saving an
-                operator from typing the same credential every time; a password manager does that
-                properly -- per user, per browser, never in the bundle -- but only if the fields
-                are annotated for it. Without these the change is a pure usability regression, and
-                a usability regression is what gets reverted. */}
+            {/* autoComplete is what replaced the prefill: a password manager fills these per user,
+                per browser, and never from the bundle. */}
             <input
               id="auth-email"
               type="email"
               className="form-control"
               style={{ borderRadius: '8px' }}
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={e => { setEmail(e.target.value); setAuthError(null) }}
               autoComplete="username"
               autoFocus
               required
@@ -227,40 +211,77 @@ function AuthScreen({ onLoginSuccess, notice }) {
 
           <div className="form-group" style={{ marginBottom: '24px' }}>
             <label className="form-label" htmlFor="auth-password" style={{ marginBottom: '6px' }}>Password</label>
-            <input
-              id="auth-password"
-              type="password"
-              className="form-control"
-              style={{ borderRadius: '8px' }}
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              autoComplete="current-password"
-              required
-            />
+            <div className="password-field">
+              <input
+                ref={passwordRef}
+                id="auth-password"
+                type={revealed ? 'text' : 'password'}
+                className="form-control"
+                style={{ borderRadius: '8px' }}
+                value={password}
+                onChange={e => { setPassword(e.target.value); setAuthError(null) }}
+                autoComplete="current-password"
+                required
+              />
+              <HoldToReveal revealed={revealed} onChange={setRevealed} />
+            </div>
           </div>
 
           <button
             type="submit"
             className="btn btn-primary"
             disabled={loading}
-            // Fill and ink come from .btn-primary via --accent-strong / --accent-contrast.
-            // This used to pin dark ink onto --accent, which in the light theme is the pairing
-            // that measures 5.13:1 by WCAG 2 but only APCA Lc 36.6 -- legible on paper, hard
-            // to read on screen.
             style={{ width: '100%', padding: '12px', borderRadius: '8px', fontWeight: 600, fontSize: '14px', border: 'none', cursor: 'pointer' }}
           >
             {loading ? 'Authenticating...' : 'Sign In'}
           </button>
         </form>
-
-        {/* WHERE THE SIGN-UP TOGGLE USED TO BE. A line of text rather than nothing, because an
-            operator who expected to register needs to be told the door is shut deliberately --
-            otherwise the report that arrives is "the sign-up button is broken". */}
-        <p style={{ marginTop: '18px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>
-          Accounts are provisioned by an administrator. Contact your platform owner for access.
+      ) : resetSent ? (
+        // The same sentence whether or not the address exists, so the form cannot be used to
+        // discover which addresses hold accounts.
+        <p role="status" style={{ fontSize: '13px', color: 'var(--text-primary)', margin: 0, lineHeight: 1.5 }}>
+          If an account exists for <strong>{resetSent}</strong>, a link to choose a new password is on
+          its way. It expires after an hour.
         </p>
-      </div>
-    </div>
+      ) : (
+        <form onSubmit={handleForgot}>
+          <div className="form-group" style={{ marginBottom: '24px' }}>
+            <label className="form-label" htmlFor="auth-email" style={{ marginBottom: '6px' }}>Email Address</label>
+            <input
+              id="auth-email"
+              type="email"
+              className="form-control"
+              style={{ borderRadius: '8px' }}
+              value={email}
+              onChange={e => { setEmail(e.target.value); setAuthError(null) }}
+              autoComplete="username"
+              autoFocus
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={loading}
+            style={{ width: '100%', padding: '12px', borderRadius: '8px', fontWeight: 600, fontSize: '14px', border: 'none', cursor: 'pointer' }}
+          >
+            {loading ? 'Sending…' : 'Send reset link'}
+          </button>
+        </form>
+      )}
+
+      <p style={{ marginTop: '18px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+        {mode === 'signin' ? (
+          <>
+            <button type="button" className="auth-link" onClick={() => switchMode('forgot')}>Forgot your password?</button>
+            <br />
+            Accounts are provisioned by an administrator. Contact your platform owner for access.
+          </>
+        ) : (
+          <button type="button" className="auth-link" onClick={() => switchMode('signin')}>Back to sign in</button>
+        )}
+      </p>
+    </AuthShell>
   )
 }
 
@@ -291,21 +312,8 @@ function AuthScreen({ onLoginSuccess, notice }) {
  */
 function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReportBug }) {
   const [open, setOpen] = useState(false)
-  const wrapRef = useRef(null)
-
-  useEffect(() => {
-    if (!open) return
-    // `mousedown`, not `click`: closing on click would fire after a button inside the popover had
-    // already been pressed, and closing on blur would beat the press entirely.
-    const onPointer = (e) => { if (!wrapRef.current?.contains(e.target)) setOpen(false) }
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onPointer)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onPointer)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  const wrapRef = useClickOutside(() => setOpen(false), open)
+  useEscapeKey(() => setOpen(false), open)
 
   const nextTheme = theme === 'dark' ? 'Light' : 'Dark'
 
@@ -474,6 +482,7 @@ function Dashboard({ session, onSignOut }) {
   }
   const { theme, toggleTheme } = useTheme()
   const { toast, showToast, clearToast } = useToast()
+  const { mode: sidebarMode, setMode: setSidebarMode } = useSidebarMode()
 
   const { userRole, hasPermission, loadingPerms } = usePermissions(session)
 
@@ -718,7 +727,7 @@ function Dashboard({ session, onSignOut }) {
           NOT is a two-column layout that resizes: the expanded panel is painted over the page from
           inside that gutter, so nothing here reflows when the pointer enters it. See Sidebar.jsx. */}
       <div className="app-body">
-        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={handleNavClick} />
+        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={handleNavClick} mode={sidebarMode} onChangeMode={setSidebarMode} />
 
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
@@ -732,6 +741,7 @@ function Dashboard({ session, onSignOut }) {
                 route. */}
             {tab === 'digital-thread' && hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ) && (
               <DigitalThreadTab
+                userRole={userRole}
                 initialEntity={selectedThreadEntity}
                 onClearEntity={() => setSelectedThreadEntity(null)}
                 showToast={showToast}
@@ -790,6 +800,9 @@ export default function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [authNotice, setAuthNotice] = useState(null)
+  // True while a password-reset link is being honoured: from the reset URL, or from the
+  // PASSWORD_RECOVERY event supabase-js raises after exchanging the link's token for a session.
+  const [recovering, setRecovering] = useState(() => window.location.pathname === RESET_PASSWORD_PATH)
 
   useEffect(() => {
     let cancelled = false
@@ -840,6 +853,12 @@ export default function App() {
         setSession(session)
         return
       }
+      if (event === 'PASSWORD_RECOVERY') {
+        setRecovering(true)
+        setSession(session)
+        setLoading(false)
+        return
+      }
       // For other events (INITIAL_SESSION, USER_MODIFIED), update session normally
       setSession(session)
       setLoading(false)
@@ -868,6 +887,21 @@ export default function App() {
 
   if (loading) {
     return <div className="loading-wrap"><div className="spinner" /> Connecting to Supabase Auth…</div>
+  }
+
+  if (recovering) {
+    const finish = () => {
+      setRecovering(false)
+      window.history.replaceState({}, '', '/overview')
+    }
+    if (session) return <ResetPasswordScreen email={session.user?.email} onDone={finish} />
+    // The link's token was rejected or already spent: no session arrived with it.
+    return (
+      <AuthScreen
+        notice="That password reset link has expired or was already used. Request a new one below."
+        onLoginSuccess={(sess) => { finish(); setSession(sess) }}
+      />
+    )
   }
 
   if (!session) {

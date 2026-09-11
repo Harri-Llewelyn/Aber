@@ -7,6 +7,7 @@ import CopyableId from '../common/CopyableId'
 // report -- the row's buttons now only open a dialog.
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { IconArchive, IconRefreshCw, IconTrash } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 
 export function ArchivesTab({ showToast, hasPermission }) {
   const [archives, setArchives] = useState([])
@@ -59,20 +60,13 @@ export function ArchivesTab({ showToast, hasPermission }) {
           below, which costs no extra row because the card needed a top edge either way. */}
       <div className="card">
         <div className="card-header">
-          <h3 className="section-title">Archived Entities (Out of Commission) <span className="section-count">{archives.length}</span></h3>
-        </div>
-
-        {/* A DESCRIPTION, IN THE BODY. The sentence about retention was already here as a `<span>`
-            in the HEADER, sharing the row with the title -- so it was competing with the title for
-            the same line rather than explaining it, and it stopped at the one fact it had room for.
-            Cards carry their description in the body; this is that. */}
-        <div className="card-body">
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
-            An archived entity is out of commission but not gone: it keeps its identity and its
-            history, stops appearing on the asset pages, and runs a retention timer to an auto-purge
-            date. Restore returns it to service with everything intact — which is what makes
-            archiving the reversible half of decommissioning, and deletion the other one.
-          </p>
+          <h3 className="section-title">
+            Archived Entities (Out of Commission)
+            <HelpTip
+              label="About archived entities"
+              text="An archived entity is out of commission but not gone: it keeps its identity and history, leaves the asset pages, and runs a retention timer to an auto-purge date. Restore returns it to service with everything intact."
+            />
+          </h3>
         </div>
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading archives…</div> :
          archives.length === 0 ? (

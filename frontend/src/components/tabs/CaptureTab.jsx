@@ -15,6 +15,7 @@ import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import {
   IconDownload, IconPlay, IconRecord, IconShieldAlert, IconTrash, IconUpload, IconX
 } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 
 /**
  * Recording the broker, and publishing a recording back.
@@ -433,17 +434,16 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               its first line, and a two-word title where one will do is a word the reader has to
               skip on every visit. Same for the card below. */}
           <div className="card-header">
-            <h3 className="section-title">Playback</h3>
+            <h3 className="section-title">
+              Playback
+              <HelpTip
+                label="About playback"
+                text="Publish a stored capture back into the stack as a simulated gateway, through the real broker and the real ingestion path, rebased onto now. Every captured identity is rewritten onto the target's own assets."
+              />
+            </h3>
           </div>
 
           <div className="card-body">
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-              Publish a stored capture back into the stack as a simulated gateway — through the real
-              broker, down the real ingestion path, rebased onto now. Every captured identity is
-              rewritten onto the target's own assets, because the broker pins each topic's edge-node
-              segment to the account that publishes it.
-            </p>
-
             <PlaybackCard
               job={activePlayback}
               onStop={onStopPlayback}
@@ -503,7 +503,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
-              Capture <span className="section-count">{withCapture}</span>
+              Capture
+              <HelpTip
+                label="About capture"
+                text="Record what a gateway or a single device actually said, and keep it. One capture is stored per subject; a new recording replaces it. Select a row to inspect it, upload a capture, or publish one."
+              />
             </h3>
 
             {/* THE SUBJECT SWITCH LIVES IN THE HEADER, NOT THE FILTER BAR. It changes WHAT IS
@@ -540,12 +544,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           </div>
 
           <div className="card-body">
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-              Record what a gateway or a single device actually said, and keep it. One capture is
-              stored per subject, and a new recording replaces it. Select a row to inspect it,
-              upload a capture, or publish one.
-            </p>
-
             {error && (
               <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
                 <IconShieldAlert size={14} className="callout-icon" />
@@ -724,7 +722,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                           disabled={!onSelectSchema}
                         >
                           {s.schema_name}
-                          {s.version ? <span className="section-count" style={{ marginLeft: '6px' }}>v{s.version}</span> : null}
+                          {s.version ? <span className="badge badge-neutral" style={{ marginLeft: '6px' }}>v{s.version}</span> : null}
                         </button>
                       ))}
                     </div>
@@ -1362,7 +1360,7 @@ function SubjectRow({ row, selected, onSelect }) {
 
 /** Bytes → a short human string. Local rather than shared: the only other one is the 3D uploader's,
  *  and that is tuned for megabyte models. */
-export function formatSize(bytes) {
+function formatSize(bytes) {
   if (bytes === null || bytes === undefined) return '—'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`

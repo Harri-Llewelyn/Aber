@@ -7,7 +7,7 @@
  * birth) is the signal; this mirrors gatewayStatus.js's client-side, no-backend-cron pattern.
  */
 
-export const PROVISIONING_OVERDUE_MS = 24 * 60 * 60 * 1000 // 24h
+const PROVISIONING_OVERDUE_MS = 24 * 60 * 60 * 1000 // 24h
 
 export function isProvisioningOverdue(device, now = Date.now()) {
   if (!device || device.is_quarantined || device.is_archived || device.first_dbirth_at) return false

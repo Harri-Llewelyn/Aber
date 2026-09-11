@@ -238,6 +238,12 @@ demonstrator, it is the only one.
 Self-registered accounts get read-only `Operator` via the `handle_new_user` trigger; an
 `Administrator` must promote them.
 
+**Forgotten passwords** are reset from the sign-in card (*Forgot your password?*), which asks
+GoTrue to email a link to `/reset-password`. The link is sent over SMTP, so set `SMTP_HOST`,
+`SMTP_FROM` and the credentials in `.env` (`supabaseAuth.smtp` and `secrets.smtpPassword` on the
+chart). With no relay configured the request fails and the card tells the user to ask an
+administrator, who can set a password through the Auth API or Studio instead.
+
 > **`.env.example` contains working development secrets** — the standard Supabase demo values, also
 > the gateway's registered API keys. **Generate fresh secrets for any shared or hosted environment.**
 

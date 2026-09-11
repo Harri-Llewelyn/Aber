@@ -28,6 +28,3 @@ const files = import.meta.glob('./*.md', { query: '?raw', import: 'default', eag
 export const HELP_CORPUS = Object.fromEntries(
   Object.entries(files).map(([path, source]) => [path.replace(/^\.\//, '').replace(/\.md$/, ''), source])
 )
-
-/** The pages the corpus covers, sorted -- used by the tests and by nothing at runtime. */
-export const HELP_PAGES = Object.keys(HELP_CORPUS).sort()

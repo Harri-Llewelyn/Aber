@@ -242,19 +242,19 @@ describe('clearing schema filters', () => {
   })
 
   /*
-   * FILTERED OF TOTAL. A narrowed registry showing a bare count reads as a short registry, which
-   * is the wrong thing to believe about a version history -- and the reader has no way to tell
-   * that a filter is the reason.
+   * FILTERED OF TOTAL, AND ONLY THEN. A narrowed registry showing a bare count reads as a short
+   * registry, which is the wrong thing to believe about a version history. Unfiltered, the count
+   * says nothing the list below does not, so the title carries no badge at all.
    */
-  it('reports the count as filtered-of-total only while narrowed', async () => {
+  it('shows a filtered-of-total badge only while narrowed', async () => {
     renderTab()
     await ready()
 
     fireEvent.change(statusSelect(), { target: { value: 'all' } })
-    expect(registryCard().querySelector('.section-count')).toHaveTextContent('3')
+    expect(registryCard().querySelector('.card-header .section-count')).toBeNull()
 
     fireEvent.change(searchBox(), { target: { value: 'robot' } })
-    expect(registryCard().querySelector('.section-count')).toHaveTextContent('1/3')
+    expect(registryCard().querySelector('.card-header .section-count')).toHaveTextContent('1/3')
   })
 })
 
