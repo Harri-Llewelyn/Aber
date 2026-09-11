@@ -229,6 +229,17 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     expect(api.put.mock.calls[0][1]).toMatchObject({ location_scope: 'cell', cell_id: 'cell-1' })
   })
 
+  it("names the offline gateways in a banner above the table, matching the rail's amber", async () => {
+    // The sidebar turns the Gateways icon amber for an offline gateway; the page has to say which.
+    api.get.mockImplementation(routeGet({ gateways: [gateway, staleGateway] }))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Quiet_Gateway')).toBeInTheDocument())
+    const banner = screen.getByText(/1 gateway offline/).closest('div')
+    expect(banner).toHaveTextContent('Quiet_Gateway')
+    expect(banner).not.toHaveTextContent('Virtual_Gateway_NodeRED')
+    expect(banner.closest('.card')).toBeNull()
+  })
+
   it('downgrades a gateway with an aged-out heartbeat to STALE', async () => {
     api.get.mockImplementation(routeGet({ gateways: [staleGateway] }))
 

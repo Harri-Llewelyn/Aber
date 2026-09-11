@@ -4,6 +4,7 @@ An edge gateway is what actually talks to machines and publishes their data to t
 
 ## What the controls do
 
+- **The banners** above the table are the page's unfinished business: devices assigned to no gateway, and gateways that should be reporting and are not. The Gateways icon in the sidebar turns amber while a gateway is offline; the banner is where that colour is explained. A gateway still awaiting setup is not offline.
 - **Add a gateway** creates the platform record, and for an appliance the enrolment it then waits for. Nothing is installed from here.
 - **The enrolment bundle** is what you carry to the machine. A remote gateway's broker credential is minted on the appliance itself and never travels through a browser -- which is why there is nothing to copy down here, and nothing that can be re-shown later.
 - **Connected Devices** lists what has published underneath this gateway. It is the short route from "this gateway is quiet" to "and these six things went quiet with it".

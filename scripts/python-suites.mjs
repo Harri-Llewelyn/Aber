@@ -178,6 +178,13 @@ export const SUITES = {
       'honestly occupies and an incomplete path is skipped and counted rather than filled with a ' +
       'placeholder. A fake query builder and a fake client; no broker, no database.',
   },
+  'ingestion/test_dockerfile_copies.py': {
+    lanes: ['unit'],
+    why:
+      'Every sibling module ingestion.py imports, directly or through another, must be copied in ' +
+      'by ingestion/Dockerfile, which lists files one by one; a module left off is a crash loop ' +
+      'on the first boot. File inspection only.',
+  },
   'ingestion/test_device_location.py': {
     lanes: ['unit'],
     why:

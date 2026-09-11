@@ -1326,7 +1326,9 @@ between, for the Unified Namespace bridge to name a reading's place
   files re-apply them, as `ensure_gateway_status_view()` does.
 - **The proposal lanes admit the new columns** (`area_id` on devices and gateways, `area_id` and
   `floor` on cells), and `approve_proposal()` assigns them; `relocate_devices()` takes `area_id`
-  on a move. `areas` joins the asset audit domain.
+  on a move. `approve_quarantined_device()` is dropped and redeclared with `p_area_id` and
+  `p_set_area`, so a quarantined device can be approved straight into Area-Wide; the old
+  signature has to go first, or PostgREST would find two. `areas` joins the asset audit domain.
 
 Rejected: a many-to-many between devices and sites for a BMS shared by two buildings. Adjacent
 buildings are one ISA-95 site, so such a BMS is already Site-Wide; a join table would have made

@@ -477,6 +477,31 @@ describe('approving a quarantined device', () => {
     })
   })
 
+  it('forwards Area-Wide with its area, and holds the button until an area is named', async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: { success: true }, error: null })
+    api.get.mockImplementation(routeGet([], {
+      quarantine: [quarantined],
+      areas: [
+        { area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 },
+        { area_id: 'area-2', area_name: 'Building 2', cells: [], cell_count: 0 }
+      ]
+    }))
+    render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+    await waitFor(() => expect(screen.getByText('Unknown_Robot')).toBeTruthy())
+    fireEvent.click(screen.getAllByRole('button', { name: /Approve/i })[0])
+    await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
+    expect(screen.getByRole('button', { name: /Approve & Onboard/i })).toBeDisabled()
+    fireEvent.change(document.querySelector('#approve-area'), { target: { value: 'area-2' } })
+    fireEvent.click(screen.getByRole('button', { name: /Approve & Onboard/i }))
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled())
+    expect(supabase.functions.invoke.mock.calls[0][1].body).toMatchObject({
+      device_id: quarantined.asset_id, cell_id: '', area_id: 'area-2', location_scope: 'area_wide'
+    })
+  })
+
   it('forwards inherit as an empty cell rather than omitting the key', async () => {
     // The edge function distinguishes absent (do not write) from empty (write NULL); the modal
     // always answers, so it always sends the key.

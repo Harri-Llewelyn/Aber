@@ -41,6 +41,7 @@ python ingestion/test_directory_publish.py
 # The Unified Namespace bridge: the topic is fixed at the level a device honestly occupies, and
 # an incomplete path is skipped and counted rather than filled with a placeholder.
 python ingestion/test_uns_publish.py
+python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_payload_conformance.py
 # The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker

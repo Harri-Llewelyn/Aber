@@ -5,7 +5,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
-  gatewayLiveStatus, isGatewayPending, formatHeartbeat,
+  gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat,
   formatCertExpiry, isCertExpiring, formatBytes, CERT_EXPIRY_WARN_DAYS
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
@@ -16,6 +16,7 @@ import {
 import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
+import { isShadowGateway } from '../../utils/fleetCounts'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
@@ -263,6 +264,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   const canOpenForge = userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 
   const unassignedDevices = assets.filter(a => !a.is_archived && !a.active_gateway_id)
+  // The gateways that should be reporting and are not: the rail's amber for this page, and the
+  // same rule as gatewayFleetCounts(). Awaiting setup is an unfinished task, not a fault, and the
+  // playback lane is not a connector to any machine.
+  const offlineGateways = gateways.filter(g => !g.is_archived && !isShadowGateway(g) && !isGatewayPending(g) && !isGatewayOnline(g))
 
   // Built from the flat device list: ingestion records the arriving edge node on a quarantined
   // device, so a device held on a gateway is attributable before it is approved.
@@ -326,6 +331,19 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
           {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
           Assign them from the Devices page.
+        </div>
+      )}
+
+      {/* Says what the rail's colour means before the table is read: which gateways are silent,
+          and that their devices are silent with them. */}
+      {offlineGateways.length > 0 && (
+        <div style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px var(--inset)', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <IconShieldAlert size={18} style={{ flexShrink: 0 }} />
+          <span>
+            <strong>{offlineGateways.length} gateway{offlineGateways.length === 1 ? '' : 's'} offline:</strong>{' '}
+            {offlineGateways.slice(0, 5).map(g => g.gateway_name).join(', ')}{offlineGateways.length > 5 ? ', …' : ''}.
+            Every device underneath is silent with it. Check the appliance, its network, and its broker credential.
+          </span>
         </div>
       )}
 

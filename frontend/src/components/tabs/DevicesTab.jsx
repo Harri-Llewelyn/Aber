@@ -422,6 +422,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           gateway_id: targetGateway,
           asset_name: body?.asset_name,
           cell_id: body?.cell_id ?? '',
+          area_id: body?.area_id ?? '',
           location_scope: body?.location_scope || 'cell'
         }
       }))
@@ -1334,6 +1335,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         <ApproveQuarantineModal
           item={approveItem}
           cells={cells}
+          areas={areas}
           gateways={gateways}
           suggestion={suggestMatches(approveItem, assets, schemas)[0] || null}
           onApprove={approveQuarantine}

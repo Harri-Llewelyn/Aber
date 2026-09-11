@@ -13,6 +13,10 @@ This function enforces **fail-closed** authorization. Requests are evaluated str
 
 ---
 
+## Location
+
+The body may carry `cell_id`, `area_id` and `location_scope` (`cell`, `area_wide` or `site_wide`). Each is written only when present: an absent key leaves the column alone, so `devices.cell_id` keeps its NULL-means-inherit meaning, while an empty string is the picker's explicit Inherit and is written as NULL. `area_wide` requires an `area_id` and clears the cell; `site_wide` clears both; `cell` clears the area. The RPC mirrors the same rules.
+
 ## Smoke Testing with Curl
 
 ### 1. Test User with No Role Claim (Expected: `403 Forbidden`)

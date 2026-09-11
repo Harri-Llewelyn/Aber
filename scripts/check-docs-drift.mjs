@@ -532,6 +532,7 @@ function edgeFunctionNames() {
     'public.approve_proposal': '0097 assigns the area and floor columns the lanes now admit; 0090 adds the cell, gateway and link branches, drops the withdrawn publish branch and refuses a proposal already in place; 0088 added the per-lane gate and 0089 the author stamp; 0086 holds the asset-only form',
     // 0097 adds the area_wide scope and its area_id to a move; the baseline holds the two-scope form.
     'public.relocate_devices': '0097 adds area_wide and area_id to a move; the baseline holds the cell-or-site_wide form',
+    'public.approve_quarantined_device': '0097 drops the baseline signature and redeclares it with p_area_id and p_set_area for area_wide; the baseline holds the cell-or-site_wide form',
     // 0089 adds proposed_by_email to the columns a proposer may NOT move. The guard names every
     // immutable column explicitly, so a new one has to join the list or an UPDATE could
     // re-attribute a proposal an approver is already reading.

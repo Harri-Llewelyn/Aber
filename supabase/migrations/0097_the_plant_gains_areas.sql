@@ -721,6 +721,149 @@ SELECT public.seed_setting(
 SELECT public.ensure_gateway_status_view();
 
 -- -------------------------------------------------------------------------------------------------
+-- 8b. Quarantine approval learns the third scope
+-- -------------------------------------------------------------------------------------------------
+-- The baseline's form takes a cell and a scope of cell or site_wide. This one takes an area too,
+-- for area_wide, under the same rule as the rest: location is omitted when not answered, never
+-- defaulted, which the p_set_* flags carry. The old signature is dropped first: CREATE OR REPLACE
+-- with more parameters would leave both, and PostgREST refuses an ambiguous RPC. 0001 recreates
+-- the old one on every boot, and this file removes it again, in that order.
+DROP FUNCTION IF EXISTS public.approve_quarantined_device(uuid, uuid, uuid, uuid, text, uuid, text, boolean, boolean);
+
+CREATE OR REPLACE FUNCTION public.approve_quarantined_device(
+    p_device_id uuid, p_actor_id uuid,
+    p_gateway_id uuid DEFAULT NULL::uuid, p_merge_into_device_id uuid DEFAULT NULL::uuid,
+    p_asset_name text DEFAULT NULL::text, p_cell_id uuid DEFAULT NULL::uuid,
+    p_location_scope text DEFAULT NULL::text,
+    p_set_cell boolean DEFAULT false, p_set_location_scope boolean DEFAULT false,
+    p_area_id uuid DEFAULT NULL::uuid, p_set_area boolean DEFAULT false
+) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  v_quarantined public.devices%ROWTYPE;
+  v_candidate   public.devices%ROWTYPE;
+  v_result      public.devices%ROWTYPE;
+  v_actor_role  text;
+  v_cell        uuid := p_cell_id;
+  v_area        uuid := p_area_id;
+BEGIN
+  -- Authorization is re-derived from the database rather than taken on trust. The edge function
+  -- checks too; this is the check that still holds if the RPC is ever reached another way.
+  SELECT r.name INTO v_actor_role
+    FROM public.user_roles ur
+    JOIN public.roles r ON r.id = ur.role_id
+   WHERE ur.user_id = p_actor_id::text
+   LIMIT 1;
+
+  IF v_actor_role IS NULL OR v_actor_role NOT IN ('Administrator', 'Shopfloor_Manager') THEN
+    RAISE EXCEPTION 'actor % is not permitted to approve quarantined devices', p_actor_id
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  -- Attribute every trigger-written audit row in this transaction to the operator. SET LOCAL, so
+  -- it is discarded at COMMIT and cannot bleed into the connection's next user.
+  PERFORM set_config('acs_cymru.actor_id', p_actor_id::text, true);
+
+  SELECT * INTO v_quarantined FROM public.devices WHERE id = p_device_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'quarantined device % not found', p_device_id
+      USING ERRCODE = 'no_data_found';
+  END IF;
+
+  -- ---------------------------------------------------------------------------------------
+  -- Merge path: absorb a discovered duplicate into the row that was already provisioned.
+  -- ---------------------------------------------------------------------------------------
+  IF p_merge_into_device_id IS NOT NULL THEN
+    IF p_merge_into_device_id = p_device_id THEN
+      RAISE EXCEPTION 'cannot merge device % into itself', p_device_id
+        USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    -- Two named ids and a short transaction; the FOR UPDATE is what stops a concurrent approval
+    -- racing this one into two live rows.
+    SELECT * INTO v_candidate FROM public.devices WHERE id = p_merge_into_device_id FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'target device % not found', p_merge_into_device_id
+        USING ERRCODE = 'no_data_found';
+    END IF;
+
+    -- asset_config is keyed by sparkplug_id, not by row id, so the recorded birth parameters
+    -- have to be re-keyed onto the surviving row.
+    UPDATE public.asset_config
+       SET asset_id = v_candidate.sparkplug_id
+     WHERE asset_id = v_quarantined.sparkplug_id;
+
+    -- reported_identity carries over deliberately: the physical device keeps publishing under
+    -- the id it announced, and that is what ingestion has to keep resolving. Without it the
+    -- merged device is re-quarantined on its very next birth. The candidate's deliberately
+    -- provisioned fields (gateway_id, schema_id, connection_method) are left alone.
+    UPDATE public.devices
+       SET status            = v_quarantined.status,
+           first_dbirth_at   = COALESCE(v_candidate.first_dbirth_at, v_quarantined.first_dbirth_at),
+           reported_identity = v_quarantined.reported_identity,
+           identity_source   = v_quarantined.identity_source,
+           quarantine_reason = NULL,
+           is_quarantined    = false
+     WHERE id = v_candidate.id
+    RETURNING * INTO v_result;
+
+    DELETE FROM public.devices WHERE id = v_quarantined.id;
+
+    RETURN jsonb_build_object(
+      'merged', true,
+      'device', to_jsonb(v_result),
+      'discarded_device_id', v_quarantined.id
+    );
+  END IF;
+
+  -- ---------------------------------------------------------------------------------------
+  -- Straight approval.
+  -- ---------------------------------------------------------------------------------------
+  -- Mirrors the scope CHECKs: a site-wide asset names neither cell nor area, an area-wide one
+  -- names its area and no cell, a cell-scoped one names no area. Cleared here rather than left
+  -- to a constraint violation the caller cannot interpret.
+  IF p_set_location_scope AND p_location_scope = 'site_wide' THEN
+    v_cell := NULL;
+    v_area := NULL;
+  ELSIF p_set_location_scope AND p_location_scope = 'area_wide' THEN
+    v_cell := NULL;
+    IF v_area IS NULL THEN
+      RAISE EXCEPTION 'an area_wide device must name its area'
+        USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+  ELSIF p_set_location_scope THEN
+    v_area := NULL;
+  END IF;
+
+  UPDATE public.devices
+     SET is_quarantined    = false,
+         quarantine_reason = NULL,
+         gateway_id        = p_gateway_id,
+         -- LOCATION IS OMITTED WHEN NOT ANSWERED, NEVER DEFAULTED. devices.cell_id is
+         -- NULL-means-inherit with no column default, so writing a value the operator did not
+         -- choose would switch inheritance off permanently for every device approved this way.
+         -- The p_set_* flags are what distinguish "not supplied" from "explicitly cleared" --
+         -- a plain NULL argument cannot express the difference. A wide scope clears the cell
+         -- whether or not one was supplied, since the CHECK would refuse the pair.
+         cell_id           = CASE WHEN p_set_cell OR (p_set_location_scope AND p_location_scope <> 'cell')
+                                  THEN v_cell ELSE cell_id END,
+         area_id           = CASE WHEN p_set_area OR p_set_location_scope THEN v_area ELSE area_id END,
+         location_scope    = CASE WHEN p_set_location_scope THEN p_location_scope ELSE location_scope END,
+         name              = COALESCE(NULLIF(btrim(COALESCE(p_asset_name, '')), ''), name)
+   WHERE id = p_device_id
+  RETURNING * INTO v_result;
+
+  RETURN jsonb_build_object('merged', false, 'device', to_jsonb(v_result));
+END;
+$$;
+
+COMMENT ON FUNCTION public.approve_quarantined_device(uuid, uuid, uuid, uuid, text, uuid, text, boolean, boolean, uuid, boolean) IS 'Atomically approves or merges a quarantined device. Re-checks the actor role against public.user_roles and attributes the resulting digital_thread rows to that actor. Takes the three location scopes; location is written only when answered.';
+REVOKE ALL ON FUNCTION public.approve_quarantined_device(uuid, uuid, uuid, uuid, text, uuid, text, boolean, boolean, uuid, boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.approve_quarantined_device(uuid, uuid, uuid, uuid, text, uuid, text, boolean, boolean, uuid, boolean) TO service_role;
+
+-- -------------------------------------------------------------------------------------------------
 -- 9. Self-checks
 -- -------------------------------------------------------------------------------------------------
 DO $$
