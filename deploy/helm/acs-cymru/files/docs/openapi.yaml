@@ -85,9 +85,14 @@ info:
       gateway; it is not a stored "unassigned", and the column has no default.
 
     Resolution is `COALESCE(device.cell_id, gateway.cell_id)`, exposed by the
-    **`device_locations`** view. `location_scope` (`cell` | `site_wide`) records an operator's
-    assertion that an asset has no single cell; a CHECK forbids `site_wide` with a populated
-    `cell_id`.
+    **`device_locations`** view. `location_scope` (`cell` | `area_wide` | `site_wide`) records an
+    operator's assertion that an asset has no single cell; a CHECK forbids either wide scope with
+    a populated `cell_id`.
+
+    Above the cell sits the ISA-95 **area** (a building, `/rest/v1/areas`): `cells.area_id` files
+    a cell, and a device's `effective_area_id` on the same view is its cell's area, or its own
+    `area_id` when it is `area_wide`. The site is one campus and lives in `system_settings` as
+    `site.name`; the enterprise is each gateway's `sparkplug_group`.
 
     **No embed can express this.** `cells?select=*,gateways(devices(*))` returns devices by
     inheritance only, so a device explicitly placed in cell B whose gateway serves cell A comes
@@ -279,6 +284,70 @@ paths:
       responses:
         '204': { description: Deleted. }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/areas:
+    get:
+      tags: [Assets]
+      summary: List areas (buildings)
+      description: |
+        The ISA-95 level above the cells. `?select=*,cells(*)` embeds each area's cells; devices
+        are not embeddable here for the reason in the Asset location note — read
+        `device_locations.effective_area_id`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: name
+          in: query
+          schema: { type: string }
+          description: 'Filter, e.g. `eq.Building 3`. Names are unique.'
+      responses:
+        '200':
+          description: Matching areas.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Area' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Assets]
+      summary: Create an area
+      parameters: [{ $ref: '#/components/parameters/Prefer' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AreaWrite' }
+      responses:
+        '201': { description: Created. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [Assets]
+      summary: Update areas matching a filter
+      description: 'Always send a filter, e.g. `?id=eq.<uuid>`; an unfiltered PATCH updates every row.'
+      parameters:
+        - { name: id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AreaWrite' }
+      responses:
+        '204': { description: Updated. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Assets]
+      summary: Delete areas matching a filter
+      description: |
+        Cells filed in the area have `area_id` set to NULL, never deleted. Refused while a device
+        or gateway is `area_wide` in it: that scope requires its area, so move the asset first.
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+      responses:
+        '204': { description: Deleted. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: An area-wide asset still names this area. }
 
   /rest/v1/gateways:
     get:
@@ -3128,21 +3197,48 @@ components:
 
     LocationScope:
       type: string
-      enum: [cell, site_wide]
+      enum: [cell, area_wide, site_wide]
       default: cell
       description: |
-        `site_wide` is an operator's assertion that this asset has no single cell (a BMS, an
-        AGV, an ambient sensor). A CHECK forbids it alongside a populated `cell_id`.
+        `site_wide` is an operator's assertion that this asset has no single cell and no single
+        area: it serves the whole campus (an AGV, an ambient sensor). `area_wide` is the same
+        assertion one level down: no single cell, one building (a BMS), and it REQUIRES `area_id`.
+        A CHECK forbids either alongside a populated `cell_id`, and forbids `area_id` on anything
+        but `area_wide` — a cell-scoped asset's area is its cell's, read from `device_locations`.
 
         **Scope does not inherit; only `cell_id` does.** A device behind a site-wide gateway
         resolves to *Unassigned*, not to Site-Wide.
 
-    Cell:
+    Area:
       type: object
-      description: A shopfloor cell zone.
+      description: An ISA-95 area — one building of the one site. The level between the site (a setting, `site.name`) and the cells.
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        name: { type: string, example: Assembly Line 1, description: 'UNIQUE — cells are not addressed on the wire, so a stable name is safe here.' }
+        name: { type: string, example: Building 3, description: 'UNIQUE, and the `<area>` segment of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`.' }
+        description: { type: string, nullable: true }
+        icon: { type: string, default: Building2, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap], description: 'Icon key, a closed set (`areas_icon_valid`) rendered by the dashboard from a bundled SVG set. What the building is for.' }
+        created_at: { type: string, format: date-time, readOnly: true }
+        cells:
+          type: array
+          description: Present only when embedded via `select`.
+          items: { $ref: '#/components/schemas/Cell' }
+
+    AreaWrite:
+      type: object
+      properties:
+        name: { type: string, example: Building 3 }
+        description: { type: string, nullable: true }
+        icon: { type: string, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap] }
+
+    Cell:
+      type: object
+      description: A shopfloor cell zone — an ISA-95 work center.
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, example: Assembly Line 1, description: 'UNIQUE — cells are not addressed on the wire, so a stable name is safe here. It is the `<cell>` segment of its `uns/` topics, so a new name cannot contain `/`, `+` or `#`.' }
+        area_id: { type: string, format: uuid, nullable: true, description: 'The area (building) this cell is filed in. NULL is unfiled, which the dashboard lists as a queue.' }
+        floor: { type: integer, nullable: true, description: 'Ground is 0, basements negative. A grouping, not a hierarchy level.' }
+        description: { type: string, nullable: true, description: 'Free text, shown as a help tip beside the name on the Overview map when present.' }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
@@ -3157,6 +3253,9 @@ components:
       type: object
       properties:
         name: { type: string, example: Assembly Line 1 }
+        area_id: { type: string, format: uuid, nullable: true }
+        floor: { type: integer, nullable: true }
+        description: { type: string, nullable: true }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean }
         archived_at: { type: string, format: date-time, nullable: true }
@@ -3188,6 +3287,7 @@ components:
             node address Factory+ resolves as (group, node), which is what `/v1/address/…` reads.
             Editable, unlike `sparkplug_id`: it is a configuration choice, not an issued identity.
         location_scope: { $ref: '#/components/schemas/LocationScope' }
+        area_id: { type: string, format: uuid, nullable: true, description: 'Populated exactly when `location_scope` is `area_wide`.' }
         access_url: { type: string, nullable: true, description: 'The gateway''s own UI. Omitted rather than disabled in the dashboard when absent.' }
         status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE }
         last_heartbeat:
@@ -3211,6 +3311,7 @@ components:
       properties:
         name: { type: string, example: Sim_Gateway_Cell1_Machining }
         cell_id: { type: string, format: uuid, nullable: true }
+        area_id: { type: string, format: uuid, nullable: true }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         access_url: { type: string, nullable: true }
         status: { type: string, enum: [ONLINE, OFFLINE] }
@@ -3276,6 +3377,7 @@ components:
             Explicit LOCATION OVERRIDE. NULL means inherit from the gateway; it is not a stored
             "unassigned", and the column has no default — a default would make inheritance
             unreachable. Read `device_locations.effective_cell_id` to display.
+        area_id: { type: string, format: uuid, nullable: true, description: 'Populated exactly when `location_scope` is `area_wide`. Read `device_locations.effective_area_id` to display.' }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE, description: 'Set ONLINE on DBIRTH, OFFLINE on DDEATH, and OFFLINE by the ingestion watchdog after a configurable silence.' }
         is_quarantined:
@@ -3342,6 +3444,7 @@ components:
         name: { type: string, example: Sim_CNC_Mill_01 }
         gateway_id: { type: string, format: uuid, nullable: true }
         cell_id: { type: string, format: uuid, nullable: true, description: 'Send NULL to clear an override and return the device to inheriting.' }
+        area_id: { type: string, format: uuid, nullable: true, description: 'Required with `location_scope=area_wide`; must be NULL otherwise.' }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         status: { type: string, enum: [ONLINE, OFFLINE] }
         is_quarantined: { type: boolean }

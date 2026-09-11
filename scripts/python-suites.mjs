@@ -231,6 +231,22 @@ export const SUITES = {
       'silently, on the hottest path in the system. The tuples are asserted element by element ' +
       'rather than by count, which is only worth anything if the suite runs.',
   },
+  'ingestion/test_telemetry_writer.py': {
+    lanes: ['unit'],
+    why:
+      'The historian writer -- the queue between the callback thread and TimescaleDB, and the ' +
+      'thread that drains it. Several messages become one transaction, and the suite pins what ' +
+      'must not change with that: row order, one asset tuple per asset, and that one bad message ' +
+      'still loses one message. A widened blast radius would show up as lost readings from ' +
+      'healthy devices, silently.',
+  },
+  'ingestion/test_directory_refresh.py': {
+    lanes: ['unit'],
+    why:
+      'The directory refresher: one request per table per pass instead of one per device per ' +
+      'cache TTL. The keys and identity sources must be the ones the per-entity path produces, ' +
+      'or resolution changes meaning depending on which path filled the cache.',
+  },
   'ingestion/test_capture_playback.py': {
     lanes: ['unit'],
     why:

@@ -11,8 +11,9 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, fifteen edge functions, an i3X server and
-> a React dashboard.
+> Node-RED. The custom surface is one Python ingestion service — a daemon and the modules beside it:
+> the constraint engine, the metrics registry, capture and playback, the Directory and UNS publishers,
+> cold archival — fifteen edge functions, an i3X server and a React dashboard.
 
 ---
 

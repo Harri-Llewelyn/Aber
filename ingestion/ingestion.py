@@ -1,6 +1,8 @@
 import logging
 import os
+import queue
 import re
+import signal
 import ssl
 import threading
 import time
@@ -14,6 +16,15 @@ from datetime import datetime, timezone
 from logging_config import get_logger
 import metrics
 from metrics import start_metrics_server
+from registry import (
+    count, count_labelled, counter_snapshot,
+    labelled_snapshot, histogram_snapshot, observe_uns_seconds, observe_write_seconds,
+    WRITE_SECONDS_BUCKETS,
+)
+from conformance import (
+    MetricConstraint, ModelledSchema, constraint_violations, enforceable_violation,
+    modelled_constraints, payload_violations, violation_signature,
+)
 # capture.py owns the capture file format, so the daemon and the CLI cannot diverge.
 import capture_worker
 # Imported at module level so a syntax error in it is a startup failure.
@@ -98,8 +109,23 @@ INGESTION_STATS_INTERVAL = int(os.getenv("INGESTION_STATS_INTERVAL", "60"))
 # nothing else. No credential, so counters only: no values, names or payloads (see metrics.py).
 INGESTION_METRICS_PORT = int(os.getenv("INGESTION_METRICS_PORT", "9108"))
 
-# Maximum tuples per INSERT statement. A DDATA is one batched statement; this caps its size.
+# Maximum tuples per INSERT statement; execute_values pages a larger batch.
 TELEMETRY_INSERT_PAGE_SIZE = int(os.getenv("TELEMETRY_INSERT_PAGE_SIZE", "500"))
+
+# The historian writer (see TelemetryWriter). Messages waiting to be written are bounded so a
+# stalled historian cannot grow the process without limit; a full queue holds the callback
+# thread for the put timeout, which is backpressure onto the broker, then drops.
+TELEMETRY_QUEUE_MAX_MESSAGES = int(os.getenv("TELEMETRY_QUEUE_MAX_MESSAGES", "10000"))
+TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS = float(os.getenv("TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS", "5"))
+# Messages per transaction, at most.
+TELEMETRY_BATCH_MAX_MESSAGES = int(os.getenv("TELEMETRY_BATCH_MAX_MESSAGES", "500"))
+# How long a SIGTERM waits for the queue to drain. Inside the grace period both targets give a
+# container (10s on Compose, 30s on Kubernetes).
+TELEMETRY_SHUTDOWN_DRAIN_SECONDS = float(os.getenv("TELEMETRY_SHUTDOWN_DRAIN_SECONDS", "8"))
+
+# Seconds between directory refresh passes (see refresh_directory_caches). 0 disables the thread
+# and every cache miss costs a round trip, as it did before the thread existed.
+DIRECTORY_REFRESH_SECONDS = float(os.getenv("DIRECTORY_REFRESH_SECONDS", "5"))
 
 # Bounded retry on a failed TimescaleDB connection. It runs on the paho callback thread, which
 # every device shares, so the ceiling is deliberately low.
@@ -506,30 +532,15 @@ _DEVICE_COLUMNS = (
     "last_birth_metrics,status,identity_source,conformance_policy"
 )
 
+# `status` lets process_node_message() tell a transition from a repeated heartbeat in the log.
+# `is_archived` is fetched rather than filtered so an archived gateway is distinguishable from
+# an unregistered one; resolve_gateway() refuses it.
+_GATEWAY_COLUMNS = "id,name,sparkplug_id,sparkplug_group,status,is_archived"
+
 # The value of devices.conformance_policy that lets a violation DROP a metric rather than only
 # record it (0050). Anything else -- including the 'audit' default and a row fetched before this
 # column existed -- means record and write anyway, which is the behaviour since 0026.
 CONFORMANCE_ENFORCE = "enforce"
-
-# -----------------------------------------------------------------------------
-# Throughput counters
-# -----------------------------------------------------------------------------
-# Monotonic, never reset, behind a lock. Incremented at the sites that already decide, so the
-# counters and the log cannot disagree about what happened.
-_counters = {}
-_counters_lock = threading.Lock()
-
-def count(name: str, n: int = 1):
-    """Add to a monotonic counter. Unknown names are created on first use."""
-    if n <= 0:
-        return
-    with _counters_lock:
-        _counters[name] = _counters.get(name, 0) + n
-
-def counter_snapshot() -> dict:
-    """A copy of the counters, safe to read while the callback thread is writing."""
-    with _counters_lock:
-        return dict(_counters)
 
 # The drop pair. `reason` produces both the flat counter `dropped_<reason>` and the `reason`
 # field on the warning. Per-device fields go on the log line and never on the counter: the
@@ -544,88 +555,6 @@ def drop(reason: str, message: str, *args, emit_log: bool = True, **fields):
     count(f"dropped_{reason}")
     if emit_log:
         logger.warning(message, *args, extra={"reason": reason, **fields})
-
-# Labelled counters, beside the flat ones. The only label is `edge_node`, one per gateway;
-# labelling by device would be unbounded.
-_labelled = {}
-
-def count_labelled(name: str, labels: dict, n: int = 1):
-    """Add to a monotonic counter carrying labels. Key order is normalised so it cannot split."""
-    if n <= 0:
-        return
-    key = (name, tuple(sorted(labels.items())))
-    with _counters_lock:
-        _labelled[key] = _labelled.get(key, 0) + n
-
-def labelled_snapshot() -> dict:
-    with _counters_lock:
-        return dict(_labelled)
-
-# Historian write latency histogram. A distribution, not a mean: the interesting write is the
-# slow one that stalls every other device behind it. Buckets cover a healthy local insert
-# (sub-ms to a few ms), contention (tens to hundreds of ms) and the bounded reconnect: at or
-# above 0.25s means DB_CONNECT_BACKOFF_SECONDS ran, so a reconnect stall is readable here.
-WRITE_SECONDS_BUCKETS = (
-    0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-)
-
-# COUNTS PER BUCKET, NOT CUMULATIVE. Prometheus wants cumulative `le` buckets and metrics.py
-# accumulates them at render time, because this list is written on the callback thread and read
-# once per scrape: one increment per observation is the right trade against thirteen.
-_write_seconds_buckets = [0] * len(WRITE_SECONDS_BUCKETS)
-_write_seconds_sum = 0.0
-_write_seconds_count = 0
-
-def observe_write_seconds(seconds: float):
-    """
-    Record one committed historian write.
-
-    Only committed writes are observed; a failed write has its own counter and its duration
-    describes the failure, not capacity. Shares _counters_lock (re-entrant, held briefly).
-    """
-    global _write_seconds_sum, _write_seconds_count
-    with _counters_lock:
-        _write_seconds_count += 1
-        _write_seconds_sum += seconds
-        for i, upper in enumerate(WRITE_SECONDS_BUCKETS):
-            if seconds <= upper:
-                _write_seconds_buckets[i] += 1
-                return
-        # Above the last finite bucket. Nothing to increment -- +Inf is derived from the total at
-        # render time, so an outlier is still counted in `_count` and still moves `_sum`.
-
-# The UNS bridge's publish, timed the same way: it runs on the same callback thread after the
-# commit, so its cost is part of the single-writer ceiling and belongs beside the write's.
-_uns_seconds_buckets = [0] * len(WRITE_SECONDS_BUCKETS)
-_uns_seconds_sum = 0.0
-_uns_seconds_count = 0
-
-def observe_uns_seconds(seconds: float):
-    """Record one UNS republish pass for a message, published or skipped."""
-    global _uns_seconds_sum, _uns_seconds_count
-    with _counters_lock:
-        _uns_seconds_count += 1
-        _uns_seconds_sum += seconds
-        for i, upper in enumerate(WRITE_SECONDS_BUCKETS):
-            if seconds <= upper:
-                _uns_seconds_buckets[i] += 1
-                return
-
-def histogram_snapshot() -> dict:
-    """Histogram state, in the shape metrics.render_exposition() takes."""
-    with _counters_lock:
-        return {
-            "acs_ingestion_write_seconds": {
-                "buckets": tuple(zip(WRITE_SECONDS_BUCKETS, _write_seconds_buckets)),
-                "sum": _write_seconds_sum,
-                "count": _write_seconds_count,
-            },
-            "acs_ingestion_uns_publish_seconds": {
-                "buckets": tuple(zip(WRITE_SECONDS_BUCKETS, _uns_seconds_buckets)),
-                "sum": _uns_seconds_sum,
-                "count": _uns_seconds_count,
-            },
-        }
 
 def diagnose_device_identity(wire_id: str):
     """
@@ -1089,10 +1018,7 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
         # None here is the negative entry, not a miss. See TTLCache.get().
         return row
 
-    # `status` lets process_node_message() tell a transition from a repeated heartbeat in the log.
-    # `is_archived` is fetched rather than filtered so an archived gateway is distinguishable from
-    # an unregistered one; resolve_gateway() refuses it.
-    columns = "id,name,sparkplug_id,sparkplug_group,status,is_archived"
+    columns = _GATEWAY_COLUMNS
     try:
         # 1. Group-qualified.
         if group_id:
@@ -1152,6 +1078,97 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
         # verify_gateway_binding() would turn into a quarantine reason.
         logger.error("Error resolving gateway identity '%s' in Supabase: %s", wire_id, e)
         raise DirectoryUnavailable(str(e)) from e
+
+# -----------------------------------------------------------------------------
+# Directory refresh
+# -----------------------------------------------------------------------------
+# resolve_device() and _resolve_gateway_row() miss their caches once per entity per
+# CACHE_TTL_SECONDS, and each miss is a PostgREST round trip on the callback thread: N devices
+# cost N/5 round trips a second. This thread reads the whole directory in one request per table
+# per pass and re-fills both caches, so the hot path misses only for an id the directory does
+# not hold. A pass that fails leaves the caches alone; entries expire on their own TTL and the
+# per-entity lookup takes over, which is the behaviour without the thread.
+# See ingestion/README.md -> "The directory refresher".
+
+# PostgREST's default max-rows. Paged so a larger fleet still arrives whole.
+DIRECTORY_PAGE_SIZE = 1000
+
+def _directory_rows(table, columns):
+    """Every row of `table`, paged."""
+    rows = []
+    start = 0
+    while True:
+        res = supabase_client.table(table).select(columns).range(
+            start, start + DIRECTORY_PAGE_SIZE - 1
+        ).execute()
+        page = list(res.data or []) if res else []
+        rows.extend(page)
+        if len(page) < DIRECTORY_PAGE_SIZE:
+            return rows
+        start += DIRECTORY_PAGE_SIZE
+
+def refresh_directory_caches():
+    """
+    One pass: re-fill the device and gateway caches from the directory.
+
+    Returns (devices, gateways) row counts. Each cached row is its own dict, as resolve_device()
+    would have built it, and the replacement is per key: a row the DBIRTH path mutated in place
+    since the pass began is superseded by the directory's copy, which already carries that write.
+    """
+    devices = _directory_rows("devices", _DEVICE_COLUMNS)
+    # reported_identity first so that a wire id that is one device's sparkplug_id and another's
+    # reported_identity resolves as resolve_device() resolves it: sparkplug_id wins.
+    for column, source in (("reported_identity", SOURCE_REPORTED_IDENTITY),
+                           ("sparkplug_id", SOURCE_SPARKPLUG_ID)):
+        for row in devices:
+            key = row.get(column)
+            if not key:
+                continue
+            cached = dict(row)
+            cached["_identity_source"] = source
+            _device_cache.set(key, cached)
+
+    gateways = _directory_rows("gateways", _GATEWAY_COLUMNS)
+    for row in gateways:
+        key = row.get("sparkplug_id")
+        if not key:
+            continue
+        cached = dict(row)
+        cached["_identity_source"] = SOURCE_SPARKPLUG_ID
+        # The same (group, node) key _resolve_gateway_row() uses. A node publishing under a group
+        # other than its registered one still takes the per-entity path, which warns about it.
+        _gateway_cache.set((row.get("sparkplug_group") or "", key), cached)
+
+    if len(_device_cache) >= _device_cache.maxsize:
+        logger.warning(
+            "The directory holds more device ids (%d) than MAX_ENTITIES_PER_CACHE (%d): the "
+            "cache cannot hold the fleet and resolution falls back to per-entity lookups for "
+            "whatever it evicts. Raise MAX_ENTITIES_PER_CACHE.",
+            len(_device_cache), _device_cache.maxsize,
+        )
+    return len(devices), len(gateways)
+
+def start_directory_refresher():
+    """Warm both caches now, then keep them warm every DIRECTORY_REFRESH_SECONDS."""
+    if DIRECTORY_REFRESH_SECONDS <= 0:
+        logger.info("Directory refresh is disabled (DIRECTORY_REFRESH_SECONDS=0); every cache "
+                    "miss is a directory round trip.")
+        return
+    if not supabase_client:
+        return
+
+    def loop():
+        while True:
+            try:
+                refresh_directory_caches()
+            except Exception as exc:  # noqa: BLE001 - a warm-up must never stop ingestion
+                logger.warning(
+                    "Directory refresh failed (%s); resolution falls back to per-entity lookups "
+                    "until the next pass.", exc,
+                )
+            time.sleep(DIRECTORY_REFRESH_SECONDS)
+
+    threading.Thread(target=loop, name="directory-refresher", daemon=True).start()
 
 # -----------------------------------------------------------------------------
 # Sparkplug B Ingestion Handlers
@@ -1945,141 +1962,9 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
 # `dropped: true`, since those are genuinely lost.
 # See ingestion/README.md -> "Schema Conformance".
 
-# JSON Schema type names satisfied by each Sparkplug value column. `integer` is accepted for a
-# double because process_ddata casts every integer wire type to float.
-_JSON_TYPES_FOR_VALUE = {
-    "double": frozenset({"number", "integer"}),
-    "string": frozenset({"string"}),
-    "bool": frozenset({"boolean"}),
-}
-
 # device_uuid -> ModelledSchema (or None -- see device_modelled_constraints). Keyed on a resolved
 # uuid, so it is bounded by the fleet; it gets the same container as the other caches anyway.
 _schema_cache = TTLCache(MAX_ENTITIES_PER_CACHE, SCHEMA_CACHE_TTL_SECONDS, "schema")
-
-class MetricConstraint(NamedTuple):
-    """
-    What every attached schema, taken together, permits one metric to carry.
-
-    `None` on any field means unconstrained for that facet, which is not the same as absent: a
-    metric named in `required` but not in `properties` is modelled with no constraints.
-    """
-    types:   frozenset = None   # JSON Schema `type`, as a set of names
-    enum:    frozenset = None   # `enum`, as a set of permitted scalars
-    minimum: float     = None
-    maximum: float     = None
-    pattern: str       = None   # `pattern`, a regular expression, strings only
-
-class ModelledSchema(NamedTuple):
-    """
-    The resolved schema surface for a device: what each metric may carry, and whether anything
-    not named is permitted at all.
-
-    `closed` is `additionalProperties: false` on any attached schema. It is the only thing that
-    makes an unmodelled metric a rejectable fault; JSON Schema's default permits unnamed
-    properties.
-    """
-    metrics: dict
-    closed:  bool = False
-
-def _widen(a, b, union):
-    """
-    Combine one facet across two schemas, permissively: `None` (unconstrained) wins, because the
-    union is what the device is permitted to send.
-    """
-    if a is None or b is None:
-        return None
-    return union(a, b)
-
-def modelled_constraints(schema_definitions):
-    """
-    Metric name -> MetricConstraint across every attached schema, plus whether the set is closed.
-
-    The union across schemas mirrors modelled_metrics_across() in validate.py: a device may carry
-    several submodels, and a metric modelled by any one of them is modelled.
-    """
-    result = {}
-    closed = False
-
-    for definition in schema_definitions or []:
-        if not isinstance(definition, dict):
-            continue
-
-        # `additionalProperties: false` on ANY attached schema closes the set. Any is the right
-        # quantifier: a schema saying "nothing beyond these" is an assertion about the whole
-        # device, and another submodel staying silent is not a contradiction of it.
-        if definition.get("additionalProperties") is False:
-            closed = True
-
-        properties = definition.get("properties")
-        properties = properties if isinstance(properties, dict) else {}
-
-        # Resolved per schema before the union. Within one schema, `required: ["M"]` beside a typed
-        # `properties.M` adds no type information and must not erase it; across schemas a schema that
-        # declares M with no type widens the union to unconstrained.
-        this_schema = {}
-
-        for name, spec in properties.items():
-            if not isinstance(name, str):
-                continue
-            if not isinstance(spec, dict):
-                this_schema[name] = MetricConstraint()
-                continue
-
-            declared = spec.get("type")
-            if isinstance(declared, str):
-                types = frozenset({declared})
-            elif isinstance(declared, list):
-                types = frozenset(t for t in declared if isinstance(t, str))
-            else:
-                types = None
-
-            raw_enum = spec.get("enum")
-            if isinstance(raw_enum, list) and raw_enum:
-                enum = frozenset(v for v in raw_enum if isinstance(v, (str, int, float, bool)))
-                enum = enum or None
-            else:
-                enum = None
-
-            # exclusiveMinimum / exclusiveMaximum are not read: Draft 4 spells them as booleans, Draft 6+
-            # as numbers, and a misread facet would reject good telemetry.
-            minimum = _number_or_none(spec.get("minimum"))
-            maximum = _number_or_none(spec.get("maximum"))
-
-            pattern = spec.get("pattern")
-            pattern = pattern if isinstance(pattern, str) and pattern else None
-
-            this_schema[name] = MetricConstraint(types, enum, minimum, maximum, pattern)
-
-        for name in definition.get("required") or []:
-            if isinstance(name, str):
-                this_schema.setdefault(name, MetricConstraint())
-
-        for name, c in this_schema.items():
-            if name not in result:
-                result[name] = c
-            else:
-                prev = result[name]
-                result[name] = MetricConstraint(
-                    types=_widen(prev.types, c.types, lambda x, y: x | y),
-                    enum=_widen(prev.enum, c.enum, lambda x, y: x | y),
-                    # The widest bound survives: a floor of 0 in one schema and 10 in another
-                    # permits anything at or above 0.
-                    minimum=_widen(prev.minimum, c.minimum, min),
-                    maximum=_widen(prev.maximum, c.maximum, max),
-                    # Two patterns cannot be combined into one expression meaning "either" short of
-                    # building an alternation and hoping both are well formed. Differing patterns
-                    # therefore widen to unconstrained, which is the rule every other facet follows.
-                    pattern=_widen(prev.pattern, c.pattern, lambda x, y: x if x == y else None),
-                )
-
-    return ModelledSchema(result, closed)
-
-def _number_or_none(value):
-    """A JSON number, or None. `True` is an int in Python and is not a bound."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value)
 
 def device_modelled_constraints(device_uuid: str):
     """
@@ -2123,142 +2008,6 @@ def device_modelled_constraints(device_uuid: str):
     _schema_cache.set(device_uuid, result)
     return result
 
-def constraint_violations(name, value_kind, value, constraint):
-    """
-    Every facet of one constraint that this value fails, as (code, detail, extra) tuples.
-
-    Pure, so it is testable with three literals. Type comes first and returns alone: a value of
-    the wrong type fails `minimum` and `pattern` too, and reporting all three buries the cause.
-    """
-    satisfied = _JSON_TYPES_FOR_VALUE.get(value_kind, frozenset())
-
-    if constraint.types is not None and not (satisfied & constraint.types):
-        return [("type_mismatch",
-                 "schema declares %s" % "/".join(sorted(constraint.types)),
-                 {"expected_types": sorted(constraint.types)})]
-
-    out = []
-
-    if constraint.enum is not None and value not in constraint.enum:
-        # Sorted on the string form: an enum may legitimately mix strings and numbers, which are
-        # not orderable against each other in Python 3.
-        listed = sorted(constraint.enum, key=lambda v: str(v))
-        out.append(("enum_mismatch",
-                    "schema permits %s" % ", ".join(repr(v) for v in listed),
-                    {"permitted": [v for v in listed]}))
-
-    # Bounds apply to numbers only. A string carrying a `minimum` in its schema is a schema fault,
-    # not a telemetry fault, and comparing the two in Python 3 raises rather than answering.
-    if value_kind == "double" and isinstance(value, (int, float)):
-        if constraint.minimum is not None and value < constraint.minimum:
-            out.append(("below_minimum",
-                        "schema sets minimum %g" % constraint.minimum,
-                        {"minimum": constraint.minimum}))
-        if constraint.maximum is not None and value > constraint.maximum:
-            out.append(("above_maximum",
-                        "schema sets maximum %g" % constraint.maximum,
-                        {"maximum": constraint.maximum}))
-
-    if constraint.pattern is not None and value_kind == "string" and isinstance(value, str):
-        try:
-            if re.search(constraint.pattern, value) is None:
-                out.append(("pattern_mismatch",
-                            "schema requires a match for %s" % constraint.pattern,
-                            {"pattern": constraint.pattern}))
-        except re.error:
-            # A stored schema carrying an invalid regular expression is the schema author's fault
-            # and must not be charged to the device. Reported against the SCHEMA so it is visible,
-            # and deliberately never enforced -- see enforceable_violation().
-            out.append(("schema_pattern_invalid",
-                        "schema pattern %s is not a valid regular expression"
-                        % constraint.pattern,
-                        {"pattern": constraint.pattern}))
-
-    return out
-
-def payload_violations(observed, dropped, modelled):
-    """
-    Everything wrong with one DDATA payload, as a list of audit-shaped dicts.
-
-    `observed` -- [(metric_name, value_kind, value)] for metrics the loop accepted, where
-                  value_kind is a key of _JSON_TYPES_FOR_VALUE.
-    `dropped`  -- [(metric_name_or_None, code, detail)] for metrics the loop skipped.
-    `modelled` -- the ModelledSchema from device_modelled_constraints(), or None to skip the
-                  schema half entirely.
-
-    Pure: every branch is reachable from a unit test with three literals.
-    """
-    violations = []
-
-    for name, code, detail in dropped:
-        violations.append({
-            "metric": name,
-            "code": code,
-            "detail": detail,
-            # The half that is genuinely lost. See the section header.
-            "dropped": True,
-        })
-
-    if modelled is None:
-        return violations
-
-    for name, value_kind, value in observed:
-        constraint = modelled.metrics.get(name)
-
-        if constraint is None:
-            violations.append({
-                "metric": name,
-                "code": "unmodelled_metric",
-                "detail": ("no attached schema declares this metric, and one of them closes the "
-                           "set with additionalProperties: false"
-                           if modelled.closed else
-                           "no attached schema declares this metric"),
-                "observed_type": value_kind,
-                "dropped": False,
-            })
-            continue
-
-        for code, detail, extra in constraint_violations(name, value_kind, value, constraint):
-            violations.append({
-                "metric": name,
-                "code": code,
-                "detail": detail,
-                "observed_type": value_kind,
-                "dropped": False,
-                **extra,
-            })
-
-    return violations
-
-def enforceable_violation(violation, closed):
-    """
-    Whether this finding justifies dropping the metric, as opposed to only recording it.
-
-      * `type_mismatch`, `enum_mismatch`, `below_minimum`, `above_maximum`, `pattern_mismatch`
-        contradict a constraint the bound schema states. Enforceable.
-      * `unmodelled_metric` is enforceable only when a schema closes the set with
-        `additionalProperties: false`; JSON Schema's default permits unnamed properties.
-      * `schema_pattern_invalid` is never enforceable: the fault is in the stored schema.
-      * Anything already `dropped` was skipped by the loop for its own reasons.
-    """
-    if violation.get("dropped"):
-        return False
-    code = violation.get("code")
-    if code == "unmodelled_metric":
-        return bool(closed)
-    return code in _ENFORCEABLE_CODES
-
-_ENFORCEABLE_CODES = frozenset({
-    "type_mismatch", "enum_mismatch", "below_minimum", "above_maximum", "pattern_mismatch",
-})
-
-def _violation_signature(violations):
-    """
-    A hashable summary of what is wrong, ignoring how often and when: a device publishing the
-    same unmodelled metric on every message has one problem, recorded once.
-    """
-    return frozenset((v.get("metric"), v.get("code")) for v in violations)
-
 # {device_uuid: signature}. In-memory, so a daemon restart re-reports each distinct fault once --
 # which is the right trade: an operator who restarts ingestion to clear a fault wants to know
 # whether it came back.
@@ -2279,7 +2028,7 @@ def record_payload_violations(device: dict, violations, observed_at):
     if not device_id:
         return
 
-    signature = _violation_signature(violations)
+    signature = violation_signature(violations)
 
     if not violations:
         # Recovery clears the memo, so a fault that returns after being fixed is recorded again.
@@ -2314,6 +2063,228 @@ def record_payload_violations(device: dict, violations, observed_at):
         logger.error(
             "Could not record payload violations for '%s': %s", device.get("name"), e, exc_info=True
         )
+
+# -----------------------------------------------------------------------------
+# The historian writer
+# -----------------------------------------------------------------------------
+# One thread owns the TimescaleDB connection. The paho callback thread decides what a DDATA means
+# and hands the rows over; this thread writes whatever has accumulated as one transaction. Under
+# light traffic that is one message per transaction. Under load the queue fills while a commit is
+# in flight and the next transaction carries everything that arrived meanwhile, so the fixed cost
+# of a transaction is paid once per batch rather than once per message.
+# See ingestion/README.md -> "The historian writer".
+
+class PendingWrite(NamedTuple):
+    """One DDATA, decided on the callback thread and waiting to be written."""
+    wire_id: str
+    device: dict
+    asset_id: str
+    asset_name: str
+    rows: list
+    observed: list
+    dropped: list
+    modelled: object
+    payload_dt: datetime
+    group_id: str
+    client: object
+
+def _write_batch(cur, batch):
+    """The statements for one transaction: the asset rows, then every telemetry row."""
+    # Asset rows first, for the foreign key. One statement, one row per asset: an upsert cannot
+    # touch the same row twice in a statement, so the last name seen for an asset wins. Refreshed
+    # on every write so a rename is not left stale.
+    assets = {}
+    for item in batch:
+        assets[item.asset_id] = item.asset_name
+    execute_values(
+        cur,
+        """
+        INSERT INTO assets (asset_id, asset_name) VALUES %s
+        ON CONFLICT (asset_id) DO UPDATE SET asset_name = EXCLUDED.asset_name
+        """,
+        list(assets.items()),
+    )
+
+    # DO NOTHING, not DO UPDATE: the historian is append-only, and an upsert would let any
+    # publisher rewrite history. A duplicate is a redelivered MQTT message. Guarded on a non-empty
+    # list: execute_values with no rows emits an invalid statement, and a batch whose every
+    # metric was filtered is ordinary.
+    rows = [row for item in batch for row in item.rows]
+    if rows:
+        execute_values(
+            cur,
+            """
+            INSERT INTO telemetry (time, asset_id, metric_name, val_double, val_string, val_bool)
+            VALUES %s
+            ON CONFLICT (time, asset_id, metric_name) DO NOTHING
+            """,
+            rows,
+            page_size=TELEMETRY_INSERT_PAGE_SIZE,
+        )
+
+def _after_commit(item):
+    """What one message owes once its rows are durable."""
+    count("metrics_written", len(item.rows))
+    # Not `messages_written`: metrics.py reads every `messages_<x>` flat name as a message
+    # type, and this is a count of commits, not of arrivals.
+    count("written_messages")
+
+    # After the commit, so the UNS carries only what the historian recorded. Off by default,
+    # never raises, and timed into its own histogram (uns_publish.py).
+    uns_publish.publish_ddata(
+        item.client, supabase_client, item.device, item.group_id, item.rows,
+        count=count, observe=observe_uns_seconds,
+    )
+
+    # Conformance, after the commit: this writes to Supabase over PostgREST, and a rejection row
+    # asserts something about the device, which a rolled-back batch cannot support. `modelled`
+    # was resolved before the write and is reused rather than re-read.
+    if AUDIT_PAYLOAD_REJECTIONS:
+        record_payload_violations(
+            item.device,
+            payload_violations(item.observed, item.dropped, item.modelled),
+            item.payload_dt,
+        )
+
+class TelemetryWriter:
+    """
+    The queue between the callback thread and the historian, and the thread that drains it.
+
+    `submit()` is the callback thread's side. `flush()` writes everything queued on the calling
+    thread and exists for the suites, which never start the thread.
+    """
+
+    def __init__(self, maxsize, max_batch):
+        self._queue = queue.Queue(maxsize)
+        self.max_batch = max_batch
+        self._stop = threading.Event()
+        self._thread = None
+
+    def depth(self):
+        """Messages waiting. The saturation signal: it only grows while the writer is behind."""
+        return self._queue.qsize()
+
+    def submit(self, pending):
+        """Queue one message. False when the queue stayed full for the whole put timeout."""
+        try:
+            self._queue.put(pending, timeout=TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS)
+            return True
+        except queue.Full:
+            drop(
+                "write_queue_full",
+                "Historian writer queue has held %d messages for %.0fs; dropping DDATA for '%s'. "
+                "The writer is slower than the fleet: read acs_ingestion_write_seconds.",
+                TELEMETRY_QUEUE_MAX_MESSAGES, TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS, pending.wire_id,
+                device=pending.wire_id,
+            )
+            return False
+
+    def flush(self):
+        """Write everything queued, now, on this thread. Not while the writer thread runs."""
+        while True:
+            batch = self._take(block=False)
+            if not batch:
+                return
+            self._write(batch)
+
+    def start(self):
+        self._thread = threading.Thread(target=self._run, name="historian-writer", daemon=True)
+        self._thread.start()
+
+    def stop(self, timeout):
+        """Ask the thread to drain what is queued and exit. True when it did within `timeout`."""
+        self._stop.set()
+        if self._thread is None:
+            return True
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
+
+    def _run(self):
+        while True:
+            batch = self._take(block=True)
+            if batch:
+                try:
+                    self._write(batch)
+                except Exception:  # noqa: BLE001 - the writer thread must outlive any one batch
+                    count("write_failures", len(batch))
+                    logger.error(
+                        "Historian writer: unhandled error; %d message(s) lost.", len(batch),
+                        exc_info=True,
+                    )
+            elif self._stop.is_set():
+                return
+
+    def _take(self, block):
+        """Whatever is queued, up to max_batch. Waits for the first item only when `block`."""
+        items = []
+        try:
+            items.append(self._queue.get(block=block, timeout=0.5 if block else None))
+        except queue.Empty:
+            return items
+        while len(items) < self.max_batch:
+            try:
+                items.append(self._queue.get_nowait())
+            except queue.Empty:
+                break
+        return items
+
+    def _write(self, batch):
+        # The clock starts before the connection is acquired: a reconnect occupies this thread
+        # for up to DB_CONNECT_MAX_ATTEMPTS * DB_CONNECT_BACKOFF_SECONDS, and that stall is what
+        # the histogram exists to expose.
+        started = time.perf_counter()
+
+        db_conn = get_timescaledb_connection()
+        if not db_conn:
+            for item in batch:
+                drop(
+                    "db_unavailable",
+                    "TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'",
+                    item.wire_id,
+                    device=item.wire_id,
+                )
+            return
+
+        try:
+            with db_conn:
+                with db_conn.cursor() as cur:
+                    _write_batch(cur, batch)
+        except Exception as e:
+            if len(batch) > 1:
+                # One message can poison a batch. Retried one at a time, so only that message is
+                # lost and write_failures counts it alone.
+                count("write_batch_failures")
+                logger.warning(
+                    "Historian write of %d message(s) failed (%s); retrying each on its own.",
+                    len(batch), e,
+                )
+                for item in batch:
+                    self._write([item])
+                return
+            # The message is lost: `with db_conn` rolled the transaction back. Counted so the
+            # loss is visible in STATS rather than only in the log.
+            count("write_failures")
+            logger.error("Error writing DDATA telemetry to TimescaleDB: %s", e, exc_info=True)
+            return
+
+        # After `with db_conn` exits: the commit is where a hypertable write becomes durable.
+        observe_write_seconds(time.perf_counter() - started)
+        for item in batch:
+            _after_commit(item)
+
+_writer = TelemetryWriter(TELEMETRY_QUEUE_MAX_MESSAGES, TELEMETRY_BATCH_MAX_MESSAGES)
+
+def _drain_and_exit(signum, frame):
+    """SIGTERM and SIGINT: write what was accepted, then exit."""
+    queued = _writer.depth()
+    logger.info("Signal %d: draining %d queued historian write(s) before exit.", signum, queued)
+    if not _writer.stop(TELEMETRY_SHUTDOWN_DRAIN_SECONDS):
+        logger.warning(
+            "Historian writer did not drain within %.0fs; %d message(s) lost.",
+            TELEMETRY_SHUTDOWN_DRAIN_SECONDS, _writer.depth(),
+        )
+    logging.shutdown()
+    os._exit(0)
 
 def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = None, client=None):
     """
@@ -2379,25 +2350,10 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     asset_id = device["sparkplug_id"]
     asset_name = device.get("name") or asset_id
 
-    # The clock starts before the connection is acquired: a reconnect occupies the one callback
-    # thread for up to DB_CONNECT_MAX_ATTEMPTS * DB_CONNECT_BACKOFF_SECONDS, and that stall is
-    # what the histogram exists to expose.
-    write_started = time.perf_counter()
-
-    db_conn = get_timescaledb_connection()
-    if not db_conn:
-        drop(
-            "db_unavailable",
-            "TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'", wire_id,
-            device=wire_id,
-        )
-        return
-
     payload_ts = payload.timestamp if hasattr(payload, 'timestamp') and payload.timestamp > 0 else int(time.time() * 1000)
     payload_dt = datetime.fromtimestamp(payload_ts / 1000.0, timezone.utc)
 
-    # Declared out here so they survive the try; the conformance record is written only after the
-    # telemetry write committed. A rolled-back batch is evidence about the database, not the device.
+    # For the conformance record, which the writer writes after the commit.
     observed = []
     dropped = []
 
@@ -2415,248 +2371,185 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     enforcing = enforcing and modelled is not None
     rejected_schema = 0
 
-    try:
-        with db_conn:
-            with db_conn.cursor() as cur:
-                # Ensure asset entry exists in TimescaleDB assets table to satisfy foreign key
-                # constraint. asset_name is a display-only cached copy of the Supabase label, so
-                # it is refreshed on every birth rather than left stale after a rename.
-                cur.execute(
-                    """
-                    INSERT INTO assets (asset_id, asset_name) VALUES (%s, %s)
-                    ON CONFLICT (asset_id) DO UPDATE SET asset_name = EXCLUDED.asset_name;
-                    """,
-                    (asset_id, asset_name)
-                )
+    # Every metric decided here; nothing is written here. Failure granularity is per message:
+    # the writer's transaction rolls a message back whole.
+    rows = []
+    rejected_timestamps = 0
+    unresolved_aliases = 0
+    for metric in payload.metrics:
+        # `observed` and `dropped` are filled alongside the loop's own decisions, never by a second
+        # pass that could disagree with what was written.
+        # The alias is resolved before every other test, including the identity-metric filter: an
+        # aliased Asset_ID has an empty name and would otherwise be written as a metric.
+        metric_name = resolve_metric_name(group_id, gateway_wire_id, metric)
+        if metric_name is None:
+            unresolved_aliases += 1
+            # NO NAME, and that is the whole condition being reported -- the metric
+            # arrived as an alias no birth certificate explains. The alias number is
+            # the only identity it has, so it is what the record carries.
+            dropped.append((
+                None,
+                "unresolved_alias",
+                "alias %s is not in edge node '%s' alias table" % (
+                    getattr(metric, "alias", None), gateway_wire_id
+                ),
+            ))
+            continue
 
-                # Rows are accumulated and written in one statement below. Failure granularity is unchanged:
-                # the loop already runs inside `with db_conn:`, which rolls back the whole message on any
-                # exception.
-                rows = []
-                rejected_timestamps = 0
-                unresolved_aliases = 0
-                for metric in payload.metrics:
-                    # `observed` and `dropped` are filled alongside the loop's own decisions, never by a second
-                    # pass that could disagree with what was written.
-                    # The alias is resolved before every other test, including the identity-metric filter: an
-                    # aliased Asset_ID has an empty name and would otherwise be written as a metric.
-                    metric_name = resolve_metric_name(group_id, gateway_wire_id, metric)
-                    if metric_name is None:
-                        unresolved_aliases += 1
-                        # NO NAME, and that is the whole condition being reported -- the metric
-                        # arrived as an alias no birth certificate explains. The alias number is
-                        # the only identity it has, so it is what the record carries.
-                        dropped.append((
-                            None,
-                            "unresolved_alias",
-                            "alias %s is not in edge node '%s' alias table" % (
-                                getattr(metric, "alias", None), gateway_wire_id
-                            ),
-                        ))
-                        continue
+        if metric_name in IDENTITY_METRICS:
+            continue
 
-                    if metric_name in IDENTITY_METRICS:
-                        continue
+        if metric.HasField('timestamp') and metric.timestamp > 0:
+            metric_dt = datetime.fromtimestamp(metric.timestamp / 1000.0, timezone.utc)
+        else:
+            metric_dt = payload_dt
 
-                    if metric.HasField('timestamp') and metric.timestamp > 0:
-                        metric_dt = datetime.fromtimestamp(metric.timestamp / 1000.0, timezone.utc)
-                    else:
-                        metric_dt = payload_dt
+        # Reject rather than clamp: clamping relabels a reading to a time it did not happen, and
+        # piles every sample from a broken clock onto one timestamp.
+        if not _timestamp_is_sane(metric_dt):
+            rejected_timestamps += 1
+            dropped.append((
+                metric_name,
+                "timestamp_out_of_window",
+                "timestamp %s is outside the sanity window (-%ds/+%ds)" % (
+                    metric_dt.isoformat(),
+                    TELEMETRY_MAX_AGE_SECONDS,
+                    TELEMETRY_MAX_FUTURE_SECONDS,
+                ),
+            ))
+            continue
 
-                    # Reject rather than clamp: clamping relabels a reading to a time it did not happen, and
-                    # piles every sample from a broken clock onto one timestamp.
-                    if not _timestamp_is_sane(metric_dt):
-                        rejected_timestamps += 1
-                        dropped.append((
-                            metric_name,
-                            "timestamp_out_of_window",
-                            "timestamp %s is outside the sanity window (-%ds/+%ds)" % (
-                                metric_dt.isoformat(),
-                                TELEMETRY_MAX_AGE_SECONDS,
-                                TELEMETRY_MAX_FUTURE_SECONDS,
-                            ),
-                        ))
-                        continue
+        val_double = None
+        val_string = None
+        val_bool = None
 
-                    val_double = None
-                    val_string = None
-                    val_bool = None
+        # Which of the three columns the value lands in is what a JSON Schema `type` constrains, so the
+        # conformance check reads this rather than re-inspecting the protobuf.
+        value_kind = None
 
-                    # Which of the three columns the value lands in is what a JSON Schema `type` constrains, so the
-                    # conformance check reads this rather than re-inspecting the protobuf.
-                    value_kind = None
+        if metric.HasField("int_value"):
+            val_double = float(metric.int_value)
+            value_kind = "double"
+        elif metric.HasField("long_value"):
+            val_double = float(metric.long_value)
+            value_kind = "double"
+        elif metric.HasField("float_value"):
+            val_double = float(metric.float_value)
+            value_kind = "double"
+        elif metric.HasField("double_value"):
+            val_double = metric.double_value
+            value_kind = "double"
+        elif metric.HasField("boolean_value"):
+            val_bool = metric.boolean_value
+            value_kind = "bool"
+        elif metric.HasField("string_value"):
+            val_string = metric.string_value
+            value_kind = "string"
+        else:
+            # A metric carrying no recognised value field is a genuine loss and is recorded.
+            dropped.append((
+                metric_name,
+                "no_value",
+                "metric carries no recognised Sparkplug value field",
+            ))
+            continue
 
-                    if metric.HasField("int_value"):
-                        val_double = float(metric.int_value)
-                        value_kind = "double"
-                    elif metric.HasField("long_value"):
-                        val_double = float(metric.long_value)
-                        value_kind = "double"
-                    elif metric.HasField("float_value"):
-                        val_double = float(metric.float_value)
-                        value_kind = "double"
-                    elif metric.HasField("double_value"):
-                        val_double = metric.double_value
-                        value_kind = "double"
-                    elif metric.HasField("boolean_value"):
-                        val_bool = metric.boolean_value
-                        value_kind = "bool"
-                    elif metric.HasField("string_value"):
-                        val_string = metric.string_value
-                        value_kind = "string"
-                    else:
-                        # A metric carrying no recognised value field is a genuine loss and is recorded.
-                        dropped.append((
-                            metric_name,
-                            "no_value",
-                            "metric carries no recognised Sparkplug value field",
-                        ))
-                        continue
-
-                    # The VALUE travels with the kind now: enum, minimum, maximum and pattern
-                    # are constraints on values, and the kind alone answered only `type`.
-                    metric_value = (
-                        val_double if value_kind == "double"
-                        else val_string if value_kind == "string"
-                        else val_bool
-                    )
-
-                    # ---------------------------------------------------------------------
-                    # Enforcement. Only reached for a device explicitly set to `enforce`.
-                    # ---------------------------------------------------------------------
-                    # The offending metric only, not the message, as for an unresolved alias or an out-of-window
-                    # timestamp above.
-                    if enforcing:
-                        constraint = modelled.metrics.get(metric_name)
-                        if constraint is None:
-                            faults = ([("unmodelled_metric",
-                                        "no attached schema declares this metric", {})]
-                                      if modelled.closed else [])
-                        else:
-                            faults = constraint_violations(
-                                metric_name, value_kind, metric_value, constraint)
-                            faults = [
-                                f for f in faults
-                                if enforceable_violation({"code": f[0], "dropped": False},
-                                                         modelled.closed)
-                            ]
-
-                        if faults:
-                            code, detail, _extra = faults[0]
-                            dropped.append((metric_name, code, detail))
-                            rejected_schema += 1
-                            # Names the device, the metric and the constraint: the schema cache TTL means an edit starts
-                            # discarding telemetry up to five minutes later, and the line is what connects the two.
-                            logger.warning(
-                                "SCHEMA ENFORCED: dropped metric '%s' for device '%s' (%s) -- %s "
-                                "(%s). The device is set to conformance_policy=enforce; this "
-                                "reading was NOT written and cannot be recovered.",
-                                metric_name, device.get("name"), asset_id, code, detail
-                            )
-                            continue
-
-                    observed.append((metric_name, value_kind, metric_value))
-
-                    rows.append(
-                        (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
-                    )
-
-                metric_count = len(rows)
-
-                # DO NOTHING, not DO UPDATE: the historian is append-only, and an upsert would let any
-                # publisher rewrite history. A duplicate is a redelivered MQTT message.
-                # Guarded on a non-empty list: execute_values with no rows emits an invalid statement, and a
-                # message whose every metric was filtered is ordinary.
-                if rows:
-                    execute_values(
-                        cur,
-                        """
-                        INSERT INTO telemetry (time, asset_id, metric_name, val_double, val_string, val_bool)
-                        VALUES %s
-                        ON CONFLICT (time, asset_id, metric_name) DO NOTHING
-                        """,
-                        rows,
-                        page_size=TELEMETRY_INSERT_PAGE_SIZE,
-                    )
-
-                # Counted inside the transaction block but after the loop, so this reflects rows
-                # the commit is about to make durable. An exception below unwinds the write and
-                # skips this, keeping the counter honest rather than optimistic.
-                count("metrics_written", metric_count)
-                count("metrics_rejected_timestamp", rejected_timestamps)
-                # The same event labelled by edge node, which is what makes it actionable; this is the series
-                # metrics.py exports. `metrics_rejected_timestamp` stays in the flat registry beside its
-                # warning and is not exported twice.
-                count_labelled(
-                    "acs_ingestion_timestamps_rejected_total",
-                    {"edge_node": gateway_wire_id}, rejected_timestamps
-                )
-                count("metrics_unresolved_alias", unresolved_aliases)
-                count("metrics_rejected_schema", rejected_schema)
-
-                if unresolved_aliases:
-                    # Skip the undecodable metrics, keep the rest, and ask the node to re-birth. On a cold start
-                    # every metric is alias-only and nothing resolves, so the two are the same there.
-                    requested = request_node_rebirth(client, group_id, gateway_wire_id)
-                    if requested:
-                        logger.warning(
-                            "Dropped %d metric(s) for asset '%s': their aliases are not in edge "
-                            "node '%s' alias table, so no birth certificate has been seen for it "
-                            "since this daemon started. A rebirth has been requested.",
-                            unresolved_aliases, asset_id, gateway_wire_id
-                        )
-
-                if rejected_timestamps:
-                    logger.warning(
-                        "Rejected %d metric(s) for asset '%s' with timestamps outside the sanity "
-                        "window (-%ds/+%ds). Check the gateway's clock.",
-                        rejected_timestamps, asset_id,
-                        TELEMETRY_MAX_AGE_SECONDS, TELEMETRY_MAX_FUTURE_SECONDS
-                    )
-
-                if rejected_schema:
-                    # A second line, at the same level as the timestamp and alias summaries above,
-                    # so the per-message total is visible to somebody reading the log for volume
-                    # rather than for a specific metric.
-                    logger.warning(
-                        "Dropped %d metric(s) for asset '%s' that contradicted its bound schema. "
-                        "Set conformance_policy='audit' on this device to record without "
-                        "discarding.", rejected_schema, asset_id
-                    )
-
-                logger.info("INGESTED DDATA: Ingested %d metrics for asset '%s' into TimescaleDB", metric_count, asset_id)
-
-        # Outside `with db_conn`: the block commits on exit, and the commit is where a hypertable
-        # write becomes durable. Reached only when the commit succeeded.
-        observe_write_seconds(time.perf_counter() - write_started)
-
-        # After the commit, so the UNS carries only what the historian recorded. Off by default,
-        # never raises, and timed into its own histogram (uns_publish.py).
-        uns_publish.publish_ddata(
-            client, supabase_client, device, group_id or DEFAULT_SPARKPLUG_GROUP, rows,
-            count=count, observe=observe_uns_seconds,
+        # The VALUE travels with the kind now: enum, minimum, maximum and pattern
+        # are constraints on values, and the kind alone answered only `type`.
+        metric_value = (
+            val_double if value_kind == "double"
+            else val_string if value_kind == "string"
+            else val_bool
         )
-    except Exception as e:
-        # The whole message is lost: `with db_conn` rolled the transaction back, so none of the
-        # batch landed. Counted so the loss is visible in STATS rather than only in the log --
-        # a write that fails once a minute is invisible in a log nobody is tailing.
-        count("write_failures")
-        logger.error("Error writing DDATA telemetry to TimescaleDB: %s", e, exc_info=True)
-        return
 
-    # Conformance, after the commit and outside the transaction: this writes to Supabase over
-    # PostgREST, and a rejection row asserts something about the device, which a rolled-back batch
-    # cannot support. The flag is tested here as well as inside record_payload_violations because
-    # device_modelled_constraints() can issue a round trip on a cache miss.
-    if AUDIT_PAYLOAD_REJECTIONS:
-        # `modelled` was resolved before the write and is reused rather than re-read: it is the
-        # same cached value, and fetching it twice would double the round trips on a cache miss
-        # for a device that is enforcing.
-        record_payload_violations(
-            device,
-            payload_violations(observed, dropped, modelled),
-            payload_dt,
+        # ---------------------------------------------------------------------
+        # Enforcement. Only reached for a device explicitly set to `enforce`.
+        # ---------------------------------------------------------------------
+        # The offending metric only, not the message, as for an unresolved alias or an out-of-window
+        # timestamp above.
+        if enforcing:
+            constraint = modelled.metrics.get(metric_name)
+            if constraint is None:
+                faults = ([("unmodelled_metric",
+                            "no attached schema declares this metric", {})]
+                          if modelled.closed else [])
+            else:
+                faults = constraint_violations(
+                    metric_name, value_kind, metric_value, constraint)
+                faults = [
+                    f for f in faults
+                    if enforceable_violation({"code": f[0], "dropped": False},
+                                             modelled.closed)
+                ]
+
+            if faults:
+                code, detail, _extra = faults[0]
+                dropped.append((metric_name, code, detail))
+                rejected_schema += 1
+                # Names the device, the metric and the constraint: the schema cache TTL means an edit starts
+                # discarding telemetry up to five minutes later, and the line is what connects the two.
+                logger.warning(
+                    "SCHEMA ENFORCED: dropped metric '%s' for device '%s' (%s) -- %s "
+                    "(%s). The device is set to conformance_policy=enforce; this "
+                    "reading was NOT written and cannot be recovered.",
+                    metric_name, device.get("name"), asset_id, code, detail
+                )
+                continue
+
+        observed.append((metric_name, value_kind, metric_value))
+
+        rows.append(
+            (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
         )
+
+    # Counted beside the warnings that name them. What was written is counted by the writer,
+    # after the commit.
+    count("metrics_rejected_timestamp", rejected_timestamps)
+    # The same event labelled by edge node, which is what makes it actionable; this is the series
+    # metrics.py exports. `metrics_rejected_timestamp` stays in the flat registry beside its
+    # warning and is not exported twice.
+    count_labelled(
+        "acs_ingestion_timestamps_rejected_total",
+        {"edge_node": gateway_wire_id}, rejected_timestamps
+    )
+    count("metrics_unresolved_alias", unresolved_aliases)
+    count("metrics_rejected_schema", rejected_schema)
+
+    if unresolved_aliases:
+        # Skip the undecodable metrics, keep the rest, and ask the node to re-birth. On a cold start
+        # every metric is alias-only and nothing resolves, so the two are the same there.
+        requested = request_node_rebirth(client, group_id, gateway_wire_id)
+        if requested:
+            logger.warning(
+                "Dropped %d metric(s) for asset '%s': their aliases are not in edge "
+                "node '%s' alias table, so no birth certificate has been seen for it "
+                "since this daemon started. A rebirth has been requested.",
+                unresolved_aliases, asset_id, gateway_wire_id
+            )
+
+    if rejected_timestamps:
+        logger.warning(
+            "Rejected %d metric(s) for asset '%s' with timestamps outside the sanity "
+            "window (-%ds/+%ds). Check the gateway's clock.",
+            rejected_timestamps, asset_id,
+            TELEMETRY_MAX_AGE_SECONDS, TELEMETRY_MAX_FUTURE_SECONDS
+        )
+
+    if rejected_schema:
+        # A second line, at the same level as the timestamp and alias summaries above,
+        # so the per-message total is visible to somebody reading the log for volume
+        # rather than for a specific metric.
+        logger.warning(
+            "Dropped %d metric(s) for asset '%s' that contradicted its bound schema. "
+            "Set conformance_policy='audit' on this device to record without "
+            "discarding.", rejected_schema, asset_id
+        )
+
+    _writer.submit(PendingWrite(
+        wire_id=wire_id, device=device, asset_id=asset_id, asset_name=asset_name, rows=rows,
+        observed=observed, dropped=dropped, modelled=modelled, payload_dt=payload_dt,
+        group_id=group_id or DEFAULT_SPARKPLUG_GROUP, client=client,
+    ))
 
 # Whether the daemon is subscribed. `acs_ingestion_db_connected` answers the same question for
 # PostgreSQL; "the process is running" and "the daemon is receiving messages" are different
@@ -3235,6 +3128,7 @@ def start_metrics_endpoint():
                     1 if (_ts_conn is not None and not _ts_conn.closed) else 0,
                 # The subscription, not the connection. See the note above on_connect().
                 "acs_ingestion_mqtt_connected": 1 if _mqtt_subscribed else 0,
+                "acs_ingestion_write_queue_depth": _writer.depth(),
             },
         )
 
@@ -3309,6 +3203,10 @@ def main():
     # Also before the connect loop, so a daemon that cannot reach the broker still reports "no
     # traffic" on a timer rather than going silent in a way that looks like a crash.
     start_stats_reporter()
+    # The writer before the broker connects: nothing drains the queue until it runs. The
+    # directory refresher likewise, so the first messages resolve against a warm cache.
+    _writer.start()
+    start_directory_refresher()
     # A daemon stuck retrying the broker must still be scrapeable: `acs_ingestion_up` at 1 with
     # flat counters is what "connected to nothing" looks like, and is distinguishable from a dead
     # target.
@@ -3341,6 +3239,10 @@ def main():
         check_privileges=_startup_conn is None,
         reconcile_capture=not capture_reconciled,
     )
+
+    # On the main thread, where signal handlers must be installed.
+    signal.signal(signal.SIGTERM, _drain_and_exit)
+    signal.signal(signal.SIGINT, _drain_and_exit)
 
     while True:
         try:

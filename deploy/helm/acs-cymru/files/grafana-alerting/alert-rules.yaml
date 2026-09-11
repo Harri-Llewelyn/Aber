@@ -941,6 +941,65 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+      # -------------------------------------------------------------------------------------------
+      # 7. HISTORIAN WRITER SATURATING. rate(acs_ingestion_write_seconds_sum) is the fraction of the
+      # writer thread's time spent inside transactions -- its occupancy. Half is the warning: the
+      # daemon keeps up, and a burst (a gateway flushing an outage's backlog) or a slower historian
+      # is what takes it the rest of the way. Queue depth is deliberately not the trigger: it grows
+      # only once the writer is already behind, and a full queue's drops reach rule 2 anyway.
+      # `for: 10m` rides out a backlog flush, which is meant to run hot.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-ingestion-writer-saturating
+        title: Historian Writer Saturating
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The ingestion daemon's historian writer has been busy more than half the time for ten
+            minutes. Telemetry is still being written; a burst or a slower historian would start it
+            queueing. Read acs_ingestion_write_queue_depth and acs_ingestion_write_seconds beside it.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: sum(rate(acs_ingestion_write_seconds_sum[5m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.5]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
   # ===============================================================================================
   # THE LOG PIPELINE. Loki and Alloy hold the evidence for every other fault here, so their own
   # failure destroys the record of itself. Four rules for four distinct failures:

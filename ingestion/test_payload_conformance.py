@@ -55,6 +55,7 @@ _stub("paho.mqtt")
 _stub("paho.mqtt.client", Client=object)
 
 import ingestion  # noqa: E402  (must follow the stubs above)
+import registry  # noqa: E402
 
 
 OBSERVED_AT = datetime(2026, 8, 21, 9, 30, tzinfo=timezone.utc)
@@ -470,13 +471,13 @@ class RecordViolationsTestCase(unittest.TestCase):
         ingestion.supabase_client = self.client
         ingestion.AUDIT_PAYLOAD_REJECTIONS = True
         ingestion._last_violation_signature.clear()
-        ingestion._counters.clear()
+        registry._counters.clear()
 
     def tearDown(self):
         ingestion.supabase_client = self._real_client
         ingestion.AUDIT_PAYLOAD_REJECTIONS = self._real_flag
         ingestion._last_violation_signature.clear()
-        ingestion._counters.clear()
+        registry._counters.clear()
 
     def violation(self, metric="Rogue/Metric", code="unmodelled_metric"):
         return [{"metric": metric, "code": code, "detail": "d", "dropped": False}]

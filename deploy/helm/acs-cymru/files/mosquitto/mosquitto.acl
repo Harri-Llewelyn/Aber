@@ -132,6 +132,14 @@ topic write ACS-Cymru/Directory/#
 # And reads it back, so the daemon can verify its own retained documents without a second
 # account. See "The Directory topic, and who may read it" below for why that list is short.
 topic read  ACS-Cymru/Directory/#
+# The Unified Namespace (ingestion/uns_publish.py): every decoded reading, retained, under
+# uns/<enterprise>/<site>/<area>/<cell>/<device>/<metric>. The daemon is the only writer, and the
+# tree is off by default (UNS_MQTT_ENABLED). READ IS GRANTED TO NO GATEWAY AND TO NO OTHER
+# PRINCIPAL HERE: `uns/#` is every machine's readings in the clear, so one gateway credential
+# reading it would read the whole plant, which the per-node pattern above exists to prevent. A
+# BI or SCADA consumer gets its own account and a `topic read uns/#` rule, added deliberately.
+topic write uns/#
+topic read  uns/#
 
 
 # ---------------------------------------------------------------------------------------------

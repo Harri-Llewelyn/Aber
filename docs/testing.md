@@ -62,6 +62,10 @@ python ingestion/test_structured_logging.py
 python test-harness/test_log_pipeline.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
+# The historian writer -- several messages become one transaction; one bad message still loses one
+python ingestion/test_telemetry_writer.py
+# The directory refresher -- one request per table per pass, keyed as the per-entity path keys
+python ingestion/test_directory_refresh.py
 # Broker capture and playback -- identity rewriting, timestamp rebasing, wire encodings
 python ingestion/test_capture_playback.py
 # The daemon-side recording engine -- subject matching, the caps, and the manifest

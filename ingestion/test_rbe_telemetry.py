@@ -345,6 +345,8 @@ class TestSparseDdataIngestion(unittest.TestCase):
 
     def ingest(self, payload):
         ingestion.process_ddata(DEVICE, NODE, payload, group_id=GROUP, client=MagicMock())
+        # The writer thread is never started by the suites; drain the queue here.
+        ingestion._writer.flush()
 
     def test_a_single_metric_payload_writes_exactly_one_row(self):
         """

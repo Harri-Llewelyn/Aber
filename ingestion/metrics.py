@@ -75,6 +75,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 COUNTER_MAP = {
     # Throughput.
     "metrics_written": ("acs_ingestion_metrics_written_total", {}),
+    "written_messages": ("acs_ingestion_messages_written_total", {}),
     # Drops, one label value per reason. The flat names encode the reason already; this is where
     # that convention becomes a dimension a query can group by.
     "dropped_gateway_binding": (
@@ -99,6 +100,8 @@ COUNTER_MAP = {
         "acs_ingestion_messages_dropped_total", {"reason": "node_message_directory_unavailable"}),
     "dropped_db_unavailable": (
         "acs_ingestion_messages_dropped_total", {"reason": "db_unavailable"}),
+    "dropped_write_queue_full": (
+        "acs_ingestion_messages_dropped_total", {"reason": "write_queue_full"}),
     # Per-metric rejections, which are NOT message drops -- the message was accepted and some of
     # its metrics were not. Kept as separate series so a query cannot conflate them.
     # `metrics_rejected_timestamp` is absent DELIBERATELY: it leaves labelled by edge node, and
@@ -107,6 +110,7 @@ COUNTER_MAP = {
     "metrics_rejected_schema": ("acs_ingestion_schema_rejected_total", {}),
     # The historian write path.
     "write_failures": ("acs_ingestion_write_failures_total", {}),
+    "write_batch_failures": ("acs_ingestion_write_batch_failures_total", {}),
     "db_reconnects": ("acs_ingestion_db_reconnects_total", {}),
     "db_connect_failures": ("acs_ingestion_db_connect_failures_total", {}),
     "db_heals": ("acs_ingestion_db_heals_total", {}),
@@ -158,6 +162,9 @@ EXPORTED_LABELLED_INSTEAD = {
 HELP = {
     "acs_ingestion_messages_total":
         "Sparkplug messages the daemon acted on, after parsing and the command-topic filter.",
+    "acs_ingestion_messages_written_total":
+        "DDATA messages whose telemetry the historian committed. Divide acs_ingestion_write_seconds_count "
+        "into it for the messages per transaction: 1 while the writer keeps up, rising as it batches.",
     "acs_ingestion_metrics_written_total":
         "Individual metric samples written to the historian.",
     "acs_ingestion_messages_dropped_total":
@@ -172,6 +179,14 @@ HELP = {
         "Metrics carrying an alias with no known name, pending a rebirth.",
     "acs_ingestion_schema_rejected_total":
         "Metrics DROPPED for contradicting their device's bound schema. Non-zero only for a device set to conformance_policy=enforce (0050); this telemetry was not written and cannot be recovered.",
+    "acs_ingestion_write_batch_failures_total":
+        "Transactions carrying more than one message that failed and were retried one message at a "
+        "time. The message at fault is counted by acs_ingestion_write_failures_total; the others were "
+        "written on the retry.",
+    "acs_ingestion_write_queue_depth":
+        "DDATA messages decided by the callback thread and not yet written. THE SATURATION SIGNAL: "
+        "it grows only while the writer is behind the fleet, and a full queue drops with "
+        "reason=\"write_queue_full\".",
     "acs_ingestion_write_failures_total":
         "Historian writes that raised. Telemetry from these is lost.",
     "acs_ingestion_uns_published_total":
@@ -183,9 +198,9 @@ HELP = {
         "cell_unfiled are the two Unassigned queues on the dashboard; lane is a shadow or "
         "simulated device; unsafe_name is a segment carrying / + or #.",
     "acs_ingestion_uns_publish_seconds":
-        "Time the UNS republish takes per DDATA, on the same callback thread as the historian "
-        "write. Read it beside acs_ingestion_write_seconds: the two together are the per-message "
-        "cost on the single-writer path.",
+        "Time the UNS republish takes per DDATA, on the historian writer thread after the commit. "
+        "Read it beside acs_ingestion_write_seconds: both occupy the one thread whose saturation "
+        "is the daemon's ceiling.",
     "acs_ingestion_db_reconnects_total": "Times the historian connection was re-opened.",
     "acs_ingestion_db_connect_failures_total": "Failed attempts to open the historian connection.",
     "acs_ingestion_db_heals_total":
@@ -227,13 +242,13 @@ HELP = {
         "acs_ingestion_messages_dropped_total{reason=\"gateway_binding\"}, which is what an "
         "enumeration attempt would also move.",
     "acs_ingestion_write_seconds":
-        "Wall time one DDATA message spends occupying the historian write path, from acquiring "
-        "the connection to after the commit. THE SINGLE-WRITER CEILING IS THIS SERIES: every "
-        "write happens on the one paho callback thread, so a slow write stalls every other "
-        "device rather than only its own. Committed writes only -- a write that raised is "
-        "counted by acs_ingestion_write_failures_total and excluded here, so that a p99 spike "
-        "unambiguously means a slow database and never an absent one. Observations at or above "
-        "0.25s are the bounded reconnect running, not the INSERT.",
+        "Wall time of one historian transaction, from acquiring the connection to after the commit. "
+        "One observation per transaction, which carries every message queued while the previous one "
+        "ran. rate(_sum) is the fraction of the writer thread in use, and that is the capacity gauge: "
+        "at 1 the writer is saturated and acs_ingestion_write_queue_depth grows. Committed writes only "
+        "-- a transaction that raised is counted by acs_ingestion_write_failures_total and excluded, so "
+        "a p99 spike unambiguously means a slow database and never an absent one. Observations at or "
+        "above 0.25s are the bounded reconnect running, not the INSERT.",
     "acs_ingestion_up": "1 while the daemon is serving this endpoint.",
     "acs_ingestion_db_connected":
         "1 when the historian connection is open. 0 means telemetry is being dropped now.",
@@ -286,6 +301,7 @@ TYPES = {
     "acs_ingestion_up": "gauge",
     "acs_ingestion_db_connected": "gauge",
     "acs_ingestion_mqtt_connected": "gauge",
+    "acs_ingestion_write_queue_depth": "gauge",
     # A LABELLED GAUGE, which is why it arrives through `labelled` rather than through `gauges`.
     # The TYPE is decided here by name, not by which argument a series came in on -- so a gauge
     # that needs a label dimension has somewhere to go without a fourth parameter.
