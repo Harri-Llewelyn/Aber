@@ -28,7 +28,7 @@ export const SOURCE_INHERITED = 'inherited'
 export const SOURCE_SITE_WIDE = 'site_wide'
 export const SOURCE_UNASSIGNED = 'unassigned'
 export const SOURCE_SIMULATED = 'simulated'
-const SOURCE_SHADOW = 'shadow'
+export const SOURCE_SHADOW = 'shadow'
 
 const SOURCE_LABELS = {
   [SOURCE_EXPLICIT]: 'Set on device',
