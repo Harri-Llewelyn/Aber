@@ -5,7 +5,7 @@ import { OverviewTab } from '../components/tabs/OverviewTab'
 import { api } from '../api'
 
 /**
- * The Shopfloor Dashboard legend and its alert category. The map paints a device chip red when
+ * The Site Map legend and its alert category. The map paints a device chip red when
  * Grafana has an alert firing against it, and the legend must name that colour. The two halves are
  * tested together: a legend entry promising a red chip is only true while the chip is also legible
  * without colour.

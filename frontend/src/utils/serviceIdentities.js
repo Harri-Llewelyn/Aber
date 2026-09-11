@@ -22,11 +22,14 @@ export const BROKER_PRINCIPALS = [
       'write spBv1.0/+/NCMD/+',
       'write ACS-Cymru/Directory/#',
       'read  ACS-Cymru/Directory/#',
+      'write uns/#',
+      'read  uns/#',
     ],
-    // The one principal here that can write, and both writes are narrow: NCMD is how a rebirth is
-    // requested, and `ACS-Cymru/Directory/#` is the Directory's MQTT half (off unless
-    // DIRECTORY_MQTT_ENABLED). Read is granted only to the principals that already hold `spBv1.0/#`,
-    // and to no gateway.
+    // The one principal here that can write, and every write is narrow: NCMD is how a rebirth is
+    // requested, `ACS-Cymru/Directory/#` is the Directory's MQTT half (off unless
+    // DIRECTORY_MQTT_ENABLED) and `uns/#` is the Unified Namespace (off unless UNS_MQTT_ENABLED).
+    // Neither tree is readable by any gateway: the Directory would enumerate the site, and the
+    // UNS would hand one credential every machine's readings.
     writes: true,
   },
   {

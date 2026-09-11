@@ -1209,6 +1209,12 @@ services:
       DIRECTORY_MQTT_ENABLED: ${DIRECTORY_MQTT_ENABLED:-}
       DIRECTORY_MQTT_TOPIC_PREFIX: ${DIRECTORY_MQTT_TOPIC_PREFIX:-ACS-Cymru/Directory/v1}
       DIRECTORY_MQTT_INTERVAL_SECONDS: ${DIRECTORY_MQTT_INTERVAL_SECONDS:-60}
+      # The Unified Namespace bridge, off by default for the same reason: every decoded reading,
+      # retained under uns/..., behind mosquitto.acl alone. The root must stay inside the ACL's
+      # `topic write uns/#` rule.
+      UNS_MQTT_ENABLED: ${UNS_MQTT_ENABLED:-}
+      UNS_MQTT_TOPIC_ROOT: ${UNS_MQTT_TOPIC_ROOT:-uns}
+      UNS_CONTEXT_TTL_SECONDS: ${UNS_CONTEXT_TTL_SECONDS:-60}
       PYTHONUNBUFFERED: "1"
     # The CA, mounted unconditionally so MQTT_TLS_ENABLED is the only switch. ca.key is unreadable.
     volumes:

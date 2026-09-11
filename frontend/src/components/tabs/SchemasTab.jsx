@@ -685,7 +685,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           {/* FILTERED OF TOTAL, not a bare count. A narrowed registry would otherwise read as a
               short one, which is the wrong thing to believe about a version history. */}
           <h3 className="section-title">
-            Registered Schemas
+            Schemas
             <HelpTip
               label="About schemas"
               text="A schema declares what a device is modelled to publish. A published schema is read-only: changes are made by creating the next version, which forks it into an editable draft. Publishing a draft activates it, archives its predecessor and moves every device across in one transaction. Version numbers are assigned by the database."
@@ -1505,7 +1505,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           },
           {
             label: `View ${deviceCountFor(selectedSchema.schema_uuid)} Provisioned Device(s)`,
-            icon: <IconCheck size={13} />,
+            icon: <IconCpu size={13} />,
             onClick: () => onSelectSchema?.(selectedSchema.schema_uuid),
             disabled: deviceCountFor(selectedSchema.schema_uuid) === 0,
             title: deviceCountFor(selectedSchema.schema_uuid) === 0

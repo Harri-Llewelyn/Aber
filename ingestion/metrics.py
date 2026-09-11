@@ -126,6 +126,16 @@ COUNTER_MAP = {
     # Appliance health (archived migration 0035).
     "gateway_health_metrics_rejected": (
         "acs_ingestion_gateway_health_rejected_total", {}),
+    # The UNS bridge (uns_publish.py): topics written, and readings not republished by reason.
+    # The reasons are uns_publish.SKIP_REASONS; test_uns_publish.py holds the two lists together.
+    "uns_published": ("acs_ingestion_uns_published_total", {}),
+    "uns_skipped_site_unset": ("acs_ingestion_uns_skipped_total", {"reason": "site_unset"}),
+    "uns_skipped_location_unknown": ("acs_ingestion_uns_skipped_total", {"reason": "location_unknown"}),
+    "uns_skipped_lane": ("acs_ingestion_uns_skipped_total", {"reason": "lane"}),
+    "uns_skipped_unassigned": ("acs_ingestion_uns_skipped_total", {"reason": "unassigned"}),
+    "uns_skipped_cell_unfiled": ("acs_ingestion_uns_skipped_total", {"reason": "cell_unfiled"}),
+    "uns_skipped_unsafe_name": ("acs_ingestion_uns_skipped_total", {"reason": "unsafe_name"}),
+    "uns_skipped_publish_error": ("acs_ingestion_uns_skipped_total", {"reason": "publish_error"}),
 }
 
 # FLAT COUNTERS THAT ARE DELIBERATELY NOT EXPORTED FROM THIS TABLE, each because the same event
@@ -164,6 +174,18 @@ HELP = {
         "Metrics DROPPED for contradicting their device's bound schema. Non-zero only for a device set to conformance_policy=enforce (0050); this telemetry was not written and cannot be recovered.",
     "acs_ingestion_write_failures_total":
         "Historian writes that raised. Telemetry from these is lost.",
+    "acs_ingestion_uns_published_total":
+        "Readings republished on the Unified Namespace (uns/...) after the historian commit. Zero "
+        "while UNS_MQTT_ENABLED is unset.",
+    "acs_ingestion_uns_skipped_total":
+        "Readings the UNS bridge did not republish, by reason. Nothing here is lost: the historian "
+        "holds every one. site_unset means the site.name setting is empty; unassigned and "
+        "cell_unfiled are the two Unassigned queues on the dashboard; lane is a shadow or "
+        "simulated device; unsafe_name is a segment carrying / + or #.",
+    "acs_ingestion_uns_publish_seconds":
+        "Time the UNS republish takes per DDATA, on the same callback thread as the historian "
+        "write. Read it beside acs_ingestion_write_seconds: the two together are the per-message "
+        "cost on the single-writer path.",
     "acs_ingestion_db_reconnects_total": "Times the historian connection was re-opened.",
     "acs_ingestion_db_connect_failures_total": "Failed attempts to open the historian connection.",
     "acs_ingestion_db_heals_total":

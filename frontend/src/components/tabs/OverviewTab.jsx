@@ -6,12 +6,15 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat } from '../../utils/gatewayStatus'
-import { gatewayFleetCounts, deviceFleetCounts } from '../../utils/fleetCounts'
+import { gatewayFleetCounts } from '../../utils/fleetCounts'
+import { useSetting } from '../../hooks/useSettings'
+import { HelpTip } from '../common/HelpTip'
 import {
-  SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell,
-  applyStagedMoves
+  SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE,
+  SOURCE_SIMULATED, groupDevicesByCell, groupCellsByFloor, applyStagedMoves
 } from '../../utils/cellResolution'
 import { cellIconComponent } from '../../utils/cellIcon'
+import { areaIconComponent } from '../../utils/areaIcon'
 import {
   DEVICE_STATUS,
   deviceLifecycleStatus,
@@ -22,7 +25,8 @@ import {
 } from '../../utils/deviceStatus'
 import {
   IconMap,
-  IconFactory,
+  IconLayoutDashboard,
+  IconChevronRight,
   IconArchive,
   IconExternalLink,
   IconLock,
@@ -36,8 +40,8 @@ import {
 } from '../common/Icons'
 
 export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, showToast, hasPermission, onNavigateTab, activeAlerts = [] }) {
-  const [stats, setStats]     = useState({ cells: 0, gateways: 0, assets: 0, telemetry: 0 })
   const [cells, setCells]     = useState([])
+  const [areas, setAreas]     = useState([])
   const [gwList, setGwList]   = useState([])
   const [assets, setAssets]   = useState([])
   const [telemetry, setTelemetry] = useState([])
@@ -47,16 +51,17 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     try {
       // /api/v1/stats is not requested: the quarantine figure is derived from `assets`, which this
       // page already holds.
-      const [c, g, a, t] = await Promise.all([
+      const [c, g, a, t, ar] = await Promise.all([
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/gateways', { signal }),
         api.get('/api/v1/devices', { signal }),
         // The map only needs the current value of each metric, not history -- and this
         // runs on a 3s poll, so it must stay bounded.
         api.get('/api/v1/telemetry/latest?minutes=60', { signal }).catch(() => []),
+        // Tolerated: with no areas the map is the flat grid it always was.
+        api.get('/api/v1/areas', { signal }).catch(() => []),
       ])
-      setStats({ cells: c.length, gateways: g.length, assets: a.length, telemetry: t.length })
-      setCells(c); setGwList(g); setAssets(a); setTelemetry(t)
+      setCells(c); setGwList(g); setAssets(a); setTelemetry(t); setAreas(ar)
       setLoading(false)
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -77,6 +82,28 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   useClockTick(STALENESS_TICK_MS)
 
   const canManageDevice = hasPermission(PERMISSION_UUIDS.DEVICE_MANAGE)
+
+  // The ISA-95 site, one setting (`site.name`, 0097). Empty until an administrator names it.
+  const siteName = useSetting('site.name', '')
+
+  /**
+   * Which area the map shows: '' is every area, the flat grid grouped by area. A view is
+   * a filter on the cells and on the Area-Wide lane; Site-Wide and Unassigned stay as context,
+   * because an area's operator still wants the campus BMS and the queue.
+   */
+  const [areaView, setAreaView] = useState('')
+  // An area deleted underneath the view falls back to every area rather than to an empty map.
+  useEffect(() => {
+    if (areaView && !areas.some(ar => ar.area_id === areaView)) setAreaView('')
+  }, [areas, areaView])
+  const viewedArea = areas.find(ar => ar.area_id === areaView) || null
+  // The cycle: every area first, then each area in name order.
+  const areaCycle = ['', ...areas.map(ar => ar.area_id)]
+  const stepArea = (delta) => {
+    const at = areaCycle.indexOf(areaView)
+    setAreaView(areaCycle[(at + delta + areaCycle.length) % areaCycle.length])
+  }
+  const cellsById = useMemo(() => new Map(cells.map(c => [c.cell_id, c])), [cells])
 
   /**
    * Drag-and-drop is off until enabled, a second gate on top of the permission: this page is left
@@ -112,25 +139,27 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
    * distinct from saved.
    */
   const stagedAssets = useMemo(
-    () => applyStagedMoves(assets, gwList, staged),
-    [assets, gwList, staged]
+    () => applyStagedMoves(assets, gwList, staged, cellsById),
+    [assets, gwList, staged, cellsById]
   )
 
   /**
    * Stage one move, or unstage it if it puts the device back where its committed row already has
    * it, so the batch never carries a move the RPC would report as unchanged.
    */
-  const stageMove = useCallback((assetId, cellId, scope) => {
+  const stageMove = useCallback((assetId, cellId, scope, areaId = null) => {
     setStaged(prev => {
       const next = new Map(prev)
       const committed = assets.find(a => a.asset_id === assetId)
       // `explicit_cell_id` first: `cell_id` on these rows is the device's own column, but the
       // view fields merged alongside it are the ones that survive a re-resolution.
       const wasCell = committed?.explicit_cell_id ?? committed?.cell_id ?? null
+      const wasArea = committed?.explicit_area_id ?? committed?.area_id ?? null
       const wasScope = committed?.location_scope || SCOPE_CELL
       const nowCell = cellId || null
-      if (nowCell === wasCell && scope === wasScope) next.delete(assetId)
-      else next.set(assetId, { cell_id: nowCell, location_scope: scope })
+      const nowArea = areaId || null
+      if (nowCell === wasCell && nowArea === wasArea && scope === wasScope) next.delete(assetId)
+      else next.set(assetId, { cell_id: nowCell, area_id: nowArea, location_scope: scope })
       return next
     })
   }, [assets])
@@ -174,31 +203,51 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   // groupDevicesByCell() for why the cells endpoint does not supply this.
   const devicesByCell = useMemo(() => groupDevicesByCell(stagedAssets), [stagedAssets])
 
-  // The derived lanes. None is a row in `cells`: Unassigned is the absence of a decision, Site-Wide
-  // an assertion, Simulated a fact about the gateway. Shadow is not here: this map answers what the
-  // plant is doing now, and a replay is not now; a running playback is visible on the Capture page.
+  // The derived lanes that belong to no area. None is a row in `cells`: Unassigned is the
+  // absence of a decision, Site-Wide an assertion, Simulated a fact about the gateway. Area-Wide
+  // is not here: it is one tile per area, in the grid beside that area's cells. Shadow is
+  // not here either: this map answers what the plant is doing now, and a replay is not now; a
+  // running playback is visible on the Capture page.
   const laneDevices = useMemo(() => ({
     [SOURCE_UNASSIGNED]: stagedAssets.filter(a => a.location_source === SOURCE_UNASSIGNED),
     [SOURCE_SITE_WIDE]: stagedAssets.filter(a => a.location_source === SOURCE_SITE_WIDE),
     [SOURCE_SIMULATED]: stagedAssets.filter(a => a.location_source === SOURCE_SIMULATED)
   }), [stagedAssets])
 
-  /**
-   * Drop onto one of the two derived lanes. Site-Wide is an assertion and always takes: it sets the
-   * scope and clears the cell (`devices_site_wide_has_no_cell`). Unassigned is not settable: the
-   * drop clears the explicit cell and reports where the device actually resolves, which may be the
-   * inherited cell again.
-   */
-  const handleLaneDrop = (e, lane) => {
+  /** The payload of a drop, or null with the error already shown. */
+  const droppedAsset = (e) => {
     e.preventDefault()
-    if (!canRearrange) return
-    let assetData
+    if (!canRearrange) return null
     try {
-      assetData = JSON.parse(e.dataTransfer.getData('application/json'))
+      return JSON.parse(e.dataTransfer.getData('application/json'))
     } catch (err) {
       showToast(err.message, 'error')
-      return
+      return null
     }
+  }
+
+  /**
+   * Drop onto an area's Area-Wide tile. An assertion that always takes: it sets the scope, names
+   * the area the tile belongs to and clears the cell (`devices_area_wide_has_no_cell`,
+   * `devices_area_wide_names_its_area`).
+   */
+  const handleAreaWideDrop = (e, area) => {
+    const assetData = droppedAsset(e)
+    if (!assetData) return
+    if (assetData.location_source === SOURCE_AREA_WIDE && assetData.effective_area_id === area.area_id) return
+    stageMove(assetData.asset_id, null, SCOPE_AREA_WIDE, area.area_id)
+    showToast(`Staged: '${assetData.asset_name}' → Area-Wide in ${area.area_name} — it will belong to no single cell there`, 'success')
+  }
+
+  /**
+   * Drop onto one of the campus lanes. Site-Wide is an assertion and always takes: it sets the
+   * scope and clears the cell (`devices_site_wide_has_no_cell`). Unassigned is not settable: the
+   * drop clears the explicit cell and reports where the device actually resolves, which may be
+   * the inherited cell again.
+   */
+  const handleLaneDrop = (e, lane) => {
+    const assetData = droppedAsset(e)
+    if (!assetData) return
 
     if (assetData.location_source === lane) return
 
@@ -403,7 +452,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
    * The one tile shape, used by the derived lanes and the physical cells alike; they differ only in
    * the props below.
    */
-  const floorTile = ({ key, className, name, nameTitle, Icon, status, gateways, devices, counts, hint, onDrop, onNameClick, headerRight, empty, badge }) => {
+  const floorTile = ({ key, className, name, nameTitle, description, Icon, status, gateways, devices, counts, hint, onDrop, onNameClick, headerRight, empty, badge }) => {
     // A tile is pending when something staged is sitting in it.
     const pending = devices.some(d => d.staged)
     // A tile with no onDrop must not accept dragover either: preventDefault() there is what tells
@@ -430,6 +479,13 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
           {/* Titled as well as truncated. Where the name is also a link, the title carries the
               destination. */}
           <span className="zone-name" title={nameTitle || name}>{name}</span>
+          {/* A cell's description, read on demand beside its name; nothing when there is none. The
+              click is stopped so opening the tip does not also open the Cells page. */}
+          {description && (
+            <span onClick={e => e.stopPropagation()}>
+              <HelpTip label={`About ${name}`} text={description} size={12} />
+            </span>
+          )}
           {badge}
         </div>
         {headerRight || <span className="zone-counts" title={`${gateways.length} gateway(s), ${devices.length} device(s)`}>{counts}</span>}
@@ -459,8 +515,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       icon: IconMap,
       className: 'shopfloor-lane shopfloor-lane-site',
       matchGateway: (g) => !g.is_simulated && !g.is_shadow && g.location_scope === SCOPE_SITE_WIDE,
-      empty: 'No site-wide assets. Drop a BMS, AGV or ambient sensor here.',
-      hint: 'A permanent home, not a queue. Facility-wide and mobile assets live here rather than being filed in an arbitrary bay.'
+      empty: 'No site-wide assets.',
+      hint: 'A permanent home, not a queue. Campus-wide and mobile assets live here rather than being filed in an arbitrary bay.'
     },
     {
       // Context like Site-Wide rather than a queue, so it sits between the two: stable contents an
@@ -473,7 +529,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       // Not droppable: this lane is a statement about the gateway's provenance, not a location the
       // operator can assert.
       droppable: false,
-      empty: 'Nothing synthetic. Every asset here reports from real hardware.',
+      empty: 'No Simulated Assets.',
       hint: 'Telemetry generated rather than observed — a simulator, or a broker playback target. Set on the gateway; its devices inherit it and cannot be filed into a cell.'
     },
     {
@@ -488,7 +544,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         && g.location_scope !== SCOPE_SITE_WIDE && !g.cell_id,
       // Empty here is a result, the queue has drained, so it says so. The tile keeps its full
       // height so the grid row has no hole.
-      empty: 'All clear — every asset resolves to a cell or is Site-Wide.',
+      empty: 'No Unassigned Assets',
       hint: 'A work queue, not a location. Drop a device here to clear the cell set on it; if its gateway serves a cell it will inherit that instead.'
     }
   ]
@@ -499,81 +555,78 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     gateways: gwList.filter(lane.matchGateway)
   }))
 
+  /**
+   * An area's Area-Wide tile: the first tile among that area's cells, in the grid rather
+   * than in the lane row, because unlike the lanes it belongs to an area. One per area, so a
+   * drop always knows which area it names; the tile shares the Site-Wide hue, being the
+   * same kind of home one level down.
+   */
+  const areaWideTile = (ar) => {
+    const assets = stagedAssets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === ar.area_id)
+    const areaGateways = gwList.filter(g => !g.is_simulated && !g.is_shadow
+      && g.location_scope === SCOPE_AREA_WIDE && g.area_id === ar.area_id)
+    return floorTile({
+      key: `area-wide:${ar.area_id}`,
+      className: 'shopfloor-lane shopfloor-lane-area',
+      name: `Area-Wide — ${ar.area_name}`,
+      nameTitle: `Area-Wide in ${ar.area_name} — a derived lane, not a cell: assets that serve the whole area`,
+      Icon: areaIconComponent(ar.icon),
+      status: rollupStatus(assets),
+      gateways: areaGateways,
+      devices: assets,
+      counts: `GW: ${areaGateways.length} | Dev: ${assets.length}`,
+      hint: 'A permanent home one level below Site-Wide: assets that serve this whole area rather than one cell in it, such as its building management system.',
+      onDrop: (e) => handleAreaWideDrop(e, ar),
+      empty: `No area-wide assets in ${ar.area_name}.`
+    })
+  }
+
   if (loading) return <div className="loading-wrap"><div className="spinner" /> Loading shopfloor overview…</div>
 
-  const activeCellsCount = cells.filter(c => !c.is_archived).length
-  const archivedCellsCount = cells.filter(c => c.is_archived).length
+
+  /**
+   * The cell grid in sections. An area view is its floors, led by the area's Area-Wide
+   * tile; the every-area view is one section per area, each led by its Area-Wide tile, with
+   * unfiled cells last; a plant with no areas is the flat grid, one unlabelled section. Headings
+   * span the grid row, so the tiles keep flowing as one grid. An area with no cells yet still
+   * gets its section: its Area-Wide tile is where its BMS shows.
+   */
+  const visibleCells = areaView ? cells.filter(c => c.area_id === areaView) : cells
+  const cellSections = areaView
+    ? groupCellsByFloor(visibleCells).map(f => ({ key: `floor:${f.floor}`, label: f.label, cells: f.cells }))
+    : areas.length > 0
+      ? [
+          ...areas.map(ar => ({ key: `area:${ar.area_id}`, label: ar.area_name, area: ar, cells: cells.filter(c => c.area_id === ar.area_id) })),
+          ...(cells.some(c => !c.area_id)
+            ? [{ key: 'area:none', label: 'Unfiled — in no area yet', cells: cells.filter(c => !c.area_id) }]
+            : [])
+        ]
+      : [{ key: 'all', label: null, cells }]
 
   // The shadow lane is not part of the fleet; the rule and the returned `shadow` figure are in
-  // fleetCounts.js.
+  // fleetCounts.js. Only the shadow figure is read here: the fleet counts the ribbon used to print
+  // are now the rail's signals (hooks/useNavSignals.js).
   const gw = gatewayFleetCounts(gwList)
-  const dev = deviceFleetCounts(assets)
 
-  // Appended to the tooltips rather than folded into the buckets, which go on summing to the
-  // headline total -- the property the quarantine note protects.
-  const shadowGwNote = gw.shadow > 0
-    ? ` Plus ${gw.shadow} playback gateway, which publishes recorded captures and is not a connector to any machine.`
-    : ''
-  const shadowAssetNote = dev.shadow > 0
-    ? ` Plus ${dev.shadow} shadow device${dev.shadow === 1 ? '' : 's'} — stand-ins that receive replayed readings, not machines.`
-    : ''
+  // The ISA-95 enterprise is the Sparkplug group the gateways publish under, which is already data;
+  // several groups are all named. The playback gateway is not a member of the plant.
+  const enterprise = [...new Set(gwList.filter(g => !g.is_shadow && g.sparkplug_group).map(g => g.sparkplug_group))].join(' / ')
 
   return (
     <>
-      {/* No page heading or description: the rail names the page, and the ribbon and map state the
-          rest. */}
-      {/* Every figure and click target of the old stat cards, in one 48px bar. The headline is live
-          / total because the question from across a room is whether everything is up; the breakdown
-          is on each item's `title`. */}
-      <div className="kpi-ribbon">
-        <button
-          className="kpi-item"
-          onClick={() => onNavigateTab && onNavigateTab('cells')}
-          title={`${activeCellsCount} active / ${stats.cells} total cell zones (${archivedCellsCount} archived). Click to view Cells.`}
-        >
-          <span className="kpi-label">Cells</span>
-          <span className="kpi-value">{activeCellsCount}<span className="kpi-total">/{stats.cells}</span></span>
-          <span className="kpi-unit">Active</span>
-        </button>
-
-        <button
-          className="kpi-item"
-          onClick={() => onNavigateTab && onNavigateTab('gateways')}
-          title={`${gw.online} online / ${gw.pending} awaiting setup / ${gw.offline} offline / ${gw.archived} archived, of ${gw.total} registered edge gateways.${shadowGwNote} Click to view Gateways.`}
-        >
-          <span className="kpi-label">Gateways</span>
-          <span className="kpi-value">{gw.online}<span className="kpi-total">/{gw.total}</span></span>
-          <span className="kpi-unit">Online</span>
-        </button>
-
-        {/* Pending Quarantine is folded into the Devices item: quarantine is a sub-state of the
-            device population. It raises a warning treatment while any device is held, with an icon
-            and the word spelled out, so the signal does not depend on colour. */}
-        <button
-          className={`kpi-item${dev.quarantined > 0 ? ' kpi-item-alert' : ''}`}
-          onClick={() => onNavigateTab && onNavigateTab('devices')}
-          title={dev.quarantined > 0
-            ? `${dev.quarantined} device${dev.quarantined === 1 ? '' : 's'} awaiting zero-touch onboarding approval. ${dev.online} online / ${dev.offline} offline / ${dev.archived} archived, of ${dev.total}.${shadowAssetNote} Click to review the quarantine queue.`
-            : `${dev.online} online / ${dev.offline} offline / ${dev.archived} archived, of ${dev.total} registered shopfloor devices.${shadowAssetNote} Click to view Devices.`}
-        >
-          <span className="kpi-label">Devices</span>
-          <span className="kpi-value">{dev.online}<span className="kpi-total">/{dev.total}</span></span>
-          <span className="kpi-unit">Online</span>
-          {dev.quarantined > 0 && (
-            <span className="kpi-alert-flag">
-              <IconShieldAlert size={12} aria-hidden="true" />
-              {dev.quarantined} Quarantined
-            </span>
-          )}
-        </button>
-      </div>
-
+      {/* No page heading or description: the rail names the page, and the map states the rest. */}
       <div className="shopfloor-map-card">
         <div className="shopfloor-map-bg">
           <div className="shopfloor-header">
             <div className="shopfloor-title">
               <IconMap size={18} />
-              <span>Shopfloor Dashboard</span>
+              <span>Site Map</span>
+              {/* The sentence that says what a tile is, read on demand; the legend decodes the
+                  dots. */}
+              <HelpTip
+                label="About the site map"
+                text="Every cell on the site, with the devices that resolve to it. A device sits in its own cell if it names one and in its gateway's otherwise, so this is where the two disagreeing becomes visible. The lanes at the top hold what belongs to no area — site-wide assets, simulated ones, and anything still waiting to be placed. Below them, each area's Area-Wide tile leads its cells."
+              />
             </div>
             {/* The legend describes the tile dots, which are the only thing a reader has to decode
                 to scan the grid; chip meanings are on each chip's `title`. */}
@@ -607,13 +660,24 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             </div>
           </div>
 
-          {/* The sentence that says what a tile is; the legend decodes the dots. */}
-          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '0 0 16px' }}>
-            Every cell on the shopfloor, with the devices that resolve to it. A device sits in its
-            own cell if it names one and in its gateway's otherwise, so this is where the two
-            disagreeing becomes visible. The lanes at the front hold what belongs to no single
-            cell — site-wide assets, and anything still waiting to be placed.
-          </p>
+          {/* The rungs above the lanes, so the page shows the whole ISA-95 ladder: enterprise and
+              site here, the areas and cells beneath. The site is the setting the Unified
+              Namespace publishes under, and its absence is said rather than left blank. */}
+          <div className="site-hierarchy" role="group" aria-label="Hierarchy">
+            <div className="site-hierarchy-level" title="The ISA-95 enterprise: the Sparkplug group the gateways publish under">
+              <span className="site-hierarchy-label">Enterprise</span>
+              {enterprise
+                ? <span className="site-hierarchy-value">{enterprise}</span>
+                : <span className="site-hierarchy-unset">Not known yet — it is the Sparkplug group of the first gateway</span>}
+            </div>
+            <IconChevronRight size={12} className="site-hierarchy-sep" aria-hidden="true" />
+            <div className="site-hierarchy-level" title="The ISA-95 site: this campus, named on the Settings page under Site">
+              <span className="site-hierarchy-label">Site</span>
+              {siteName
+                ? <span className="site-hierarchy-value">{siteName}</span>
+                : <span className="site-hierarchy-unset">Not set — name it on the Settings page under Site</span>}
+            </div>
+          </div>
 
           {/* Shown only while the mode is on, so the page carries no standing instruction about a
               gesture that is usually unavailable — and so it is obvious the map is live. */}
@@ -656,9 +720,10 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             </div>
           )}
 
-          {/* Two grids: the lanes are assets that belong to no cell, so they get a row of their own
-              and the plant reads as the grid beneath. Each lane holds gateways as well as devices,
-              because a gateway with no cell is usually why its devices have none. */}
+          {/* Two grids: the lanes are assets that belong to no area, so they get a row of their
+              own above the area selector, and the plant reads as the grid beneath. Each lane
+              holds gateways as well as devices, because a gateway with no cell is usually why its
+              devices have none. */}
           <div className="shopfloor-lanes">
             {laneViews.map(({ lane, devices: laneAssets, gateways: laneGateways }) => floorTile({
               key: lane.key,
@@ -680,17 +745,59 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             }))}
           </div>
 
-          {/* THE PLANT ITSELF, BELOW THE LANES. */}
+          {/* The area selector, between the campus lanes and the areas they are not part
+              of, and only once there is an area to select. Every area first, then one button
+              per area; the arrows cycle through the same list. */}
+          {areas.length > 0 && (
+            <div className="shopfloor-areas" role="group" aria-label="Area">
+              {/* The icon set has one chevron; the other is it turned round. */}
+              <button className="btn btn-ghost btn-sm" onClick={() => stepArea(-1)} title="Previous area" aria-label="Previous area">
+                <IconChevronRight size={13} style={{ transform: 'rotate(180deg)' }} />
+              </button>
+              <button
+                className={`btn btn-sm ${areaView === '' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setAreaView('')}
+                aria-pressed={areaView === ''}
+                title="Every area, grouped"
+              >
+                All areas
+              </button>
+              {areas.map(ar => {
+                const AreaGlyph = areaIconComponent(ar.icon)
+                return (
+                  <button
+                    key={ar.area_id}
+                    className={`btn btn-sm ${areaView === ar.area_id ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => setAreaView(ar.area_id)}
+                    aria-pressed={areaView === ar.area_id}
+                    title={`Show only ${ar.area_name}, by floor`}
+                  >
+                    <AreaGlyph size={12} /> {ar.area_name}
+                  </button>
+                )
+              })}
+              <button className="btn btn-ghost btn-sm" onClick={() => stepArea(1)} title="Next area" aria-label="Next area">
+                <IconChevronRight size={13} />
+              </button>
+            </div>
+          )}
+
+          {/* THE PLANT ITSELF, BELOW THE LANES. In an area view its Area-Wide tile leads, above
+              the floors, since it belongs to the area and to no floor of it. */}
           <div className="shopfloor-grid">
-            {cells.length === 0 && (
+            {viewedArea && areaWideTile(viewedArea)}
+
+            {visibleCells.length === 0 && (
               /* An empty state of its own, since this grid can be empty while the lanes are full (a
                  stack running only the simulator has no cells). Three cases: assets in the lanes
                  above, nothing at all, or only the seeded Playback gateway, which matches no lane
                  and is named with the Capture page. */
               <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
-                <div className="empty-icon"><IconFactory size={36} /></div>
+                <div className="empty-icon"><IconLayoutDashboard size={36} /></div>
                 <div className="empty-text">
-                  {laneViews.some(v => v.gateways.length > 0 || v.devices.length > 0)
+                  {viewedArea
+                    ? `No cells filed in ${viewedArea.area_name} yet. File them on the Areas page.`
+                    : laneViews.some(v => v.gateways.length > 0 || v.devices.length > 0)
                     ? 'No cell zones configured — every asset resolves to one of the lanes above.'
                     : gw.shadow > 0
                       ? 'Nothing on the floor yet. The only gateway on this stack is the replay '
@@ -700,7 +807,15 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
               </div>
             )}
 
-            {cells.map(c => {
+            {cellSections.map(section => [
+              section.label && (
+                <div key={section.key} className="shopfloor-floor-heading" title={areaView ? 'Floor' : 'Area'}>
+                  {section.label}
+                </div>
+              ),
+              // An area's section opens with its Area-Wide tile, first beside its cells.
+              section.area && areaWideTile(section.area),
+              ...section.cells.map(c => {
               // Cells own gateways; gateways own devices. Deriving the gateway list
               // from the devices instead hid every gateway that has no device yet.
               const cellGateways = gwList.filter(g => g.cell_id === c.cell_id)
@@ -714,6 +829,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                 className: `shopfloor-cell${c.is_archived ? ' shopfloor-zone-archived' : ''}`,
                 name: c.cell_name,
                 nameTitle: `Cell '${c.cell_name}' (Zone #${c.cell_id}) — Click to view on Cells page`,
+                description: c.description,
                 // Per-cell icon, falling back to the default for one this build does not know
                 // (utils/cellIcon.jsx).
                 Icon: cellIconComponent(c.icon),
@@ -746,7 +862,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                   </a>
                 ) : null
               })
-            })}
+              })
+            ])}
           </div>
         </div>
       </div>

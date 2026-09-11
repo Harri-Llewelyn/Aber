@@ -17,7 +17,8 @@ export const PAGE_KEYWORDS = {
   // operator searches "request" or "ask", an approver searches "approve" or "pending".
   'approvals':      ['proposal', 'proposals', 'approve', 'reject', 'pending', 'queue', 'request',
                      'change', 'review', 'publish'],
-  'cells':          ['zone', 'area', 'shopfloor', 'location'],
+  'areas':          ['building', 'buildings', 'floor', 'isa-95', 'isa95', 'site', 'hierarchy', 'uns'],
+  'cells':          ['zone', 'work center', 'work centre', 'shopfloor', 'location'],
   'gateways':       ['edge', 'node', 'mqtt', 'sparkplug', 'broker', 'bundle', 'enrolment', 'enrollment'],
   'devices':        ['asset', 'machine', 'equipment', 'sensor', 'robot', 'quarantine', 'nameplate'],
   'archives':       ['archived', 'decommissioned', 'restore', 'retired', 'out of commission'],
@@ -40,6 +41,7 @@ export const CARDS = [
   { id: 'site-wide-lane',       label: 'Site-Wide',            tab: 'overview',       keywords: ['no cell', 'bms', 'agv', 'unassigned lane'] },
   { id: 'unassigned-lane',      label: 'Unassigned',           tab: 'overview',       keywords: ['no cell', 'orphan', 'unplaced'] },
 
+  { id: 'area-list',            label: 'Areas',                tab: 'areas',          keywords: ['buildings', 'unfiled cells', 'area list'] },
   { id: 'shopfloor-cells',      label: 'Shopfloor Cells',      tab: 'cells',          keywords: ['cell list', 'zones'] },
   { id: 'edge-gateways',        label: 'Edge Gateways',        tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
   { id: 'device-list',          label: 'Devices',              tab: 'devices',        keywords: ['device list', 'assets'] },

@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   SCOPE_CELL,
+  SCOPE_AREA_WIDE,
   SCOPE_SITE_WIDE,
+  SOURCE_AREA_WIDE,
+  groupCellsByArea,
+  groupCellsByFloor,
+  floorLabel,
   LOCATION_SCOPES,
   SOURCE_EXPLICIT,
   SOURCE_INHERITED,
@@ -31,6 +36,7 @@ import {
 
 const CELL_A = 'aaaaaaaa-0000-4000-8000-000000000000';
 const CELL_B = 'bbbbbbbb-0000-4000-8000-000000000000';
+const AREA_1 = '11111111-0000-4000-8000-000000000000';
 
 const gatewayInCellA = { id: 'gw-1', cell_id: CELL_A, location_scope: SCOPE_CELL };
 
@@ -77,8 +83,83 @@ describe('effective cell resolution', () => {
     expect(resolveDeviceLocation({ location_scope: 'nonsense' }, gatewayInCellA).location_scope).toBe(SCOPE_CELL);
   });
 
-  it('exposes only the two scopes the CHECK constraints allow', () => {
-    expect(LOCATION_SCOPES).toEqual([SCOPE_CELL, SCOPE_SITE_WIDE]);
+  it('exposes only the three scopes the CHECK constraints allow', () => {
+    expect(LOCATION_SCOPES).toEqual([SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE]);
+  });
+});
+
+/**
+ * The area rung. A cell-scoped device's area is its effective cell's; an area-wide device names
+ * its own and has no cell; a site-wide device has neither. Mirrors the view's third CASE.
+ */
+describe('effective area resolution', () => {
+  const cellsById = new Map([
+    [CELL_A, { cell_id: CELL_A, area_id: AREA_1 }],
+    [CELL_B, { cell_id: CELL_B, area_id: null }]
+  ]);
+
+  it('derives the area from the effective cell, inherited or explicit', () => {
+    expect(resolveDeviceLocation({ cell_id: null }, gatewayInCellA, cellsById).effective_area_id).toBe(AREA_1);
+    expect(resolveDeviceLocation({ cell_id: CELL_B }, gatewayInCellA, cellsById).effective_area_id).toBeNull();
+  });
+
+  it('resolves an area-wide device to its own area and to no cell, even behind a gateway with one', () => {
+    const loc = resolveDeviceLocation({ location_scope: SCOPE_AREA_WIDE, area_id: AREA_1 }, gatewayInCellA, cellsById);
+    expect(loc.location_source).toBe(SOURCE_AREA_WIDE);
+    expect(loc.effective_cell_id).toBeNull();
+    expect(loc.effective_area_id).toBe(AREA_1);
+    expect(loc.explicit_area_id).toBe(AREA_1);
+  });
+
+  it('gives a site-wide device no area: the whole campus is not an area', () => {
+    const loc = resolveDeviceLocation({ location_scope: SCOPE_SITE_WIDE, area_id: AREA_1 }, gatewayInCellA, cellsById);
+    expect(loc.effective_area_id).toBeNull();
+  });
+
+  it('ranks area-wide below site-wide and above the explicit cell, as the view does', () => {
+    expect(resolveDeviceLocation({ location_scope: SCOPE_AREA_WIDE, area_id: AREA_1, cell_id: CELL_B }, null).location_source)
+      .toBe(SOURCE_AREA_WIDE);
+    expect(resolveDeviceLocation({ location_scope: SCOPE_AREA_WIDE, area_id: AREA_1 }, { id: 'gw', is_simulated: true }).location_source)
+      .toBe('simulated');
+  });
+
+  it('resolves no area without the cell rows to look one up in', () => {
+    expect(resolveDeviceLocation({ cell_id: null }, gatewayInCellA).effective_area_id).toBeNull();
+  });
+
+  it('keeps an area-wide device out of the Unassigned queue and out of every cell bucket', () => {
+    const device = { location_scope: SCOPE_AREA_WIDE, area_id: AREA_1 };
+    expect(needsCellAssignment(device, null)).toBe(false);
+    expect(groupDevicesByCell([{ ...device, id: 'bms' }]).size).toBe(0);
+  });
+
+  it('treats an area-wide gateway like a site-wide one for the unassigned hint', () => {
+    expect(unassignedReason({ cell_id: null }, { id: 'gw', cell_id: null, location_scope: SCOPE_AREA_WIDE }))
+      .toBe(UNASSIGNED_GATEWAY_SITE_WIDE);
+  });
+});
+
+describe('grouping cells by area and floor', () => {
+  it('keeps unfiled cells under a null key, because that bucket is the Areas page queue', () => {
+    const byArea = groupCellsByArea([{ cell_id: 'c1', area_id: AREA_1 }, { cell_id: 'c2', area_id: null }, { cell_id: 'c3' }]);
+    expect(byArea.get(AREA_1).map(c => c.cell_id)).toEqual(['c1']);
+    expect(byArea.get(null).map(c => c.cell_id)).toEqual(['c2', 'c3']);
+  });
+
+  it('orders floors ground first, then up, then basements, then no floor', () => {
+    const groups = groupCellsByFloor([
+      { cell_id: 'b', floor: -1 }, { cell_id: 'two', floor: 2 }, { cell_id: 'g', floor: 0 },
+      { cell_id: 'none' }, { cell_id: 'one', floor: 1 }, { cell_id: 'b2', floor: -2 }
+    ]);
+    expect(groups.map(g => g.floor)).toEqual([0, 1, 2, -1, -2, null]);
+    expect(groups.map(g => g.label)).toEqual(['Ground floor', 'Floor 1', 'Floor 2', 'Basement', 'Basement 2', 'No floor set']);
+  });
+
+  it('labels a floor the way a person on the stairs would', () => {
+    expect(floorLabel(0)).toBe('Ground floor');
+    expect(floorLabel(3)).toBe('Floor 3');
+    expect(floorLabel(-1)).toBe('Basement');
+    expect(floorLabel(undefined)).toBe('No floor set');
   });
 });
 
@@ -182,9 +263,9 @@ describe('grouping devices by cell', () => {
 
 describe('labels and bulk resolution', () => {
   it('labels each source distinctly', () => {
-    const labels = [SOURCE_EXPLICIT, SOURCE_INHERITED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED]
+    const labels = [SOURCE_EXPLICIT, SOURCE_INHERITED, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED]
       .map(locationSourceLabel);
-    expect(new Set(labels).size).toBe(4);
+    expect(new Set(labels).size).toBe(5);
     expect(locationSourceLabel(undefined)).toBe('Unassigned');
   });
 
@@ -289,6 +370,28 @@ describe('applyStagedMoves', () => {
     const staged = new Map([['d1', { cell_id: null, location_scope: SCOPE_SITE_WIDE }]]);
     const byCell = groupDevicesByCell(applyStagedMoves([withServerAnswer()], gateways, staged));
     expect(byCell.size).toBe(0);
+  });
+
+  it('stages an area-wide move with its area, clearing the cell, and resolves the area at the drop', () => {
+    const staged = new Map([['d1', { cell_id: CELL_B, area_id: AREA_1, location_scope: SCOPE_AREA_WIDE }]]);
+    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
+    expect(moved.location_scope).toBe(SCOPE_AREA_WIDE);
+    expect(moved.cell_id).toBeNull();
+    expect(moved.area_id).toBe(AREA_1);
+    expect(moved.effective_cell_id).toBeNull();
+    expect(moved.effective_area_id).toBe(AREA_1);
+    expect(moved.location_source).toBe(SOURCE_AREA_WIDE);
+  });
+
+  it('drops a stored area when staged back to a cell, mirroring devices_area_wide_names_its_area', () => {
+    const device = withServerAnswer({ location_scope: SCOPE_AREA_WIDE, area_id: AREA_1, location_source: SOURCE_AREA_WIDE, effective_cell_id: null });
+    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
+    const cells = new Map([[CELL_B, { cell_id: CELL_B, area_id: AREA_1 }]]);
+    const [moved] = applyStagedMoves([device], gateways, staged, cells);
+    expect(moved.area_id).toBeNull();
+    expect(moved.effective_cell_id).toBe(CELL_B);
+    // Derived through the cell now, not stored on the device.
+    expect(moved.effective_area_id).toBe(AREA_1);
   });
 
   it('does not touch the gateway, because a drop is not a data-path change', () => {

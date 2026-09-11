@@ -2,7 +2,7 @@ import { supabase, SUPABASE_URL, SUPABASE_GATEWAY_KEY } from './lib/supabaseClie
 import { withActivityTracking } from './lib/apiActivity';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
-import { resolveDeviceLocation, SCOPE_SITE_WIDE } from './utils/cellResolution';
+import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 import { DIGITAL_THREAD_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
@@ -54,7 +54,9 @@ const mapDeviceRow = (d, gateway, location) => {
     gateway_cell_id: loc.gateway_cell_id,
     location_scope: loc.location_scope,
     location_source: loc.location_source,
-    cell_mismatch: loc.cell_mismatch
+    cell_mismatch: loc.cell_mismatch,
+    explicit_area_id: loc.explicit_area_id,
+    effective_area_id: loc.effective_area_id
   };
 };
 
@@ -77,9 +79,9 @@ const DEVICE_EMBED =
   // `shadow_of` (0060) says this device exists to RECEIVE a replay rather than to report a machine.
   // Selected because the Capture page filters on it: a shadow device is not a capture subject, and
   // without the column the filter silently matches nothing.
-  'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path, shadow_of';
+  'is_archived, gateway_id, cell_id, area_id, location_scope, created_at, model_3d_path, shadow_of';
 const GATEWAY_EMBED =
-  `id, name, description, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
+  `id, name, description, sparkplug_id, cell_id, area_id, location_scope, access_url, status, last_heartbeat, ` +
   `deployment, is_simulated, is_shadow, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**
@@ -101,19 +103,28 @@ const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
 const gatewayIdFrom = (body) => emptyToNull(body.active_gateway_id ?? body.gateway_id);
 
 /**
- * The location columns a request is actually trying to set; `{}` when it mentions neither, so a
- * partial update cannot blank a field it never sent. Marking an asset Site-Wide clears its cell
- * here, because the CHECK constraints reject a site-wide asset that also names one.
+ * The location columns a request is actually trying to set; `{}` when it mentions none, so a
+ * partial update cannot blank a field it never sent. The scope decides the other two, as the CHECK
+ * constraints do: a wide scope clears the cell, and only area-wide keeps an area.
  */
 function locationFieldsFrom(body) {
   const fields = {};
   if ('cell_id' in body) fields.cell_id = emptyToNull(body.cell_id);
+  if ('area_id' in body) fields.area_id = emptyToNull(body.area_id);
   if ('location_scope' in body) {
-    fields.location_scope = body.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : 'cell';
-    if (fields.location_scope === SCOPE_SITE_WIDE) fields.cell_id = null;
+    fields.location_scope = normaliseScope(body.location_scope);
+    if (fields.location_scope !== SCOPE_CELL) fields.cell_id = null;
+    if (fields.location_scope !== SCOPE_AREA_WIDE) fields.area_id = null;
   }
   return fields;
 }
+
+// A floor is a small integer or nothing; the form submits an empty string for nothing.
+const floorFrom = (v) => {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const n = Number(v);
+  return Number.isInteger(n) ? n : null;
+};
 
 export const TELEMETRY_PAGE_SIZE = 500;
 // postgres_fdw pushes WHERE clauses to TimescaleDB but not LIMIT, so an unbounded
@@ -1166,6 +1177,23 @@ const apiMethods = {
       return combined;
     }
 
+    if (path.startsWith('/api/v1/areas')) {
+      // Cells embedded so the Areas page has membership in one round trip. Devices are not: a
+      // device's area is derived through its resolved cell, which is device_locations' answer.
+      const { data, error } = await supabase
+        .from('areas')
+        .select('*, cells(id, name, floor, icon, is_archived)')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(a => ({
+        ...a,
+        area_id: a.id,
+        area_name: a.name,
+        cells: (a.cells || []).map(c => ({ ...c, cell_id: c.id, cell_name: c.name })),
+        cell_count: (a.cells || []).length
+      }));
+    }
+
     if (path.startsWith('/api/v1/cells')) {
       // Nested embed so each cell arrives with its gateways in one round trip. Devices are not
       // returned: membership is the resolved effective cell, which no embed can express, and every
@@ -1287,7 +1315,7 @@ const apiMethods = {
           .from('devices')
           // `is_simulated` and `is_shadow` are selected for the fallback path: when the device_locations
           // read fails, resolveDeviceLocation() re-derives locally and needs them.
-          .select('*, gateways(id, name, cell_id, location_scope, is_simulated, is_shadow, status, is_archived)')
+          .select('*, gateways(id, name, cell_id, area_id, location_scope, is_simulated, is_shadow, status, is_archived)')
           .order('created_at', { ascending: false }),
         loadDeviceLocations()
       ]);
@@ -1845,10 +1873,25 @@ const apiMethods = {
       return data[0] || {};
     }
 
+    if (path === '/api/v1/areas') {
+      const { data, error } = await supabase.from('areas').insert({
+        name: body.area_name,
+        description: emptyToNull(body.description),
+        // Omitted when the caller sends nothing, so the column's own default is the one place
+        // that value lives (the cells insert below says why).
+        ...(body.icon ? { icon: body.icon } : {})
+      }).select();
+      if (error) throw error;
+      return data?.[0] || {};
+    }
+
     if (path === '/api/v1/cells') {
       const { data, error } = await supabase.from('cells').insert({
         name: body.cell_name,
         grafana_url: body.access_url,
+        description: emptyToNull(body.description),
+        area_id: emptyToNull(body.area_id),
+        floor: floorFrom(body.floor),
         // Omitted rather than defaulted here when the caller sends nothing: the column's own
         // NOT NULL DEFAULT 'Factory' is the single place that value lives, and repeating it in
         // the client is how the two eventually disagree.
@@ -2177,11 +2220,25 @@ const apiMethods = {
       return data[0];
     }
 
+    if (path.startsWith('/api/v1/areas/')) {
+      const { data, error } = await supabase.from('areas').update({
+        name: body.area_name,
+        description: emptyToNull(body.description),
+        ...(body.icon ? { icon: body.icon } : {})
+      }).eq('id', id).select();
+      if (error) throw error;
+      return data[0];
+    }
+
     if (path.startsWith('/api/v1/cells/')) {
       const { data, error } = await supabase.from('cells').update({
         name: body.cell_name,
         grafana_url: body.access_url,
-        ...(body.icon ? { icon: body.icon } : {})
+        ...(body.icon ? { icon: body.icon } : {}),
+        // Only when sent: the Areas page files a cell with a body naming nothing else.
+        ...('area_id' in body ? { area_id: emptyToNull(body.area_id) } : {}),
+        ...('floor' in body ? { floor: floorFrom(body.floor) } : {}),
+        ...('description' in body ? { description: emptyToNull(body.description) } : {})
       }).eq('id', id).select();
       if (error) throw error;
       return data[0];
@@ -2297,7 +2354,8 @@ const apiMethods = {
     const payload = (moves || []).map(m => ({
       device_id: m.device_id,
       cell_id: m.cell_id || null,
-      location_scope: m.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : 'cell'
+      area_id: m.area_id || null,
+      location_scope: normaliseScope(m.location_scope)
     }));
     if (payload.length === 0) throw new Error('No moves to apply.');
     const { data, error } = await supabase.rpc('relocate_devices', { p_moves: payload });
@@ -2403,6 +2461,13 @@ const apiMethods = {
 
     const parts = path.split('/');
     const id = parts[parts.length - 1];
+
+    if (path.startsWith('/api/v1/areas/')) {
+      // Refused by the database while an area-wide asset names it; its cells are un-filed.
+      const { error } = await supabase.from('areas').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    }
 
     if (path.startsWith('/api/v1/cells/')) {
       const { error } = await supabase.from('cells').delete().eq('id', id);

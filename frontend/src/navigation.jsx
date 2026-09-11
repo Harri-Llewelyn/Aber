@@ -1,6 +1,7 @@
 import React from 'react'
 import { PERMISSION_UUIDS } from './constants'
 import {
+  IconMap,
   IconLayoutDashboard,
   IconFactory,
   IconRadio,
@@ -52,12 +53,16 @@ export const NAV_GROUPS = [
 ]
 
 export const TABS = [
-  { id: 'overview',       label: 'Overview',       group: 'home',    icon: <IconLayoutDashboard size={16} /> },
+  { id: 'overview',       label: 'Overview',       group: 'home',    icon: <IconMap size={16} /> },
   // Gated on `proposal:create`: an Auditor holds neither it nor a decision gate, and RLS would
   // return them their own proposals, of which they can have none.
   { id: 'approvals',      label: 'Approvals',      group: 'work',    icon: <IconShieldCheck size={16} />, permission: PERMISSION_UUIDS.PROPOSAL_CREATE },
 
-  { id: 'cells',          label: 'Cells',          group: 'assets',  icon: <IconFactory size={16} /> },
+  // The ISA-95 order, top down: an area holds cells, a cell holds gateways and devices. The
+  // glyphs read the same way: the map is the site, the factory an area, the grid its cells. The
+  // chips and section icons on the other pages use the same three.
+  { id: 'areas',          label: 'Areas',          group: 'assets',  icon: <IconFactory size={16} /> },
+  { id: 'cells',          label: 'Cells',          group: 'assets',  icon: <IconLayoutDashboard size={16} /> },
   { id: 'gateways',       label: 'Gateways',       group: 'assets',  icon: <IconRadio size={16} /> },
   { id: 'devices',        label: 'Devices',        group: 'assets',  icon: <IconCpu size={16} /> },
   // Not "Cold Storage", two groups down: this is entity archives with a Restore button and an

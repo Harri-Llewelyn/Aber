@@ -5,7 +5,7 @@ Devices are what the gateways publish. Most are not created here: they appear be
 ## What the controls do
 
 - **Assign a schema** classifies the device. Until it has one, its metrics are names on a wire.
-- **Shopfloor Cell Zone** places the device, either in its own right or by taking the location of the gateway it reports through.
+- **Location** places the device. It is one of three: in a cell, either its own or the one inherited from the gateway it reports through; Area-Wide, serving a whole area; or Site-Wide, serving the whole campus. Only one can be chosen, and a dropdown appears only where the choice leaves more than one answer, such as which cell or which area.
 - **Device Name** is yours to set. **Reported Name** and **Published ID** are what the device says about itself, and they are kept separate deliberately -- a self-declared name is a claim, not evidence, and letting it overwrite yours would lose the distinction.
 - **The notes field** holds what no column can: "spindle rebuilt 2026-03; runs warmer than its twin".
 - **The filters** -- cell, gateway, schema, status, type -- all narrow the same list, and the search box takes a name, a UUID or a Sparkplug ID.

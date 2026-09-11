@@ -221,6 +221,13 @@ spec:
               value: {{ .Values.ingestion.directoryMqttTopicPrefix | quote }}
             - name: DIRECTORY_MQTT_INTERVAL_SECONDS
               value: {{ .Values.ingestion.directoryMqttIntervalSeconds | quote }}
+            {{/* The Unified Namespace bridge, passed unconditionally for the same reason. */}}
+            - name: UNS_MQTT_ENABLED
+              value: {{ .Values.ingestion.unsMqttEnabled | quote }}
+            - name: UNS_MQTT_TOPIC_ROOT
+              value: {{ .Values.ingestion.unsMqttTopicRoot | quote }}
+            - name: UNS_CONTEXT_TTL_SECONDS
+              value: {{ .Values.ingestion.unsContextTtlSeconds | quote }}
           {{/*
             LIVENESS ON A HEARTBEAT FILE'S AGE.
 

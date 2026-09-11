@@ -661,14 +661,14 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
     expect(onSelectDevice).toHaveBeenCalledWith('dev-1')
   })
 
-  it('carries the five columns and no Actions column', async () => {
+  it('carries the six columns and no Actions column', async () => {
     renderCells()
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
     const headers = [...cellsTable().querySelectorAll('thead th')].map(h => h.textContent.trim())
     // The icon column's header is a screen-reader label, so it reads as a word here and as an
     // empty cell on screen.
-    expect(headers).toEqual(['Icon', 'Cell Name', 'Cell UUID', 'Assigned Gateways', 'Assigned Devices'])
+    expect(headers).toEqual(['Icon', 'Cell Name', 'Area / Floor', 'Cell UUID', 'Assigned Gateways', 'Assigned Devices'])
     expect(headers).not.toContain('Actions')
     expect(within(cellsTable()).queryByRole('button', { name: /Telemetry/i })).toBeNull()
   })

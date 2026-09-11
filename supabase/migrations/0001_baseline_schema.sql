@@ -5243,6 +5243,9 @@ COMMENT ON COLUMN public.devices.shadow_of IS 'For a shadow device: the real mac
 -- device_locations :: VIEW
 --
 
+-- Dropped first: 0097 recreates this view with two more columns, and CREATE OR REPLACE cannot
+-- take them away again on the next replay. The grants below are re-applied there too.
+DROP VIEW IF EXISTS public.device_locations;
 CREATE OR REPLACE VIEW public.device_locations WITH (security_invoker='true') AS
  SELECT d.id AS device_id,
     d.gateway_id,

@@ -151,10 +151,8 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     // --danger measured 4.09:1 dark / 3.69:1 light on the 0.2 hover level.
     ['danger-reveal label on hover',   '--danger-text', tint([255,77,109], 0.2, card),     AA_TEXT],
     ['btn-danger label at rest',       '--danger-text', tint([255,77,109], 0.12, card),    AA_TEXT],
-    // .kpi-ribbon: the label is the 12px caption beside each figure, and the quarantine item
-    // lays the same 0.07 amber over it that the alert card does.
-    ['--text-muted on kpi item',       '--text-muted',  card,                              AA_TEXT],
-    ['--text-muted on kpi alert',      '--text-muted',  alertCard,                         AA_TEXT],
+    // The rail's flagged item paints --warning-text on the sidebar's ground, which is the card's.
+    ['--warning-text on rail item',    '--warning-text', card,                             AA_TEXT],
     // Brand badges. The label is --text-primary ON the brand tint precisely because the brand
     // colours themselves are not legible as text -- see the negative guard below.
     ['sharepoint badge label',         '--text-primary', tint([0,120,212], 0.15, surface),  AA_TEXT],
@@ -348,7 +346,7 @@ describe('type scale floor', () => {
   // Named in the requirement, and the ones an operator reads at a distance rather than leans in
   // for. These are captions, so 12px is their floor rather than the app-wide 11px.
   it('holds metadata and status captions at 12px', () => {
-    for (const selector of ['.cell-meta', '.kpi-label', '.badge', 'th']) {
+    for (const selector of ['.cell-meta', '.site-hierarchy-label', '.badge', 'th']) {
       const rule = APP_CSS.match(new RegExp(`\\n\\${selector} \\{([\\s\\S]*?)\\n\\}`))
         || APP_CSS.match(new RegExp(`\\n${selector} \\{([\\s\\S]*?)\\n\\}`))
       const size = Number(rule[1].match(/font-size:\s*(\d+)px/)[1])
@@ -364,13 +362,9 @@ describe('type scale floor', () => {
     expect(Number(td.match(/padding:\s*(\d+)px/)[1])).toBeLessThanOrEqual(12)
   })
 
-  // System identifiers and numeric readouts stay monospace, and the KPI figures stay bold --
-  // they are the numbers read across a room.
-  it('keeps identifiers monospace and the KPI figure bold', () => {
+  // System identifiers and numeric readouts stay monospace.
+  it('keeps identifiers monospace', () => {
     expect(APP_CSS.match(/\n\.mono \{([\s\S]*?)\n\}/)[1]).toMatch(/JetBrains Mono/)
-    const kpi = APP_CSS.match(/\n\.kpi-value \{([\s\S]*?)\n\}/)[1]
-    expect(kpi).toMatch(/JetBrains Mono/)
-    expect(Number(kpi.match(/font-weight:\s*(\d+)/)[1])).toBeGreaterThanOrEqual(700)
   })
 })
 

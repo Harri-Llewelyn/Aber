@@ -64,12 +64,12 @@ beforeEach(() => { vi.clearAllMocks() })
 // The shape of the list
 
 describe('the cells table', () => {
-  it('renders one row per cell with the five columns', async () => {
+  it('renders one row per cell with the six columns', async () => {
     renderCells()
     await ready()
 
     expect([...table().querySelectorAll('thead th')].map(h => h.textContent.trim()))
-      .toEqual(['Icon', 'Cell Name', 'Cell UUID', 'Assigned Gateways', 'Assigned Devices'])
+      .toEqual(['Icon', 'Cell Name', 'Area / Floor', 'Cell UUID', 'Assigned Gateways', 'Assigned Devices'])
     expect(table().querySelectorAll('tbody tr')).toHaveLength(1)
   })
 
@@ -93,7 +93,7 @@ describe('the cells table', () => {
     await ready()
 
     // This is where somebody gets a cell id out of the app and into a query.
-    const uuidCell = rowFor('Assembly Line 1').querySelectorAll('td')[2]
+    const uuidCell = rowFor('Assembly Line 1').querySelectorAll('td')[3]
     expect(within(uuidCell).getByRole('button')).toHaveTextContent('cell-1')
   })
 })
@@ -249,6 +249,6 @@ describe('filters still narrow the table', () => {
     })
 
     expect(table()).toBeNull()
-    expect(document.querySelector('.empty-state')).toHaveTextContent('No shopfloor cells match')
+    expect(document.querySelector('.empty-state')).toHaveTextContent('No cells match the selected filter')
   })
 })

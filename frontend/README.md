@@ -252,8 +252,9 @@ change: it is the `anon` role, public by construction, and already readable in a
 
 | Tab | Notes |
 | :--- | :--- |
-| `OverviewTab` | Asset summary and the shopfloor map. **Site-Wide and Unassigned stack full-width above the cell grid** — they are not cells, and inside the grid they reflowed between bays as cells were added. Dropping onto Unassigned *clears* the override, because Unassigned is derived and cannot be set |
-| `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load |
+| `OverviewTab` | The site map, the whole ISA-95 ladder on one page: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned full-width above the area selector** — they belong to no area, and inside the grid they reflowed between bays as cells were added. Dropping onto Unassigned *clears* the override, because Unassigned is derived and cannot be set. The map cycles **All areas** and one area at a time; an area view groups its cells by floor. **Area-Wide is one tile per area, first among that area's cells**, so a drop always knows its area. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
+| `AreasTab` | The ISA-95 areas (buildings). Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide |
+| `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. Area and floor are on the form; the floor is a number, not a level |
 | `GatewaysTab` | **Launch UI** and **Edit** visible, the rest in an `ActionMenu`; **Restore replaces Edit** on an archived row |
 | `DevicesTab` | Quarantined devices render **in the onboarding queue banner only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. Two visible actions, not seven |
 | `SchemasTab` | Metric catalog, the standard-vocabulary reference card, and the schema registry. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |

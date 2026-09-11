@@ -913,6 +913,76 @@ interoperability claim would become false the moment the payload left HTTP.
 | `DIRECTORY_MQTT_TOPIC_PREFIX` | `ACS-Cymru/Directory/v1` | Deliberately **not** under `spBv1.0/`: these are not Sparkplug payloads and must not be parsed as any |
 | `DIRECTORY_MQTT_INTERVAL_SECONDS` | `60` | Republish interval |
 
+## The Unified Namespace
+
+`uns_publish.py` republishes every metric a DDATA wrote to the historian on a plain, retained topic,
+as JSON, for the consumer that has a broker connection and no Sparkplug decoder: a BI tool, a SCADA
+client, a dashboard. It runs on the ingestion callback thread, after the commit, so what it
+publishes is exactly what was recorded ([issue #66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66)).
+
+**The topic is ISA-95's hierarchy, and the path is fixed at the level the asset honestly occupies.**
+
+```
+uns/<enterprise>/<site>/<area>/<cell>/<device>/<metric>     a device in a cell
+uns/<enterprise>/<site>/<area>/<device>/<metric>            area-wide -- a building's BMS
+uns/<enterprise>/<site>/<device>/<metric>                   site-wide -- serves the whole campus
+```
+
+| Segment | ISA-95 | Where it comes from |
+| :--- | :--- | :--- |
+| `<enterprise>` | Enterprise | The message's Sparkplug group (`gateways.sparkplug_group`), already on the wire |
+| `<site>` | Site | The `site.name` setting. One campus, so one value; a second campus is the migration that makes it a table |
+| `<area>` | Area | `areas.name` (`0097`) — a building. A cell files into one; an area-wide asset names one |
+| `<cell>` | Work center | `cells.name`, through `device_locations.effective_cell_id` |
+| `<device>` | Work unit | `devices.name` |
+| `<metric>` | | The metric name as the leaf. A catalog name with a `/` group prefix becomes a subtree |
+
+The floor a cell is on is a number on the cell for the Overview map and is deliberately **not** a
+segment: ISA-95 has no rung for it and a consumer subscribing per building or per cell does not
+want one. The words in the data model stay Sparkplug's (`devices`, `gateways`) and the ISA-95 words
+appear where the hierarchy is being named — here, and on the Areas page.
+
+**An incomplete path is skipped, never filled with a placeholder.** A device that is unassigned, a
+cell filed in no area, a site whose name is unset: none is published, each is counted under
+`acs_ingestion_uns_skipped_total{reason=...}`, and the Areas page's unfiled queue and the Overview's
+Unassigned lane are where an operator completes the path. An invented segment would put a word
+nobody chose in every topic, which is the trap the derived lanes exist to avoid. Names are checked
+for `/`, `+` and `#` on the way in (`areas_name_topic_safe`, `cells_name_topic_safe`; the cell
+rule is `NOT VALID`, so a cell named before `0097` keeps its row and is skipped with
+`reason="unsafe_name"` until renamed).
+
+**The payload** is one reading:
+
+```json
+{"name": "Spindle/Speed", "value": 1200.0, "timestamp": "2026-09-11T12:00:00.250Z", "units": "rpm", "asset_id": "dev…"}
+```
+
+`timestamp` is ISO 8601 UTC at the millisecond precision Sparkplug carries; it is not padded to
+nanoseconds the wire never had. `units` is the metric catalog's, when the catalog names the metric.
+Retained, QoS 0: a subscriber sees the last value on connect, and the next reading is the retry.
+
+**It is off by default**, for the Directory publisher's reason. A topic has no caller, so the broker
+ACL is the whole of the access control, and `uns/#` is every machine's readings in the clear.
+`mosquitto.acl` grants the daemon write and read on `uns/#` and **no gateway a read of it**: one
+gateway credential reading the tree would read the whole plant, which the per-node confinement
+exists to prevent. A BI or SCADA consumer gets its own account and its own `topic read uns/#` rule,
+added deliberately. `scripts/check-broker-config.mjs` asserts all three halves by delivery.
+
+**The cost is on the single-writer path**, one publish per metric per message on the same thread
+as the historian write, and it is measured the same way: `acs_ingestion_uns_publish_seconds` sits
+beside `acs_ingestion_write_seconds`, and the two together are the per-message cost. The location
+context — the device's resolved cell and area, their names, the site — is cached for
+`UNS_CONTEXT_TTL_SECONDS`, so a message costs no directory read and a relocation on the dashboard
+moves a device's topic within that window.
+
+### Configuration
+
+| Variable | Default | |
+| :--- | :--- | :--- |
+| `UNS_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
+| `UNS_MQTT_TOPIC_ROOT` | `uns` | Must stay inside the ACL's `topic write uns/#` rule, or publishes are dropped silently at QoS 0 |
+| `UNS_CONTEXT_TTL_SECONDS` | `60` | How long a device's location and the site name are believed |
+
 ## Device Liveness Watchdog
 
 A device that stops publishing writes nothing and emits no DDEATH, so before this it stayed

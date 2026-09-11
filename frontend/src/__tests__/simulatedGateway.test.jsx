@@ -215,10 +215,11 @@ describe('the Cell Zone control', () => {
     expect(within(document.querySelector('table')).getByText('Site-Wide')).toBeInTheDocument()
   })
 
-  it('offers Site-Wide inside the cell picker rather than as a checkbox beside it', async () => {
+  it('offers Site-Wide as one radio of three, not as a checkbox beside the cell picker', async () => {
     await show([gateway()])
     openEdit()
-    expect(within(cellSelect()).getByRole('option', { name: /Site-Wide/i })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Site-Wide/i })).toBeInTheDocument()
+    expect(within(cellSelect()).queryByRole('option', { name: /Site-Wide/i })).toBeNull()
     // One question, one control: the tick box that had to reach over and clear the select is gone.
     expect(screen.queryByRole('checkbox', { name: /Site-Wide/i })).toBeNull()
   })
