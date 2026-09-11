@@ -2125,7 +2125,9 @@ def _write_batch(cur, batch):
 def _after_commit(item):
     """What one message owes once its rows are durable."""
     count("metrics_written", len(item.rows))
-    count("messages_written")
+    # Not `messages_written`: metrics.py reads every `messages_<x>` flat name as a message
+    # type, and this is a count of commits, not of arrivals.
+    count("written_messages")
 
     # After the commit, so the UNS carries only what the historian recorded. Off by default,
     # never raises, and timed into its own histogram (uns_publish.py).

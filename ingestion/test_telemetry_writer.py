@@ -47,6 +47,7 @@ _stub("paho.mqtt.client", Client=object)
 
 import ingestion  # noqa: E402
 import registry  # noqa: E402
+import metrics  # noqa: E402
 
 NOW = datetime.now(timezone.utc)
 
@@ -173,7 +174,7 @@ class TestCoalescing(WriterTestCase):
         self.writer.submit(pending(DEV_B, [("Z", 3.0)]))
         self.writer.flush()
         snapshot = registry.counter_snapshot()
-        self.assertEqual(snapshot.get("messages_written"), 2)
+        self.assertEqual(snapshot.get("written_messages"), 2)
         self.assertEqual(snapshot.get("metrics_written"), 3)
 
     def test_a_message_with_no_rows_still_upserts_its_asset_and_counts(self):
@@ -181,7 +182,7 @@ class TestCoalescing(WriterTestCase):
         self.writer.flush()
         self.assertEqual(len(self.asset_calls()), 1)
         self.assertEqual(self.telemetry_calls(), [])
-        self.assertEqual(registry.counter_snapshot().get("messages_written"), 1)
+        self.assertEqual(registry.counter_snapshot().get("written_messages"), 1)
 
 
 class TestAssetUpsert(WriterTestCase):
@@ -232,7 +233,7 @@ class TestFailure(WriterTestCase):
         snapshot = registry.counter_snapshot()
         self.assertEqual(snapshot.get("write_batch_failures"), 1)
         self.assertEqual(snapshot.get("write_failures"), 1)
-        self.assertEqual(snapshot.get("messages_written"), 2)
+        self.assertEqual(snapshot.get("written_messages"), 2)
         self.assertEqual(snapshot.get("metrics_written"), 2)
         # The batch, then one transaction per message on the retry.
         self.assertEqual(self.transactions(), 4)
@@ -340,6 +341,29 @@ class TestShutdownDefaults(unittest.TestCase):
 
     def test_the_daemon_holds_one_writer(self):
         self.assertIsInstance(ingestion._writer, ingestion.TelemetryWriter)
+
+
+class TestExposition(unittest.TestCase):
+    """
+    The renderer reads every `messages_<x>` flat name as a message TYPE and never consults the
+    table for it, so a writer counter spelled that way would surface as
+    acs_ingestion_messages_total{msg_type="written"}. It did, on the live endpoint, before this
+    test existed.
+    """
+
+    def test_the_commit_counter_is_exported_under_its_own_name(self):
+        out = metrics.render_exposition({"written_messages": 2})
+        self.assertIn("acs_ingestion_messages_written_total 2", out)
+        self.assertNotIn('msg_type="written"', out)
+
+    def test_no_mapped_counter_is_shadowed_by_the_message_type_convention(self):
+        shadowed = [name for name in metrics.COUNTER_MAP if name.startswith("messages_")]
+        self.assertEqual(shadowed, [], "these names never reach COUNTER_MAP in render_exposition")
+
+    def test_the_writer_counters_are_mapped(self):
+        for name in ("written_messages", "write_batch_failures", "dropped_write_queue_full"):
+            self.assertIn(name, metrics.COUNTER_MAP)
+        self.assertEqual(metrics.TYPES.get("acs_ingestion_write_queue_depth"), "gauge")
 
 
 if __name__ == "__main__":

@@ -75,7 +75,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 COUNTER_MAP = {
     # Throughput.
     "metrics_written": ("acs_ingestion_metrics_written_total", {}),
-    "messages_written": ("acs_ingestion_messages_written_total", {}),
+    "written_messages": ("acs_ingestion_messages_written_total", {}),
     # Drops, one label value per reason. The flat names encode the reason already; this is where
     # that convention becomes a dimension a query can group by.
     "dropped_gateway_binding": (
