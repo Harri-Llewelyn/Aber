@@ -5,80 +5,53 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { grafanaAlertUrl } from '../../constants'
 
 /**
- * The right-hand context drawer: one entity at a time, beside the list it came from.
+ * The right-hand context drawer: one entity at a time, beside the list it came from. Not an
+ * overlay: `.page-layout` is a flex row and this panel is a sibling of the list, so opening it
+ * narrows the table and rows stay clickable. Presentational only: it renders `fields` and `actions`
+ * and knows nothing about the entity kinds. Why a drawer: ../../README.md, Migrated design notes.
  *
- * NOT AN OVERLAY, and the layout depends on it. `.page-layout` is a flex row and this panel is a
- * SIBLING of the list, so opening it narrows the table rather than covering it, and rows stay
- * clickable while it is open. Positioning it absolutely would look the same and break that.
+ * @param {boolean} open Whether the drawer is expanded. Always rendered; see `aria-hidden` below.
  *
- * PRESENTATIONAL ONLY. It renders `fields` and `actions` and knows nothing about cells, gateways,
- * devices or schemas -- each page supplies its own facts.
+ * @param {string} type Entity kind, announced in the region label.
  *
- * Why a drawer rather than a modal or an expanding row:
- * ../../README.md -> "Migrated design notes"
+ * @param {string} title The entity's display name.
  *
- * @param {boolean}  open      Whether the drawer is expanded. Always rendered; see the note on
- *                             `aria-hidden` below for why it is not conditionally mounted.
- * @param {string}   type      Entity kind, shown as a badge: 'CELL' | 'GATEWAY' | 'DEVICE' | 'SCHEMA'.
- * @param {string}   title     The entity's display name.
- * @param {node}     subtitle  Optional line under the title -- status badges, lifecycle flags.
- * @param {Array}    fields    [{ label, value, mono?, copyable?, title?, full?, danger? }]
- *                             rendered as the metadata list. `copyable` renders the value as a
- *                             CopyableId button. `danger` colours the VALUE only -- the label
- *                             stays neutral, because the fact is the problem, not the field.
- *                             Used for a gateway CA inside its expiry window.
- * @param {Array}    actions   [{ label, icon, onClick, href?, disabled?, title?, primary?,
- *                             pending?, pendingLabel? }]. `pending` puts that one action into the
- *                             in-flight state -- spinner, swapped label, and unclickable until it
- *                             settles. Per action rather than per panel: these lists mix a
- *                             mutation with four navigations, and spinning all five for one click
- *                             would claim work nothing is doing.
- * @param {Function} onCopy    Toast callback handed to CopyableId, so a copy is reported the same
- *                             way it is everywhere else in the app.
- * @param {node}     beforeActions  Sections that are FACTS about the entity -- a gateway's device
- *                             list, say. Rendered with the metadata, above the actions, because
- *                             that is what they are: another thing the panel says, not another
- *                             thing it does.
- * @param {node}     children  Sections that are TOOLS -- an upload control, an inspector. Rendered
- *                             after the actions, so a section of unknown height cannot push the
- *                             action list off the bottom of the drawer.
- * @param {Function} onClose   Called by the X, by Escape, and by anything else that clears selection.
- * @param {string}   subject   What this drawer is showing, as one noun, used in the region label
- *                             and on the close control: "details" for an entity, "help" for the
- *                             help corpus. ONE PROP RATHER THAN TWO because the two strings must
- *                             agree -- a drawer announcing itself as help whose X says "close
- *                             details" is the kind of mismatch only a screen reader hears.
- * @param {string}   className Extra classes on the <aside>. The drawer is positioned by the flex
- *                             row it sits in, and the app-level instance sits in a different row
- *                             from the per-page ones -- see `.context-panel-app`.
+ * @param {node} subtitle Optional line under the title.
+ *
+ * @param {Array} fields [{ label, value, mono?, copyable?, title?, full?, danger? }]. `copyable`
+ * renders a CopyableId; `danger` colours the value only.
+ *
+ * @param {Array} actions [{ label, icon, onClick, href?, disabled?, title?, primary?, pending?,
+ * pendingLabel? }]. `pending` puts that one action into the in-flight state.
+ *
+ * @param {Function} onCopy Toast callback handed to CopyableId.
+ *
+ * @param {node} beforeActions Sections that are facts about the entity, rendered with the metadata
+ * above the actions.
+ *
+ * @param {node} children Sections that are tools, rendered after the actions so an unknown height
+ * cannot push them off the drawer.
+ *
+ * @param {Function} onClose Called by the X, by Escape, and by anything else that clears selection.
+ *
+ * @param {string} subject What the drawer shows, as one noun, used in the region label and on the
+ * close control so the two agree.
+ *
+ * @param {string} className Extra classes on the <aside>; the app-level instance sits in a
+ * different row (`.context-panel-app`).
  */
 export function ContextPanel({ open, type, title, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '' }) {
   const closeRef = useRef(null)
 
-  // Escape closes, from anywhere on the page.
-  //
-  // Caught at the document rather than on the panel because the panel does NOT take focus when it
-  // opens -- it is not modal, and stealing focus from the table would break the one workflow it
-  // exists for: clicking down a list of rows and reading each one. So the key has to be caught
-  // while focus is still in the table.
-  //
-  // Through the shared stack, which matters here more than anywhere: nearly every action in this
-  // panel OPENS A MODAL over it -- telemetry, documents, the nameplate, archive. With a listener
-  // of its own, Escape out of any of those would have closed the modal and the panel behind it,
-  // losing the selection the operator was working through. The `open` flag keeps the panel off
-  // the stack entirely while closed, so it never takes the top from a dialog on a page whose
-  // drawer happens to be idle.
+  // Escape closes, caught at the document because the panel does not take focus. Through the shared
+  // stack, so Escape out of a modal opened from this panel closes the modal and not the panel
+  // behind it; `open` keeps a closed panel off the stack.
   useEscapeKey(onClose, open)
 
   return (
-    /*
-      Always in the DOM, hidden with `aria-hidden` and `inert`-like semantics rather than unmounted.
-      The width transition is what makes the table resize smoothly instead of jumping, and a
-      component that unmounts has nothing to transition from. `aria-hidden` plus the CSS
-      `visibility: hidden` on the closed state is what keeps the collapsed panel out of the
-      accessibility tree and out of the tab order -- a hidden drawer must not be five tab stops
-      between the table and the pagination.
-    */
+    /* Always in the DOM, hidden with `aria-hidden` rather than unmounted: the width transition
+       needs something to transition from, and `visibility: hidden` on the closed state keeps it out
+       of the tab order. */
     <aside
       className={`context-panel${open ? ' context-panel-open' : ''}${className ? ' ' + className : ''}`}
       aria-hidden={!open}
@@ -88,10 +61,8 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
       <div className="context-panel-inner">
         <div className="context-panel-header">
           <div className="context-panel-heading">
-            {/* NO TYPE BADGE. A pill reading DEVICE sat above a title on a page called Devices,
-                opened from a row in a table of devices -- it restated the one thing already
-                established three times over. The kind is still announced to assistive tech on the
-                region label above, where it costs nothing and is not otherwise derivable. */}
+            {/* No type badge: the kind is already established by the page, and is announced on the
+                region label. */}
             {/* Titled as well as truncated: an entity name long enough to overrun 360px is exactly
                 the kind you opened the panel to read. */}
             <div className="context-panel-title" title={title}>{title}</div>
@@ -110,23 +81,16 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
         </div>
 
         <div className="context-panel-body">
-          {/* THE ALERT GOES ABOVE THE METADATA, and it is the only thing in this panel that does.
-              Everything below is a stable fact about the entity and is read in its own time; an
-              active alert is the one item with a deadline on it. Putting it under the fields would
-              mean an overheating machine's most important line arrived after its creation date.
-
-              Rendered from a prop rather than derived here: this panel is presentational and knows
-              nothing about cells, gateways or devices -- see the header -- and teaching it to
-              cross-reference alerts would be the first of four pages' worth of entity knowledge. */}
+          {/* The alert goes above the metadata: it is the one item with a deadline. Rendered from a
+              prop, because this panel knows nothing about entities. */}
           {alert && (
             <div
               className={`context-alert context-alert-${alert.severity || 'warning'}`}
               role="status"
             >
               <div className="context-alert-head">
-                {/* Circle for critical, triangle for warning -- the same two glyphs the Devices
-                    table and the Topbar pill use, so severity has a shape here too and not only a
-                    border colour. */}
+                {/* Circle for critical, triangle for warning, the same glyphs the Devices table and
+                    the alert pill use. */}
                 {alert.severity === 'critical' ? <IconAlertCircle size={13} /> : <IconAlertTriangle size={13} />}
                 <span className="context-alert-name">{alert.alert_name}</span>
                 <span className="context-alert-sev">{(alert.severity || 'warning').toUpperCase()}</span>
@@ -136,22 +100,10 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
                 <span>
                   Raised by Grafana{alert.starts_at ? ` · since ${new Date(alert.starts_at).toLocaleTimeString()}` : ''}
                 </span>
-                {/*
-                  THE ONE PLACE THIS PANEL LINKS SOMEWHERE ON ITS OWN INITIATIVE, and it is warranted
-                  by what the banner already says: "raised by Grafana. Thresholds and silences live
-                  there, not here." That sentence tells an operator their next step is in another
-                  application and then leaves them to find it -- which means reading a port number
-                  off the Directory page. This closes that gap.
-
-                  A REAL ANCHOR, target=_blank. Middle-click and "copy link address" have to work:
-                  the likeliest use of this link is pasting it into a message to whoever owns the
-                  rule. That is also why it is not a button with a window.open handler.
-
-                  BY RULE, NOT BY DEVICE. It also filtered on `label:sparkplug_id`, which returned an
-                  empty list -- /alerting/list searches rule DEFINITIONS and that label exists only on
-                  evaluated instances. See grafanaAlertUrl for the full reasoning, and for why this
-                  targets the list by name rather than the rule's UID.
-                */}
+                {/* The one place this panel links on its own initiative. A real anchor with
+                    target=_blank, so middle-click and copy link address work. By rule name, not by
+                    device label: /alerting/list searches rule definitions, and `sparkplug_id`
+                    exists only on evaluated instances. See grafanaAlertUrl. */}
                 <a
                   className="context-alert-link"
                   href={grafanaAlertUrl(alert.alert_name)}
@@ -180,11 +132,8 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
                         row look identical otherwise, and only one of them is a problem. */}
                     {f.value === null || f.value === undefined || f.value === ''
                       ? <span className="context-field-empty">Not set</span>
-                      /* EVERY IDENTIFIER IS COPYABLE. This panel is where someone comes to get a
-                         UUID or a topic path out of the app and into a query, an MQTT client or a
-                         support ticket, and transcribing 36 characters by eye is how the wrong
-                         device gets debugged. `copyable-id-wrap` because a truncated identifier is
-                         useless -- these wrap instead of ellipsing, unlike in a dense table row. */
+                      /* Every identifier is copyable: this is where a UUID or topic path leaves the
+                         app. `copyable-id-wrap` because a truncated identifier is useless. */
                       : f.copyable
                         ? <CopyableId value={String(f.value)} label={f.label.toLowerCase()} title={f.title} onNotify={onCopy} className="copyable-id-wrap" />
                         : f.value}
@@ -202,9 +151,7 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
               <div className="context-panel-section-label">Actions</div>
               {actions.map((a, i) => {
                 const cls = `btn btn-sm ${a.primary ? 'btn-primary' : 'btn-ghost'} context-action${a.danger ? ' context-action-danger' : ''}`
-                // An href action is a real link, not a button with a navigation handler: these
-                // open Grafana and Node-RED in a new tab, and middle-click and "copy link" have
-                // to work the way they do everywhere else.
+                // An href action is a real link, so middle-click and copy link work.
                 return a.href ? (
                   <a
                     key={i}
@@ -218,9 +165,8 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
                     {a.icon} {a.label}
                   </a>
                 ) : (
-                  // `pending` and `disabled` are separate states and are NOT merged into one
-                  // class: btn-disabled greys the control out to mean "not permitted", which is
-                  // the wrong thing to say about an action that is currently running.
+                  // `pending` and `disabled` are separate: btn-disabled means not permitted, which
+                  // is the wrong thing to say about an action that is running.
                   <button
                     key={i}
                     className={`${cls}${a.disabled ? ' btn-disabled' : ''}${a.pending ? ' btn-loading' : ''}`}
@@ -239,9 +185,8 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
             </div>
           )}
 
-          {/* Extra sections -- document lists, telemetry inspectors -- supplied by the page.
-              Below the actions deliberately: a device with forty metrics would otherwise push
-              Edit Details off the bottom of the panel. */}
+          {/* Extra sections supplied by the page, below the actions so a tall section cannot push
+              Edit Details off the panel. */}
           {children && <div className="context-panel-extras">{children}</div>}
         </div>
       </div>
@@ -250,12 +195,8 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
 }
 
 /**
- * Row-click handler guard.
- *
- * A row is now both a selector and a container of buttons, so a plain `onClick` on the `<tr>` fires
- * when someone presses Edit, Archive or a copy-id control inside it -- selecting the row as a side
- * effect of a completely different action. This ignores clicks that originated on anything
- * interactive, so the row responds only to clicks on the row itself.
+ * Row-click handler guard: a row is a selector and a container of buttons, so clicks that
+ * originated on anything interactive are ignored.
  */
 export function rowSelectHandler(onSelect) {
   return (e) => {

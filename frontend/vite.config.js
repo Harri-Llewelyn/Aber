@@ -70,6 +70,10 @@ export default defineConfig(({ mode, command }) => {
 
   return {
     plugins: [react()],
+    build: {
+      // @google/model-viewer is a 1 MB chunk, loaded only when a device with a model is opened.
+      chunkSizeWarningLimit: 1100,
+    },
     // Injected rather than left to Vite's own VITE_* inlining, because the git fallback above has
     // no environment variable behind it -- `define` is what lets one spelling in the app cover the
     // container build and the working-tree build alike.

@@ -1,14 +1,9 @@
 /**
- * The OPC UA companion-specification vocabulary, as served from `opcua_vocabulary` (archived migration 0031).
- *
- * Like MTConnect and unlike ISO 22400, an OPC UA data point is positional: `ActualPosition` means
- * nothing until you say which axis of which motion device. The companion spec supplies that
- * position as a browse path, so the group and the type can both be derived from the vocabulary row
- * and only the instance ("which axis?") is left for the operator.
- *
- * ⚠ `node_id` holds a browse path in ExpandedNodeId string form, not a resolvable numeric NodeId.
- * See the header of archive/20260101000031_opcua_vocabulary.sql -- the numeric identifiers live in the published
- * NodeSet2 XML, which is not vendored here, and were not invented.
+ * The OPC UA companion-specification vocabulary, from `opcua_vocabulary`. A data point is
+ * positional: the companion spec supplies a browse path, so group and type derive from the row and
+ * only the instance (which axis) is left to the operator. `node_id` holds a browse path in
+ * ExpandedNodeId string form, not a numeric NodeId; the numeric identifiers live in the published
+ * NodeSet2 XML, which is not vendored.
  */
 
 import { STANDARDS } from './standards'
@@ -17,10 +12,9 @@ import { STANDARDS } from './standards'
 const NODE_ID_PATH = /(?:^|;)s=(.+)$/
 
 /**
- * The browse path out of an ExpandedNodeId string, or '' when it carries none.
- *
- * `nsu=http://opcfoundation.org/UA/Robotics/;s=MotionDevice/Axes/Axis/ActualPosition`
- *   -> `MotionDevice/Axes/Axis/ActualPosition`
+ * The browse path out of an ExpandedNodeId string, or '' when it carries none:
+ * `nsu=http://opcfoundation.org/UA/Robotics/;s=MotionDevice/Axes/Axis/ActualPosition` becomes
+ * `MotionDevice/Axes/Axis/ActualPosition`.
  */
 export function browsePath(nodeId) {
   const match = NODE_ID_PATH.exec((nodeId || '').trim())
@@ -34,12 +28,8 @@ export function namespaceUri(nodeId) {
 }
 
 /**
- * The metric group a data point implies: the first segment of its browse path.
- *
- * Derived from the data rather than mapped from `companion_spec`, so adding a row to the vocabulary
- * needs no corresponding code change. It also lands on the same separator convention the rest of
- * the platform uses -- an OPC UA browse path is already `/`-delimited, which is one of the reasons
- * `/` was chosen as the metric group separator in the first place.
+ * The metric group a data point implies: the first segment of its browse path, derived from the
+ * data so a new vocabulary row needs no code change.
  */
 export function suggestedGroup(entry) {
   const path = browsePath(entry?.node_id)
@@ -49,13 +39,8 @@ export function suggestedGroup(entry) {
 }
 
 /**
- * OPC UA built-in DataType -> Sparkplug datatype code.
- *
- * The form only offers Double/Boolean/String (utils/sparkplugDatatype.js), which is what this
- * platform's devices actually publish, so integer types collapse onto Double rather than
- * introducing codes nothing downstream reads. Unknown types fall back to String: it is the
- * lossless choice, and a wrong numeric datatype is unrecoverable once a device is configured
- * against it.
+ * OPC UA built-in DataType to Sparkplug datatype code. The form offers Double / Boolean / String,
+ * so integer types collapse onto Double. Unknown types fall back to String, the lossless choice.
  */
 export function sparkplugDatatypeFor(opcuaDatatype) {
   const t = (opcuaDatatype || '').trim()
@@ -65,12 +50,9 @@ export function sparkplugDatatypeFor(opcuaDatatype) {
 }
 
 /**
- * The MTConnect observation category recorded alongside an OPC UA data point.
- *
- * `metric_catalog.category` is CHECK-constrained to MTConnect's three values, so an OPC UA point
- * has to be described in those terms: a continuously-varying number is a SAMPLE, a discrete state
- * or identifier is an EVENT. Nothing here maps to CONDITION -- OPC UA models faults as alarms,
- * which this platform does not yet ingest.
+ * The MTConnect observation category recorded alongside an OPC UA point: `metric_catalog.category`
+ * is CHECK-constrained to MTConnect's values. A varying number is a SAMPLE, a discrete state an
+ * EVENT; nothing maps to CONDITION, since OPC UA models faults as alarms, which are not ingested.
  */
 export function categoryFor(opcuaDatatype) {
   return sparkplugDatatypeFor(opcuaDatatype) === 10 ? 'SAMPLE' : 'EVENT'
@@ -92,10 +74,8 @@ export function dataPointByName(vocabulary, companionSpec, name) {
 }
 
 /**
- * The vocabulary arranged into browsable sections, one per companion specification.
- *
- * Specs rather than components, because which spec a data point comes from is the first thing that
- * decides whether it applies to an asset at all -- a CNC has Machinery points and no Robotics ones.
+ * The vocabulary arranged into sections, one per companion specification, since which spec a point
+ * comes from decides whether it applies to an asset at all.
  */
 export function opcuaSections(vocabulary) {
   const buckets = new Map()
@@ -123,13 +103,9 @@ export function opcuaSections(vocabulary) {
 }
 
 /**
- * The Add Metric form state a data point implies.
- *
- * The instance is deliberately left empty: the browse path says `MotionDevice/Axes/Axis`, and which
- * axis is exactly the part the specification cannot know. Deeper path segments are dropped rather
- * than composed into the name -- only the first segment is load-bearing for grouping, and a name
- * like `MotionDevice/Axes/Axis/J1/ActualPosition` carries two segments that say nothing a reader
- * did not already know.
+ * The Add Metric form state a data point implies. The instance is left empty, since which axis is
+ * the part the specification cannot know. Deeper path segments are dropped: only the first is
+ * load-bearing for grouping.
  */
 export function opcuaPrefill(entry) {
   if (!entry) return null

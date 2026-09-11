@@ -1,55 +1,23 @@
 /**
- * ==================================================================================================
- * PROPOSING A CHANGE FROM THE FORM THAT MAKES IT
- * ==================================================================================================
+ * Proposing a change from the form that makes it.
  *
- * THE PROBLEM THIS EXISTS TO REMOVE. The approvals page used to carry a composer of its own -- a
- * second form, listing the same fields as the Edit Details dialog for the same asset, built from
- * `proposable_columns()` and rendered as bare text inputs. Two forms describing one set of columns
- * is a drift generator: the day somebody adds a picker to Edit Details, or a hint, or a validation
- * rule, the composer keeps its text box and the two dialogs quietly start disagreeing about what a
- * device is. Worse, the composer's inputs had no idea a `cell_id` was a uuid with a dropdown behind
- * it, so proposing a relocation meant typing one.
+ * There is one form per asset, the Edit Details dialog, and this module lets it end in a proposal
+ * instead of a write for somebody who may not make the change. The footer button is the only thing
+ * that differs.
  *
- * So there is ONE form per asset now -- the one that was always there -- and this module is what
- * lets it end in a proposal instead of a write. The footer button is the only thing that differs:
- * `Save` for somebody who may make the change, `Propose a change` for somebody who may not.
+ * The mapping table translates form field names to column names, as api.js does on the way to a
+ * PUT, so the two paths out of one form agree. It is deliberately not derived from
+ * `proposable_columns()`: that is the database's answer to what may be named, and the patch is
+ * filtered through it at insert and at approval. This answers which box on the form is that column.
  *
- * ==================================================================================================
- * WHY A MAPPING TABLE, AND WHY IT IS SMALL
- * ==================================================================================================
- *
- * A form's field names are not a table's column names, and never were: the Devices form holds
- * `asset_name`, the Cells form holds `cell_name` and `access_url` where the column is `grafana_url`.
- * `api.js` already translates on the way to a PUT; this does the same translation on the way to a
- * proposal, so the two paths out of one form agree about what they are describing.
- *
- * IT IS DELIBERATELY NOT DERIVED FROM `proposable_columns()`. That function is the DATABASE's
- * answer to "what may be named", and it stays the authority -- the patch is filtered through it at
- * insert AND again at approval. This is a different question: "which box on this form is that
- * column". Only the form knows, and inventing the mapping by string-matching would fail silently
- * on exactly the three pairs above.
- *
- * ==================================================================================================
- * WHAT A NON-PROPOSABLE FIELD DOES
- * ==================================================================================================
- *
- * Some fields on these forms are not proposable and should not become so: a device's gateway is its
- * DATA PATH, its schema is what its telemetry is judged against, and a gateway's `deployment` says
- * where its connector runs. 0086's header withheld that class deliberately.
- *
- * They are DISABLED IN PROPOSE MODE, not hidden. Hiding them would make two different dialogs out
- * of one, which is the drift this module exists to prevent, and it would conceal that a gateway
- * assignment exists at all. `nonProposableFields()` tells the form which ones, so it can grey them
- * and say why.
+ * Fields that are not proposable (a device's gateway and schema, a gateway's `deployment`) are
+ * disabled in propose mode, not hidden; `nonProposableFields()` tells the form which.
  */
 import { api } from '../api'
 
 /**
- * One entry per asset kind: the proposal lane, and how this form's fields map onto its columns.
- *
- * `fields` is form key -> column name. A form key absent from it is not proposable, which is what
- * `nonProposableFields()` reports and what the diff below refuses to send.
+ * One entry per asset kind: the proposal lane, and how the form's fields map onto its columns. A
+ * form key absent from `fields` is not proposable.
  */
 export const PROPOSAL_FORMS = {
   device: {
@@ -69,12 +37,9 @@ export const PROPOSAL_FORMS = {
       conformance_policy: 'Conformance policy decides what happens to unmodelled metrics — an Administrator sets it.'
     }
   },
-  /*
-   * THE ONE FORM WHOSE FIELDS ARE ALREADY COLUMN NAMES. `DeviceNameplateModal` builds itself from
-   * a FIELDS table keyed by `device_nameplate`'s own columns, so the mapping is the identity -- and
-   * it is written out rather than generated, because "every field is proposable" is a claim that
-   * should be re-read when a column is added, not inherited by default.
-   */
+  /* The one form whose fields are already column names: DeviceNameplateModal builds itself from a
+     FIELDS table keyed by `device_nameplate`'s columns. Written out rather than generated, so every
+     field is proposable is re-read when a column is added. */
   device_nameplate: {
     lane: 'device_nameplate',
     idField: 'asset_id',
@@ -132,15 +97,9 @@ export function isProposable(kind, formKey) {
 }
 
 /**
- * What this form would change, as a patch of database columns.
- *
- * ONLY WHAT ACTUALLY MOVED. A form is seeded from the current row, so sending every field would
- * make a patch of ten columns where the person changed one -- and an approver reading the diff
- * could not tell which. It would also be a row snapshot rather than a patch, reverting anything
- * that moved underneath it between proposing and approving.
- *
- * '' BECOMES null, because an emptied box means "clear this field" and that is a real proposal.
- * Dropping it would silently turn "remove the description" into a proposal that changes nothing.
+ * What this form would change, as a patch of database columns. Only what actually moved, so an
+ * approver can see which column the person changed and the patch does not revert anything that
+ * moved underneath it. '' becomes null: an emptied box means clear this field.
  */
 export function patchFromForm(kind, current, form) {
   const def = PROPOSAL_FORMS[kind]
@@ -153,9 +112,8 @@ export function patchFromForm(kind, current, form) {
     const proposed = form[formKey] === '' ? null : form[formKey]
     const existing = current[formKey] === '' || current[formKey] === undefined ? null : current[formKey]
 
-    // Compared as strings, because a form gives back strings and a row gives back typed values --
-    // a uuid, an integer, a null. `String(null)` would collapse the two nulls onto "null", so they
-    // are settled first, above.
+    // Compared as strings, because a form gives back strings and a row gives back typed values.
+    // Nulls are settled first, above, so `String(null)` cannot collapse them.
     const same = proposed === null && existing === null
       ? true
       : proposed !== null && existing !== null && String(proposed) === String(existing)
@@ -166,13 +124,9 @@ export function patchFromForm(kind, current, form) {
 }
 
 /**
- * The reverse of `patchFromForm`: an open proposal's patch, expressed as this form's fields.
- *
- * NEEDED BECAUSE ADDING TO A PROPOSAL IS EDITING A FORM. Somebody who already asked for a rename
- * and now wants the description changed too must see their own earlier request in the boxes --
- * otherwise the second proposal silently drops the first, and the per-asset cap refuses it anyway.
- * Columns the form has no box for are ignored rather than dropped on the floor loudly: they cannot
- * be in a patch this form produced.
+ * The reverse of `patchFromForm`: an open proposal's patch as this form's fields, so somebody
+ * adding to a proposal sees their earlier request in the boxes. Columns the form has no box for are
+ * ignored.
  */
 export function formFromPatch(kind, patch) {
   const def = PROPOSAL_FORMS[kind]
@@ -182,21 +136,17 @@ export function formFromPatch(kind, patch) {
   const form = {}
   for (const [column, value] of Object.entries(patch)) {
     const formKey = byColumn.get(column)
-    // '' rather than null, because that is what an empty input holds -- and `patchFromForm` turns
-    // it back into null on the way out, so a cleared field survives the round trip as a cleared
-    // field rather than becoming the string "null".
+    // '' rather than null, because that is what an empty input holds; `patchFromForm` turns it back
+    // into null.
     if (formKey) form[formKey] = value === null ? '' : value
   }
   return form
 }
 
 /**
- * File the proposal, or update one already open.
- *
- * `proposalId` is how the per-asset cap stays livable. 0086 allows one open proposal per asset per
- * person, so somebody who wants to change a second field on the same machine has to ADD to the
- * request they already have -- and the only sane place to do that is this same form, seeded with
- * their earlier patch already applied.
+ * File the proposal, or update one already open. `proposalId` is how the per-asset cap stays
+ * livable: one open proposal per asset per person, so a second field is added to the existing
+ * request.
  */
 export async function submitProposal({ kind, entityId, patch, rationale, proposalId }) {
   const def = PROPOSAL_FORMS[kind]
@@ -213,12 +163,8 @@ export async function submitProposal({ kind, entityId, patch, rationale, proposa
 }
 
 /**
- * Propose a document link against any of the three asset kinds.
- *
- * Kept beside the others because it is the same act from the reader's point of view -- "ask for
- * something I cannot do myself" -- but it takes a different shape: the patch is a row to CREATE in
- * `links`, so its fields are required rather than optional, and there is no current row to diff
- * against.
+ * Propose a document link against any of the three asset kinds. The patch is a row to create in
+ * `links`, so its fields are required and there is no current row to diff against.
  */
 export const LINK_LANES = { cell: 'cell_links', gateway: 'gateway_links', device: 'device_links' }
 

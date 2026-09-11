@@ -15,38 +15,24 @@ import {
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
- * One modal, two modes, decided by the schema's own status rather than by a prop.
- *
- * READ-ONLY IS THE DEFAULT, and it is the same read-only the database enforces. An active or
- * archived version renders its metric set as a list, not as a form with a disabled Save --
- * `prevent_active_schema_mutation()` (archived migration 0037) would reject the write, so offering the
- * shape of an edit and failing at the end is worse than not offering it. `isSchemaEditable()` is
- * the single predicate both the mode switch and every affordance below read, and it fails closed:
- * a schema whose status could not be read renders read-only.
- *
- * The CHANGE DESCRIPTION IS SHOWN AT THE TOP, above the definition, because it is the only part of
- * a version that says why it exists. A registry that lists five versions of a schema and makes you
- * diff their JSON to work out what happened is a worse record than no versions at all.
- *
- * There is exactly ONE primary action in read-only mode -- Create Version -- and it is the whole
- * editing story: there is no Edit button, disabled or otherwise, because editing an active schema
- * is not a thing that can be done, permissions notwithstanding.
+ * One modal, two modes, decided by the schema's status. Read-only is the default and is the same
+ * read-only the database enforces: `prevent_active_schema_mutation()` rejects the write, so an
+ * active or archived version renders its metrics as a list. `isSchemaEditable()` is the single
+ * predicate and fails closed. The change description is shown at the top because it is the only
+ * part of a version that says why it exists. Create Version is the one primary action in read-only
+ * mode.
  */
 export function SchemaDetailModal({
   schema, schemas = [], catalog = [], deviceCount = 0, canManage = false,
   onFork, onPublish, onDiscard, onSaveDraft, onDownload, onClose, showToast
 }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes via the shared stack, so a ConfirmModal on top answers first.
   useEscapeKey(onClose)
 
   const editable = isSchemaEditable(schema)
   const status = schemaStatus(schema)
 
-  // Seeded from the schema's current definition. A draft always starts life as an exact copy of
-  // its parent (fork_schema() copies the JSONB), so this opens showing what will be published if
-  // nothing is touched.
+  // Seeded from the schema's current definition: a draft starts as an exact copy of its parent.
   const [selectedNames, setSelectedNames] = useState(
     () => new Set(modelledMetrics(schema) || [])
   )
@@ -61,10 +47,8 @@ export function SchemaDetailModal({
 
   const lineage = useMemo(() => lineageOf(schemas, schema), [schemas, schema])
 
-  // Metrics the schema models that are no longer in the catalog -- deprecated since the version was
-  // cut, or seeded by a migration that predates the catalog. They are listed rather than dropped:
-  // silently losing a metric on save would narrow the contract a device is judged against, which
-  // is the exact failure versioning exists to make visible.
+  // Metrics the schema models that are no longer in the catalog. Listed rather than dropped:
+  // silently losing one on save would narrow the contract a device is judged against.
   const orphanedNames = useMemo(() => {
     const known = new Set(activeCatalog.map(m => m.name))
     return [...selectedNames].filter(n => !known.has(n))
@@ -111,10 +95,8 @@ export function SchemaDetailModal({
     changeDescription !== (schema?.change_description || '')
 
   /**
-   * @param {string} name Which action is running -- 'save' or 'publish'. Was a bare boolean, which
-   *   was enough to lock both buttons but not to say which of them the operator had clicked, so
-   *   neither could report its own wait. They still SHARE the lock: publishing writes the draft
-   *   first, so the two cannot overlap.
+   * @param {string} name Which action is running, 'save' or 'publish', so the clicked button can
+   * report its own wait. They still share the lock: publishing writes the draft first.
    */
   const run = async (name, fn) => {
     if (busy) return
@@ -122,16 +104,10 @@ export function SchemaDetailModal({
     try {
       await fn()
     } catch (e) {
-      // TERMINATES THE PROMISE CHAIN. `run` is invoked straight from onClick, so nothing
-      // downstream can handle a rejection -- and handleSaveDraft in SchemasTab deliberately
-      // RETHROWS after toasting, purely so the publish sequence below aborts rather than
-      // activating a version whose edits were rejected. That control-flow rethrow had nowhere
-      // to land: it surfaced as an unhandled promise rejection in the browser console (and
-      // failed the test suite's unhandled-rejection check) on every rejected save.
-      //
-      // Swallowed rather than re-reported because the error has ALREADY been shown to the user
-      // by the handler that rethrew it; toasting again here would show it twice. Logged so a
-      // rejection from some future caller that does not report is still diagnosable.
+      // Terminates the promise chain: `run` is invoked from onClick, and handleSaveDraft in
+      // SchemasTab rethrows after toasting so the publish sequence aborts. Swallowed because the
+      // error was already shown; logged so a future caller that does not report is still
+      // diagnosable.
       console.error('Schema action failed:', e)
     } finally {
       setBusyAction(null)
@@ -147,10 +123,8 @@ export function SchemaDetailModal({
   })
 
   const handlePublish = () => run('publish', async () => {
-    // Saved first, unconditionally-if-dirty, so publishing can never activate a version that is
-    // missing the edits sitting in front of the operator. Two writes rather than one because the
-    // publish RPC takes no payload -- it activates what is stored, and what is stored has to be
-    // what was shown.
+    // Saved first if dirty, so publishing can never activate a version missing the edits on screen.
+    // The publish RPC takes no payload.
     if (dirty) {
       await onSaveDraft?.({
         schema_definition: buildDefinition(),
@@ -352,11 +326,9 @@ export function SchemaDetailModal({
         <div className="modal-actions" style={{ flexWrap: 'wrap' }}>
           <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
 
-          {/* Visible here rather than behind an overflow menu, unlike in the registry row. There
-              is room, and this is the screen someone is already on when they decide they want the
-              file open in an editor -- putting it one click further away on the one page where it
-              is obviously wanted would be the wrong trade. It downloads what is STORED, so on a
-              draft with unsaved edits it is the last saved state, not what is on screen. */}
+          {/* Visible here rather than behind an overflow menu: this is the screen someone is on
+              when they want the file in an editor. It downloads what is stored, so on a dirty draft
+              that is the last saved state. */}
           <button
             className={`btn btn-ghost ${!schema?.schema_definition ? 'btn-disabled' : ''}`}
             disabled={!schema?.schema_definition || busy}
@@ -370,9 +342,7 @@ export function SchemaDetailModal({
             <IconDownload size={13} /> Download JSON
           </button>
 
-          {/* Both write buttons are locked by `busy` -- publishing writes the draft first, so the
-              two cannot overlap -- but only the one that was CLICKED spins. That is what
-              busyAction buys over the boolean it replaced. */}
+          {/* Both write buttons are locked by `busy`, but only the one clicked spins. */}
           {editable && (
             <ActionButton
               className={`btn btn-ghost ${!canSaveDraft || !dirty ? 'btn-disabled' : ''}`}
@@ -405,14 +375,8 @@ export function SchemaDetailModal({
             </ActionButton>
           )}
 
-          {/* THE OTHER WAY OUT OF A DRAFT, and until 0091 there wasn't one. The tooltip on the
-              disabled Fork control has been saying "publish or discard it first" the whole time --
-              and discarding was the half that did not exist, so the only exit from a draft nobody
-              wanted was to PUBLISH it: archive the parent, repoint every attached device. That is
-              a considerable act to be pushed into by the absence of a Cancel button.
-
-              DANGER, NOT PRIMARY, and to the left of Publish: it destroys work, and the two must
-              not read as a pair of equals. */}
+          {/* The other way out of a draft: without it the only exit was to publish. Danger, not
+              primary, and to the left of Publish. */}
           {editable && onDiscard && (
             <button
               type="button"
@@ -427,9 +391,8 @@ export function SchemaDetailModal({
             </button>
           )}
 
-          {/* The single primary action on a read-only version. Rendered only when the schema is
-              actually forkable, and disabled — with the reason — rather than hidden when the
-              operator lacks the authority or a draft is already open. */}
+          {/* The single primary action on a read-only version; disabled with the reason rather than
+              hidden. */}
           {canForkSchema(schema) && (
             <ForkAction
               schema={schema}
@@ -452,9 +415,8 @@ export function SchemaDetailModal({
 }
 
 /**
- * Split out because the reason it is unavailable is worth stating, and the three reasons read very
- * differently: no authority, a draft already open, or nothing wrong at all. A greyed-out button
- * that says none of them is the pattern `ActionMenu` exists to replace.
+ * Split out because the reason it is unavailable is worth stating: no authority, a draft already
+ * open, or nothing wrong.
  */
 function ForkAction({ schema, schemas, canManage, busy, onFork }) {
   const existingDraft = (schemas || []).find(s =>

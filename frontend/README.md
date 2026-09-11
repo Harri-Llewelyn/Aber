@@ -139,6 +139,40 @@ handed to a third party, and `'0'` cannot begin an `idShort`, so the shell fails
 The lesson is the one the fixture already taught: *an implementation that is not listed in the
 fixture is an implementation that is not checked.*
 
+### Why the Digital Thread groups overlapping markers into a badge
+
+`components/tabs/DigitalThreadTab.jsx` draws one lane per asset with a marker per event. Events
+written by one transaction share a timestamp exactly (`recorded_at` is the transaction start time),
+so a commissioning burst of five or six rows lands on one pixel. Two fixes were tried and rejected:
+
+- **A vertical fan** displaced colliding markers off the lane's centre line. The track is 32px and
+  a marker 15px, so it held three; a fourth cycled back into the first slot, and the densest
+  moments on the page were the ones it could not draw. Three fanned dots and five look alike, so
+  it could not be counted either.
+- **Nudging along the time axis** would make the same pair of events appear different distances
+  apart depending on the range control, and it would erase the causation signal: perfect overlap
+  is the visual signature of one act.
+
+Markers closer than `CLUSTER_GAP_PX` (14px, one marker plus its ring) become one badge carrying the
+count. Grouping is by **pixel** distance, not by time, so the range control acts as a zoom and a
+cluster dissolves into its members as the same events move apart on screen. The badge sits at the
+mean of its members' positions, so the x-axis still tells the truth, and its hover says whether the
+members share a `causation_id` (one act) or merely a timestamp. Ordering inside a cluster falls
+back to `event_id`, the order the rows were written, which is also how `causationSiblings()` orders
+the rows of one transaction.
+
+### What the Access Control page deliberately does not claim
+
+`components/tabs/AccessControlTab.jsx` is not an inventory of the broker. Mosquitto's accounts live
+in a file reachable only by `gateway-credential-service`, which is add-only and cannot list
+anything back; giving it a LIST verb would hand whoever holds one bearer token the whole account
+table. So the page shows what the **platform issued and recorded**, and the difference shows up
+wherever a credential was minted outside a dashboard session: `record_gateway_credential_issued()`
+cannot be called on a script's behalf, because `has_role()` resolves through `auth.uid()`, which is
+NULL for the service-role key. Such a gateway reads *No platform record* and connects perfectly
+well. The state is named for the record and not for the credential: *No credential* would be a
+claim about the broker, which is the one thing the page cannot see.
+
 ---
 
 ## Realtime

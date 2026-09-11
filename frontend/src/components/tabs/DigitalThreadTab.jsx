@@ -13,9 +13,8 @@ import {
 import { useSetting } from '../../hooks/useSettings'
 
 /**
- * How a machine-originated change is described. `changed_by` names WHICH user and is NULL for
- * every write no person made; `actor_source` (archived migration 0005) names WHAT KIND of actor it was,
- * so a blank author is no longer ambiguous between "a gateway did this" and "we lost track".
+ * `changed_by` names the user and is NULL for every machine write; `actor_source` names the kind of
+ * actor, so a blank author is not ambiguous.
  */
 const ACTOR_LABELS = {
   user:      { label: 'User',              title: 'Made by a signed-in operator' },
@@ -35,22 +34,13 @@ function actorTitle(event) {
 }
 
 /**
- * The trigger writes TG_TABLE_NAME -- 'cells' / 'gateways' / 'devices'. The UI has always spoken
- * in the singular upper case, and a handover from another page arrives already in that form, so
- * both spellings reach this component and both have to normalise to one.
- *
- * DEFINED IN `constants.js` AND NOT HERE, since #141. This map, the filter dropdown below and the
- * kind-to-table normaliser in `api.js` are three views of one fact, and holding them in three
- * places is what let them drift apart -- see DIGITAL_THREAD_ENTITY_TYPES for what that cost. The
- * reasoning about why `service_principals` is not a table and why `user_roles` reads as ACCESS
- * moved there with it.
+ * The trigger writes TG_TABLE_NAME ('devices'); the UI and page handovers use 'DEVICE'. The map in
+ * constants.js normalises both and is shared with the filter and api.js so the three cannot drift.
  */
 const ENTITY_KIND = ENTITY_KIND_BY_TABLE
 /**
- * The kinds the purge test can answer for -- the three that name a real table.
- *
- * Absence from `entityNames` means DELETED only for these. For anything else it means the lookup
- * never covered it, which is not the same fact and must not be rendered as though it were.
+ * The kinds backed by a real table. Absence from `entityNames` means DELETED only for these; for
+ * any other kind the lookup never covered it.
  */
 const ASSET_ENTITY_KINDS = new Set(['CELL', 'GATEWAY', 'DEVICE'])
 
@@ -58,36 +48,22 @@ const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
 
 /**
- * Columns excluded from every diff.
- *
- * Machine churn, not history. archived migration 0005 already suppresses the two worst offenders at the
- * source -- an UPDATE where nothing changed, and a heartbeat-only UPDATE -- so what these catch
- * is the residue: a real edit that also happened to bump a timestamp, which would otherwise open
- * every diff with a line nobody came to read.
- *
- * `updated_at` and `last_seen` are not columns of cells, gateways or devices in this schema.
- * They are listed anyway because a denylist that only names what exists today silently stops
- * working the moment someone adds the column, and the failure mode is noise in an audit trail
- * rather than an error anyone would notice.
+ * Columns excluded from every diff: timestamp churn that would otherwise open each diff with a line
+ * nobody came to read. `updated_at` and `last_seen` are not columns today; listed so the denylist
+ * keeps working if they are added.
  */
 const NOISE_FIELDS = new Set(['updated_at', 'last_heartbeat', 'last_seen'])
 
 /**
- * Fields whose change is a GOVERNANCE act rather than an operational one -- what this asset is
- * declared to be, as opposed to what it is currently doing. `asset_config` is not a column of
- * these three tables (it is its own table, and is not audited); it is named here because the
- * classification is written in terms of the concept, and the day that binding moves onto the row
- * this keeps saying the right thing.
+ * Fields whose change is a governance act (what the asset is declared to be) rather than an
+ * operational one. `asset_config` names the concept even though it is its own, unaudited, table.
  */
 const GOVERNANCE_FIELDS = new Set([
   'schema_id', 'asset_config', 'asset_type', 'connection_method', 'grafana_url', 'access_url'
 ])
-/* `identity_source` was in this set and has been taken out, on the evidence of a reseeded stack.
-   The commonest real event in the audit table is a device's first DBIRTH, which arrives as one
-   UPDATE touching `status`, `first_dbirth_at` and `identity_source` together -- so including it
-   painted the single most frequent lifecycle event on the page amber. It is provenance written
-   by the ingestion daemon, not configuration an operator declared, and it never moves on its
-   own. `name` and `icon` are left out for the mirror-image reason: cosmetic, not governance. */
+/* `identity_source` is deliberately absent: a device's first DBIRTH updates it alongside `status`,
+   and it is provenance written by ingestion rather than operator configuration. `name` and `icon`
+   are cosmetic, not governance. */
 
 /** The four marker classes. `kind` is a CSS suffix as well as a key -- see `.dt-node-*`. */
 export const MARKERS = {
@@ -108,15 +84,9 @@ const sameValue = (a, b) => {
 }
 
 /**
- * What actually changed between two row snapshots.
- *
- * `old_data` and `new_data` are `to_jsonb(OLD)` / `to_jsonb(NEW)` -- WHOLE ROWS, not deltas. A
- * one-column rename therefore arrives as two twenty-key objects that agree on nineteen of them,
- * which is why the drawer computes the difference rather than printing what it was given.
- *
- * An INSERT has no `old_data` and a DELETE no `new_data`; those are rendered as one-sided
- * snapshots with their empty columns dropped, because "every null column this row was born with"
- * is not a fact about the creation.
+ * The changed columns between two row snapshots. `old_data` and `new_data` are whole rows
+ * (`to_jsonb`), not deltas. An INSERT has no `old_data` and a DELETE no `new_data`; those render
+ * one-sided with their empty columns dropped.
  */
 export function diffFields(oldData, newData) {
   const before = oldData && typeof oldData === 'object' ? oldData : null
@@ -142,47 +112,23 @@ export function diffFields(oldData, newData) {
 }
 
 /**
- * Which marker an event gets.
- *
- * MOSTLY DERIVED, because the column it would otherwise read barely exists. `digital_thread.action`
- * is written from TG_OP for everything the audit TRIGGER records, so it holds INSERT / UPDATE /
- * DELETE and nothing more -- there is no QUARANTINE action and no ARCHIVE action to key off.
- * Archiving and quarantining are UPDATEs whose boolean flipped, and a schema rebinding is an UPDATE
- * that touched `schema_id`, so the distinction that matters to an operator lives in the diff.
- *
- * THE ONE EXCEPTION IS SCHEMA_REJECTION, written by `record_ingestion_rejection()` (archived migration 0026)
- * rather than by the trigger. It is not a row mutation at all -- it records a payload the ingestion
- * daemon judged non-conforming -- so there is no diff to classify it from and the action itself is
- * the answer. Governance rather than critical: it says the asset is publishing something its
- * declared model does not account for, which is the same category as a schema being rebound, and
- * NOT a lifecycle event of the kind `critical` is reserved for.
- *
- * An INSERT is always green, including the INSERT of an already-quarantined device -- the arrival
- * of a rogue asset. That follows the taxonomy as specified (INSERT is creation; the flag tests
- * apply to transitions) and is worth knowing about, because that one case is arguably red.
+ * Which marker an event gets. `digital_thread.action` holds only INSERT / UPDATE / DELETE from the
+ * trigger, so archiving, quarantining and a schema rebinding are derived from the diff.
+ * SCHEMA_REJECTION is written by `record_ingestion_rejection()` with no diff, so the action itself
+ * decides: governance, not critical. An INSERT is always creation, even of an already-quarantined
+ * device.
  */
 export function classifyEvent(event, diff) {
   const action = String(event.event_type || event.action || '').toUpperCase()
 
-  // THE DATABASE'S JUDGEMENT FIRST, WHERE THERE IS ONE. `audit_domain` is stamped at insert time
-  // by 0070 from one closed classifier, and it is the same question this function was answering
-  // by hand -- "is this about who may do what". A security row is governance whatever its verb,
-  // which is what stops a service principal's INSERT rendering green as a creation event.
-  //
-  // OPTIONAL, NOT REQUIRED. This function is also called on rows a test or an older page state
-  // supplied without the column, and on the SCHEMA_REJECTION path below whose fixtures predate it.
-  // An absent domain falls through to the derivation, which is what it always did.
+  // `audit_domain` is stamped at insert time; a security row is governance whatever its verb.
+  // Optional, because fixtures and older page states supply rows without it, which fall through to
+  // the derivation.
   if (event.audit_domain === 'security') return 'governance'
 
   if (action === 'SCHEMA_REJECTION') return 'governance'
-  // TOKEN_MINTED is governance for the same reason and a sharper one: it records that somebody was
-  // granted a way to reach this stack. It is not `creation` -- no row was created, and the thing
-  // that WAS created lives outside the database entirely -- and not `critical`, which is reserved
-  // for lifecycle events. Who may do what is precisely what governance means.
-  // TOKEN_REVOKED (0074) is the same kind of fact arriving from the other direction, and it is
-  // named here rather than left to the `audit_domain === 'security'` line above for the reason
-  // that line already gives: fixtures and older page states supply rows without the column, and a
-  // credential withdrawal is not an event to classify by accident.
+  // TOKEN_MINTED and TOKEN_REVOKED record who may reach the stack: governance, not creation and not
+  // critical. Named explicitly because rows without `audit_domain` still arrive.
   if (action === 'TOKEN_MINTED' || action === 'TOKEN_REVOKED') return 'governance'
   // The same argument, arriving from `user_roles` (0070). A revocation is not `critical`: that
   // marker is for an asset's lifecycle, and nothing on the shopfloor ended here.
@@ -199,13 +145,8 @@ export function classifyEvent(event, diff) {
 }
 
 /**
- * The range presets, and the window each one means. `ms` of null is an unbounded window.
- *
- * THE SHORT ONES ARE WHY THIS PAGE CAN NOW BE READ AT ALL AT COMMISSIONING RESOLUTION. The
- * causation work made `digital_thread` legible as ACTS rather than rows, and an act is exactly the
- * thing that happens inside one second -- so the page's most interesting content sat at a
- * resolution the range control could not reach. `24h` was the narrowest option and the custom
- * pickers were date-only, which meant the narrowest expressible window was a whole day.
+ * The range presets; `ms` of null is unbounded. The short presets exist because an act happens
+ * inside a second, and a date-only picker could not frame one.
  */
 const TIME_PRESETS = [
   { value: 'all', label: 'All time',       ms: null },
@@ -217,30 +158,16 @@ const TIME_PRESETS = [
 ]
 
 /**
- * The preset (or the custom dates) as the `since` / `until` the API takes.
- *
- * ALL TIME IS THE DEFAULT, and that is a decision about the page's main entry path rather than a
- * shrug. Most arrivals here are a handover -- "Digital Thread" on a device row -- and a device
- * whose last edit was at install time would answer that click with an empty timeline under any
- * rolling default. An operator who asks for one asset's history means all of it.
- *
- * Called at fetch time rather than memoised: a page left on "Last 24 hours" with auto-refresh
- * running would otherwise keep re-requesting the window that was current when the preset was
- * chosen, and drift a full day behind over a shift.
+ * The preset or custom dates as the `since` / `until` the API takes. All time is the default: most
+ * arrivals are a handover for one asset whose last edit may be years old. Called at fetch time
+ * rather than memoised, so a rolling window does not drift while the poll runs.
  */
 export function timeWindow(preset, customStart, customEnd) {
   /**
-   * A custom bound as an ISO instant.
-   *
-   * TWO SHAPES, BECAUSE THE INPUT CHANGED UNDER IT. `datetime-local` yields `YYYY-MM-DDTHH:mm`,
-   * which names an instant; the `date` input it replaces yielded `YYYY-MM-DD`, which names a DAY
-   * and has to be widened to one of its ends. Both are still handled -- a value persisted from the
-   * older control, or typed by hand, must not silently produce an invalid date.
-   *
-   * PARSED AS LOCAL, NOT UTC, in both shapes. An operator choosing 16:11 means 16:11 where they
-   * are standing. `new Date('2026-08-22T16:11')` is local by specification; appending a `Z` -- or
-   * building the string with toISOString() -- would shift the window by the timezone offset and
-   * quietly return the wrong hour's events.
+   * A custom bound as an ISO instant. Accepts `YYYY-MM-DDTHH:mm` from `datetime-local` and
+   * `YYYY-MM-DD` from the older date input, which names a day and is widened to one end of it.
+   * Parsed as local time: appending `Z` or using toISOString() would shift the window by the
+   * timezone offset.
    */
   const iso = (value, endOfRange) => {
     if (!value) return ''
@@ -249,9 +176,7 @@ export function timeWindow(preset, customStart, customEnd) {
       ? new Date(value)
       : new Date(`${value}T${endOfRange ? '23:59:59.999' : '00:00:00.000'}`)
     if (Number.isNaN(d.getTime())) return ''
-    // `datetime-local` has minute granularity, so an end bound of 16:11 would exclude everything
-    // that happened during 16:11. Widened to the end of that minute -- the same widening the
-    // date-only path does to the end of the day, one unit down.
+    // Minute granularity: an end bound of 16:11 must include 16:11:59.
     if (hasTime && endOfRange) d.setSeconds(59, 999)
     return d.toISOString()
   }
@@ -263,53 +188,28 @@ export function timeWindow(preset, customStart, customEnd) {
 }
 
 /**
- * How many lanes are drawn before the rest are folded behind a toggle.
- *
- * 30, NOT 15. At fifteen the toggle appeared on a seeded demonstrator -- sixteen assets, so the
- * page folded away a single lane and asked for a click to see it. A control that hides one row is
- * pure cost: the reader pays the click and the uncertainty of not knowing what was withheld, and
- * saves 33 pixels on a page that scrolls anyway.
- *
- * The cap exists for a genuinely large estate, where a few hundred lanes would make the initial
- * render the slowest thing on the page. Thirty is roughly a screen of lanes at 33px, so the fold
- * now happens when there is actually something to fold.
+ * Lanes drawn before the rest fold behind a toggle. About a screen of lanes at 33px; a smaller cap
+ * folded a single lane on a sixteen-asset stack.
  */
 const DEFAULT_LANE_LIMIT = 30
 
 /**
- * The poll interval, in seconds, when no setting overrides it.
- *
- * Named rather than inlined at the setInterval below, because it is now the FALLBACK half of a
- * declared setting (`ui.digital_thread_poll_seconds`, archived migration 0031) and the two have to be
- * findable from each other. The migration names this constant in its `fallback_source`.
+ * The fallback for the `ui.digital_thread_poll_seconds` setting, whose `fallback_source` names this
+ * constant.
  */
 const DEFAULT_POLL_SECONDS = 60
 
 /**
- * Rows per request. THE SAME 200 AS BEFORE, AND THAT IS THE POINT.
- *
- * The obvious answer to "the page stops at 200 events" is to make it 2000, and it is the wrong
- * one. `digital_thread_page()` already scans every row the filters select in order to count deleted
- * assets over the whole match rather than over the page, so a bigger page buys nothing on the
- * expensive half and costs on the two cheap ones -- a larger JSON aggregation and more DOM. It also
- * only moves the wall. What was missing was not a bigger first page but a second one.
+ * Rows per request. `digital_thread_page()` scans the whole match to count deleted assets whatever
+ * the page size, so a larger page only costs; paging is the answer, not a bigger page.
  */
 const PAGE_SIZE = 200
 
 /**
- * Fold a freshly-polled first page into the pages already loaded.
- *
- * `digital_thread` is APPEND-ONLY (0003) and read newest-first, which is what makes this safe:
- * rows already held can never change or disappear, and anything new can only belong at the top. So
- * a poll only ever has rows to PREPEND, and the pages a reader walked back to stay put.
- *
- * THE ONE CASE THAT IS NOT A MERGE is a gap. If more than PAGE_SIZE events were recorded since the
- * last poll, the fresh page and the held list no longer touch, and prepending would splice two
- * ranges together with a hole in the middle and no indication there was one. Detected by the
- * overlap being empty; answered by starting again from the newest page, which is the honest state.
- *
- * Exported for its own test: this is ordinary-looking list bookkeeping whose failure mode is a
- * reader quietly losing history, which nothing on the page would show.
+ * Fold a freshly polled first page into the pages already loaded. The thread is append-only and
+ * read newest-first, so a poll can only prepend. If the fresh page and the held list no longer
+ * overlap, more than PAGE_SIZE events arrived since the last poll, and the list restarts from the
+ * newest page rather than splicing a hole.
  */
 export function mergeFirstPage (prev, fresh) {
   if (!prev || prev.length === 0) return { events: fresh, reset: true }
@@ -321,52 +221,14 @@ export function mergeFirstPage (prev, fresh) {
   return { events: [...added, ...prev], reset: false }
 }
 
-/*
- * MARKERS TOO CLOSE TO DRAW SEPARATELY BECOME ONE BADGE THAT SAYS HOW MANY THERE ARE.
- *
- * WHAT THIS REPLACED, and why the replacement is better rather than merely different. The first
- * answer to the reported overlap was a VERTICAL FAN -- colliding markers displaced up and down off
- * the lane's centre line. It fixed the reported case (a Created and an Operational two seconds
- * apart) and then failed at exactly the point where this page is most interesting:
- *
- *   * IT HELD THREE. The track is 32px and a marker is 15px with its ring, so the fan had three
- *     slots; a fourth event cycled back into the first and overlapped anyway. A commissioning burst
- *     is routinely five or six rows, so the densest moments on the page were the ones it could not
- *     draw -- and it gave no sign of that, which is the same fault as the original overlap.
- *   * IT COULD NOT BE COUNTED. Three fanned dots and five fanned dots look alike. The reader's
- *     actual question is "how much happened here", and a fan answers "some".
- *
- * A badge answers it: `6` is a claim the page can honour at any density, and the hover breaks it
- * down by classification.
- *
- * WHY NOT NUDGE ALONG THE TIME AXIS, which is the other obvious fix and stays ruled out:
- *
- *   1. It would be ZOOM-DEPENDENT. Over an all-time range of ten hours an 8px nudge reads as about
- *      twelve minutes of separation; over a one-hour range the same nudge reads as one minute. The
- *      same pair of events would appear to be different distances apart depending on a control that
- *      has nothing to do with them.
- *   2. It would ERASE THE CAUSATION SIGNAL. Rows written in one transaction share a timestamp
- *      exactly -- `recorded_at` is transaction start time, which is why causationSiblings() orders
- *      by event_id rather than by time. Perfect overlap is the visual signature of one act.
- *
- * CLUSTERING KEEPS BOTH PROPERTIES. Every badge sits where its events' timestamps put it, so x
- * still tells the truth; and a transaction that wrote six rows becomes one badge reading `6` whose
- * hover SAYS they were one act -- stating the causation signal outright instead of leaving it to be
- * inferred from a pile of dots that happen to be exactly on top of each other.
- */
+/* Markers too close to draw separately become one badge carrying the count. Grouping is by pixel
+   distance, so the range control acts as a zoom, and positions are never nudged along the time
+   axis: identical timestamps are the visual signature of one transaction. See the Digital Thread
+   notes in frontend/README.md. */
 
 /**
- * How close, in pixels, is too close to draw separately.
- *
- * A marker is 13px plus a 2px ring, so at 14px apart two of them still touch. Below that the reader
- * cannot tell how many dots are there, which is the whole complaint.
- *
- * PIXELS, NOT TIME, AND THAT IS THE ENTIRE RULE. A time-based threshold -- "group anything inside a
- * minute" -- is wrong in both directions: it would hold a burst grouped on a 15-minute range where
- * its events are 200px apart and plainly separate, and it would leave two events a quarter of an
- * hour apart overlapping on an all-time range spanning a month. "Do these overlap" is a question
- * about pixels. Which is also what makes the range control a ZOOM: narrow the range and clusters
- * dissolve into their members, because the same events are now further apart on screen.
+ * How close, in pixels, is too close: a 13px marker with a 2px ring touches at 14px. Pixels rather
+ * than time, because whether two markers overlap depends on the range on screen.
  */
 export const CLUSTER_GAP_PX = 14
 
@@ -380,11 +242,8 @@ export const CLUSTER_GAP_PX = 14
  *                  of the track, 0..1; `event` is the earliest member, and is what a click selects.
  */
 export function clusterEvents(events, xOf, trackWidth) {
-  // CHRONOLOGICAL, and the tiebreak is the interesting half. `xOf` is monotone in the timestamp, so
-  // ordering by it is ordering by time -- except for events sharing a timestamp exactly, which is
-  // precisely the transaction case. Those fall back to `event_id`, the order the rows were WRITTEN,
-  // for the same reason causationSiblings() does: inside one act that is the order it performed
-  // them, and it is therefore the row a click on the badge should open first.
+  // Chronological; events sharing a timestamp order by `event_id`, the order the rows were written
+  // inside one transaction, which is the row a click opens first.
   const ordered = [...events].sort(
     (a, b) => xOf(a) - xOf(b) || Number(a.event_id) - Number(b.event_id)
   )
@@ -398,19 +257,15 @@ export function clusterEvents(events, xOf, trackWidth) {
     xOffset: members.reduce((sum, e) => sum + xOf(e), 0) / members.length
   })
 
-  // NO MEASUREMENT, NO CLUSTERING. Guessing a width would fold together markers that do not touch,
-  // and drawing them all singly is the status quo rather than a new fault. This is also the jsdom
-  // path -- `offsetWidth` is 0 with no layout engine -- which is what makes this function testable
-  // directly rather than only through the DOM.
+  // No measurement (jsdom, or before layout): draw everything singly rather than guess a width.
   if (!trackWidth) return ordered.map(e => item([e]))
 
   const groups = []
   let current = []
   let lastX = null
 
-  // CHAINED, not measured from the first of the group: a run of events each 10px from the last is
-  // one continuous pile, and testing against the group's start would split it into badges that
-  // still overlap at their seams.
+  // Chained from the previous member rather than the group's first: a run of events each 10px apart
+  // is one pile.
   for (const e of ordered) {
     const x = xOf(e) * trackWidth
     if (lastX !== null && x - lastX <= CLUSTER_GAP_PX) current.push(e)
@@ -423,17 +278,8 @@ export function clusterEvents(events, xOf, trackWidth) {
 }
 
 /**
- * What a cluster badge says on hover.
- *
- * THE BREAKDOWN IS BY CLASSIFICATION, in `MARKERS` order so it reads in the same order as the
- * legend above the timeline, and in the legend's own words rather than a second set of names for
- * the same four things.
- *
- * THE SECOND LINE IS THE ONE THAT EARNS ITS PLACE. Collapsing events into a count loses exactly the
- * thing a pile of dots used to show by accident: whether these happened TOGETHER or merely near
- * each other. A shared non-null `causation_id` across every member says one act wrote them;
- * identical timestamps without one say only that they landed in the same instant. Those are
- * different claims and this does not conflate them.
+ * The hover text on a cluster badge: a breakdown by classification in legend order, then whether
+ * the members share a `causation_id` (one act) or merely a timestamp.
  */
 export function clusterSummary(events, kindOf) {
   const counts = new Map()
@@ -466,43 +312,9 @@ export function clusterSummary(events, kindOf) {
 }
 
 /**
- * The sections, in the order a plant is organised: a cell holds gateways, which hold devices —
- * then the governance lane, which is not part of that hierarchy and follows it.
- *
- * =================================================================================================
- * THIS LIST WAS THREE ENTRIES LONG AND SILENTLY DISCARDED FOUR OF `ENTITY_KIND`'S SEVEN.
- *
- * `sections` filters lanes by kind and keeps only the kinds named here, so a lane of any other kind
- * was counted by the header and never drawn. Measured on a development stack, resting filters:
- *
- *     user_roles           20 lanes, 136 events      not drawn
- *     service_principals    1 lane,   15 events      not drawn
- *     schemas               6 lanes,  12 events      not drawn
- *     gateways              1 lane,    4 events      drawn
- *
- * — a header reading "28 assets · 167 events" above a single row. The counts were right; the
- * timeline could not express most of what it had. `0070` had already given every one of these a
- * legible name for exactly this surface, and adding the audit domains it introduced never reached
- * here, so the whole SECURITY lane — every role granted or revoked, every service identity — was
- * undrawable. That is the half of the audit an Auditor comes for.
- *
- * =================================================================================================
- * AND ANY KIND NOT LISTED HERE IS STILL DRAWN, under its own name.
- *
- * Extending this list fixes the four that exist today and not the failure, which is that the list
- * has to be extended at all. `sections` now appends a section for every remaining kind rather than
- * dropping it, so the next entity type the audit trigger reaches appears — unstyled and correctly
- * labelled from `ENTITY_KIND` — instead of vanishing into a count nobody can reconcile.
- *
- * =================================================================================================
- * THE ORDER AND THE LABELS COME FROM `DIGITAL_THREAD_ENTITY_TYPES`, and only the icons live here.
- *
- * Extending this list was the first fix and it was not enough: the FILTER was a fourth list of the
- * same kinds, four entries long, so the security lane became drawable and stayed unreachable. A
- * reader could see role assignments only by clearing the filter entirely, and asking for one
- * directly was not offered. Icons are the one part of a section that is genuinely presentational,
- * so they are the one part still written here; everything else is read from the shared table, and
- * a kind added there arrives in the timeline and in the dropdown together.
+ * The sections, in the order a plant is organised, then the governance lane. Order and labels come
+ * from `DIGITAL_THREAD_ENTITY_TYPES`; only the icons live here, so a kind added to the shared table
+ * reaches the timeline and the filter together.
  */
 /** The icon for a kind with no section of its own — the raw kind, which `ENTITY_KIND` made legible. */
 const FALLBACK_SECTION_ICON = IconHistory
@@ -519,10 +331,7 @@ const SECTION_ICONS = {
   SETTING:            IconSettings
 }
 
-/**
- * A kind with a place in the shared table but no icon here still gets a section -- it takes the
- * fallback, exactly as an unrecognised kind does. An icon is not permission to be drawn.
- */
+/** A kind without an icon here still gets a section, with the fallback icon. */
 const SECTIONS = DIGITAL_THREAD_ENTITY_TYPES.map(({ kind, label }) => ({
   kind,
   label,
@@ -538,21 +347,10 @@ export const shortId = (id) => {
 }
 
 /**
- * The identity an audit row carries in its own payload, for an entity no longer in the database.
- *
- * TWO FALLS, AND THE SECOND IS THE ONE THAT SURVIVES A RENAME. `name` is what an operator
- * remembers, so it comes first -- but it is mutable, and a device that was renamed shortly before
- * being purged leaves snapshots under a name nobody recognises. `sparkplug_id` is the immutable
- * wire identity: it is what the historian keyed its telemetry by, what the gateway was configured
- * with, and what appears in every Grafana panel and alert about the asset. When the two disagree
- * it is the one that can still be matched against something outside this table.
- *
- * `old_data` is preferred over `new_data` for neither -- both are checked, newest first -- because
- * an INSERT has only `new_data` and a DELETE only `old_data`, and a purged entity's final row is
- * the DELETE.
- *
- * Cells carry no `sparkplug_id`, so for those this falls through to null and the caller shortens
- * the uuid. That is correct rather than a gap: a cell has no second identity to recover.
+ * The identity an audit row carries in its payload, for an entity no longer in the database. `name`
+ * first, then `sparkplug_id`, which is immutable and is what telemetry and alerts are keyed by.
+ * Both snapshots are checked because an INSERT has only `new_data` and a DELETE only `old_data`.
+ * Cells have no `sparkplug_id` and fall through to null.
  */
 export function snapshotIdentity(event) {
   const name = event?.new_data?.name || event?.old_data?.name
@@ -565,18 +363,9 @@ export function snapshotIdentity(event) {
 }
 
 /**
- * The name to put on a lane, in three falls.
- *
- * The audit row stores only `entity_id`; names live on the entity and carry no identity of their
- * own, so the first fall is a client-side join. The SECOND is what makes a deleted entity legible
- * at all: its row is gone from `/api/v1/cells`, so the join can never resolve it -- but the audit
- * snapshot it left behind holds the identity it had when it died. A truncated id is the last
- * resort rather than the usual case it was.
- *
- * THE JOIN CAN FAIL FOR TWO DIFFERENT REASONS and this deliberately does not distinguish them: the
- * entity was hard-purged from the Archives tab, or it is merely absent from the page the caller
- * fetched. Both want the snapshot, and guessing which one it was would put a claim on screen that
- * the data does not support.
+ * The lane label in three falls: the live join, then the audit snapshot, then a shortened id. A
+ * purged entity and one merely absent from the fetched page both fall to the snapshot; the page
+ * cannot tell them apart and does not claim to.
  */
 export function resolveLaneName(entityId, laneEvents, entityNames) {
   const joined = entityNames.get(entityId)
@@ -592,20 +381,14 @@ export function resolveLaneName(entityId, laneEvents, entityNames) {
 }
 
 /**
- * The axis label format, chosen from the span it has to distinguish.
- *
- * ONE RULE DECIDES IT: two adjacent ticks must never print the same string. Five ticks across ten
- * minutes all read `14:03` without seconds; five across six months all read `Aug 2026` with only
- * a month. Either way the axis stops being an axis and becomes decoration, so each band is the
- * coarsest format that still separates its own ticks.
+ * The axis label format for a span. Adjacent ticks must never print the same string, so each band
+ * is the coarsest format that still separates its own ticks.
  */
 export function tickFormatter(spanMs) {
   const MIN = 60 * 1000, HOUR = 60 * MIN, DAY = 24 * HOUR
 
-  // UNDER AN HOUR, SECONDS ARE SHOWN. Widened from ten minutes when the 15-minute and 1-hour
-  // presets arrived: within a commissioning burst the minute is constant across several ticks and
-  // the seconds are the only thing telling them apart. Above an hour they are always `:00` on a
-  // round tick and are noise on a label that is already unambiguous.
+  // Under an hour the seconds are shown: within a burst the minute is constant across several
+  // ticks.
   if (spanMs < HOUR) {
     return (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
@@ -621,11 +404,8 @@ export function tickFormatter(spanMs) {
   if (spanMs <= 30 * DAY) {
     return (d) => d.toLocaleDateString([], { month: 'short', day: 'numeric' })
   }
-  /* Past thirty days, `MMM YYYY` is the tempting label and it is the one that breaks: five ticks
-     across a 31-day span sit about eight days apart and would all read `Aug 2026`, which is the
-     same repeated-header failure the ten-minute band exists to avoid. An ISO date never repeats
-     at any span this rule covers, and is built from local parts rather than toISOString() --
-     which would report the previous day for anyone west of UTC. */
+  /* Past thirty days, an ISO date built from local parts: `MMM YYYY` repeats across five ticks of
+     one month, and toISOString() reports the previous day west of UTC. */
   return (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-` +
                 `${String(d.getDate()).padStart(2, '0')}`
 }
@@ -641,31 +421,14 @@ const formatValue = (v) => {
 const EmptyValue = ({ label }) => <span className="dt-diff-empty">{label}</span>
 
 /**
- * The other audit rows written by the same transaction as `event`.
- *
- * WHY THIS IS A DIFFERENT AXIS FROM THE PREVIOUS/NEXT BUTTONS, and why it needed its own control
- * rather than folding into them. Those step through ONE ASSET over time -- they never leave the
- * lane. A transaction goes the other way: one operator action crosses assets, and the rows it
- * produced are related to each other by cause, not by subject. Approving a quarantined device
- * updates the device and rebinds its schema; the schema-version rebinding at 0001:779 touches
- * every device on the superseded version in one statement. Read one row at a time, those look like
- * unrelated edits that happen to share a second.
- *
- * ORDERED BY `event_id` ASCENDING -- the order the rows were WRITTEN, which inside one transaction
- * is the order the act performed them. Not by timestamp: `recorded_at` is `NOW()`, which is the
- * TRANSACTION start time in PostgreSQL and is therefore identical across every row here. Sorting
- * by it would produce an arbitrary order that looked meaningful.
- *
- * DRAWN FROM THE FETCHED, FILTERED SET, exactly as `selectedLaneEvents` is, and the consequence is
- * stated on the control itself rather than left to be discovered: a sibling excluded by the current
- * filter or time window is not counted. The alternative -- refetching by causation_id -- would let
- * the drawer step to an event the timeline behind it is not drawing, which is the same trap that
- * paragraph warns about.
+ * The other audit rows written by the same transaction. Ordered by `event_id` ascending, the order
+ * the rows were written; `recorded_at` is the transaction start time and identical across them.
+ * Drawn from the fetched, filtered set, so a sibling outside the current filter is not counted, and
+ * the control says so.
  */
 export function causationSiblings(event, events) {
-  // NULL is not a group. Every row written before archived migration 0026 carries no causation, and there
-  // is no honest backfill for a transaction that is long over -- so a NULL must never match
-  // another NULL, which would collect the entire pre-0026 history into one imaginary act.
+  // NULL is not a group: rows written before causation existed carry none, and matching NULLs would
+  // collect all of them into one act.
   if (!event?.causation_id) return []
 
   return events
@@ -676,14 +439,8 @@ export function causationSiblings(event, events) {
 }
 
 /**
- * "This change was part of a larger act -- here is the rest of it."
- *
- * RENDERED ONLY WHEN THERE ARE SIBLINGS, and the silence is deliberate. Most operator edits touch
- * exactly one row, so a permanent "0 related changes" line would occupy space on almost every event
- * to say nothing -- and, worse, it would be a CLAIM. Because the set is filtered (see above), the
- * page cannot actually tell "this was a single-row act" from "the others are outside your filter",
- * and a control that asserted the first would be wrong some of the time with no way to notice.
- * Absence asserts nothing.
+ * Rendered only when there are siblings. The set is filtered, so the page cannot tell a single-row
+ * act from siblings outside the filter; absence asserts nothing.
  */
 function CausationGroup({ siblings, entityNames, onSelect }) {
   if (!siblings.length) return null
@@ -702,9 +459,7 @@ function CausationGroup({ siblings, entityNames, onSelect }) {
 
       <ul className="dt-causation-list">
         {siblings.map(s => {
-          // Same three falls as the lane label: the live join, then the audit snapshot, then a
-          // shortened id. A sibling can perfectly well be an entity that has since been purged --
-          // a cell deletion cascading to its gateways is exactly this shape.
+          // Same three falls as the lane label; a sibling may itself have been purged.
           const name = entityNames.get(s.entity_id) || snapshotIdentity(s)?.label
           return (
             <li key={s.event_id}>
@@ -713,9 +468,8 @@ function CausationGroup({ siblings, entityNames, onSelect }) {
                 className="dt-causation-item"
                 onClick={() => onSelect(s.event_id)}
                 title={`Open this change to ${name || s.entity_id}`}
-                /* EXPLICIT, because the computed name would be the three spans read in order --
-                   "DEVICE Press_02 UPDATE" -- which names the row without saying that activating
-                   it does anything. Same reason the timeline markers carry one. */
+                /* Explicit, because the computed name would read the spans in order without saying
+                   that activating it opens the row. */
                 aria-label={`Open this change to ${name || s.entity_id}`}
               >
                 <span className="dt-causation-kind">{entityKind(s.entity_type)}</span>
@@ -733,21 +487,13 @@ function CausationGroup({ siblings, entityNames, onSelect }) {
 }
 
 /**
- * The property diff, rendered INSIDE the Digital Thread page rather than inside ContextPanel.
- *
- * ContextPanel is presentational by contract -- it renders `fields` and `actions` and knows
- * nothing about cells, gateways, devices or audit payloads (see its header). Teaching it to read
- * `old_data` would make it a fifth thing with exactly one caller, so the panel receives this
- * finished node through its `beforeActions` slot instead: a FACT about the selected event, shown
- * with the metadata it belongs to.
+ * The property diff, passed to ContextPanel through `beforeActions`. ContextPanel is presentational
+ * and knows nothing about audit payloads.
  */
 function EventDiff({ event, diff }) {
   const action = String(event.event_type || event.action || '').toUpperCase()
-  // SCHEMA_REJECTION joins the one-sided set because it records an OBSERVATION, not a mutation:
-  // `old_data` is NULL by construction (archived migration 0026), and rendering a "Previous" column that
-  // can never hold anything invites the reader to look for a prior state that does not exist.
-  // TOKEN_MINTED joins them for the same reason: `old_data` is NULL by construction (0043), because
-  // signing a token does not change a prior state -- there was no token, and now there is one more.
+  // SCHEMA_REJECTION and TOKEN_MINTED are one-sided: `old_data` is NULL by construction, and a
+  // Previous column would invite a search for a prior state that does not exist.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
     || action === 'TOKEN_MINTED'
 
@@ -758,18 +504,15 @@ function EventDiff({ event, diff }) {
           : action === 'DELETE' ? 'Final properties'
             : action === 'SCHEMA_REJECTION' ? 'Rejected payload'
               : action === 'TOKEN_MINTED' ? 'Token issued'
-                // TWO-SIDED, UNLIKE TOKEN_MINTED, and that is not an oversight. 0074 carries the
-                // original mint in `old_data` precisely so the row stays readable after the
-                // denylist entry is pruned -- which happens the moment the token expires. So there
-                // IS a prior state here, and it is the thing being withdrawn.
+                // Two-sided, unlike TOKEN_MINTED: a revocation carries the original mint in
+                // `old_data` so the row stays readable after the denylist entry is pruned.
                 : action === 'TOKEN_REVOKED' ? 'Token withdrawn'
                   : 'Changed properties'}
       </div>
 
       {diff.length === 0 ? (
-        /* Reachable in two ways, and they are different: an UPDATE whose only changed column was
-           on the noise denylist, or a row whose snapshots were never recorded. Neither is an
-           error, and neither should look like a rendering failure. */
+        /* Either an UPDATE whose only changed column was on the noise denylist, or a row without
+           snapshots. Neither is an error. */
         <div className="dt-diff-none">
           No property changes recorded outside the ignored timestamp columns.
         </div>
@@ -815,12 +558,7 @@ function EventDiff({ event, diff }) {
 }
 
 /**
- * The unabridged snapshots, collapsed.
- *
- * The diff above is the answer to "what changed"; this is the answer to "prove it". Auditing a
- * disputed change means reading the row as it was actually stored, denylist and all -- so it has
- * to be here, and it has to be shut by default or it is the JSON dump this page was rebuilt to
- * stop being.
+ * The unabridged snapshots, shut by default. The diff answers what changed; this answers prove it.
  */
 function RawSnapshots({ event }) {
   const dump = (value) => {
@@ -840,34 +578,23 @@ function RawSnapshots({ event }) {
 }
 
 /**
- * `initialEntity` is a handover from another page's "Digital Thread" action: `{ id, type }`.
- *
- * It is applied to the ordinary filters rather than held as a separate mode, so the page an
- * operator lands on is the page they already know -- every control still works, Clear Filters
- * really does clear, and the export covers what is on screen. The id goes into the name filter
- * because that filter already matches on id as well as name (see namedEntityIds), which makes the
- * handover exact: two devices may share a name, but the id is the row.
+ * `initialEntity` is a handover from another page: `{ id, type }`. Applied to the ordinary filters,
+ * so every control still works and Clear filters clears it. The id goes into the name filter, which
+ * matches ids as well as names.
  */
 export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showToast }) {
   // The kinds this role may ask for. The database policy decides what comes back; this decides
   // what is offered, so the two agree on which lanes exist for a Shopfloor_Manager.
   const entityTypes = useMemo(() => digitalThreadEntityTypesFor(userRole), [userRole])
   const allowedKinds = useMemo(() => new Set(entityTypes.map(e => e.kind)), [entityTypes])
-  // RAW, straight from the API. `events` below is the DISPLAYED set, derived from this one.
-  // Every consumer on this page -- the lanes, the domain, the drawer, the causation siblings, the
-  // CSV -- reads `events`, so deriving it is what keeps the purged filter from applying to some of
-  // them and not others. A filter applied at each call site would have eight chances to be missed.
+  // Raw, from the API. `events` below is the displayed set, and every consumer reads that one so
+  // the purged filter applies everywhere.
   const [allEvents, setAllEvents]     = useState([])
-  // Whether to INCLUDE events whose asset is no longer in the database (issue #44).
-  //
-  // HIDDEN IS THE DEFAULT, and the control is phrased as "Show" rather than "Hide" so that the
-  // default state renders unlit -- matching `Has quarantined devices` on Gateways and `Empty` on
-  // Cells, both of which are off at rest and light up when engaged. A bar that loaded with a
-  // primary-coloured button already pressed would read as a filter someone had left on.
+  // Whether to include events whose asset is no longer in the database. Hidden by default, and
+  // phrased as Show so the resting control is unlit, like the Gateways and Cells toggles.
   const [showPurged, setShowPurged]   = useState(false)
-  // Set once the three asset lookups have landed. Until then EVERY entity_id looks absent, so the
-  // purged test would classify the whole page as deleted. It also stays false if the lookups fail,
-  // which is the fail-safe direction: unable to tell purged from live means hide nothing.
+  // Set once the asset lookups have landed; until then every id looks absent. Stays false if they
+  // fail: unable to tell purged from live means hide nothing.
   const [lookupsLoaded, setLookupsLoaded] = useState(false)
   const [loading, setLoading]         = useState(true)
   const [entityTypeFilter, setEntityTypeFilter] = useState(initialEntity?.type || '')
@@ -883,28 +610,15 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   const [selectedEventId, setSelectedEventId] = useState(null)
   const [showAllLanes, setShowAllLanes] = useState(false)
 
-  /*
-   * RUNTIME OVERRIDES (archived migration 0031), each falling back to the constant above.
-   *
-   * The constants are not dead: they are what applies on a stack whose administrator has never
-   * touched Settings, which is every fresh install and every local boot. That is the whole point
-   * of the fallback contract -- a setting that has never been changed behaves exactly as the page
-   * behaved before settings existed.
-   */
+  /* Runtime overrides, each falling back to the constant above, which is what a stack whose
+     Settings were never touched runs on. */
   const laneLimit = useSetting('ui.digital_thread_lane_limit', DEFAULT_LANE_LIMIT)
   const pollSeconds = useSetting('ui.digital_thread_poll_seconds', DEFAULT_POLL_SECONDS)
 
   useEffect(() => {
-    // Cells and gateways join devices here so the audit log can be searched by the NAME an
-    // operator knows an asset by. The log itself stores only entity_id -- names live on the
-    // entity, and deliberately carry no identity of their own (they are editable), so resolving
-    // one is a client-side join rather than something the audit row could have recorded.
-    //
-    // SCHEMAS ARE THE FOURTH, AND THEY WERE MISSING. 0070 added `schemas` to the audit trigger
-    // and this lookup was never widened to match, so every schema event in the log rendered as a
-    // bare uuid -- unsearchable by the name the person who created it knows, and indistinguishable
-    // from the next one. Worse, absence from this map is what the page uses to mean PURGED, so
-    // schema rows were also being classified as events about deleted assets.
+    // Cells, gateways, devices and schemas are joined here so the log can be searched by name; the
+    // audit row stores only `entity_id`. Absence from this map is also what marks an asset as
+    // purged, so every audited table must be fetched.
     Promise.all([
       api.get('/api/v1/devices'),
       api.get('/api/v1/gateways'),
@@ -925,10 +639,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     for (const c of cells)    m.set(c.cell_id, c.cell_name)
     for (const g of gateways) m.set(g.gateway_id, g.gateway_name)
     for (const d of devices)  m.set(d.asset_id, d.asset_name)
-    // THE VERSION IS PART OF THE NAME. A schema's lineage is a chain of rows that all share a
-    // `schema_name` and differ only in `version`, so the name alone would give three rows the same
-    // label -- and the whole point of the audit trail on a schema is which VERSION something
-    // happened to.
+    // The version is part of a schema's name: a lineage shares `schema_name` and differs only in
+    // `version`.
     for (const sc of schemas) {
       const id = sc.id || sc.schema_uuid
       if (id) m.set(id, sc.version ? `${sc.schema_name} v${sc.version}` : sc.schema_name)
@@ -937,46 +649,21 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [cells, gateways, devices, schemas])
 
   /**
-   * Events whose asset has been PURGED -- the row is in the audit log, the asset is not in any of
-   * the three live tables (issue #44).
-   *
-   * ABSENCE FROM THE LOOKUP IS THE TEST, and it is exact rather than a heuristic: the three list
-   * endpoints do NOT filter `is_archived`, so an archived asset is still present here. Absent
-   * therefore means genuinely gone, not merely retired -- which matters, because archiving is
-   * reversible and the audit page must not imply otherwise.
-   *
-   * A DELETE event in the loaded page would have been the obvious alternative test and is worse:
-   * the query is capped at 200 rows inside a time window, so an asset purged before the window
-   * would read as live.
+   * Events whose asset has been purged: in the log, absent from every live table. The list
+   * endpoints do not filter `is_archived`, so absent means gone rather than retired. A DELETE event
+   * in the page would be a worse test, because the page is capped and windowed.
    */
-  // FROM THE SERVER, AND COUNTED OVER EVERYTHING THE FILTERS SELECT rather than over the page.
-  // Derived from the page it would fall to zero the moment the purge filter became a predicate --
-  // and the control it gates would disappear exactly when it was needed, leaving no way back.
-  // Null until a response says otherwise: `null` means "the server did not tell us", which is not
-  // the same as "there are none" and must not render as zero.
+  // From the server, counted over everything the filters select rather than over the page. Null
+  // means the server did not say, which must not render as zero.
   const [serverPurgedCount, setServerPurgedCount] = useState(null)
   // Whether the row limit bit. The page cannot tell otherwise, and "showing the newest 200" is the
   // difference between a quiet view and a quietly incomplete one -- which is how this was missed.
   const [truncated, setTruncated] = useState(false)
 
   /**
-   * What the page actually renders.
-   *
-   * PURGED ASSETS ARE HIDDEN BY DEFAULT. The records are never removed -- `digital_thread` is
-   * append-only and 0026 revoked DELETE even from `service_role` -- so this is a question about
-   * the resting view rather than about retention, and the resting view should be the live plant.
-   * A deleted Test gateway is noise on every visit; the button restores it in one click and
-   * carries a count, so nothing is hidden without saying so.
-   */
-  /**
-   * How many deleted assets the current filters cover.
-   *
-   * THE SERVER'S ANSWER WINS, because it is counted over everything the filters select rather than
-   * over the page that fitted -- which is the whole reason the count moved (0039). The fallback
-   * covers the case where the response carried no count at all: an older API, or a test fixture
-   * that resolves a bare array and models neither deletion nor truncation. Deriving zero there
-   * would unrender the control that reveals them, so "we were not told" falls back to "count what
-   * is in front of us" rather than to "there are none".
+   * How many deleted assets the current filters cover. The server's count wins; a response without
+   * one (an older API, or a bare-array fixture) falls back to counting the page, never to zero,
+   * which would hide the control that reveals them.
    */
   const purgedAssetCount = useMemo(() => {
     if (serverPurgedCount !== null) return serverPurgedCount
@@ -989,40 +676,22 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [serverPurgedCount, allEvents, entityNames, lookupsLoaded])
 
   /**
-   * What the page actually renders.
-   *
-   * PURGED ASSETS ARE HIDDEN BY DEFAULT (issue #44) -- the records are never removed, so this is a
-   * question about the resting view rather than about retention, and the resting view should be
-   * the live plant.
-   *
-   * A NO-OP AGAINST A CURRENT SERVER, AND KEPT ANYWAY. `digital_thread_page()` (0039) applies the
-   * same rule as a PREDICATE, before the row limit, which is what actually fixed the bug: this
-   * filter was never wrong in itself, it was wrong as the ONLY one, because the 200-row budget was
-   * spent on rows it then discarded -- four assets listed on a stack of twenty-six, and an empty
-   * Gateways section on a fleet of four healthy gateways.
-   *
-   * It stays because it costs nothing when the server has already done it and it is the only thing
-   * standing between an operator and a page full of deleted `Test` gateways if they ever talk to a
-   * build without the RPC.
+   * What the page renders. Purged assets are hidden by default. `digital_thread_page()` applies the
+   * same rule as a predicate before the row limit; this client-side filter is kept for a server
+   * without the RPC.
    */
   const events = useMemo(() => {
     if (showPurged || !lookupsLoaded) return allEvents
-    // SCOPED TO THE ASSET TYPES, mirroring 0045's fix to the server-side predicate. "Purged" means
-    // a row was deleted from cells, gateways or devices -- `entityNames` is built from exactly
-    // those three -- so an entity type with no table behind it is absent for a reason that has
-    // nothing to do with deletion. Applied universally, it hid every service-principal row.
+    // Scoped to the asset kinds: `entityNames` is built from those three tables, so any other kind
+    // is absent for reasons unrelated to deletion.
     return allEvents.filter(e => ASSET_ENTITY_KINDS.has(entityKind(e.entity_type))
       ? entityNames.has(e.entity_id)
       : true)
   }, [allEvents, entityNames, showPurged, lookupsLoaded])
 
   /**
-   * A name search resolves to the ids that match it, rather than filtering the fetched page.
-   *
-   * The row limit is applied by the database, so filtering after the fact would page through 200
-   * mixed rows and then show whichever fraction happened to match -- the same reason the action
-   * filter and the time range are SQL predicates. Resolving to ids first keeps the limit
-   * meaningful.
+   * A name search resolves to matching ids so the row limit applies in the database, as the action
+   * filter and the time range do.
    */
   const namedEntityIds = useMemo(() => {
     const q = nameFilter.trim().toLowerCase()
@@ -1034,23 +703,15 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [nameFilter, entityNames])
 
   /**
-   * Where the next page starts, or null at the end of the thread.
-   *
-   * NULL IS THE END, AND IT IS THE SERVER'S ANSWER RATHER THAN A DERIVED ONE. A short page is not
-   * a reliable end-of-data test: `events` has already been through the description search in
-   * api.js by the time it arrives, so a page can filter down to nothing while the thread continues
-   * underneath it. Trusting `length < 200` would stop the walk on the first page nobody matched.
+   * Where the next page starts; null at the end. The server's answer rather than a short page: the
+   * description search in api.js can filter a page down to nothing while the thread continues.
    */
   const [nextCursor, setNextCursor] = useState(null)
   const [loadingMore, setLoadingMore] = useState(false)
 
   /**
-   * The loaded events, mirrored into a ref.
-   *
-   * The poll below has to MERGE its result into what is already loaded rather than replace it, and
-   * it therefore has to read the current list. Reading it from state would put `allEvents` in
-   * `load`'s dependency array -- which rebuilds the interval on every fetch, so the timer would
-   * restart each time it fired and the effective poll period would drift.
+   * The loaded events, mirrored into a ref so the poll can merge without putting `allEvents` in
+   * `load`'s dependencies, which would restart the interval on every fetch.
    */
   const allEventsRef = useRef([])
   useEffect(() => { allEventsRef.current = allEvents }, [allEvents])
@@ -1078,23 +739,19 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
     api.get(buildUrl(null))
-      // `d` IS THE EVENT ARRAY, carrying the page-level counts as properties -- see api.js for why
-      // the resource stayed the return value. A fixture that resolves a bare array reports no
-      // deleted assets and no truncation, which is the honest answer for one that models neither.
+      // `d` is the event array carrying the page-level counts as properties. A fixture that
+      // resolves a bare array reports no deleted assets and no truncation.
       .then(d => {
         const fresh = Array.isArray(d) ? d : []
-        // THE POLL MUST NOT DISCARD PAGES THE READER ASKED FOR. Before paging existed this could
-        // replace the list outright, because the list was always exactly one page. Now a reader who
-        // has walked back six pages would lose five of them every sixty seconds, silently, while
-        // looking at them. `mergeFirstPage` prepends what is new and keeps the rest.
+        // The poll merges into the loaded pages rather than replacing them: a reader six pages back
+        // must not lose five of them every minute.
         const { events, reset } = isInitial
           ? { events: fresh, reset: true }
           : mergeFirstPage(allEventsRef.current, fresh)
         setAllEvents(events)
         setServerPurgedCount(typeof d?.purgedAssets === 'number' ? d.purgedAssets : null)
-        // ONLY WHEN THE LIST WAS REPLACED. A merge leaves the deeper pages loaded, so the cursor
-        // still points past the OLDEST row held -- overwriting it with page one's cursor would
-        // send the next "Load more" back to rows already on screen.
+        // Only when the list was replaced. After a merge the cursor still points past the oldest
+        // row held.
         if (reset) {
           setNextCursor(d?.nextCursor || null)
           setTruncated(Boolean(d?.truncated))
@@ -1105,12 +762,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [buildUrl])
 
   /**
-   * One more page, appended.
-   *
-   * The dedupe is not belt-and-braces. A poll can land between the click and the response, and the
-   * keyset cursor is a position in the table rather than in the list on screen -- so a row that
-   * arrived by merge could also arrive by page. Two React children with one key is a rendering bug
-   * rather than a cosmetic one.
+   * One more page, appended. Deduped because a poll can land between the click and the response,
+   * and the keyset cursor is a table position, so a row can arrive by both routes.
    */
   const loadMore = useCallback(() => {
     if (!nextCursor || loadingMore) return
@@ -1124,9 +777,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         })
         setNextCursor(d?.nextCursor || null)
         setTruncated(Boolean(d?.truncated))
-        // `purgedAssets` is deliberately NOT updated here. It is counted over everything the
-        // filters select rather than over a page (0039), so every page carries the same number and
-        // page one's answer is already the whole-match one.
+        // `purgedAssets` is counted over the whole match, so page one's answer already stands.
         setLoadingMore(false)
       })
       .catch(() => setLoadingMore(false))
@@ -1145,9 +796,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
 
   const activeFilterCount =
     (entityTypeFilter ? 1 : 0) + (nameFilter ? 1 : 0) + (actionFilter ? 1 : 0) +
-    // SHOWING the purged assets is the deviation, because hiding them is the default. Clear
-    // filters therefore returns them to hidden, which is the same contract every other control in
-    // this bar has: clearing restores the resting view.
+    // Showing purged assets is the deviation, so Clear filters returns them to hidden.
     (rangeIsFiltering ? 1 : 0) + (showPurged ? 1 : 0)
 
   const resetFilters = () => {
@@ -1163,26 +812,13 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [load])
 
   /**
-   * A fixed 60-second poll, replacing the auto-refresh control (issue #42).
-   *
-   * `load(false)`, NOT `load(true)`. The flag raises the loading state, which swaps the timeline
-   * for a spinner -- acceptable on first paint, and a flicker every minute otherwise. This is the
-   * same distinction the removed control needed a wrapper for: it wired onRefresh straight to
-   * onClick, so passing `load` directly handed the click event in as `isInitial` and blanked the
-   * timeline on every press.
-   *
-   * SAFE WITH THE DRAWER OPEN. `selected` is resolved from `events` by id on every render rather
-   * than held, so a refresh that returns the same event leaves the drawer exactly as it was, and
-   * one that no longer contains it closes it -- which is the correct outcome either way.
-   *
-   * The interval is rebuilt whenever `load` changes identity, i.e. whenever a filter changes. That
-   * is deliberate: the timer should measure from the most recent fetch, not keep firing on a
-   * schedule set by a query that is no longer running.
+   * A fixed poll. `load(false)`: the initial flag swaps the timeline for a spinner, which would
+   * flicker every minute. Safe with the drawer open, because `selected` is resolved from `events`
+   * on every render. Rebuilt whenever `load` changes, so the timer measures from the most recent
+   * fetch.
    */
   useEffect(() => {
-    // Guarded: a setting of 0 or a negative would otherwise become an interval that fires as fast
-    // as the event loop allows, which is a settings page turning into a denial of service against
-    // the reader's own browser.
+    // Guarded: a setting of 0 or less would fire as fast as the event loop allows.
     const seconds = Number(pollSeconds) > 0 ? Number(pollSeconds) : DEFAULT_POLL_SECONDS
     const timer = setInterval(() => load(false), seconds * 1000)
     return () => clearInterval(timer)
@@ -1199,12 +835,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [events])
 
   /**
-   * One lane per audited entity, busiest first.
-   *
-   * Busiest rather than most recent: a lane is worth its row of vertical space in proportion to
-   * how much it has to say, and the top of the list is where the eye starts. Ties break on the
-   * label so the order is stable between refreshes -- lanes that reshuffle under the cursor are
-   * the reason the old flat list was easier to read than an unstable timeline would be.
+   * One lane per audited entity, busiest first; ties break on the label so the order is stable
+   * between refreshes.
    */
   const lanes = useMemo(() => {
     const byEntity = new Map()
@@ -1226,28 +858,12 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   const hiddenLaneCount = lanes.length - visibleLanes.length
 
   /**
-   * The visible lanes, cut into Cells / Gateways / Devices.
-   *
-   * The CAP IS APPLIED FIRST and the sections are cut from what survives it, not the other way
-   * round. Fifteen lanes per section would be forty-five rows on a page whose whole point is that
-   * an asset's history is comparable against its neighbours' at a glance; and a per-section cap
-   * would also spend rows on a quiet section while a busy one stayed folded. Ordering by activity
-   * across the whole set and then grouping keeps the cap meaning what it says.
-   *
-   * A section with nothing in it is omitted rather than drawn empty -- "Cells (0)" is a heading
-   * that promises a row and then does not deliver one.
+   * The visible lanes, cut into sections after the cap is applied, so the cap means what it says
+   * across the whole set. Empty sections are omitted.
    */
   /**
-   * Lanes grouped into the sections that draw them.
-   *
-   * NOTHING VISIBLE MAY BE DROPPED HERE, which is the property this used to lack. It filtered
-   * `visibleLanes` down to the kinds `SECTIONS` names and discarded the rest, so a lane of an
-   * unlisted kind was counted by the header and never rendered — 27 of 28 lanes on the stack that
-   * found it. A section list is a presentation choice; it must not also be a filter.
-   *
-   * So the known kinds keep their order and their icons, and every remaining kind gets a section of
-   * its own afterwards. The result is that adding an entity type to the audit trigger degrades to
-   * "appears with a plain icon" rather than to "silently absent".
+   * Lanes grouped into sections. Nothing visible may be dropped here: known kinds keep their order
+   * and icons, and every remaining kind gets a section of its own with the fallback icon.
    */
   const sections = useMemo(() => {
     const known = SECTIONS
@@ -1260,9 +876,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       .sort()
       .map(kind => ({
         kind,
-        // `ENTITY_KIND` already turns a table name into something readable, and an unmapped type
-        // falls through it uppercased -- which is ugly and is the point: it reads as a gap to close
-        // rather than as a considered label.
+        // The raw kind, uppercased: it reads as a gap to close rather than a considered label.
         label: kind,
         Icon: FALLBACK_SECTION_ICON,
         lanes: visibleLanes.filter(l => l.kind === kind)
@@ -1272,11 +886,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [visibleLanes, allowedKinds])
 
   /**
-   * The x-axis extent, taken from the events themselves rather than from the range control.
-   *
-   * The default range is unbounded, so there is frequently no requested window to scale to; and
-   * even when there is, scaling to it would push a day of dense activity into the left-hand inch
-   * of a thirty-day track. The events decide the domain; the filter decides the events.
+   * The x-axis extent, from the events rather than the range control: the default range is
+   * unbounded, and a requested window would push a dense day into one corner of the track.
    */
   const domain = useMemo(() => {
     const stamps = events
@@ -1285,9 +896,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     if (stamps.length === 0) return null
     let min = Math.min(...stamps)
     let max = Math.max(...stamps)
-    // A single event, or a burst that all landed in the same millisecond, has no extent to
-    // divide by. Give it an hour of padding so the marker lands in the middle of the track
-    // rather than producing a division by zero.
+    // A single instant has no extent; pad it by an hour so the marker lands mid-track.
     if (max === min) { min -= 30 * 60 * 1000; max += 30 * 60 * 1000 }
     return { min, max, span: max - min }
   }, [events])
@@ -1300,38 +909,19 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     return Math.min(1, Math.max(0, (t - domain.min) / domain.span))
   }, [domain])
 
-  // The track carries 14px of padding at each end so a marker at either extreme is not clipped
-  // in half by the lane's edge; positions are therefore a calc against the padded width rather
-  // than a bare percentage.
-  //
-  // TAKES A FRACTION, not a timestamp, because a cluster badge does not have one: it sits at the
-  // MEAN of its members' positions (see clusterEvents), which is not any single event's time.
+  // The track carries 14px of padding at each end so extreme markers are not clipped; positions are
+  // a calc against the padded width. Takes a fraction, because a cluster badge sits at the mean of
+  // its members' positions.
   const offsetForFraction = (f) => `calc(14px + (100% - 28px) * ${f})`
 
-  /*
-   * The track's rendered width, needed to know which markers actually COLLIDE.
-   *
-   * MEASURED RATHER THAN ASSUMED, because the collision threshold is in pixels and the track is
-   * `flex: 1` over a `min-width: 380px` -- so the same two timestamps overlap at one viewport
-   * width and are comfortably apart at another. A hardcoded fraction would dodge markers that do
-   * not overlap on a wide screen and miss ones that do on a narrow one.
-   *
-   * The axis track is measured because it always exists, and every track shares its width. In
-   * jsdom `offsetWidth` is 0, which disables dodging -- the right default for an environment with
-   * no layout, and what makes `dodgeOffsets` testable directly instead of through the DOM.
-   */
+  /* The track's rendered width, needed to know which markers collide: the threshold is in pixels
+     and the track is `flex: 1`. The axis track always exists and every track shares its width.
+     jsdom reports 0, which disables clustering. */
   const axisTrackNode = useRef(null)
   const [trackWidth, setTrackWidth] = useState(0)
 
-  /*
-   * A CALLBACK REF, NOT A `useEffect` ON MOUNT, and the difference is the whole thing working.
-   *
-   * The timeline does not exist on first paint -- the page renders a spinner until the fetch lands,
-   * so the axis track is absent -- and an effect with `[]` deps measures a null ref, records 0, and
-   * NEVER RUNS AGAIN. The dodge would then be silently disabled forever, on a page that looked
-   * exactly as it does now. A callback ref fires when the node actually attaches, which is the
-   * moment there is something to measure.
-   */
+  /* A callback ref rather than a mount effect: the timeline is absent until the fetch lands, so an
+     effect with `[]` deps would measure null once and never again. */
   const axisTrackRef = useCallback((node) => {
     axisTrackNode.current = node
     if (node) setTrackWidth(node.offsetWidth || 0)
@@ -1344,14 +934,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [])
 
   /**
-   * lane.key -> the items its track draws: single markers and cluster badges, left to right.
-   *
-   * COMPUTED HERE RATHER THAN INSIDE THE LANE'S RENDER, where the fan used to be worked out. Two
-   * consumers now need it and only one of them is a lane: the legend states how many badges are on
-   * the timeline, and it cannot count something each row computes privately while drawing itself.
-   *
-   * PER LANE, because a collision is only a collision within one row -- two assets acting at the
-   * same instant are two markers on different lanes and were never in each other's way.
+   * lane.key to the items its track draws. Computed here because the legend also needs the badge
+   * count. Per lane, because a collision is only within one row.
    */
   const laneClusters = useMemo(() => {
     const m = new Map()
@@ -1362,11 +946,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [visibleLanes, fractionFor, trackWidth])
 
   /**
-   * How many badges are drawn, which is what the legend's "Grouped" entry counts.
-   *
-   * BADGES, NOT THE EVENTS INSIDE THEM. "Grouped (9)" beside three purple pills is a number the
-   * reader cannot reconcile with what is on screen; "Grouped (3)" is the thing they can point at.
-   * How many events any one badge holds is written on the badge itself.
+   * How many badges are drawn, which the legend's Grouped entry counts. Badges rather than the
+   * events inside them; that number is on each badge.
    */
   const clusterCount = useMemo(
     () => [...laneClusters.values()]
@@ -1384,23 +965,14 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     })
   }, [domain])
 
-  // Resolved fresh every render rather than held as an object: a refresh replaces every event
-  // object, and a stored one would leave the drawer showing a row that is no longer in the set.
-  // If the selected event drops out of the filter, the drawer simply closes.
+  // Resolved fresh every render: a refresh replaces every event object. If the selected event drops
+  // out of the filter, the drawer closes.
   const selected = events.find(e => String(e.event_id) === String(selectedEventId)) || null
   const selectedAnalysis = selected ? analysis.get(selected.event_id) : null
 
   /**
-   * The selected entity's own events, OLDEST FIRST -- the order the drawer steps through.
-   *
-   * Ascending, against the descending order the list is fetched in, because this is the one place
-   * on the page that reads as a story rather than as a feed: Previous goes back in time and Next
-   * goes forward, which is the only mapping that survives someone thinking about it. The feed
-   * order is right for "what just happened"; it is wrong for "and then what".
-   *
-   * Drawn from the FILTERED set, not refetched. Stepping through events the timeline is not
-   * drawing would move the highlight to a marker that is not on screen -- the drawer and the
-   * lane behind it have to be describing the same set.
+   * The selected entity's events, oldest first: Previous goes back in time and Next forward. Drawn
+   * from the filtered set so the drawer and the lane describe the same events.
    */
   const selectedLaneEvents = useMemo(() => {
     if (!selected) return []
@@ -1424,24 +996,16 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   )
 
   /**
-   * The export rows, built explicitly rather than by handing the raw events to the CSV writer.
-   *
-   * The raw rows carry `old_data` and `new_data` as whole-row JSONB, which is both unreadable in
-   * a spreadsheet and -- until the fix in downloadCSV -- exported as `[object Object]` on every
-   * line. What an audit export is actually for is answering "who changed what, when", so the
-   * diff this page already computes is flattened into a column that says exactly that.
+   * The export rows, built explicitly: the raw `old_data` / `new_data` JSONB is unreadable in a
+   * spreadsheet, so the computed diff is flattened into one column.
    */
   const exportRows = () => events.map(e => {
     const a = analysis.get(e.event_id) || { diff: [], kind: 'operational' }
     return {
       recorded_at:    e.timestamp,
       entity_type:    entityKind(e.entity_type),
-      // FALLS BACK THE SAME WAY THE LANE LABEL DOES. This was `entityNames.get(...) || ''`, so
-      // every row about a purged entity exported with an EMPTY name column -- exactly the rows an
-      // audit export exists to carry, since a live entity can be looked up afterwards and a
-      // deleted one cannot. `entity_name_source` says which fall produced the value, because a
-      // spreadsheet that silently mixes current names with historical ones is worse than one that
-      // labels them.
+      // Falls back the same way the lane label does, so purged entities export with a name;
+      // `entity_name_source` says which fall produced it.
       entity_name:    entityNames.get(e.entity_id) || snapshotIdentity(e)?.label || '',
       entity_name_source: entityNames.get(e.entity_id)
         ? 'current'
@@ -1465,20 +1029,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   return (
     <div className="page-layout">
       <div className="page-main">
-        {/* THE HEADING IS BACK, AND THE REASON IS NOT THE ONE THAT REMOVED IT. It went on the
-            grounds that "the top bar names the page", which is true and is still true. What it did
-            not account for is that a card is a COMPOSITION -- title, description, actions, filters
-            -- and a page whose card has none of the first three is a different shape from every
-            page whose card does. The title is the redundant part and it is cheap; the DESCRIPTION
-            is the part the top bar cannot carry, and this page needs one more than most, because
-            what the digital thread does and does not record is not guessable from a list of rows.
-
-            EXPORT IS AN ACTION, SO IT SITS WITH THE ACTIONS. It was kept in the filter bar on the
-            grounds that what it writes is decided by the filters, so it belonged at the end of the
-            row that decides it. That is an argument about proximity; the stronger one is about what
-            the control IS -- it does not filter anything, and every other card keeps its actions in
-            the header at title height. The COUNT stays the filtered count, which is the half of the
-            proximity argument worth keeping: the button still says how many rows it will write. */}
+        {/* The description is a tip on the title; Export sits in the header with the other actions
+            and states the filtered count it will write. */}
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
@@ -1509,11 +1061,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             title="Show only events against one kind of asset"
           >
             <option value="">All entities</option>
-            {/* EVERY KIND THE TIMELINE CAN DRAW, from the same table the sections are built from.
-                This was four hardcoded options against seven kinds, which is the same defect as
-                the section list one screen up and outlived the fix to it: the security lane became
-                drawable and stayed unaskable, reachable only by clearing the filter entirely.
-                Deriving it means a kind cannot be drawable and unfilterable again. */}
+            {/* Every kind this role may ask for, from the same table the sections are built from,
+                so a kind cannot be drawable and unfilterable. */}
             {entityTypes.map(({ kind, label }) => (
               <option key={kind} value={kind}>{label}</option>
             ))}
@@ -1541,9 +1090,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             ))}
           </select>
 
-          {/* ALL TIME IS THE DEFAULT -- see timeWindow. The window is a query parameter, not a
-              client-side filter, so a narrower range does not spend the 200-row budget on rows
-              outside it. */}
+          {/* All time is the default (see timeWindow). The window is a query parameter, so a
+              narrower range does not spend the row budget outside it. */}
           <select
             className="form-control"
             style={{ width: '150px' }}
@@ -1555,16 +1103,11 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             <option value="custom">Custom range…</option>
           </select>
 
-          {/* Shown only in the custom mode rather than sitting empty beside the presets. Two
-              controls that do nothing until a fifth option is chosen are two controls whose
-              relationship to the preset beside them has to be guessed at. */}
+          {/* Shown only in custom mode. */}
           {rangePreset === 'custom' && (
             <>
-              {/* `datetime-local`, NOT `date`. The narrowest window a date pair can express is a
-                  whole day, which on a stack commissioned this morning makes All time and today
-                  the same picture. Minute granularity is what lets an operator frame the burst
-                  itself. `timeWindow()` widens the end bound to :59.999 so the closing minute is
-                  included rather than cut in half. */}
+              {/* `datetime-local`, not `date`: a date pair cannot express a window narrower than a
+                  day. `timeWindow()` widens the end bound to :59.999. */}
               <input
                 type="datetime-local"
                 className="form-control"
@@ -1586,19 +1129,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             </>
           )}
 
-          {/* SHOWN ONLY WHEN IT WOULD DO SOMETHING, matching Clear filters beside it and the custom
-              date inputs above. A permanent control reading "(0)" on the overwhelmingly common
-              case -- nothing purged -- is a control whose relationship to the page has to be
-              guessed at.
-
-              SAME SHAPE AS `Has quarantined devices` (Gateways) AND `Empty` (Cells): a `btn-sm`
-              that carries `btn-primary` when engaged and `btn-ghost` at rest, an icon, and a
-              count. It was a bare checkbox, which was the only control of its kind in the app.
-
-              The TOOLTIP says "no longer in the database" where the label says "deleted", because
-              absence from the three lookups is all the test can actually see. Purged is the usual
-              reason; an asset the caller's own policies hide would look identical. The label has
-              to be short enough to read in a filter bar, so the precision lives in the tooltip. */}
+          {/* Shown only when something is purged, like Clear filters and the custom inputs. Same
+              shape as the Gateways and Cells toggles. The tooltip says no longer in the database,
+              because absence from the lookups is all the test sees. */}
           {purgedAssetCount > 0 && (
             <button
               className={`btn btn-sm ${showPurged ? 'btn-primary' : 'btn-ghost'}`}
@@ -1618,18 +1151,11 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
           {/* The spacer moved off Clear Filters and onto this group, so the right-hand end of the
               bar holds the same thing whether or not a filter happens to be set. */}
           <div className="filter-bar-spacer filter-bar-actions">
-            {/* AutoRefreshControl removed (issue #42). It was a Refresh button and an interval
-                select defaulting to Off, so the page was static until someone noticed the control
-                and chose a value -- and the same widget then offered 1s and 5s against an audit
-                log that changes when an operator does something. A fixed 60s poll below does what
-                the control was there to arrange, without asking. */}
           </div>
         </div>
           </div>{/* .card-body */}
 
-        {/* The timeline is a second `.card-body` rather than the card's own inline padding, which
-            is what it used to carry. Two bodies get a divider between them from one rule, so the
-            controls and the trace read as separate registers of the same card. */}
+        {/* A second `.card-body`, so the controls and the trace get a divider from one rule. */}
         <div className="card-body">
           {loading ? (
             <div className="loading-wrap"><div className="spinner" /> Loading digital thread trace sequence…</div>
@@ -1644,9 +1170,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             </div>
           ) : (
             <>
-              {/* The key is a legend for a colour scale that is DERIVED rather than stored, so it
-                  is doing more work than a legend usually does: without it there is nothing
-                  anywhere -- no column, no filter option -- that says what amber means. */}
+              {/* The legend for a derived colour scale: nothing else on the page says what amber
+                  means. */}
               <div className="dt-legend">
                 {Object.entries(MARKERS).map(([kind, m]) => (
                   <span key={kind} className="dt-legend-item" title={m.hint}>
@@ -1655,16 +1180,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                   </span>
                 ))}
 
-                {/* SHOWN ONLY WHEN THERE IS NOTATION TO EXPLAIN, which follows the rule the purged
-                    toggle and the custom date inputs already follow on this page. A key entry for
-                    a mark that is not on screen is a reader looking for a purple pill that does
-                    not exist -- and at a narrow enough range there are none, which is the feature
-                    rather than an edge case.
-
-                    THE SAMPLE IS A REAL `.dt-cluster`, exactly as the four dots above are real
-                    `.dt-node-<kind>` fills: the key cannot drift away from what it describes. It
-                    reads `n` rather than a specific number so it is plainly a placeholder for the
-                    count each badge carries, not a claim that every group holds two. */}
+                {/* Shown only while a badge is on screen. The sample is a real `.dt-cluster`,
+                    reading `n` as a placeholder for each badge's count. */}
                 {clusterCount > 0 && (
                   <span
                     className="dt-legend-item"
@@ -1700,16 +1217,11 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
 
                   {sections.map(section => (
                     <React.Fragment key={section.kind}>
-                      {/* The heading carries the count, and the count is what is DRAWN rather than
-                          what exists: with the lane cap in play a heading reading "Devices (20)"
-                          above thirteen rows would be stating a number the page is not showing.
-                          The toggle below names the remainder. */}
+                      {/* The count is what is drawn, not what exists: the lane cap may fold some,
+                          and the toggle below names the remainder. */}
                       <div className="dt-section" role="separator" aria-label={`${section.label} lanes`}>
-                        {/* The icon, name and count are one BADGE now rather than three loose
-                            items on a row, so a section reads as a heading over the track cards
-                            below it rather than as another lane. The rule to its right is what
-                            carries the eye across; it is drawn by CSS so it cannot be mistaken for
-                            content. */}
+                        {/* Icon, name and count as one badge, so a section reads as a heading over
+                            the track cards. The rule beside it is CSS. */}
                         <span className="dt-section-badge">
                           <section.Icon size={12} />
                           <span className="dt-section-name">{section.label}</span>
@@ -1719,16 +1231,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
 
                       {section.lanes.map(lane => (
                         <div className="dt-lane" key={lane.key}>
-                          {/* NO TYPE BADGE. A pill reading DEVICE on every row of a section headed
-                              Devices restates the one thing the heading directly above it has just
-                              established -- and it cost 60px of a 210px label that the asset's NAME
-                              is a better use of. The icon carries the kind for anyone scrolled past
-                              the heading, at a fraction of the width.
-
-                              THE ID IS NO LONGER COPYABLE HERE. It moved to the drawer's Entity ID
-                              field, which is copyable and always present: an operator who wants the
-                              UUID is one click from it, and a 36-character button on every lane left
-                              no room for the name that made the lane recognisable. */}
+                          {/* No type badge: the section heading and the icon already carry the
+                              kind, and the width goes to the name. The UUID is copyable in the
+                              drawer's Entity ID field. */}
                           <div
                             className="dt-lane-label"
                             title={lane.name ? `${lane.name} — ${lane.entityId}` : lane.entityId}
@@ -1738,13 +1243,11 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                             })}
                             {lane.name
                               ? <strong className="dt-lane-name">{lane.name}</strong>
-                              /* Neither the join nor any snapshot could name it. The shortened id
-                                 is the last resort, monospaced so the halves it keeps stay
-                                 comparable between lanes. */
+                              /* Neither the join nor a snapshot could name it: the shortened id,
+                                 monospaced. */
                               : <span className="dt-lane-name dt-lane-unnamed mono">{shortId(lane.entityId)}</span>}
-                            {/* A name recovered from the audit payload rather than from a live row
-                                means the entity is GONE. Saying so is the difference between "this
-                                asset" and "this asset, as it was named when it was deleted". */}
+                            {/* A name recovered from the audit payload means the entity is gone;
+                                say so. */}
                             {lane.fromSnapshot && (
                               <span className="dt-lane-gone" title="This entity no longer exists — the name is the one recorded in its final audit snapshot">
                                 deleted
@@ -1754,11 +1257,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
 
                           <div className="dt-track">
                             {(laneClusters.get(lane.key) || []).map(item => {
-                              /* THE RING FOLLOWS THE DRAWER, and for a badge that means "the
-                                 drawer is showing one of MY events" rather than "the drawer is
-                                 showing the one I open on click". That is what keeps the highlight
-                                 in place while Previous/Next steps through a burst: the badge is
-                                 where those events are, so the badge is what stays lit. */
+                              /* The ring follows the drawer: a badge is lit while the drawer shows
+                                 any of its events, so the highlight stays put while Previous / Next
+                                 steps through the burst. */
                               const isSelected = item.events
                                 .some(e => String(e.event_id) === String(selectedEventId))
 
@@ -1769,11 +1270,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                                     type="button"
                                     className={`dt-cluster${isSelected ? ' dt-node-selected' : ''}`}
                                     style={{ left: offsetForFraction(item.xOffset) }}
-                                    /* THE FIRST, i.e. the oldest -- see clusterEvents on why the
-                                       tiebreak is event_id. Opening a burst at its start is the
-                                       only choice that makes Next mean "and then what"; opening
-                                       it in the middle would leave half the group behind the
-                                       Previous button with nothing saying so. */
+                                    /* The oldest member (see clusterEvents on the tiebreak), so
+                                       Next means and then what. */
                                     onClick={() => setSelectedEventId(item.event.event_id)}
                                     title={clusterSummary(
                                       item.events,
@@ -1798,9 +1296,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                                   className={`dt-node dt-node-${kind}${isSelected ? ' dt-node-selected' : ''}`}
                                   style={{ left: offsetForFraction(item.xOffset) }}
                                   onClick={() => setSelectedEventId(e.event_id)}
-                                  /* A plain `title`, which is what the rest of this app uses for a
-                                     hover hint. Three lines -- what, who, when -- is what the hover
-                                     is for; everything else is a click away in the drawer. */
+                                  /* A plain `title`, as elsewhere: what, who, when. The rest is in
+                                     the drawer. */
                                   title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e)}\n${new Date(e.timestamp).toLocaleString()}`}
                                   aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
                                   aria-pressed={isSelected}
@@ -1834,18 +1331,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                 </button>
               )}
 
-              {/* THE END OF THE THREAD, SAID OUT LOUD.
-
-                  `truncated` has been returned by the server and stored in this component since
-                  0039 and was never once rendered -- so a page showing the newest 200 of several
-                  thousand events looked exactly like a page showing all of them. That is the
-                  failure worth fixing here; "Load more" is what makes saying it useful rather than
-                  merely honest.
-
-                  BOTH NUMBERS, WHEN THEY DISAGREE. `allEvents` is what was fetched and `events` is
-                  what survived the purged-asset filter and the description search, and a footer
-                  reading "600 events" above a timeline drawing 40 is how a reader concludes the
-                  page is broken. */}
+              {/* The end of the thread, said out loud. Both numbers when they disagree: `allEvents`
+                  is what was fetched, `events` what survived the purged filter and the description
+                  search. */}
               <div className="dt-pagination">
                 <span className="dt-pagination-count">
                   {events.length === allEvents.length
@@ -1862,21 +1350,16 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                     {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
                   </button>
                 ) : truncated ? (
-                  /* CUT OFF WITH NO WAY FORWARD, which is not a contradiction and is not dead code.
-                     `truncated` and `next_cursor` come from the same response but are not the same
-                     claim: a browser running this build against a database that has not applied
-                     0077 gets the first and not the second. Telling the reader the view is
-                     incomplete still matters when they cannot do anything about it -- more, if
-                     anything, because the alternative is a page that quietly answers a question
-                     about the whole plant with its newest 200 rows. */
+                  /* Cut off with no way forward: `truncated` and `next_cursor` come from the same
+                     response, but a database without the paging RPC returns only the first. The
+                     view is still incomplete and the reader is told so. */
                   <span className="dt-pagination-end">
                     Showing the newest {allEvents.length} events — there are older ones this view
                     cannot reach.
                   </span>
                 ) : (
-                  /* ONLY MEANINGFUL ONCE SOMETHING WAS PAGED. On a stack with forty events the
-                     first response is already the whole thread, and announcing the end of it
-                     would be noise about a limit the reader never met. */
+                  /* Only meaningful once something was paged: a first response holding the whole
+                     thread has no end to announce. */
                   allEvents.length >= PAGE_SIZE && (
                     <span className="dt-pagination-end">
                       End of the thread — every event matching these filters is loaded.
@@ -1899,15 +1382,11 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
           ? (entityNames.get(selected.entity_id) || snapshotIdentity(selected)?.label || selected.entity_id)
           : ''}
         subtitle={selected && (
-          /* One flex ITEM, laid out internally as rows. `.context-panel-subtitle` is a wrapping
-             flex row shared with three other pages, so multi-line content has to bring its own
-             container rather than expect that one to stack it. */
+          /* One flex item laid out internally as rows; `.context-panel-subtitle` is a wrapping row
+             shared with other pages. */
           <div className="dt-drawer-nav">
-            {/* WHERE THIS SITS IS THE POINT. A control that changes what the drawer is showing
-                belongs above the thing it changes -- put below the fields it would be a footer
-                you discover after reading the record you did not want. It is in the subtitle
-                slot because that is the only slot ContextPanel offers above the metadata, and
-                widening that shared component for one caller is the trade this avoids. */}
+            {/* Above the thing it changes. The subtitle slot is the only one ContextPanel offers
+                above the metadata. */}
             <div className="dt-drawer-nav-pos" title="Position in this asset's history, oldest first">
               Event {selectedIndex + 1} of {selectedLaneEvents.length}
               {' · '}
@@ -1917,9 +1396,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             </div>
 
             <div className="dt-drawer-nav-btns">
-              {/* Previous is OLDER. Disabled rather than hidden at the ends: a control that
-                  disappears at the boundary makes the row reflow under the cursor, and the
-                  second click of a double-step lands on whatever moved into its place. */}
+              {/* Previous is older. Disabled rather than hidden at the ends, so the row does not
+                  reflow under the cursor. */}
               <button
                 className={`btn btn-ghost btn-sm dt-nav-btn${selectedIndex <= 0 ? ' btn-disabled' : ''}`}
                 onClick={() => stepTo(selectedIndex - 1)}
@@ -1957,9 +1435,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             value: actorLabel(selected),
             title: actorTitle(selected)
           },
-          // Only when there is one. `changed_by` is NULL for every machine-originated write, and
-          // an empty "Not set" row against a change the ingestion daemon made would read as a
-          // gap rather than as the ordinary case it is.
+          // Only when there is one: `changed_by` is NULL for every machine-originated write.
           ...(selected.changed_by
             ? [{ label: 'User ID', value: selected.changed_by, copyable: true, mono: true, title: 'The signed-in user who made this change' }]
             : []),
@@ -1967,10 +1443,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
           // The audit row's own id. It identifies THIS mutation rather than the asset it touched,
           // which is what you need to quote when two edits a second apart are being told apart.
           { label: 'Mutation ID', value: String(selected.event_id), copyable: true, mono: true, title: 'Audit row ID for this single change' },
-          // Only when there is one, for the same reason `User ID` is conditional: every row written
-          // before archived migration 0026 carries no causation, and there is no honest value to backfill
-          // for a transaction that is long over. A "Not set" row against a year of history would
-          // read as a gap in the record rather than as the boundary of a feature.
+          // Only when there is one: rows written before causation existed carry none.
           ...(selected.causation_id
             ? [{
                 label: 'Transaction',
@@ -1985,11 +1458,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         ] : []}
         beforeActions={selected && selectedAnalysis && (
           <>
-            {/* ABOVE THE DIFF, and that placement follows the rule the subtitle nav is written to:
-                a control that changes what the drawer is showing belongs above the thing it
-                changes. Below the diff it would be a footer you find after reading the record you
-                did not want -- and the whole point of this control is that the row you are looking
-                at may not be the one that explains what happened. */}
+            {/* Above the diff, for the reason the subtitle nav is: a control that changes what the
+                drawer shows belongs above it. */}
             <CausationGroup
               siblings={selectedSiblings}
               entityNames={entityNames}

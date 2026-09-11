@@ -56,44 +56,31 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   const [cells, setCells]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
-  // The create/edit form is a modal like any other, even though it is written inline here rather
-  // than extracted into components/modals. Escape closes it, through the shared stack so the
-  // ArchiveModal that can open over it is the one that answers first.
+  // The create/edit form is a modal written inline. Escape closes it through the shared stack, so
+  // an ArchiveModal opened over it answers first.
   useEscapeKey(() => setShowForm(false), showForm)
   const [editing, setEditing]   = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
-  // The context panel holds an ID, not the gateway object.
-  //
-  // This page polls, so a captured object would freeze at the moment it was clicked -- the panel
-  // would show a heartbeat that stopped ageing and a status that never changed, beside a table row
-  // updating normally. Resolving the id against the current list every render means the drawer is
-  // as live as the row it came from, and it closes itself if the entity disappears.
+  // The context panel holds an id, not the gateway object: this page polls, and resolving the id
+  // every render keeps the drawer as live as the row. It closes itself if the entity disappears.
   const [selectedId, setSelectedId] = useState(null)
-  // location_scope defaults to 'cell' -- an edge node belongs in some cell until someone says
-  // otherwise. `deployment` is deliberately NOT the same question: it says where the connector
-  // RUNS, site-wide is a claim about where the assets ARE. A host-run gateway is usually
-  // site-wide, but conflating them would relocate assets on a checkbox.
-  //
-  // 'remote' is the default because it is the case that needs setup: a remote gateway leaves this
-  // form with a bundle to install, and defaulting to the one that finishes on save would let an
-  // operator create a gateway that silently never gets an appliance.
+  // `location_scope` defaults to 'cell'. `deployment` is a different question: where the connector
+  // runs, not where the assets are. 'remote' is the default because it is the case that needs
+  // setup, and it finishes with a bundle to install.
   const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', deployment: 'remote', is_simulated: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
   const [form, setForm]         = useState(blank)
-  // DERIVED, NOT A SECOND PIECE OF STATE. The form carries `deployment` and `is_simulated` because
-  // that is what the API takes; the select carries one word. Storing both would be two things to
-  // keep in step for one decision -- the bug class this whole item is about.
+  // Derived, not a second piece of state: the form carries `deployment` and `is_simulated` because
+  // that is what the API takes; the select carries one word.
   const formType = gatewayType(form)
-  // Derived the same way and for the same reason, off the flags rather than off `formType`: the
-  // rule belongs to `gateways_synthetic_has_no_cell`, which is written in terms of the two
-  // columns, so reading them keeps this true if a fourth type is ever added.
+  // Derived off the flags rather than `formType`: the rule belongs to
+  // `gateways_synthetic_has_no_cell`, which is written in terms of the two columns.
   const formAcceptsCell = gatewayAcceptsCell(form)
   const [docsForGw, setDocsForGw] = useState(null)
   // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
   // the name and sparkplug_id, and it stays open across a poll that may reorder the list.
   const [bundleForGw, setBundleForGw] = useState(null)
-  // The HOST-RUN counterpart to bundleForGw. Separate state rather than a mode flag on one
-  // modal: the two are authorised differently, destroy different things, and only one of them
-  // ever puts a password on screen.
+  // The host-run counterpart to bundleForGw. Separate state: the two are authorised differently,
+  // destroy different things, and only one puts a password on screen.
   const [credentialForGw, setCredentialForGw] = useState(null)
   const [filterMode, setFilterMode] = useState('all')
 
@@ -138,9 +125,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
   const load = useCallback(async (signal) => {
     try {
-      // Each gateway arrives with its devices embedded (gateways?select=*,devices(...)),
-      // so an assignment made anywhere shows up on the next poll. The flat device list
-      // is still needed to surface devices that belong to no gateway at all.
+      // Each gateway arrives with its devices embedded, so an assignment made anywhere shows on the
+      // next poll. The flat device list still surfaces devices that belong to no gateway.
       const [g, a, c] = await Promise.all([
         api.get('/api/v1/gateways', { signal }),
         api.get('/api/v1/devices', { signal }),
@@ -148,9 +134,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       ])
       setGateways(g); setAssets(a); setCells(c)
 
-      /* WHAT THIS PERSON HAS ALREADY ASKED FOR, so the edit dialog can seed itself with an open
-         proposal's patch rather than silently replacing it. Tolerated rather than required: this
-         page must not fail to load because the proposals endpoint did. */
+      /* This person's open proposals, so the edit dialog can seed itself with an open patch rather
+         than replace it. Tolerated rather than required. */
       try {
         const proposals = await api.get('/api/v1/proposals', { signal })
         setOpenProposals((proposals || []).filter(pr => pr.status === 'open'))
@@ -166,18 +151,13 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     }
   }, [])
 
-  // Reconciliation loop, not the primary refresh -- see useRealtimeTable for why polling stays.
-  //
-  // Worth knowing: ingestion stamps gateways.last_heartbeat on every NBIRTH/NDATA/NDEATH, so
-  // this page receives a change event roughly every 30s per gateway from the simulator alone.
-  // That is the highest-traffic subscription in the app and the reason the hook debounces.
-  //
+  // Reconciliation loop, not the primary refresh (see useRealtimeTable). Ingestion stamps
+  // `last_heartbeat` on every NBIRTH / NDATA / NDEATH, so this is the highest-traffic subscription
+  // in the app and the reason the hook debounces.
   usePolling(load, refreshInterval())
   useRealtimeTable(['gateways', 'devices', 'cells'], load, { enabled: REALTIME_ENABLED })
-  // Heartbeat staleness is derived from the wall clock by gatewayLiveStatus(), and a gateway
-  // going quiet produces no database change and therefore no Realtime event. Without this
-  // tick, a silent gateway would keep its last-rendered status until the 60s reconciliation
-  // poll. Re-renders only; issues no requests.
+  // Heartbeat staleness is derived from the wall clock by gatewayLiveStatus(), and a gateway going
+  // quiet produces no Realtime event. Re-renders only; issues no requests.
   useClockTick(STALENESS_TICK_MS)
 
   // In-flight state for the form's Save and for whichever gateway is restoring.
@@ -189,9 +169,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
   const save = async () => {
     try {
-      /* THE FORK IS AT THE END. Everything above is shared; only the last step differs, and it
-         differs by who is asking. A gateway can only be REGISTERED by an Administrator -- the
-         remote branch below mints a bundle, which is not a thing to queue. */
+      /* The fork is at the end: everything above is shared. A gateway can only be registered by an
+         Administrator, since the remote branch mints a bundle, which is not a thing to queue. */
       if (proposeMode) {
         if (!editing) throw new Error('A gateway can only be registered by an Administrator.')
         const patch = patchFromForm('gateway', editing, form)
@@ -216,17 +195,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       setShowForm(false); load()
 
       /**
-       * THE REMOTE BRANCH. A host-run gateway is finished the moment its row exists -- it is a
-       * connector running on the app host, and nothing has to be carried anywhere. A REMOTE one has
-       * only just started: it needs a bundle, on a machine, before it can publish at all.
-       *
-       * So the bundle modal opens immediately rather than leaving the operator to find a button. The
-       * alternative is a row that says AWAITING SETUP with no indication of what the setup IS, which
-       * is the state this whole flow exists to remove.
-       *
-       * AND IT DOWNLOADS WITHOUT CONFIRMING, which the drawer's route into the same modal does not.
-       * The row is seconds old, so there is no earlier bundle for this one to invalidate -- the
-       * whole reason that confirmation exists is absent here. See GatewayBundleModal.
+       * The remote branch. A host-run gateway is finished when its row exists; a remote one needs a
+       * bundle on a machine before it can publish, so the bundle modal opens immediately. It
+       * downloads without confirming: the row is seconds old, so there is no earlier bundle to
+       * invalidate. See GatewayBundleModal.
        */
       if (form.deployment === 'remote') {
         setBundleForGw({
@@ -263,21 +235,16 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
   const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
 
-  /* ONE FORM, TWO ENDINGS -- see frontend/src/utils/proposeFromForm.js. Derived rather than
-     stored, so it cannot disagree with the permission that decides whether the write would be
-     accepted. */
+  /* One form, two endings (utils/proposeFromForm.js). Derived rather than stored, so it cannot
+     disagree with the permission. */
   const proposeMode = !canManage && canPropose
   const [editingProposal, setEditingProposal] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
   const withheldFields = nonProposableFields('gateway')
 
   /**
-   * The note under a field a proposal may not name.
-   *
-   * WITHHELD, NOT HIDDEN. `deployment` says where this gateway's connector RUNS and `is_simulated`
-   * is what it IS -- neither is a label, and moving one re-points a broker topic namespace. Hiding
-   * the controls would make two different dialogs out of one, which is the drift this restructure
-   * removes.
+   * The note under a field a proposal may not name. Disabled with the reason rather than hidden:
+   * `deployment` says where the connector runs, and moving it re-points a broker topic namespace.
    */
   const Withheld = ({ field }) => (
     proposeMode && withheldFields[field]
@@ -285,48 +252,24 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       : null
   )
   /**
-   * WHO MAY OPEN THE FORGE, and it is a ROLE rather than a permission on purpose.
-   *
-   * The forge's own door -- the `forge` listener in supabase/envoy.yaml -- admits Administrator and
-   * Shopfloor_Manager by the role in the verified token, and nobody else. This mirrors that list
-   * rather than inventing a second rule that could disagree with the control: an Operator shown
-   * the link would follow it to a 403, so they are shown nothing. The UI agrees with the boundary,
-   * it does not implement it.
-   *
-   * THE PROPOSAL DROPZONE USED TO SIT HERE and admitted Operators, on the argument that a
-   * review step whose proposals can only come from the roles that may merge them is a formality.
-   * It went with the forge's door: a pull request opened there under the author's own name is the
-   * record now, `main` is protected in every gateway repository, and only an administrator's
-   * approval lets a merge through -- which is still two privileges rather than one.
-   *
-   * THE FLOW-BACKUP GATES SAT HERE BEFORE THAT and were the mirror of supabase/storage-policies.sql:
-   * GATEWAY_MANAGE to write, plus the Auditor's DIGITAL_THREAD_READ to read. They went with the
-   * backup panel -- a copy in a bucket has no diff, no history and no reviewer.
+   * Who may open the forge: a role, mirroring the `forge` listener in supabase/envoy.yaml, which
+   * admits Administrator and Shopfloor_Manager by the role in the verified token. The UI agrees
+   * with the boundary; it does not implement it.
    */
   const canOpenForge = userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 
   const unassignedDevices = assets.filter(a => !a.is_archived && !a.active_gateway_id)
 
-  // Built from the flat device list rather than the embedded one: ingestion records the arriving
-  // edge node on a quarantined device, so a device held on a gateway is attributable even though
-  // it has not been approved onto it yet.
+  // Built from the flat device list: ingestion records the arriving edge node on a quarantined
+  // device, so a device held on a gateway is attributable before it is approved.
   const gatewaysWithQuarantine = new Set(
     assets.filter(a => a.is_quarantined && a.active_gateway_id).map(a => a.active_gateway_id)
   )
 
   const filteredGateways = gateways.filter(g => {
-    // HIDDEN BY DEFAULT, matching the Devices page's treatment of the shadow devices this gateway
-    // publishes as. It is one row on every stack, it is seeded rather than created, and almost
-    // every action on it has been withdrawn -- so it sits in the fleet list offering nothing while
-    // reading, to anyone scanning for a real connector, as a gateway that is permanently offline.
-    //
-    // NOT REMOVED FROM THE PAGE. It has to stay reachable: minting its broker credential is the one
-    // act an operator must perform on it, and 0060's NOTICE names this page as where. The toggle
-    // is what keeps it findable while keeping it out of the way.
-    //
-    // TYPE-FILTERED SEPARATELY. Choosing Simulated in the Type control should not surface it either
-    // -- Shadow is its own type, and a filter that quietly widened to include the playback gateway
-    // would be the "Simulated means three things" problem returning by the back door.
+    // Hidden by default, like the Devices page's shadow devices: one seeded row on every stack with
+    // almost every action withdrawn. Not removed, because minting its broker credential happens
+    // here. Filtered separately from Type, since Shadow is its own type.
     if (!showShadowGateways && g.is_shadow) return false
     if (filterMode === 'active'   && g.is_archived) return false
     if (filterMode === 'archived' && !g.is_archived) return false
@@ -406,9 +349,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
         <div className="card-body">
       <div className="filter-bar">
-        {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
-            a filter like the rest, and having two filter surfaces on one page meant the header
-            row also crowded out the primary action. Counts are kept in the option labels. */}
+        {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
         <select
           className="form-control"
           style={{ width: '150px' }}
@@ -439,11 +380,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <option value="OFFLINE">Offline</option>
         </select>
 
-        {/* FILTERS ON THE SAME VALUE THE Type COLUMN PRINTS, through the same helper. It used to
-            filter on `deployment` alone and offer "On an appliance" / "On this host", which could
-            not express Simulated at all: a simulated gateway is host-run, so "On this host"
-            returned it alongside the real connectors and there was no way to separate them --
-            while the column beside it had been telling them apart since 0064. */}
+        {/* Filters on the same value the Type column prints, through the same helper, so Simulated
+            can be separated from the real host-run connectors. */}
         <select className="form-control" style={{ width: '160px' }} value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Host (a connector inside this stack), or Simulated (host-run, readings generated)">
           <option value="">Any type</option>
           {SELECTABLE_TYPES.map(t => (
@@ -459,9 +397,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <IconShieldAlert size={13} /> Has quarantined devices ({gatewaysWithQuarantine.size})
         </button>
 
-        {/* SHOWN ONLY WHEN ONE EXISTS, like the Devices page's shadow toggle. 0060 seeds exactly
-            one, so on a stack that has it this is a single button; on one that somehow does not,
-            a control for an absent row would be a puzzle rather than a filter. */}
+        {/* Shown only when one exists, like the Devices page's shadow toggle. */}
         {shadowGatewayCount > 0 && (
           <button
             className={`btn btn-sm ${showShadowGateways ? 'btn-primary' : 'btn-ghost'}`}
@@ -521,15 +457,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                        >
                          <td>
                            <strong>{g.gateway_name}</strong>
-                           {/* THE KIND OF GATEWAY IS A COLUMN NOW, not two badges beside the name.
-                               They were VIRTUAL and SIMULATED, could both appear at once, and
-                               between them said three things -- where it runs, whether the numbers
-                               are real, and (in the tooltip) "Cloud", which contradicted the first.
-                               One Type column answers the question once, and sorts.
-
-                               ARCHIVED STAYS HERE, because it is not a kind: a gateway of any type
-                               can be decommissioned, and it is the state that changes what the row
-                               MEANS rather than what the gateway IS. */}
+                           {/* The kind of gateway is a column, and sorts. ARCHIVED stays a badge
+                               because it is a state, not a kind: a gateway of any type can be
+                               decommissioned. */}
                            {g.is_archived && (
                              <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned gateway">
                                <IconArchive size={11} /> ARCHIVED
@@ -547,22 +477,11 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                            </span>
                          </td>
                          <td>
-                           {/* FOUR STATES, AND THE FIRST ONE IS "THE QUESTION DOES NOT APPLY".
-                               A synthetic gateway cannot hold a cell -- gateways_synthetic_has_no_cell
-                               (0059) -- so `location_scope` on one is inert: `device_locations`
-                               resolves simulated and shadow AHEAD of it, and the value changes
-                               nothing about where anything lands.
-
-                               It was still being PRINTED, which is how four simulated gateways came
-                               to report three different cell zones between them: the one seeded
-                               `site_wide` read "Site-Wide" and the others read "No cell", a
-                               difference with no behaviour behind it. Worse, "No cell" is rendered
-                               as a warning promising devices in the Unassigned queue, and theirs
-                               are in the Simulated lane. Both were answering a question this row
-                               does not have.
-
-                               Site-Wide is still an answer for every other gateway, and must not
-                               read as the unanswered case, or nobody ever stops trying to fix it. */}
+                           {/* Four states, and the first is that the question does not apply: a
+                               synthetic gateway cannot hold a cell
+                               (`gateways_synthetic_has_no_cell`), so its stored `location_scope` is
+                               inert and is not printed. Site-Wide is still an answer for every
+                               other gateway and must not read as the unanswered case. */}
                            {!gatewayAcceptsCell(g)
                              ? <span style={{ fontSize: '11px', color: 'var(--text-dim)' }} title={`${gatewayTypeLabel(gatewayType(g))} gateways have no cell: their devices resolve to the ${gatewayTypeLabel(gatewayType(g))} lane, which takes precedence over cell membership.`}>—</span>
                              : g.location_scope === SCOPE_SITE_WIDE
@@ -590,17 +509,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                            ) : gwAssets.length === 0 ? (
                              <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No devices assigned</span>
                            ) : (
-                             /* Collapsed past three, as the Devices Type column is. A gateway
-                                serving twenty devices rendered twenty-one chips and a row several
-                                lines tall -- and the count is unbounded, since it grows with the
-                                fleet rather than with a fixed vocabulary.
-
-                                TWO KINDS OF ENTRY ARE PINNED. The Online/Offline summary is the
-                                answer to "is this gateway healthy", which is the question the
-                                column exists to answer, so hiding it behind a "+18" would defeat
-                                the column. A QUARANTINED device is pinned for the same reason
-                                Unmodelled is on Devices: it is the one entry that calls for
-                                action, and it would otherwise be lost among the healthy ones. */
+                             /* Collapsed past three, as the Devices Type column is. The Online /
+                                Offline summary is pinned because it is the question the column
+                                answers; a QUARANTINED device is pinned because it calls for action. */
                              <TagList
                                limit={3}
                                tags={[
@@ -639,11 +550,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         <div className="modal-overlay">
           <div className="modal">
             <div className="modal-title">{editing ? 'Edit Gateway' : 'Register Gateway'}</div>
-            {/* THE READ-ONLY IDENTIFIER BLOCKS ARE GONE, same as in the device form. Sparkplug ID,
-                the publish-topic helper and the internal UUID were three of this dialog's rows and
-                none of them could be edited; all three are on the context drawer, copyable, where
-                somebody hunting an identifier actually looks. A form whose majority is read-only
-                teaches the reader that its controls are decorative. */}
+            {/* The identifiers are facts, not fields, and live on the context drawer where they are
+                copyable. */}
             <div className="form-group">
               <label className="form-label">Gateway Name</label>
               <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Friendly label for this gateway" placeholder="e.g. Sim_Gateway_Cell1_Machining" />
@@ -665,21 +573,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 Optional, and read by nothing — a note for whoever comes to this next.
               </div>
             </div>
-            {/* ONE CONTROL, NOT TWO CHECKBOXES, AND THE SCHEMA STILL HOLDS TWO FACTS.
-
-                It was "Runs on this host" plus "Telemetry is simulated or replayed", which offered
-                four combinations where the database permits three: `gateways_simulated_is_host`
-                (0064) forbids a remote simulator, so one of the four was a write that would be
-                refused after the operator had ticked it. A select over the legal states cannot
-                express the refused one.
-
-                This is a rendering of the constraint rather than a collapse of the model -- see
-                utils/gatewayType.js. If a remote simulator is ever wanted, the CHECK relaxes in one
-                line and a fourth option appears here with no data migration behind it.
-
-                IT COMES BEFORE THE CELL ZONE BECAUSE IT GOVERNS IT. Choosing Simulated makes the
-                field below unavailable, and a control that disables the one above it makes an
-                operator re-read a decision they had already taken. */}
+            {/* One control, not two checkboxes: `gateways_simulated_is_host` forbids a remote
+                simulator, so a select over the legal states cannot express the refused one
+                (utils/gatewayType.js). It comes before the cell zone because it governs it. */}
             <div className="form-group">
               <label className="form-label" htmlFor="gateway-type">Type</label>
               <select
@@ -689,11 +585,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 onChange={e => setForm(f => ({
                   ...f,
                   ...gatewayTypeFields(e.target.value),
-                  // CLEARED HERE, NOT LEFT FOR THE SAVE TO DISCOVER.
-                  // `gateways_synthetic_has_no_cell` (0059) refuses a simulated gateway that holds
-                  // a cell, so carrying a stale cell_id through this change turns the Save button
-                  // into a constraint violation -- with the offending field disabled and the
-                  // operator unable to see, let alone clear, the value being rejected.
+                  // Cleared here rather than left for the save: `gateways_synthetic_has_no_cell`
+                  // refuses a simulated gateway holding a cell, and the offending field is disabled
+                  // below.
                   ...(e.target.value === GATEWAY_TYPES.SIMULATED
                     ? { cell_id: '', location_scope: SCOPE_CELL }
                     : {})
@@ -705,41 +599,25 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 ))}
               </select>
             </div>
-            {/* THE CONSEQUENCE, SAID BEFORE IT IS CHOSEN. Remote means a bundle to download and
-                hardware to run it on; the other two mean the row is finished on save. That
-                difference used to be invisible until after the gateway existed.
-
-                Shown for every type rather than only on create, unlike the note it replaces: the
-                Simulated description is about what the READINGS are, which an operator editing an
-                existing row has as much reason to read as one creating it. */}
+            {/* The consequence, said before it is chosen: Remote means a bundle to download and
+                hardware to run it on. Shown for every type, since the Simulated description is
+                about what the readings are. */}
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
               {gatewayTypeDescription(formType)}
               {!editing && formType === GATEWAY_TYPES.REMOTE
                 && ' On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
             </div>
-            {/* SITE-WIDE IS AN OPTION IN THIS LIST, NOT A CHECKBOX BESIDE IT.
-
-                The two controls answered ONE question -- where does this gateway sit -- and the
-                answers are mutually exclusive by CHECK (`gateways_site_wide_has_no_cell`): "it is
-                in no particular cell" and "it is in Bay 4" cannot both be true. Splitting one
-                question across a select and a tick box made the exclusion something the form had
-                to enforce by clearing the other control, and made Site-Wide look like a modifier
-                on a cell choice rather than an alternative to it.
-
-                Its option value is SCOPE_SITE_WIDE, which cannot collide with a cell id: those are
-                UUIDs. */}
+            {/* Site-Wide is an option in this list, not a checkbox:
+                `gateways_site_wide_has_no_cell` makes the answers exclusive. Its value cannot
+                collide with a cell UUID. */}
             <div className="form-group">
               <label className="form-label" htmlFor="gateway-cell-zone">Shopfloor Cell Zone</label>
               <select
                 id="gateway-cell-zone"
                 className="form-control"
-                // READS AS "NO CELL" FOR A SYNTHETIC GATEWAY WHATEVER IS STORED, which is the
-                // reported bug in its other half: the seeded BMS simulator carries
-                // `location_scope = 'site_wide'` from before 0059 made the flag win, so a disabled
-                // box would have shown "Site-Wide" directly above a note saying simulated gateways
-                // have no cell. The stored value is inert -- device_locations resolves `simulated`
-                // ahead of it -- and this is a display fallback, not a write: nothing is cleared
-                // here, only on the type change that would make the row unsavable.
+                // Reads as No cell for a synthetic gateway whatever is stored: `device_locations`
+                // resolves `simulated` ahead of the stored scope. A display fallback, not a write;
+                // clearing happens only on the type change that would make the row unsavable.
                 value={!formAcceptsCell
                   ? ''
                   : form.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : (form.cell_id || '')}
@@ -837,11 +715,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           // keyed on -- and the one identifier here that is not the UUID above it.
           { label: 'Sparkplug Edge Node ID', value: selected.sparkplug_id || gatewaySparkplugId(selected.gateway_id), mono: true, copyable: true },
           {
-            // The REAL group id where the gateway carries one. archived migration 0008 made the edge node
-            // address (group, node) rather than node alone, so a wildcard here was throwing away
-            // half of an address the row already knows -- and a topic you cannot paste into an MQTT
-            // client without editing it first is not much of an answer. Falls back to `+` only
-            // where the group is genuinely unrecorded.
+            // The real group id where the gateway carries one, so the topic can be pasted into an
+            // MQTT client. Falls back to `+` only where the group is unrecorded.
             label: 'Sparkplug Topic Path',
             value: `spBv1.0/${selected.sparkplug_group || '+'}/NDATA/${selected.sparkplug_id || gatewaySparkplugId(selected.gateway_id)}`,
             mono: true,
@@ -852,11 +727,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           },
           {
             label: 'Cell Zone',
-            // A LINK when there is a cell to open. Site-Wide is deliberately left as plain text --
-            // it is the assertion that this gateway belongs to no cell, so a chip styled like the
-            // others but leading nowhere would promise an affordance that cannot exist.
-            // Same three-way as the column, for the same reason: on a synthetic gateway the stored
-            // scope is inert, so printing it here would contradict the row it was opened from.
+            // A link when there is a cell to open. Site-Wide stays plain text: it asserts the
+            // gateway belongs to no cell. Same three-way as the column, since on a synthetic
+            // gateway the stored scope is inert.
             value: !gatewayAcceptsCell(selected)
               ? `${gatewayTypeLabel(gatewayType(selected))} — no cell`
               : selected.location_scope === SCOPE_SITE_WIDE
@@ -881,18 +754,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
           /**
-           * WHAT THE APPLIANCE SAYS ABOUT ITSELF (archived migration 0035).
-           *
-           * SHOWN ONLY WHEN IT HAS REPORTED, and `health_reported_at` is what decides -- not the
-           * individual values. A gateway that has never reported health is a virtual one or an
-           * appliance on an older bundle, and six rows of "--" would read as six faults rather than
-           * as a capability it does not have. A gateway that reported once and stopped keeps its
-           * last values AND its reporting age, which is the pair that says so.
-           *
-           * These are CURRENT VALUES WITH NO HISTORY -- the trend lives in Grafana's Gateway Fleet
-           * Health dashboard, off Prometheus gauges. So there is deliberately no sparkline here:
-           * one drawn from a single value would be a straight line implying a stability nothing
-           * measured.
+           * What the appliance says about itself. Shown only once `health_reported_at` is set: a
+           * gateway that never reported is virtual or on an older bundle, and six rows of dashes
+           * would read as six faults. Current values with no history; the trend is in Grafana's
+           * Gateway Fleet Health dashboard.
            */
           ...(selected.health_reported_at ? [
             {
@@ -953,10 +818,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + 'detect edits made afterwards in the Node-RED editor.'
             },
             /**
-             * WHERE main IS, from the forge rather than from the appliance. forge-events records
-             * it on every push (0095), so a merge shows here at once rather than on the
-             * appliance's next tick. Not yet a drift check against the Flow row above: that hash
-             * is the flow the appliance was ENROLLED with, not the one it last deployed.
+             * Where main is, from the forge: forge-events records it on every push. Not yet a drift
+             * check against the Flow row above, which is the hash the appliance was enrolled with.
              */
             {
               label: 'Committed',
@@ -980,28 +843,11 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         ] : []}
         actions={selected ? [
           /**
-           * ASK THE NODE TO SAY WHO IT IS AGAIN.
-           *
-           * `Node Control/Rebirth` republishes the birth certificate: the metric list, the datatypes
-           * and the ALIAS TABLE every subsequent DDATA is resolved against. The daemon already sends
-           * this on its own -- at startup, on every sequence gap, at the start of every capture --
-           * because that table is in-memory and a stable device may not birth again for weeks. This
-           * is the same publish with a person as the reason, and until now the only way to get one
-           * was to nudge a node in the Node-RED editor and redeploy.
-           *
-           * IT IS THE ONLY COMMAND THIS DASHBOARD SENDS, and the distinction is worth keeping in
-           * view: a rebirth asks a node to RESTATE WHAT IT ALREADY IS. Sparkplug's same NCMD channel
-           * can write metric values, which is actuation, and that is deliberately not reachable from
-           * here -- see 0058.
-           *
-           * NOT ON AN ARCHIVED GATEWAY, where nothing is listening.
-           *
-           * AND NOT ON A SHADOW GATEWAY, where nothing is listening either -- for a different
-           * reason worth keeping distinct. The playback worker only PUBLISHES: it holds no
-           * subscription (see playback_worker.py, which says so at the top and explains that this
-           * is why the `seq` objection that kept capture inside the daemon does not apply to it).
-           * So an NCMD addressed to the playback edge node is received by nobody, and the request
-           * would sit in `rebirth_requests` recording something that can never be answered.
+           * Ask the node to restate its birth certificate: `Node Control/Rebirth` republishes the
+           * metric list, datatypes and alias table. The only command this dashboard sends; metric
+           * writes over NCMD are actuation and are deliberately not reachable from here. Not on an
+           * archived gateway, and not on the shadow gateway, whose playback worker only publishes
+           * and holds no subscription.
            */
           !selected.is_archived && !selected.is_shadow && canManage && {
             label: 'Request Rebirth',
@@ -1021,20 +867,11 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             pendingLabel: 'Requesting…'
           },
           /**
-           * SETUP COMES FIRST WHILE IT IS UNFINISHED, above Launch UI and Edit.
-           *
-           * A physical gateway that has never enrolled has no UI to launch and nothing worth editing
-           * -- the only useful action is "give me the bundle". Shown for AWAITING_BIRTH too, because
-           * an appliance that enrolled and then never published is the case where an operator needs to
-           * re-issue and start again, and that is otherwise a dead end.
-           *
-           * Absent once the gateway is ONLINE: re-issuing then would invalidate the credential a
-           * working appliance is using, which is a destructive act dressed as a convenience.
-           *
-           * CONFIRM FIRST ON THIS ROUTE, unlike the one straight after creation. This gateway is not
-           * new: it may already hold a live token somebody downloaded, or -- at AWAITING_BIRTH -- a
-           * broker credential an appliance is holding. Issuing destroys whichever it has, so the
-           * modal asks for the gateway's name before it mints anything.
+           * Setup comes first while it is unfinished, above Launch UI and Edit; shown for
+           * AWAITING_BIRTH too, so an appliance that enrolled and never published can be re-issued.
+           * Absent once ONLINE, since re-issuing invalidates a working credential. Confirms first
+           * on this route, unlike the one straight after creation, because this gateway may already
+           * hold a live token.
            */
           !selected.is_archived && selected.deployment === 'remote' && isGatewayPending(selected) && canManage && {
             label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Bundle' : 'Download Setup Bundle',
@@ -1051,23 +888,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               ? 'This appliance enrolled but has not published. Re-issuing invalidates its current credential.'
               : 'Generate the bootstrap bundle for this gateway and download it'
           },
-          /*
-           * THE HOST-RUN COUNTERPART, AND THE CONDITIONS ARE THE MIRROR OF THE ONE ABOVE.
-           *
-           * `deployment === 'host'` instead of `'remote'`, and no `isGatewayPending()`: enrolment is
-           * a lifecycle a remote appliance passes through, and a host-run gateway has none -- there
-           * is no appliance to wait for, so there is no state in which minting is premature or too
-           * late. The two RPCs behind these buttons are mirror images on the same axis, which is
-           * why the column is named for that axis.
-           *
-           * NOT SHOWN ON AN ARCHIVED GATEWAY, matching the bundle action and 0041's own refusal.
-           * 0037 found that a bundle downloaded before archiving stayed redeemable afterwards and
-           * resurrected the row; minting directly is the same hole reached in one step.
-           *
-           * THIS IS THE ONLY PLACE A PASSWORD APPEARS IN THE PRODUCT. Everything else either hands
-           * out a claim (the bundle) or never reveals a secret at all, which is why the modal
-           * confirms unconditionally rather than taking the bundle modal's create-time exemption.
-           */
+          /* The host-run counterpart, mirrored: `deployment === 'host'` and no
+             `isGatewayPending()`, because a host-run gateway has no enrolment lifecycle. Not on an
+             archived gateway, since a credential minted then would resurrect the row. This is the
+             only place a password appears in the product, so the modal confirms unconditionally. */
           !selected.is_archived && selected.deployment === 'host' && canManage && {
             label: 'Generate Broker Credential',
             icon: <IconLock size={13} />,
@@ -1077,10 +901,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               gateway_name: selected.gateway_name,
               sparkplug_id: selected.sparkplug_id
             }),
-            // NAMED BY THE CONDITION THE ACTION IS GATED ON, which is `deployment === 'host'`. It
-            // said "this virtual gateway", a word this codebase does not use because it meant
-            // three things at once -- and the one it meant HERE is the one this tooltip needs: no
-            // appliance, so the credential is minted in the browser instead of on the box.
+            // Named by the condition the action is gated on, `deployment === 'host'`: no appliance,
+            // so the credential is minted in the browser.
             title: 'Mint this host-run gateway a broker account and show the password once. A Remote gateway enrols itself instead, and its credential never reaches a browser.'
           },
           selected.access_url && {
@@ -1098,25 +920,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             primary: !selected.access_url,
             title: !canArchive ? 'Requires Admin permissions' : 'Restore gateway back to active service'
           } : !selected.is_shadow && {
-            /* WITHDRAWN FROM THE PLAYBACK GATEWAY, and not merely because there is no reason to
-               edit it -- the form OFFERS WRITES THE DATABASE REFUSES on this row.
-
-               `gateways_shadow_is_simulated` (0059) is `NOT is_shadow OR is_simulated`, and this
-               gateway is the one row where is_shadow is true. So choosing Remote or Host in the
-               Type control sets is_simulated = false and the save comes back a CHECK violation:
-               two of the three options are dead ends. That is precisely the failure the two
-               checkboxes had before 0064 -- a combination an operator can pick and then have
-               rejected -- reappearing on one row because the form cannot express "this one is
-               already a fourth type".
-
-               Nothing here needs changing anyway. 0060 seeds the row, its name and description are
-               its own, it has no appliance to give an access URL, and gateways_synthetic_has_no_cell
-               forbids the cell. The remaining editable field is a label on a gateway nobody browses
-               to. Withdrawing the whole action is smaller and clearer than a form that disables
-               four of its five fields.
-
-               Renaming is still possible from the database for anyone who genuinely needs it, which
-               is the right amount of friction for a row the platform depends on by flag. */
+            /* Withdrawn from the playback gateway: `gateways_shadow_is_simulated` refuses two of
+               the three Type options on this row, and nothing else on it needs editing. Renaming is
+               possible from the database. */
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
             onClick: () => {
               setEditing(selected)
@@ -1134,10 +940,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 ? 'Requires Admin permissions'
                 : 'Edit gateway configuration'
           },
-          /* WITHHELD FROM A READER WHO MAY NOT OPEN THE PAGE. The nav hides Digital Thread
-             without `digital_thread:read`; a drawer button that navigated there anyway would be
-             the one route into a page the app has decided not to show, landing them on an empty
-             table that explains nothing. `.filter(Boolean)` below drops it. */
+          /* Withheld from a reader who may not open the page: the nav hides Digital Thread without
+             `digital_thread:read`. `.filter(Boolean)` drops it. */
           canReadThread && {
             label: 'View Digital Thread', icon: <IconHistory size={13} />,
             onClick: () => onViewThread?.(selected),
@@ -1148,14 +952,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             onClick: () => setDocsForGw(selected),
             title: 'Attach or edit links for this gateway — documents, an asset register, a file repository, any URL'
           },
-          /* NOT OFFERED FOR THE PLAYBACK GATEWAY, and 0067 refuses it in the database as well --
-             this only stops an operator being shown a button whose failure is a database error.
-
-             Archiving the last shadow gateway leaves broker playback with no edge node to publish
-             as, and `ensure_shadow_devices()` finds it by flag, so the failure surfaces weeks later
-             at the moment somebody starts a job. The archive itself reports success and reads as
-             ordinary housekeeping. Swapping in a second shadow gateway first is legitimate and is
-             allowed; the database is where that distinction is enforced. */
+          /* Not offered for the playback gateway; the database refuses it as well. Archiving the
+             last shadow gateway would leave playback with no edge node, failing weeks later when a
+             job starts. */
           !selected.is_archived && !selected.is_shadow && {
             label: 'Archive Gateway', icon: <IconArchive size={13} />,
             onClick: () => setArchiveTarget(selected),
@@ -1164,25 +963,16 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             title: !canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Gateway'
           },
         ].filter(Boolean) : []}
-        /* WITH THE METADATA, ABOVE THE ACTIONS. "Which devices" is a fact about this gateway
-           rather than an action on it -- it is the question the row's Connected Devices count
-           raises and cannot answer, so it belongs with Last Heartbeat and the topic path, not
-           below a list of buttons where it read as an afterthought. */
+        /* With the metadata, above the actions: which devices is a fact about this gateway. */
         beforeActions={selected && (
           <div>
             <div className="context-panel-section-label">Connected Devices ({selectedDevices.length})</div>
             {selectedDevices.length === 0
               ? <div className="context-field-empty" style={{ fontSize: '11px' }}>No devices assigned</div>
               : (
-                /* CHIPS THAT GO SOMEWHERE, not status badges. This list answers "which devices" and
-                   then stranded you: the next question is always "what is wrong with that one", and
-                   the only way through was to read a name off here, switch tab and search for it.
-                   Now it is a click, matching the Cell Zone and Schema chips elsewhere in this
-                   drawer -- one navigation idiom across all four pages rather than three.
-
-                   THE LIFECYCLE STATE SURVIVES THE CHANGE, as a dot rather than as the chip's own
-                   colour. A chip coloured by status would collide with `chip-link`'s hover, and the
-                   two facts are independent: where this goes, and how the device is doing. */
+                /* Chips that navigate, matching the Cell Zone and Schema chips elsewhere in this
+                   drawer. The lifecycle state is a dot rather than the chip's colour, because
+                   status colour would collide with `chip-link`'s hover. */
                 <div className="context-device-list">
                   {selectedDevices.map(d => {
                     const status = deviceLifecycleStatus(d)
@@ -1201,10 +991,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 </div>
               )}
 
-            {/* WITH THE DEVICE LIST FOR THE SAME REASON: "what this appliance is asked to run" is a
-                fact about the gateway, and it is next to "what has published underneath it".
-                Withheld from an archived gateway, which is not a thing to be proposing changes to,
-                and rendered as nothing at all for a role the forge would refuse. */}
+            {/* With the device list: what this appliance is asked to run is a fact about the
+                gateway. Withheld from an archived gateway, and rendered as nothing for a role the
+                forge would refuse. */}
             {!selected.is_archived && (
               <div style={{ marginTop: '14px' }}>
                 <GatewayRepositoryPanel
@@ -1214,17 +1003,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               </div>
             )}
 
-            {/* THE CAPTURE LIBRARY THAT WAS HERE MOVED TO THE CAPTURE PAGE, and it had to rather
-                than merely being tidier there. This panel listed the bucket directly: objects with
-                a name, a size and a timestamp. 0055 stores ONE capture per subject at a
-                deterministic path, with the note, the message count and the manifest -- including
-                `birth_captured`, which decides whether a capture will replay at all -- in a table.
-                Left here it would have shown a single row called `capture.json` and none of the
-                facts that matter, which is worse than not showing it.
-
-                It also only ever covered GATEWAYS. Captures are filed by the subject recorded, and
-                a device is now a subject in its own right; a per-gateway panel has nowhere to put
-                that. */}
+            {/* The capture library lives on the Capture page, where captures are filed by subject
+                (gateway or device) with note, message count and manifest. */}
           </div>
         )}
       />

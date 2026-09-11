@@ -31,36 +31,13 @@ import {
 import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone } from '../../utils/gatewayType'
 
 /**
- * Access Control — broker credentials, and where they came from.
+ * Access Control: broker credentials and service identities.
  *
- * =================================================================================================
- * THE GAP THIS CLOSES, in the words of Machine Identities in supabase/README.md: "the only way to see what credentials exist today is
- * to read `.env` on the machine that generated them, which is a file, not a view — and a file that
- * the hand-off checklist explicitly tells you to delete."
- *
- * =================================================================================================
- * WHAT IT DELIBERATELY DOES NOT CLAIM, WHICH IS THE HARDEST PART OF THE PAGE
- *
- * It is not an inventory of the broker. Mosquitto's accounts live in a file reachable only by
- * `gateway-credential-service`, which is add-only and cannot list anything back -- and giving it a
- * LIST verb would hand whoever holds one bearer token the whole account table, which is precisely
- * the drift its header forbids.
- *
- * So this shows what the PLATFORM issued and recorded. The difference shows up wherever a
- * credential was minted outside a dashboard session -- `scripts/mosquitto-provision-gateway.mjs` on
- * the host, for instance, where `record_gateway_credential_issued()` cannot be called on its behalf
- * because `has_role()` resolves through `auth.uid()`, which is NULL for the service-role key. Such
- * a gateway reads `No platform record` here and connects perfectly well.
- *
- * THAT IS WHY THE STATE IS NAMED FOR THE RECORD AND NOT FOR THE CREDENTIAL. "No credential" would
- * be a claim about the broker; "No platform record" is a claim about this database, which is the
- * only thing the page can actually see.
- *
- * =================================================================================================
- * ADMINISTRATOR ONLY, gated the same way Settings is -- on the ROLE, not on a permission. The
- * database gates the two RPCs behind this page on `has_role(ARRAY['Administrator',
- * 'Shopfloor_Manager'])`, and the page is narrower than the API on purpose: reading who holds what
- * is an access-control question, and `authz:manage` is the permission that names it.
+ * It shows what the platform issued and recorded, not an inventory of the broker:
+ * `gateway-credential-service` is add-only and cannot list, so a credential minted outside a
+ * dashboard session reads `No platform record` and connects perfectly well. Administrator only,
+ * gated on the role as Settings is; the page is narrower than the RPCs behind it, which also admit
+ * Shopfloor_Manager.
  */
 export function AccessControlTab({ showToast }) {
   const [rows, setRows] = useState([])
@@ -71,27 +48,24 @@ export function AccessControlTab({ showToast }) {
   const [credentialForGw, setCredentialForGw] = useState(null)
   const [principals, setPrincipals] = useState([])
   const [tokens, setTokens] = useState(() => new Map())
-  // { principal, name } while the mint dialog is open. The NAME is carried rather than re-derived
-  // in the modal: describePrincipal() lives here, and a modal that looked it up again would be a
-  // second place for an undocumented principal to be labelled differently.
+  // { principal, name } while the mint dialog is open. The name is carried rather than re-derived,
+  // so an undocumented principal is labelled once.
   const [mintFor, setMintFor] = useState(null)
-  // { principal, name, status } while the inventory dialog is open. The STATUS is passed rather
-  // than recomputed, so the dialog lists exactly what the badge counted -- two derivations from
-  // the same rows is two places for the count and the list to disagree.
+  // { principal, name, status } while the inventory dialog is open. The status is passed, so the
+  // dialog lists exactly what the badge counted.
   const [tokensFor, setTokensFor] = useState(null)
-  // The jtis auth_pre_request() is currently refusing. Its own state because it is its own read
-  // with its own authority: an Auditor can see the denylist, a Shopfloor_Manager cannot, and
-  // tokenStatus() degrades to the pre-0074 reading on an empty set rather than claiming
-  // everything is live.
+  // The jtis auth_pre_request() is refusing. Its own state because it is its own read with its own
+  // authority: an Auditor can see the denylist, a Shopfloor_Manager cannot, and tokenStatus()
+  // degrades on an empty set rather than claiming everything is live.
   const [revokedJtis, setRevokedJtis] = useState(() => new Set())
   // Principal id -> its `revoked_service_principals` row (0076). A MAP, not a Set: the row carries
   // when and why, and both are shown.
   const [revokedPrincipals, setRevokedPrincipals] = useState(() => new Map())
   // { principal, name, revocation, activeTokens } while the withdraw/reinstate dialog is open.
   const [revokeIdentity, setRevokeIdentity] = useState(null)
-  // ITS OWN ERROR, not folded into loadError. The two reads have DIFFERENT authority -- gateway
-  // credentials accept Shopfloor_Manager, service principals are Administrator-only (0042) -- so a
-  // single error state would blame the whole page for a refusal that applies to one section.
+  // Its own error: gateway credentials accept Shopfloor_Manager, service principals are
+  // Administrator-only, and one error state would blame the whole page for a refusal that applies
+  // to one section.
   const [principalError, setPrincipalError] = useState(null)
 
   const load = useCallback((isInitial = false) => {
@@ -100,26 +74,21 @@ export function AccessControlTab({ showToast }) {
       .then(d => { setRows(d); setLoadError(null); setLoading(false) })
       .catch(e => { setLoadError(e?.message || 'Could not read gateway credentials.'); setLoading(false) })
 
-    // NOT AWAITED WITH THE OTHER, and not allowed to fail the page. This section is supplementary:
-    // an Administrator who can see it should, and everyone else should still get the credential
-    // inventory rather than a blank tab.
+    // Not awaited with the other and not allowed to fail the page: everyone else still gets the
+    // credential inventory.
     api.listServicePrincipals()
       .then(d => { setPrincipals(d); setPrincipalError(null) })
       .catch(e => { setPrincipals([]); setPrincipalError(e?.message || 'Could not list service principals.') })
 
-    // ITS OWN FAILURE, SWALLOWED TO AN EMPTY MAP. `digital_thread:read` is a separate permission
-    // from listing principals, and a caller without it should still see the identities -- with
-    // every one reading "No token on record", which is exactly what that state means from where
-    // they stand. Blanking the section instead would hide the identities over a missing history.
+    // Its own failure, swallowed to an empty map: `digital_thread:read` is a separate permission,
+    // and a caller without it still sees the identities, each reading No token on record.
     api.listServiceTokens()
       .then(setTokens)
       .catch(() => setTokens(new Map()))
 
-    // THE THIRD READ, and it is what keeps the count honest rather than what enables the button.
-    // Without it a badge reads "5 active tokens" after four have been withdrawn -- overstating
-    // exposure on the one page whose job is to state it, which is the same error tokenStatus()
-    // exists to avoid in the other direction. api.listRevokedServiceTokens() already resolves to
-    // an empty Set on a refusal, so the .catch here is for a transport failure only.
+    // The third read keeps the count honest: without it a badge reads 5 active tokens after four
+    // were withdrawn. api.listRevokedServiceTokens() already resolves to an empty Set on a refusal,
+    // so the .catch is for transport failure.
     api.listRevokedServiceTokens()
       .then(setRevokedJtis)
       .catch(() => setRevokedJtis(new Set()))
@@ -133,9 +102,7 @@ export function AccessControlTab({ showToast }) {
 
   useEffect(() => { load(true) }, [load])
 
-  // NOT REALTIME, and not polled. Nothing on this page changes on its own: a credential changes
-  // when somebody on this page changes it, or when a gateway is archived from another tab. A 3s
-  // poll would re-read the audit table forever to show the same six rows.
+  // Not Realtime and not polled: nothing on this page changes on its own.
   const visible = useMemo(
     () => rows.filter(r => showArchived || !r.is_archived),
     [rows, showArchived]
@@ -174,27 +141,15 @@ export function AccessControlTab({ showToast }) {
   return (
     <div className="page-layout">
       <div className="page-main">
-        {/* ONE CARD FOR ONE LIST -- title, description, controls and rows -- which is the Schemas
-            page's shape and the one the rest of the app uses. This was three stacked cards for a
-            single table: three borders, three sets of padding, and a heading separated from the
-            rows it describes by a control bar in its own box.
-
-            THE PAGE STILL STATES ITS OWN LIMIT BEFORE THE FIRST ROW, which is the part that has to
-            survive the tidying: somebody arriving to answer "does this gateway have a credential"
-            needs to know what this page can and cannot see BEFORE they read a row, not after they
-            have acted on one. */}
-        {/* THE REGISTERED SCHEMAS SHAPE, which is the one the rest of the app uses: a `.card-header`
-            carrying the title, its count and the card's own actions on one line; the description
-            full width beneath it; then the rows. This was a title stacked over two paragraphs over a
-            filter bar, which spent four bands of vertical space before the first row and put the
-            list's totals ABOVE the list they summarise. */}
+        {/* One card for one list: title, description, controls and rows. The page states its own
+            limit before the first row, so a reader knows what it can and cannot see before acting
+            on one. */}
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
               Broker credentials{' '}
-              {/* FILTERED OF TOTAL when a filter is on, the same as the schema registry -- a
-                  narrowed list would otherwise read as a short one, which is the wrong thing to
-                  believe about an inventory of who can reach your broker. */}
+              {/* Filtered of total when a filter is on, so a narrowed inventory does not read as a
+                  short one. */}
               <span
                 className="section-count"
                 title={visible.length === rows.length
@@ -205,10 +160,8 @@ export function AccessControlTab({ showToast }) {
               </span>
             </h3>
 
-            {/* The card's actions, in the header of the card they act on. The archived toggle is
-                the Devices page's "Needs attention" control -- a btn-sm switching between
-                btn-primary and btn-ghost, carrying its own count -- rather than a bare checkbox,
-                which was the only control of its kind in the app and read as a form field. */}
+            {/* The card's actions in its header. The archived toggle is the Devices page's Needs
+                attention control, a btn-sm carrying its own count. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <button
                 className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
@@ -231,12 +184,8 @@ export function AccessControlTab({ showToast }) {
             issue one.
           </p>
 
-          {/* A SHAPE AS WELL AS A COLOUR. This was a red paragraph, which is the weakest form the
-              warning can take: colour alone carries it, so it is invisible to a reader who cannot
-              distinguish it and reads as mere emphasis to everyone else. The tint is deliberately
-              subtle -- this is a standing property of the page, not an error that has just
-              happened, and a full-strength banner that is always present is one people learn to
-              look past. */}
+          {/* A shape as well as a colour, and a subtle tint: this is a standing property of the
+              page, not an error that has just happened. */}
           <div className="callout callout-warning">
             <IconShieldAlert size={14} className="callout-icon" />
             <div>
@@ -285,10 +234,9 @@ export function AccessControlTab({ showToast }) {
                       )}
                     </td>
                     <td>
-                      {/* THE SAME FOUR WORDS AS THE GATEWAYS AND CAPTURE PAGES, from the same
-                          helper. This column said HOST-RUN or APPLIANCE, which is only the
-                          deployment half -- and on the page whose subject is credentials, a
-                          simulator and a shadow gateway hold one for different reasons. */}
+                      {/* The same four words as the Gateways and Capture pages, from the same
+                          helper: a simulator and a shadow gateway hold a credential for different
+                          reasons. */}
                       <span
                         className={`badge badge-${gatewayTypeTone(gatewayType(g))}`}
                         style={{ fontSize: '11px' }}
@@ -297,11 +245,9 @@ export function AccessControlTab({ showToast }) {
                         {gatewayTypeLabel(gatewayType(g))}
                       </span>
                     </td>
-                    {/* THE USERNAME IS THE WIRE IDENTITY, not a display name -- and it is the one
-                        value on this page an operator retypes elsewhere, into a broker node's
-                        credential pair. Click-to-copy for the same reason every other identifier in
-                        the app has it: a 24-character string transcribed by eye is a gateway that
-                        authenticates and then has every publish silently dropped by the ACL. */}
+                    {/* The username is the wire identity, retyped into a broker node's credential
+                        pair. Click-to-copy, because a transcription error is a gateway whose every
+                        publish is silently dropped by the ACL. */}
                     <td>
                       <CopyableId
                         value={g.sparkplug_id}
@@ -369,14 +315,8 @@ export function AccessControlTab({ showToast }) {
           </table>
           </div>
 
-          {/* A SUMMARY BELONGS AFTER THE THING IT SUMMARISES. These sat in a filter bar above the
-              table, which read as a filter -- four numbers beside two buttons, in the band where
-              every other page puts controls -- and asked the reader to hold four totals in their
-              head before seeing a single row.
-
-              Each count and its label is ONE pill so the pair cannot be split across a wrap: as
-              loose text, "0 issued 0 bundle outstanding 0 revoked" scans as six tokens rather than
-              three facts. */}
+          {/* A summary belongs after the thing it summarises. Each count and its label is one pill,
+              so the pair cannot split across a wrap. */}
           <div className="table-summary">
             <span className={`table-summary-pill${summary.issued ? '' : ' table-summary-pill-zero'}`}>
               <strong>{summary.issued}</strong> issued
@@ -393,19 +333,11 @@ export function AccessControlTab({ showToast }) {
           </div>
         </div>
 
-        {/* =========================================================================================
-            SERVICE IDENTITIES -- the second half of the page, and the half that is TWO LISTS rather
-            than one. Nothing holds an identity on both planes, which is the fact worth showing: the
-            ingestion daemon connects to the broker as `factoryplus_ingestion` and reaches the
-            database with the service-role key, which is not an identity at all.
-            ========================================================================================= */}
-        {/* A HEADING, NOT A CARD. It holds one sentence and introduces the two cards beneath it, so
-            wrapping it in a card of its own gave the page a third border, a third padding, and a
-            band that looked like a section with nothing in it.
-
-            It also carried `.settings-preamble-title`, which is small-caps -- a THIRD title
-            treatment on a page that already had `.section-title` above and bold 13px text below.
-            One page, one way of naming a section. */}
+        {/* Service identities: two lists rather than one, because nothing holds an identity on both
+            planes. The ingestion daemon connects to the broker as `factoryplus_ingestion` and
+            reaches the database with the service-role key. */}
+        {/* A heading, not a card: one sentence introducing the two cards beneath, in the page's one
+            title treatment. */}
         <div style={{ margin: 'calc(var(--stack) * 1.5) 0 10px' }}>
           <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <IconLock size={15} /> Service identities
@@ -417,14 +349,8 @@ export function AccessControlTab({ showToast }) {
           </p>
         </div>
 
-        {/* THE SAME COLUMN RHYTHM AS THE CREDENTIALS TABLE ABOVE, because it is the same kind of
-            question: an identity, what it holds, what that reaches, and where it comes from. These
-            were stacked prose, which meant every row repeated the label words ("The identity…",
-            "Reaches:", "Token minted by") that one header says once. */}
-        {/* THE DIRECTORY'S GROUPED-CARD SHAPE -- `.card` > `.card-header` > title + count > rows --
-            which is what every other multi-table page in the app uses. This was a bold 13px div
-            with hand-picked padding, so the same page named one section with `.section-title` and
-            another with an improvised style. */}
+        {/* The same column rhythm as the credentials table: an identity, what it holds, what that
+            reaches, where it comes from. */}
         <div className="card" style={{ marginTop: 'var(--stack)' }}>
           <div className="card-header">
             <h3 className="section-title">
@@ -448,15 +374,13 @@ export function AccessControlTab({ showToast }) {
               <thead>
                 <tr>
                   <th>Identity</th>
-                  {/* ITS OWN COLUMN, matching how the Schemas page treats a schema UUID. It was
-                      stacked under the name, which made it read as a subtitle rather than as the
-                      value a JWT's `sub` claim has to equal. */}
+                  {/* Its own column, as the Schemas page treats a UUID: it is the value a JWT's
+                      `sub` claim has to equal. */}
                   <th>Principal ID</th>
                   <th>Holds</th>
                   <th>Reaches</th>
-                  {/* WHAT IS OUTSTANDING, not when it was last minted -- see tokenStatus(). A
-                      re-mint adds a live credential rather than replacing one, and nothing here
-                      can revoke either. */}
+                  {/* What is outstanding, not when it was last minted (tokenStatus()): a re-mint
+                      adds a live credential rather than replacing one. */}
                   <th title="Long-lived tokens signed for this identity that have not yet expired">
                     Tokens
                   </th>
@@ -471,20 +395,16 @@ export function AccessControlTab({ showToast }) {
                 )}
                 {principals.map(p => {
                   const meta = describePrincipal(p.principal_id)
-                  // THE DENYLIST IS PASSED, so a withdrawn token stops being counted as active.
-                  // `Date.now()` is spelled out because the third argument cannot be reached past
-                  // a defaulted second one.
+                  // The denylist is passed so a withdrawn token stops counting as active.
+                  // `Date.now()` is spelled out because the third argument cannot be reached past a
+                  // defaulted second.
                   const status = tokenStatus(tokens.get(p.principal_id), Date.now(), revokedJtis)
                   const revocation = revokedPrincipals.get(p.principal_id) || null
                   return (
                     <tr key={p.principal_id}>
-                      {/* THE PURPOSE IS A TOOLTIP NOW. It is three lines of background on a row whose
-                          other four columns are the answer -- what it holds, what that reaches, and
-                          where its token comes from. Read once and then in the way every time after,
-                          which is what a tooltip is for.
-
-                          The dotted underline is what says there is something to hover. A title on a
-                          plain span is invisible, and an affordance nobody can see is not one. */}
+                      {/* The purpose is a tooltip: three lines of background on a row whose other
+                          columns are the answer. The dotted underline says there is something to
+                          hover. */}
                       <td>
                         <span
                           title={meta.purpose}
@@ -508,22 +428,18 @@ export function AccessControlTab({ showToast }) {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                          {/* PERMISSIONS, NOT A ROLE. 0080 stopped these identities holding
-                              `Operator`: it is a person's role, and every widening of it silently
-                              re-granted three of the stack's own processes. */}
+                          {/* Permissions, not a role: these identities no longer hold `Operator`,
+                              whose every widening silently re-granted the stack's own processes. */}
                           {(p.permissions || []).map(perm => (
                             <span key={perm} className="badge badge-neutral" style={{ fontSize: '11px' }}>{perm}</span>
                           ))}
-                          {/* STATED, NOT ASSUMED. It is the property that makes listing these safe,
-                              and 0042 returns it rather than letting the page infer it from the
-                              predicate it selected on. */}
+                          {/* Stated, not assumed: `can_sign_in` is returned by the RPC rather than
+                              inferred from the predicate it selected on. */}
                           {p.can_sign_in === false && (
                             <span className="badge badge-ok" style={{ fontSize: '11px' }}>CANNOT SIGN IN</span>
                           )}
-                          {/* BESIDE THE GRANTS, NOT IN THE TOKEN COLUMN, because it is a fact about
-                              the IDENTITY rather than about its credentials -- and it outranks
-                              them: a revoked principal is refused whatever its tokens say, so a
-                              reader scanning what it holds needs to see it here. */}
+                          {/* Beside the grants, because a revocation is a fact about the identity
+                              and outranks its tokens. */}
                           {revocation && (
                             <span
                               className="badge badge-danger"
@@ -540,23 +456,10 @@ export function AccessControlTab({ showToast }) {
                       <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '40ch' }}>
                         {permissionReach(p.permissions)}
                       </td>
-                      {/* SAID ONCE. The detail was rendered as a tooltip AND as a paragraph below
-                          the badge -- the identical tokenStatusDetail(status) string, twice, in a
-                          34ch column. It reads as two facts and is one.
-
-                          The tooltip is the copy that survives, matching the Identity column beside
-                          it, and it takes that column's dotted underline with it: a title on a
-                          plain element is an affordance nobody can see. */}
-                      {/* THE BADGE BECAME THE WAY IN, because it already carries the count and the
-                          count is the question a revocation follows from. A separate Revoke button
-                          in this row could not work: a principal has N tokens and
-                          `revoke_service_token()` takes a jti, so a row-level control would have to
-                          PICK one -- and whichever rule it used would be a guess the operator
-                          cannot see being made. See ServiceTokenInventoryModal's header.
-
-                          IT STAYS A PLAIN BADGE WHEN THERE IS NOTHING TO LIST, rather than
-                          rendering a button that opens an empty dialog. `cursor: help` is then
-                          honest -- the tooltip is all there is. */}
+                      {/* Said once, as a tooltip with the dotted underline that says so. */}
+                      {/* The badge is the way in: a principal has N tokens and
+                          `revoke_service_token()` takes a jti, so a row-level Revoke would have to
+                          pick one. A plain badge when there is nothing to list. */}
                       <td>
                         {status.rows.length > 0 ? (
                           <button
@@ -589,34 +492,17 @@ export function AccessControlTab({ showToast }) {
                           </span>
                         )}
                       </td>
-                      {/* A BUTTON WHERE A TOKEN IS ACTUALLY READ, AND THE COMMAND EVERYWHERE ELSE.
-                          Minting stayed on the host because these tokens could not be revoked, so
-                          issuing one should cost more than a click. 0074 removed that premise —
-                          `revoke_service_token()` withdraws a jti and `auth_pre_request()` refuses
-                          it on every PostgREST request after — and the retired revocable-tokens roadmap item is explicit that
-                          this is the order: *"Build revocation first and the same RPC stops being a
-                          hazard."*
-
-                          IT IS PER-PRINCIPAL, AND IT USED NOT TO BE. Every row once rendered
-                          `mint-mcp-token.mjs --principal <id>`, which is wrong for two of the three
-                          this stack ships with — and wrong in the direction that does damage. That
-                          script WOULD sign a token for Service_Ingestor: same subject, same secret,
-                          entirely valid. No worker would ever read it, because the daemon takes its
-                          key from the environment. The result is a second privileged credential,
-                          issued by an operator who was following the page, and nothing fixed.
-
-                          THE BUTTON INHERITS THAT DISTINCTION RATHER THAN DISCARDING IT. Offering
-                          it on every row would reintroduce the same mistake through a nicer
-                          control, so `isMintableFromPage()` decides — see its header — and the two
-                          environment-key identities keep the rotate command that actually changes
-                          what their process presents. */}
+                      {/* A button where a token is actually read, and the command everywhere else.
+                          `isMintableFromPage()` decides: the two environment-key identities take
+                          their key from the environment at boot, so a minted token for them would
+                          be a second privileged credential nothing reads. They keep the rotate
+                          command. */}
                       <td>
                         {isMintableFromPage(meta) ? (
                           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                            {/* MINTING IS NOT OFFERED FOR A WITHDRAWN IDENTITY, and the swap is not
-                                cosmetic: record_service_token_issued() refuses one outright (0076),
-                                so the button would sign nothing and return an error. Reinstating is
-                                the action that is actually available, so it is the one shown. */}
+                            {/* Minting is not offered for a withdrawn identity:
+                                record_service_token_issued() refuses it. Reinstating is the action
+                                available, so it is the one shown. */}
                             {revocation ? (
                               <button
                                 className="btn btn-ghost"
@@ -636,10 +522,7 @@ export function AccessControlTab({ showToast }) {
                                 <IconLock size={13} /> Issue Token
                               </button>
                             )}
-                            {/* WITHDRAWING IS OFFERED WHEREVER MINTING IS, which is the pairing that
-                                keeps the page honest: a control that hands out credentials and no
-                                control that takes the identity back is the asymmetry the retired revocable-tokens roadmap item
-                                refused to ship in the first place. */}
+                            {/* Withdrawing is offered wherever minting is. */}
                             {!revocation && (
                               <button
                                 className="btn btn-ghost"
@@ -651,10 +534,8 @@ export function AccessControlTab({ showToast }) {
                                 Withdraw
                               </button>
                             )}
-                            {/* KEPT BESIDE IT, NOT REPLACED. `mint-mcp-token.mjs` survives as
-                                break-glass for the reason item 3 gives: a stack whose only
-                                Administrator cannot sign in still needs a way to mint. What
-                                changed is that it stopped being the only way. */}
+                            {/* Kept beside it: `mint-mcp-token.mjs` survives as break-glass for a
+                                stack whose only Administrator cannot sign in. */}
                             <CopyableId
                               value={meta.mintCommand.replace('{id}', p.principal_id)}
                               label="mint command"
@@ -670,11 +551,9 @@ export function AccessControlTab({ showToast }) {
                             label="rotate command"
                             display="Copy Command"
                             variant="button"
-                            // THE TOOLTIP CARRIES THE DISTINCTION NOW THAT THE LABEL CANNOT.
-                            // Both rows read "Copy Command", so the command itself is named here --
-                            // and it is `npm run keys:rotate`, not the MCP mint, which is the whole
-                            // reason this column is per-principal. An operator who copies without
-                            // hovering still gets the right command; one who hovers learns why.
+                            // The tooltip carries the distinction the label cannot: this is `npm
+                            // run keys:rotate`, because the identity's key lives in .env and is
+                            // read at boot.
                             title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this identity's key lives in .env and is read at boot, so ROTATING it, not minting a new token, is what changes what the process presents. It records the issue before writing, and names the containers to restart.`}
                             onNotify={showToast}
                           />
@@ -688,26 +567,10 @@ export function AccessControlTab({ showToast }) {
             </div>
           )}
 
-          {/* SHOWN ONLY WHILE IT IS TRUE OF THIS STACK, which is the fix rather than deleting it.
-
-              As a permanent footer it had become self-contradicting: after a rotation both service
-              principals display "1 active token" and the paragraph beneath them said they "are not
-              here and cannot be". Only careful parsing of "the first" reconciled those, and nobody
-              parses a footer carefully.
-
-              THE CAVEAT MOVED INTO THE ROW RATHER THAN BEING LOST (#91). What it protected against
-              is real: on a stack that has never rotated, this list is genuinely empty for the two
-              most powerful credentials on the box -- `npm run setup` signs them before the database
-              exists, so there is nothing to record into -- and an unlabelled empty list reads as
-              "nothing outstanding". This inventory is the compensating control README.md's Accepted
-              risks section names, and a control whose coverage is unstated is one an operator
-              over-trusts.
-
-              But the TOKENS cell already says it, per row and per principal, on the badge that
-              shows the state: "No token recorded ... That is not the same as none existing". That
-              is where somebody reading a specific row looks, and it is now self-contained rather
-              than pointing at a paragraph below. A footer restating it was a second copy of a
-              caveat the row carries, on a page this dense. */}
+          {/* Shown only while it is true of this stack. On a stack that has never rotated, the
+              token list is empty for the two most powerful credentials, because `npm run setup`
+              signs them before the database exists. The per-row badge says so; this footer restates
+              it only while it applies. */}
         </div>
 
         <div className="card" style={{ marginTop: 'var(--stack)' }}>
@@ -720,9 +583,9 @@ export function AccessControlTab({ showToast }) {
               />
             </h3>
           </div>
-          {/* DECLARED IN THE REPOSITORY, NOT FETCHED, and the page says so rather than implying a
-              live read. Mosquitto has no API that lists its principals; check-docs-drift asserts
-              this list against mosquitto.acl, in both directions and including the topic rules. */}
+          {/* Declared in the repository, not fetched: Mosquitto has no API that lists its
+              principals. check-docs-drift asserts this list against mosquitto.acl in both
+              directions. */}
           <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
             Read from <code>mosquitto.acl</code> in the repository — the broker has no API that lists
             these, so they are declared alongside the file and checked against it at build time.
@@ -754,10 +617,8 @@ export function AccessControlTab({ showToast }) {
                   <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '46ch' }}>{bp.purpose}</td>
                 </tr>
               ))}
-              {/* A ROW, NOT A TRAILING BLOCK. It is not a principal -- there is no account by this
-                  name -- but it IS an entry in the same file granting the same kind of thing, and
-                  rendering it as an orphaned paragraph made it read as a footnote rather than as
-                  the rule most of the fleet actually connects under. The badge says what it is. */}
+              {/* A row, not a trailing block: it is not an account, but it is an entry in the same
+                  file granting the same kind of access, and most of the fleet connects under it. */}
               <tr>
                 <td style={{ fontWeight: 600 }}>Every gateway</td>
                 <td>
@@ -793,11 +654,8 @@ export function AccessControlTab({ showToast }) {
         />
       )}
 
-      {/* NOT `afterAction`, WHICH THE TWO GATEWAY MODALS USE. That helper closes the dialog and
-          reloads the credential inventory; this one has to reload the TOKEN inventory instead, so
-          the new mint appears in the row's status badge rather than the operator wondering whether
-          it worked. `load()` refreshes all three reads, which is cheap and avoids a second code
-          path that could drift from it. */}
+      {/* Not `afterAction`, which reloads the credential inventory; this reloads the token
+          inventory so the mint appears in the badge. `load()` refreshes all three reads. */}
       {mintFor && (
         <ServiceTokenModal
           principal={mintFor.principal}
@@ -807,9 +665,8 @@ export function AccessControlTab({ showToast }) {
         />
       )}
 
-      {/* `onChanged` RATHER THAN RELOADING ON EVERY CLOSE. This dialog is opened to look at least
-          as often as to act, and refetching three reads because somebody glanced at a list would
-          make the table flicker for nothing. It reloads only when a withdrawal actually happened. */}
+      {/* `onChanged` rather than reloading on every close: the dialog is opened to look as often as
+          to act. */}
       {tokensFor && (
         <ServiceTokenInventoryModal
           principalName={tokensFor.name}

@@ -12,46 +12,16 @@ const TTL_CHOICES = [7, 30, 90]
 const DEFAULT_TTL = 30
 
 /**
- * Mint a long-lived token for a service principal and show it exactly once.
+ * Mint a long-lived token for a service principal and show it once. This exists because revocation
+ * does: `revoke_service_token()` denylists a jti and `auth_pre_request()` refuses it on every
+ * PostgREST request after. If that half is removed, this goes with it.
  *
- * =================================================================================================
- * THIS BUTTON WAS REFUSED ONCE, AND WHAT CHANGED IS NOT THE UI
+ * No type-the-name confirmation, unlike GatewayCredentialModal: nothing is destroyed here, since a
+ * second token is a second credential and the first keeps working. What the operator must learn
+ * instead is that a mint adds rather than replaces.
  *
- * The revocable-tokens roadmap item -- since shipped, so named rather than numbered -- recorded the
- * refusal and quoted the reason: *"technically neat, and it would have made an unrevocable
- * credential a button press with a tidy audit trail of a thing nobody can undo.
- * Solving the wrong half well is worse than not solving it, because the clean implementation reads
- * as safety."* The objection was never effort, and it was never the screen. It was that the product
- * would be handing out credentials it had no way to withdraw.
- *
- * 0074 built the withdrawal -- `revoke_service_token()` denylists a jti, and `auth_pre_request()`
- * refuses it on every PostgREST request after that. So this exists now because the other half does,
- * and if that half is ever removed this one must go with it.
- *
- * =================================================================================================
- * WHY THERE IS NO TYPE-THE-NAME CONFIRMATION, UNLIKE GatewayCredentialModal
- *
- * That modal confirms unconditionally because a broker holds ONE password per username, so minting
- * always REPLACES -- possibly one a running Node-RED is holding, which then fails silently. The
- * confirmation is what stands between "generate a credential" and "take a cell offline".
- *
- * NOTHING IS DESTROYED HERE. A second token is a second credential; the first keeps working until
- * it expires or is revoked. There is no running consumer to break, so a barrier shaped like that
- * one would be theatre -- and worse than theatre, because a confirmation that never protects
- * anything teaches an operator to type through the ones that do.
- *
- * What this screen owes the operator instead is the fact they will act on: that a mint ADDS rather
- * than replaces, which is the opposite of what the neighbouring modal does and the single most
- * likely thing to be assumed wrong.
- *
- * =================================================================================================
- * THE TOKEN IS NEVER PUT ANYWHERE IT COULD BE READ BACK
- *
- * Not in a toast, not in the URL, and not in `digital_thread` -- 0043 records the jti, the expiry
- * and the roles, and never the token itself, because that table is append-only and readable by
- * anyone holding the audit lane. It lives in this component's state until the modal closes and
- * then it is gone: the signature is reproducible only from JWT_SECRET, which is held by the edge
- * runtime and is not reachable from a browser or from SQL.
+ * The token lives in this component's state until the modal closes: not in a toast, the URL or
+ * `digital_thread`, which records the jti, expiry and roles only.
  */
 export function ServiceTokenModal({ principal, principalName, onClose, showToast }) {
   const [step, setStep] = useState('confirm')
@@ -73,10 +43,8 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
       setStep('reveal')
       showToast?.(`Token issued for ${principalName}`, 'success')
     } catch (err) {
-      // THE STEP IS NOT ADVANCED, matching GatewayCredentialModal. Nothing was issued, and dropping
-      // the operator onto an empty reveal screen would imply a token exists that they failed to
-      // catch. The edge function discards an unrecorded token rather than returning it, so a
-      // failure here genuinely means no credential was created.
+      // The step is not advanced, matching GatewayCredentialModal: the edge function discards an
+      // unrecorded token, so a failure here means no credential was created.
       setError(err.message)
       showToast?.(err.message, 'error')
     } finally {
@@ -116,9 +84,8 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
                 <IconShieldAlert size={13} /> Issue a long-lived token for this identity?
               </strong>
               <div style={{ color: 'var(--text-muted)', marginTop: '6px' }}>
-                {/* THE ONE FACT THAT DIFFERS FROM THE BROKER CREDENTIAL MODAL, said first. An
-                    operator who has used that dialog will assume this replaces, and act on the
-                    assumption by minting to "rotate" — leaving two live credentials. */}
+                {/* The one fact that differs from the broker credential modal, said first: minting
+                    to rotate would leave two live credentials. */}
                 This <strong>adds</strong> a credential. It does <strong>not</strong> replace any
                 token this identity already holds — those keep working until they expire or are
                 revoked individually.
@@ -140,9 +107,8 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
                   <option key={d} value={d}>{d} days</option>
                 ))}
               </select>
-              {/* WHY THE CEILING EXISTS, rather than just what it is. Revocation reaches PostgREST
-                  and nothing else, so for the other four services the expiry is still the only
-                  bound — which is exactly why a shorter one is worth choosing. */}
+              {/* Why the ceiling exists: revocation reaches PostgREST and nothing else, so for the
+                  other services the expiry is the only bound. */}
               <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>
                 90 days is the ceiling. Prefer the shortest that works: revoking reaches the API
                 only, so for storage, realtime and the edge functions the expiry is the only limit.
@@ -202,10 +168,8 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
             </div>
 
             <div className="form-group">
-              {/* THE jti IS SHOWN BECAUSE IT IS THE HANDLE FOR WITHDRAWING THIS TOKEN. Without it
-                  an operator who has closed this dialog must find the TOKEN_MINTED row in the
-                  Digital Thread to revoke — which is possible, and is not something to require of
-                  somebody who has just realised they pasted a credential somewhere wrong. */}
+              {/* The jti is the handle for withdrawing this token; without it an operator must find
+                  the TOKEN_MINTED row in the Digital Thread. */}
               <label className="form-label">Token ID (jti)</label>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <input className="form-control mono" readOnly value={minted.jti} />

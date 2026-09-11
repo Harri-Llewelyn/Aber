@@ -1,45 +1,20 @@
 /**
- * What the PLATFORM knows about a gateway's broker credential.
+ * What the platform knows about a gateway's broker credential.
  *
- * =================================================================================================
- * THE ONE THING THIS FILE EXISTS TO GET RIGHT: THE PLATFORM CANNOT SEE THE BROKER'S PASSWORD FILE.
+ * The platform cannot see the broker's password file: `gateway-credential-service` is add-only and
+ * cannot list. State is derived from what the database recorded: `enrolled_at` (an appliance
+ * redeemed a bundle), `credential_revoked_at` (archive or delete rotated it), or a
+ * CREDENTIAL_ISSUED row (minted for a host-run gateway through the UI).
  *
- * Mosquitto's accounts live in a file on the broker, reachable only by `gateway-credential-service`
- * -- which is add-only by design and cannot list or read anything back. Its own header says why:
- * "it is not a general credential API and must not become one." Adding a LIST verb to answer this
- * page's question would be exactly the drift it warns against, and would hand whoever holds one
- * bearer token an inventory of every account on the broker.
- *
- * So this derives credential state from what the DATABASE recorded, and the distinction between
- * those two things is not pedantic -- it is the difference between the page being useful and the
- * page being wrong:
- *
- *   * `enrolled_at`            an appliance redeemed a bundle (0025 / enroll-gateway)
- *   * `credential_revoked_at`  archive or delete rotated it to an unrecorded password (0038)
- *   * a CREDENTIAL_ISSUED row  someone minted one for a host-run gateway through the UI (0041)
- *
- * AND CREDENTIALS EXIST THAT NONE OF THOSE RECORD. `scripts/mosquitto-provision-gateway.mjs`
- * mints an account on the broker directly, and `record_gateway_credential_issued()` cannot be
- * called on its behalf: `has_role()` resolves through `auth.uid()`, which is NULL for the
- * service-role key. That refusal is correct -- the row records a PERSON's act and a script has no
- * person -- but it means an account minted from the host works while the platform holds no record
- * of it. (The demonstration floor's four gateways were the case that made this visible; the
- * script that provisioned them is retired, and the host path it called is not.)
- *
- * THAT CASE THEREFORE GETS ITS OWN STATE RATHER THAN BEING FOLDED INTO "none". `unrecorded` says
- * "the platform did not issue one and cannot tell whether the broker holds one", which is true.
- * Reporting it as "No credential" would be a claim about the broker that this code is in no
- * position to make -- and it is the state a new user's whole shopfloor is in.
- * =================================================================================================
+ * Credentials exist that none of those record: an account minted on the host by script works while
+ * the platform holds no record. That case gets its own state, `unrecorded`, rather than being
+ * reported as No credential, which would be a claim about the broker.
  */
 
 /**
- * The states, in the order a reader should think about them.
- *
- * `revoked` OUTRANKS EVERYTHING, including a later issue record. 0038 rotates the account to a
- * password nobody records, and its sweep can clear an optimistic stamp -- so a gateway carrying
- * both a revocation and an issue is one whose issue came first. Ordering the checks the other way
- * would show a decommissioned gateway as credentialled.
+ * The states, in the order a reader should think about them. `revoked` outranks everything,
+ * including a later issue record: the revocation sweep can clear an optimistic stamp, so a gateway
+ * carrying both is one whose issue came first.
  */
 export const CREDENTIAL_STATES = {
   REVOKED: 'revoked',
@@ -63,10 +38,8 @@ const TONES = {
 };
 
 /**
- * `issuedAt` is the LATEST CREDENTIAL_ISSUED row for this gateway, or null.
- *
- * Passed in rather than looked up here so this stays a pure function of two plain values -- the
- * same shape as gatewayStatus.js, and the reason both are testable without a database.
+ * `issuedAt` is the latest CREDENTIAL_ISSUED row for this gateway, or null. Passed in so this stays
+ * a pure function of two plain values.
  */
 export function credentialState(gateway, issuedAt = null) {
   if (!gateway) return CREDENTIAL_STATES.UNRECORDED;
@@ -74,16 +47,14 @@ export function credentialState(gateway, issuedAt = null) {
   // Ordered deliberately -- see the note on CREDENTIAL_STATES.
   if (gateway.credential_revoked_at) return CREDENTIAL_STATES.REVOKED;
 
-  // A HOST-RUN GATEWAY'S ONLY RECORD IS THE AUDIT ROW. It has no enrolment: `enrolled_at` is set
-  // by enroll-gateway, which refuses a host-run gateway outright, so reading it here would be
-  // reading a column that is NULL by construction and calling the result an answer.
+  // A host-run gateway's only record is the audit row: enroll-gateway refuses it, so `enrolled_at`
+  // is NULL by construction.
   if (issuedAt) return CREDENTIAL_STATES.ISSUED;
 
   if (gateway.enrolled_at) return CREDENTIAL_STATES.ISSUED;
 
-  // REMOTE AND MID-ENROLMENT. `PENDING_ENROLLMENT` means a bundle was issued and not yet
-  // redeemed; `AWAITING_BIRTH` means it WAS redeemed -- a credential exists -- but the appliance
-  // has not published. The second is covered by `enrolled_at` above, so only the first lands here.
+  // Remote and mid-enrolment. PENDING_ENROLLMENT means a bundle was issued and not redeemed;
+  // AWAITING_BIRTH means it was redeemed, which `enrolled_at` above already covers.
   if (gateway.deployment === 'remote' && gateway.status === 'PENDING_ENROLLMENT') {
     return CREDENTIAL_STATES.AWAITING_ENROLMENT;
   }
@@ -100,8 +71,7 @@ export function credentialStateTone(state) {
 }
 
 /**
- * The sentence under the badge. Written per state because a legend at the top of a table is read
- * once and then scrolled past, and "No platform record" is the one an operator will misread.
+ * The sentence under the badge, per state; No platform record is the one an operator will misread.
  */
 export function credentialStateExplanation(state, gateway) {
   switch (state) {
@@ -125,18 +95,9 @@ export function credentialStateExplanation(state, gateway) {
 }
 
 /**
- * Which action, if any, this gateway offers.
- *
- * MIRRORS GatewaysTab's own conditions rather than inventing a second set, because two predicates
- * deciding one question is how a page ends up offering a button the API then refuses. A REMOTE
- * gateway gets a bundle, because the credential is minted on the appliance; a HOST-RUN one gets a
- * mint, because there is no appliance to mint it on; an archived one gets neither, which is 0041's
- * refusal and 0037's reason.
- *
- * This read `is_virtual`, which is no longer a column. The question was always about where the
- * connector runs -- `authorize_virtual_gateway_credential()` and `issue_gateway_enrollment_token()`
- * are mirror images of each other on exactly that axis -- and `deployment` is that question with
- * one meaning instead of three.
+ * Which action, if any, this gateway offers, mirroring GatewaysTab's own conditions: a remote
+ * gateway gets a bundle, a host-run one gets a mint, an archived one neither. `deployment` is the
+ * axis.
  */
 export function credentialAction(gateway) {
   if (!gateway || gateway.is_archived) return null;
