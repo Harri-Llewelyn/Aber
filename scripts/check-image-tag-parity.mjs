@@ -37,6 +37,9 @@ const BUILT_IMAGES = [
   // Built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd, which makes its
   // base subject to the same pin as the broker's.
   'gateway-credential',
+  // Built FROM supabase/postgres for a pg_dump at least the server's version; its base is coupled
+  // to the supabase-db tag below.
+  'backup-service',
   // supabase/postgres with supabase/migrations/*.sql copied in, because the chain cannot reach a
   // cluster through the chart (a ConfigMap and Helm's release Secret are capped at 1 MiB). Its tag
   // is the schema version, and pinning an older one is a database rollback, which is why it is
@@ -167,6 +170,13 @@ const BASE_IMAGE_COUPLINGS = [
     // supabase/postgres, and this image bakes them into a copy of it. Drift means identical SQL
     // parsed by different psql clients.
     why: 'Compose runs this image directly (supabase-db, supabase-db-init); the chart bakes the migrations into an image built FROM it.',
+  },
+  {
+    dockerfile: join('backup-service', 'Dockerfile'),
+    base: 'supabase/postgres',
+    // pg_dump must be at least the server's version, so the service is built from the server's
+    // image; a drift here is a dumping client older than the database it dumps.
+    why: 'Compose runs this image directly (supabase-db); the backup service is built FROM it for its pg_dump.',
   },
 ];
 

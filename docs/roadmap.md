@@ -10,11 +10,11 @@ it leaves this file and its substance moves into the documentation of the compon
 (`CONTRIBUTING.md` says why), so retiring an entry and renumbering the rest costs one grep of
 `§[0-9]` in this file.
 
-**Ordering.** 1–5 are the platform's own: the one item somebody else sets the deadline for, then
-the identity and operations chain. 6–8 are the edge chain, in dependency order: 6 makes a gateway's
-flow reviewable, 7 makes the appliance a managed artefact and shares 6's puller, 8 removes what 6
-replaced. 9 runs under every other item. 10 is a rename and sits second to last because nothing
-depends on it. 11 is last by rule: it folds the migration chain, so every entry that changes the
+**Ordering.** 1–4 are the platform's own: the one item somebody else sets the deadline for, then
+the identity and operations chain. 5–7 are the edge chain, in dependency order: 5 makes a gateway's
+flow reviewable, 6 makes the appliance a managed artefact and shares 5's puller, 7 removes what 5
+replaced. 8 runs under every other item. 9 is a rename and sits second to last because nothing
+depends on it. 10 is last by rule: it folds the migration chain, so every entry that changes the
 schema must have landed before it.
 
 **Retired entries, and where their substance went.**
@@ -29,11 +29,12 @@ schema must have landed before it.
 | Contextual help | [`frontend/README.md`](../frontend/README.md#contextual-help) |
 | The Directory's MQTT half | [`ingestion/README.md`](../ingestion/README.md#the-directory-on-mqtt) |
 | The log store, structured logging and the drop drill-down | [`ingestion/README.md`](../ingestion/README.md#log-fields), `loki/loki.yaml`, `alloy/config.alloy` |
-| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 7 |
+| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 6 |
 | Kong → Envoy, and the new API key translation | [`docs/gateway-migration.md`](gateway-migration.md) |
 | The demonstration floor and simulator | Removed; [`tutorial/README.md`](../tutorial/README.md) builds one machine by hand |
 | Horizontal ingestion scaling | Answered, not built: [The single-writer ceiling](../ingestion/README.md#the-single-writer-ceiling). The write path since moved to [the historian writer](../ingestion/README.md#the-historian-writer), one thread and one transaction per batch |
 | Ingress → Gateway API for CORS | Answered, not built: it would state origin policy a second way on one of two targets |
+| A backup an operator can take without a shell (`0101`) | [`supabase/README.md`](../supabase/README.md#backups-from-the-dashboard-0101): the Backups page, the backup service, the forge in every backup, and the retention and no-download decisions; restore stays [the runbook](../supabase/README.md#backup-and-recovery) |
 | The ISA-95 Unified Namespace bridge (`0097`) | [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) for the bridge; [`supabase/README.md`](../supabase/README.md#the-plant-gains-areas-and-a-third-scope-0097) for the areas, the site setting and the `area_wide` scope |
 
 ---
@@ -130,40 +131,7 @@ it: a code can only drop MFA and force re-enrolment.
 
 ---
 
-## 4 · A backup an operator can take without a shell
-
-**Builds on:** [`scripts/backup-databases.sh`](../scripts/backup-databases.sh) · the chart's backup
-CronJob · [Backup and Recovery](../supabase/README.md#backup-and-recovery) · `0055`'s
-`capture_jobs` / captures split · [`gateway-credential-service.mjs`](../scripts/gateway-credential-service.mjs)
-
-The backup itself exists: both databases, the storage objects and a manifest, idempotent, pruned on
-a retention window. What is missing is a caller. Nothing in the stack can run it: it needs
-`docker compose exec`, `supabase_admin`, and the historian, none of which an edge function has.
-
-**The shape is the Capture page's:** `backup_jobs` for the act and `backups` for the artefact, an
-Administrator-only RPC, and a new privileged service on the `gateway-credential-service.mjs` model
-(one verb, no read-back, not published) that does the work. A separate **Backups** page; the Cold
-Storage page is a different subject and its read-only rule is about irreversible acts, which this
-is not.
-
-**The first version produces a backup server-side and lists what exists, with no download.** The
-dumps contain `auth.users`, hashed OAuth secrets, the whole `digital_thread`, every flow in the
-storage tar, and the historian's password inside the Supabase dump; a download button lowers "shell
-access on the host" to "any Administrator session". Size points the same way.
-
-**Restore stays a runbook.** It needs nine roles no dump creates, cannot be replayed over a previous
-restore, and is exactly the irreversible act the page refuses to put one click from a table.
-
-**Worth deciding early.** Where the artefact lives (a bucket is reachable from both targets and puts
-a later download under `storage-policies.sql`). Whether a scheduled and a requested backup are the
-same row. What the retention window means once a human can ask (a backup taken before a risky
-migration is the one a timer deletes first). Whether the service drives `pg_dump` at all:
-`pgBackRest` or CloudNativePG changes what the privilege is. **The forge's volume is now in scope**:
-Gitea holds the only copy of every gateway's flow and is in no dump (GitHub issue).
-
----
-
-## 5 · The broker's Dynamic Security plugin
+## 4 · The broker's Dynamic Security plugin
 
 **Builds on:** [`mosquitto.acl`](../mosquitto/mosquitto.acl) ·
 [`gateway-credential-service.mjs`](../scripts/gateway-credential-service.mjs) ·
@@ -195,7 +163,7 @@ account to an unguessable password and bouncing that one session may be cheaper.
 
 ---
 
-## 6 · GitOps edge sync
+## 5 · GitOps edge sync
 
 **Builds on:** the forge (`gitea`, `gitea-init.sh`), one private repository per enrolled gateway
 in the `gateways` organisation ([`_shared/forge.ts`](../supabase/functions/_shared/forge.ts)) ·
@@ -221,7 +189,8 @@ webhook that records the head of `main` on the gateway row so a merge shows in t
 ([What a gateway's repository comes with](../supabase/README.md#what-a-gateways-repository-comes-with-and-how-the-forge-reports-back-0095)).
 Both teams may create repositories in the organisation. Gitea's own sign-out is the platform's.
 A sweep on a timer (`0099`) reconciles team membership with `user_roles`, re-registers a missing
-push webhook, and protects `main` on any repository made by hand in the organisation. A flow the
+push webhook, and protects `main` on any repository made by hand in the organisation. The forge's
+volume, host keys included, is in every backup the backup service takes (`0101`). A flow the
 appliance deploys is a `FLOW_DEPLOYED` row in the digital thread (`0100`), written by the daemon
 from the heartbeat as `ingestion`; the puller never touches the database, so no fourth actor kind.
 
@@ -229,13 +198,12 @@ from the heartbeat as `ingestion`; the puller never touches the database, so no 
 
 - **A required status check refusing `flows_cred.json` by shape.** The endpoint that used to refuse
   it is gone, and a file uploaded through the forge's own UI meets no check until the puller
-  refuses it on the appliance, which is late. It needs a Gitea Actions runner, which 7 argues on;
+  refuses it on the appliance, which is late. It needs a Gitea Actions runner, which 6 argues on;
   until then the puller's refusal is the only check.
 - **A failed webhook delivery does not alert.** It is visible on the hook's page in the forge and
   nowhere else. A repository from before `0095` gets its hook back from the sweep but not its
   incident template, which the machine account cannot commit to a protected `main`; an
   administrator adds it by pull request. Small, and not urgent.
-- **Backup and retention for the forge**, which 4 now owns.
 
 **Constraints.** Deploy only what is committed; a revert is a new commit and never a force-push
 (branch protection in the forge, and `flow-sync.mjs` refuses a non-descendant head); `flows_cred.json`
@@ -246,14 +214,14 @@ and the choice re-opens on the evidence of both.
 
 ---
 
-## 7 · The appliance itself, and the code somebody wants to run on it
+## 6 · The appliance itself, and the code somebody wants to run on it
 
 **Builds on:** [`gateway-bundle`](../supabase/functions/gateway-bundle/index.ts) ·
 [`gateway-bundle-template/`](../gateway-bundle-template) · `bootstrap.mjs`'s once-only guard ·
 [`docs/physical-gateways.md`](physical-gateways.md) · the `apikey` gate and its four exemptions ·
 [`check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) · the clock offset gauge and its
-alert · 6, whose forge and puller this reuses · arrives from a request to run custom data-gathering
+alert · 5, whose forge and puller this reuses · arrives from a request to run custom data-gathering
 software on gateways, for legacy machinery
 
 Three subjects that are one appliance: commissioning as a pasted command, the operating system as
@@ -333,7 +301,7 @@ does.
 
 ---
 
-## 8 · Retiring the flow-backup bucket
+## 7 · Retiring the flow-backup bucket
 
 **Builds on:** the `gateway-backups` bucket in [`storage-init.mjs`](../scripts/storage-init.mjs) ·
 [`storage-policies.sql`](../supabase/storage-policies.sql) · `GATEWAY_BACKUP_BUCKET` in
@@ -343,19 +311,21 @@ assertions
 The browser half is done: nothing in the dashboard reads or writes the bucket, and a gateway's flow
 lives in its repository in the forge. What remains is the bucket itself, deliberately still created
 and governed so nothing can quietly start writing to it, and the one change that removes it has to
-decide what happens to whatever an earlier install already stored there. Retention is decided once
-across services rather than per bucket, which is why this waits on 4.
+decide what happens to whatever an earlier install already stored there. Retention is now decided
+once, in the backup service (a window for scheduled backups, a pin for requested ones), and the
+bucket's contents fall under the same answer: kept in a backup, not in a second store.
 
 The repository pointer is derived (`gateway-<sparkplug_id>` in the organisation named in
 `constants.js`), not stored; a column is earned only if a gateway ever needs re-pointing. A tracked
 branch other than `main` is the one part that genuinely does not fit and is a small separate
 decision. **Archiving a gateway should archive its repository and its wiki** (Gitea archives both
 together), and deleting one is the retention question again: the wiki is the one place a plant's
-notes about a gateway live, so a delete is a decision and never a cascade. Decide it with 4.
+notes about a gateway live, so a delete is a decision and never a cascade. The forge is in every
+backup now, so a deleted repository is recoverable from one for as long as the backup is kept.
 
 ---
 
-## 9 · The transport between services
+## 8 · The transport between services
 
 **Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
 [`internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
@@ -390,7 +360,7 @@ chart's subdomains, not a second proxy. The blocker is a wildcard DNS record thi
 own; design the `nip.io` escape hatch in from the start. MQTT and git-over-SSH do not ride it.
 
 **Client certificates on the gateway link** (`CN = <sparkplug_id>`, so `%u` still matches) are the
-intended direction and wait for 5, because `crlfile` revocation needs a reload.
+intended direction and wait for 4, because `crlfile` revocation needs a reload.
 
 **Must not touch:** `%u` confinement, the origin policy's single home in `envoy.yaml`, the root's
 residence outside the chart, and the absence of a skip-verification switch. A service mesh is the
@@ -402,7 +372,7 @@ in separate changes.
 
 ---
 
-## 10 · Cells become work centers
+## 9 · Cells become work centers
 
 **Builds on:** `public.cells` and everything that names it · `public.areas` (`0097`) ·
 [The Unified Namespace](../ingestion/README.md#the-unified-namespace) ·
@@ -427,7 +397,7 @@ wire.
 
 **Must not touch:** the `uns/` topic shape, which already uses the cell's name and not the table's.
 
-## 11 · The migration chain folds back into the baseline, and the codebase is audited
+## 10 · The migration chain folds back into the baseline, and the codebase is audited
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)

@@ -496,7 +496,7 @@ function EventDiff({ event, diff }) {
   // SCHEMA_REJECTION and TOKEN_MINTED are one-sided: `old_data` is NULL by construction, and a
   // Previous column would invite a search for a prior state that does not exist.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
-    || action === 'TOKEN_MINTED'
+    || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'
 
   return (
     <div className="dt-diff">
@@ -505,6 +505,9 @@ function EventDiff({ event, diff }) {
           : action === 'DELETE' ? 'Final properties'
             : action === 'SCHEMA_REJECTION' ? 'Rejected payload'
               : action === 'FLOW_DEPLOYED' ? 'Deployed flow'
+              : action === 'BACKUP_REQUESTED' ? 'Backup asked for'
+              : action === 'BACKUP_TAKEN' ? 'Backup written'
+              : action === 'BACKUP_PRUNED' ? 'Backup removed'
               : action === 'TOKEN_MINTED' ? 'Token issued'
                 // Two-sided, unlike TOKEN_MINTED: a revocation carries the original mint in
                 // `old_data` so the row stays readable after the denylist entry is pruned.
@@ -528,6 +531,9 @@ function EventDiff({ event, diff }) {
                 : action === 'INSERT' ? 'Created'
                   : action === 'SCHEMA_REJECTION' ? 'Observed'
                     : action === 'FLOW_DEPLOYED' ? 'Reported'
+                    : action === 'BACKUP_REQUESTED' ? 'Asked'
+                    : action === 'BACKUP_TAKEN' ? 'Written'
+                    : action === 'BACKUP_PRUNED' ? 'Removed'
                     : action === 'TOKEN_MINTED' ? 'Issued'
                       : action === 'TOKEN_REVOKED' ? 'Revoked'
                         : 'New'}</th>

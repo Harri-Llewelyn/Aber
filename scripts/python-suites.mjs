@@ -655,6 +655,16 @@ export const SUITES = {
       "without the incident template; and the database's sweep_forge() answers true. Needs the " +
       'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',
   },
+  'backup-service/test_backup_service.py': {
+    lanes: ['stack'],
+    why:
+      'The backup service (0101): an Operator cannot ask and cannot read the tables; the ' +
+      "service's gates answer no PostgREST role; a backup an Administrator asks for is taken, with " +
+      'the files where the row says, as big as it says, with the digests it says, a manifest ' +
+      'restore-databases.sh can read and a forge archive carrying the host keys; the thread names ' +
+      'who asked and that the service wrote it; a queued request refuses a twin, can be cancelled ' +
+      'and says why; and a pinned backup is released once. Stops the service container briefly.',
+  },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],
     why:

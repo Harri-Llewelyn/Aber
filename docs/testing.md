@@ -137,6 +137,14 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
 
+# The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
+# service's gates; a requested backup is taken -- both dumps, the storage objects and the forge,
+# digests matching the row, a manifest restore-databases.sh reads -- and the thread names who asked
+# and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
+# backup is released once. Takes a real backup and removes it afterwards; stops the service
+# container for a few seconds for the cancel case.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
+
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
 # integrity, and that the embedded token is the one the database will accept.
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \

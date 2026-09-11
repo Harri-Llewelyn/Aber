@@ -1197,6 +1197,9 @@ jobs:
           # from a ConfigMap, so this image supplies only the runtime -- node, and the broker's own
           # mosquitto_passwd, which is why it is built FROM eclipse-mosquitto.
           docker build -f gateway-credential/Dockerfile  -t "$IMG_NS/gateway-credential:$V" gateway-credential
+          # The backup service's runtime -- the database image for its pg_dump, plus node, sqlite3
+          # and GNU tar. The code is mounted from a ConfigMap, like the credential sidecar's.
+          docker build -f backup-service/Dockerfile      -t "$IMG_NS/backup-service:$V" backup-service
           # The schema. Context is supabase/, because that is where migrations/ lives and the whole
           # image is supabase/postgres plus that directory -- see supabase/db-init/Dockerfile for
           # why the chart cannot carry it.
@@ -1219,7 +1222,7 @@ jobs:
         run: |
           # Every image this repository builds. A tag absent from the registry ImagePullBackOffs; a tag
           # present there silently runs the last release instead of this tree.
-          IMAGE_NAMES="edge-runtime ingestion node-red i3x-service gateway-credential db-init frontend test-runner"
+          IMAGE_NAMES="edge-runtime ingestion node-red i3x-service gateway-credential backup-service db-init frontend test-runner"
           REFS=""
           for n in $IMAGE_NAMES; do REFS="$REFS $IMG_NS/$n:$V"; done
 
@@ -1264,8 +1267,8 @@ jobs:
           # again. Dropping it (and the builder cache) is the largest single reclaim, after the import.
           docker image rm -f \
             "$IMG_NS/edge-runtime:$V" "$IMG_NS/ingestion:$V" "$IMG_NS/node-red:$V" \
-            "$IMG_NS/i3x-service:$V" "$IMG_NS/gateway-credential:$V" "$IMG_NS/db-init:$V" \
-            "$IMG_NS/frontend:$V" "$IMG_NS/test-runner:$V" || true
+            "$IMG_NS/i3x-service:$V" "$IMG_NS/gateway-credential:$V" "$IMG_NS/backup-service:$V" \
+            "$IMG_NS/db-init:$V" "$IMG_NS/frontend:$V" "$IMG_NS/test-runner:$V" || true
           docker builder prune -af || true
           docker image prune -af || true
           echo "--- disk after import and reclaim"

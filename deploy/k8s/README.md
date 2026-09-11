@@ -515,6 +515,10 @@ docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 # end. The service's own code is NOT baked in — the chart mounts it from a ConfigMap.
 docker build -f gateway-credential/Dockerfile   -t $NS/acs-cymru-gateway-credential:$V gateway-credential
 
+# The backup service -- supabase/postgres for its pg_dump, plus node, sqlite3 and GNU tar. The
+# code itself is projected from a ConfigMap (scripts/backup-service.mjs), so this is runtime only.
+docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
+
 # db-init — THE SCHEMA, baked in. supabase/postgres with supabase/migrations/*.sql copied to
 # /migrations; context is supabase/, where that directory lives. It exists because the chain cannot
 # travel in the chart: a ConfigMap is capped at 1 MiB, which forced it to be gzipped, and Helm's
@@ -709,6 +713,17 @@ kubectl -n acs-cymru create job --from=cronjob/acs-cymru-backup backup-now   # r
 
 `pg_dump -Fc` of both databases, nightly, onto a PVC that **survives `helm uninstall`** — deleting the
 release is exactly when the backups are most wanted.
+
+**Or the backup service, from the dashboard.** With `backupService.enabled=true` (and the
+`backup-service` image built, above) the CronJob yields to a Deployment that takes the same backup
+when an Administrator asks on the **Backups** page, and on `backup.schedule` through pg_cron, one
+directory per backup on the same PVC, with the storage objects (`backup.includeStorage`) and the
+forge's volume (`backup.includeForge`) beside the two dumps. Retention (`backup.retentionDays`)
+applies to scheduled backups; a requested one is pinned until released on the page. Both
+`include*` flags mount a ReadWriteOnce PVC, so each pins the pod to that pod's node — on a cluster
+where the storage and forge pods sit on different nodes, enable one or the other. The mechanism,
+the tables and the restore runbook are in
+[`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-0101).
 
 Ad hoc, without waiting for the schedule:
 

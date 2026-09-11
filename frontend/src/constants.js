@@ -65,6 +65,14 @@ export const DIGITAL_THREAD_ACTIONS = {
   // hash: the digest before and after, and what the forge's main held at that moment. Actor
   // `ingestion`, no user: the daemon witnessed what the appliance reported.
   FLOW_DEPLOYED:     'Flow deployed',
+  // The backup lane (0101). The first three are a person's acts and name them; the last three are
+  // the backup service's, actor `service`, no user.
+  BACKUP_REQUESTED:  'Backup requested',
+  BACKUP_CANCELLED:  'Backup cancelled',
+  BACKUP_RELEASED:   'Backup released',
+  BACKUP_TAKEN:      'Backup taken',
+  BACKUP_FAILED:     'Backup failed',
+  BACKUP_PRUNED:     'Backup pruned',
 };
 
 /**
@@ -94,6 +102,10 @@ export const DIGITAL_THREAD_ENTITY_TYPES = [
   // device's own history (the entity thread in api.js unions the two).
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
   { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
+  // The backup lane (0101): the act and the artefact, both filed under security by
+  // audit_domain_for()'s fail-closed default, which is where an act on the whole database belongs.
+  { kind: 'BACKUP JOB',       table: 'backup_jobs',        label: 'Backup jobs',        domain: 'security' },
+  { kind: 'BACKUP',           table: 'backups',            label: 'Backups',            domain: 'security' },
 ];
 
 /**
@@ -129,7 +141,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  */
 export const VALID_TABS = [
   'overview', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'vocabulary', 'directory',
-  'capture', 'archives', 'cold-storage', 'access-control', 'settings'
+  'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings'
 ];
 
 // Realtime rollout flag and the polling intervals paired with it. REALTIME_ENABLED gates every

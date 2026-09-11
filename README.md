@@ -431,6 +431,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `cold-archiver` | `acs-cymru_cold_archiver` | `./ingestion/Dockerfile` (same image as `ingestion`, different command) | — |
 | `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |
 | `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
+| `backup-service` | `acs-cymru_backup_service` | `./backup-service/Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
 | `gitea-init` | `acs-cymru_gitea_init` | `gitea/gitea:1.27.3` | — |

@@ -169,6 +169,14 @@ const MIRRORS = [
     why: 'The credential-issuing sidecar in the broker pod; mints one gateway account per call',
   },
   {
+    source: 'scripts',
+    dest: 'backup-service',
+    // The same arrangement as gateway-credential: Compose bind-mounts it, the chart projects it
+    // through a ConfigMap over an image that supplies pg_dump, node, sqlite3 and tar.
+    match: (name) => name === 'backup-service.mjs',
+    why: 'The backup service; takes a queued backup_jobs row to a tier 1 backup on the backup PVC',
+  },
+  {
     source: join('scripts', 'lib'),
     // A SEPARATE dest FROM THE ENTRY ABOVE, and it has to be. Each mirror OWNS its destination
     // directory and deletes anything in it that its own source did not produce -- so two mirrors

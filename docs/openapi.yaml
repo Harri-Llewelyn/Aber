@@ -1360,6 +1360,140 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/CaptureJob' } }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
+  /rest/v1/backup_jobs:
+    get:
+      tags: [Storage]
+      summary: Read backup jobs, queued, running and finished
+      description: |
+        One row per backup **attempted** (`0101`), including the ones that failed. At most one row
+        is `PENDING` or `RUNNING` at a time across the stack, enforced by a partial unique index.
+
+        **Administrator only**, on the read as on every write: RLS admits no other role, so every
+        other caller receives an empty array rather than a refusal.
+
+        **Writes do not happen here.** `request_backup()` and the service's own gates are the only
+        doors; `cancel_backup_job()` withdraws a `PENDING` row. The backup service claims the row,
+        takes the backup and finalises it into a `backups` row, so a `COMPLETED` job carries
+        `backup_id` and a `FAILED` one carries `error`. A row left `RUNNING` by a service restart
+        is failed at the next start.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED] }, description: 'e.g. `in.(PENDING,RUNNING)`' }
+        - { name: origin, in: query, schema: { type: string, enum: [requested, scheduled] } }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Backup jobs, for an Administrator; an empty array for anyone else.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/BackupJob' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
+  /rest/v1/backups:
+    get:
+      tags: [Storage]
+      summary: Read the backups that exist
+      description: |
+        One row per backup **on the backup volume** (`0101`): where it is, how big, which
+        components it holds with their digests, and whether it is pinned. The row is deleted when
+        the service prunes the files; `BACKUP_PRUNED` in `digital_thread` is the record that it did.
+
+        **The bytes are not served.** Nothing here or in Storage hands a dump to a browser: it
+        holds every user account, every service credential's hash, the whole audit trail and the
+        historian's password. `location` is a path inside the service's container, for the runbook.
+
+        **Administrator only.** Written by `backup_finalise()` alone; `release_backup()` is the
+        one change a user can make.
+      parameters:
+        - { name: origin, in: query, schema: { type: string, enum: [requested, scheduled] } }
+        - { name: pinned, in: query, schema: { type: boolean }, description: 'e.g. `eq.true`' }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Backups, for an Administrator; an empty array for anyone else.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Backup' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
+  /rest/v1/rpc/request_backup:
+    post:
+      tags: [Storage]
+      summary: Queue a backup of the whole stack
+      description: |
+        Both databases, the storage objects and the forge, taken by the backup service and
+        **pinned** until `release_backup()`. Administrator only, checked server-side. Refuses while
+        another backup is queued or running, naming it: a `PENDING` row nobody has claimed means no
+        backup service is running, and the message says so. Writes `BACKUP_REQUESTED` naming the
+        caller.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                p_note: { type: string, nullable: true, description: 'Why it is being taken; kept with the backup.' }
+      responses:
+        '200':
+          description: Queued, with the job id.
+          content:
+            application/json:
+              schema: { type: string, format: uuid }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'A backup is already queued or running; the message names it.' }
+
+  /rest/v1/rpc/cancel_backup_job:
+    post:
+      tags: [Storage]
+      summary: Withdraw a queued backup
+      description: |
+        `PENDING` only: a `RUNNING` job is the service's, and a row flipped under it would leave a
+        finished backup recorded as one that did not happen. Administrator only. Returns `false`
+        when the job had already been claimed or finished, which is not an error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_job_id]
+              properties:
+                p_job_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Whether the job was cancelled.
+          content:
+            application/json:
+              schema: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/release_backup:
+    post:
+      tags: [Storage]
+      summary: Let the retention window apply to a requested backup
+      description: |
+        Clears `pinned` and records who released it. Nothing is deleted here: the service prunes
+        on its next pass, and only once the backup is older than its retention window.
+        Administrator only. Returns `false` when the backup was not pinned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_backup_id]
+              properties:
+                p_backup_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Whether the backup was pinned and is now released.
+          content:
+            application/json:
+              schema: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /rest/v1/playback_jobs:
     get:
       tags: [Storage]
@@ -4005,6 +4139,53 @@ components:
         created_at: { type: string, format: date-time }
         started_at: { type: string, format: date-time, nullable: true }
         finished_at: { type: string, format: date-time, nullable: true }
+
+    BackupJob:
+      type: object
+      description: |
+        One backup attempted (`0101`). Written only through `request_backup()`,
+        `enqueue_scheduled_backup()` and the backup service's gates.
+      properties:
+        id: { type: string, format: uuid }
+        origin: { type: string, enum: [requested, scheduled] }
+        status: { type: string, enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED] }
+        note: { type: string, nullable: true }
+        requested_by: { type: string, format: uuid, nullable: true, description: 'The Administrator who asked; NULL for a scheduled backup.' }
+        backup_id: { type: string, format: uuid, nullable: true, description: 'The backups row this job produced. Not a foreign key: a pruned backup keeps its job row.' }
+        error: { type: string, nullable: true, description: 'What the service said when it failed, capped at 2000 characters.' }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+
+    Backup:
+      type: object
+      description: |
+        One backup that exists on the backup volume (`0101`). The row is deleted when the service
+        prunes the files.
+      properties:
+        id: { type: string, format: uuid }
+        stamp: { type: string, example: 20260911T143000Z, description: 'The UTC stamp the files carry and the directory holding them; what `BACKUP_STAMP` takes in restore-databases.sh.' }
+        origin: { type: string, enum: [requested, scheduled] }
+        note: { type: string, nullable: true }
+        requested_by: { type: string, format: uuid, nullable: true }
+        job_id: { type: string, format: uuid, nullable: true }
+        location: { type: string, example: /backups/20260911T143000Z, description: 'A path inside the backup service''s container.' }
+        components:
+          type: array
+          description: 'What the backup holds. A component the service had no volume for is absent, not empty.'
+          items:
+            type: object
+            properties:
+              name: { type: string, enum: [supabase-db, timescaledb, storage-objects, forge] }
+              file: { type: string }
+              size_bytes: { type: integer, format: int64 }
+              sha256: { type: string }
+              sqlite: { type: string, nullable: true, description: 'The forge component only: how gitea.db was copied.' }
+        size_bytes: { type: integer, format: int64, description: 'The components summed.' }
+        pinned: { type: boolean, description: 'True keeps the backup out of the retention prune. A requested backup is born pinned.' }
+        released_at: { type: string, format: date-time, nullable: true }
+        released_by: { type: string, format: uuid, nullable: true }
+        taken_at: { type: string, format: date-time }
 
     RebirthRequest:
       type: object
