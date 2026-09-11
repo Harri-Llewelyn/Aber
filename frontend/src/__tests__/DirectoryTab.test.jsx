@@ -34,7 +34,7 @@ const SERVICES = [
   svc('Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883'),
   svc('Node-RED (Virtual Edge Gateway Simulator)', 'EDGE_NODE', 'http://localhost:1880'),
   svc('Sparkplug B Ingestion Engine', 'INGESTION', 'mqtt://mosquitto:1883/spBv1.0/#'),
-  svc('Supabase API Gateway (Kong)', 'API_GATEWAY', 'http://127.0.0.1:54321'),
+  svc('Supabase API Gateway (Envoy)', 'API_GATEWAY', 'http://127.0.0.1:54321'),
   svc('Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1'),
   svc('Supabase Edge Functions', 'SERVERLESS', 'http://127.0.0.1:54321/functions/v1'),
   svc('Supabase PostgREST API', 'REST_API', 'http://127.0.0.1:54321/rest/v1'),
@@ -121,7 +121,7 @@ describe('DirectoryTab service groups', () => {
     expect(namesIn(INGEST)).toEqual([
       'Mosquitto MQTT Broker',
       'Sparkplug B Ingestion Engine',
-      'Supabase API Gateway (Kong)'
+      'Supabase API Gateway (Envoy)'
     ])
     expect(namesIn(DATA)).toEqual([
       'Supabase PostgREST API',

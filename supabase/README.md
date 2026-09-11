@@ -2706,6 +2706,19 @@ table advertises `localhost:1880`.
 
 ---
 
+## The Directory names the gateway that runs (`0096`)
+
+Both targets run Envoy, and the seeded directory row still read *Supabase API Gateway (Kong)*.
+The name is display text and also the key `directory_liveness_job_map()` joins the `envoy` scrape
+job to, so the two change together: `0001` maps `envoy` to *Supabase API Gateway (Envoy)* and is
+replayed every boot, `0002` seeds the new name, and `0096` renames the row on a database that
+already holds the old one. The seed's INSERT for this row conflicts on `id` rather than
+`service_name`, as the Node-RED row has since `0016`: a database from before the rename holds the
+id under the old name, and a name-targeted clause raises on the primary key every boot instead of
+skipping. The rename is guarded on the new name being free, so a service an operator registered
+under it by hand is kept. The anon key's vault description in `0002` no longer names Kong either;
+the seed rewrites the three revocation secrets on every boot, so that needed no migration.
+
 ## Schema Versioning
 
 A published schema is **read-only**. Changing one means forking the next version, editing the
