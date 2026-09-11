@@ -8,13 +8,17 @@ allowed to be heard at all.
 
 | File | Purpose |
 | :--- | :--- |
-| [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping |
+| [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
+| [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
+| [`registry.py`](registry.py) | The counter and histogram registry that `metrics.py` renders |
 | [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 43 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
 | [`test_device_location.py`](test_device_location.py) | Invariant: the daemon never writes an asset's location |
 | [`test_entity_cache.py`](test_entity_cache.py) | The bounded resolution caches: LRU eviction, and the in-place-mutation and negative-entry contracts |
+| [`test_telemetry_writer.py`](test_telemetry_writer.py) | The historian writer: several messages become one transaction, and one bad message still loses one |
+| [`test_directory_refresh.py`](test_directory_refresh.py) | The directory refresher: one request per table per pass, keyed as the per-entity path keys |
 
 ---
 
@@ -62,6 +66,28 @@ column derived from the row's UUID primary key, so it cannot drift.
    'legacy_name'`. **This arm goes away once every gateway has been reconfigured.**
 
 Any failure resolves to `None`, which callers treat as quarantined — the fail-closed answer.
+
+### The directory refresher
+
+Both resolution caches hold a row for `CACHE_TTL_SECONDS` (5 s), so a change made in the dashboard
+reaches the hot path within five seconds. Before the refresher that meant one PostgREST round trip
+per device per five seconds, on the callback thread every device shares: with hundreds of devices
+the directory cost that thread more time than the historian did, and the write histogram never
+saw it because it starts after resolution.
+
+`start_directory_refresher()` reads the whole directory — one request per table per pass, paged
+past PostgREST's `max-rows` — every `DIRECTORY_REFRESH_SECONDS` (5) and re-fills both caches under
+the same keys and identity sources the per-entity path would have produced, so nothing downstream
+can tell which path filled the cache. The hot path then misses only for an id the directory does
+not hold, and that miss costs what it always did. A failed pass changes nothing: entries expire on
+their TTL and the per-entity lookup takes over. The pass warns when the directory holds more ids
+than `MAX_ENTITIES_PER_CACHE`, because a cache that cannot hold the fleet evicts what it just filled.
+
+**One window is left open knowingly.** The DBIRTH path mutates a cached row in place after writing
+the same change to Supabase, so the next birth inside the TTL does not re-detect it. A pass that
+fetched just before that write and set just after it replaces the mutated row with a copy that
+predates the write, and the next birth re-detects the change once: one duplicate no-op `UPDATE`
+and one duplicate audit row. The window is one round trip in five seconds, on a rebirth.
 
 ---
 
@@ -727,24 +753,22 @@ Rows are keyed by **`sparkplug_id`**, never by name, so a rename never breaks a 
   reading as having happened at a time it did not, and would pile every sample from a broken clock
   onto one timestamp where the primary key collapses them anyway.
 
-### One statement per message
+### The historian writer
 
-A DDATA message is written as a **single batched `INSERT`** (`psycopg2.extras.execute_values`,
-`TELEMETRY_INSERT_PAGE_SIZE` = 500), not one statement per metric.
+`process_ddata()` decides — resolution, binding, aliases, the sanity window, conformance — and hands
+the rows to the historian writer, one thread that owns the TimescaleDB connection. The writer takes
+whatever has accumulated in its queue, up to `TELEMETRY_BATCH_MAX_MESSAGES` (500), and writes it as
+**one transaction**: one upsert carrying each asset once, one `execute_values` carrying every row in
+arrival order (`TELEMETRY_INSERT_PAGE_SIZE` tuples per statement), one commit.
 
-**Atomicity is unchanged, which is the first thing people ask.** The metric loop already ran inside
-`with db_conn:` — a transaction block that rolls back wholesale on any exception — so a bad row
-aborted the whole message before this change and aborts the whole message after it. What changed is
-the number of round trips.
+**Under light traffic nothing changes.** A message arriving at an empty queue is written on its own,
+so the latency is one commit, as it was when the callback thread wrote it. Under load the queue
+fills while a commit is in flight and the next transaction carries everything that arrived meanwhile.
+That is what moves the ceiling: the cost of a transaction is almost all fixed — about 2.4 ms of
+round trip and commit against about 0.04 ms per row — and it is now paid once per batch.
 
-**The empty batch is guarded.** `execute_values` on an empty list emits `VALUES` with nothing after
-it, which is a syntax error. A message whose every metric was filtered — all identity metrics, or
-every timestamp rejected — is entirely ordinary and must not raise.
-
-**The `assets` upsert stays a separate statement before the batch.** It satisfies the foreign key
-the telemetry rows depend on.
-
-Measured against the shipped TimescaleDB, 200 messages per size, same host, mean per message:
+Measured against the shipped TimescaleDB, 200 messages per size, same host, mean per message, when
+each message was still its own transaction:
 
 | metrics per message | before | after | metrics/s before → after |
 | ---: | ---: | ---: | :--- |
@@ -752,35 +776,53 @@ Measured against the shipped TimescaleDB, 200 messages per size, same host, mean
 | 10 | 7.59 ms | 2.92 ms | 1,317 → 3,429 |
 | 40 | 24.48 ms | 4.07 ms | 1,634 → 9,835 |
 
-**Read the first row before the last one.** Under report-by-exception a DDATA usually carries *one*
-metric, and there the change is worth nothing — the difference is inside run-to-run variance
-(±12% across repeats). The win is real but it is a win for **multi-metric payloads**: a birth
-certificate, a gateway flushing a buffered backlog after an outage, or any fleet not using RBE.
-That is also the honest answer to whether the daemon needed an asynchronous worker queue at this
-scale: at ~2.5 ms per single-metric message, twelve devices on a 5-second scan spend roughly
-6 ms per second writing. The callback thread is not the bottleneck, and the queue is not justified
-by these numbers.
+"Before" and "after" there are one statement per metric against one per message. Read the marginal
+row cost off the table: 0.04 ms. Under report-by-exception a DDATA usually carries *one* metric,
+which is why per-message batching was worth nothing there and cross-message batching is worth
+everything.
+
+**Failure granularity is still one message.** A transaction carrying more than one message that
+fails is retried one message at a time, so the message at fault is the only one lost — counted by
+`acs_ingestion_write_failures_total` as before — and `acs_ingestion_write_batch_failures_total`
+records that a batch had to be split. A message whose every metric was filtered still upserts its
+asset row and still counts as written; the empty telemetry statement is guarded, since
+`execute_values` on an empty list is a syntax error.
+
+**What runs after the commit runs on the writer thread**: the UNS republish and the conformance
+record, per message, in arrival order. Both were on the callback thread before and neither raises
+into the writer.
+
+**The queue is bounded** (`TELEMETRY_QUEUE_MAX_MESSAGES`, 10,000). A full queue holds the callback
+thread for `TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS` (5) first — the broker sees a slow consumer, which
+is backpressure — and only then drops, with `reason="write_queue_full"`, so a writer that is merely
+slow costs latency and a writer that is stuck costs a counted drop rather than a hung daemon.
+`acs_ingestion_write_queue_depth` is the saturation signal: it grows only while the writer is behind.
+
+**A SIGTERM drains the queue before the process exits**, bounded by
+`TELEMETRY_SHUTDOWN_DRAIN_SECONDS` (8, inside Compose's 10 s grace period). A restart under load
+loses nothing the daemon had accepted; the log says how many were queued and, if the bound was hit,
+how many were lost.
 
 ### Connection handling
 
-One connection, not a pool: every write happens on the paho callback thread, so there is exactly
-one writer. That is also what makes the module-level global safe, and it is the first thing to
-revisit if a worker thread is ever added — psycopg2 connections are not safe for concurrent use.
+One connection, not a pool, and one thread — the writer — uses it. That is what makes the
+module-level global safe: psycopg2 connections are not safe for concurrent use, and the callback
+thread never touches this one.
 
 `get_timescaledb_connection()` retries a failed connect `DB_CONNECT_MAX_ATTEMPTS` (3) times with
 exponential backoff, capped at `DB_CONNECT_BACKOFF_MAX_SECONDS`. **Bounded and short on purpose:**
 returning `None` on the first failure meant a momentary blip dropped telemetry silently, because
-every caller answers `None` by dropping the message — but this runs on the callback thread shared
-by the whole fleet, so a generous retry stalls every other device behind one unreachable database.
+the writer answers `None` by dropping the batch — but every queued message waits on this retry, so
+a generous one stalls the whole fleet behind one unreachable database.
 
 `conn.closed` is checked but is **not sufficient**: psycopg2 sets it only for a close on this side.
 A connection dropped by the server still reports `closed == 0` and fails on first use, which is what
-the caller's exception handler and the next call through here cover.
+the writer's exception handler and the next call through here cover.
 
 A separate healer thread retries, off the message path and every `DB_HEAL_INTERVAL_SECONDS`, the two startup
 steps a dependency that was not up yet can prevent: the historian connection and `capture_worker.reconcile()`.
 It opens a connection with the lock released and only takes `_ts_conn_lock` to publish the result, so a
-message arriving mid-heal never waits on a network round trip. It stays resident so
+batch arriving mid-heal never waits on a network round trip. It stays resident so
 `acs_ingestion_db_connected` answers "can this daemon reach the historian" at all times.
 
 ---
@@ -917,7 +959,7 @@ interoperability claim would become false the moment the payload left HTTP.
 
 `uns_publish.py` republishes every metric a DDATA wrote to the historian on a plain, retained topic,
 as JSON, for the consumer that has a broker connection and no Sparkplug decoder: a BI tool, a SCADA
-client, a dashboard. It runs on the ingestion callback thread, after the commit, so what it
+client, a dashboard. It runs on the historian writer thread, after the commit, so what it
 publishes is exactly what was recorded ([issue #66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66)).
 
 **The topic is ISA-95's hierarchy, and the path is fixed at the level the asset honestly occupies.**
@@ -1036,6 +1078,11 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
 | `MAX_ALIASES_PER_NODE` | `5000` | Cap on the per-node alias table |
 | `MAX_ENTITIES_PER_CACHE` | `1000` | Cap on each entity resolution cache. Same reasoning, applied to the caches keyed by the id seen on the wire |
+| `DIRECTORY_REFRESH_SECONDS` | `5` | Seconds between directory refresh passes — see [The directory refresher](#the-directory-refresher). `0` disables the thread |
+| `TELEMETRY_BATCH_MAX_MESSAGES` | `500` | Messages per historian transaction, at most — see [The historian writer](#the-historian-writer) |
+| `TELEMETRY_QUEUE_MAX_MESSAGES` | `10000` | Messages the writer may hold. Full means backpressure for the put timeout, then a counted drop |
+| `TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS` | `5` | How long a full queue holds the callback thread before dropping |
+| `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` | `8` | How long a SIGTERM waits for the queue to drain. Inside the container grace period on both targets |
 | `INGESTION_STATS_INTERVAL` | `60` | Seconds between `STATS` log lines. `0` disables the reporter |
 | `INGESTION_METRICS_PORT` | `9108` | Prometheus endpoint. `0` disables it — see [Metrics](#metrics) |
 | `LOG_LEVEL` | `INFO` | Any level name; an unrecognised one falls back to `INFO` |
@@ -1130,12 +1177,15 @@ Prometheus, the log line is for whoever is reading `docker logs` at 3am with no 
 | :--- | :--- | :--- |
 | `acs_ingestion_messages_total` | `msg_type` | Messages acted on, after parsing and the command-topic filter. **Flat is the signal**: a running daemon consuming nothing. |
 | `acs_ingestion_metrics_written_total` | — | Metric samples written to the historian. |
+| `acs_ingestion_messages_written_total` | — | DDATA messages whose telemetry the historian committed. Divided by `acs_ingestion_write_seconds_count` it is messages per transaction: 1 while the writer keeps up, rising as it batches. |
 | `acs_ingestion_messages_dropped_total` | `reason` | **Telemetry that was NOT recorded.** Under report-by-exception nothing restates it. See the reasons below. |
 | `acs_ingestion_timestamps_rejected_total` | `edge_node` | A metric's timestamp fell outside the sanity window. The message was still processed; that metric was **refused rather than clamped** and cannot be recovered. The label names the appliance, which is almost always a clock rather than a device — read it beside the gauge below. |
 | `acs_ingestion_alias_unresolved_total` | — | An alias arrived with no known name. Normal briefly after a restart, pending a rebirth; sustained means a node is not re-birthing. |
 | `acs_ingestion_sequence_gaps_total` | `edge_node` | **A message was lost between the edge node and the historian.** The only loss signal RBE offers. |
 | `acs_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
 | `acs_ingestion_write_failures_total` | — | A historian write raised. That telemetry is gone. |
+| `acs_ingestion_write_batch_failures_total` | — | A transaction carrying several messages failed and was split. The message at fault is in `write_failures_total`; the rest were written on the retry. |
+| `acs_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
 | `acs_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
 | `acs_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (archived migration 0026). The telemetry was still written. |
 | `acs_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
@@ -1147,8 +1197,8 @@ Prometheus, the log line is for whoever is reading `docker logs` at 3am with no 
 | `acs_ingestion_unmapped_counter_total` | `counter` | A counter exists in `ingestion.py` with no mapping in `metrics.py`. Not a data fault — a monitoring one. |
 
 `reason` on the drop counter: `gateway_binding` (a device published under a gateway that does not
-own it), `gateway_archived`, `quarantined_or_unregistered`, `db_unavailable`, and the four
-directory-unavailable reasons below.
+own it), `gateway_archived`, `quarantined_or_unregistered`, `db_unavailable`, `write_queue_full` (the
+writer's queue stayed full for the put timeout), and the four directory-unavailable reasons below.
 
 **The directory being unreachable costs a different amount depending on what was lost**, which is
 why it is four reasons and not one. A brief PostgREST restart, Kong reload or failover produces
@@ -1193,7 +1243,7 @@ That is worth knowing rather than smoothing away.
 
 ### Alert rules — shipped
 
-**All six are provisioned**, in the `Ingestion Pipeline` group of
+**All seven are provisioned**, in the `Ingestion Pipeline` group of
 [`grafana/provisioning/alerting/alert-rules.yaml`](../grafana/provisioning/alerting/alert-rules.yaml),
 reading the `prometheus` datasource the Compose stack now provides.
 
@@ -1208,6 +1258,7 @@ looks wrong.
 | Binding rejections rising | `rate(acs_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
 | Historian unreachable | `acs_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
 | Message loss | `increase(acs_ingestion_sequence_gaps_total[15m]) > 0` | — | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
+| Historian writer saturating | `sum(rate(acs_ingestion_write_seconds_sum[5m])) > 0.5` | 10m | The writer thread's occupancy, read straight off the histogram. Half is the warning: the daemon keeps up, and a burst or a slower historian takes it the rest of the way. Queue depth is deliberately not the trigger — it moves only once the writer is already behind, and a full queue's drops reach the drop rule anyway. |
 | Gateway clock skew | `abs(acs_ingestion_gateway_clock_offset_seconds) > 60`, gated on the measurement being under 300s old | 15m | **Well inside the sanity window on purpose.** Past +5m the telemetry is discarded; this fires while it is still being accepted and silently misfiled, which is the failure worth catching. The staleness gate is what stops a powered-down appliance alerting forever on the clock it had when it left. |
 
 **Binding rejections rising is the one to read first.** It was the last outstanding rule of the
@@ -1218,57 +1269,62 @@ Queue Depth — read *state* out of Supabase through `public.platform_health`, a
 **On Kubernetes they are provisioned but not necessarily evaluable.** The chart renders a
 `ServiceMonitor` when `telemetry.serviceMonitor.enabled` is set, and that needs the Prometheus
 Operator CRDs the chart deliberately does not install — so a cluster that brings no Prometheus of
-its own gets five rules against a datasource whose health check fails. That is stated at the URL
+its own gets these rules against a datasource whose health check fails. That is stated at the URL
 placeholder in `grafana/provisioning/datasources/datasources.template.yml`, which is also why the
 datasource URL is substituted per deployment target rather than committed.
 
 ### `acs_ingestion_write_seconds` — the one distribution
 
-Every other series here answers *how many*; this one answers *how long*, and it is the only
-measurement of the ceiling the daemon's own docstring asserts. `get_timescaledb_connection()` has
-always said that one connection on the paho callback thread is "the thing to revisit first" — and
-until this histogram existed, nobody had ever measured what that thread actually costs per message.
+Every other series here answers *how many*; this one answers *how long*, and it is the measurement
+of the ceiling. One observation per historian transaction, which carries every message queued while
+the previous one ran.
 
-**It had been deferred to the horizontal-scaling work, on the argument that a latency number is
-worth more once there is a before-and-after to compare against. That argument is the wrong way
-round**: you cannot have a *before* if you fit the instrument afterwards. The measurement is what
-decides whether the rewrite is worth doing, so it has to come first.
+**`rate(acs_ingestion_write_seconds_sum[5m])` is the writer's occupancy** — the fraction of the
+writer thread's time spent inside transactions — and that is the capacity gauge the `Historian
+Writer Saturating` rule reads. At 1 the writer is saturated and `acs_ingestion_write_queue_depth`
+grows. Messages per transaction is `acs_ingestion_messages_written_total /
+acs_ingestion_write_seconds_count`: 1 while the writer keeps up, rising as it batches.
 
 **What it times, and why it starts where it does.** The clock starts before the connection is
-acquired, not at the `INSERT`, and stops after `with db_conn` commits. What bounds this daemon is
-how long the single callback thread is *occupied*, and a reconnect occupies it for up to
-`DB_CONNECT_MAX_ATTEMPTS × DB_CONNECT_BACKOFF_SECONDS` while the whole fleet waits — the stall
-`get_timescaledb_connection()` accepts on purpose. Timing only the `INSERT` would hide it. The
-bucket boundaries are chosen so it cannot hide inside a bucket that also holds healthy writes:
-**anything at or above `le="0.25"` is the reconnect path, not the database.**
+acquired, not at the `INSERT`, and stops after `with db_conn` commits. A reconnect occupies the
+writer for up to `DB_CONNECT_MAX_ATTEMPTS × DB_CONNECT_BACKOFF_SECONDS` while every queued message
+waits, and timing only the `INSERT` would hide it. The bucket boundaries are chosen so it cannot
+hide inside a bucket that also holds healthy writes: **anything at or above `le="0.25"` is the
+reconnect path, not the database.**
 
-**Committed writes only.** A write that raised is counted by `acs_ingestion_write_failures_total`
-and excluded here, so a p99 spike means a slow database and never an absent one. Letting the two
-share a distribution would make the quantile ambiguous between conditions that call for opposite
-responses.
+**Committed writes only.** A transaction that raised is counted by
+`acs_ingestion_write_failures_total` and excluded here, so a p99 spike means a slow database and
+never an absent one. Letting the two share a distribution would make the quantile ambiguous between
+conditions that call for opposite responses.
 
-**It does not cover the whole message.** Device resolution — which can issue a PostgREST round trip
-on a cache miss — and protobuf decode happen *before* the clock starts, on the same thread. So a
-ceiling derived from this series is an **upper bound**: the real one is lower.
+**It measures the writer thread, not the callback thread.** Device resolution and protobuf decode
+happen on the callback thread before a message reaches the queue; [the directory
+refresher](#the-directory-refresher) is what keeps that thread's cost flat with fleet size.
 
 ### The single-writer ceiling
 
-**This was a roadmap item — *horizontal ingestion scaling* — and it was retired on 2026-09-02
-because the instrument above closed it.** The entry used to quote the ceiling out of
-`get_timescaledb_connection()`'s docstring, which is an assertion rather than a measurement. There
-is now a number:
+**Measured 2026-08-21, when the callback thread wrote each message in its own transaction:**
 
 | | |
 |---|---|
-| mean write | **~4.1 ms** (0.0744 s over 18 writes, measured 2026-08-21) |
+| mean write | **~4.1 ms** (0.0744 s over 18 writes) |
 | p90 | **12.6 ms**, via `histogram_quantile` |
-| implied single-thread ceiling | **~240 msg/s**, and this is an *upper* bound |
+| implied single-thread ceiling | **~240 msg/s**, an *upper* bound |
 | fleet rate when measured | **~0.95 msg/s** |
 
-An upper bound for the reason the section above gives: device resolution and protobuf decode occupy
-the same thread before the clock starts. Even so, the headroom is **two orders of magnitude**. The
-constraint is real and it is documented here rather than tracked as pending work, because at 0.4% of
-the measured ceiling there is nothing to action.
+That number retired *horizontal ingestion scaling* from the roadmap on 2026-09-02: at 0.4% of the
+ceiling there was nothing to action. What has changed since is not the number but its owner. The
+callback thread no longer writes; [the historian writer](#the-historian-writer) does, one
+transaction per batch, and the fixed cost that set the 240 is paid once per batch. Under
+report-by-exception a message is one row at about 0.04 ms, so the writer's ceiling is set by how
+many messages a transaction carries — and it carries whatever arrived during the previous commit.
+The measurement that matters now is `rate(acs_ingestion_write_seconds_sum)`, the occupancy, and the
+`Historian Writer Saturating` rule reads it.
+
+**The directory was the nearer ceiling, and it was never measured.** Every device cost a PostgREST
+round trip per `CACHE_TTL_SECONDS` on the callback thread — with 300 devices, sixty a second — which
+the write histogram never saw because it starts after resolution. [The directory
+refresher](#the-directory-refresher) makes that two requests per pass regardless of fleet size.
 
 **`$share` is not the way out, and this is the part worth keeping.** The roadmap entry called an
 MQTT 5 shared subscription "the honest path" and said the daemon was already shaped for it. Tested
