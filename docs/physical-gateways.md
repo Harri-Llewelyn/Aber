@@ -420,6 +420,14 @@ Once somebody approves and merges it, the appliance's own `flow-sync` service pu
 minutes by default — and reloads Node-RED. The appliance is what reaches out; the platform never
 opens a connection to a gateway, which is the same rule that keeps `node_exporter` unscraped.
 
+**Watching it land.** The drawer's **Committed** row shows the head of `main` the moment the forge
+reports the push, and its **Flow** row shows the hash of the flow the appliance last deployed,
+reported on every heartbeat from `/data/gitops/deployed.json`. *main moved, deploying* means the
+appliance has not ticked since the merge; *matches main* means it has; *differs from main* more than
+ten minutes after a merge means the appliance refused the commit or cannot reach the forge, and
+`docker compose logs flow-sync` on the appliance says which. An edit made in the appliance's editor
+is in neither hash, and the next approved deploy overwrites it.
+
 ### What the appliance refuses to deploy
 
 `flow-sync` is the last of three checks on a `flows.json` and the only one on the appliance, so it

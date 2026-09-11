@@ -72,7 +72,8 @@ actually doing" is answerable from the dashboard instead of by getting a shell o
 | :--- | :--- |
 | uptime | the Node-RED runtime's own start |
 | 1-minute load, available memory, free disk on `/` | `node_exporter`, polled locally |
-| bundle version, flow hash | recorded by `bootstrap` at enrolment |
+| bundle version | recorded by `bootstrap` at enrolment |
+| flow hash | `/data/gitops/deployed.json`, written by `flow-sync` after every deploy and by `bootstrap` for the enrolment flow |
 | broker CA expiry | read from the CA this appliance installed |
 
 **`node_exporter` runs here and is never scraped from the centre.** It has no published port. The

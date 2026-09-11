@@ -2640,12 +2640,19 @@ dumped copy of that view became a call to the same function, because `CREATE OR 
 cannot narrow a view the function has just widened and every boot after the first was failing in
 `0001`.
 
-**Not yet a drift check.** The heartbeat's flow hash is the one `bootstrap.mjs` wrote into
-`gateway.env` at enrolment, not what `flow-sync.mjs` last deployed, so `forge_head_flow_sha256`
-and `flow_hash` sit side by side and the dashboard does not call their difference drift. The
-appliance-side half is in [`docs/roadmap.md`](../docs/roadmap.md), *GitOps edge sync*.
-`test_forge_events.py` covers the signature, what is recorded and ignored, and one delivery sent by
-the forge itself for a freshly enrolled gateway.
+**The drift check.** `flow_hash` is the same digest from the other side: `flow-sync.mjs` records
+the SHA-256 of every flow it deploys in `/data/gitops/deployed.json` (and `bootstrap.mjs` records
+the enrolment flow there in the same shape), a `file in` node in the appliance's flow reads that
+record every minute into the flow cache, and the heartbeat reports it as `Flow_Hash`. It is a file
+and not an environment variable because a reload does not re-source `gateway.env`; an appliance
+enrolled before this reports its enrolment hash until it is re-enrolled, and reads as differing.
+The drawer's **Flow** row compares the two: equal is *matches main*; different within two sync
+intervals of the push is *main moved, deploying*; different past that is *differs from main*, in
+red, and the appliance's `flow-sync` log says why. An edit made in the Node-RED editor is in
+neither digest; the next approved deploy overwrites it. `frontend/src/utils/flowDrift.js` holds the
+states and `scripts/check-gateway-flow-template.mjs` asserts the flow reads the file both scripts
+name. `test_forge_events.py` covers the signature, what is recorded and ignored, and one delivery
+sent by the forge itself for a freshly enrolled gateway.
 
 ## A replay lane is minted, not assigned (`0083`)
 

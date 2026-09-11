@@ -230,16 +230,6 @@ Both teams may create repositories in the organisation. Gitea's own sign-out is 
   it is gone, and a file uploaded through the forge's own UI meets no check until the puller
   refuses it on the appliance, which is late. It needs a Gitea Actions runner, which 7 argues on;
   until then the puller's refusal is the only check.
-- **Drift detection, whose forge half is done and whose appliance half is not.** `0095` records the
-  SHA-256 of `flows.json` at the head of `main` beside the hash the heartbeat reports. But the
-  heartbeat reports the hash `bootstrap.mjs` wrote into `gateway.env` at enrolment, not what
-  `flow-sync.mjs` last deployed — the function node reads it from the process environment, which
-  a reload does not refresh — so the two differ from the first convergence on and the dashboard
-  does not yet call that drift. The remaining piece is on the appliance: `flow-sync.mjs` already
-  writes `deployed.json` with the deployed `flow_sha256`; the heartbeat has to carry that value
-  (a restart after deploy that re-sources `gateway.env`, or a flow-side read through the admin API
-  the sync agent already holds a credential for). Once it does, the comparison is one row and the
-  drawer's **Committed** and **Flow** rows can disagree meaningfully.
 - **A status check does not alert.** A failed webhook delivery is visible on the hook's page in
   the forge and nowhere else; a repository from before `0095` has no hook and no template until
   somebody re-enrols the gateway or adds them by hand. Both are small and neither is urgent.

@@ -5,9 +5,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  * The forge says when `main` moved, and the gateway row remembers. Gitea delivers a push event to
  * this function (the hook is registered at enrolment, forge.ts), and this records the head of
  * `main` on the gateway: sha, message, who, when, and the SHA-256 of `flows.json` at that head.
- * That hash is the forge's half of a drift check; the appliance's heartbeat carries the hash of the
- * flow it was enrolled with, so the two are stored side by side and the dashboard does not yet call
- * their difference drift.
+ * That hash is the forge's half of the drift check: the appliance's heartbeat carries the hash of
+ * the flow flow-sync.mjs last deployed, and the gateway drawer compares the two.
  *
  * The signature is the whole of the authentication: `X-Gitea-Signature` is the hex HMAC-SHA256 of
  * the raw body under the hook's secret, verified against GITEA_WEBHOOK_SECRET. The body is read as
