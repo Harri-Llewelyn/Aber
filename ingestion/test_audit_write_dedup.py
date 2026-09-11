@@ -56,6 +56,7 @@ _stub("paho.mqtt")
 _stub("paho.mqtt.client", Client=object)
 
 import ingestion  # noqa: E402  (must follow the stubs above)
+import registry  # noqa: E402
 
 
 GROUP = "ACS-Cymru"
@@ -118,7 +119,7 @@ class DBirthDedupTestCase(unittest.TestCase):
         ingestion._gateway_cache.clear()
         ingestion._device_seen.clear()
         ingestion._alias_map.clear()
-        ingestion._counters.clear()
+        registry._counters.clear()
 
         self.device = registered_device()
 
@@ -345,7 +346,7 @@ class TestHeartbeatStillWritesEveryTime(unittest.TestCase):
 
         ingestion._gateway_cache.clear()
         ingestion._unknown_gateway_warned.clear()
-        ingestion._counters.clear()
+        registry._counters.clear()
 
         self.gateway = {
             "id": "gateway-uuid",

@@ -24,6 +24,10 @@ COPY ingestion/logging_config.py .
 # ingestion.py at module scope, so a missing COPY here is a crash loop on start, not a
 # degraded endpoint.
 COPY ingestion/metrics.py .
+# The counter registry metrics.py renders, and the constraint engine (issue #152). Both are
+# imported by ingestion.py at module scope: the same crash-loop rule as above.
+COPY ingestion/registry.py .
+COPY ingestion/conformance.py .
 COPY ingestion/validate.py .
 # Dashboard-driven broker capture. SAME RULE AS metrics.py ABOVE, and it bites
 # twice here: ingestion.py imports capture_worker at module scope, and capture_worker imports

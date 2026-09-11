@@ -22,6 +22,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import metrics  # noqa: E402
+import registry  # noqa: E402
 
 
 # =================================================================================================
@@ -405,7 +406,7 @@ class SequenceGapTestCase(unittest.TestCase):
 
     def setUp(self):
         self.ing._last_seq.clear()
-        self.ing._labelled.clear()
+        registry._labelled.clear()
         # request_node_rebirth needs a broker client; None is the documented "no client" path and
         # is what keeps this test off the network.
         self.node = "TestNode"
@@ -636,10 +637,10 @@ class WriteLatencyRegistryTestCase(unittest.TestCase):
         self.ing = _load_ingestion()
         # Module-level state, so each test starts from a known point rather than from whatever
         # the previous one left.
-        with self.ing._counters_lock:
-            self.ing._write_seconds_buckets[:] = [0] * len(self.ing.WRITE_SECONDS_BUCKETS)
-            self.ing._write_seconds_sum = 0.0
-            self.ing._write_seconds_count = 0
+        with registry._counters_lock:
+            registry._write_seconds_buckets[:] = [0] * len(registry.WRITE_SECONDS_BUCKETS)
+            registry._write_seconds_sum = 0.0
+            registry._write_seconds_count = 0
 
     def snapshot(self):
         return self.ing.histogram_snapshot()["acs_ingestion_write_seconds"]
@@ -700,7 +701,7 @@ class DirectoryUnavailableDropTestCase(unittest.TestCase):
         cls.ing = _load_ingestion()
 
     def setUp(self):
-        self.ing._counters.clear()
+        registry._counters.clear()
         self.ing._unknown_gateway_warned.clear()
         # The daemon returns early on every one of these paths when there is no client, so a
         # falsy one would make all four tests pass against code that never ran.

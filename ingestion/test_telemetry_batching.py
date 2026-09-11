@@ -51,6 +51,7 @@ _stub("paho.mqtt")
 _stub("paho.mqtt.client", Client=object)
 
 import ingestion  # noqa: E402
+import registry  # noqa: E402
 
 GROUP = "ACS-Cymru"
 NODE = "gwy" + "1" * 21
@@ -105,7 +106,7 @@ class BatchingTestCase(unittest.TestCase):
         ingestion._alias_map.clear()
         ingestion._device_seen.clear()
         ingestion._last_seq.clear()
-        ingestion._counters.clear()
+        registry._counters.clear()
 
         self.device = {
             "id": "20000000-0000-4000-8000-000000000002",
