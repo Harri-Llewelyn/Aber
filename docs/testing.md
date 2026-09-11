@@ -38,6 +38,10 @@ python ingestion/test_mqtt_tls.py
 # fails if NBIRTH, DBIRTH or an on_message handler ever appears in it. That is the design
 # issue #64 proposed and this refused -- a registry accumulated from what devices claim.
 python ingestion/test_directory_publish.py
+# The Unified Namespace bridge: the topic is fixed at the level a device honestly occupies, and
+# an incomplete path is skipped and counted rather than filled with a placeholder.
+python ingestion/test_uns_publish.py
+python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_payload_conformance.py
 # The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker

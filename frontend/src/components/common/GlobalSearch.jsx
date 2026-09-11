@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { isUuid } from '../../utils/isUuid'
 import { buildTargets, matchTargets } from '../../searchIndex'
-import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconFactory, IconClipboardList } from './Icons'
+import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList } from './Icons'
 
 /**
  * One box that answers three questions: where is the page called X (the nav), where is the card
@@ -23,7 +23,7 @@ const ENTITY_LABEL = {
 const ENTITY_ICON = {
   device: <IconCpu size={15} />,
   gateway: <IconRadio size={15} />,
-  cell: <IconFactory size={15} />,
+  cell: <IconLayoutDashboard size={15} />,
   schema: <IconClipboardList size={15} />
 }
 

@@ -292,6 +292,28 @@ try {
         false
       );
 
+      // The Unified Namespace (ingestion/uns_publish.py): every reading in the clear under uns/.
+      // The same two halves, for the same reason: the daemon is the only writer, and a gateway
+      // reading the tree would read every machine's telemetry with one credential.
+      expect(
+        'the ingestion principal MAY publish the Unified Namespace (it is the only writer)',
+        (delivers('factoryplus_ingestion', 'uns/ACS-Cymru/Site/Area/Cell/dev1/Speed',
+          'factoryplus_ingestion', 'uns/#')),
+        true
+      );
+      expect(
+        'a gateway may NOT read the Unified Namespace (one credential would read the whole plant)',
+        (delivers('factoryplus_ingestion', 'uns/ACS-Cymru/Site/Area/Cell/dev1/Speed',
+          GATEWAY_A, 'uns/#')),
+        false
+      );
+      expect(
+        'a gateway may NOT publish into the Unified Namespace (only decoded, verified readings belong there)',
+        (delivers(GATEWAY_A, `uns/ACS-Cymru/Site/Area/Cell/${GATEWAY_A}/Speed`,
+          'factoryplus_ingestion', 'uns/#')),
+        false
+      );
+
       // $SYS is reachable only by the monitoring account, and it is load-bearing: the broker's own
       // probes authenticate as it, so losing this rule leaves the pod permanently NotReady.
       const sysRead = (user) => docker(['exec', r.name, 'mosquitto_sub', '-u', user,

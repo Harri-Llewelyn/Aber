@@ -4,7 +4,7 @@ import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../const
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { gatewayLiveStatus, gatewayNeedsAttention } from '../../utils/gatewayStatus'
-import { groupDevicesByCell, NON_CELL_SOURCES } from '../../utils/cellResolution'
+import { groupDevicesByCell, NON_CELL_SOURCES, floorLabel } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { ActionButton } from '../common/ActionButton'
@@ -12,10 +12,11 @@ import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
+import { AreaIcon } from '../../utils/areaIcon'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
-  IconFactory,
+  IconLayoutDashboard,
   IconPlus,
   IconPencil,
   IconArchive,
@@ -33,7 +34,7 @@ import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThread, hasPermission, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
+export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewThread, hasPermission, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   /**
@@ -47,6 +48,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   }
 
   const [cells, setCells]       = useState([])
+  const [areas, setAreas]       = useState([])
   const [assets, setAssets]     = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -55,7 +57,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const [editing, setEditing]   = useState(null)
   // DEFAULT_CELL_ICON rather than the literal 'Factory': the column's default, the CHECK
   // constraint and this form all have to agree, and one imported constant is one place they can.
-  const blank = { cell_name: '', access_url: '', icon: DEFAULT_CELL_ICON }
+  // `area_id` '' is unfiled and `floor` '' is unset; api.js turns both into NULL.
+  const blank = { cell_name: '', access_url: '', description: '', icon: DEFAULT_CELL_ICON, area_id: '', floor: '' }
   const [formVal, setFormVal]   = useState(blank)
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [docsForCell, setDocsForCell] = useState(null)
@@ -90,11 +93,12 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
       // /api/v1/cells embeds each cell's gateways only. Device membership is the resolved effective
       // cell, grouped from `assets` by groupDevicesByCell and read once for the cards and the
       // unassigned counter.
-      const [c, a] = await Promise.all([
+      const [c, a, ar] = await Promise.all([
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/devices', { signal }),
+        api.get('/api/v1/areas', { signal }).catch(() => [])
       ])
-      setCells(c); setAssets(a)
+      setCells(c); setAssets(a); setAreas(ar)
 
       /* This person's open proposals, so the edit dialog can seed itself with an open patch rather
          than replace it. Tolerated rather than required. */
@@ -128,9 +132,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
     try {
       /* THE FORK IS AT THE END, not at the beginning: the fields, their validation and their null
          handling are shared, and only the last step differs -- by who is asking. */
+      // The floor arrives from a number input as text; the column is an integer, and a proposal
+      // carrying "2" against a row holding 2 would read as a change that changes nothing.
+      const floor = formVal.floor === '' || formVal.floor === null || formVal.floor === undefined ? '' : Number(formVal.floor)
+      const form = { ...formVal, floor }
       if (proposeMode) {
         if (!editing) throw new Error('A cell can only be created by an Administrator.')
-        const patch = patchFromForm('cell', editing, formVal)
+        const patch = patchFromForm('cell', editing, form)
         await submitProposal({
           kind: 'cell', entityId: editing.cell_id, patch,
           rationale: formVal.__rationale, proposalId: editingProposal?.id
@@ -142,8 +150,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         return
       }
 
-      if (editing) await api.put(`/api/v1/cells/${editing.cell_id}`, formVal)
-      else         await api.post('/api/v1/cells', formVal)
+      if (editing) await api.put(`/api/v1/cells/${editing.cell_id}`, form)
+      else         await api.post('/api/v1/cells', form)
       setShowForm(false); loadAll(); showToast(editing ? 'Cell saved' : 'Cell created', 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
@@ -221,7 +229,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const activeFilterCount =
     (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
 
-  // Arriving from a Cell Zone chip or the shopfloor map with one cell named: open it. Identifier
+  // Arriving from a Cell Zone chip or the site map with one cell named: open it. Identifier
   // equality only, since the search predicate also matches names.
   useArrivalSelection(
     searchQuery,
@@ -257,10 +265,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">
-            Shopfloor Cells
+            Cells
             <HelpTip
               label="About cells"
-              text="A cell is a zone of the shopfloor and what groups the assets in it. A gateway belongs to one, and a device inherits its gateway's unless it names its own. The dashboard, the alerts and the Grafana folders are all organised by cell."
+              text="A cell is a zone of an Area and what groups the assets in it. A gateway belongs to one, and a device inherits its gateway's unless it names its own. The dashboard, the alerts and the Grafana folders are all organised by cell."
             />
           </h3>
           {/* The primary action in the header, where every card keeps its. */}
@@ -269,7 +277,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             style={{ marginLeft: 'auto' }}
             disabled={!canManage}
             onClick={() => canManage && (setEditing(null), setFormVal(blank), setShowForm(true))}
-            title={!canManage ? 'Requires Admin permissions' : 'Configure new shopfloor cell zone'}
+            title={!canManage ? 'Requires Admin permissions' : 'Configure new cell'}
           >
             <IconPlus size={14} /> New Cell
           </button>
@@ -332,11 +340,11 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
       {/* One table, not a card per cell: a cell reads as one row and the drawer holds its detail,
           which is what keeps the page scannable at any fleet size. */}
         {loading ? (
-          <div className="loading-wrap"><div className="spinner" /> Loading shopfloor cells…</div>
+          <div className="loading-wrap"><div className="spinner" /> Loading cells…</div>
         ) : filteredCells.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon"><IconFactory size={36} /></div>
-            <div className="empty-text">No shopfloor cells match the selected filter.</div>
+            <div className="empty-icon"><IconLayoutDashboard size={36} /></div>
+            <div className="empty-text">No cells match the selected filter.</div>
           </div>
         ) : (
           <div className="table-wrap">
@@ -347,6 +355,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                       screen-reader label, because a 32px column cannot carry a word. */}
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
                   <th title="Human-readable cell zone name">Cell Name</th>
+                  <th title="The ISA-95 area (area) and floor this cell is on">Area / Floor</th>
                   <th title="Cell zone unique UUID">Cell UUID</th>
                   <th title="Edge gateways assigned to this cell zone">Assigned Gateways</th>
                   <th title="Devices located in this cell — its gateways' devices, plus any device filed here explicitly">Assigned Devices</th>
@@ -373,6 +382,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                       <td className="cell-icon-col"><CellIcon cell={c} size={16} /></td>
                       <td>
                         <strong>{c.cell_name}</strong>
+                        {c.description && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{c.description}</div>}
                         {c.is_archived && (
                           <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Cell decommissioned and archived">
                             <IconArchive size={11} /> ARCHIVED
@@ -383,6 +393,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                         {isEmpty && !c.is_archived && (
                           <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', marginLeft: '8px' }} title="No gateways and no devices resolve to this cell">empty</span>
                         )}
+                      </td>
+                      <td>
+                        {/* Unfiled is a state to act on, said in the queue's colour; the floor is
+                            context and stays muted. */}
+                        {c.area_id
+                          ? <span>{areas.find(a => a.area_id === c.area_id)?.area_name || <span className="mono">{c.area_id}</span>}</span>
+                          : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Not filed in any area — file it on the Areas page or in Edit Details">Unfiled</span>}
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{floorLabel(c.floor)}</div>
                       </td>
                       <td><CopyableId value={c.cell_id} label="cell UUID" onNotify={showToast} /></td>
                       <td>
@@ -455,6 +473,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
               <input className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" title="Enter descriptive cell zone name" />
             </div>
             <div className="form-group">
+              <label className="form-label" htmlFor="cell-description">Description (Optional)</label>
+              <input id="cell-description" className="form-control" value={formVal.description || ''} onChange={e => setFormVal(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Five-axis machining, two shifts" title="Shown as a help tip beside the cell's name on the Overview map" />
+            </div>
+            <div className="form-group">
               {/* A grid of buttons, not a select: the choice is visual. */}
               <label className="form-label">Cell Icon</label>
               <div className="icon-picker" role="radiogroup" aria-label="Cell icon">
@@ -472,6 +494,38 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                     <span>{label}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+            {/* Where the cell is in the area hierarchy. The area is a row on the Areas page;
+                the floor is a number on this cell and groups the Overview map. */}
+            <div className="form-group">
+              <label className="form-label" htmlFor="cell-area">Area</label>
+              <select
+                id="cell-area"
+                className="form-control"
+                value={formVal.area_id || ''}
+                onChange={e => setFormVal(f => ({ ...f, area_id: e.target.value }))}
+                title="The ISA-95 area this cell is in. Unfiled cells are listed as a queue on the Areas page."
+              >
+                <option value="">— Unfiled —</option>
+                {areas.map(a => <option key={a.area_id} value={a.area_id}>{a.area_name}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="cell-floor">Floor</label>
+              <input
+                id="cell-floor"
+                type="number"
+                step="1"
+                className="form-control"
+                style={{ width: '120px' }}
+                value={formVal.floor ?? ''}
+                onChange={e => setFormVal(f => ({ ...f, floor: e.target.value }))}
+                placeholder="0"
+                title="Ground floor is 0, the first floor 1, a basement -1. Leave empty if it does not apply."
+              />
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                Ground is 0, basements are negative. {floorLabel(formVal.floor === '' || formVal.floor === null || formVal.floor === undefined ? undefined : Number(formVal.floor))}.
               </div>
             </div>
             <div className="form-group">
@@ -541,6 +595,24 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         )}
         fields={selectedCell ? [
           { label: 'Cell UUID', value: selectedCell.cell_id, mono: true, copyable: true },
+          { label: 'Description', value: selectedCell.description || null, full: true },
+          {
+            label: 'Area',
+            value: selectedCell.area_id
+              ? (
+                <button
+                  className="chip chip-link"
+                  onClick={() => onSelectArea?.(selectedCell.area_id)}
+                  title="Open this area on the Areas page"
+                >
+                  <AreaIcon area={areas.find(a => a.area_id === selectedCell.area_id)} size={11} />
+                  <span className="chip-name">{areas.find(a => a.area_id === selectedCell.area_id)?.area_name || selectedCell.area_id}</span>
+                </button>
+              )
+              : 'Unfiled',
+            title: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
+          },
+          { label: 'Floor', value: floorLabel(selectedCell.floor), title: 'Ground floor is 0, basements negative' },
           {
             // Chips rather than a comma-joined string: a cell is a junction, and its panel must
             // reach the gateways and devices it relates.
@@ -620,7 +692,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                 ? openProposals.find(pr => pr.entity_type === 'cells' && pr.entity_id === selectedCell.cell_id)
                 : null
               setEditingProposal(mine || null)
-              setFormVal({ ...selectedCell, ...formFromPatch('cell', mine?.patch) })
+              setFormVal({
+                ...selectedCell,
+                // The selects and the number input want '' for nothing, not null.
+                area_id: selectedCell.area_id || '',
+                floor: selectedCell.floor ?? '',
+                ...formFromPatch('cell', mine?.patch)
+              })
               setShowForm(true)
             },
             disabled: (!canManage && !canPropose) || selectedCell.is_archived,

@@ -3,7 +3,7 @@ import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { ContextPanel } from '../common/ContextPanel'
 import {
-  IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu, IconTrash,
+  IconHistory, IconDownload, IconX, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconFileCode, IconSettings
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
@@ -42,7 +42,7 @@ const ENTITY_KIND = ENTITY_KIND_BY_TABLE
  * The kinds backed by a real table. Absence from `entityNames` means DELETED only for these; for
  * any other kind the lookup never covered it.
  */
-const ASSET_ENTITY_KINDS = new Set(['CELL', 'GATEWAY', 'DEVICE'])
+const ASSET_ENTITY_KINDS = new Set(['AREA', 'CELL', 'GATEWAY', 'DEVICE'])
 
 const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
@@ -320,7 +320,8 @@ export function clusterSummary(events, kindOf) {
 const FALLBACK_SECTION_ICON = IconHistory
 
 const SECTION_ICONS = {
-  CELL:               IconBuilding2,
+  AREA:               IconFactory,
+  CELL:               IconLayoutDashboard,
   GATEWAY:            IconRadio,
   DEVICE:             IconCpu,
   // THE SECURITY LANE (0070), in the order a reader meets it: who holds what, what the machines
@@ -606,6 +607,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   const [devices, setDevices]         = useState([])
   const [gateways, setGateways]       = useState([])
   const [cells, setCells]             = useState([])
+  const [areas, setAreas]             = useState([])
   const [schemas, setSchemas] = useState([])
   const [selectedEventId, setSelectedEventId] = useState(null)
   const [showAllLanes, setShowAllLanes] = useState(false)
@@ -625,17 +627,19 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       api.get('/api/v1/cells'),
       // Tolerated rather than required: this page must not fail to load because one lookup did,
       // and the uuid fallback below is exactly the behaviour that was there before.
-      api.get('/api/v1/schemas').catch(() => [])
+      api.get('/api/v1/schemas').catch(() => []),
+      api.get('/api/v1/areas').catch(() => [])
     ])
-      .then(([d, g, c, sc]) => {
-        setDevices(d); setGateways(g); setCells(c); setSchemas(sc || []); setLookupsLoaded(true)
+      .then(([d, g, c, sc, ar]) => {
+        setDevices(d); setGateways(g); setCells(c); setSchemas(sc || []); setAreas(ar || []); setLookupsLoaded(true)
       })
       .catch(() => {})
   }, [])
 
-  /** entity_id -> display name, across all four audited tables. */
+  /** entity_id -> display name, across all five audited tables. */
   const entityNames = useMemo(() => {
     const m = new Map()
+    for (const ar of areas)   m.set(ar.area_id, ar.area_name)
     for (const c of cells)    m.set(c.cell_id, c.cell_name)
     for (const g of gateways) m.set(g.gateway_id, g.gateway_name)
     for (const d of devices)  m.set(d.asset_id, d.asset_name)
@@ -646,7 +650,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       if (id) m.set(id, sc.version ? `${sc.schema_name} v${sc.version}` : sc.schema_name)
     }
     return m
-  }, [cells, gateways, devices, schemas])
+  }, [areas, cells, gateways, devices, schemas])
 
   /**
    * Events whose asset has been purged: in the log, absent from every live table. The list

@@ -72,7 +72,7 @@ const cardTable = (heading) => {
   return title?.closest('.card')?.querySelector('table')
 }
 
-const registryTable = () => cardTable('Registered Schemas')
+const registryTable = () => cardTable('Schemas')
 
 const rowFor = (name) => {
   const cell = within(registryTable()).getByText(name)

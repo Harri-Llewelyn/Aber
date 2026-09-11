@@ -48,11 +48,13 @@ import { Toast } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
 import { HelpPanel } from './components/common/HelpPanel'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
+import { useNavSignals } from './hooks/useNavSignals'
 import { BugReportModal } from './components/modals/BugReportModal'
 import { ShortcutsModal } from './components/modals/ShortcutsModal'
 
 // Lazy-load Tab components
 const OverviewTab      = lazy(() => import('./components/tabs/OverviewTab').then(m => ({ default: m.OverviewTab })))
+const AreasTab         = lazy(() => import('./components/tabs/AreasTab').then(m => ({ default: m.AreasTab })))
 const CellsTab         = lazy(() => import('./components/tabs/CellsTab').then(m => ({ default: m.CellsTab })))
 const GatewaysTab      = lazy(() => import('./components/tabs/GatewaysTab').then(m => ({ default: m.GatewaysTab })))
 const DevicesTab       = lazy(() => import('./components/tabs/DevicesTab').then(m => ({ default: m.DevicesTab })))
@@ -348,6 +350,8 @@ function Dashboard({ session, onSignOut }) {
   const [selectedSchemaId, setSelectedSchemaId] = useState('')
   // Set when a cell zone is clicked on the Overview shopfloor map; consumed by CellsTab.
   const [selectedCellFilter, setSelectedCellFilter] = useState('')
+  // Set by a cell drawer's Area chip; consumed by AreasTab, which opens that area's drawer.
+  const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
   // Set by a "Digital Thread" action on an asset row; consumed by DigitalThreadTab as { id, type }.
   const [selectedThreadEntity, setSelectedThreadEntity] = useState(null)
   // Set by Use on the Vocabulary page; consumed by SchemasTab, which resolves it against the
@@ -359,7 +363,7 @@ function Dashboard({ session, onSignOut }) {
 
   const { tab, setTab, handleNavClick } = useAppRouting(
     setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter,
-    setSelectedThreadEntity, setPendingVocabularyEntry
+    setSelectedThreadEntity, setPendingVocabularyEntry, setSelectedAreaFilter
   )
 
   /** Drill into one asset's audit trace on the page that owns it, rather than in a dialog. */
@@ -376,6 +380,7 @@ function Dashboard({ session, onSignOut }) {
   const showDevice  = (id) => { setSelectedDeviceFilter(id);  setTab('devices',  { search: id }) }
   const showGateway = (id) => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }
   const showCell    = (id) => { setSelectedCellFilter(id);    setTab('cells',    { search: id }) }
+  const showArea    = (id) => { setSelectedAreaFilter(id);    setTab('areas',    { search: id }) }
   /** Open ONE schema's drawer on the Schemas page -- a device drawer's Schema chip. */
   const showSchema  = (uuid) => { setSelectedSchemaId(uuid);  setTab('schemas',  { search: uuid }) }
   /** The opposite direction: every device provisioned with a schema. Note the `schema` key. */
@@ -436,6 +441,10 @@ function Dashboard({ session, onSignOut }) {
   // Grafana's firing alerts, via platform_alerts. Owned by App rather than a tab so an alert is
   // visible whichever page is open.
   const firingAlerts = usePlatformAlerts(showToast)
+
+  // What the rail flags in the warning colour: quarantine, offline gateways, unfiled cells. Owned
+  // here for the same reason the alerts are.
+  const navSignals = useNavSignals()
 
   // Fed by the counter every call through `api` increments, so it covers a save on a modal and a
   // tab's reconciliation poll alike without either having to report anything.
@@ -551,14 +560,15 @@ function Dashboard({ session, onSignOut }) {
       {/* The rail is a permanent gutter. In hover mode its expanded panel paints over the page; in
           expanded mode the row reflows. See Sidebar.jsx. */}
       <div className="app-body">
-        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={handleNavClick} mode={sidebarMode} onChangeMode={setSidebarMode} />
+        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={handleNavClick} mode={sidebarMode} onChangeMode={setSidebarMode} signals={navSignals} />
 
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'overview'       && <OverviewTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+            {tab === 'areas'          && <AreasTab showToast={showToast} onViewThread={a => viewThreadFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
+            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
             {tab === 'digital-thread' && hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ) && (

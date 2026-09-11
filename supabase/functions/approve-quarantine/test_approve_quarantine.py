@@ -105,13 +105,24 @@ def evaluate_location_patch(body: dict) -> tuple[int, dict]:
             return 400, {}
         patch["cell_id"] = trimmed or None
 
+    if "area_id" in body:
+        area_id = body["area_id"]
+        trimmed = area_id.strip() if isinstance(area_id, str) else area_id
+        if trimmed and not UUID_RE.match(str(trimmed)):
+            return 400, {}
+        patch["area_id"] = trimmed or None
+
     if "location_scope" in body:
         scope = body["location_scope"]
-        if scope not in ("cell", "site_wide"):
+        if scope not in ("cell", "site_wide", "area_wide"):
+            return 400, {}
+        if scope == "area_wide" and not patch.get("area_id"):
             return 400, {}
         patch["location_scope"] = scope
-        if scope == "site_wide":
+        if scope != "cell":
             patch["cell_id"] = None
+        if scope != "area_wide":
+            patch["area_id"] = None
 
     return 200, patch
 
@@ -154,6 +165,30 @@ class TestApproveQuarantineLocation(unittest.TestCase):
         self.assertIsNone(patch["cell_id"])
         self.assertEqual(patch["location_scope"], "site_wide")
 
+    def test_area_wide_names_its_area_and_clears_the_cell(self):
+        """
+        Mirrors devices_area_wide_names_its_area and devices_area_wide_has_no_cell (0097).
+        """
+        status, patch = evaluate_location_patch({
+            "cell_id": "aaaaaaaa-0000-4000-8000-000000000000",
+            "area_id": "bbbbbbbb-0000-4000-8000-000000000000",
+            "location_scope": "area_wide"
+        })
+        self.assertEqual(status, 200)
+        self.assertIsNone(patch["cell_id"])
+        self.assertEqual(patch["area_id"], "bbbbbbbb-0000-4000-8000-000000000000")
+
+    def test_area_wide_without_an_area_is_rejected(self):
+        status, _ = evaluate_location_patch({"cell_id": "", "area_id": "", "location_scope": "area_wide"})
+        self.assertEqual(status, 400)
+
+    def test_a_cell_scope_clears_any_area(self):
+        status, patch = evaluate_location_patch({
+            "cell_id": "", "area_id": "bbbbbbbb-0000-4000-8000-000000000000", "location_scope": "cell"
+        })
+        self.assertEqual(status, 200)
+        self.assertIsNone(patch["area_id"])
+
     def test_unknown_scope_is_rejected(self):
         status, _ = evaluate_location_patch({"location_scope": "building"})
         self.assertEqual(status, 400)
@@ -174,12 +209,11 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
         # The write itself moved into an atomic RPC, so half of what this class guards now lives
         # in SQL. Both halves are still checked -- the invariant did not change, only its home.
         #
-        # Its home moved once more in the squash: `approve_quarantined_device()` was declared by
-        # 0003 and is now in the baseline, in the single final form the whole chain produced.
-        # Reading it there is strictly better than reading 0003 was -- 0003 held the FIRST of
-        # several declarations, and a later migration replacing the body would have left this
-        # suite asserting against SQL the database had long stopped running.
-        migration = os.path.join(here, "..", "..", "migrations", "0001_baseline_schema.sql")
+        # Read from the LAST file that declares it, which is what the database runs: 0097 dropped
+        # the baseline's form and redeclared it with the area parameters. Reading the baseline
+        # would assert against SQL the database has stopped running, which is the drift this
+        # class exists to catch.
+        migration = os.path.join(here, "..", "..", "migrations", "0097_the_plant_gains_areas.sql")
         with open(migration, "r", encoding="utf-8") as handle:
             self.rpc_sql = handle.read()
 
@@ -199,8 +233,10 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
         """
         self.assertIn("p_set_cell: setCell", self.source)
         self.assertIn("p_set_location_scope: setLocationScope", self.source)
+        self.assertIn("p_set_area: setArea", self.source)
         self.assertIn("WHEN p_set_cell", self.rpc_sql)
         self.assertIn("WHEN p_set_location_scope", self.rpc_sql)
+        self.assertIn("WHEN p_set_area", self.rpc_sql)
 
     def test_the_cell_is_still_cleared_for_site_wide(self):
         """
@@ -213,7 +249,18 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
         self.assertIn("v_cell := NULL;", self.rpc_sql)
 
     def test_source_still_constrains_the_scope_to_the_check_constraint_values(self):
-        self.assertIn('location_scope !== "cell" && location_scope !== "site_wide"', self.source)
+        self.assertIn(
+            'location_scope !== "cell" && location_scope !== "site_wide" && location_scope !== "area_wide"',
+            self.source
+        )
+
+    def test_the_rpc_refuses_area_wide_without_an_area(self):
+        """
+        Mirrors devices_area_wide_names_its_area: the function raises its own error rather than
+        letting the CHECK produce one the caller cannot interpret.
+        """
+        self.assertIn("ELSIF p_set_location_scope AND p_location_scope = 'area_wide' THEN", self.rpc_sql)
+        self.assertIn("an area_wide device must name its area", self.rpc_sql)
 
     def test_the_actor_is_passed_so_the_audit_trail_can_attribute_the_approval(self):
         """

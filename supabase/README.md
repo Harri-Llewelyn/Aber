@@ -1298,6 +1298,43 @@ because that is the behaviour under test. Shorter retention for simulated data w
 feature that needs synthetic data to behave normally, and could not be built cheaply anyway —
 retention is one policy on one hypertable dropping whole chunks rather than rows.
 
+### The plant gains areas, and a third scope (`0097`)
+
+ISA-95's hierarchy is enterprise, site, area, work center, work unit. The stack had the two lowest
+as `cells` and `devices` and the enterprise as `gateways.sparkplug_group`; `0097` adds the two
+between, for the Unified Namespace bridge to name a reading's place
+([`ingestion/README.md`](../ingestion/README.md#the-unified-namespace)).
+
+- **The site is one setting**, `site.name`, not a table. The plant is one campus; a second is
+  the migration that promotes it. The bridge publishes nothing while it is empty.
+- **An area is a building**: `public.areas`, with `cells.area_id` nullable and `ON DELETE SET
+  NULL`, so deleting a building un-files its cells into the Areas page's queue rather than
+  deleting them. `cells.floor` is a small integer (ground 0, basements negative) for grouping the
+  Overview map; it is deliberately not a level. `cells.description` is free text, shown as a
+  help tip beside the cell's name on the map. `areas.icon` is a closed set of keys
+  (`areas_icon_valid`) mirrored by `frontend/src/utils/areaIcon.jsx`, as `cells.icon` is.
+- **`location_scope` gains `area_wide`**: a building's BMS, with no single cell and one area. It
+  REQUIRES `area_id` and nothing else may store one (`*_area_wide_names_its_area`), for the reason
+  `devices.cell_id` has no default: a cell-scoped asset's area is its cell's, derived in
+  `device_locations` (`effective_area_id`) and never stored twice. `site_wide` keeps its meaning.
+- **Names become topic segments**, so `areas.name` and `cells.name` refuse `/`, `+` and `#`. The
+  cell rule is `NOT VALID`: a cell named before `0097` keeps its row and the migration names it
+  in a NOTICE.
+- **`device_locations` is dropped and recreated**, in `0001` and again in `0097`. `CREATE OR
+  REPLACE` can append a column but cannot take one away, so `0001`'s replay after `0097` had
+  widened the view would have failed on the second boot. DROP VIEW discards the grants, and both
+  files re-apply them, as `ensure_gateway_status_view()` does.
+- **The proposal lanes admit the new columns** (`area_id` on devices and gateways, `area_id` and
+  `floor` on cells), and `approve_proposal()` assigns them; `relocate_devices()` takes `area_id`
+  on a move. `approve_quarantined_device()` is dropped and redeclared with `p_area_id` and
+  `p_set_area`, so a quarantined device can be approved straight into Area-Wide; the old
+  signature has to go first, or PostgREST would find two. `areas` joins the asset audit domain.
+
+Rejected: a many-to-many between devices and sites for a BMS shared by two buildings. Adjacent
+buildings are one ISA-95 site, so such a BMS is already Site-Wide; a join table would have made
+the view one row per pair, published each reading once per site, and let a per-site ACL leak a
+shared device.
+
 ### The playback gateway is visible and almost inert (`0067`)
 
 It stays on the Gateways and Access Control pages deliberately: it holds a broker credential an

@@ -432,7 +432,7 @@ describe('shopfloor drop feedback', () => {
 
     expect(api.relocateDevices).toHaveBeenCalledTimes(1)
     expect(api.relocateDevices).toHaveBeenCalledWith([
-      { device_id: 'dev-1', cell_id: 'cell-1', location_scope: 'cell' }
+      { device_id: 'dev-1', cell_id: 'cell-1', area_id: null, location_scope: 'cell' }
     ])
     // The message names the transaction, because that is the thing the batch bought.
     expect(showToast).toHaveBeenCalledWith(

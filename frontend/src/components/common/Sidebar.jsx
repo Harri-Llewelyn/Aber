@@ -18,7 +18,7 @@ import { IconPanelLeft, IconCheck } from './Icons'
  * transparent labels is not navigation. A focus that arrives while the pointer is already on the
  * rail is a click, and is ignored so the panel does not stay open over the page it navigated to.
  */
-export function Sidebar({ tabs, currentTab, onNavigate, mode = 'hover', onChangeMode }) {
+export function Sidebar({ tabs, currentTab, onNavigate, mode = 'hover', onChangeMode, signals = {} }) {
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -44,19 +44,24 @@ export function Sidebar({ tabs, currentTab, onNavigate, mode = 'hover', onChange
           <div className="sidebar-group" key={group.id}>
             {index > 0 && <div className="sidebar-divider" role="presentation" />}
 
-            {group.tabs.map(t => (
-              <button
-                key={t.id}
-                className={`sidebar-item${currentTab === t.id ? ' active' : ''}`}
-                onClick={() => onNavigate(t.id)}
-                title={`Navigate to ${t.label} page`}
-                aria-label={t.label}
-                aria-current={currentTab === t.id ? 'page' : undefined}
-              >
-                <span className="sidebar-item-icon">{t.icon}</span>
-                <span className="sidebar-item-label">{t.label}</span>
-              </button>
-            ))}
+            {group.tabs.map(t => {
+              // A page with work waiting takes the warning colour, and says why on its title and
+              // label, so the colour is never the only signal (hooks/useNavSignals.js).
+              const signal = signals[t.id]
+              return (
+                <button
+                  key={t.id}
+                  className={`sidebar-item${currentTab === t.id ? ' active' : ''}${signal ? ` sidebar-item-${signal.tone}` : ''}`}
+                  onClick={() => onNavigate(t.id)}
+                  title={signal ? `${t.label} — ${signal.note}` : `Navigate to ${t.label} page`}
+                  aria-label={signal ? `${t.label} — ${signal.note}` : t.label}
+                  aria-current={currentTab === t.id ? 'page' : undefined}
+                >
+                  <span className="sidebar-item-icon">{t.icon}</span>
+                  <span className="sidebar-item-label">{t.label}</span>
+                </button>
+              )
+            })}
           </div>
         ))}
 

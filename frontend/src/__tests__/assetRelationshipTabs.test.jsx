@@ -109,8 +109,6 @@ const sentBatch = () => api.relocateDevices.mock.calls[0][0]
 const cellTiles = () => [...document.querySelectorAll('.shopfloor-grid > .shopfloor-cell')]
 const cellTileFor = (name) => cellTiles().find(z => within(z).queryByText(name))
 const laneTiles = () => [...document.querySelectorAll('.shopfloor-lanes > .shopfloor-lane')]
-const kpiItem = (label) => [...document.querySelectorAll('.kpi-item')]
-  .find(n => label.test(n.textContent))
 
 describe('CellsTab shows the gateways and devices attached to a cell', () => {
   it('names a cell\'s gateways and the devices reachable through them, on one row', async () => {
@@ -202,9 +200,9 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     // Edit moved into the context panel with the rest of the gateway ACTIONS column.
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
-    // Site-Wide is an option in the cell picker, not a checkbox beside it: you cannot choose
-    // Site-Wide and a cell because they are the same field.
-    fireEvent.change(document.querySelector('#gateway-cell-zone'), { target: { value: 'site_wide' } })
+    // Site-Wide is one radio of three, not a checkbox beside the cell picker: you cannot choose
+    // Site-Wide and a cell because they are the same question.
+    fireEvent.click(screen.getByRole('radio', { name: /Site-Wide/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
@@ -229,6 +227,17 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ location_scope: 'cell', cell_id: 'cell-1' })
+  })
+
+  it("names the offline gateways in a banner above the table, matching the rail's amber", async () => {
+    // The sidebar turns the Gateways icon amber for an offline gateway; the page has to say which.
+    api.get.mockImplementation(routeGet({ gateways: [gateway, staleGateway] }))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Quiet_Gateway')).toBeInTheDocument())
+    const banner = screen.getByText(/1 gateway offline/).closest('div')
+    expect(banner).toHaveTextContent('Quiet_Gateway')
+    expect(banner).not.toHaveTextContent('Virtual_Gateway_NodeRED')
+    expect(banner.closest('.card')).toBeNull()
   })
 
   it('downgrades a gateway with an aged-out heartbeat to STALE', async () => {
@@ -261,56 +270,6 @@ describe('OverviewTab shopfloor map', () => {
     expect(within(zone).getByText('GW: 1 | Dev: 1')).toBeInTheDocument()
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
     expect(within(zone).getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument()
-
-    // The ribbon reports live/total per row. The full breakdown the stat cards printed underneath
-    // moved onto each item's title, so it is read from there.
-    expect(kpiItem(/Cells/).textContent).toContain('1/1')
-    // Gateways carry a fourth bucket, "awaiting setup", for the enrolment states. Excluded from
-    // `offline` because a gateway waiting for its bundle is an unfinished task, not a fault.
-    expect(kpiItem(/Gateways/)).toHaveAttribute(
-      'title', expect.stringContaining('1 online / 0 awaiting setup / 0 offline / 0 archived')
-    )
-    expect(kpiItem(/Devices/)).toHaveAttribute('title', expect.stringContaining('1 online / 0 offline / 0 archived'))
-  })
-
-  // A quarantined device is stored with status OFFLINE; it must be counted as Quarantined only, not
-  // also as Offline.
-  it('counts a quarantined device only as Quarantined, and raises the alert treatment', async () => {
-    api.get.mockImplementation(routeGet({
-      devices: [{ ...gateway.devices[0], is_quarantined: true, status: 'OFFLINE' }],
-    }))
-    render(
-      <OverviewTab
-        onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
-        hasPermission={() => true} onNavigateTab={vi.fn()}
-      />
-    )
-    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-
-    // Not counted as Online, and the four buckets still sum to the ribbon item's total of 1.
-    const devices = kpiItem(/Devices/)
-    expect(devices.textContent).toContain('0/1')
-    expect(devices).toHaveAttribute('title', expect.stringContaining('1 device awaiting zero-touch onboarding approval'))
-    expect(devices).toHaveAttribute('title', expect.stringContaining('0 online / 0 offline / 0 archived, of 1'))
-
-    // The item raises the warning treatment so the state is visible without reading the title --
-    // and spells the word out beside the figure, so the signal is not colour alone.
-    expect(devices.className).toMatch(/kpi-item-alert/)
-    expect(within(devices).getByText(/1 Quarantined/)).toBeInTheDocument()
-  })
-
-  it('shows no alert treatment when nothing is quarantined', async () => {
-    api.get.mockImplementation(routeGet())
-    render(
-      <OverviewTab
-        onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
-        hasPermission={() => true} onNavigateTab={vi.fn()}
-      />
-    )
-    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-
-    expect(document.querySelector('.kpi-item-alert')).toBeNull()
-    expect(screen.queryByText(/Quarantined/)).toBeNull()
   })
 
   it('files a dropped device into the target cell even when that cell has no gateway', async () => {
@@ -344,7 +303,7 @@ describe('OverviewTab shopfloor map', () => {
 
     await applyRearrange()
     expect(sentBatch()).toEqual([
-      { device_id: 'dev-1', cell_id: 'cell-1', location_scope: 'cell' }
+      { device_id: 'dev-1', cell_id: 'cell-1', area_id: null, location_scope: 'cell' }
     ])
     // The data path is not touched: dragging a machine across the floor plan says where it is,
     // not which connector reaches it. The move carries no gateway at all.
@@ -563,7 +522,7 @@ describe('OverviewTab shopfloor map', () => {
     const unassignedLane = screen.getByTitle(/work queue, not a location/i)
     expect(within(unassignedLane).queryByText('Site_Connector')).not.toBeInTheDocument()
     // Nothing stranded, so the queue has collapsed to its one-line form.
-    expect(within(unassignedLane).getByText(/All clear/i)).toBeInTheDocument()
+    expect(within(unassignedLane).getByText(/No Unassigned Assets/i)).toBeInTheDocument()
   })
 
   /**
@@ -587,7 +546,7 @@ describe('OverviewTab shopfloor map', () => {
       expect(lane.querySelector('.zone-body')).toBeTruthy()
       expect(within(lane).getByText('GW: 0 | Dev: 0')).toBeInTheDocument()
       // "All clear" -- empty here is a RESULT, not an invitation to fill it.
-      expect(within(lane).getByText(/All clear/i)).toBeInTheDocument()
+      expect(within(lane).getByText(/No Unassigned Assets/i)).toBeInTheDocument()
     })
 
     it('gives the lanes a row of their own, at the same tile size as the cells', async () => {
@@ -623,7 +582,7 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Unassigned')).toBeInTheDocument())
 
       const lane = laneOf(/work queue, not a location/i)
-      expect(within(lane).getByText(/All clear/i)).toBeInTheDocument()
+      expect(within(lane).getByText(/No Unassigned Assets/i)).toBeInTheDocument()
 
       enableRearrange()
       fireEvent.drop(lane, {
@@ -637,7 +596,7 @@ describe('OverviewTab shopfloor map', () => {
 
       await applyRearrange()
       expect(sentBatch()).toEqual([
-        { device_id: 'dev-1', cell_id: null, location_scope: 'cell' }
+        { device_id: 'dev-1', cell_id: null, area_id: null, location_scope: 'cell' }
       ])
     })
 
@@ -654,7 +613,7 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Orphan_CNC')).toBeInTheDocument())
 
       const lane = laneOf(/work queue, not a location/i)
-      expect(within(lane).queryByText(/All clear/i)).toBeNull()
+      expect(within(lane).queryByText(/No Unassigned Assets/i)).toBeNull()
       expect(within(lane).getByText('GW: 0 | Dev: 1')).toBeInTheDocument()
       expect(within(lane).getByText('Orphan_CNC')).toBeInTheDocument()
     })
@@ -671,7 +630,7 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Unassigned')).toBeInTheDocument())
 
       const lane = laneOf(/work queue, not a location/i)
-      expect(within(lane).queryByText(/All clear/i)).toBeNull()
+      expect(within(lane).queryByText(/No Unassigned Assets/i)).toBeNull()
       expect(within(lane).getByText('Homeless_Gateway')).toBeInTheDocument()
     })
 
@@ -748,8 +707,8 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
 
       const lane = laneOf(/permanent home, not a queue/i)
-      expect(within(lane).getByText(/Drop a BMS, AGV or ambient sensor here/i)).toBeInTheDocument()
-      expect(within(lane).queryByText(/All clear/i)).toBeNull()
+      expect(within(lane).getByText(/No site-wide assets/i)).toBeInTheDocument()
+      expect(within(lane).queryByText(/No Unassigned Assets/i)).toBeNull()
     })
   })
 
@@ -769,9 +728,11 @@ describe('OverviewTab shopfloor map', () => {
 
     // The lane row holds the lanes and only the lanes.
     expect([...lanes.querySelectorAll(':scope > .shopfloor-zone')]).toEqual(laneTiles())
-    // The cell grid holds cells and only cells.
+    // The cell grid holds the areas' contents: cells, and an area's Area-Wide tile, which
+    // belongs to that area and not to the campus row. No area here, so cells only.
     expect([...grid.querySelectorAll(':scope > .shopfloor-zone')]
-      .every(t => t.className.includes('shopfloor-cell'))).toBe(true)
+      .every(t => t.className.includes('shopfloor-cell') || t.className.includes('shopfloor-lane-area'))).toBe(true)
+    expect(grid.querySelectorAll('.shopfloor-lane-area')).toHaveLength(0)
     // And the lanes come first in the document, which is what "above" means without layout.
     expect(lanes.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -877,7 +838,7 @@ describe('OverviewTab shopfloor map', () => {
 
     await applyRearrange()
     expect(sentBatch()).toEqual([
-      { device_id: 'dev-1', cell_id: null, location_scope: 'site_wide' }
+      { device_id: 'dev-1', cell_id: null, area_id: null, location_scope: 'site_wide' }
     ])
   })
 
@@ -912,7 +873,7 @@ describe('OverviewTab shopfloor map', () => {
 
     await applyRearrange()
     expect(sentBatch()).toEqual([
-      { device_id: 'dev-1', cell_id: null, location_scope: 'cell' }
+      { device_id: 'dev-1', cell_id: null, area_id: null, location_scope: 'cell' }
     ])
     // And the data path is untouched.
     expect('active_gateway_id' in sentBatch()[0]).toBe(false)

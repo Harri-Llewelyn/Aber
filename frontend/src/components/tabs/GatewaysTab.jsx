@@ -5,7 +5,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
-  gatewayLiveStatus, isGatewayPending, formatHeartbeat,
+  gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat,
   formatCertExpiry, isCertExpiring, formatBytes, CERT_EXPIRY_WARN_DAYS
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
@@ -15,7 +15,9 @@ import {
 } from '../../utils/gatewayType'
 import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
-import { SCOPE_CELL, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
+import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
+import { isShadowGateway } from '../../utils/fleetCounts'
+import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { StatusBadge } from '../common/StatusBadge'
@@ -39,7 +41,7 @@ import {
   IconExternalLink,
   IconZap,
   IconShieldAlert,
-  IconMap,
+  IconLayoutDashboard,
   IconX,
   IconDownload,
   IconLock
@@ -67,7 +69,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // `location_scope` defaults to 'cell'. `deployment` is a different question: where the connector
   // runs, not where the assets are. 'remote' is the default because it is the case that needs
   // setup, and it finishes with a bundle to install.
-  const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', deployment: 'remote', is_simulated: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
+  const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', deployment: 'remote', is_simulated: false, access_url: '', cell_id: '', area_id: '', location_scope: SCOPE_CELL }
+  const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
   // Derived, not a second piece of state: the form carries `deployment` and `is_simulated` because
   // that is what the API takes; the select carries one word.
@@ -127,12 +130,14 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     try {
       // Each gateway arrives with its devices embedded, so an assignment made anywhere shows on the
       // next poll. The flat device list still surfaces devices that belong to no gateway.
-      const [g, a, c] = await Promise.all([
+      const [g, a, c, ar] = await Promise.all([
         api.get('/api/v1/gateways', { signal }),
         api.get('/api/v1/devices', { signal }),
-        api.get('/api/v1/cells', { signal })
+        api.get('/api/v1/cells', { signal }),
+        // Tolerated: without it the picker simply offers no Area-Wide entries.
+        api.get('/api/v1/areas', { signal }).catch(() => [])
       ])
-      setGateways(g); setAssets(a); setCells(c)
+      setGateways(g); setAssets(a); setCells(c); setAreas(ar)
 
       /* This person's open proposals, so the edit dialog can seed itself with an open patch rather
          than replace it. Tolerated rather than required. */
@@ -259,6 +264,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   const canOpenForge = userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 
   const unassignedDevices = assets.filter(a => !a.is_archived && !a.active_gateway_id)
+  // The gateways that should be reporting and are not: the rail's amber for this page, and the
+  // same rule as gatewayFleetCounts(). Awaiting setup is an unfinished task, not a fault, and the
+  // playback lane is not a connector to any machine.
+  const offlineGateways = gateways.filter(g => !g.is_archived && !isShadowGateway(g) && !isGatewayPending(g) && !isGatewayOnline(g))
 
   // Built from the flat device list: ingestion records the arriving edge node on a quarantined
   // device, so a device held on a gateway is attributable before it is approved.
@@ -325,12 +334,25 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         </div>
       )}
 
+      {/* Says what the rail's colour means before the table is read: which gateways are silent,
+          and that their devices are silent with them. */}
+      {offlineGateways.length > 0 && (
+        <div style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px var(--inset)', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <IconShieldAlert size={18} style={{ flexShrink: 0 }} />
+          <span>
+            <strong>{offlineGateways.length} gateway{offlineGateways.length === 1 ? '' : 's'} offline:</strong>{' '}
+            {offlineGateways.slice(0, 5).map(g => g.gateway_name).join(', ')}{offlineGateways.length > 5 ? ', …' : ''}.
+            Every device underneath is silent with it. Check the appliance, its network, and its broker credential.
+          </span>
+        </div>
+      )}
+
       {/* One card: title, description, primary action, filters, table. See CellsTab's note on why
           the filter bar came inside rather than floating above. */}
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">
-            Edge Gateways
+            Gateways
             <HelpTip
               label="About gateways"
               text="A gateway is an edge node: the thing that publishes to the broker, and the identity every topic beneath it is pinned to. Its devices reach the platform through it, so status here is derived from the last heartbeat rather than from anything the gateway asserts about itself."
@@ -341,7 +363,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             style={{ marginLeft: 'auto' }}
             disabled={!canManage}
             onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
-            title={!canManage ? 'Requires Admin permissions' : 'Register new edge gateway'}
+            title={!canManage ? 'Requires Admin permissions' : 'Register new gateway'}
           >
             <IconPlus size={14} /> New Gateway
           </button>
@@ -422,7 +444,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
          filteredGateways.length === 0 ? (
            <div className="empty-state">
              <div className="empty-icon"><IconRadio size={36} /></div>
-             <div className="empty-text">No edge gateways match the selected filter.</div>
+             <div className="empty-text">No gateways match the selected filter.</div>
            </div>
          ) : (
            <div className="table-wrap">
@@ -432,7 +454,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                    <th title="Human-readable gateway name">Gateway Name</th>
                    <th title="The gateway's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug edge node id is derived from this, so nothing is lost by showing it here.">Gateway UUID</th>
                    <th title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Shadow (republishes recorded captures)">Type</th>
-                   <th title="Shopfloor cell zone this gateway serves">Cell Zone</th>
+                   <th title="Where this gateway serves: a cell, a whole area, or the whole site">Location</th>
                    <th title="Network connectivity status">Gateway Status</th>
                    <th title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</th>
                    <th title="Devices assigned to this gateway">Connected Devices</th>
@@ -485,7 +507,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                            {!gatewayAcceptsCell(g)
                              ? <span style={{ fontSize: '11px', color: 'var(--text-dim)' }} title={`${gatewayTypeLabel(gatewayType(g))} gateways have no cell: their devices resolve to the ${gatewayTypeLabel(gatewayType(g))} lane, which takes precedence over cell membership.`}>—</span>
                              : g.location_scope === SCOPE_SITE_WIDE
-                               ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Serves the whole facility rather than one cell. Its devices need their own cell.">Site-Wide</span>
+                               ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Serves the whole campus rather than one cell. Its devices need their own cell.">Site-Wide</span>
+                               : g.location_scope === SCOPE_AREA_WIDE
+                                 ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title={`Serves the whole of ${areas.find(ar => ar.area_id === g.area_id)?.area_name || 'its area'} rather than one cell. Its devices need their own cell.`}>Area-Wide</span>
                                : g.cell_id
                                  ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
                                  : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Devices on this gateway inherit no cell, so they land in the Unassigned queue">No cell</span>}
@@ -589,7 +613,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                   // refuses a simulated gateway holding a cell, and the offending field is disabled
                   // below.
                   ...(e.target.value === GATEWAY_TYPES.SIMULATED
-                    ? { cell_id: '', location_scope: SCOPE_CELL }
+                    ? { cell_id: '', area_id: '', location_scope: SCOPE_CELL }
                     : {})
                 }))}
                 title="Where this gateway's connector runs, and whether its readings are real"
@@ -607,42 +631,35 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               {!editing && formType === GATEWAY_TYPES.REMOTE
                 && ' On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
             </div>
-            {/* Site-Wide is an option in this list, not a checkbox:
-                `gateways_site_wide_has_no_cell` makes the answers exclusive. Its value cannot
-                collide with a cell UUID. */}
+            {/* One exclusive choice of scope, then the cell or the area it calls for. The
+                scopes are exclusive by CHECK (`gateways_site_wide_has_no_cell` and the area-wide
+                pair), which is what a radio group says. Reads as In a cell with none chosen for
+                a synthetic gateway whatever is stored: `device_locations` resolves `simulated`
+                ahead of the stored scope. A display fallback, not a write; clearing happens only
+                on the type change that would make the row unsavable. */}
             <div className="form-group">
-              <label className="form-label" htmlFor="gateway-cell-zone">Shopfloor Cell Zone</label>
-              <select
-                id="gateway-cell-zone"
-                className="form-control"
-                // Reads as No cell for a synthetic gateway whatever is stored: `device_locations`
-                // resolves `simulated` ahead of the stored scope. A display fallback, not a write;
-                // clearing happens only on the type change that would make the row unsavable.
-                value={!formAcceptsCell
-                  ? ''
-                  : form.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : (form.cell_id || '')}
+              <label className="form-label">Location</label>
+              <LocationPicker
+                idPrefix="gateway"
+                form={form}
+                onChange={fields => setForm(f => ({ ...f, ...fields }))}
+                cells={cells}
+                areas={areas}
                 disabled={!formAcceptsCell}
-                onChange={e => setForm(f => (e.target.value === SCOPE_SITE_WIDE
-                  ? { ...f, location_scope: SCOPE_SITE_WIDE, cell_id: '' }
-                  : { ...f, location_scope: SCOPE_CELL, cell_id: e.target.value }))}
                 title={formAcceptsCell
-                  ? 'Cell this gateway serves — its devices inherit this cell unless they carry one of their own'
+                  ? undefined
                   : 'A simulated gateway belongs to the Simulated lane, which resolves ahead of any cell'}
-              >
-                <option value="">— No cell assigned —</option>
-                <option value={SCOPE_SITE_WIDE}>Site-Wide — serves no single cell</option>
-                {cells.filter(c => !c.is_archived).map(c => (
-                  <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
-                ))}
-              </select>
+                cellEmptyLabel="— No cell assigned —"
+                cellTitle="Cell this gateway serves — its devices inherit this cell unless they carry one of their own"
+              />
 
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
                 {!formAcceptsCell
                   /* Says which lane it lands in instead, so the disabled control reads as an
                      answer already given rather than as a field that failed to load. */
                   ? 'Simulated gateways have no cell: their devices resolve to the Simulated lane, which takes precedence over cell membership. gateways_synthetic_has_no_cell (0059) refuses the pairing outright.'
-                  : form.location_scope === SCOPE_SITE_WIDE
-                    ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
+                  : form.location_scope === SCOPE_SITE_WIDE || form.location_scope === SCOPE_AREA_WIDE
+                    ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide or Area-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
                     : form.cell_id
                       ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
                       : null}
@@ -672,9 +689,13 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                title={proposeMode
-                  ? 'Ask for these changes — an approver applies them, or says why not'
-                  : 'Save gateway configuration'}
+                // Area-Wide with no area named would be refused by the database; held here.
+                disabled={locationIncomplete(form)}
+                title={locationIncomplete(form)
+                  ? 'Choose which area the gateway serves'
+                  : proposeMode
+                    ? 'Ask for these changes — an approver applies them, or says why not'
+                    : 'Save gateway configuration'}
               >
                 {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
@@ -726,7 +747,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               : 'The NDATA topic this edge node publishes on. No Sparkplug group is recorded for it, so that segment is a wildcard.'
           },
           {
-            label: 'Cell Zone',
+            label: 'Location',
             // A link when there is a cell to open. Site-Wide stays plain text: it asserts the
             // gateway belongs to no cell. Same three-way as the column, since on a synthetic
             // gateway the stored scope is inert.
@@ -734,6 +755,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               ? `${gatewayTypeLabel(gatewayType(selected))} — no cell`
               : selected.location_scope === SCOPE_SITE_WIDE
                 ? 'Site-Wide'
+                : selected.location_scope === SCOPE_AREA_WIDE
+                  ? `Area-Wide — ${areas.find(ar => ar.area_id === selected.area_id)?.area_name || selected.area_id}`
                 : selectedCell
                   ? (
                       <button
@@ -741,7 +764,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                         onClick={() => onSelectCell?.(selectedCell.cell_id)}
                         title="Open this cell on the Cells page"
                       >
-                        <IconMap size={11} />
+                        <IconLayoutDashboard size={11} />
                         <span className="chip-name">{selectedCell.cell_name}</span>
                       </button>
                     )
@@ -749,8 +772,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             title: !gatewayAcceptsCell(selected)
               ? `Its devices resolve to the ${gatewayTypeLabel(gatewayType(selected))} lane, which takes precedence over cell membership. gateways_synthetic_has_no_cell (0059) refuses the pairing.`
               : selected.location_scope === SCOPE_SITE_WIDE
-                ? 'A host-run or central connector serving the whole facility. Its devices inherit no cell from it.'
-                : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
+                ? 'A host-run or central connector serving the whole campus. Its devices inherit no cell from it.'
+                : selected.location_scope === SCOPE_AREA_WIDE
+                  ? 'A connector serving one whole area. Its devices inherit no cell from it.'
+                  : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
           /**
@@ -930,7 +955,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 ? openProposals.find(pr => pr.entity_type === 'gateways' && pr.entity_id === selected.gateway_id)
                 : null
               setEditingProposal(mine || null)
-              setForm({ ...selected, ...formFromPatch('gateway', mine?.patch) })
+              // The picker wants '' for no area, not null.
+              setForm({ ...selected, area_id: selected.area_id || '', ...formFromPatch('gateway', mine?.patch) })
               setShowForm(true)
             },
             disabled: !canManage && !canPropose,

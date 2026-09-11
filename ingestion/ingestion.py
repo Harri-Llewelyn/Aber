@@ -18,6 +18,7 @@ from metrics import start_metrics_server
 import capture_worker
 # Imported at module level so a syntax error in it is a startup failure.
 import directory_publish
+import uns_publish
 
 logger = get_logger("ingestion")
 
@@ -593,6 +594,23 @@ def observe_write_seconds(seconds: float):
         # Above the last finite bucket. Nothing to increment -- +Inf is derived from the total at
         # render time, so an outlier is still counted in `_count` and still moves `_sum`.
 
+# The UNS bridge's publish, timed the same way: it runs on the same callback thread after the
+# commit, so its cost is part of the single-writer ceiling and belongs beside the write's.
+_uns_seconds_buckets = [0] * len(WRITE_SECONDS_BUCKETS)
+_uns_seconds_sum = 0.0
+_uns_seconds_count = 0
+
+def observe_uns_seconds(seconds: float):
+    """Record one UNS republish pass for a message, published or skipped."""
+    global _uns_seconds_sum, _uns_seconds_count
+    with _counters_lock:
+        _uns_seconds_count += 1
+        _uns_seconds_sum += seconds
+        for i, upper in enumerate(WRITE_SECONDS_BUCKETS):
+            if seconds <= upper:
+                _uns_seconds_buckets[i] += 1
+                return
+
 def histogram_snapshot() -> dict:
     """Histogram state, in the shape metrics.render_exposition() takes."""
     with _counters_lock:
@@ -601,7 +619,12 @@ def histogram_snapshot() -> dict:
                 "buckets": tuple(zip(WRITE_SECONDS_BUCKETS, _write_seconds_buckets)),
                 "sum": _write_seconds_sum,
                 "count": _write_seconds_count,
-            }
+            },
+            "acs_ingestion_uns_publish_seconds": {
+                "buckets": tuple(zip(WRITE_SECONDS_BUCKETS, _uns_seconds_buckets)),
+                "sum": _uns_seconds_sum,
+                "count": _uns_seconds_count,
+            },
         }
 
 def diagnose_device_identity(wire_id: str):
@@ -2606,6 +2629,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # Outside `with db_conn`: the block commits on exit, and the commit is where a hypertable
         # write becomes durable. Reached only when the commit succeeded.
         observe_write_seconds(time.perf_counter() - write_started)
+
+        # After the commit, so the UNS carries only what the historian recorded. Off by default,
+        # never raises, and timed into its own histogram (uns_publish.py).
+        uns_publish.publish_ddata(
+            client, supabase_client, device, group_id or DEFAULT_SPARKPLUG_GROUP, rows,
+            count=count, observe=observe_uns_seconds,
+        )
     except Exception as e:
         # The whole message is lost: `with db_conn` rolled the transaction back, so none of the
         # batch landed. Counted so the loss is visible in STATS rather than only in the log --
@@ -3300,6 +3330,9 @@ def main():
     # it logs which. The Directory is derived from the enrolment records, not from the birth
     # stream: publishing a DBIRTH does not make an unenrolled device a resolvable address.
     directory_publish.start(client, supabase_client)
+    # The UNS bridge publishes from the DDATA path itself and only needs to say which state it is
+    # in; a bridge that is off and silent reads the same as one that is on and failing.
+    uns_publish.announce()
 
     # Last of the background threads, because it needs the outcome of the steps above. On a clean
     # start both flags are False and this thread only keeps the historian gauge honest.

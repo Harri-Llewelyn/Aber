@@ -541,38 +541,13 @@ describe('shopfloor grid across viewports', () => {
 })
 
 /**
- * The KPI ribbon's geometry, read from App.css: without the equal grid the segments size to their
- * text and the dividers land nowhere, without `stretch` the dividers collapse into stubs, and
- * without the inset shadow the quarantine bar paints against the divider as one smear.
+ * The rail's warning tone, read from App.css: a page with work waiting is coloured, but the
+ * current page keeps its accent, since which page you are on outranks what is waiting there.
  */
-describe('KPI ribbon geometry', () => {
-  const rule = (selector) =>
-    APP_CSS.match(new RegExp(`${selector.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
-
-  it('divides the full width into three equal columns', () => {
-    const ribbon = rule('.kpi-ribbon')
-    expect(ribbon).toMatch(/display:\s*grid/)
-    expect(ribbon).toMatch(/grid-template-columns:\s*repeat\(3,\s*1fr\)/)
-    expect(ribbon).toMatch(/width:\s*100%/)
-    expect(ribbon).toMatch(/height:\s*48px/)
-  })
-
-  it('stretches the segments so the dividers run the bar\'s full height', () => {
-    expect(rule('.kpi-ribbon')).toMatch(/align-items:\s*stretch/)
-    // The content is centred inside each segment instead.
-    const item = rule('.kpi-item')
-    expect(item).toMatch(/align-items:\s*center/)
-    expect(item).toMatch(/justify-content:\s*center/)
-  })
-
-  it('rules between the columns and not against the ribbon\'s own edge', () => {
-    expect(APP_CSS).toMatch(/\.kpi-item:not\(:last-child\)\s*\{\s*border-right:\s*1px solid var\(--border\)/)
-  })
-
-  it('paints the quarantine bar inside the segment, so it cannot merge with a divider', () => {
-    const alert = rule('.kpi-item-alert')
-    expect(alert).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--warning\)/)
-    expect(alert).not.toMatch(/border-left/)
+describe('sidebar warning tone', () => {
+  it('colours a flagged item, and never the current page', () => {
+    expect(APP_CSS).toMatch(/\.sidebar-item\.sidebar-item-warning:not\(\.active\) \{ color: var\(--warning-text\); \}/)
+    expect(APP_CSS).not.toMatch(/\.kpi-/)
   })
 })
 

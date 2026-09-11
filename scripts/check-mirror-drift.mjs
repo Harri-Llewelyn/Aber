@@ -224,10 +224,10 @@ const compare = (mirror, label, jsValue, sqlValue) => {
       ok.push('cellResolution: shadow resolves ahead of simulated on both sides');
     }
 
-    // The six location_source labels are a closed set the UI switches on. `THEN` and `ELSE`,
+    // The seven location_source labels are a closed set the UI switches on. `THEN` and `ELSE`,
     // because 'unassigned' is the CASE's fall-through. The alternation is spelled out so adding a
     // lane is a deliberate edit here too.
-    const sqlSources = [...new Set([...body.matchAll(/(?:THEN|ELSE) '(site_wide|explicit|inherited|unassigned|simulated|shadow)'::text/g)].map((m) => m[1]))].sort();
+    const sqlSources = [...new Set([...body.matchAll(/(?:THEN|ELSE) '(site_wide|area_wide|explicit|inherited|unassigned|simulated|shadow)'::text/g)].map((m) => m[1]))].sort();
     const jsSources = [...new Set([...js.matchAll(/export const SOURCE_[A-Z_]+ = '([a-z_]+)'/g)].map((m) => m[1]))].sort();
     compare('cellResolution', 'location_source labels', jsSources.join(','), sqlSources.join(','));
   }

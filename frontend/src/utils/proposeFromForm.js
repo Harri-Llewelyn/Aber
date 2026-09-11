@@ -28,6 +28,7 @@ export const PROPOSAL_FORMS = {
       description: 'description',
       connection_method: 'connection_method',
       cell_id: 'cell_id',
+      area_id: 'area_id',
       location_scope: 'location_scope'
     },
     // WHY EACH ONE IS OUT, in the words the form shows the reader.
@@ -65,7 +66,10 @@ export const PROPOSAL_FORMS = {
     fields: {
       cell_name: 'name',
       access_url: 'grafana_url',
-      icon: 'icon'
+      icon: 'icon',
+      area_id: 'area_id',
+      floor: 'floor',
+      description: 'description'
     },
     withheld: {}
   },
@@ -77,6 +81,7 @@ export const PROPOSAL_FORMS = {
       description: 'description',
       access_url: 'access_url',
       cell_id: 'cell_id',
+      area_id: 'area_id',
       location_scope: 'location_scope'
     },
     withheld: {

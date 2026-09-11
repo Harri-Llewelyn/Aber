@@ -13,7 +13,7 @@ it leaves this file and its substance moves into the documentation of the compon
 **Ordering.** 1–5 are the platform's own: the one item somebody else sets the deadline for, then
 the identity and operations chain. 6–8 are the edge chain, in dependency order: 6 makes a gateway's
 flow reviewable, 7 makes the appliance a managed artefact and shares 6's puller, 8 removes what 6
-replaced. 9 is a feature request. 10 runs under every other item and sits last.
+replaced. 9 runs under every other item. 10 is a rename and sits last because nothing depends on it.
 
 **Retired entries, and where their substance went.**
 
@@ -32,6 +32,7 @@ replaced. 9 is a feature request. 10 runs under every other item and sits last.
 | The demonstration floor and simulator | Removed; [`tutorial/README.md`](../tutorial/README.md) builds one machine by hand |
 | Horizontal ingestion scaling | Answered, not built: [The single-writer ceiling](../ingestion/README.md#the-single-writer-ceiling) |
 | Ingress → Gateway API for CORS | Answered, not built: it would state origin policy a second way on one of two targets |
+| The ISA-95 Unified Namespace bridge (`0097`) | [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) for the bridge; [`supabase/README.md`](../supabase/README.md#the-plant-gains-areas-and-a-third-scope-0097) for the areas, the site setting and the `area_wide` scope |
 
 ---
 
@@ -368,29 +369,7 @@ notes about a gateway live, so a delete is a decision and never a cascade. Decid
 
 ---
 
-## 9 · An ISA-95 Unified Namespace bridge
-
-**Builds on:** the DDATA path in [`ingestion.py`](../ingestion/ingestion.py) ·
-`public.device_locations` · `cells` · `devices.location_scope` ·
-[`mosquitto.acl`](../mosquitto/mosquitto.acl) ·
-issue [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66)
-
-Republish decoded values on plain `uns/...` topics so a BI tool or SCADA client can read one number
-without a protobuf decoder. Nothing exists yet.
-
-**The hierarchy the issue names is not in the schema.** ISA-95 has six levels; this stack has two
-(`cells` and `devices`). `ACS-Cymru` is the Sparkplug group id and `Factory2050` does not exist as
-data. The missing levels are either configuration (`system_settings`, right for one site and wrong
-for two) or columns on `cells`. Build on `device_locations`, not `devices.cell_id` (an override
-whose `NULL` means inherit), and give `location_scope = 'site_wide'` devices somewhere real to live.
-
-Publishing from the ingestion callback thread puts a second publish on the single-writer path;
-instrument it the same way. A `uns/#` tree any gateway credential could read would let one machine's
-credential read the whole plant, which the per-node ACL currently prevents.
-
----
-
-## 10 · The transport between services
+## 9 · The transport between services
 
 **Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
 [`internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
@@ -434,3 +413,30 @@ complete answer and does nothing for Compose.
 **Worth deciding early.** Whether Compose is in scope for the posture or only the transport.
 `require` or `verify-full` for Postgres. `internalClients` and any remaining loopback bindings flip
 in separate changes.
+
+---
+
+## 10 · Cells become work centers
+
+**Builds on:** `public.cells` and everything that names it · `public.areas` (`0097`) ·
+[The Unified Namespace](../ingestion/README.md#the-unified-namespace) ·
+[`CONTRIBUTING.md`](../CONTRIBUTING.md)
+
+The stack's data model uses plant words where the standards have their own: a `cell` is an ISA-95
+work center, and the Areas page and the `uns/` topics were the first surfaces to use the standard's
+word deliberately. The remaining inconsistency is the table, its API routes, its permission
+(`cell:manage`), its proposal lane, the `CELL` thread kind and the word on every page.
+
+**`devices` stays.** A device is Sparkplug's word and the row is a Sparkplug device; "work unit" is
+the ISA-95 view of the same row and appears only where the hierarchy is being named. ISA-95 also
+uses "cell" at both levels (a process cell is a work center type, a work cell a work unit type), so
+the rename resolves an ambiguity the standard itself carries.
+
+**Decided:** the rename is a migration and a sweep, not a synonym layer. A view named `cells` over
+`work_centers` would give the frontend two names for one thing, which is the state this entry
+exists to remove. The migration is additive-then-subtractive across two releases so the frontend
+and the edge functions can move between them; the `cell:manage` permission UUID is immutable and
+only its name changes. `sparkplug_id` and every topic are untouched: a cell is not addressed on the
+wire.
+
+**Must not touch:** the `uns/` topic shape, which already uses the cell's name and not the table's.

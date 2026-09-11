@@ -556,6 +556,12 @@ html, body, #root {
   outline-offset: 1px;
 }
 
+/* A page with work waiting: the icon and label take the warning colour, and the item's title and
+   aria-label say what the work is (hooks/useNavSignals.js). The current page keeps its accent,
+   since which page you are on outranks what is waiting there. */
+.sidebar-item.sidebar-item-warning:not(.active) { color: var(--warning-text); }
+.sidebar-item.sidebar-item-warning:not(.active):hover { color: var(--warning-text); }
+
 /* Global search, the centre of the top bar. `flex: 0 1 480px` against two `flex: 1 1 0` flanks, so
    it sits on the bar's true centre and shrinks before the brand does. */
 .global-search {
@@ -844,98 +850,6 @@ html, body, #root {
 .count-link:disabled:hover .section-count {
   background: var(--accent-dim);
   color: var(--accent);
-}
-
-/* KPI ribbon: one 48px bar of figures above the shopfloor map. The headline is "n/N Active", since
-   the question this bar answers is whether everything is up; the Offline/Archived split is on each
-   item's `title`. */
-/* Three equal columns, not three centred items, so the dividers read as structure. `align-items:
-   stretch`, not `center`: the items must run the full height or their right borders collapse into
-   stubs. Each item centres its own content. */
-.kpi-ribbon {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  align-items: stretch;
-  width: 100%;
-  height: 48px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  margin-bottom: 14px;
-  overflow: hidden;
-}
-
-.kpi-item {
-  display: flex;
-  /* `center`, not `baseline`: in a stretched item a common baseline pins the group to the top of
-     the bar. */
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  gap: 8px;
-  /* The grid track now supplies the width, so this is only breathing room -- and it has to stay
-     modest, because the content is `nowrap` and a wide padding would overflow its third of the bar
-     on a narrow window rather than wrapping. */
-  padding: 0 16px;
-  border: none;
-  background: none;
-  font-family: 'Outfit', sans-serif;
-  cursor: pointer;
-  transition: var(--transition);
-  white-space: nowrap;
-  min-width: 0;
-}
-
-/* Rules between the columns rather than gaps, so the ribbon is one object. The items stretch, so
-   each border runs the full height; the last item is excluded so there is no inner edge against the
-   ribbon's own border. */
-.kpi-item:not(:last-child) { border-right: 1px solid var(--border); }
-
-.kpi-item:hover { background: var(--bg-glass); }
-.kpi-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-
-.kpi-label {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.9px;
-  color: var(--text-muted);
-}
-
-.kpi-value {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary);
-  line-height: 1;
-}
-
-/* The denominator is deliberately quieter than the numerator. "1/1" and "1/9" want to be told
-   apart at a glance, and it is the first number that moves. */
-.kpi-total { color: var(--text-muted); font-weight: 500; }
-
-.kpi-unit { font-size: 11px; color: var(--text-muted); }
-
-/* Raised on the item whose figure needs an operator to act: Devices, while any device is held in
-   quarantine. themeContrast.test.js measures this fill as "--warning-text on alert card". Colour is
-   never the only signal: the item also grows an icon and the word "Quarantined". */
-/* The amber bar is an inset shadow, not a border-left, so it occupies no layout and the 1px divider
-   beside it stays clean. */
-.kpi-item-alert {
-  box-shadow: inset 3px 0 0 var(--warning);
-  background: linear-gradient(to right, rgba(255, 179, 0, 0.07), var(--bg-card) 70%);
-}
-
-.kpi-item-alert:hover { background: rgba(255, 179, 0, 0.12); }
-
-.kpi-alert-flag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--warning-text);
 }
 
 /* ===== Table ===== */
@@ -1822,6 +1736,70 @@ tbody tr:hover { background: var(--bg-glass); }
 .shopfloor-zone.shopfloor-lane-site {
   border-color: var(--accent);
   background: rgba(0, 212, 255, 0.05);
+}
+
+/* Area-Wide shares Site-Wide's hue: both are permanent homes for assets that belong to no single
+   cell, one building up and one campus up. */
+.shopfloor-zone.shopfloor-lane-area {
+  border-color: var(--accent);
+  background: rgba(0, 212, 255, 0.05);
+}
+
+.shopfloor-zone.shopfloor-lane-area:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.2);
+}
+
+/* The rungs above the map: enterprise, then site. Small caps for the level, the name beside it. */
+.site-hierarchy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.site-hierarchy-level {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.site-hierarchy-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.site-hierarchy-value { font-weight: 600; color: var(--text-primary); }
+
+/* The site's name is what the Unified Namespace publishes under; while it is empty the bridge is
+   inert, so its absence is said in the warning colour. */
+.site-hierarchy-unset { color: var(--warning-text); font-style: italic; }
+
+.site-hierarchy-sep { color: var(--text-dim); }
+
+/* The area selector above the map: one button per area, "All areas" first. */
+.shopfloor-areas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+/* A floor heading inside the cell grid spans the row. */
+.shopfloor-floor-heading {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 4px 0 -4px;
 }
 
 /* Simulated is grey rather than a fifth hue: --accent and --warning carry infrastructure and
@@ -4001,3 +3979,37 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .sidebar-mode-option-label { display: block; font-weight: 600; }
 .sidebar-mode-option-desc { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* The location picker (common/LocationPicker.jsx): three exclusive choices in a row, then the
+   dropdown the choice calls for beneath. Native radios, so the exclusivity is the browser's. */
+.location-picker-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-bottom: 8px;
+}
+
+.location-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.location-choice input[type="radio"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.location-choice.is-disabled {
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
+.location-picker-fixed {
+  font-size: 13px;
+  padding: 6px 0;
+  color: var(--text-muted);
+}

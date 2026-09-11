@@ -60,7 +60,7 @@ export default async function handler(req: Request): Promise<Response> {
 
 
     const {
-      device_id, gateway_id, merge_into_device_id, asset_name, cell_id, location_scope
+      device_id, gateway_id, merge_into_device_id, asset_name, cell_id, area_id, location_scope
     } = await req.json();
 
     if (!device_id) {
@@ -99,9 +99,24 @@ export default async function handler(req: Request): Promise<Response> {
       normalisedCell = trimmed || null;
     }
 
+    // The area, under the same absent-or-empty rule as the cell. Only area_wide stores one
+    // (`devices_area_wide_names_its_area`), and it must.
+    const setArea = area_id !== undefined;
+    let normalisedArea: string | null = null;
+    if (setArea) {
+      const trimmed = typeof area_id === "string" ? area_id.trim() : area_id;
+      if (trimmed && !isUuid(trimmed)) {
+        return badRequest("area_id must be an area UUID");
+      }
+      normalisedArea = trimmed || null;
+    }
+
     const setLocationScope = location_scope !== undefined;
-    if (setLocationScope && location_scope !== "cell" && location_scope !== "site_wide") {
-      return badRequest("location_scope must be 'cell' or 'site_wide'");
+    if (setLocationScope && location_scope !== "cell" && location_scope !== "site_wide" && location_scope !== "area_wide") {
+      return badRequest("location_scope must be 'cell', 'area_wide' or 'site_wide'");
+    }
+    if (setLocationScope && location_scope === "area_wide" && !normalisedArea) {
+      return badRequest("area_id is required when location_scope is 'area_wide'");
     }
 
     if (gateway_id !== undefined && gateway_id !== null && gateway_id !== "" && !isUuid(gateway_id)) {
@@ -125,6 +140,8 @@ export default async function handler(req: Request): Promise<Response> {
       p_location_scope: setLocationScope ? location_scope : null,
       p_set_cell: setCell,
       p_set_location_scope: setLocationScope,
+      p_area_id: normalisedArea,
+      p_set_area: setArea,
     });
 
     if (rpcError) {

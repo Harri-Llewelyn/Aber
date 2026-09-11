@@ -1,12 +1,14 @@
 import React, { useState } from 'react'
 import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
+import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { usePendingKey } from '../../hooks/usePendingAction'
 import { gatewayAcceptsDevices } from '../../utils/gatewayType'
+import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
 
-export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onApprove, onMerge, onCancel }) {
+export function ApproveQuarantineModal({ item, cells, gateways, areas = [], suggestion, onApprove, onMerge, onCancel }) {
   // One key space across both buttons: approving as new and merging into the suggested match are
   // two answers to the same question, so running one locks the other.
   const [busy, runBusy] = usePendingKey()
@@ -20,27 +22,30 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
   const [connMethod, setConnMethod] = useState('Sparkplug B')
   const [gatewayId, setGatewayId] = useState(item.gateway_id || (gateways[0] ? gateways[0].gateway_id : ''))
 
-  // The cell is chosen here because the operator is already looking at the device. Empty means
-  // inherit from the gateway, as on the Devices form; forcing a value would store an override that
-  // stops tracking the gateway.
-  const [cellId, setCellId] = useState('')
-  const [siteWide, setSiteWide] = useState(false)
+  // The location is chosen here because the operator is already looking at the device. The same
+  // picker as the Devices form: an empty cell means inherit from the gateway, and forcing a value
+  // would store an override that stops tracking the gateway.
+  const [location, setLocation] = useState({ cell_id: '', area_id: '', location_scope: SCOPE_CELL })
+  const scope = location.location_scope
+  const cellId = scope === SCOPE_CELL ? location.cell_id : ''
 
   const selectedGateway = gateways.find(g => g.gateway_id === gatewayId)
   const derivedCellName = selectedGateway?.cell_id
     ? (cells.find(c => c.cell_id === selectedGateway.cell_id)?.cell_name || null)
     : null
+  const chosenAreaName = areas.find(a => a.area_id === location.area_id)?.area_name
 
   // What the device will resolve to once approved. A gateway with no cell cannot supply one, so the
   // operator is told that leaving the picker alone lands the device in the Unassigned queue.
-  const willBeUnassigned = !siteWide && !cellId && !selectedGateway?.cell_id
+  const willBeUnassigned = scope === SCOPE_CELL && !cellId && !selectedGateway?.cell_id
 
   const handleSave = () => runBusy('approve', () => onApprove(item.asset_id, {
     asset_name: assetName,
     connection_method: connMethod,
     active_gateway_id: gatewayId,
-    cell_id: siteWide ? '' : cellId,
-    location_scope: siteWide ? 'site_wide' : 'cell'
+    cell_id: cellId,
+    area_id: scope === SCOPE_AREA_WIDE ? location.area_id : '',
+    location_scope: scope
   }))
 
   const handleAcceptMatch = () => runBusy('merge', () => onMerge(item.asset_id, suggestion.candidateId))
@@ -115,50 +120,37 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
             </div>
 
             <div className="form-group">
-              <label className="form-label">Shopfloor Cell Zone</label>
-              <select
-                className="form-control"
-                value={siteWide ? '' : cellId}
-                disabled={siteWide}
-                onChange={e => setCellId(e.target.value)}
-                title="Where this device sits. Leave on Inherit to follow the gateway above."
-              >
-                <option value="">
-                  {derivedCellName
-                    ? `— Inherit from gateway (${derivedCellName}) —`
-                    : '— Inherit from gateway (gateway has no cell) —'}
-                </option>
-                {cells.filter(c => !c.is_archived).map(c => (
-                  <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
-                ))}
-              </select>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '12px', cursor: 'pointer' }}
-                     title="For assets with no single cell — a BMS, an AGV, an ambient sensor">
-                <input
-                  type="checkbox"
-                  checked={siteWide}
-                  onChange={e => { setSiteWide(e.target.checked); if (e.target.checked) setCellId('') }}
-                />
-                <span>Site-Wide — this asset has no single cell</span>
-              </label>
+              <label className="form-label">Location</label>
+              <LocationPicker
+                idPrefix="approve"
+                form={location}
+                onChange={fields => setLocation(l => ({ ...l, ...fields }))}
+                cells={cells}
+                areas={areas}
+                cellEmptyLabel={derivedCellName
+                  ? `— Inherit from gateway (${derivedCellName}) —`
+                  : '— Inherit from gateway (gateway has no cell) —'}
+                cellTitle="Where this device sits. Leave on Inherit to follow the gateway above."
+              />
 
               {willBeUnassigned ? (
                 <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px', display: 'flex', alignItems: 'flex-start', gap: '5px' }}>
                   <IconAlertTriangle size={12} style={{ flexShrink: 0, marginTop: '1px' }} />
                   <span>
                     {gatewayId
-                      ? 'The selected gateway has no cell of its own — a host-run connector never does — so this device will land in the Unassigned queue. Pick a cell now, or mark it Site-Wide.'
+                      ? 'The selected gateway has no cell of its own — a host-run connector never does — so this device will land in the Unassigned queue. Pick a cell now, or mark it Area-Wide or Site-Wide.'
                       : 'With no gateway and no cell, this device will land in the Unassigned queue.'}
                   </span>
                 </div>
               ) : (
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                  {siteWide
+                  {scope === SCOPE_SITE_WIDE
                     ? 'Reported as Site-Wide rather than under any cell.'
-                    : cellId
-                      ? 'Set on this device — it stays put even if the gateway is reassigned.'
-                      : 'Follows the gateway above, and moves with it.'}
+                    : scope === SCOPE_AREA_WIDE
+                      ? `Reported as Area-Wide in ${chosenAreaName || 'the chosen area'} rather than under any cell in it.`
+                      : cellId
+                        ? 'Set on this device — it stays put even if the gateway is reassigned.'
+                        : 'Follows the gateway above, and moves with it.'}
                 </div>
               )}
             </div>
@@ -170,9 +162,10 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
           <ActionButton
             pending={busy === 'approve'}
             pendingLabel="Approving…"
-            disabled={busy === 'merge'}
+            // Area-Wide with no area named would be refused by the database; held here.
+            disabled={busy === 'merge' || (!isGateway && locationIncomplete(location))}
             onClick={handleSave}
-            title="Confirm onboarding and register"
+            title={!isGateway && locationIncomplete(location) ? 'Choose which area the device serves' : 'Confirm onboarding and register'}
           >
             Approve &amp; Onboard
           </ActionButton>

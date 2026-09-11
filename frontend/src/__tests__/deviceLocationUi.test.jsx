@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
@@ -56,8 +56,9 @@ const CELLS = [
   { cell_id: CELL_2, cell_name: 'Paint Shop', is_archived: false }
 ]
 
-const routeGet = (rows, { quarantine = [], cells = CELLS } = {}) => (path) => {
+const routeGet = (rows, { quarantine = [], cells = CELLS, areas = [] } = {}) => (path) => {
   if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+  if (path.startsWith('/api/v1/areas')) return Promise.resolve(areas)
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(cells)
   if (path.startsWith('/api/v1/quarantine')) return Promise.resolve(quarantine)
   if (path.startsWith('/api/v1/devices')) return Promise.resolve(rows)
@@ -241,9 +242,9 @@ describe('the edit form', () => {
   it('clears the cell when Site-Wide is chosen, mirroring the CHECK constraint', async () => {
     await show([device({ cell_id: CELL_2, effective_cell_id: CELL_2, location_source: 'explicit' })])
     openEdit()
-    // An option in the cell picker rather than a checkbox below it: `devices_site_wide_has_no_cell`
-    // makes the two answers exclusive, and one control cannot hold both.
-    fireEvent.change(document.querySelector('#device-cell-zone'), { target: { value: 'site_wide' } })
+    // One radio of three rather than a checkbox beside the cell picker:
+    // `devices_site_wide_has_no_cell` makes the answers exclusive, and a radio group says so.
+    fireEvent.click(screen.getByRole('radio', { name: /Site-Wide/i }))
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
@@ -267,11 +268,56 @@ describe('the edit form', () => {
     expect(within(cellPicker()).getByText(/Decommissioned Bay \(archived\)/)).toBeInTheDocument()
   })
 
-  it('offers Site-Wide inside the picker rather than as a checkbox beside it', async () => {
+  it('offers the three scopes as one exclusive choice, with the cell list only under In a cell', async () => {
     await show([device()])
     openEdit()
-    expect(within(cellPicker()).getByRole('option', { name: /Site-Wide/i })).toBeInTheDocument()
+    const radios = screen.getAllByRole('radio').map(r => r.value)
+    expect(radios).toEqual(['cell', 'area_wide', 'site_wide'])
+    expect(screen.getByRole('radio', { name: /In a cell/i })).toBeChecked()
+    // Site-Wide is not a checkbox reaching over to clear the select, and not an entry in it either:
+    // the cell list holds cells.
     expect(screen.queryByRole('checkbox', { name: /Site-Wide/i })).toBeNull()
+    expect(within(cellPicker()).queryByRole('option', { name: /Site-Wide/i })).toBeNull()
+
+    fireEvent.click(screen.getByRole('radio', { name: /Site-Wide/i }))
+    expect(document.querySelector('#device-cell-zone')).toBeNull()
+  })
+
+  it('withholds Area-Wide until an area exists, and names the only one without asking', async () => {
+    await show([device()])
+    openEdit()
+    expect(screen.getByRole('radio', { name: /Area-Wide/i })).toBeDisabled()
+    cleanup()
+
+    await show([device()], { areas: [{ area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 }] })
+    openEdit()
+    fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
+    // One area: no dropdown, its name is stated and the save carries it.
+    expect(document.querySelector('#device-area')).toBeNull()
+    expect(screen.getByText('Building 1')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: 'area-1', location_scope: 'area_wide' })
+  })
+
+  it('asks which area when there are several, and holds the save until one is chosen', async () => {
+    await show([device()], {
+      areas: [
+        { area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 },
+        { area_id: 'area-2', area_name: 'Building 2', cells: [], cell_count: 0 }
+      ]
+    })
+    openEdit()
+    fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
+    const areaPicker = document.querySelector('#device-area')
+    expect(areaPicker.value).toBe('')
+    // `devices_area_wide_names_its_area` would refuse the row, so the button says so instead.
+    expect(screen.getByRole('button', { name: /Save Configuration/i })).toBeDisabled()
+
+    fireEvent.change(areaPicker, { target: { value: 'area-2' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: 'area-2', location_scope: 'area_wide' })
   })
 
   it('disables the picker when the serving gateway is simulated, and says which lane instead', async () => {
@@ -428,6 +474,31 @@ describe('approving a quarantined device', () => {
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled())
     expect(supabase.functions.invoke.mock.calls[0][1].body).toMatchObject({
       device_id: quarantined.asset_id, cell_id: CELL_2, location_scope: 'cell'
+    })
+  })
+
+  it('forwards Area-Wide with its area, and holds the button until an area is named', async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: { success: true }, error: null })
+    api.get.mockImplementation(routeGet([], {
+      quarantine: [quarantined],
+      areas: [
+        { area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 },
+        { area_id: 'area-2', area_name: 'Building 2', cells: [], cell_count: 0 }
+      ]
+    }))
+    render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+    await waitFor(() => expect(screen.getByText('Unknown_Robot')).toBeTruthy())
+    fireEvent.click(screen.getAllByRole('button', { name: /Approve/i })[0])
+    await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
+    expect(screen.getByRole('button', { name: /Approve & Onboard/i })).toBeDisabled()
+    fireEvent.change(document.querySelector('#approve-area'), { target: { value: 'area-2' } })
+    fireEvent.click(screen.getByRole('button', { name: /Approve & Onboard/i }))
+
+    await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled())
+    expect(supabase.functions.invoke.mock.calls[0][1].body).toMatchObject({
+      device_id: quarantined.asset_id, cell_id: '', area_id: 'area-2', location_scope: 'area_wide'
     })
   })
 

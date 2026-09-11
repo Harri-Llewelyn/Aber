@@ -55,7 +55,7 @@ export function ArchivesTab({ showToast, hasPermission }) {
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">
-            Archived Entities (Out of Commission)
+            Archives
             <HelpTip
               label="About archived entities"
               text="An archived entity is out of commission but not gone: it keeps its identity and history, leaves the asset pages, and runs a retention timer to an auto-purge date. Restore returns it to service with everything intact."

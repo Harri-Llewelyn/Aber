@@ -686,6 +686,13 @@ ingestion:
   directoryMqttEnabled: false
   directoryMqttTopicPrefix: ACS-Cymru/Directory/v1
   directoryMqttIntervalSeconds: 60
+  # The Unified Namespace bridge (ingestion/uns_publish.py). Off by default for the same reason:
+  # every decoded reading, retained under uns/..., behind mosquitto.acl alone. The root MUST stay
+  # inside the ACL's `topic write uns/#` rule. The TTL bounds how long a relocation on the
+  # dashboard takes to move a device's topic.
+  unsMqttEnabled: false
+  unsMqttTopicRoot: uns
+  unsContextTtlSeconds: 60
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { memory: 512Mi }

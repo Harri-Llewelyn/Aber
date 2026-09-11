@@ -75,6 +75,7 @@ export const DIGITAL_THREAD_ACTIONS = {
  * any consumer is left behind.
  */
 export const DIGITAL_THREAD_ENTITY_TYPES = [
+  { kind: 'AREA',             table: 'areas',              label: 'Areas',              domain: 'asset' },
   { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset' },
   { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset' },
   { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset' },
@@ -123,7 +124,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  * here renders and does nothing when clicked. `appRouting.test.jsx` asserts the two match.
  */
 export const VALID_TABS = [
-  'overview', 'approvals', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'vocabulary', 'directory',
+  'overview', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'vocabulary', 'directory',
   'capture', 'archives', 'cold-storage', 'access-control', 'settings'
 ];
 

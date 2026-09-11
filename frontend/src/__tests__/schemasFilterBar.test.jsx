@@ -66,7 +66,7 @@ const renderTab = (props = {}) => render(
  * SchemasTab.test.jsx does.
  */
 const registryCard = () => [...document.querySelectorAll('.card-header .section-title')]
-  .find(h => h.textContent.includes('Registered Schemas'))?.closest('.card')
+  .find(h => h.textContent.trim().startsWith('Schemas'))?.closest('.card')
 
 const registryRows = () => [...(registryCard()?.querySelectorAll('tbody tr') || [])]
 const registryNames = () => registryRows().map(r => r.querySelector('td')?.textContent.trim())

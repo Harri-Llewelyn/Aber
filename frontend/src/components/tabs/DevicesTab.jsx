@@ -35,10 +35,12 @@ import {
   deviceStatusTitle
 } from '../../utils/deviceStatus'
 import {
-  SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_SITE_WIDE, NON_CELL_SOURCES,
+  SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, NON_CELL_SOURCES,
   resolveDeviceLocation, needsCellAssignment, unassignedHint,
   locationSourceLabel, gatewayAcceptsCell, noCellReason
 } from '../../utils/cellResolution'
+import { AreaIcon } from '../../utils/areaIcon'
+import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import {
   unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
 } from '../../utils/deviceTags'
@@ -50,7 +52,6 @@ import {
   IconShieldCheck,
   IconCpu,
   IconDrive,
-  IconMap,
   IconFileText,
   IconPlus,
   IconPencil,
@@ -67,7 +68,9 @@ import {
   IconAlertCircle,
   IconLock,
   IconDownload,
-  IconX
+  IconX,
+  IconRadio,
+  IconLayoutDashboard
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
@@ -78,7 +81,7 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
-export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelectCell, onSelectSchema, onViewThread, onPropose, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
+export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewThread, onPropose, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so Overview, Cells and
    * Gateways resolve alerts the same way.
@@ -123,7 +126,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const [exportTelemetry, setExportTelemetry] = useState(null)
   // No asset_type: classification is derived from the schema's metric groups (utils/deviceTags.js).
   // `cell_id` starts empty, meaning inherit from the gateway.
-  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', location_scope: SCOPE_CELL })
+  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', area_id: '', location_scope: SCOPE_CELL })
+  const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('all')
 
@@ -249,13 +253,15 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
 
   const loadAll = useCallback(async (signal) => {
     try {
-      const [a, c, g, s] = await Promise.all([
+      const [a, c, g, s, ar] = await Promise.all([
         api.get('/api/v1/devices', { signal }),
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/gateways', { signal }),
         api.get('/api/v1/schemas', { signal }),
+        // Tolerated: without it the picker simply offers no Area-Wide entries.
+        api.get('/api/v1/areas', { signal }).catch(() => []),
       ])
-      setAssets(a); setCells(c); setGateways(g); setSchemas(s)
+      setAssets(a); setCells(c); setGateways(g); setSchemas(s); setAreas(ar)
 
       try {
         const q = await api.get('/api/v1/quarantine', { signal })
@@ -298,9 +304,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
         schema_id: form.schema_id || null,
-        // '' is the inherit option, which api.js turns into NULL. Both keys are always sent because
-        // the form always shows both.
+        // '' is the inherit option, which api.js turns into NULL. All three keys are always sent
+        // because the form always shows the one picker that sets them.
         cell_id: form.cell_id || '',
+        area_id: form.area_id || '',
         location_scope: form.location_scope || SCOPE_CELL,
       }
       // Edit only: a device being created takes the column's default rather than an explicit
@@ -415,6 +422,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           gateway_id: targetGateway,
           asset_name: body?.asset_name,
           cell_id: body?.cell_id ?? '',
+          area_id: body?.area_id ?? '',
           location_scope: body?.location_scope || 'cell'
         }
       }))
@@ -527,6 +535,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const cellById = useMemo(
     () => new Map(cells.map(c => [c.cell_id, c])),
     [cells]
+  )
+  const areaById = useMemo(
+    () => new Map(areas.map(ar => [ar.area_id, ar])),
+    [areas]
   )
 
   // A device an operator needs to act on: quarantined, provisioned but never seen, still resolved
@@ -998,8 +1010,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                               return (
                                 <span className="badge badge-neutral" style={{ fontSize: '11px' }}
                                       title={a.location_source === SOURCE_SITE_WIDE
-                                        ? 'Asserted to have no single cell — facility-wide or mobile'
-                                        : noCellReason(gw) || 'Resolves to a lane rather than to a cell'}>
+                                        ? 'Asserted to have no single cell — campus-wide or mobile'
+                                        : a.location_source === SOURCE_AREA_WIDE
+                                          ? `Asserted to have no single cell — serves the whole of ${areaById.get(a.effective_area_id)?.area_name || 'its area'}`
+                                          : noCellReason(gw) || 'Resolves to a lane rather than to a cell'}>
                                   {locationSourceLabel(a.location_source)}
                                 </span>
                               )
@@ -1101,49 +1115,39 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             {(() => {
               const formGateway = gateways.find(g => g.gateway_id === form.active_gateway_id) || null
               const siteWide = form.location_scope === SCOPE_SITE_WIDE
+              const areaWide = form.location_scope === SCOPE_AREA_WIDE
               const location = resolveDeviceLocation(
-                { cell_id: siteWide ? null : form.cell_id, location_scope: form.location_scope },
+                { cell_id: siteWide || areaWide ? null : form.cell_id, area_id: areaWide ? form.area_id : null, location_scope: form.location_scope },
                 formGateway
               )
+              const chosenAreaName = areas.find(ar => ar.area_id === form.area_id)?.area_name
               const nameOf = (id) => cells.find(c => c.cell_id === id)?.cell_name
               const inheritedName = nameOf(location.gateway_cell_id)
-              const chosenCell = cells.find(c => c.cell_id === form.cell_id)
               // Whether a cell means anything for this device, decided by its gateway. There is no
               // CHECK on the device side; a stored cell would be accepted and ignored.
               const acceptsCell = gatewayAcceptsCell(formGateway)
 
               return (
                 <div className="form-group">
-                  <label className="form-label" htmlFor="device-cell-zone">Shopfloor Cell Zone</label>
-                  {/* Site-Wide is an option here, not a checkbox: `devices_site_wide_has_no_cell`
-                      makes the answers exclusive. Its value cannot collide with a cell UUID. */}
-                  <select
-                    id="device-cell-zone"
-                    className="form-control"
-                    value={siteWide ? SCOPE_SITE_WIDE : (form.cell_id || '')}
+                  <label className="form-label">Location</label>
+                  {/* One exclusive choice of scope, then the cell or the area it calls for.
+                      The scopes are exclusive by CHECK (`devices_site_wide_has_no_cell` and the
+                      area-wide pair), which is what a radio group says. */}
+                  <LocationPicker
+                    idPrefix="device"
+                    form={form}
+                    onChange={fields => setForm(f => ({ ...f, ...fields }))}
+                    cells={cells}
+                    areas={areas}
                     disabled={!acceptsCell}
-                    onChange={e => setForm(f => (e.target.value === SCOPE_SITE_WIDE
-                      ? { ...f, location_scope: SCOPE_SITE_WIDE, cell_id: '' }
-                      : { ...f, location_scope: SCOPE_CELL, cell_id: e.target.value }))}
                     title={acceptsCell
-                      ? 'Where this device physically sits. Leave on Inherit to follow its gateway.'
+                      ? undefined
                       : 'Its gateway generates or replays this telemetry, so the device resolves to a lane rather than to a cell'}
-                  >
-                    {/* Named after what it resolves to, not "None" -- the empty value is a
-                        deliberate "follow the gateway", not an absence. */}
-                    <option value="">
-                      {inheritedName ? `— Inherit from gateway (${inheritedName}) —` : '— Inherit from gateway (gateway has no cell) —'}
-                    </option>
-                    <option value={SCOPE_SITE_WIDE}>Site-Wide — no single cell</option>
-                    {cells.filter(c => !c.is_archived).map(c => (
-                      <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
-                    ))}
-                    {/* An archived cell is not offered, but one already stored stays visible:
-                        silently dropping it would relocate the device on the next save. */}
-                    {chosenCell?.is_archived && (
-                      <option value={chosenCell.cell_id}>{chosenCell.cell_name} (archived)</option>
-                    )}
-                  </select>
+                    // Named after what it resolves to, not "None": the empty value is a deliberate
+                    // "follow the gateway", not an absence.
+                    cellEmptyLabel={inheritedName ? `— Inherit from gateway (${inheritedName}) —` : '— Inherit from gateway (gateway has no cell) —'}
+                    cellTitle="Where this device physically sits. Leave on Inherit to follow its gateway."
+                  />
 
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
                     {!acceptsCell
@@ -1152,8 +1156,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                          synthetic. */
                       ? `${noCellReason(formGateway)} Any cell already set on it is kept, and applies again if that changes.`
                       : siteWide
-                        ? 'Reported as Site-Wide rather than under any cell. Use this for facility-wide or mobile assets.'
-                        : location.location_source === SOURCE_EXPLICIT
+                        ? 'Reported as Site-Wide rather than under any cell. Use this for campus-wide or mobile assets.'
+                        : areaWide
+                          ? `Reported as Area-Wide in ${chosenAreaName || 'this area'} rather than under any cell in it. Use this for a building management system or anything that serves the whole area.`
+                          : location.location_source === SOURCE_EXPLICIT
                           ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
                           : inheritedName
                             ? `Follows the gateway above. Reassigning the gateway moves this device with it.`
@@ -1308,9 +1314,13 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                title={proposeMode
-                  ? 'Ask for these changes — an approver applies them, or says why not'
-                  : 'Save device configuration and gateway assignment'}
+                // Area-Wide with no area named would be refused by the database; held here.
+                disabled={locationIncomplete(form)}
+                title={locationIncomplete(form)
+                  ? 'Choose which area the device serves'
+                  : proposeMode
+                    ? 'Ask for these changes — an approver applies them, or says why not'
+                    : 'Save device configuration and gateway assignment'}
               >
                 {proposeMode
                   ? (editingProposal ? 'Update your proposal' : 'Propose a change')
@@ -1325,6 +1335,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         <ApproveQuarantineModal
           item={approveItem}
           cells={cells}
+          areas={areas}
           gateways={gateways}
           suggestion={suggestMatches(approveItem, assets, schemas)[0] || null}
           onApprove={approveQuarantine}
@@ -1429,7 +1440,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                 onClick={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
                 title="Open this gateway on the Gateways page"
               >
-                <IconDrive size={11} />
+                <IconRadio size={11} />
                 <span className="chip-name">
                   {gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id)?.gateway_name
                     || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
@@ -1441,9 +1452,11 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           {
             // Resolved, not the explicit override. Site-Wide is not a link: it asserts the device
             // belongs to no cell.
-            label: 'Cell Zone (resolved)',
+            label: 'Location (resolved)',
             value: selectedLocation?.location_scope === SCOPE_SITE_WIDE
               ? 'Site-Wide'
+              : selectedLocation?.location_scope === SCOPE_AREA_WIDE
+                ? `Area-Wide — ${areaById.get(selectedLocation?.effective_area_id)?.area_name || 'its area'}`
               : (() => {
                   const cell = cells.find(c => c.cell_id === selectedLocation?.effective_cell_id)
                   if (!cell) return null
@@ -1453,7 +1466,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                       onClick={() => onSelectCell?.(cell.cell_id)}
                       title="Open this cell on the Cells page"
                     >
-                      <IconMap size={11} />
+                      <IconLayoutDashboard size={11} />
                       <span className="chip-name">{cell.cell_name}</span>
                     </button>
                   )
@@ -1462,12 +1475,30 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
               ? 'Set on the device itself, so it stays here regardless of its gateway.'
               : selectedLocation?.location_scope === SCOPE_SITE_WIDE
                 ? 'Marked Site-Wide: it belongs to no single cell.'
-                : 'Inherited from its gateway. It will follow the gateway if that moves.'
+                : selectedLocation?.location_scope === SCOPE_AREA_WIDE
+                  ? 'Marked Area-Wide: it belongs to an area rather than to any one cell in it.'
+                  : 'Inherited from its gateway. It will follow the gateway if that moves.'
+          },
+          {
+            label: 'Area (resolved)',
+            value: selectedLocation?.effective_area_id
+              ? (
+                <button
+                  className="chip chip-link"
+                  onClick={() => onSelectArea?.(selectedLocation.effective_area_id)}
+                  title="Open this area on the Areas page"
+                >
+                  <AreaIcon area={areaById.get(selectedLocation.effective_area_id)} size={11} />
+                  <span className="chip-name">{areaById.get(selectedLocation.effective_area_id)?.area_name || selectedLocation.effective_area_id}</span>
+                </button>
+              )
+              : null,
+            title: 'The ISA-95 area: its cell\'s, or its own when it is Area-Wide. Site-wide and unassigned devices have none.'
           },
           {
             label: 'Location Source',
             value: selectedLocation?.location_source || null,
-            title: 'explicit = set on the device; inherited = from its gateway; site_wide = no single cell; unassigned = nothing to inherit.'
+            title: 'explicit = set on the device; inherited = from its gateway; area_wide = no single cell, one area; site_wide = no single cell, the campus; unassigned = nothing to inherit.'
           },
           {
             // Resolved through schemasForDevice, not `selectedDevice.schema_id`: a schema arrives
