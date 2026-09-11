@@ -13,6 +13,7 @@ import {
   IconHistory,
   IconRecord,
   IconDatabase,
+  IconHardDrive,
   IconLock,
   IconSettings,
   IconShieldCheck
@@ -93,6 +94,9 @@ export const TABS = [
   // behind it: seeing who holds what is an access-control question, and a Shopfloor_Manager who
   // needs to issue a credential still can, from Gateways.
   { id: 'access-control', label: 'Access Control', group: 'admin',   icon: <IconLock size={16} />, role: 'Administrator' },
+  // Administrator alone, as request_backup() and the two tables' SELECT policies are: a backup
+  // is an act on the whole database, and reading what exists sizes the security lane.
+  { id: 'backups',        label: 'Backups',        group: 'admin',   icon: <IconHardDrive size={16} />, role: 'Administrator' },
   { id: 'settings',       label: 'Settings',       group: 'admin',   icon: <IconSettings size={16} />, role: 'Administrator' }
 ]
 

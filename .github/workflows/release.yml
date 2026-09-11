@@ -143,6 +143,13 @@ jobs:
             dockerfile: gateway-credential/Dockerfile
             context: gateway-credential
             build_args: ''
+          # The backup service's runtime: supabase/postgres for a pg_dump at least the server's
+          # version, plus node, sqlite3 and GNU tar. The service's code is mounted from a
+          # ConfigMap, as the credential sidecar's is.
+          - name: backup-service
+            dockerfile: backup-service/Dockerfile
+            context: backup-service
+            build_args: ''
           # The schema itself: supabase/postgres with supabase/migrations/*.sql copied in. This
           # image's tag is the database version, and the chain cannot travel in the chart (a
           # ConfigMap and Helm's release Secret are both capped at 1 MiB), so a chart published
@@ -332,7 +339,7 @@ jobs:
             --set e2e.enabled=true > /tmp/from-package.yaml
 
           MISSING=0
-          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential db-init; do
+          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init; do
             REF="$IMAGE_NAMESPACE/$img:$V"
             if grep -qF "$REF" /tmp/from-package.yaml; then
               echo "  ok  $REF"
@@ -385,7 +392,7 @@ jobs:
             echo '```'
             echo
             echo "Images published at \`$V\`:"
-            for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential db-init; do
+            for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init; do
               echo "- \`$IMAGE_NAMESPACE/$img:$V\`"
             done
           } >> "$GITHUB_STEP_SUMMARY"

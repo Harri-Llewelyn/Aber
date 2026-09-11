@@ -29,6 +29,7 @@ export const PAGE_KEYWORDS = {
   'capture':        ['record', 'recording', 'replay', 'playback', 'shadow'],
   'cold-storage':   ['parquet', 'tiered', 'object storage', 'minio', 'telemetry archive', 's3'],
   'access-control': ['users', 'roles', 'permissions', 'principals', 'credentials', 'rbac', 'identities'],
+  'backups':        ['backup', 'dump', 'pg_dump', 'restore', 'snapshot', 'retention', 'disaster recovery'],
   'settings':       ['configuration', 'config', 'retention', 'preferences', 'tuning']
 }
 
@@ -67,6 +68,7 @@ export const CARDS = [
   { id: 'service-identities',   label: 'Service identities',   tab: 'access-control', keywords: ['machine accounts', 'non-human'] },
   { id: 'database-principals',  label: 'Database principals',  tab: 'access-control', keywords: ['auth users', 'cannot sign in', 'service role'] },
   { id: 'broker-principals',    label: 'Broker principals',    tab: 'access-control', keywords: ['acl', 'mosquitto users', 'topic access'] },
+  { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] },
   { id: 'runtime-configuration', label: 'Runtime configuration', tab: 'settings',     keywords: ['system settings', 'retention', 'thresholds'] }
 ]
 

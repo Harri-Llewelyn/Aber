@@ -69,6 +69,7 @@ const CaptureTab       = lazy(() => import('./components/tabs/CaptureTab').then(
 const ColdStorageTab   = lazy(() => import('./components/tabs/ColdStorageTab').then(m => ({ default: m.ColdStorageTab })))
 const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then(m => ({ default: m.SettingsTab })))
 const AccessControlTab = lazy(() => import('./components/tabs/AccessControlTab').then(m => ({ default: m.AccessControlTab })))
+const BackupsTab       = lazy(() => import('./components/tabs/BackupsTab').then(m => ({ default: m.BackupsTab })))
 const ApprovalsTab     = lazy(() => import('./components/tabs/ApprovalsTab').then(m => ({ default: m.ApprovalsTab })))
 
 /* The page list lives in navigation.jsx and is re-exported here unchanged: the sidebar and the
@@ -606,6 +607,7 @@ function Dashboard({ session, onSignOut }) {
             {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
                 the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
             {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} />}
+            {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
             {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} />}
           </Suspense>
         </main>

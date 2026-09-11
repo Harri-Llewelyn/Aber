@@ -66,6 +66,9 @@ spec:
     requests:
       storage: {{ .Values.backup.persistence.size }}
 {{- end }}
+{{- /* The PVC above is rendered either way; the CronJob yields to the backup service
+       (apps/backup-service.yaml) when that is enabled, so one scheduler writes the volume. */ -}}
+{{- if not .Values.backupService.enabled }}
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -299,4 +302,5 @@ spec:
                 # single-node rule (nothing does, for RWO), it just stops this pod writing.
                 readOnly: true
             {{- end }}
+{{- end }}
 {{- end }}

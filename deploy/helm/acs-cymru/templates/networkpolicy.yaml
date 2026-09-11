@@ -103,6 +103,8 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
 
   (dict "from" "backup"             "to" "supabase-db"        "port" 5432 "why" "pg_dump")
   (dict "from" "backup"             "to" "timescaledb"        "port" 5432 "why" "pg_dump")
+  (dict "from" "backup-service"     "to" "supabase-db"        "port" 5432 "why" "pg_dump, and the job queue it claims from")
+  (dict "from" "backup-service"     "to" "timescaledb"        "port" 5432 "why" "pg_dump")
 -}}
 {{- /* Filter to edges whose BOTH ends are actually deployed, so a partial install does not carry
      rules naming absent components -- harmless, but it makes the rendered policy misleading. */ -}}
@@ -133,7 +135,8 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
       "test-fdw" (and .Values.supabaseDb.enabled .Values.timescaledb.enabled)
       "e2e-validate" .Values.e2e.enabled
       "e2e-aas-export" .Values.e2e.enabled
-      "backup" .Values.backup.enabled
+      "backup" (and .Values.backup.enabled (not .Values.backupService.enabled))
+      "backup-service" (and .Values.backup.enabled .Values.backupService.enabled)
 -}}
 {{- $live := list -}}
 {{- range $edges -}}

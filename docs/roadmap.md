@@ -11,11 +11,12 @@ it leaves this file and its substance moves into the documentation of the compon
 `§[0-9]` in this file.
 
 **Ordering.** 1–5 are the platform's own: the one item somebody else sets the deadline for, then
-the identity and operations chain. 6–8 are the edge chain, in dependency order: 6 makes a gateway's
-flow reviewable, 7 makes the appliance a managed artefact and shares 6's puller, 8 removes what 6
-replaced. 9 runs under every other item. 10 is a rename and sits second to last because nothing
-depends on it. 11 is last by rule: it folds the migration chain, so every entry that changes the
-schema must have landed before it.
+the identity and operations chain, ending with the rehearsal that turns the backup into a
+capability. 6–8 are the edge chain, in dependency order: 6 makes a gateway's flow reviewable, 7
+makes the appliance a managed artefact and shares 6's puller, 8 removes what 6 replaced. 9 runs
+under every other item. 10 is a rename and sits second to last because nothing depends on it. 11
+is last by rule: it folds the migration chain, so every entry that changes the schema must have
+landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -34,6 +35,7 @@ schema must have landed before it.
 | The demonstration floor and simulator | Removed; [`tutorial/README.md`](../tutorial/README.md) builds one machine by hand |
 | Horizontal ingestion scaling | Answered, not built: [The single-writer ceiling](../ingestion/README.md#the-single-writer-ceiling). The write path since moved to [the historian writer](../ingestion/README.md#the-historian-writer), one thread and one transaction per batch |
 | Ingress → Gateway API for CORS | Answered, not built: it would state origin policy a second way on one of two targets |
+| A backup an operator can take without a shell (`0101`) | [`supabase/README.md`](../supabase/README.md#backups-from-the-dashboard-0101): the Backups page, the backup service, the forge in every backup, and the retention and no-download decisions; restore stays [the runbook](../supabase/README.md#backup-and-recovery) |
 | The ISA-95 Unified Namespace bridge (`0097`) | [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) for the bridge; [`supabase/README.md`](../supabase/README.md#the-plant-gains-areas-and-a-third-scope-0097) for the areas, the site setting and the `area_wide` scope |
 
 ---
@@ -130,40 +132,7 @@ it: a code can only drop MFA and force re-enrolment.
 
 ---
 
-## 4 · A backup an operator can take without a shell
-
-**Builds on:** [`scripts/backup-databases.sh`](../scripts/backup-databases.sh) · the chart's backup
-CronJob · [Backup and Recovery](../supabase/README.md#backup-and-recovery) · `0055`'s
-`capture_jobs` / captures split · [`gateway-credential-service.mjs`](../scripts/gateway-credential-service.mjs)
-
-The backup itself exists: both databases, the storage objects and a manifest, idempotent, pruned on
-a retention window. What is missing is a caller. Nothing in the stack can run it: it needs
-`docker compose exec`, `supabase_admin`, and the historian, none of which an edge function has.
-
-**The shape is the Capture page's:** `backup_jobs` for the act and `backups` for the artefact, an
-Administrator-only RPC, and a new privileged service on the `gateway-credential-service.mjs` model
-(one verb, no read-back, not published) that does the work. A separate **Backups** page; the Cold
-Storage page is a different subject and its read-only rule is about irreversible acts, which this
-is not.
-
-**The first version produces a backup server-side and lists what exists, with no download.** The
-dumps contain `auth.users`, hashed OAuth secrets, the whole `digital_thread`, every flow in the
-storage tar, and the historian's password inside the Supabase dump; a download button lowers "shell
-access on the host" to "any Administrator session". Size points the same way.
-
-**Restore stays a runbook.** It needs nine roles no dump creates, cannot be replayed over a previous
-restore, and is exactly the irreversible act the page refuses to put one click from a table.
-
-**Worth deciding early.** Where the artefact lives (a bucket is reachable from both targets and puts
-a later download under `storage-policies.sql`). Whether a scheduled and a requested backup are the
-same row. What the retention window means once a human can ask (a backup taken before a risky
-migration is the one a timer deletes first). Whether the service drives `pg_dump` at all:
-`pgBackRest` or CloudNativePG changes what the privilege is. **The forge's volume is now in scope**:
-Gitea holds the only copy of every gateway's flow and is in no dump (GitHub issue).
-
----
-
-## 5 · The broker's Dynamic Security plugin
+## 4 · The broker's Dynamic Security plugin
 
 **Builds on:** [`mosquitto.acl`](../mosquitto/mosquitto.acl) ·
 [`gateway-credential-service.mjs`](../scripts/gateway-credential-service.mjs) ·
@@ -195,6 +164,47 @@ account to an unguessable password and bouncing that one session may be cheaper.
 
 ---
 
+## 5 · A restore is rehearsed from a backup the service took
+
+**Builds on:** [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) ·
+[`scripts/restore-databases.sh`](../scripts/restore-databases.sh) ·
+[`scripts/backup-service.mjs`](../scripts/backup-service.mjs) and
+[Backups from the dashboard](../supabase/README.md#backups-from-the-dashboard-0101) (`0101`) ·
+issue [#155](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/155)
+
+The backup an Administrator takes on the Backups page has been taken and its digests checked, and
+nothing has yet restored from one. The weekly rehearsal in CI restores the CronJob's flat dumps
+into a disposable cluster and compares row counts; it has been failing since the Actions
+allowance ran out, and it knows nothing of the service's per-stamp directory, the forge archive,
+or a Compose stack. Until one restore has run end to end from a service-made directory, the
+README's own line applies: an untested backup is a belief, not a capability.
+
+**What remains.**
+
+- **Make the weekly rehearsal pass again** (#155), then move its backup step onto the service:
+  install with `backupService.enabled`, call `request_backup()` as the seeded Administrator,
+  wait for the `backups` row, and restore from the directory it names rather than from the
+  CronJob's files.
+- **Rehearse the forge.** Restore `forge-<stamp>.tar.gz` into an empty forge volume and assert
+  that every gateway repository is back, that `main` is still protected, and that the SSH host
+  key is byte-identical to the one an enrolled appliance pinned, because a forge restored without
+  it is a fleet-wide re-enrolment.
+- **Rehearse on Compose**, which the CI job does not touch: `docker cp` the directory out of
+  `backup_data`, `restore-databases.sh` with `BACKUP_DIR` pointed at it, and the forge steps
+  from the README, against a stack brought up once so the nine roles exist.
+
+**Decided:** restore stays a runbook and a rehearsal, never a button; the rehearsal is CI's and
+weekly, not the service's; and a rehearsal that restores the data layer alone is reported as
+that, as the workflow's header already insists.
+
+**Worth deciding early.** Whether the broker's CA and password file (`mosquitto_certs`,
+`mosquitto_data`) join the tier 1 backup. Neither is in it today; losing the root is a
+fleet-wide re-enrolment, and on Compose only a tier 2 snapshot saves them. Whether the platform's
+own Node-RED data joins for the same reason. Whether the rehearsal should also prove the
+retention prune removes exactly the directory the row named and nothing beside it.
+
+---
+
 ## 6 · GitOps edge sync
 
 **Builds on:** the forge (`gitea`, `gitea-init.sh`), one private repository per enrolled gateway
@@ -221,7 +231,8 @@ webhook that records the head of `main` on the gateway row so a merge shows in t
 ([What a gateway's repository comes with](../supabase/README.md#what-a-gateways-repository-comes-with-and-how-the-forge-reports-back-0095)).
 Both teams may create repositories in the organisation. Gitea's own sign-out is the platform's.
 A sweep on a timer (`0099`) reconciles team membership with `user_roles`, re-registers a missing
-push webhook, and protects `main` on any repository made by hand in the organisation. A flow the
+push webhook, and protects `main` on any repository made by hand in the organisation. The forge's
+volume, host keys included, is in every backup the backup service takes (`0101`). A flow the
 appliance deploys is a `FLOW_DEPLOYED` row in the digital thread (`0100`), written by the daemon
 from the heartbeat as `ingestion`; the puller never touches the database, so no fourth actor kind.
 
@@ -235,7 +246,6 @@ from the heartbeat as `ingestion`; the puller never touches the database, so no 
   nowhere else. A repository from before `0095` gets its hook back from the sweep but not its
   incident template, which the machine account cannot commit to a protected `main`; an
   administrator adds it by pull request. Small, and not urgent.
-- **Backup and retention for the forge**, which 4 now owns.
 
 **Constraints.** Deploy only what is committed; a revert is a new commit and never a force-push
 (branch protection in the forge, and `flow-sync.mjs` refuses a non-descendant head); `flows_cred.json`
@@ -343,15 +353,17 @@ assertions
 The browser half is done: nothing in the dashboard reads or writes the bucket, and a gateway's flow
 lives in its repository in the forge. What remains is the bucket itself, deliberately still created
 and governed so nothing can quietly start writing to it, and the one change that removes it has to
-decide what happens to whatever an earlier install already stored there. Retention is decided once
-across services rather than per bucket, which is why this waits on 4.
+decide what happens to whatever an earlier install already stored there. Retention is now decided
+once, in the backup service (a window for scheduled backups, a pin for requested ones), and the
+bucket's contents fall under the same answer: kept in a backup, not in a second store.
 
 The repository pointer is derived (`gateway-<sparkplug_id>` in the organisation named in
 `constants.js`), not stored; a column is earned only if a gateway ever needs re-pointing. A tracked
 branch other than `main` is the one part that genuinely does not fit and is a small separate
 decision. **Archiving a gateway should archive its repository and its wiki** (Gitea archives both
 together), and deleting one is the retention question again: the wiki is the one place a plant's
-notes about a gateway live, so a delete is a decision and never a cascade. Decide it with 4.
+notes about a gateway live, so a delete is a decision and never a cascade. The forge is in every
+backup now, so a deleted repository is recoverable from one for as long as the backup is kept.
 
 ---
 
@@ -390,7 +402,7 @@ chart's subdomains, not a second proxy. The blocker is a wildcard DNS record thi
 own; design the `nip.io` escape hatch in from the start. MQTT and git-over-SSH do not ride it.
 
 **Client certificates on the gateway link** (`CN = <sparkplug_id>`, so `%u` still matches) are the
-intended direction and wait for 5, because `crlfile` revocation needs a reload.
+intended direction and wait for 4, because `crlfile` revocation needs a reload.
 
 **Must not touch:** `%u` confinement, the origin policy's single home in `envoy.yaml`, the root's
 residence outside the chart, and the absence of a skip-verification switch. A service mesh is the

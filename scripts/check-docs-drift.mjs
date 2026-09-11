@@ -374,7 +374,7 @@ function edgeFunctionNames() {
   ].map((m) => m[1]);
   const unique = [...new Set(built)];
   // Bumped deliberately rather than derived: the count is the check.
-  const EXPECTED = 8;
+  const EXPECTED = 9;
   if (unique.length !== EXPECTED) {
     fail(
       `expected ${EXPECTED} chart images with an empty tag (built here, resolved from appVersion); ` +

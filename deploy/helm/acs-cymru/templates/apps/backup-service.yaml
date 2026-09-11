@@ -1,0 +1,165 @@
+{{- if and .Values.backup.enabled .Values.backupService.enabled }}
+{{- $component := "backup-service" -}}
+{{- $secretName := include "acs-cymru.secretName" . -}}
+{{- $fullname := include "acs-cymru.fullname" . -}}
+{{- if ne .Values.backup.destination "pvc" }}
+{{- fail "\n\nacs-cymru: backupService.enabled needs backup.destination=pvc.\n\nThe service writes one directory per backup onto the backup PVC and records where; it has no S3\nclient. Set backupService.enabled=false to keep the CronJob's s3 destination.\n" }}
+{{- end }}
+{{- $includeStorage := and .Values.backup.includeStorage .Values.supabaseStorage.enabled
+      .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
+{{- $includeForge := and .Values.backup.includeForge .Values.gitea.enabled -}}
+{{/*
+=================================================================================================
+The backup service: a backup_jobs row (0101) becomes a tier 1 backup on the backup PVC.
+
+Replaces the CronJob when enabled (backup-cronjob.yaml renders the PVC alone): the schedule moves
+into pg_cron, registered by the service on backup.schedule, and a backup an Administrator asks
+for on the Backups page runs the same way. Both dumps as their superusers, the storage objects
+and the forge, one directory per backup, manifest included; retention from backup.retentionDays
+for scheduled backups, and a requested one is pinned until released.
+
+THE SAME BASE IMAGE AS THE DATABASE, for its pg_dump (the client must be at least the server's
+version), plus node, sqlite3 and GNU tar. The code is projected from a ConfigMap, as the
+credential service's is, so a script change needs no image rebuild.
+
+NO SERVICE OBJECT. Nothing calls it; the liveness probe reads /healthz on the pod. The dumps
+never leave the PVC, and restore is the runbook in supabase/README.md.
+
+CO-LOCATION. The storage PVC and the forge's are ReadWriteOnce, so including either requires this
+pod on that pod's node -- the same podAffinity the CronJob carries, and required rather than
+preferred for the same reason. Including both on a cluster where those two pods are on different
+nodes leaves this one Pending, which is the honest outcome; the values file says so.
+=================================================================================================
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-backup-service-scripts" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  backup-service.mjs: |
+{{ .Files.Get "files/backup-service/backup-service.mjs" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backup-service
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  # One replica, Recreate: two services would each claim jobs. The single-flight index stops
+  # them running two backups, but a rolling update would still leave one to fail the other's.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or $includeStorage $includeForge }}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            {{- if $includeStorage }}
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" "supabase-storage") | nindent 18 }}
+            {{- end }}
+            {{- if $includeForge }}
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" "gitea") | nindent 18 }}
+            {{- end }}
+      {{- end }}
+      containers:
+        - name: backup-service
+          image: {{ include "acs-cymru.image" (dict "ctx" . "image" .Values.backupService.image) | quote }}
+          imagePullPolicy: {{ .Values.backupService.image.pullPolicy }}
+          command: ["node", "/scripts/backup-service.mjs"]
+          env:
+            - name: SUPABASE_DB_HOST
+              value: {{ include "acs-cymru.supabaseDb.host" . | quote }}
+            - name: SUPABASE_DB_PORT
+              value: {{ include "acs-cymru.supabaseDb.port" . | quote }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "POSTGRES_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            - name: TIMESCALE_HOST
+              value: {{ include "acs-cymru.timescale.host" . | quote }}
+            - name: TIMESCALE_PORT
+              value: {{ include "acs-cymru.timescale.port" . | quote }}
+            - name: TIMESCALE_USER
+              value: {{ .Values.timescaledb.username | quote }}
+            - name: TIMESCALE_DB
+              value: {{ .Values.timescaledb.database | quote }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "TIMESCALE_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            - name: BACKUP_DIR
+              value: /backups
+            - name: BACKUP_RETENTION_DAYS
+              value: {{ .Values.backup.retentionDays | quote }}
+            - name: BACKUP_SCHEDULE
+              value: {{ .Values.backup.schedule | quote }}
+            - name: BACKUP_FORMAT
+              value: {{ .Values.backupService.format | quote }}
+            # An empty path disables the component; the manifest records its absence.
+            - name: STORAGE_PATH
+              value: {{ ternary "/storage" "" $includeStorage | quote }}
+            - name: FORGE_PATH
+              value: {{ ternary "/forge" "" $includeForge | quote }}
+          ports:
+            - name: healthz
+              containerPort: 9020
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.backupService.resources | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: backups
+              mountPath: /backups
+            {{- if $includeStorage }}
+            - name: storage-objects
+              mountPath: /storage
+              readOnly: true
+            {{- end }}
+            {{- if $includeForge }}
+            - name: forge
+              mountPath: /forge
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ printf "%s-backup-service-scripts" $fullname }}
+        - name: backups
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-backup" $fullname }}
+        {{- if $includeStorage }}
+        - name: storage-objects
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-storage" $fullname }}
+            readOnly: true
+        {{- end }}
+        {{- if $includeForge }}
+        - name: forge
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-gitea" $fullname }}
+            readOnly: true
+        {{- end }}
+{{- end }}

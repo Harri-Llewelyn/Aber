@@ -1131,6 +1131,45 @@ services:
       mosquitto:
         condition: service_healthy
 
+  # The backup service: turns a backup_jobs row (0101) into a tier 1 backup on `backup_data`.
+  # Both databases as their superusers, the storage objects and the forge, one directory per
+  # backup, and the schedule and retention window from the two variables below. Not published:
+  # it serves /healthz on the compose network and nothing else, and the dumps never leave the
+  # volume. Restore is the runbook in supabase/README.md, from a shell, against that volume.
+  backup-service:
+    container_name: acs-cymru_backup_service
+    build:
+      context: ./backup-service
+    restart: always
+    environment:
+      SUPABASE_DB_HOST: supabase-db
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      TIMESCALE_HOST: timescaledb
+      TIMESCALE_USER: ${DB_USER:-postgres}
+      TIMESCALE_DB: ${DB_NAME:-postgres}
+      TIMESCALE_PASSWORD: ${DB_PASSWORD:-postgres}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-30 2 * * *}
+      BACKUP_FORMAT: ${BACKUP_FORMAT:-plain}
+    volumes:
+      - backup_data:/backups
+      # Read-only: the service copies these and never writes into them.
+      - storage_data:/storage:ro
+      - gitea_data:/forge:ro
+      - ./scripts/backup-service.mjs:/scripts/backup-service.mjs:ro
+    command: ["node", "/scripts/backup-service.mjs"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:9020/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      supabase-db-init:
+        condition: service_completed_successfully
+      timescaledb:
+        condition: service_healthy
+
   # ---------------------------------------------------------------------------
   # Application Runtimes & Ingestion
   # ---------------------------------------------------------------------------
@@ -1703,9 +1742,14 @@ volumes:
   nodered_data:
   grafana_data:
   # Gitea: the SQLite database, every repository, and the SSH host keys appliances pin in
-  # known_hosts. Holds the only copy of every gateway's edge flow. NOT IN ANY BACKUP YET (see the
-  # GitHub issue on forge backup); regenerating the host keys makes every gateway refuse to clone.
+  # known_hosts. Holds the only copy of every gateway's edge flow. In every backup the backup
+  # service takes (as forge-<stamp>.tar.gz); regenerating the host keys makes every gateway refuse
+  # to clone, so a restored forge is restored from that archive, host keys included.
   gitea_data:
+  # The backup service's output: one directory per backup, each holding both dumps, the storage
+  # objects, the forge and a manifest. Survives `docker compose down`; `docker volume rm` on it is
+  # the loss of every backup, which is the moment they are wanted.
+  backup_data:
 
   # Prometheus' TSDB. Retention is set on the service because it shares a disk with two databases.
   prometheus_data:

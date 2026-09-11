@@ -3002,6 +3002,99 @@ the same command is a fleet-wide re-enrolment: the two sit in the same volume li
 same kind of thing. A tier 2 snapshot does capture `loki_data`, because it captures the machine,
 but that is a side effect rather than a promise and no retention story should be built on it.
 
+### Backups from the dashboard (0101)
+
+The tier 1 backup above needed a shell. `0101` gives it a caller: the **Backups** page (Administrator
+only) queues a `backup_jobs` row through `request_backup()`, and the **backup service**
+(`scripts/backup-service.mjs`, the `backup-service` container on Compose and a Deployment behind
+`backupService.enabled` on Kubernetes) claims it, takes the backup and records a `backups` row.
+The shape is the Capture page's: the job is the act, the row is the artefact, and the page reads
+both and writes neither.
+
+**What the service takes.** Both databases as their superusers (`supabase_admin`, for the reason
+above), the storage objects, and the forge, into one directory per backup on its own volume
+(`backup_data` on Compose, the backup PVC on Kubernetes), named by the UTC stamp:
+
+```
+/backups/20260911T143000Z/
+  supabase-db-20260911T143000Z.sql.gz       # or .dump, with BACKUP_FORMAT=custom
+  timescaledb-20260911T143000Z.sql.gz
+  storage-objects-20260911T143000Z.tar.gz   # absent when no storage volume is mounted
+  forge-20260911T143000Z.tar.gz             # absent when no forge volume is mounted
+  manifest-20260911T143000Z.txt             # what restore-databases.sh reads
+  manifest.json                             # sizes and SHA-256 digests, as the row records them
+```
+
+The forge archive is `gitea_data` minus its logs, with `gitea.db` replaced by a copy taken through
+sqlite3's online backup (consistent while Gitea writes), or, when the read-only mount refuses that,
+a raw copy of the database with its WAL folded in and an integrity check passed. `manifest.json`
+says which. The SSH host keys are in it: a forge recreated without them is a fleet-wide
+re-enrolment, because every appliance pins them.
+
+**How the service talks to the database.** Through `psql`, as `supabase_admin`, the session
+`pg_dump` needs anyway. The gates it calls (`backup_claim_job()`, `backup_finalise()`,
+`backup_fail()`, `backup_reconcile_jobs()`, `backup_prunable()`, `backup_forget()`,
+`backup_schedule()`) are revoked from every PostgREST role and refuse any session that is not a
+superuser's, so the one credential the service holds is the whole of its authority and there is
+no second one to keep in step. It publishes nothing but `/healthz`.
+
+**Scheduled and requested backups are one row shape** and differ in two columns. `origin` says
+which; `requested_by` names the Administrator or is NULL. The schedule is the service's: at start
+it registers `enqueue_scheduled_backup()` with pg_cron on `BACKUP_SCHEDULE` (`backup.schedule` on
+the chart), or removes the job when that is empty, so a stack with no service queues nothing that
+nobody will take. On Kubernetes, enabling the service retires the CronJob; the PVC is shared, and
+the service's directories sit beside the CronJob's flat files.
+
+**Retention is decided once, here.** A scheduled backup is pruned by the service once it is older
+than `BACKUP_RETENTION_DAYS`; the files go first and `backup_forget()` removes the row and writes
+`BACKUP_PRUNED`. A requested backup is **pinned** at birth and the window does not apply until an
+Administrator releases it on the page (`release_backup()`), because a backup taken before a risky
+change is the one a timer must not delete first. `0` disables pruning.
+
+**Every act is a thread row.** `BACKUP_REQUESTED`, `BACKUP_CANCELLED` and `BACKUP_RELEASED` as the
+user who did it; `BACKUP_TAKEN`, `BACKUP_FAILED` and `BACKUP_PRUNED` as `service`, with no user.
+`audit_domain_for()` files both entity types under `security` by its fail-closed default, which is
+where an act on the whole database belongs.
+
+**What was decided, and why the alternatives were not taken.**
+
+- *The artefact lives on a volume, not in a Storage bucket.* Uploading to a bucket needs the
+  service-role key or a JWT minted from the JWT secret, either of which is a larger authority than
+  "dump the database" and exactly the second credential this design avoids. A later download, if
+  one is ever wanted, is a signed URL from an edge function over a bucket the service does not
+  write; it is not built, and the page says so.
+- *No download, no restore button.* A dump holds `auth.users`, every OAuth secret's hash, the whole
+  `digital_thread` and the historian's password; a download lowers "shell access on the host" to
+  "any Administrator session". Restore is the runbook below: it needs nine roles no dump creates
+  and cannot be replayed over a previous restore.
+- *`pg_dump`, not pgBackRest or CloudNativePG.* Either changes what the privilege is and what the
+  chart deploys, and is a separate piece of work. This is the floor, not the ceiling, as the
+  CronJob's header says.
+
+**Restoring from a service-made backup** is the tier 1 runbook with two differences: the files are
+in a directory on the volume, and there is a forge archive.
+
+```bash
+# Compose. Copy the directory out of the volume, then restore as above.
+docker cp acs-cymru_backup_service:/backups/<stamp> ./backups/<stamp>
+BACKUP_DIR=./backups/<stamp> BACKUP_STAMP=<stamp> scripts/restore-databases.sh
+
+# The forge: stop Gitea, replace the volume's contents, start it. Restoring the archive restores
+# the host keys, so appliances keep cloning.
+docker compose stop gitea
+docker run --rm -v acs-cymru_gitea_data:/data -v "$PWD/backups/<stamp>:/b:ro" alpine \
+  sh -c 'rm -rf /data/* && tar -xzf /b/forge-<stamp>.tar.gz -C /data'
+docker compose start gitea
+```
+
+On Kubernetes the same files are under `/backups/<stamp>` on the backup PVC, with `.dump` files by
+default (`backupService.format`), restored with `pg_restore` as the cluster runbook shows.
+
+**Not yet rehearsed.** The service's backups have been taken and their digests checked; no restore
+has yet run from one, and the weekly CI rehearsal still restores the CronJob's files. That is the
+roadmap entry *A restore is rehearsed from a backup the service took*, and until it lands the line
+at the end of this section applies to these backups as much as to any.
+
 ### Tier 2: infrastructure snapshots
 
 For the Kubernetes target — CSI `VolumeSnapshot`, Velero, and the storage-PVC gap — see

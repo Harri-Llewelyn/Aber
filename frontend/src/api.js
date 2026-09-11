@@ -830,6 +830,74 @@ const apiMethods = {
     return data;
   },
 
+  // -------------------------------------------------------------------------------------------
+  // Backups (0101). Administrator only on both tables and every RPC; the bytes never come here.
+  // -------------------------------------------------------------------------------------------
+
+  /** Every backup that exists on the backup volume, newest first. */
+  listBackups: async () => {
+    const { data, error } = await supabase
+      .from('backups')
+      .select('*')
+      .order('taken_at', { ascending: false });
+    if (error) throw new Error(error.message || 'Could not list backups');
+    return data || [];
+  },
+
+  /** The backup that is queued or running, or null. At most one, by a partial unique index. */
+  activeBackupJob: async () => {
+    const { data, error } = await supabase
+      .from('backup_jobs')
+      .select('*')
+      .in('status', ['PENDING', 'RUNNING'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read backup jobs');
+    return data || null;
+  },
+
+  /** The last few finished jobs, so a failure is visible after its card has gone. */
+  recentBackupJobs: async (limit = 5) => {
+    const { data, error } = await supabase
+      .from('backup_jobs')
+      .select('*')
+      .in('status', ['COMPLETED', 'FAILED', 'CANCELLED'])
+      .order('finished_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(error.message || 'Could not read backup jobs');
+    return data || [];
+  },
+
+  /**
+   * Queue a backup. Returns the job id. The gate refuses while one is queued or running and
+   * names it, so the message is surfaced verbatim.
+   */
+  requestBackup: async (note) => {
+    const { data, error } = await supabase.rpc('request_backup', { p_note: note || null });
+    if (error) {
+      if (/insufficient_privilege|only an Administrator/i.test(error.message || '')) {
+        throw new Error('Taking a backup requires Administrator.');
+      }
+      throw new Error(error.message || 'Could not queue the backup');
+    }
+    return data;
+  },
+
+  /** Withdraw a queued backup. False when the service had already claimed it. */
+  cancelBackupJob: async (jobId) => {
+    const { data, error } = await supabase.rpc('cancel_backup_job', { p_job_id: jobId });
+    if (error) throw new Error(error.message || 'Could not cancel the backup');
+    return data === true;
+  },
+
+  /** Let the retention window apply to a requested backup. False when it was not pinned. */
+  releaseBackup: async (backupId) => {
+    const { data, error } = await supabase.rpc('release_backup', { p_backup_id: backupId });
+    if (error) throw new Error(error.message || 'Could not release the backup');
+    return data === true;
+  },
+
   /**
    * Every stored capture, with the subject it was recorded from.
    *
