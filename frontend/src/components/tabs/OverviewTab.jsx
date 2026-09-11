@@ -45,11 +45,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
 
   const loadAll = useCallback(async (signal) => {
     try {
-      // /api/v1/stats is deliberately no longer requested. Its only consumers were the
-      // Pending Quarantine card's value and a `docs` field nothing ever read. The quarantine
-      // figure is now derived from `assets`, which this page already has in full -- so the
-      // endpoint was a second round-trip per refresh for a number we could already count,
-      // and a second source of truth that could disagree with the list beside it.
+      // /api/v1/stats is not requested: the quarantine figure is derived from `assets`, which this
+      // page already holds.
       const [c, g, a, t] = await Promise.all([
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/gateways', { signal }),
@@ -72,9 +69,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   // Reconciliation loop, not the primary refresh: Realtime carries the updates and this
   // catches whatever a dropped socket missed. Falls back to the 3s poll when Realtime is off.
   usePolling(loadAll, refreshInterval())
-  // Telemetry is deliberately absent -- it is a postgres_fdw foreign table and can never emit
-  // Postgres changes here. The telemetry count on this page therefore refreshes on the loop
-  // above, not on notification.
+  // Telemetry is absent: a postgres_fdw foreign table emits no Postgres changes, so its count
+  // refreshes on the poll above.
   useRealtimeTable(['cells', 'gateways', 'devices'], loadAll, { enabled: REALTIME_ENABLED })
   // This page renders gatewayLiveStatus()/isGatewayOnline() too, so it needs the same
   // wall-clock tick as GatewaysTab to notice a gateway that has simply gone quiet.
@@ -83,19 +79,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   const canManageDevice = hasPermission(PERMISSION_UUIDS.DEVICE_MANAGE)
 
   /**
-   * Drag-and-drop is OFF until explicitly enabled, and that is a deliberate second gate on top of
-   * the permission check.
-   *
-   * This page is mostly read: it is the one people leave open on a wall display and glance at. A
-   * drag is a one-gesture, no-confirmation write to a device's location, so a slipped mouse
-   * silently relocated an asset — and every correction is a second row in `digital_thread`, which
-   * archived migration 0006 makes immutable. Those rows are not the problem and must not be suppressed: the
-   * move genuinely happened, and an audit trail that hides operator mistakes is worth less than one
-   * that does not. The fix is to stop the accidental gesture, not to hide its record.
-   *
-   * A mode toggle rather than a confirm-on-drop: confirmation turns every deliberate move into two
-   * steps and gets clicked through anyway, whereas a mode is paid for once per editing session. It
-   * also advertises the feature, which was previously discoverable only by trying it.
+   * Drag-and-drop is off until enabled, a second gate on top of the permission: this page is left
+   * open on wall displays, and a slipped mouse would relocate an asset with no confirmation. A mode
+   * rather than a confirm-on-drop, paid for once per editing session.
    */
   const [rearranging, setRearranging] = useState(false)
   const canRearrange = canManageDevice && rearranging
@@ -113,32 +99,17 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   }
 
   /**
-   * The moves an operator has made but not yet applied: device id -> { cell_id, location_scope }.
-   *
-   * REARRANGE MODE IS NOW A TRANSACTION, not just a mode. Every drop used to issue its own
-   * `PUT /api/v1/devices/{id}` on mouse release, so reassigning six machines -- one decision,
-   * taken once -- landed as six independent UPDATEs: six transactions, six `causation_id`s, six
-   * rows in the Digital Thread that look like six unrelated acts. Staging them here and applying
-   * the batch through `relocate_devices` (0033) makes it one transaction and therefore one
-   * causation, which is exactly what the event drawer's "Same transaction" control exists to show.
-   *
-   * KEYED BY DEVICE, so dragging the same chip three times before applying collapses to one
-   * entry rather than three conflicting instructions -- and the RPC refuses a batch naming a
-   * device twice, so this is the guard rather than a convenience.
+   * The moves an operator has made but not yet applied: device id to { cell_id, location_scope }.
+   * Applied as one batch through `relocate_devices`, so a rearrangement is one transaction with one
+   * `causation_id`. Keyed by device, because the RPC refuses a batch naming a device twice.
    */
   const [staged, setStaged] = useState(() => new Map())
   const [applying, setApplying] = useState(false)
 
   /**
-   * The floor as it would look once applied.
-   *
-   * Every consumer below -- the cell buckets, both lanes, the tile dots -- reads this rather than
-   * `assets`, so a staged device moves the instant it is dropped. That inverts what `pendingZone`
-   * used to compensate for: a drop had NO optimistic feedback, the chip stayed put until the
-   * reload landed, and on a slow link that was indistinguishable from a refused drop -- which is
-   * how one move became two writes. Now the chip moves immediately and nothing has been written,
-   * so the burden moves the other way: staged must be visibly distinct from saved, which is what
-   * the `staged` flag applyStagedMoves() sets is for.
+   * The floor as it would look once applied. Every consumer below reads this rather than `assets`,
+   * so a staged device moves the instant it is dropped; the `staged` flag keeps staged visibly
+   * distinct from saved.
    */
   const stagedAssets = useMemo(
     () => applyStagedMoves(assets, gwList, staged),
@@ -146,13 +117,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   )
 
   /**
-   * Stage one move, or UNSTAGE it if it puts the device back where it already is.
-   *
-   * The comparison is against the device's committed row in `assets`, never against the staged
-   * view -- dragging a chip out to another cell and then back again must leave nothing staged at
-   * all. Without this the batch carries a move the RPC correctly reports as `unchanged`, the
-   * commit bar offers to apply work that does nothing, and the operator is told N moves were
-   * applied when the thread recorded fewer.
+   * Stage one move, or unstage it if it puts the device back where its committed row already has
+   * it, so the batch never carries a move the RPC would report as unchanged.
    */
   const stageMove = useCallback((assetId, cellId, scope) => {
     setStaged(prev => {
@@ -182,24 +148,18 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       return
     }
 
-    // Where it currently resolves to, not its explicit override -- a device inheriting the target
-    // cell is already there, and dropping it again should stay a no-op. `assetData` comes off the
-    // STAGED view, so this is correct for a chip that has already been moved once.
+    // Where it currently resolves to, not its explicit override: a device inheriting the target
+    // cell is already there. `assetData` comes off the staged view.
     if (assetData.effective_cell_id === targetCellId) return
 
     const targetCellName = cells.find(c => c.cell_id === targetCellId)?.cell_name || 'the target cell'
 
-    // A move sets devices.cell_id directly (archived migration 0036). It used to have to rewire
-    // the device's GATEWAY to express a move, because location was only inheritable -- which meant
-    // the drop was refused outright when the target cell had no gateway or more than one, and
-    // when it did work it changed the data path to say something about geography. Dragging a
-    // machine across the floor plan says where the machine is; it says nothing about which
-    // connector reaches it, so the gateway is deliberately left alone.
+    // A move sets `devices.cell_id` directly. Dragging a machine across the floor says where it is,
+    // not which connector reaches it, so the gateway is left alone.
     stageMove(assetData.asset_id, targetCellId, SCOPE_CELL)
 
-    // Said at STAGING time, not on apply, because this is when the operator can still change
-    // their mind. The device will be pinned to this cell and will stop following its gateway --
-    // what the drop asked for, but not something the result makes visible.
+    // Said at staging time, when the operator can still change their mind: the device will be
+    // pinned to this cell and stop following its gateway.
     const servingGateway = gwList.find(g => g.gateway_id === assetData.active_gateway_id)
     const detached = servingGateway && servingGateway.cell_id && servingGateway.cell_id !== targetCellId
     showToast(
@@ -214,18 +174,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   // groupDevicesByCell() for why the cells endpoint does not supply this.
   const devicesByCell = useMemo(() => groupDevicesByCell(stagedAssets), [stagedAssets])
 
-  // The derived lanes. None is a row in `cells` -- Unassigned is the absence of a decision,
-  // Site-Wide is an operator's assertion that an asset has no single cell, and Simulated is a fact
-  // about the gateway; a magic cell row would put all three meanings in a free-text name. They are
-  // rendered beside the cells because that is where an operator looks for an asset, and because a
-  // queue nobody can see never drains.
-  //
-  // SHADOW IS NOT HERE, and its absence is deliberate rather than an oversight. This map answers
-  // "what is my plant doing now", and a replay is not now -- a lane of stand-ins for machines
-  // invites exactly the miscount the lanes exist to prevent. A running playback is visible on the
-  // Capture page, which is where a job belongs. Note this is NOT a rule that derived lanes are
-  // hidden here: Simulated shows, because on a stack running the simulator the simulated fleet is
-  // the plant, and hiding it would empty the page.
+  // The derived lanes. None is a row in `cells`: Unassigned is the absence of a decision, Site-Wide
+  // an assertion, Simulated a fact about the gateway. Shadow is not here: this map answers what the
+  // plant is doing now, and a replay is not now; a running playback is visible on the Capture page.
   const laneDevices = useMemo(() => ({
     [SOURCE_UNASSIGNED]: stagedAssets.filter(a => a.location_source === SOURCE_UNASSIGNED),
     [SOURCE_SITE_WIDE]: stagedAssets.filter(a => a.location_source === SOURCE_SITE_WIDE),
@@ -233,18 +184,10 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   }), [stagedAssets])
 
   /**
-   * Drop onto one of the two derived lanes.
-   *
-   * Site-Wide is an assertion and always takes: it sets the scope and clears the cell, mirroring
-   * devices_site_wide_has_no_cell.
-   *
-   * UNASSIGNED IS NOT SETTABLE, and that is not a limitation to work around -- it is what the
-   * word means. Unassigned is the resolution running out of arms, so the drop clears the device's
-   * explicit cell and then reports where it actually landed. A device whose gateway serves a cell
-   * will inherit that cell again and visibly spring back, which is correct: it is not unassigned,
-   * and saying otherwise would be the one lie this model exists to avoid telling. Detaching the
-   * gateway to force it would express a location intent by changing the DATA PATH -- exactly the
-   * coupling archived migration 0036 removed.
+   * Drop onto one of the two derived lanes. Site-Wide is an assertion and always takes: it sets the
+   * scope and clears the cell (`devices_site_wide_has_no_cell`). Unassigned is not settable: the
+   * drop clears the explicit cell and reports where the device actually resolves, which may be the
+   * inherited cell again.
    */
   const handleLaneDrop = (e, lane) => {
     e.preventDefault()
@@ -267,11 +210,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       return
     }
 
-    // AND THE SPRING-BACK IS NOW VISIBLE AT THE DROP, not after a write. Staging clears the
-    // explicit cell and re-runs the resolution locally, so a device whose gateway serves a cell
-    // re-inherits it and the chip lands back in that cell immediately. Under the old immediate
-    // write the operator saw the chip stay put, then jump somewhere unexpected once the reload
-    // arrived. The message explains what they just watched happen.
+    // The spring-back is visible at the drop: staging re-runs the resolution locally, so a device
+    // that re-inherits its gateway's cell lands back there immediately, and the message says why.
     const gateway = gwList.find(g => g.gateway_id === assetData.active_gateway_id)
     const inheritedName = gateway?.cell_id
       ? (cells.find(c => c.cell_id === gateway.cell_id)?.cell_name || 'its gateway\'s cell')
@@ -286,12 +226,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   }
 
   /**
-   * Apply the whole rearrangement as one transaction.
-   *
-   * ONE RPC, not one request per staged move. Firing them separately from here would still be one
-   * transaction each -- the thread would look exactly as it did before this work -- and it would
-   * reintroduce the half-applied batch: a failure on the fourth of six leaves three machines
-   * moved with no record the other three were ever meant to be.
+   * Apply the whole rearrangement as one RPC, so the thread records one act and a failure cannot
+   * leave half the batch applied.
    */
   const applyStaged = async () => {
     if (staged.size === 0 || applying) return
@@ -327,9 +263,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   }
 
   /**
-   * Leaving the mode with work staged has to MEAN something, and silently discarding is the one
-   * thing it must not mean. With immediate writes the only undo was dragging the device back,
-   * which wrote again; staging replaces that with an explicit choice, so the exit asks.
+   * Leaving the mode with work staged asks, because silently discarding is the one thing it must
+   * not do.
    */
   const toggleRearrange = () => {
     if (rearranging && staged.size > 0) {
@@ -342,10 +277,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   }
 
   /**
-   * The browser-level half of "must not lose the work silently". A reload or a closed tab throws
-   * the staged batch away with no server state to recover it from, so the browser is asked to
-   * confirm. In-app navigation is covered differently -- this component keeps its state while the
-   * tab is mounted, and the commit bar below is what stops the batch being forgotten.
+   * A reload or a closed tab throws the staged batch away with nothing server-side to recover, so
+   * the browser asks. In-app navigation keeps this component's state while the tab is mounted.
    */
   useEffect(() => {
     if (staged.size === 0) return undefined
@@ -354,30 +287,16 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     return () => window.removeEventListener('beforeunload', warn)
   }, [staged.size])
 
-  // The per-asset telemetry index that used to live here is GONE, along with the only thing that
-  // read it. Nothing on this page inspects metric VALUES any more -- `telemetry` is still fetched,
-  // but only for the row count on the stats card. Keeping the Map would have been a per-render
-  // rebuild of an index with no consumer.
 
   /**
-   * The tile's health dot: the state of the devices resolving to it.
-   *
-   * This is what makes an eight-column grid scannable at all. Without it you have to read the
-   * chips inside every tile to find the one that needs attention.
-   *
-   * IT REPORTS CONNECTIVITY, NOT PROCESS CONDITION. This used to evaluate the latest telemetry
-   * against hardcoded rules -- `Systems/TEMPERATURE > 80.0` among them -- and paint an Alarm
-   * state. See utils/deviceStatus.js for the four reasons that was wrong; the short version is
-   * that the threshold was a literal while every device publishes its own, and a React render
-   * pass is not an alerting engine. Metric thresholds are Grafana's job.
+   * The tile's health dot: the state of the devices resolving to it. It reports connectivity, not
+   * process condition; metric thresholds are Grafana's job (see utils/deviceStatus.js).
    */
   const rollupStatus = useCallback((devices) => rollupDeviceStatus(devices), [])
 
   /**
-   * Which devices Grafana currently has an alert firing on (issue #34).
-   *
-   * Indexed once per render of the page rather than searched per chip: a cell with forty devices
-   * would otherwise walk the alert list forty times to draw one row.
+   * Which devices Grafana has an alert firing on, indexed once per render rather than searched per
+   * chip.
    */
   const alerts = useMemo(() => alertIndex(activeAlerts), [activeAlerts])
 
@@ -385,23 +304,19 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     attention: 'Needs attention — a device here is quarantined, waiting to be admitted',
     normal: 'Normal — at least one device here is online',
     idle: 'Nothing live — no device here is currently reporting',
-    // Says WHO raised it, because that is the difference between this red and the red this
-    // dashboard withdrew. The map relays a Grafana verdict; it does not evaluate a threshold of
-    // its own. See deviceChipClass() for why that distinction is what permits red at all.
+    // Says who raised it: the map relays a Grafana verdict and evaluates no threshold of its own
+    // (see deviceChipClass()).
     alert: 'Alert firing — Grafana has raised an alert against a device in this tile. The device '
       + 'chip turns red and is flagged ALARM or WARN'
   }
 
-  // One renderer for cell cards and both lanes. A device dragged out of Unassigned has to look
-  // and behave exactly like one already in a cell, or the lanes read as a different kind of thing
-  // rather than as somewhere the same asset currently sits.
+  // One renderer for cell cards and both lanes, so a device dragged out of Unassigned looks and
+  // behaves like one already in a cell.
   const deviceChip = (a) => {
     const status = deviceLifecycleStatus(a)
     const isArch = a.is_archived
-    // Archived reads as inert regardless of the last lifecycle state it held -- a decommissioned
-    // machine that happens to still be publishing must not look like a running one.
-    // ARCHIVED STILL WINS, which is why this is one helper rather than a ternary per site: an
-    // alert firing against something taken out of service is noise about a decision already made.
+    // Archived reads as inert regardless of lifecycle state, and archived still wins over an alert:
+    // an alert against something taken out of service is noise about a decision already made.
     const alert = alertForDevice(alerts, a)
     const colorCls = deviceChipClass(a, alert)
     const isOff = status !== DEVICE_STATUS.ONLINE
@@ -417,41 +332,27 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
           cursor: isInactive ? 'pointer' : canRearrange ? 'grab' : 'pointer',
           userSelect: 'none',
           opacity: isArch ? 0.7 : 1,
-          // STAGED MUST NOT LOOK SAVED. The chip moves the moment it is dropped now, so without
-          // a mark the only difference between "moved" and "moved and durable" is whether the
-          // operator remembers pressing Apply. A dashed outline reads as provisional in a way a
-          // colour change would not -- colour on these chips already means device status.
+          // Staged must not look saved: a dashed outline reads as provisional, and colour on these
+          // chips already means device status.
           ...(a.staged ? { outline: '1px dashed var(--accent)', outlineOffset: '1px' } : null)
         }}
         title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)}${a.staged ? ' — STAGED: this move has not been applied yet' : ''} — ${canRearrange && !isInactive ? 'Drag to reassign Cell, or click' : 'Click'} to view on Devices page`}
       >
         {isArch ? <IconArchive size={11} /> : <IconCog size={11} />}
-        {/* NAME ONLY. The UUID used to sit inline beside it, capped at ~72px, and it was buying
-            almost nothing: six characters of an opaque identifier are not enough to recognise a
-            device by, and they were the reason a name as ordinary as "Sim_CNC_Mill_01" clipped.
-            The full id is on the `title` above, where it is actually readable. */}
+        {/* Name only. The full id is on the `title`. */}
         <span className="chip-name">{a.asset_name}</span>
         {a.staged && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Staged move — not applied yet">STAGED</span>}
         {isArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
-        {/* QUARANTINED AND OFFLINE GET DIFFERENT FLAGS. Both are "not running", but only one of
-            them is waiting on a decision somebody has to make, and labelling a pending device OFF
-            says it went away rather than that it was never let in. */}
+        {/* Quarantined and offline get different flags: only one of them is waiting on a decision. */}
         {!isArch && status === DEVICE_STATUS.QUARANTINED && (
           <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>QUAR</span>
         )}
         {!isArch && status === DEVICE_STATUS.OFFLINE && (
           <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>OFF</span>
         )}
-        {/* AN ALERT IS THE ONE CHIP STATE THAT WAS COLOUR ALONE. Every other treatment on this map
-            carries a mark as well as a hue -- ARCH, QUAR, OFF, STAGED, and the tile dot's `title` --
-            because `.tile-dot` states the rule outright: never colour alone. A red chip with no
-            flag broke it, and issue #59 asks the legend to name a category the map could not
-            actually spell out.
-
-            ARCHIVED WINS, matching deviceChipClass()'s precedence exactly rather than restating it:
-            the chip is already grey by then, and a flag contradicting its own colour is worse than
-            no flag. The glyph and wording are DevicesTab's -- circle/ALARM for critical, triangle
-            for anything else -- so a device does not answer to two different names on two pages. */}
+        {/* An alert carries a flag as well as a hue, like every other chip state: never colour
+            alone. Archived wins, matching deviceChipClass(). The glyph and wording are
+            DevicesTab's, so a device does not answer to two names on two pages. */}
         {!isArch && alert && (
           <span
             className="chip-flag"
@@ -489,11 +390,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                 : gwStatus === 'PENDING_ENROLLMENT' ? 'badge-pending'
                   : gwStatus === 'AWAITING_BIRTH' ? 'badge-provisioned'
                     : 'badge-offline'}`} />}
-        {/* Name only, same as the device chip. The per-gateway "N dev" that used to sit here went
-            with the UUIDs: the tile header already totals GW and Dev for the whole zone, and the
-            per-gateway figure is on this chip's title. The HOST and ARCHIVED badges are down to
-            single flags for the same reason -- a bordered pill left no room for the name it
-            describes. */}
+        {/* Name only, like the device chip; the per-gateway count is on the title, and the tile
+            header totals the zone. */}
         <span className="chip-name mono">{g.gateway_name}</span>
         {g.deployment === 'host' && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Runs on this host"><IconZap size={9} /></span>}
         {isGwArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
@@ -502,25 +400,15 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   }
 
   /**
-   * THE ONE TILE SHAPE, used by the derived lanes and the physical cells alike.
-   *
-   * They were separate blocks of near-identical JSX, which is how the lanes ended up with a
-   * "DERIVED" badge and the cells with a Dashboard link but neither had the other's spacing. A
-   * lane has to read as the same kind of object in a different place -- that is the whole premise
-   * of dragging a device from one into the other -- so they now differ only in the props below.
+   * The one tile shape, used by the derived lanes and the physical cells alike; they differ only in
+   * the props below.
    */
   const floorTile = ({ key, className, name, nameTitle, Icon, status, gateways, devices, counts, hint, onDrop, onNameClick, headerRight, empty, badge }) => {
-    // A TILE IS PENDING WHEN SOMETHING STAGED IS SITTING IN IT, which is a different question
-    // from the one this used to answer. It used to track the single tile with an outstanding
-    // `api.put` -- a drop is no longer a write, so there is nothing outstanding to track. What
-    // there is instead is a tile holding devices that only look like they are there, and that is
-    // the thing an operator must be able to see at a glance before applying the batch.
+    // A tile is pending when something staged is sitting in it.
     const pending = devices.some(d => d.staged)
-    // A TILE WITH NO onDrop MUST NOT ACCEPT DRAGOVER EITHER. handleDragOver calls
-    // preventDefault(), which is precisely what tells the browser "this is a valid drop target" --
-    // so wiring it unconditionally gave the Simulated lane a drop cursor over a tile that then
-    // silently swallowed the drop. Refusing at dragover shows a no-entry cursor instead, which
-    // says the same thing before the operator commits to the gesture.
+    // A tile with no onDrop must not accept dragover either: preventDefault() there is what tells
+    // the browser the target is valid, and refusing shows a no-entry cursor before the operator
+    // commits.
     const droppable = !!onDrop
     return (
     <div
@@ -539,9 +427,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
           onClick={onNameClick}
         >
           {Icon && <Icon size={13} style={{ flexShrink: 0 }} />}
-          {/* Titled as well as truncated -- a long cell name still outruns a ~296px tile
-              and the ellipsis has to lead somewhere. Where the name is also a link, its title
-              carries the destination too, so one hover answers both questions. */}
+          {/* Titled as well as truncated. Where the name is also a link, the title carries the
+              destination. */}
           <span className="zone-name" title={nameTitle || name}>{name}</span>
           {badge}
         </div>
@@ -562,15 +449,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     )
   }
 
-  // Site-Wide first: it is infrastructure and its contents are stable, so it reads as context for
-  // the queue beside it. Unassigned comes second because it is the thing to act on, and it sits
-  // directly before the cells its contents are waiting to be filed into. Both are pinned to the
-  // front of the grid by CSS `order` -- see .shopfloor-lane in App.css.
-  //
-  // A gateway's lane is read from its OWN columns, not from the resolution a device goes through
-  // -- gateways have no inheritance to resolve. Unassigned means "cell-scoped but no cell yet",
-  // which is why it tests both fields: a site-wide gateway has no cell either, and lumping the
-  // two together would put a deliberate answer in a queue that is supposed to drain.
+  // Site-Wide first as stable context, Unassigned second as the thing to act on; both pinned to the
+  // front of the grid by CSS `order`. A gateway's lane is read from its own columns, since gateways
+  // have no inheritance: Unassigned is cell-scoped with no cell yet, so it tests both fields.
   const LANES = [
     {
       key: SOURCE_SITE_WIDE,
@@ -589,10 +470,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       icon: IconBot,
       className: 'shopfloor-lane shopfloor-lane-simulated',
       matchGateway: (g) => !g.is_shadow && g.is_simulated,
-      // NOT DROPPABLE. Every other lane is reachable by a drop because it is a statement about
-      // location, and location is the operator's to assert. This one is a statement about the
-      // gateway's provenance -- dragging a real machine into it would be claiming its readings are
-      // invented, which is not a placement and is not settable from a map.
+      // Not droppable: this lane is a statement about the gateway's provenance, not a location the
+      // operator can assert.
       droppable: false,
       empty: 'Nothing synthetic. Every asset here reports from real hardware.',
       hint: 'Telemetry generated rather than observed — a simulator, or a broker playback target. Set on the gateway; its devices inherit it and cannot be filed into a cell.'
@@ -602,17 +481,13 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       title: 'Unassigned',
       icon: IconShieldAlert,
       className: 'shopfloor-lane shopfloor-lane-queue',
-      // SYNTHETIC GATEWAYS ARE EXCLUDED, which is the whole point of the lane beside it. They have
-      // no cell and are cell-scoped, so they matched here until 0059 -- sitting in a queue whose
-      // every suggested fix ("set a cell on the Gateways page") is refused by
-      // gateways_synthetic_has_no_cell. A queue that cannot drain is one an operator learns to
-      // ignore, which costs the real entries their only signal.
+      // Synthetic gateways are excluded: they are cell-scoped with no cell, and
+      // `gateways_synthetic_has_no_cell` refuses every suggested fix, so they would sit in a queue
+      // that cannot drain.
       matchGateway: (g) => !g.is_simulated && !g.is_shadow
         && g.location_scope !== SCOPE_SITE_WIDE && !g.cell_id,
-      // Empty here is a RESULT, not a state -- the queue has drained -- so it says so rather than
-      // describing what could go in it. The tile no longer collapses to a single line to make the
-      // point: in a grid of uniform tiles a half-height one leaves a hole in the row, and at
-      // ~296px there is no longer enough height at stake to be worth it.
+      // Empty here is a result, the queue has drained, so it says so. The tile keeps its full
+      // height so the grid row has no hole.
       empty: 'All clear — every asset resolves to a cell or is Site-Wide.',
       hint: 'A work queue, not a location. Drop a device here to clear the cell set on it; if its gateway serves a cell it will inherit that instead.'
     }
@@ -629,9 +504,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   const activeCellsCount = cells.filter(c => !c.is_archived).length
   const archivedCellsCount = cells.filter(c => c.is_archived).length
 
-  // THE SHADOW LANE IS NOT PART OF THE FLEET, and this ribbon was the last surface that disagreed.
-  // The rule, why it is one rule rather than three, and what the returned `shadow` figure is for
-  // are all in fleetCounts.js -- it is the only place that sentence is written now.
+  // The shadow lane is not part of the fleet; the rule and the returned `shadow` figure are in
+  // fleetCounts.js.
   const gw = gatewayFleetCounts(gwList)
   const dev = deviceFleetCounts(assets)
 
@@ -646,13 +520,11 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
 
   return (
     <>
-      {/* No page heading and no description paragraph. The top bar's active tab already names this
-          page, and the paragraph that used to sit here cost 41px on every load to say what the
-          stat cards and the map below state directly. */}
-      {/* Every figure and every click target the three stat cards carried, in 48px instead of 154.
-          The headline is "live / total" rather than a bare total: the question this bar answers
-          from across a room is "is everything up?", which a total alone cannot answer. The
-          breakdown the cards printed underneath moves onto each item's `title`. */}
+      {/* No page heading or description: the rail names the page, and the ribbon and map state the
+          rest. */}
+      {/* Every figure and click target of the old stat cards, in one 48px bar. The headline is live
+          / total because the question from across a room is whether everything is up; the breakdown
+          is on each item's `title`. */}
       <div className="kpi-ribbon">
         <button
           className="kpi-item"
@@ -674,17 +546,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
           <span className="kpi-unit">Online</span>
         </button>
 
-        {/*
-          The separate "Pending Quarantine" card was folded in here. It reported the same
-          device the Offline figure already counted, and quarantine is a sub-state of the
-          device population rather than a population of its own.
-
-          Losing the dedicated card must not lose the prominence, since quarantine is the one
-          state on this page that requires an operator to act. The item therefore raises a
-          warning treatment while any device is held: a coloured left bar and tint, plus an icon
-          and the word "Quarantined" spelled out beside the figure. The icon and the word carry
-          the meaning on their own, so the signal does not depend on colour alone.
-        */}
+        {/* Pending Quarantine is folded into the Devices item: quarantine is a sub-state of the
+            device population. It raises a warning treatment while any device is held, with an icon
+            and the word spelled out, so the signal does not depend on colour. */}
         <button
           className={`kpi-item${dev.quarantined > 0 ? ' kpi-item-alert' : ''}`}
           onClick={() => onNavigateTab && onNavigateTab('devices')}
@@ -711,26 +575,17 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
               <IconMap size={18} />
               <span>Shopfloor Dashboard</span>
             </div>
-            {/* The legend now describes the TILE DOTS, which are new and are the only thing a
-                reader has to decode to scan the grid. It used to describe the chips, whose
-                meaning is on each chip's own `title` and in its icon -- and one of its four
-                entries ("Amber: Archived") did not match what amber meant on a chip anyway. */}
+            {/* The legend describes the tile dots, which are the only thing a reader has to decode
+                to scan the grid; chip meanings are on each chip's `title`. */}
             <div className="shopfloor-legend">
               <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
-              {/* "Needs attention", not "Quarantined". This is a TILE state, and the tile is
-                  reporting that something inside it wants a decision -- which today is only ever a
-                  quarantined device, but the label should describe the dot rather than enumerate
-                  today's one cause. The title says which. */}
+              {/* Needs attention, not Quarantined: a tile state, described by the dot rather than
+                  by today's one cause. The title says which. */}
               <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
-              {/* THE FOURTH CATEGORY IS A CHIP, NOT A DOT (issue #59), and the swatch says so.
-                  Red arrived on this map with issue #34 and the legend never grew an entry for it,
-                  so the one colour that means "somebody look now" was the only one undocumented.
-
-                  It is drawn as a miniature chip rather than a fourth dot on purpose: the dots roll
-                  up CONNECTIVITY for a whole tile, and an alert belongs to one device inside it. A
-                  red dot in this row would promise a tile-level state the grid does not paint --
-                  see rollupDeviceStatus(), which has no alert input and deliberately none. */}
+              {/* The fourth category is a chip, not a dot: the dots roll up connectivity for a
+                  whole tile, and an alert belongs to one device inside it (rollupDeviceStatus() has
+                  no alert input). */}
               <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
               {canManageDevice ? (
                 <button
@@ -752,10 +607,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             </div>
           </div>
 
-          {/* A DESCRIPTION, LIKE EVERY OTHER CARD ON THE STACK. This one had a title and a legend
-              and no sentence saying what it is showing -- and it is the one card where that costs
-              most, because a grid of tiles is the least self-explanatory thing here. The legend
-              decodes the dots; this says what a tile IS. */}
+          {/* The sentence that says what a tile is; the legend decodes the dots. */}
           <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '0 0 16px' }}>
             Every cell on the shopfloor, with the devices that resolve to it. A device sits in its
             own cell if it names one and in its gateway's otherwise, so this is where the two
@@ -768,10 +620,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
           {canRearrange && (
             <div style={{ marginBottom: '16px', fontSize: '11px', color: 'var(--warning-text)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <IconPencil size={12} />
-              {/* THE COUNT AND THE ACTIONS LIVE IN THE SAME BANNER the mode already showed, rather
-                  than in a new floating bar. This banner is the thing that says the map is live;
-                  a second element saying the map is also unsaved would be two places to look for
-                  one answer, and the one that scrolled off screen would be the one that mattered. */}
+              {/* The count and the actions live in the banner that already says the map is live, so
+                  there is one place to look. */}
               {staged.size === 0 ? (
                 <span>
                   Drag a device onto a cell or lane to stage a move. Nothing is written until you apply.
@@ -806,24 +656,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             </div>
           )}
 
-          {/* TWO GRIDS, BECAUSE LANES AND CELLS ARE DIFFERENT KINDS OF THING.
-              The lanes held positions 1-3 of a single grid by CSS `order`, which pinned them but
-              did not SEPARATE them: at most widths they sat on the same row as the first cells, so
-              the map read as one run of tiles in which three happened to be coloured differently.
-              A reader had to already know which were derived to see the boundary.
-
-              A row of their own draws it structurally instead. The lanes are the assets that
-              belong to NO cell -- and every one of them is a fact about the data path, not a place
-              on the floor -- so the plant reads as the grid beneath them.
-
-              This reverses the merge that put them in one grid, and the reason it is now the
-              cheaper choice is that there are three lanes rather than two: three tiles fill a row
-              on their own, so the height that merging saved is no longer there to save.
-
-              Each lane holds BOTH gateways and devices. A gateway with no cell is exactly as
-              stranded as a device with no cell -- and it is usually the CAUSE of the devices
-              beside it being stranded, since they had nothing to inherit. Showing only the
-              devices left the reason off-screen. */}
+          {/* Two grids: the lanes are assets that belong to no cell, so they get a row of their own
+              and the plant reads as the grid beneath. Each lane holds gateways as well as devices,
+              because a gateway with no cell is usually why its devices have none. */}
           <div className="shopfloor-lanes">
             {laneViews.map(({ lane, devices: laneAssets, gateways: laneGateways }) => floorTile({
               key: lane.key,
@@ -839,11 +674,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
               hint: lane.hint,
               onDrop: lane.droppable === false ? undefined : (e) => handleLaneDrop(e, lane.key),
               empty: lane.empty,
-              // THE "DERIVED" BADGE IS GONE FROM THE TILE, and the word moved onto the name's
-              // title instead. It was a `flex-shrink: 0` element sharing a narrow header with the
-              // name, so it took its width first and left "Site-Wide" and "Unassigned" rendering
-              // as "S..." and "U..." -- a badge explaining what a tile is, at the cost of the
-              // tile's name. The colour and the border now carry "not a cell" on their own.
+              // The word derived is on the name's title rather than a badge, which took the
+              // header's width and truncated the name. The colour and border carry not a cell.
               nameTitle: `${lane.title} — a derived lane, not a cell: it has no record in the database`
             }))}
           </div>
@@ -851,25 +683,10 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
           {/* THE PLANT ITSELF, BELOW THE LANES. */}
           <div className="shopfloor-grid">
             {cells.length === 0 && (
-              /* AN EMPTY STATE OF ITS OWN, now that this grid can be empty while the lanes above
-                 are full -- which is the ordinary state of a stack running only the simulator,
-                 since gateways_synthetic_has_no_cell (0059) means the demonstration floor has no
-                 cells at all. Under one grid that case rendered nothing here and the section
-                 simply stopped, reading as a map that had failed to load.
-
-                 It says where the assets went, because the previous wording ("No active cells
-                 configured") answered a question nobody had asked while leaving the obvious one
-                 -- then where is everything? -- to the tiles above it.
-
-                 THREE CASES, NOT TWO, and the third is the one 0073 made ordinary. On a stack that
-                 ships empty the only gateway is the seeded Playback row, which is `is_shadow` and
-                 therefore matches NO lane -- deliberately, see the LANES note above. So the lanes
-                 were empty, the grid was empty, and the fallback said "no active cells" while the
-                 first sentence of the other branch ("every asset resolves to one of the lanes
-                 above") would have been an outright lie: nothing resolved to a lane at all, and an
-                 operator reading either one had no way to learn that the stack does hold a gateway
-                 and that it is the replay lane. It names the Capture page because that is where the
-                 code has already decided a replay belongs. */
+              /* An empty state of its own, since this grid can be empty while the lanes are full (a
+                 stack running only the simulator has no cells). Three cases: assets in the lanes
+                 above, nothing at all, or only the seeded Playback gateway, which matches no lane
+                 and is named with the Capture page. */
               <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
                 <div className="empty-icon"><IconFactory size={36} /></div>
                 <div className="empty-text">
@@ -887,23 +704,18 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
               // Cells own gateways; gateways own devices. Deriving the gateway list
               // from the devices instead hid every gateway that has no device yet.
               const cellGateways = gwList.filter(g => g.cell_id === c.cell_id)
-              // Devices that RESOLVE to this cell, grouped from the list this page already
-              // loads. /api/v1/cells no longer returns them -- on a 3s poll, having that
-              // endpoint fetch the device table as well meant reading it twice a tick.
+              // Devices that resolve to this cell, grouped from the list this page already loads.
               const cellAssets = devicesByCell.get(c.cell_id) || []
 
               return floorTile({
                 key: c.cell_id,
-                // `shopfloor-cell` marks the physical bays apart from the two derived lanes now
-                // that they share one grid -- it is what "every tile except the lanes" selects on,
-                // in CSS and in the tests.
+                // `shopfloor-cell` marks the physical bays apart from the derived lanes, in CSS and
+                // in the tests.
                 className: `shopfloor-cell${c.is_archived ? ' shopfloor-zone-archived' : ''}`,
                 name: c.cell_name,
                 nameTitle: `Cell '${c.cell_name}' (Zone #${c.cell_id}) — Click to view on Cells page`,
-                // Per-cell now rather than one glyph for every zone: a floor of six identical
-                // rectangles is read name-by-name, which is the thing a map is meant to avoid.
-                // Falls back to the default for an icon this build does not know -- see
-                // utils/cellIcon.jsx.
+                // Per-cell icon, falling back to the default for one this build does not know
+                // (utils/cellIcon.jsx).
                 Icon: cellIconComponent(c.icon),
                 status: rollupStatus(cellAssets),
                 gateways: cellGateways,
@@ -913,19 +725,14 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                   ? `Cell Zone #${c.cell_id} (Archived / Out of Commission)`
                   : `Cell Zone #${c.cell_id}: Drag device node here to reassign`,
                 onDrop: (e) => handleDrop(e, c.cell_id),
-                // Hands the cell's id over so the Cells page arrives filtered to it. This used to
-                // call onNavigateTab('cells'), which dropped the identity and landed on an
-                // unfiltered list. onSelectCell mirrors onSelectDevice/onSelectGateway; it falls
-                // back to a plain navigation so the tile still works if a caller wires only the
-                // tab handler.
+                // Hands the cell's id over so the Cells page arrives filtered; falls back to a
+                // plain navigation if only the tab handler is wired.
                 onNameClick: () => onSelectCell ? onSelectCell(c.cell_id) : onNavigateTab && onNavigateTab('cells'),
                 empty: canRearrange ? 'Drag & drop a device node here to assign.' : 'No gateways or devices in this cell zone.',
                 badge: c.is_archived
                   ? <span className="chip-flag" style={{ color: 'var(--warning-text)' }} title="Shopfloor Cell zone archived">ARCH</span>
                   : null,
-                // The Dashboard link displaces the count pair when a cell has one: it is the only
-                // action a tile offers, and at this width there is room for one or the other. The
-                // counts stay reachable on the tile's own `title`.
+                // The Dashboard link displaces the count pair, which stays on the tile's `title`.
                 headerRight: c.access_url ? (
                   <a
                     href={c.access_url}

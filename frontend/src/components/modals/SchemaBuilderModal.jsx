@@ -14,9 +14,7 @@ import { gatewayAcceptsDevices } from '../../utils/gatewayType'
 const ANY_STANDARD = '__any__'
 
 export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onCancel)
 
   const [schemaName, setSchemaName] = useState('')
@@ -32,10 +30,8 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
 
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
 
-  // The standard filter narrows what is *listed*, never what is selected. A schema legitimately
-  // mixes standards -- an OEE submodel of ISO KPIs alongside the MTConnect observations they are
-  // computed from is the normal case -- so clearing a selection on filter change would fight the
-  // thing the filter exists to make easier.
+  // The standard filter narrows what is listed, never what is selected: a schema legitimately mixes
+  // standards, such as ISO KPIs beside the MTConnect observations they are computed from.
   const filteredCatalog = useMemo(() => {
     const q = search.trim().toLowerCase()
     return activeCatalog.filter(m => {
@@ -70,9 +66,8 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
         properties,
         required: selectedMetrics.map(m => m.name)
       },
-      // The AAS Submodel this schema corresponds to, if it is a known one -- an IDTA submodel
-      // template id, say. Optional: most schemas are local compositions with no template behind
-      // them, and asserting one there would be a false claim.
+      // The AAS Submodel this schema corresponds to, if it is a known one (an IDTA submodel
+      // template id). Optional: most schemas are local compositions.
       semantic_id: semanticId.trim(),
       semantic_id_type: semanticIdType
     }
@@ -94,10 +89,8 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
 
   return (
     <div className="modal-overlay">
-      {/* WIDE, not the bare `.modal` 480px (issue #36). This dialog is a two-column list --
-          metric name against its description -- and at 480px the description was compressed to a
-          few words per line, which is the half a reader is choosing between metrics ON. That is
-          the same argument `.modal-wide` was written for. */}
+      {/* Wide, not the bare `.modal`: a two-column list of metric name against description, and the
+          description is what a reader chooses on. */}
       <div className="modal modal-wide">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconFileCode size={18} />
@@ -151,9 +144,7 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
               onChange={e => setSearch(e.target.value)}
               placeholder="Search catalog metrics…"
             />
-            {/* Filters the list only. A schema mixing standards is normal — ISO 22400 KPIs beside
-                the MTConnect observations they are computed from — so selections survive a change
-                here. */}
+            {/* Filters the list only; selections survive a change here. */}
             <select
               className="form-control"
               style={{ flex: '0 0 165px' }}
@@ -169,17 +160,14 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
               ))}
             </select>
           </div>
-          {/* Was a flat 220px -- about four rows on any screen, which is the "see more metrics"
-              half of #36. Scales with the viewport but stays capped: `.modal` already caps its own
-              height and scrolls, so an uncapped list here would just move the scrollbar outwards
-              and take the search box off screen with it. */}
+          {/* Scales with the viewport but stays capped, since `.modal` caps its own height and an
+              uncapped list would move the scrollbar outwards and take the search box off screen. */}
           <div style={{ maxHeight: 'min(46vh, 440px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             {filteredCatalog.length === 0 ? (
               <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>No matching catalog metrics.</div>
             ) : (
-              // Grouped the same way as the Schemas page catalog table -- this is the same
-              // registry, and a picker that ordered it differently would be its own puzzle.
-              // Grouping applies to the search results, so a filtered list stays navigable.
+              // Grouped the same way as the Schemas page catalog table. Grouping applies to the
+              // search results, so a filtered list stays navigable.
               groupCatalog(filteredCatalog).map(group => (
                 <div key={group.label}>
                   <div
@@ -249,9 +237,8 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
 
         <div className="modal-actions" style={{ flexWrap: 'wrap' }}>
           <button className="btn btn-ghost" onClick={onCancel} disabled={!!submitting} title="Discard and close">Cancel</button>
-          {/* Both submissions save the same schema, so one running locks the other -- but only
-              the one that was clicked reports, which is why `submitting` names the mode rather
-              than being a boolean. */}
+          {/* Both submissions save the same schema, so one running locks the other, and only the
+              one clicked reports; `submitting` names the mode. */}
           <ActionButton
             className={`btn btn-primary ${!canSave ? 'btn-disabled' : ''}`}
             disabled={!canSave || !!submitting}
@@ -262,9 +249,8 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
           >
             Save Schema Only
           </ActionButton>
-          {/* There is no separate "Save & Provision Device" action: provisioning is now a
-              prerequisite of the spec sheet, since the sheet has to quote the Sparkplug ID the
-              platform issues to the device. The two buttons did the same thing. */}
+          {/* There is no separate "Save & Provision Device" action: provisioning is a prerequisite
+              of the spec sheet, which quotes the Sparkplug ID the platform issues. */}
           <ActionButton
             className={`btn btn-primary ${!canUseDeviceActions ? 'btn-disabled' : ''}`}
             disabled={!canUseDeviceActions || !!submitting}

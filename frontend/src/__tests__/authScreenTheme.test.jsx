@@ -17,12 +17,9 @@ vi.mock('../lib/supabaseClient', () => ({
 }))
 
 /**
- * Strip comments before scanning.
- *
- * These assertions look for forbidden strings in the source, and the fix for this very bug
- * left a comment that names the phantom variables and the old `color: '#fff'` so the mistake
- * is not repeated. Without this the tests would flag their own explanation. Only whole-line
- * `//` comments are removed, so a `//` inside a URL or string literal is left alone.
+ * Strip comments before scanning: these assertions look for forbidden strings in the source, and a
+ * comment naming the old mistake would otherwise be flagged. Only whole-line `//` comments are
+ * removed.
  */
 const stripComments = (src) =>
   src
@@ -40,13 +37,10 @@ const definedVars = new Set(
 )
 
 /**
- * The sign-in card rendered white-on-white in light mode because it referenced
- * var(--text-main) and var(--bg-main) -- neither of which exists. Both carried a hardcoded
- * near-white fallback, so the typo produced a plausible result in dark mode and an unreadable
- * one in light mode, with no error anywhere.
- *
- * These tests guard the class of bug, not just the two names: any CSS variable referenced in
- * App.jsx must be one the stylesheet defines, and the login inputs must not hardcode a colour.
+ * The sign-in card once referenced var(--text-main) and var(--bg-main), neither of which exists,
+ * and the hardcoded fallbacks hid it in dark mode. These guard the class of bug: any CSS variable
+ * referenced in App.jsx must be one the stylesheet defines, and the login inputs must not hardcode
+ * a colour.
  */
 describe('AuthScreen theming', () => {
   beforeEach(() => {

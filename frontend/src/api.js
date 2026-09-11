@@ -143,7 +143,7 @@ export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
  * trend over a month is made cheap by there being fewer rows, not by asking for fewer. The CSV
  * export does not use these: a bucket average is not a reading any instrument produced.
  */
-export const TELEMETRY_RESOLUTIONS = {
+const TELEMETRY_RESOLUTIONS = {
   '1m': { relation: 'telemetry_1m', bucketMinutes: 1 },
   '5m': { relation: 'telemetry_5m', bucketMinutes: 5 },
   '1h': { relation: 'telemetry_1h', bucketMinutes: 60 }
@@ -283,7 +283,7 @@ const mapDigitalThreadRow = (t) => ({
  * (supabase/storage-policies.sql). Resolved from the environment, as storage-init.mjs and the
  * policies resolve it; the default is the same name.
  */
-export const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-models');
+const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-models');
 
 /*
  * The `gateway-backups` bucket is no longer touched by the browser: a gateway's flow is
@@ -299,7 +299,7 @@ export const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-mod
  * window. Objects live under `<sparkplug_id>/` of the subject that was recorded; the prefix is
  * enforced by RLS (supabase/storage-policies.sql), and the paths here follow the rule.
  */
-export const CAPTURE_BUCKET = readSetting('VITE_CAPTURE_BUCKET', 'broker-captures');
+const CAPTURE_BUCKET = readSetting('VITE_CAPTURE_BUCKET', 'broker-captures');
 
 /**
  * The capture-file version this stack reads. Mirrors `CAPTURE_VERSION` in ingestion/capture.py,
@@ -314,7 +314,7 @@ export const CAPTURE_VERSION = 1;
  * folder inside it. Only the plain `filename="..."` form is parsed; a null falls back to a name
  * of the caller's own.
  */
-export function filenameFromDisposition(header) {
+function filenameFromDisposition(header) {
   const match = /filename="([^"]+)"/i.exec(header || '');
   return match ? match[1] : null;
 }

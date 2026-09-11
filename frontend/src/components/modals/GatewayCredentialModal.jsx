@@ -8,35 +8,16 @@ import { IconCheck, IconCopy, IconLock, IconShieldAlert, IconX } from '../common
 const COPY_FEEDBACK_MS = 1600
 
 /**
- * Mint a HOST-RUN gateway's broker credential and show it exactly once.
+ * Mint a host-run gateway's broker credential and show it once. The counterpart to
+ * GatewayBundleModal: a remote gateway's appliance exchanges a claim for its credential, and a
+ * host-run gateway has no appliance, so the password must be shown to a person.
  *
- * THE COUNTERPART TO GatewayBundleModal, and it deliberately reads like it. That one hands a
- * physical gateway a CLAIM the appliance exchanges for a credential at first boot, so no password
- * ever reaches a browser. A host-run gateway has no appliance -- `issue_gateway_enrollment_token()`
- * refuses one outright for exactly that reason -- so the password has to be shown to a person, and
- * this is the one place in the product where that happens.
+ * It always confirms, with no create-time exemption: a broker holds one password per username, so
+ * minting always replaces, possibly a credential a running Node-RED holds, which then fails
+ * silently.
  *
- * ---------------------------------------------------------------------------------------------
- * WHY IT ALWAYS CONFIRMS, WITH NO `confirmFirst` ESCAPE HATCH
- *
- * The bundle modal skips its confirmation on one route: straight after creating a gateway, where
- * there is provably nothing to destroy. That exemption cannot exist here. A broker holds ONE
- * password per username, so minting always REPLACES -- and the thing it replaces may be a
- * credential a running Node-RED is holding, which fails later, silently, as
- * `Connection failed to broker` with no CONNACK code and no mention of a password.
- *
- * A gateway created seconds ago looks identical to one that has been publishing for a month. The
- * confirmation is the only thing standing between "generate a credential" and "take a cell
- * offline", so it is unconditional.
- *
- * ---------------------------------------------------------------------------------------------
- * THE PASSWORD IS NEVER PUT ANYWHERE IT COULD BE READ BACK
- *
- * Not in a toast (they persist in a container the operator may scroll), not in the URL, and not in
- * `digital_thread` -- 0041 records the wire identity and never the secret, because that table is
- * append-only and readable by anyone holding `digital_thread:read`. It lives in this component's
- * state until the modal closes, and then it is gone: `mosquitto_passwd` stores only a hash, so
- * nothing in the stack can produce it again.
+ * The password lives in this component's state until the modal closes: not in a toast, the URL or
+ * `digital_thread`, and `mosquitto_passwd` stores only a hash.
  */
 export function GatewayCredentialModal({ gateway, onClose, showToast }) {
   const [step, setStep] = useState('confirm')
@@ -63,9 +44,8 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
       setStep('reveal')
 
       if (result?.audit_recorded === false) {
-        // SURFACED, NOT SWALLOWED. The credential is real and usable; what failed is the record of
-        // it having been issued. That is the operator's problem to escalate, not ours to hide --
-        // and it is the only case where a successful mint needs saying anything about.
+        // Surfaced, not swallowed: the credential is real and usable; what failed is the record of
+        // its issue, which is for the operator to escalate.
         showToast?.(
           'Credential issued, but the Digital Thread entry could not be written. Note this.',
           'error'
@@ -74,9 +54,8 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
         showToast?.(`Broker credential issued for '${gateway.gateway_name}'`, 'success')
       }
     } catch (err) {
-      // THE STEP IS NOT ADVANCED. Nothing was minted, so whatever credential the gateway had is
-      // still valid. Leaving the operator on the confirm screen says that; dropping them onto an
-      // empty reveal screen would imply a password exists that they failed to catch.
+      // The step is not advanced: nothing was minted, so whatever credential the gateway had is
+      // still valid.
       setError(err.message)
       showToast?.(err.message, 'error')
     } finally {
@@ -92,33 +71,16 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
     if (!ok) showToast?.('Could not reach the clipboard — select the value and copy it.', 'error')
   }, [showToast])
 
-  // THE ENV BLOCK IS BUILT FROM ONE SOURCE with the fields shown above it, for the reason the
-  // bundle modal gives about its command block: two literals drift, and the failure is an operator
-  // pasting lines that disagree with what is on screen.
-  //
-  // TWO DESTINATIONS, BECAUSE THERE ARE TWO KINDS OF HOLDER, and printing the wrong one is worse
-  // than printing nothing: an operator follows it, nothing works, and the password is already gone.
-  //
-  // A SIMULATED gateway's password is held by a Node-RED broker node, which reads a `.env` PAIR.
-  // The variable NAME is left as a placeholder on purpose: `acsCredentialsEnv` is declared per
-  // broker node in the flow and is deliberately NOT derived from the gateway's name --
-  // provision-gateways.mjs documents the debugging session that cost -- so this component cannot
-  // know it, and guessing would produce a block that looks authoritative and does not work.
-  //
-  // A PLAYBACK gateway (0060) has no Node-RED node at all. Nothing publishes as it except the
-  // playback worker, which reads ONE json object keyed by sparkplug_id -- and that key IS
-  // derivable, so this half prints a line that can be pasted whole.
+  // The env block is built from one source with the fields shown above it. Two destinations: a
+  // simulated gateway's password is read by a Node-RED broker node from a `.env` pair whose
+  // variable name is declared per node and left as a placeholder here; the playback gateway's is
+  // read by the playback worker from one JSON object keyed by sparkplug_id, which is derivable.
   const isPlayback = !!gateway.is_shadow
 
-  // WHAT THE SERVER DID, NOT WHAT THIS COMPONENT INFERS (0078). `playback_delivered` is:
-  //
-  //   true    the password was written where the worker reads it -- nothing for an operator to do
-  //   false   this IS a playback target and delivery FAILED -- it must be placed by hand
-  //   null    not a playback target, so there was nothing to deliver
-  //
-  // ABSENT IS TREATED AS null, which is what a build talking to a stack whose migrations have not
-  // replayed yet will see. That degrades to the pre-0078 instructions, which are correct there --
-  // the wrong way round would tell an operator to do nothing on a stack where nothing was done.
+  // What the server did, not what this component infers. `playback_delivered` is true (written
+  // where the worker reads it), false (a playback target, delivery failed, place by hand) or null
+  // (not a playback target). Absent is treated as null, which is what a build talking to an older
+  // stack sees.
   const wasDelivered = credential?.playback_delivered === true
   const deliveryFailed = credential?.playback_delivered === false
   const envBlock = !credential
@@ -233,9 +195,8 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                   {copied === 'user' ? <IconCheck size={13} /> : <IconCopy size={13} />}
                 </button>
               </div>
-              {/* Said explicitly, because it looks like a coincidence and is a constraint.
-                  mosquitto.acl pins the topic's edge-node segment to the connecting username, so a
-                  friendly name here authenticates fine and then has every publish silently dropped. */}
+              {/* Said explicitly because it looks like a coincidence and is a constraint:
+                  mosquitto.acl pins the topic's edge-node segment to the connecting username. */}
               <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>
                 This is the gateway’s Sparkplug ID, and it cannot be anything else — the broker’s ACL
                 matches the topic against the connecting username.
@@ -256,17 +217,8 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
               </div>
             </div>
 
-            {/* DELIVERED MEANS THERE IS NOTHING TO DO, and saying otherwise is the bug this
-                replaced. Until 0078 this dialog told every playback operator to paste a variable
-                into `.env` and run `docker compose up -d playback` -- which was true, and is now
-                the WRONG instruction: the credential service writes the password where the worker
-                reads it, and the worker picks it up within its poll interval. An operator who
-                followed the old text would edit `.env` to a value the delivered file already
-                overrides, and conclude the paste had failed.
-
-                THREE STATES, NOT TWO. `playback_delivered` is true, false or null, and false is
-                the one that needs a person -- see the edge function for why they cannot be
-                collapsed into a boolean. */}
+            {/* Delivered means there is nothing to do: the credential service writes the password
+                where the worker reads it. Three states, and false is the one that needs a person. */}
             {wasDelivered ? (
               <div className="form-group" style={{ fontSize: '12px' }}>
                 <strong style={{ color: 'var(--success-text)' }}>
@@ -290,10 +242,8 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                   <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
                     {isPlayback ? (
                       <>
-                        {/* THE FALLBACK PATH, and it is reached when delivery was attempted and
-                            failed -- so it has to say that, or an operator reads the same
-                            instruction they would have got on a healthy stack and never learns
-                            something went wrong. */}
+                        {/* The fallback path, reached when delivery was attempted and failed, so it
+                            says so. */}
                         {deliveryFailed && (
                           <strong style={{ color: 'var(--warning-text)', display: 'block', marginBottom: '4px' }}>
                             Automatic delivery to the playback worker failed, so this has to be

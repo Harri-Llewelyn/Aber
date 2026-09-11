@@ -33,25 +33,17 @@ const gateway = {
     {
       asset_id: 'dev-1', asset_name: 'Simulated_CNC_01', status: 'ONLINE',
       gateway_name: 'Virtual_Gateway_NodeRED', active_gateway_id: 'gw-1',
-      // Location as api.js now merges it from device_locations: no explicit override, so the
-      // device inherits its gateway's cell. Cell membership is grouped from the device list by
-      // the tabs themselves -- /api/v1/cells no longer carries it.
+      // Location as api.js merges it from device_locations: no explicit override, so the device
+      // inherits its gateway's cell. Cell membership is grouped from the device list by the tabs.
       cell_id: null, location_scope: 'cell', effective_cell_id: 'cell-1',
       gateway_cell_id: 'cell-1', location_source: 'inherited', cell_mismatch: false
     }
   ]
 }
 
-/*
- * A device whose cell is its OWN, not its gateway's.
- *
- * Needed because dropping onto Unassigned CLEARS the explicit cell, and the default fixture above
- * has none to clear -- it inherits cell-1 from gw-1. Staging compares each move against the
- * device's committed row and drops the ones that change nothing, so the default device staged
- * onto Unassigned correctly stages nothing at all. The old immediate-write path could not tell
- * the difference: it issued the PUT regardless, so a drag payload that CLAIMED to be explicit was
- * never checked against the row being rendered. These tests were passing that contradiction.
- */
+/* A device whose cell is its own, not its gateway's. Dropping onto Unassigned clears the explicit
+   cell, and the default fixture has none to clear; staging compares each move against the committed
+   row and drops the ones that change nothing. */
 const explicitlyFiledDevice = {
   ...gateway.devices[0],
   cell_id: 'cell-1',
@@ -68,9 +60,8 @@ const staleGateway = {
   devices: []
 }
 
-// No `devices`/`device_count`: /api/v1/cells returns gateways only, and membership is resolved
-// from the device list by groupDevicesByCell(). Leaving them here would let a regression that
-// re-read them from the cell pass unnoticed.
+// No `devices`/`device_count`: /api/v1/cells returns gateways only, and membership is resolved from
+// the device list by groupDevicesByCell().
 const cell = {
   cell_id: 'cell-1',
   cell_name: 'Assembly Line 1',
@@ -97,21 +88,13 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-// Drag-and-drop is gated behind an explicit Rearrange mode, off by default, so a stray drag on a
-// page that is mostly read cannot relocate an asset. Every drop test has to enter that mode first
-// -- which is exactly what a user now does.
+// Drag-and-drop is gated behind an explicit Rearrange mode, off by default, so every drop test
+// enters that mode first.
 const enableRearrange = () => fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
 
-/*
- * A DROP NO LONGER WRITES. Moves are staged and applied together as one transaction (migration
- * 0033), so a test that wants to see the write has to press Apply -- which is exactly what a user
- * now does, and is the reason these assertions moved from api.put to api.relocateDevices.
- *
- * The distinction is load-bearing rather than cosmetic: six drops used to be six transactions and
- * therefore six unrelated-looking rows in the Digital Thread. `relocateDevices` is called ONCE
- * with the whole batch, and the tests below assert that shape rather than just that something was
- * written.
- */
+/* A drop does not write. Moves are staged and applied together as one transaction, so a test that
+   wants to see the write presses Apply. `relocateDevices` is called once with the whole batch, and
+   the tests assert that shape. */
 const applyRearrange = async () => {
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: /Apply \d+ move/ }))
@@ -121,9 +104,8 @@ const applyRearrange = async () => {
 /** The single batch the page sent, as an array of moves. */
 const sentBatch = () => api.relocateDevices.mock.calls[0][0]
 
-// TWO GRIDS. The derived lanes have a row of their own above the cells, so neither "a tile" nor
-// "the first .shopfloor-zone" identifies anything on its own. Cells carry .shopfloor-cell and live
-// in .shopfloor-grid; lanes carry .shopfloor-lane and live in .shopfloor-lanes.
+// Two grids: lanes carry .shopfloor-lane and live in .shopfloor-lanes; cells carry .shopfloor-cell
+// and live in .shopfloor-grid.
 const cellTiles = () => [...document.querySelectorAll('.shopfloor-grid > .shopfloor-cell')]
 const cellTileFor = (name) => cellTiles().find(z => within(z).queryByText(name))
 const laneTiles = () => [...document.querySelectorAll('.shopfloor-lanes > .shopfloor-lane')]
@@ -138,28 +120,22 @@ describe('CellsTab shows the gateways and devices attached to a cell', () => {
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    // WHAT THIS TEST IS FOR IS UNCHANGED: a cell has to name the gateways assigned to it and the
-    // devices that RESOLVE to it, so the page answers "what is in this zone" without a drill-down.
-    // Where it says it moved twice. It was a pair of titled sub-cards, then a pair of bare tables
-    // inside a per-cell card, and it is now two columns of one table (issue #61) -- because three
-    // of those cards filled a viewport and the page stopped being scannable at all.
+    // A cell names the gateways assigned to it and the devices that resolve to it, as two columns
+    // of one table.
     const row = screen.getByText('Assembly Line 1').closest('tr')
     expect(within(row).getByText('Virtual_Gateway_NodeRED')).toBeTruthy()
     expect(within(row).getByText('Simulated_CNC_01')).toBeTruthy()
     // The same summary the Gateways page puts on a gateway's device column.
     expect(within(row).getByText('1 Online / 0 Offline')).toBeTruthy()
 
-    // THE HEARTBEAT IS DELIBERATELY NOT HERE. Per-gateway Sparkplug ID, status and heartbeat age
-    // were three of the columns the nested tables carried, and they are the bulk of the height
-    // this issue was about. Each is on the gateway's own row on the Gateways page, one click away
-    // through the drawer's chip.
+    // The heartbeat is not here: per-gateway status and heartbeat age are on the Gateways page, one
+    // click away through the drawer's chip.
     expect(screen.queryByText('20s ago')).toBeNull()
   })
 
   it('does not flag a Site-Wide device as unlinked', async () => {
-    // It resolves to no cell, but that is the operator's answer rather than an omission.
-    // Flagging it produced a permanent warning no action could clear, which just teaches people
-    // to ignore the banner.
+    // It resolves to no cell, but that is the operator's answer rather than an omission; flagging
+    // it would be a permanent warning no action could clear.
     api.get.mockImplementation(routeGet({
       cells: [{ ...cell, gateways: [], gateway_count: 0 }],
       devices: [{ asset_id: 'dev-s', asset_name: 'Site_BMS', status: 'ONLINE',
@@ -226,9 +202,8 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     // Edit moved into the context panel with the rest of the gateway ACTIONS column.
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
-    // Site-Wide is an OPTION in the cell picker now, not a checkbox beside it: one question, one
-    // control. The exclusion it used to enforce by reaching over and clearing the select is now
-    // structural -- you cannot choose Site-Wide and a cell, because they are the same field.
+    // Site-Wide is an option in the cell picker, not a checkbox beside it: you cannot choose
+    // Site-Wide and a cell because they are the same field.
     fireEvent.change(document.querySelector('#gateway-cell-zone'), { target: { value: 'site_wide' } })
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
 
@@ -247,9 +222,8 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
-    // Changing the TYPE must not move the cell. They are different questions -- where the connector
-    // runs versus where its assets are -- and conflating them would relocate a plant's devices on a
-    // dropdown.
+    // Changing the type must not move the cell: where the connector runs and where its assets are
+    // are different questions.
     fireEvent.change(document.querySelector('#gateway-type'), { target: { value: 'host' } })
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
 
@@ -282,9 +256,7 @@ describe('OverviewTab shopfloor map', () => {
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    // The two "Active Edge Gateways (n)" / "Operating Devices (n)" section headings inside each
-    // tile were replaced by one count pair in its header. They cost ~40px per tile to say what
-    // eleven characters say now, which a tile this size cannot afford.
+    // The per-tile section headings were replaced by one count pair in the header.
     const zone = cellTileFor('Assembly Line 1')
     expect(within(zone).getByText('GW: 1 | Dev: 1')).toBeInTheDocument()
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
@@ -293,19 +265,16 @@ describe('OverviewTab shopfloor map', () => {
     // The ribbon reports live/total per row. The full breakdown the stat cards printed underneath
     // moved onto each item's title, so it is read from there.
     expect(kpiItem(/Cells/).textContent).toContain('1/1')
-    // GATEWAYS CARRY A FOURTH BUCKET: "awaiting setup" — the two physical-gateway enrolment states.
-    // They are excluded from `offline` for the same reason quarantined devices are (see the note
-    // below): a gateway waiting for somebody to carry its bundle to a machine is an unfinished task,
-    // and counting it as offline reports a fault on every appliance still in its box.
+    // Gateways carry a fourth bucket, "awaiting setup", for the enrolment states. Excluded from
+    // `offline` because a gateway waiting for its bundle is an unfinished task, not a fault.
     expect(kpiItem(/Gateways/)).toHaveAttribute(
       'title', expect.stringContaining('1 online / 0 awaiting setup / 0 offline / 0 archived')
     )
     expect(kpiItem(/Devices/)).toHaveAttribute('title', expect.stringContaining('1 online / 0 offline / 0 archived'))
   })
 
-  // A quarantined device is stored with status OFFLINE. It used to be counted in the Offline
-  // figure AND on a separate Pending Quarantine card -- the same device twice, with the
-  // Offline count implying a fault rather than "waiting to be admitted".
+  // A quarantined device is stored with status OFFLINE; it must be counted as Quarantined only, not
+  // also as Offline.
   it('counts a quarantined device only as Quarantined, and raises the alert treatment', async () => {
     api.get.mockImplementation(routeGet({
       devices: [{ ...gateway.devices[0], is_quarantined: true, status: 'OFFLINE' }],
@@ -345,10 +314,8 @@ describe('OverviewTab shopfloor map', () => {
   })
 
   it('files a dropped device into the target cell even when that cell has no gateway', async () => {
-    // This used to be refused outright. A drop had to express location by rewiring the device's
-    // GATEWAY, so a cell with no gateway -- or with two -- had nowhere to put the device, and a
-    // successful drop changed the data path to say something about geography. With
-    // devices.cell_id the drop writes location directly and the gateway is left alone.
+    // With devices.cell_id the drop writes location directly and leaves the gateway alone, so a
+    // cell with no gateway can take a device.
     const showToast = vi.fn()
     api.get.mockImplementation(routeGet({
       cells: [{ ...cell, gateways: [], gateway_count: 0 }],
@@ -416,9 +383,8 @@ describe('OverviewTab shopfloor map', () => {
       const { container } = renderMap()
       await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 
-      // `:not(.chip-gw)` because the first chip in the DOM is the cell's GATEWAY chip, which is
-      // never draggable -- selecting it would make this assertion pass for the wrong reason.
-      // React omits the attribute for draggable={false}, so read the DOM property.
+      // `:not(.chip-gw)` because the first chip in the DOM is the cell's gateway chip, which is
+      // never draggable. React omits the attribute for draggable={false}, so read the DOM property.
       const deviceChipEl = () => container.querySelector('.zone-chips .chip:not(.chip-gw)')
       expect(deviceChipEl().draggable).toBe(false)
 
@@ -498,17 +464,14 @@ describe('OverviewTab shopfloor map', () => {
     expect(screen.getByText('Site-Wide')).toBeInTheDocument()
     expect(screen.getByText('Orphan_CNC')).toBeInTheDocument()
     expect(screen.getByText('Site_BMS')).toBeInTheDocument()
-    // Still marked as derived so they do not read as cells someone could rename or archive --
-    // but by their tint, border and name title rather than by a pill that was eating the name.
-    // See 'shows the lane names in full' below.
+    // Marked as derived by tint, border and name title rather than by a pill that would eat the
+    // name. See 'shows the lane names in full' below.
     expect(laneTiles().map(t => t.className.includes('shopfloor-lane'))).toEqual([true, true, true])
   })
 
   it('gives synthetic assets the Simulated lane rather than the Unassigned queue', async () => {
-    // 0059. Before it, a device behind a simulated gateway had no cell and was cell-scoped, so it
-    // matched Unassigned exactly -- landing in a work queue whose every suggested remedy ("set a
-    // cell on the Gateways page") is refused by gateways_synthetic_has_no_cell. A queue that
-    // cannot drain is one an operator stops reading.
+    // A device behind a simulated gateway is simulated-scoped, not cell-scoped, so it does not land
+    // in Unassigned, a queue whose every remedy is refused by gateways_synthetic_has_no_cell.
     api.get.mockImplementation(routeGet({
       gateways: [
         { ...gateway, gateway_id: 'gw-sim', gateway_name: 'Sim_Connector',
@@ -542,9 +505,8 @@ describe('OverviewTab shopfloor map', () => {
   })
 
   it('does not accept a drop onto the Simulated lane', async () => {
-    // The other lanes take drops because they are statements about LOCATION, which is the
-    // operator's to assert. This one is a statement about the gateway's provenance: dragging a
-    // real machine into it would be claiming its readings are invented.
+    // The other lanes take drops because they are statements about location. This one is a
+    // statement about the gateway's provenance.
     api.get.mockImplementation(routeGet())
 
     render(
@@ -605,16 +567,8 @@ describe('OverviewTab shopfloor map', () => {
   })
 
   /**
-   * The tiles are UNIFORM now, and that is a deliberate reversal.
-   *
-   * An empty zone used to collapse to its header, because a 320px-wide, 180px-tall card saying
-   * "no gateways serving this zone" three times over pushed the cells that did have contents
-   * below the fold. At ~296px in a six-column grid an empty tile costs about 110px in one
-   * column, and a grid of ragged half-height tiles is harder to scan than an even one -- so the
-   * density that made the collapse necessary is also what made it unnecessary.
-   *
-   * What must NOT change is the meaning: an empty queue still says "All clear" rather than
-   * describing what could go in it, and it is still a drop target.
+   * The tiles are uniform: an empty tile keeps its shape, still says "All clear" rather than
+   * describing what could go in it, and is still a drop target.
    */
   describe('empty tiles keep their shape and their meaning', () => {
     const laneOf = (title) => screen.getByTitle(title)
@@ -645,10 +599,8 @@ describe('OverviewTab shopfloor map', () => {
       )
       await waitFor(() => expect(screen.getByText('Unassigned')).toBeInTheDocument())
 
-      // SEPARATE GRIDS, ONE TILE SHAPE. The lanes shared the cell grid and were held at its front
-      // by CSS `order`, which pinned their position without separating them: at most widths they
-      // sat on the same row as the first bays and the boundary between "derived" and "on the
-      // floor" was visible only to a reader who already knew where it was.
+      // Separate grids, one tile shape: the lanes are in their own grid rather than held at the
+      // front of the cell grid by CSS `order`.
       expect(container.querySelector('.shopfloor-lanes')).not.toBeNull()
       expect(laneTiles()).toHaveLength(3)
       // No lane leaked into the cell grid, which is what the split has to guarantee.
@@ -758,9 +710,7 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Bay 9')).toBeInTheDocument())
 
       const zone = cellTileFor('Bay 9')
-      // The zone id used to be printed in the header. That slot now carries the GW/Dev counts,
-      // which are read far more often, and the id moved onto the name's title -- still one hover
-      // away, and no longer competing with the counts for eleven characters of tile.
+      // The header slot carries the GW/Dev counts; the zone id is on the name's title.
       expect(within(zone).getByTitle(/Zone #cell-empty/)).toBeInTheDocument()
 
       enableRearrange()
@@ -804,10 +754,8 @@ describe('OverviewTab shopfloor map', () => {
   })
 
   it('puts every lane above the cell grid, and nothing else with them', async () => {
-    // What stops the queue moving as cells are added is now structural rather than a CSS `order`
-    // hint: it is in a different grid. A queue nobody can find never drains, and the guarantee is
-    // stronger this way -- `order` held the lanes at the front of a row that cells could still
-    // join, so the tile beside the queue changed as the floor grew.
+    // What keeps the queue in place is structural: it is in a different grid, not held by a CSS
+    // `order` hint.
     api.get.mockImplementation(routeGet())
 
     const { container } = render(
@@ -841,21 +789,16 @@ describe('OverviewTab shopfloor map', () => {
     expect(within(first).getByText('Site-Wide')).toBeInTheDocument()
     expect(within(second).getByText('Simulated')).toBeInTheDocument()
     expect(within(third).getByText('Unassigned')).toBeInTheDocument()
-    // Each lane carries its OWN hue, not one shared "derived" treatment. They are not three of a
-    // kind -- a permanent home, a statement about provenance, and a queue that should drain -- and
-    // colouring them alike made the set read as a single category that the cells were simply not
-    // in. Simulated is deliberately the neutral one: it is the only lane here that wants LESS
-    // attention than a real cell.
+    // Each lane carries its own hue: a permanent home, a statement about provenance, and a queue
+    // that should drain. Simulated is the neutral one.
     expect(first.className).toMatch(/shopfloor-lane-site/)
     expect(second.className).toMatch(/shopfloor-lane-simulated/)
     expect(third.className).toMatch(/shopfloor-lane-queue/)
   })
 
   it('gives the whole chip to the asset name, and keeps the id on its title', async () => {
-    // The UUID used to render inline beside the name, capped at ~72px. Six characters of an opaque
-    // identifier are not enough to recognise a device by, and they were the reason a name as
-    // ordinary as "Simulated_CNC_01" clipped. Removing it is only safe while the id stays
-    // REACHABLE, which is what the second half of this pins.
+    // The UUID is not printed beside the name. Removing it is only safe while the id stays
+    // reachable, which the second half pins.
     api.get.mockImplementation(routeGet({ telemetry: [] }))
 
     render(
@@ -881,9 +824,8 @@ describe('OverviewTab shopfloor map', () => {
   })
 
   it('shows the lane names in full, rather than a badge explaining what they are', async () => {
-    // The DERIVED pill was `flex-shrink: 0` in a header it shared with the name, so it took its
-    // width first and left "Site-Wide" and "Unassigned" rendering as "S..." and "U...". The word
-    // moved onto the name's title; the tint and border carry "not a cell" on their own.
+    // The word DERIVED is on the name's title, not a pill that would shrink "Site-Wide" to "S...";
+    // the tint and border carry "not a cell".
     api.get.mockImplementation(routeGet())
 
     render(
@@ -962,9 +904,8 @@ describe('OverviewTab shopfloor map', () => {
       }
     })
 
-    // The gateway serves Assembly Line 1, so the device inherits it rather than going unassigned
-    // -- and it says so at the DROP, because the local re-resolution has already sprung the chip
-    // back into that cell where the operator can see it.
+    // The gateway serves Assembly Line 1, so the device inherits it, and the toast says so at the
+    // drop.
     expect(showToast).toHaveBeenCalledWith(
       expect.stringContaining("inherits 'Assembly Line 1'"), 'warning'
     )
@@ -1006,12 +947,8 @@ describe('OverviewTab shopfloor map', () => {
     ))
   })
 
-  /*
-   * DEFERRED COMMIT (archived migration 0033).
-   *
-   * Staging buys atomicity and a single causation_id, and it costs three things the immediate
-   * writes never had to think about. Each of these is one of them.
-   */
+  /* Deferred commit. Staging buys atomicity and a single causation_id; each test here is one of the
+     things it costs. */
   describe('staged moves are a transaction, not a queue of writes', () => {
     const renderMap = (showToast = vi.fn()) => {
       api.get.mockImplementation(routeGet({ devices: [explicitlyFiledDevice] }))
@@ -1070,9 +1007,7 @@ describe('OverviewTab shopfloor map', () => {
     })
 
     it('UNSTAGES a device dragged back where it started', async () => {
-      // With immediate writes the only undo was dragging back, which wrote AGAIN -- two audit
-      // rows for a decision that was reversed before it ever took effect. Staged, the round trip
-      // has to cancel out and leave nothing to apply.
+      // A drag back must cancel out and leave nothing to apply, rather than writing twice.
       renderMap()
       await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
       enableRearrange()
@@ -1207,17 +1142,11 @@ describe('OverviewTab shopfloor map', () => {
   })
 })
 
-// The TelemetryTab stream tests lived here. Paging a fleet-wide stream is not something the
-// per-device drawer that replaced it does: it shows the latest value per metric and defers
-// history to the CSV export. See deviceTelemetryAccordion.test.jsx.
+// Paging a fleet-wide stream has no equivalent in the per-device drawer, which shows the latest
+// value per metric and defers history to the CSV export. See deviceTelemetryAccordion.test.jsx.
 
-// ---------------------------------------------------------------------------------------------
-// Overview -> Cells hand-over
-// ---------------------------------------------------------------------------------------------
-// The cell zone title has always carried the tooltip "Click to view Cell 'X' on Cells page" and
-// then called onNavigateTab('cells'), which drops the identity -- so it landed on an unfiltered
-// list and the tooltip was a promise the UI did not keep. These pin both halves: Overview emits
-// the id, and Cells consumes it the same way Gateways and Devices already consume theirs.
+// Overview -> Cells hand-over: Overview emits the cell id, and Cells consumes it the way Gateways
+// and Devices consume theirs.
 describe('Overview hands a cell over to the Cells page', () => {
   const renderOverview = (props = {}) => render(
     <OverviewTab

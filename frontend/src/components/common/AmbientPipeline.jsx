@@ -1,59 +1,21 @@
 import { useEffect, useRef } from 'react'
 
 /**
- * The ambient canvas behind the sign-in card.
+ * The ambient canvas behind the sign-in card, adapted from the Codrops Pipeline ambient canvas
+ * background.
  *
- * Adapted from the Codrops "Pipeline" ambient canvas background.
+ * Licence: Codrops permits the resource to be used freely where it is integrated into or built upon
+ * in personal or commercial projects, including web apps, and forbids redistributing or selling it
+ * as-is. The credit is kept as attribution. The bundled `noise.min.js` is not imported because this
+ * effect never referenced it.
  *
- * PROVENANCE AND LICENCE, recorded here because it is the thing that gets lost first. Codrops
- * permits the resource to be used freely where it is "integrated or built upon" in personal or
- * commercial projects including web apps, which is this. What it forbids is taking the resource
- * as-is and selling, redistributing or re-publishing it, or selling pluginized versions -- none of
- * which is what a sign-in background inside a larger application does. The visible-mention clause
- * is scoped to FREE PLUGINS built on the resource, so it does not reach this; the credit above is
- * kept because attribution is right, not because the licence compels it.
+ * Changes from the original: it is a component whose animation loop stops on unmount; the trail
+ * buffer is faded each frame rather than left to saturate; `checkBounds` actually wraps pipes; no
+ * noise library.
  *
- * The licence also says to consider the licences of everything the resource bundles. The only one
- * was `noise.min.js` (simplex-noise), and point 4 below is that this effect never referenced it --
- * so it is not imported and there is nothing further to check.
- *
- * Four things changed on the way in, and each is a correctness or fitness issue rather than taste:
- *
- *   1. IT IS A COMPONENT, NOT A SCRIPT. The original declares module-level `let`s, binds to
- *      `window.load`, and runs a requestAnimationFrame loop that nothing ever stops. Dropped into
- *      a React app that leaks a loop per mount -- sign out and back in a few times and the machine
- *      is running four of them against detached canvases.
- *
- *   2. THE ACCUMULATION BUFFER IS FADED, NOT LEFT TO SATURATE. The original never clears its trail
- *      canvas: strokes pile up forever, which looks right for the thirty seconds a demo page is
- *      open and turns into a solid slab on a terminal parked at a login screen all shift. A
- *      low-alpha ground fill each frame bounds it.
- *
- *   3. `checkBounds` IS ACTUALLY WIRED UP. The original takes x and y BY VALUE, reassigns the
- *      locals, and returns nothing -- so nothing ever wraps and pipes simply leave the viewport
- *      and wait out their TTL offscreen. Wrapping here keeps the density even.
- *
- *   4. `noise.min.js` IS NOT IMPORTED. The demo ships simplex noise beside this effect and this
- *      effect never references it.
- *
- * ---------------------------------------------------------------------------------------------
- * WHY THE COLOURS ARE READ FROM THE STYLESHEET RATHER THAN WRITTEN HERE
- *
- * A canvas cannot use a CSS variable, so the values have to be resolved in JS -- but resolving
- * them from `--bg-base` and `--accent` means this file holds no palette of its own and cannot
- * drift from the theme. That matters here more than most places: authScreenTheme.test.jsx exists
- * because a typo'd variable name once fell through to a hardcoded literal and rendered white text
- * on a white card, correct-looking in dark mode and invisible in light.
- *
- * ---------------------------------------------------------------------------------------------
- * LIGHT MODE IS A DIFFERENT EFFECT, NOT THE SAME ONE RECOLOURED
- *
- * The dark treatment is additive glow: bright low-alpha strokes accumulating on near-black, drawn
- * twice, once through a blur. That logic has no light-mode equivalent -- pale strokes on a pale
- * ground are invisible, and the blur only greys the page. So light inverts the model: dark ink at
- * low alpha on the page ground, no blur pass, reading as a plotter drawing rather than neon. One
- * motion engine, two identities, and the blur -- the expensive part -- runs in exactly the theme
- * that needs it.
+ * Colours are resolved from `--bg-base` and `--accent`, so this file holds no palette of its own.
+ * Light mode is a different effect: dark ink at low alpha with no blur pass, where dark is additive
+ * glow drawn twice.
  */
 
 const PIPE_COUNT = 30
@@ -85,10 +47,8 @@ const fadeInOut = (t, m) => {
 }
 
 /**
- * Resolve a CSS colour to {h, s, l}.
- *
- * Handles the two notations App.css actually uses for these tokens -- #rrggbb and #rgb. Anything
- * else returns null and the caller falls back, rather than this quietly producing black.
+ * Resolve a CSS colour to {h, s, l}. Handles #rrggbb and #rgb; anything else returns null and the
+ * caller falls back.
  */
 function hexToHsl(input) {
   const value = (input || '').trim()
@@ -119,10 +79,8 @@ function hexToHsl(input) {
 }
 
 /**
- * The per-theme treatment, derived from whatever the stylesheet currently says.
- *
- * `hueSpread` is deliberately narrow in light mode: a spread of hues reads as playful on black and
- * as an inconsistent pen on paper.
+ * The per-theme treatment, derived from the stylesheet. `hueSpread` is narrow in light mode, where
+ * a spread of hues reads as an inconsistent pen.
  */
 function readTheme(isLight) {
   const styles = getComputedStyle(document.documentElement)
@@ -139,22 +97,9 @@ function readTheme(isLight) {
         hueSpread: 24,
         saturation: 58,
         lightness: 26,
-        // WHAT SETS VISIBLE WEIGHT IS alpha DIVIDED BY fade, NOT alpha. Each stroke deposits
-        // `alpha`; every frame the buffer gives back `fade` of everything on it, so the steady
-        // state is the ratio. The two numbers cannot be tuned independently.
-        //
-        // AND THE RATIO IS NOT COMPARABLE ACROSS THE TWO THEMES, which is what took two passes to
-        // see. Dark composites the trail buffer TWICE -- once through the blur, then again sharp
-        // -- so it gets about double the effective opacity out of the same pair. Light draws it
-        // once. Comparing light's ratio against dark's as though they were like-for-like is what
-        // produced 1.6 on the first attempt and 6.5 on the second, both too faint.
-        //
-        // The ink/glow instinct behind those attempts was also backwards. Light has MORE lightness
-        // contrast against its ground, not less: 28 against 95 is 67 points, where dark's 50
-        // against 6 is 44. Nothing about paper needed the effect held back; only the missing
-        // second composite did.
-        //
-        // So this sits near double dark's 10.4 -- the factor the single composite gives up.
+        // Visible weight is alpha divided by fade: each stroke deposits `alpha`, and every frame
+        // the buffer keeps `fade` of it. Dark composites the trail twice (blurred and sharp) and
+        // light once, so light's ratio sits near double dark's.
         alpha: 0.18,
         fade: 0.012,
         blur: 0,
@@ -188,10 +133,8 @@ export default function AmbientPipeline({ theme }) {
     // The accumulation buffer. Never shown; only ever composited onto `view`.
     const trail = document.createElement('canvas')
 
-    // TRY/CATCH AND NOT JUST A NULL CHECK. `getContext` is specified to return null when the
-    // context type is unavailable, but it THROWS in jsdom and in browsers with canvas disabled
-    // -- so a null guard alone leaves an exception escaping a passive effect and taking the
-    // sign-in screen down with it. This is decoration; it is not allowed to do that.
+    // try/catch, not a null check: `getContext` throws in jsdom and in browsers with canvas
+    // disabled, and decoration must not take the sign-in screen down.
     let viewCtx = null
     let trailCtx = null
     try {
@@ -205,29 +148,17 @@ export default function AmbientPipeline({ theme }) {
       return undefined
     }
 
-    // READ THE TOKENS ONLY ONCE THE ATTRIBUTE THEY DEPEND ON IS ACTUALLY SET.
-    //
-    // React runs effects CHILDREN FIRST. `useTheme` lives in AuthScreen, the parent, so on a
-    // theme change the order is: this effect re-runs and resolves --bg-base / --accent, and only
-    // THEN does useTheme set data-theme on the root. The canvas therefore painted one theme
-    // behind on every toggle -- a light card on a dark field and vice versa -- and looked correct
-    // only after a reload with the dark theme stored, because the values it read from a root with
-    // no data-theme at all are `:root`, which IS the dark palette. Agreement by coincidence.
-    //
-    // Setting it here rather than waiting is deliberate and is not a second owner of the value:
-    // it writes exactly what useTheme is about to write, from the same prop useTheme derives it
-    // from, and is a no-op whenever the two already agree. The alternative -- resolving the
-    // palette without the DOM -- means this file carrying its own copy of the theme, which is the
-    // thing the stylesheet read exists to avoid.
+    // Set `data-theme` here before reading the tokens. React runs effects children first, so this
+    // effect would otherwise read the palette before useTheme in the parent had set the attribute,
+    // and paint one theme behind. It writes exactly what useTheme is about to write.
     const isLight = theme === 'light'
     if (theme && document.documentElement.getAttribute('data-theme') !== theme) {
       document.documentElement.setAttribute('data-theme', theme)
     }
     let palette = readTheme(isLight)
 
-    // DELIBERATELY 1x, not devicePixelRatio. This is a soft, blurred, low-alpha field with no
-    // edges anybody can resolve -- rendering it at 2x or 3x quadruples the per-frame cost of the
-    // blur for a difference nobody can see. The visible canvas is stretched by CSS.
+    // 1x, not devicePixelRatio: a blurred low-alpha field has no edges to resolve, and higher
+    // density multiplies the blur cost for nothing visible.
     let width = 0
     let height = 0
 
@@ -350,10 +281,8 @@ export default function AmbientPipeline({ theme }) {
     initPipes()
 
     if (reduceMotion) {
-      // A STILL FRAME, NOT A FROZEN LOOP. Continuous drift behind a login form is a textbook
-      // vestibular trigger, and "no animation" should cost nothing per frame rather than run the
-      // same work and discard it. Seeding a few hundred ticks gives a composed image instead of
-      // thirty lonely dots.
+      // A still frame under reduced motion, seeded with a few hundred ticks so it is a composed
+      // image rather than a frozen loop.
       for (let n = 0; n < 260; n++) {
         tick++
         for (let i = 0; i < PROPS_LENGTH; i += PROPS_PER_PIPE) updatePipe(i)

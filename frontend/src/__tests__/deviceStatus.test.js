@@ -10,17 +10,9 @@ import {
 } from '../utils/deviceStatus'
 
 /**
- * The device lifecycle contract.
- *
- * These pin two things. The first is the mapping itself -- three states, one colour each, shared by
- * the map, the table and the drawer so they cannot disagree about the same row.
- *
- * The second is the thing that was REMOVED, and it is the more important half. The shopfloor map
- * used to derive an "alarm" state by evaluating the latest telemetry against literals --
- * `Systems/TEMPERATURE > 80.0` among them -- while `metric_catalog` carried a per-device
- * `max_temp_threshold` that nothing read. The tests below assert that no telemetry value can
- * influence this any more: these functions take a DEVICE ROW and nothing else, so there is nowhere
- * for a threshold to creep back in.
+ * The device lifecycle contract: three states, one colour each, shared by the map, the table and
+ * the drawer. These functions take a device row and nothing else, so no telemetry value can
+ * influence the status and there is nowhere for a threshold to creep in.
  */
 
 const device = (over = {}) => ({
@@ -59,9 +51,8 @@ describe('deviceLifecycleStatus', () => {
   })
 
   it('is unaffected by anything a device has published', () => {
-    // THE REGRESSION GUARD. An over-temperature, e-stopped, interrupted device that is still
-    // talking to the platform is ONLINE -- that is what the dashboard is authoritative for.
-    // Whether 95 degC is a problem is Grafana's question, and it has the thresholds to answer it.
+    // The regression guard: an over-temperature, e-stopped device that is still talking to the
+    // platform is ONLINE. Whether 95 degC is a problem is Grafana's question.
     const hot = device({
       'Systems/TEMPERATURE': 95,
       'Controller/EXECUTION': 'INTERRUPTED',

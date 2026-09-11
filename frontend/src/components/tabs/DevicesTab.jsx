@@ -69,6 +69,7 @@ import {
   IconDownload,
   IconX
 } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
@@ -79,26 +80,8 @@ const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
 export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelectCell, onSelectSchema, onViewThread, onPropose, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
   /**
-   * Firing alerts, indexed by the two keys a device can be matched on.
-   *
-   * BOTH KEYS, because the webhook resolves `device_id` best-effort: an alert whose sparkplug_id
-   * matched no device row is still recorded, with a null device_id. Indexing on sparkplug_id alone
-   * would be enough today and would silently stop matching the moment a device is re-registered
-   * under a new UUID with the same wire id, which is exactly what a re-provision does.
-   *
-   * Severity ordering matters: a device with a critical AND a warning is a device with a critical on
-   * it, so the reduce keeps the worst rather than the last one seen.
-   */
-  /**
-   * Which devices have an alert firing on them.
-   *
-   * MOVED TO utils/deviceAlerts.js, not deleted (issue #34). This page resolved alerts against
-   * devices correctly long before Overview, Cells and Gateways were asked to do the same -- and
-   * copying the rules to three more call sites is how four pages end up disagreeing about which
-   * device an alert belongs to. The reasoning that used to sit here now sits with the helper: it
-   * indexes on BOTH `sparkplug_id` and `device_id` because a rename must not lose an alert and a
-   * nullable `device_id` must not be the only key, and it keeps the WORST severity rather than the
-   * last one seen.
+   * Which devices have an alert firing on them, via utils/deviceAlerts.js so Overview, Cells and
+   * Gateways resolve alerts the same way.
    */
   const alertsByDevice = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
 
@@ -129,11 +112,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   // the inspector is a four-column table and the drawer is 360px wide.
   const [telemetryFor, setTelemetryFor] = useState(null)
   const [docsForDevice, setDocsForDevice] = useState(null)
-  // Bumped when EntityLinksModal closes. It also drove a document-link count that nothing has
-  // rendered since the row accordions retired into the context drawer; that count and its request
-  // are gone. This survives because the telemetry/catalog read below keys on it too, and that one
-  // is live -- a document edit is a reasonable moment to re-read, and it is the only signal here
-  // that a human touched something.
+  // Bumped when EntityLinksModal closes; the telemetry and catalog read below keys on it, since a
+  // document edit is a reasonable moment to re-read.
   const [docRefreshKey, setDocRefreshKey] = useState(0)
   // sparkplug_id -> { metric_name: last value }, for the Out-of-vocabulary finding. Keyed on the
   // WIRE identity, not the row id: telemetry.asset_id is the sparkplug_id.
@@ -141,26 +121,16 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const [catalog, setCatalog] = useState([])
   // { device, metricNames } while the telemetry CSV export dialog is open.
   const [exportTelemetry, setExportTelemetry] = useState(null)
-  // No asset_type: a device's classification is now derived from the metric groups its schema
-  // models (see utils/deviceTags.js), not typed in by hand. The column is left in place so
-  // legacy values keep displaying, but nothing writes it any more.
-  // cell_id starts EMPTY, not at some default cell: empty means "inherit from the gateway"
-  // (archived migration 0036), so a device registered without anyone choosing a location follows its
-  // gateway rather than being pinned wherever the form happened to default.
+  // No asset_type: classification is derived from the schema's metric groups (utils/deviceTags.js).
+  // `cell_id` starts empty, meaning inherit from the gateway.
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', location_scope: SCOPE_CELL })
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('all')
 
   /**
-   * Latest reported value per (device, metric), plus the catalog that says which values are legal.
-   *
-   * DELIBERATELY OUTSIDE loadAll(), which runs on a 3s poll and on every Realtime event. This
-   * finding compares a last-known value against a vocabulary; neither side moves fast enough to
-   * justify re-reading the whole fleet's telemetry at that rate, and `telemetry_latest` is a view
-   * over the hypertable rather than a cheap table scan.
-   *
-   * Non-fatal: a failure leaves the finding unavailable rather than failing the device list, and
-   * deviceTagList treats "no telemetry loaded" as "no finding" rather than as a clean bill.
+   * Latest value per (device, metric), plus the catalog that says which values are legal. Outside
+   * loadAll() because `telemetry_latest` is a view over the hypertable and neither side moves fast
+   * enough for the 3s poll. Non-fatal: no telemetry loaded means no finding, not a clean bill.
    */
   useEffect(() => {
     let cancelled = false
@@ -191,27 +161,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     latestBySparkplugId.get(effectiveSparkplugId(device)) || null
 
   /**
-   * A device row, shaped for the edit form.
-   *
-   * The only transformation is `schema_id`, and it is here rather than inline because the drawer and
-   * the row's Edit action both open the same form and both used to seed it from the raw row.
-   *
-   * THE DROPDOWN MANAGES `devices.schema_id`, WHICH IS ONE OF THE TWO ROUTES A SCHEMA ARRIVES BY.
-   * Seeding it with the resolved schema makes the control show what is actually attached, so saving
-   * an unrelated field no longer silently clears the picker's apparent value. It also means saving
-   * WRITES that id into `devices.schema_id` for a device that previously carried it only through
-   * `device_submodels` -- which is harmless: schemasForDevice prefers the submodels either way, so
-   * the two agreeing changes nothing about what is displayed or evaluated.
-   *
-   * AN EXPLICIT `schema_id` WINS OVER A SUBMODEL, which is the conservative precedence and not the
-   * obvious one. This control edits that column, so a device that already carries a value there has
-   * already answered the question the dropdown asks -- seeding from a submodel instead would show a
-   * different schema and then WRITE it on the next save, silently reassigning a device because
-   * somebody edited its description. The fallback only fills a hole; it never overrules an answer.
-   *
-   * A device with several submodels is the case this cannot represent, so it does not pretend to:
-   * the form renders a note naming them. Silently dropping them would turn a save into a data loss
-   * the operator had no way to see coming. Not hypothetical -- Sim_CNC_Mill_01 carries two.
+   * A device row shaped for the edit form. `schema_id` is seeded with the resolved schema so the
+   * picker shows what is attached; an explicit `devices.schema_id` wins over a submodel, and the
+   * fallback only fills a hole. A device with several submodels cannot be represented by one
+   * select, so the form names them rather than dropping any.
    */
   const editFormFor = (device) => {
     const attached = schemasForDevice(device, schemas)
@@ -313,12 +266,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         }
       }
 
-      /* WHAT IS WAITING ON THESE MACHINES, so a device can say so on its own page rather than
-         only on the Approvals page. RLS decides what comes back and this code does not
-         second-guess it: a proposer sees their own requests, an approver sees the ones they may
-         decide, and an empty list is a truthful answer for somebody entitled to neither. It is
-         tolerated rather than required -- the devices page must not fail to load because the
-         proposals endpoint did. */
+      /* Open proposals on these machines, so a device can say what is waiting on it. RLS decides
+         what comes back. Tolerated rather than required, so the page loads if the endpoint fails. */
       try {
         const proposals = await api.get('/api/v1/proposals', { signal })
         setOpenProposals((proposals || []).filter(pr => pr.status === 'open'))
@@ -336,9 +285,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
 
   // Reconciliation loop, not the primary refresh -- see useRealtimeTable for why polling stays.
   usePolling(loadAll, refreshInterval())
-  // The quarantine queue rendered on this page is a filtered view of `devices`, so it arrives
-  // on the same subscription. `cells` is watched because each row shows its device's cell,
-  // resolved through the gateway.
+  // The quarantine queue is a filtered view of `devices`; `cells` is watched because each row shows
+  // its resolved cell.
   useRealtimeTable(['devices', 'gateways', 'cells'], loadAll, { enabled: REALTIME_ENABLED })
 
   const save = async () => {
@@ -350,20 +298,17 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
         schema_id: form.schema_id || null,
-        // '' is the inherit option, which api.js turns into NULL. Both keys are always sent
-        // from this form because the form always shows both -- a partial send would be a
-        // silent no-op on whichever one the user had just changed.
+        // '' is the inherit option, which api.js turns into NULL. Both keys are always sent because
+        // the form always shows both.
         cell_id: form.cell_id || '',
         location_scope: form.location_scope || SCOPE_CELL,
       }
-      // Edit only, matching the control above: a device being created takes the column's own
-      // default. Sending it on create would write 'audit' explicitly, which is the same value by
-      // a longer route and makes the form look like it decided something it did not.
+      // Edit only: a device being created takes the column's default rather than an explicit
+      // 'audit'.
       if (editing) payload.conformance_policy = form.conformance_policy || 'audit'
 
-      /* THE FORK IS HERE AND NOWHERE ELSE. Everything above -- the fields, their validation, the
-         null handling -- is shared, which is the whole point: a second form for proposing was what
-         drifted. Only the last step differs, and it differs by who is asking. */
+      /* The fork is here and nowhere else: fields and validation are shared, and only the last step
+         differs by who is asking. */
       if (proposeMode) {
         if (!editing) throw new Error('A device can only be registered by an Administrator.')
         const patch = patchFromForm('device', editFormFor(editing), form)
@@ -391,9 +336,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     } catch (e) { showToast(e.message, 'error') }
   }
 
-  // In-flight state for the device form, and for whichever row is restoring or being rejected.
-  // Restore and Reject share one key space on purpose: they are both row mutations that reload the
-  // list, and two of them overlapping is two reloads racing.
+  // In-flight state for the form and for the row being restored or rejected. Restore and Reject
+  // share one key because both reload the list.
   const [saving, runSave] = usePendingAction()
   const [rowBusyId, runRowAction] = usePendingKey()
 
@@ -402,12 +346,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const [exportingAas, setExportingAas] = useState(null)
 
   /**
-   * Download this device's Asset Administration Shell (IEC 63278) as AAS V3 JSON.
-   *
-   * The document is composed server-side by the `aas-export` edge function; the browser only names
-   * the file. That split is deliberate — the shell needs the service role to read `asset_config`
-   * and the whole `metric_catalog`, and building it client-side would mean granting every signed-in
-   * browser that read surface.
+   * Download this device's Asset Administration Shell (IEC 63278) as AAS V3 JSON. Composed
+   * server-side by the `aas-export` edge function, which holds the service role needed to read
+   * `asset_config` and the whole catalog.
    */
   const exportAas = async (asset, format = 'json') => {
     setExportingAas(asset.asset_id)
@@ -422,17 +363,14 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         downloadJSON(result.aas, `${asset.asset_name}_aas_v3.json`)
       }
 
-      // An unmapped metric is a real gap in the export's usefulness, so it is reported rather than
-      // left to be discovered by diffing the payload. It is a warning, not an error: `semantic_id`
-      // is nullable on purpose and a local extension legitimately has none.
+      // An unmapped metric is reported as a warning: `semantic_id` is nullable and a local
+      // extension legitimately has none.
       const stats = result.stats || {}
       const unmapped = stats.unmapped_semantic_ids || 0
       const label = format === 'aasx' ? 'AASX package' : 'AAS JSON'
       const summary = `${stats.submodels || 0} submodels, ${stats.telemetry_metrics || 0} metrics`
-      // AN UNREACHABLE MODEL URL OUTRANKS AN UNMAPPED METRIC, so it is reported first when both
-      // are true. An unmapped semantic id degrades what a consumer can INFER from the shell; a
-      // loopback 3D reference is a link that resolves to the exporter's own machine and nowhere
-      // else -- discoverable otherwise only by opening the shell somewhere it does not work.
+      // An unreachable model URL outranks an unmapped metric: a loopback 3D reference resolves only
+      // on the exporter's own machine.
       if (result.warning) {
         showToast(`${label} exported for '${asset.asset_name}' — ${result.warning}`, 'warning')
       } else if (unmapped > 0) {
@@ -466,17 +404,12 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     const targetGateway = body?.active_gateway_id || body?.gateway_id || null
 
     try {
-      // trackRequest, because this goes to the Edge Function on the supabase client directly and
-      // so never passes the `api` wrapper that feeds the top bar's activity line. Approving a
-      // quarantined device is among the slowest mutations here -- it is the last one that should
-      // leave the indicator dark.
+      // trackRequest, because this calls the edge function on the supabase client directly and
+      // bypasses the `api` wrapper that feeds the activity line.
       const { data, error } = await trackRequest(() => supabase.functions.invoke('approve-quarantine', {
-        // asset_name carries the operator's correction to the label the device announced
-        // itself under. It was collected by the modal and then dropped on the floor here.
-        //
-        // cell_id/location_scope are the modal's location answer. '' is the Inherit option and
-        // is forwarded as such -- the edge function writes NULL for it, which is what keeps the
-        // device following its gateway.
+        // `asset_name` is the operator's correction to the announced label. `cell_id` and
+        // `location_scope` are the modal's location answer; '' is Inherit, and the edge function
+        // writes NULL for it.
         body: {
           device_id: assetId,
           gateway_id: targetGateway,
@@ -490,9 +423,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         // error.message is always generic on a non-2xx; the real reason (e.g.
         // "Forbidden: Insufficient privileges") lives in the response body.
         const detail = await edgeFunctionErrorMessage(error, 'Quarantine approval denied or failed')
-        // Edge Functions validate the session with the auth server, so they are where a
-        // session that PostgREST still accepts first shows up as dead. Sign out rather
-        // than leaving the user half-authenticated.
+        // Edge functions validate the session with the auth server, so a session PostgREST still
+        // accepts first shows up as dead here. Sign out rather than stay half-authenticated.
         showToast(await describeAuthFailure(detail, detail), 'error')
         return
       }
@@ -560,24 +492,15 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
   const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
 
-  /* THE FORM ENDS IN A PROPOSAL RATHER THAN A WRITE, for somebody who may not make the change.
-     Derived, never stored: a second piece of state saying "this dialog is in propose mode" could
-     disagree with the permission that decides whether the write would be accepted, and the form
-     would offer Save to somebody the database then refuses.
-
-     `editingProposal` is the open proposal this form is ADDING TO, if any. 0086 allows one open
-     proposal per asset per person, so somebody changing a second field on the same machine has to
-     extend the request they already have -- and this form, seeded with their earlier patch, is the
-     only sane place to do it. */
+  /* The form ends in a proposal rather than a write for somebody who may not make the change.
+     Derived, never stored, so it cannot disagree with the permission. `editingProposal` is the open
+     proposal this form adds to: one open proposal per asset per person, so a second change extends
+     the first. */
   const proposeMode = !canManage && canPropose
 
   /**
-   * The note under a field a proposal may not name.
-   *
-   * WITHHELD, NOT HIDDEN. Hiding these would make two different dialogs out of one -- the drift
-   * this whole restructure removes -- and would conceal that a gateway assignment exists at all.
-   * The control is disabled and the reason is printed, so the reader learns where the boundary is
-   * instead of wondering why their change did not stick.
+   * The note under a field a proposal may not name. Disabled with the reason printed, rather than
+   * hidden, so the reader learns where the boundary is.
    */
   const Withheld = ({ field }) => (
     proposeMode && withheldFields[field]
@@ -588,26 +511,15 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const withheldFields = nonProposableFields('device')
   const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
 
-  // Metrics the device declared at its last birth that its schema does not account for.
-  // Derived, not stored: adding the metric to the schema clears this on the next poll rather
-  // than waiting for the device to rebirth. See utils/deviceTags.js.
+  // Metrics declared at the last birth that the schema does not model. Derived, so adding the
+  // metric to the schema clears it on the next poll. See utils/deviceTags.js.
   const unmodelledFor = useCallback(
     (a) => unmodelledMetrics(a, schemasForDevice(a, schemas)),
     [schemas]
   )
 
-  // ---------------------------------------------------------------------------------------------
-  // INDEXES, NOT `Array.find`, for the two lookups that happen PER DEVICE ROW.
-  //
-  // `needsAttention` and the filter predicate below each resolve a device's gateway and its
-  // effective cell, and both were doing it with `gateways.find(...)` / `cells.find(...)` -- a
-  // linear scan inside a loop over every device, so the work was devices x gateways on every
-  // render. On a four-cell demo that is invisible; on a real fleet it is the search box going
-  // sticky, and the cause is nowhere near the search box.
-  //
-  // Built with useMemo so they survive renders that changed neither list -- which is most of them,
-  // since this component holds thirty-odd pieces of state and any one of them re-renders it.
-  // ---------------------------------------------------------------------------------------------
+  // Indexes for the two lookups that run per device row; `Array.find` inside the filter was devices
+  // x gateways per render. Memoised so they survive renders that changed neither list.
   const gatewayById = useMemo(
     () => new Map(gateways.map(g => [g.gateway_id, g])),
     [gateways]
@@ -617,17 +529,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     [cells]
   )
 
-  // A device an operator needs to act on: held in quarantine, provisioned but never seen,
-  // still being resolved by name because its gateway has not been moved onto Sparkplug IDs
-  // yet, or publishing metrics its schema does not model.
-  //
-  // The is_quarantined arm is kept as the definition of "needs attention" even though the
-  // table below never renders a quarantined device -- both callers now exclude them first.
-  // It stays so this predicate remains true to its name if it is ever reused somewhere the
-  // quarantine banner is not present.
-  // A cell that has been archived is still a valid foreign key, so a device can go on pointing
-  // at a decommissioned cell indefinitely with nothing to show for it. Derived, not enforced:
-  // archiving a cell should not fail because something still references it.
+  // A device an operator needs to act on: quarantined, provisioned but never seen, still resolved
+  // by name, or publishing unmodelled metrics. The quarantine arm stays so the predicate is true to
+  // its name where the banner is absent. An archived cell is still a valid foreign key, so pointing
+  // at one is derived rather than enforced.
   const pointsAtArchivedCell = (a) =>
     !!a.effective_cell_id && !!cellById.get(a.effective_cell_id)?.is_archived
 
@@ -639,41 +544,17 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
     a.cell_mismatch || pointsAtArchivedCell(a)
 
-  // ---------------------------------------------------------------------------------------------
-  // MEMOISED, because this is the hot path and this component re-renders constantly.
-  //
-  // The predicate below is not cheap -- it resolves the device's schemas, its tags, its gateway and
-  // its effective cell -- and it ran on every render, for every device. This component holds thirty
-  // pieces of state; opening a modal, receiving a Realtime tick or typing one character in the
-  // search box all re-ran the whole thing, and only the last of those actually changes the answer.
-  //
-  // THE DEPENDENCY LIST IS THE CONTRACT. Every value the predicate reads is named: miss one and the
-  // table silently stops responding to that filter, which is a worse bug than the slowness this
-  // fixes. They are listed in the order the predicate uses them so the two can be read together.
-  // ---------------------------------------------------------------------------------------------
+  // Memoised: the predicate resolves schemas, tags, gateway and cell for every device, and this
+  // component re-renders on any of thirty pieces of state. The dependency list is the contract:
+  // miss a value the predicate reads and that filter stops responding.
   const filteredAssets = useMemo(() => assets.filter(a => {
-    // Quarantined devices belong to the Zero-Touch Onboarding Quarantine Queue above and
-    // nowhere else. They used to appear here as well, so every pending device was listed
-    // twice on the same screen -- once with approve/reject actions, once with the ordinary
-    // edit/archive actions that do not apply to a device which has not been admitted yet.
-    //
-    // The two lists come from different sources (this filters `assets`; the banner renders
-    // the `quarantine` state loaded from /api/v1/quarantine), so this is the only place the
-    // separation can be enforced.
+    // Quarantined devices belong to the queue above and nowhere else. The two lists come from
+    // different sources, so this is the only place the separation is enforced.
     if (a.is_quarantined) return false
 
-    // REPLAY LANES ARE OUT BY DEFAULT, for the reason quarantined devices are: they are a different
-    // KIND of row rendered by the same table, and mixing them silently is worse than either showing
-    // or hiding them deliberately.
-    //
-    // `ensure_shadow_devices()` (0060) mints one per device a capture recorded, at the moment a
-    // playback starts. So a stack that has never replayed has none, and the first playback would
-    // otherwise double the device list -- six machines becoming twelve rows, the new ones
-    // indistinguishable from the real ones and sitting next to the machines they replay.
-    //
-    // NOT FOLDED INTO `filterMode`, which is about the ARCHIVED lifecycle. A shadow device can be
-    // archived or not, so it is an orthogonal axis and a four-way active/archived/shadow/all would
-    // make one of those combinations unreachable.
+    // Replay lanes are out by default: `ensure_shadow_devices()` mints one per captured device when
+    // a playback starts, which would otherwise double the list. Not folded into `filterMode`, which
+    // is the archived axis; a shadow can be archived or not.
     if (!showShadows && a.shadow_of) return false
 
     if (filterMode === 'active'   && a.is_archived) return false
@@ -683,10 +564,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     if (schemaFilter && !schemasForDevice(a, schemas).some(s => s.schema_uuid === schemaFilter)) return false
     if (tagFilter && !deviceHasTag(a, schemasForDevice(a, schemas), tagFilter, latestFor(a), catalog)) return false
     if (gatewayFilter && (a.active_gateway_id || '') !== gatewayFilter) return false
-    // The resolved cell, not the explicit override -- filtering on cell_id would match only
-    // devices someone had explicitly filed and silently hide every inherited one. The two
-    // synthetic values are lanes, not cells: Unassigned is the queue that should drain and
-    // Site-Wide is a permanent home, and neither is a row in `cells`.
+    // The resolved cell, not the explicit override, or every inherited device would be hidden.
+    // Unassigned and Site-Wide are lanes, not rows in `cells`.
     if (cellFilter === CELL_FILTER_UNASSIGNED) {
       if (!needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null)) return false
     } else if (cellFilter === CELL_FILTER_SITE_WIDE) {
@@ -716,31 +595,21 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     unmodelledFor, cellById,
   ])
 
-  // Counts only what the "Needs attention" filter can actually reveal in the table below.
-  // Quarantined devices are excluded because they are no longer rendered there -- they are
-  // counted by the quarantine banner's own badge instead. Including them here would make the
-  // number disagree with the rows shown the moment the filter is switched on, and would
-  // double-count every pending device across the two badges.
-  // `needsAttention` is a plain function rebuilt on every render, so naming IT here would defeat
-  // the memo entirely. Its own inputs are named instead -- the two Maps and `unmodelledFor` are
-  // everything it closes over that can change. (There is no eslint in this project to check that
-  // for us, which is exactly why it is written down.)
+  // Counts only what the Needs attention filter can reveal below; quarantined devices are counted
+  // by the banner instead. `needsAttention` is rebuilt every render, so its inputs are the
+  // dependencies.
   const attentionCount = useMemo(
     () => assets.filter(a => !a.is_quarantined && needsAttention(a)).length,
     [assets, gatewayById, cellById, unmodelledFor]
   )
-  // COUNTED ACROSS EVERY DEVICE, not across the filtered list: it is the number the toggle reveals,
-  // so counting the rows already on screen would report zero exactly when the button is most worth
-  // pressing. Quarantined lanes are excluded for the same reason attentionCount excludes them --
-  // they are rendered by the onboarding banner and not by this table.
+  // Counted across every device, not the filtered list: it is the number the toggle reveals.
+  // Quarantined lanes are excluded as attentionCount excludes them.
   const shadowCount = useMemo(
     () => assets.filter(a => !a.is_quarantined && a.shadow_of).length,
     [assets]
   )
-  // Walks every device's schemas and last-birth metrics to build the tag dropdown. Memoised for
-  // the same reason as the filter: nothing about it changes when a modal opens.
-  // Same reasoning: `latestFor` is rebuilt every render and closes over `latestBySparkplugId`,
-  // which is the dependency that actually moves and is named here in its place.
+  // Walks every device's schemas and last-birth metrics for the tag dropdown. `latestFor` is
+  // rebuilt every render, so `latestBySparkplugId` is the dependency.
   const tagOptions = useMemo(
     () => availableTags(assets, schemas, latestFor, catalog),
     [assets, schemas, latestBySparkplugId, catalog]
@@ -750,9 +619,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     (attentionOnly ? 1 : 0) + (showShadows ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
   const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
 
-  // Arriving from a gateway's device chip, a schema's device chip, an alert row or the shopfloor
-  // map: the caller named ONE device, so open it rather than leaving a one-row table to be clicked.
-  // Identifier equality only -- typing a name into the search box opens nothing. See the hook.
+  // Arriving from a chip, an alert row or the shopfloor map with one device named: open it rather
+  // than leave a one-row table. Identifier equality only; see the hook.
   useArrivalSelection(
     searchQuery,
     assets,
@@ -764,10 +632,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   // the current filter, or deleted, resolves to null and the drawer closes itself.
   const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
 
-  /* BOTH DEVICE LANES COUNT. `devices` and `device_nameplate` are two kinds of change to one
-     machine, and both are keyed by the device's id -- so a nameplate request waiting on this
-     device is a request waiting on this device, and hiding it here because it is filed under a
-     different lane would be an accounting distinction, not a useful one. */
+  /* Both device lanes count: `devices` and `device_nameplate` are two kinds of change to one
+     machine, keyed by the same id. */
   const openForSelected = useMemo(
     () => (selectedDevice
       ? openProposals.filter(p => p.entity_id === selectedDevice.asset_id
@@ -786,16 +652,16 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     <div className="page-layout">
       <div className="page-main">
 
-      {/* One card: title, description, primary action, filters, table. See CellsTab's note on why
-          the filter bar came inside rather than floating above.
-
-          The onboarding queue below stays INSIDE the body rather than above the card, and the
-          reading order is the argument: what this page is, how to narrow it, the devices waiting to
-          be let in, then the ones that are in. */}
+      {/* One card: title, primary action, filters, table. The onboarding queue stays inside the
+          body: the devices waiting to be let in, then the ones that are in. */}
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">
-            Devices <span className="section-count">{assets.length}</span>
+            Devices
+            <HelpTip
+              label="About devices"
+              text="A device is an asset that publishes telemetry through a gateway. What it is modelled to publish comes from its schema; what it actually publishes is what the historian records. This page surfaces the two disagreeing: a quarantine, an unmodelled metric, or a device that has never birthed."
+            />
           </h3>
           <button
             className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
@@ -809,19 +675,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         </div>
 
         <div className="card-body">
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-            A device is an asset that publishes telemetry through a gateway. What it is MODELLED to
-            publish comes from its schema; what it actually publishes is what the historian records,
-            and the two disagreeing is the thing this page exists to surface — as a quarantine, an
-            unmodelled metric, or a device that has never birthed at all.
-          </p>
-
       {/* Filters live on their own row within the card: the header outgrew a single line once
           schema, status and relationship filters arrived. */}
       <div className="filter-bar">
-        {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
-            a filter like the rest, and having two filter surfaces on one page meant the header
-            row also crowded out the primary action. Counts are kept in the option labels. */}
+        {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
         <select
           className="form-control"
           style={{ width: '150px' }}
@@ -892,11 +749,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
 
-        {/* SHOWN ONLY WHEN THERE ARE ANY, like the Archived toggle on the Access Control page. A
-            permanent "Show shadow devices (0)" on every stack that has never played anything back would be
-            a control for a feature most operators will not use, taking width from the filters they
-            do. It appears the moment a playback mints the first lane, which is also the moment
-            somebody wonders where the extra devices came from. */}
+        {/* Shown only when there are any, like the Archived toggle on Access Control: it appears
+            the moment a playback mints the first lane. */}
         {shadowCount > 0 && (
           <button
             className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
@@ -926,7 +780,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--warning-text)', fontWeight: 600 }}>
               <IconShieldAlert size={20} />
-              <span>Zero-Touch Onboarding Quarantine Queue <span className="section-count">{quarantine.length}</span></span>
+              <span>Zero-Touch Onboarding Quarantine Queue</span>
             </div>
             {!canApprove && (
               <span style={{ fontSize: '11px', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -943,11 +797,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                   const [suggestion] = suggestMatches(q, assets, schemas)
                   return (
                   <tr key={q.quarantine_id}>
-                    {/* Constrained for the same reason as the payload cell: a MALFORMED_IDENTITY
-                        reason is a full diagnostic sentence (~200 characters), so left to size
-                        itself it pushes the action buttons off the right-hand edge on exactly the
-                        rows where an operator most needs to act. It wraps instead of truncating —
-                        the whole point of that message is that it is readable. */}
+                    {/* Constrained like the payload cell: a MALFORMED_IDENTITY reason is a full
+                        sentence and would push the actions off the edge. It wraps rather than
+                        truncates. */}
                     <td style={{ maxWidth: '280px' }}>
                       <strong>{q.asset_name}</strong>
                       {q.quarantine_reason && (
@@ -976,9 +828,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                         >
                           Approve & Assign
                         </button>
-                        {/* Keyed on the row, not on the table: the quarantine list is often a
-                            dozen rows deep after a bad birth, and one boolean would spin every
-                            Reject button for a click on one of them. */}
+                        {/* Keyed on the row: one boolean would spin every Reject button. */}
                         <ActionButton
                           className={`btn btn-danger btn-sm ${!canReject ? 'btn-disabled' : ''}`}
                           disabled={!canReject}
@@ -1026,11 +876,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                       >
                         <td>
                           <strong>{a.asset_name}</strong>
-                          {/* MARKED WHENEVER IT IS SHOWN, because the toggle that revealed it is a
-                              filter and filters are forgotten. A replay lane sits beside the machine
-                              it replays, with the same schema and similar readings, and the one
-                              question a reader has about a number here is whether it happened.
-                              A badge on the row answers that wherever the row is later seen. */}
+                          {/* Marked whenever shown, because the toggle that revealed it is a filter
+                              and filters are forgotten. The badge answers whether a reading
+                              happened, wherever the row is seen. */}
                           {a.shadow_of && (
                             <span className="badge badge-neutral" style={{ fontSize: '11px', marginLeft: '8px' }}
                                   title="A shadow device, not a machine. It receives recorded readings republished by broker playback, so its values did happen — on the real device, on the day the capture was taken.">
@@ -1062,9 +910,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                             </span>
                           ) : (
                             // The lifecycle badge, resolved by utils/deviceStatus.js so this cell,
-                            // the drawer's subtitle and the shopfloor chip cannot disagree about
-                            // the same row. Three states and no fourth: ONLINE, OFFLINE,
-                            // QUARANTINED.
+                            // the drawer and the shopfloor chip agree. Three states: ONLINE,
+                            // OFFLINE, QUARANTINED.
                             (() => {
                               const status = deviceLifecycleStatus(a)
                               const alert = alertFor(a)
@@ -1077,22 +924,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                                     <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
                                     {status.charAt(0) + status.slice(1).toLowerCase()}
                                   </span>
-                                  {/* THE ALERT SITS BESIDE THE LIFECYCLE STATE, NOT INSTEAD OF IT.
-                                      They answer different questions -- "is this machine talking to
-                                      us" and "is Grafana unhappy about what it said" -- and an
-                                      overheating machine is emphatically still ONLINE. Collapsing
-                                      the two into one badge is what the withdrawn client-side alarm
-                                      did, and it made a hot device indistinguishable from a
-                                      disconnected one. */}
-                                  {/* A LUCIDE GLYPH, NOT AN EMOJI. 🚨 and ⚠️ rendered at whatever
-                                      size, weight and hue the operating system's emoji font chose:
-                                      a full-colour raster on Windows, a flat outline on Linux, and
-                                      neither inherits `currentColor`, so the badge's text went red
-                                      or amber and the icon beside it did not follow. These are
-                                      stroked SVGs at 11px that take their colour from the badge --
-                                      the same treatment as the ARCHIVED and AWAITING FIRST BIRTH
-                                      badges above, which is the other half of the reason: three
-                                      badges in one column drawn from two different icon systems. */}
+                                  {/* The alert sits beside the lifecycle state, not instead of it:
+                                      an overheating machine is still ONLINE. */}
+                                  {/* A stroked SVG rather than an emoji: it takes `currentColor`
+                                      from the badge and matches the other badges in the column. */}
                                   {alert && (
                                     <span
                                       className={`badge ${alert.severity === 'critical' ? 'badge-offline' : 'badge-warning'}`}
@@ -1116,10 +951,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                             const extra = unmodelledMetrics(a, schema)
                             if (tags.length === 0 && !a.asset_type) return '—'
 
-                            // Collapsed past two: a tri-standard schema yields six or more tags,
-                            // which was making every row three lines tall. `priority` keeps
-                            // Unmodelled visible -- deviceTagList() appends it LAST, so a plain
-                            // truncation would hide the only tag that calls for action.
+                            // Collapsed past two: a tri-standard schema yields six or more tags.
+                            // `priority` keeps Unmodelled visible, since deviceTagList() appends it
+                            // last.
                             const entries = tags.map(tag => tag === UNMODELLED_TAG ? {
                               key: tag,
                               priority: true,
@@ -1151,26 +985,15 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                         </td>
                         <td style={{ maxWidth: '170px' }}>
                           {(() => {
-                            // The resolved cell, plus how it was resolved. "Inherited" and
-                            // "set on device" render the same name but behave differently when
-                            // the gateway is reassigned, so the distinction has to be visible.
+                            // The resolved cell and how it was resolved: inherited and
+                            // set-on-device behave differently when the gateway is reassigned.
                             const gw = gatewayById.get(a.active_gateway_id) || null
                             const cellName = cellById.get(a.effective_cell_id)?.cell_name
 
-                            // EVERY LANE THAT RESOLVES TO NO CELL, not just Site-Wide.
-                            //
-                            // This tested one source by hand and let the rest fall through to
-                            // `!cellName`, which is how a fleet of simulated devices came to be
-                            // reported as Unassigned: `device_locations` had answered `simulated`
-                            // for all of them, and simulated resolves to a null cell exactly as
-                            // Site-Wide does. The warning triangle then promised a queue to drain
-                            // that could never drain -- unassignedHint() has no advice for a
-                            // synthetic asset, because there is none to give.
-                            //
-                            // NON_CELL_SOURCES is the set cellResolution.js keeps for precisely
-                            // this: its own comment warns that every consumer counting "devices
-                            // with no cell" had grown a hand-written list, and this was the last
-                            // one still carrying it.
+                            // Every lane that resolves to no cell, not just Site-Wide.
+                            // NON_CELL_SOURCES is kept by cellResolution.js for this; a
+                            // hand-written list here once reported simulated devices as Unassigned,
+                            // a queue that could never drain.
                             if (NON_CELL_SOURCES.has(a.location_source)) {
                               return (
                                 <span className="badge badge-neutral" style={{ fontSize: '11px' }}
@@ -1224,14 +1047,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           <div className="modal">
             <div className="modal-title">{editing ? 'Edit Device Configuration' : 'Register New Device'}</div>
             
-            {/* EVERY FIELD IN HERE IS EDITABLE, WHICH IT WAS NOT BEFORE.
-                The Sparkplug ID and Internal UUID blocks that used to sit under the name are gone.
-                They were three of the form's five rows and none of them could be changed -- an edit
-                dialog whose majority is read-only teaches the reader that its controls are decorative,
-                and both identifiers are on the context drawer beside every other fact about the
-                device, where they are copyable and where somebody looking for an identifier actually
-                goes. The publish-topic helper went with them for the same reason: it is a fact to
-                read, not a value to set, and the drawer is where facts live. */}
+            {/* Every field here is editable. The identifiers and the topic helper are facts, and
+                live on the drawer where they are copyable. */}
             <div className="form-group">
               <label className="form-label">Device Name</label>
               <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Friendly label for this device" placeholder="e.g. Sim_CNC_Mill_01" />
@@ -1262,12 +1079,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
               <Withheld field="active_gateway_id" />
               <select className="form-control" disabled={proposeMode} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))} title={proposeMode ? withheldFields.active_gateway_id : "Select edge gateway serving this device"}>
                 <option value="">— Unassigned Gateway —</option>
-                {/* A REPLAY LANE IS LISTED BUT DISABLED, not filtered out. Issue 144.
-                    Filtering would be a quieter control and a worse one: a device that IS a
-                    replay lane would open this form with its own gateway absent from the list,
-                    the select would fall back to "Unassigned", and saving would silently move it
-                    off the lane. The disabled option keeps an existing lane displaying correctly
-                    and still cannot be chosen. migration 0083 refuses the write either way. */}
+                {/* A replay lane is listed but disabled rather than filtered out, so a device that
+                    is a lane still opens with its own gateway shown. The database refuses the write
+                    either way. */}
                 {gateways.filter(g => !g.is_archived).map(g => (
                   <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
                     {g.gateway_name} ({g.gateway_id}) — Status: {g.status}
@@ -1275,17 +1089,15 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                   </option>
                 ))}
               </select>
-              {/* Shown ALWAYS rather than only when a lane is selected: the question this answers
-                  is "why can I not pick Playback", which is asked while something else is
-                  selected. */}
+              {/* Shown always: the question is why Playback cannot be picked, asked while something
+                  else is selected. */}
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                 {noDeviceAssignmentReason({ is_shadow: true })}
               </div>
             </div>
 
-            {/* WHERE the device is, which is not the same question as how its data reaches us.
-                Leaving the picker on "Inherit" is the normal case and stores NULL; picking a cell
-                stores an override that wins over the gateway's. See archived migration 0036. */}
+            {/* Where the device is, which is not how its data reaches us. Inherit stores NULL; a
+                cell stores an override that wins over the gateway's. */}
             {(() => {
               const formGateway = gateways.find(g => g.gateway_id === form.active_gateway_id) || null
               const siteWide = form.location_scope === SCOPE_SITE_WIDE
@@ -1296,20 +1108,15 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
               const nameOf = (id) => cells.find(c => c.cell_id === id)?.cell_name
               const inheritedName = nameOf(location.gateway_cell_id)
               const chosenCell = cells.find(c => c.cell_id === form.cell_id)
-              // Whether a cell means anything for this device at all, decided by its GATEWAY. See
-              // gatewayAcceptsCell(): there is no CHECK on the device side, so a cell stored here
-              // would be accepted and then ignored -- device_locations resolves the synthetic lanes
-              // ahead of every cell arm.
+              // Whether a cell means anything for this device, decided by its gateway. There is no
+              // CHECK on the device side; a stored cell would be accepted and ignored.
               const acceptsCell = gatewayAcceptsCell(formGateway)
 
               return (
                 <div className="form-group">
                   <label className="form-label" htmlFor="device-cell-zone">Shopfloor Cell Zone</label>
-                  {/* SITE-WIDE IS AN OPTION HERE, NOT A CHECKBOX BELOW.
-                      One question, one control -- and `devices_site_wide_has_no_cell` makes the
-                      answers exclusive in the database, so a tick box that had to reach over and
-                      clear the select was modelling that exclusion twice. Its option value is
-                      SCOPE_SITE_WIDE, which cannot collide with a cell id: those are UUIDs. */}
+                  {/* Site-Wide is an option here, not a checkbox: `devices_site_wide_has_no_cell`
+                      makes the answers exclusive. Its value cannot collide with a cell UUID. */}
                   <select
                     id="device-cell-zone"
                     className="form-control"
@@ -1340,11 +1147,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
 
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
                     {!acceptsCell
-                      /* DELIBERATELY DOES NOT CLEAR `cell_id`. Unlike the gateway form, nothing
-                         here would be refused on save -- so a stored cell is kept and simply not
-                         in force, and it comes back into force by itself if the gateway stops
-                         being synthetic. Clearing it would destroy an operator's filing to enforce
-                         a rule the database does not have. */
+                      /* Deliberately does not clear `cell_id`: nothing here is refused on save, so
+                         a stored cell is kept and applies again if the gateway stops being
+                         synthetic. */
                       ? `${noCellReason(formGateway)} Any cell already set on it is kept, and applies again if that changes.`
                       : siteWide
                         ? 'Reported as Site-Wide rather than under any cell. Use this for facility-wide or mobile assets.'
@@ -1371,11 +1176,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
 
             <div className="form-group">
               <label className="form-label">Device Type / Classification <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '11px' }}>(derived)</span></label>
-              {/* flexWrap is load-bearing, not tidiness: the tri-standard schema derives six tags
-                  (Axes, Controller, Machine, MotionDevice, OEE, Systems) and an unwrapped row
-                  pushed the last of them outside the modal, where it was unreadable and could not
-                  be scrolled to. The count grows with the schema, so there is no width at which
-                  a single row is safe. */}
+              {/* flexWrap is load-bearing: a tri-standard schema derives six tags, and the count
+                  grows with the schema. */}
               <div className="form-control" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', background: 'var(--bg-glass)' }} title="Derived from the metric groups the assigned schema models — not typed in by hand">
                 {(() => {
                   const preview = deviceTagList(editing, schemas.find(s => s.schema_uuid === form.schema_id) || null)
@@ -1392,13 +1194,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             <div className="form-group">
               <label className="form-label">Schema (optional)</label>
               <Withheld field="schema_id" />
-              {/* ARCHIVED VERSIONS ARE NOT OFFERED (issue #167). assignableSchemas() keeps the one
-                  this device already carries so an unfinished migration still renders as itself;
-                  everything else archived is gone from the list. The label carries the status for
-                  the kept one, because an option reading `Test_Schema` beside `Test_Schema_v2`
-                  gives no reason not to pick it -- which is exactly how the bug was reported.
-                  The database refuses the write as well (0093); this is the half that stops an
-                  operator being offered the mistake in the first place. */}
+              {/* Archived versions are not offered; assignableSchemas() keeps the one this device
+                  already carries, labelled with its status. The database refuses the write as well. */}
               <select className="form-control" disabled={proposeMode} value={form.schema_id || ''} onChange={e => setForm(f => ({ ...f, schema_id: e.target.value }))} title={proposeMode ? withheldFields.schema_id : "Expected metric schema, from the Schemas registry. Archived versions are not offered — publish a version instead of reattaching the one it replaced."}>
                 <option value="">— No schema assigned —</option>
                 {assignableSchemas(schemas, form.schema_id).map(s => (
@@ -1407,14 +1204,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                   </option>
                 ))}
               </select>
-              {/* WHAT THIS FIELD IS FOR, IN THE ORDER IT MATTERS. This read "Used to suggest a
-                  match if a differently-named device shows up in quarantine..." and named ONLY
-                  that -- which is true, and is the smaller of the two things a schema does. It
-                  is the contract every DDATA value from this device is judged against, and under
-                  Schema Conformance = Enforce that judgement DROPS readings. Describing the
-                  quarantine hint and not the drop let somebody attach a schema believing it was a
-                  labelling aid. The quarantine sentence stays, second, because suggestMatches()
-                  really does weight a required-metric overlap above a name similarity. */}
+              {/* What the field is for, in the order it matters: the contract every DDATA value is
+                  judged against, and under Enforce that judgement drops readings. The quarantine
+                  hint is second because suggestMatches() weights a required-metric overlap above
+                  name similarity. */}
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                 The contract this device's metrics are judged against — see Schema Conformance below,
                 which decides whether a violation is recorded or the reading is dropped. Optional:
@@ -1422,20 +1215,16 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                 up in quarantine under another name, by matching the metrics it reports against the
                 schema's required fields.
               </div>
-              {/* Said only when it applies, and it says what to do rather than what happened.
-                  Reaching this means the device is on a version its lineage has moved past, which
-                  is a migration to finish rather than a setting to change here. */}
+              {/* Said only when it applies: the device is on a version its lineage has moved past,
+                  which is a migration to finish. */}
               {form.schema_id && !isAssignableSchema(schemas.find(s => s.schema_uuid === form.schema_id)) && (
                 <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
                   This device is still on an archived version. It is kept selectable so saving does not
                   silently detach it — move it forward by publishing from the Schemas page, not from here.
                 </div>
               )}
-              {/* THE ONE CASE A SINGLE-SELECT CANNOT STATE. A device may carry several submodels
-                  (device_submodels, archived migration 0034) and this control writes the 1:1 devices.schema_id.
-                  Selecting the first and saying nothing would let somebody press Save believing they
-                  had seen the whole picture and quietly disagree with the drawer beside them, which
-                  lists all of them. Naming the others is the smallest honest version of that. */}
+              {/* The one case a single select cannot state: several submodels. Naming the others is
+                  the smallest honest version. */}
               {editing && (() => {
                 const attached = schemasForDevice(editing, schemas)
                 if (attached.length < 2) return null
@@ -1449,9 +1238,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
               })()}
             </div>
 
-            {/* Only when editing. A device being created has no schema attached yet, so the
-                control would offer a choice that cannot do anything, and the column defaults to
-                'audit' server-side anyway (0050). */}
+            {/* Only when editing: a device being created has no schema yet, and the column defaults
+                to 'audit' server-side. */}
             {editing && (
               <div className="form-group">
                 <label className="form-label">Schema Conformance</label>
@@ -1470,10 +1258,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                   offending metric is affected; the rest of the message is written either way.
                 </div>
 
-                {/* THE STATE THAT LOOKS LIKE IT WORKED AND DOES NOTHING. With no schema attached
-                    the daemon has nothing to judge against, so 'enforce' is inert -- and an
-                    operator who set it would reasonably believe they had switched something on.
-                    Same instinct as the multi-submodel note above the Schema picker. */}
+                {/* The state that looks like it worked and does nothing: with no schema attached,
+                    'enforce' is inert. */}
                 {form.conformance_policy === 'enforce'
                   && schemasForDevice(editing, schemas).length === 0 && (
                   <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
@@ -1482,10 +1268,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                   </div>
                 )}
 
-                {/* THE WARNING IS SHOWN ON THE CHANGE, not on the state. Somebody reopening a
-                    device that already enforces does not need to be told again; somebody about to
-                    turn it on does, because what it discards cannot be fetched back from anywhere.
-                    Telemetry is not like a schema edit, which can be reverted. */}
+                {/* Shown on the change, not on the state: what Enforce discards cannot be fetched
+                    back. */}
                 {form.conformance_policy === 'enforce'
                   && editing.conformance_policy !== 'enforce'
                   && schemasForDevice(editing, schemas).length > 0 && (
@@ -1499,19 +1283,11 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
               </div>
             )}
 
-            {/* THE CONNECTION METHOD PICKER IS GONE, and it was the field most likely to be believed.
-                It offered OPC-UA, Modbus TCP and HTTP REST beside Sparkplug B as though choosing one
-                changed how the device is read. Nothing acts on the column: ingestion is a Sparkplug B
-                MQTT subscriber and has no other transport, so picking Modbus recorded a claim the
-                platform then contradicted on every message. The value still displays in the drawer,
-                where it reads as a fact about the asset rather than as a setting.
+            {/* No connection-method picker: ingestion is a Sparkplug B MQTT subscriber and nothing
+                acts on the column. */}
 
-                Adding a second transport means adding an ingestion path for it. The picker can come
-                back then, and it will mean something. */}
-
-            {/* THE RATIONALE, ONLY WHEN THERE IS SOMEBODY TO READ IT. A person saving their own
-                change has nobody to explain it to; a person proposing one is writing to an
-                approver who has to decide without having stood in front of the machine. */}
+            {/* The rationale, only when proposing: it is written to an approver who has not stood
+                in front of the machine. */}
             {proposeMode && (
               <div className="form-group">
                 <label className="form-label" htmlFor="propose-rationale">Why (optional)</label>
@@ -1607,10 +1383,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         title={selectedDevice?.asset_name || ''}
         subtitle={selectedDevice && (
           <>
-            {/* ONE badge for the lifecycle state, not a status badge plus a QUARANTINED badge
-                beside it -- a quarantined device used to be labelled OFFLINE and QUARANTINED at
-                once, which reads as two facts and is one. ARCHIVED stays separate because it is a
-                separate axis: a decommissioned device still has a last known lifecycle state. */}
+            {/* One badge for the lifecycle state. ARCHIVED stays separate because it is a separate
+                axis. */}
             {(() => {
               const status = deviceLifecycleStatus(selectedDevice)
               return (
@@ -1632,10 +1406,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           // is keyed on this, so it is what a trace or an export is actually matched by.
           { label: 'Sparkplug Device ID', value: effectiveSparkplugId(selectedDevice), mono: true, copyable: true },
           {
-            // The group comes from the SERVING GATEWAY, because that is where it lives: migration
-            // 0008 put `sparkplug_group` on gateways, and a device's address is its edge node's
-            // address plus its own id. Reading it here rather than printing `+` is the difference
-            // between a topic you can paste into an MQTT client and one you have to finish first.
+            // The group comes from the serving gateway, so the topic can be pasted into an MQTT
+            // client.
             label: 'Sparkplug Topic Path',
             value: `spBv1.0/${selectedGateway?.sparkplug_group || '+'}/DDATA/${selectedGateway ? (selectedGateway.sparkplug_id || selectedGateway.gateway_id) : '+'}/${effectiveSparkplugId(selectedDevice)}`,
             mono: true,
@@ -1647,13 +1419,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                 : "The DDATA topic this device publishes on. No Sparkplug group is recorded on its gateway, so that segment is a wildcard."
           },
           {
-            // A LINK, NOT A PICKER. This was an inline <select> for rebinding the device to another
-            // edge node -- a write almost nobody performs, sitting in the panel people open to READ,
-            // one mis-scroll away from silently moving a device's data path. Reassignment still
-            // exists in Edit Details, where a destructive change belongs behind an explicit save.
-            //
-            // What the field is asked ninety-nine times out of a hundred is "which gateway is this,
-            // and take me to it", so that is what it now does.
+            // A link, not a picker: rebinding lives in Edit Details behind an explicit save. What
+            // the field is asked is which gateway, and take me to it.
             label: 'Serving Gateway',
             full: true,
             value: selectedDevice.active_gateway_id ? (
@@ -1672,12 +1439,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             title: "The edge node carrying this device's data. Reassign it in Edit Details."
           },
           {
-            // RESOLVED, not the explicit override -- the two read the same in the common case and
-            // showing the wrong one is the exact confusion archived migration 0036 exists to prevent.
-            //
-            // Site-Wide is deliberately NOT a link. It is the assertion that this device belongs to
-            // no cell, so there is nowhere for the link to go -- and a chip that looked identical to
-            // the others and did nothing would be worse than plain text.
+            // Resolved, not the explicit override. Site-Wide is not a link: it asserts the device
+            // belongs to no cell.
             label: 'Cell Zone (resolved)',
             value: selectedLocation?.location_scope === SCOPE_SITE_WIDE
               ? 'Site-Wide'
@@ -1707,16 +1470,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             title: 'explicit = set on the device; inherited = from its gateway; site_wide = no single cell; unassigned = nothing to inherit.'
           },
           {
-            // RESOLVED THROUGH schemasForDevice, NOT OFF selectedDevice.schema_id, and that was a
-            // real bug rather than a tidy-up. A schema reaches a device by either of two routes: the
-            // 1:1 `devices.schema_id`, or a row in `device_submodels` (archived migration 0034, surfaced by
-            // api.js as `submodel_schema_ids`). This field read only the first, so every device
-            // the retired class-schema migration attached a schema to -- which was all six on the demo floor --
-            // showed "Not set" in the drawer while the table beside it, which has always used
-            // schemasForDevice, listed the schema's tags. Two views of one row disagreeing.
-            //
-            // ALL OF THEM, not the first. A device may carry several submodels; rendering one chip
-            // would restate the same bug one submodel later.
+            // Resolved through schemasForDevice, not `selectedDevice.schema_id`: a schema arrives
+            // by either the 1:1 column or a `device_submodels` row (`submodel_schema_ids`). All of
+            // them, since a device may carry several.
             label: 'Schema',
             value: (() => {
               const attached = schemasForDevice(selectedDevice, schemas)
@@ -1740,14 +1496,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             full: true,
             title: 'The metric contract(s) this device is judged against. Opens on the Schemas page.'
           },
-          /* CONNECTION METHOD IS GONE FROM HERE TOO, which finishes what removing the picker
-             started. Dropping the form control but keeping the read-only field left the drawer
-             stating a transport as though it were a fact about the device -- and it is not one.
-             Ingestion is a Sparkplug B MQTT subscriber with no other transport, so a device row
-             reading "Modbus TCP" describes nothing that happens: the column is a leftover claim
-             that the platform contradicts on every message it receives. A field nothing writes and
-             nothing acts on is not documentation, it is a second answer to a question that already
-             has one. The column itself is left in place; this is a UI removal, not a migration. */
+          /* Connection method is not shown: nothing writes it and nothing acts on it. The column
+             stays; this is a UI omission. */
           {
             label: 'Description',
             value: selectedDevice.description || null,
@@ -1762,9 +1512,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           },
         ] : []}
         actions={selectedDevice ? [
-          // THE WHOLE OF THE OLD ACTIONS COLUMN, which was two visible buttons plus a six-item
-          // overflow menu occupying the right-hand quarter of every row. All of it applies to one
-          // device you have already picked, which is exactly what this drawer is.
+          // The old actions column, which applies to one device you have already picked.
           selectedDevice.is_archived ? {
             label: 'Restore Device', icon: <IconRefreshCw size={13} />,
             onClick: () => runRowAction(selectedDevice.asset_id, () => restoreDevice(selectedDevice.asset_id, selectedDevice.asset_name)),
@@ -1775,27 +1523,21 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             title: !canArchive ? 'Requires Admin permissions' : 'Restore device back to active service'
           } : {
             icon: <IconPencil size={13} />,
-            // THE FORM IS SEEDED WITH THE RESOLVED SCHEMA, not with the raw row. `setForm(device)`
-            // copied `schema_id` straight across, which is null for every device whose schema
-            // arrives through `device_submodels` -- so the dropdown read "No schema assigned" for a
-            // device the rest of the page correctly showed as schema'd, and saving that form
-            // silently confirmed the wrong answer.
+            // Seeded with the resolved schema, not the raw row, whose `schema_id` is null for a
+            // device schema'd through `device_submodels`.
             label: proposeMode ? 'Propose a Change' : 'Edit Details',
             onClick: () => {
               setEditing(selectedDevice)
-              // SEEDED WITH THE OPEN PROPOSAL'S PATCH ALREADY APPLIED, when there is one. Otherwise
-              // adding a second field to a request would silently drop the first -- the new
-              // proposal would replace it, and the per-asset cap would refuse it anyway.
+              // Seeded with the open proposal's patch applied, so adding a second field extends the
+              // request rather than replacing it.
               const mine = proposeMode ? openForSelected.find(pr => pr.entity_type === 'devices') : null
               setEditingProposal(mine || null)
               setForm({ ...editFormFor(selectedDevice), ...formFromPatch('device', mine?.patch) })
               setShowForm(true)
             },
             disabled: (!canManage && !canPropose) || selectedDevice.status === 'OFFLINE',
-            // NOT `primary`, which is the change. It was the one filled button in a drawer whose
-            // other five actions are ghosts, which read as a recommendation -- and "edit this" is not
-            // what anybody opens a device panel to do. The Gateways and Cells drawers already style
-            // their edit action as a secondary; this matches them.
+            // Not `primary`: the Gateways and Cells drawers style their edit action as a secondary,
+            // and editing is not what a device panel is opened to do.
             title: selectedDevice.status === 'OFFLINE'
               ? 'Device is offline (DDEATH received)'
               : proposeMode
@@ -1804,21 +1546,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                   ? 'Requires Admin permissions'
                   : 'Edit device parameters'
           },
-          /* NO SEPARATE "PROPOSE A CHANGE" ACTION, and its absence is the point of the whole
-             restructure. It used to sit here and route to a composer on the Approvals page -- a
-             SECOND form listing the same columns as the dialog directly above it, as bare text
-             inputs, with no idea that `cell_id` had a dropdown behind it. Two forms describing one
-             device is a drift generator, and the drift is silent.
-
-             The dialog above is now the only form. For somebody who may not save it, it opens
-             under the label "Propose a Change" and its footer files a proposal instead of writing
-             -- see `proposeMode`. One form, one set of fields, one place to change them. */
-          /* WHAT IS ALREADY WAITING ON THIS MACHINE, and only when something is.
-             A device with an open request is the one case where the queue is part of this
-             device's state rather than a separate page, and both readers need it: a proposer
-             about to file a second request that the per-asset cap will refuse, and an approver
-             who arrived here from an alert. The count comes from RLS, so it is what THIS person
-             may see rather than a number they cannot act on. */
+          /* No separate Propose a Change action: the dialog above is the only form, and for
+             somebody who may not save it its footer files a proposal. See `proposeMode`. */
+          /* What is already waiting on this machine, only when something is. The count comes from
+             RLS, so it is what this person may see. */
           openForSelected.length > 0 && {
             label: openForSelected.length === 1
               ? '1 change awaiting decision'
@@ -1835,23 +1566,14 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             title: "Open this device's metric inspector"
           },
           {
-            // A read of what the device declared at birth, so it is deliberately NOT gated on
-            // device:manage and not refused for an archived device -- same reasoning as the AAS
-            // export and the schema download.
+            // A read of what the device declared at birth: not gated on device:manage and not
+            // refused for an archived device, like the AAS export.
             label: 'Configuration Parameters', icon: <IconClipboardList size={13} />,
             onClick: () => setConfigAsset(selectedDevice),
             title: 'Inspect the DBIRTH metric parameters this device reported'
           },
-          /* WITHDRAWN FROM A REPLAY LANE, and 0060 makes the argument rather than taste:
-             "NO NAMEPLATE. device_nameplate (0011) is IDTA Nameplate -- manufacturer, SERIAL
-             NUMBER, year of construction. A serial number identifies one physical object. Copying
-             it would leave the platform holding two rows claiming to be serial XYZ-4471, and the
-             AAS Part 5 export would emit two Asset Administration Shells asserting the same asset
-             identity, which is the exact thing AAS identity exists to prevent."
-
-             So offering the editor here offers to create precisely the row the migration exists to
-             prevent -- and it would be created by hand, one field at a time, with nothing to stop
-             it. A shadow is a recording of an asset, not a second asset. */
+          /* Withheld from a replay lane: a nameplate carries a serial number that identifies one
+             physical object, and a shadow is a recording of an asset, not a second asset. */
           !selectedDevice.shadow_of && {
             // Directly above the two exports on purpose: it is the only thing here that changes
             // what they contain.
@@ -1875,14 +1597,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             disabled: exportingAas === selectedDevice.asset_id,
             title: 'Download an AASX (OPC) package, with any attached 3D model bundled in'
           },
-          /* ALSO WITHDRAWN FROM A REPLAY LANE, for 0060's second rule: "NO LINKS. `links` are
-             documents ABOUT the machine, and a copy goes stale the moment someone edits the
-             original. `shadow_of` resolves them at read time instead."
-
-             A lane's documents ARE the machine's documents, reached through shadow_of. Attaching
-             one here would create the second copy that rule exists to prevent -- and it would go
-             stale silently, which is the failure mode that makes a duplicated document worse than
-             no document. */
+          /* Also withheld from a replay lane: links are resolved through `shadow_of` at read time,
+             and a copy here would go stale. */
           !selectedDevice.shadow_of && {
             // The accordion below lists the links; this is how a new one gets attached. Both are
             // needed now that the accordion no longer carries its own Manage button.
@@ -1890,10 +1606,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             onClick: () => setDocsForDevice(selectedDevice),
             title: 'Attach or edit links for this device — documents, an asset register, a file repository, any URL'
           },
-          /* WITHHELD FROM A READER WHO MAY NOT OPEN THE PAGE. The nav hides Digital Thread
-             without `digital_thread:read`; a drawer button that navigated there anyway would be
-             the one route into a page the app has decided not to show, landing them on an empty
-             table that explains nothing. `.filter(Boolean)` below drops it. */
+          /* Withheld from a reader who may not open the page: the nav hides Digital Thread without
+             `digital_thread:read`. `.filter(Boolean)` drops it. */
           canReadThread && {
             label: 'View Digital Thread', icon: <IconHistory size={13} />,
             onClick: () => onViewThread?.(selectedDevice),
@@ -1910,20 +1624,11 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           },
         ].filter(Boolean) : []}
       >
-        {/* The two row accordions, relocated. They are unchanged components -- both still fetch
-            lazily on first expand -- but they now belong to ONE device instead of being mounted
-            once per row. On a a hundred-device page that is a hundred collapsed drawers replaced
-            by one, and the table below is a table again rather than alternating data and drawers. */}
+        {/* The two accordions belong to one device rather than being mounted once per row. */}
         {selectedDevice && (
           <>
-            {/* The links accordion is gone -- a cramped list inside a 360px column, and the
-                Manage Links action above opens the full editor.
-
-                THE 3D MODEL STAYS, because it was the accordion's footer and has nowhere else to
-                go. It is an attachment like a link, which is why it does not belong in
-                the Configuration modal (a read-only view of what the device REPORTED) -- and
-                unlike a list of links, one upload control fits a narrow column perfectly well.
-                onChange reloads so model_3d_path cannot go stale. */}
+            {/* The 3D model stays: it is an attachment, and one upload control fits a narrow
+                column. onChange reloads so model_3d_path cannot go stale. */}
             <div>
               {/* The icon is what the uploader gave up when its own two-row heading came off --
                   it identified the section at a glance, and a bare text label does not. */}

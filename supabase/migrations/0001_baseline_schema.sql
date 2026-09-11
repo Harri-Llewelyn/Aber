@@ -820,7 +820,7 @@ CREATE OR REPLACE FUNCTION public.directory_liveness_job_map() RETURNS TABLE(pro
         ('grafana',       'Grafana Dashboards'),
         ('ingestion',     'Ingestion Metrics Endpoint'),
         ('node',          'Host Metrics Exporter (node_exporter)'),
-        ('envoy',         'Supabase API Gateway (Kong)'),
+        ('envoy',         'Supabase API Gateway (Envoy)'),
         ('supabase-rest', 'Supabase PostgREST API')
     ) AS t(prometheus_job, service_name);
 $$;

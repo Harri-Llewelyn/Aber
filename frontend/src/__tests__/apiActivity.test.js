@@ -9,9 +9,9 @@ import {
   resetApiActivity
 } from '../lib/apiActivity';
 
-// Mocked exactly as apiPaths.test.js does, so the REAL api module can be imported and its wrapping
-// verified without a database. This is the half that cannot be unit-tested away: withActivityTracking
-// can be perfect and the indicator still dead if api.js forgets to apply it.
+// Mocked as apiPaths.test.js does, so the real api module can be imported and its wrapping verified
+// without a database. withActivityTracking can be perfect and the indicator still dead if api.js
+// forgets to apply it.
 vi.mock('../lib/supabaseClient', () => {
   const builder = {
     select: vi.fn().mockReturnThis(),
@@ -143,8 +143,8 @@ describe('trackRequest', () => {
 });
 
 /**
- * The wiring, not the mechanism. Everything above would pass with `export const api = apiMethods`
- * in api.js and no indicator anywhere in the app.
+ * The wiring, not the mechanism: everything above would pass with `export const api = apiMethods`
+ * in api.js.
  */
 describe('the exported api is wrapped', () => {
   it('counts a real call through api.get', async () => {

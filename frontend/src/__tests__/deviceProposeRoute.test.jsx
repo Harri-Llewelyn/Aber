@@ -51,10 +51,7 @@ const routeGet = (rows, proposals = []) => (path) => {
 }
 
 /**
- * The two roles this whole feature is about.
- *
- * An Operator holds `proposal:create` and NOT `device:manage` -- which is exactly the shape 0086
- * built for, and the shape whose drawer previously offered nothing but a greyed-out Edit Details.
+ * The two roles this feature is about: an Operator holds `proposal:create` and not `device:manage`.
  */
 const asOperator = (id) => id === PERMISSION_UUIDS.PROPOSAL_CREATE
 const asManager = () => true
@@ -90,11 +87,8 @@ const actionButtons = () =>
   [...document.querySelectorAll('.context-panel-actions .context-action')]
 
 /**
- * Click one drawer action by its label.
- *
- * BY THE BUTTON, NOT BY THE TEXT. `getByText` matches the label's own span as well as the button
- * that contains it, and once the dialog is open its footer carries the same words again -- so the
- * bare query is ambiguous twice over.
+ * Click one drawer action by its label. By the button, not the text: `getByText` matches the
+ * label's span as well as the button, and the open dialog's footer carries the same words.
  */
 const clickAction = (label) => {
   const button = actionButtons().find(b => b.textContent.trim() === label)
@@ -106,9 +100,8 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('proposing a change from a device', () => {
   it('offers the route to somebody whose Edit Details is refused', async () => {
-    // THE GAP THIS CLOSES. The drawer told an Operator what they could not do -- a greyed-out
-    // Edit Details with "Requires Admin permissions" -- and said nothing about the queue that
-    // exists precisely for them.
+    // The gap this closes: the drawer told an Operator what they could not do and said nothing
+    // about the queue that exists for them.
     await show(asOperator)
     expect(panelLabels()).toContain('Propose a Change')
   })
@@ -133,9 +126,8 @@ describe('proposing a change from a device', () => {
   })
 
   it('opens the device’s own edit dialog rather than a second form elsewhere', async () => {
-    // THE POINT OF THE RESTRUCTURE. This used to route to a composer on the Approvals page: a
-    // second form listing the same columns as this dialog, as bare text inputs, with no idea that
-    // `cell_id` had a dropdown behind it. One form now, opened under a different label.
+    // One form, opened under a different label, rather than a second composer on the Approvals page
+    // listing the same columns as bare inputs.
     await show(asOperator)
     openPanel()
     clickAction('Propose a Change')
@@ -170,9 +162,8 @@ describe('proposing a change from a device', () => {
   })
 
   it('withholds the fields a proposal may not name, without hiding them', async () => {
-    // A device's gateway is its DATA PATH and its schema is what its telemetry is judged against.
-    // Hiding them would make two different dialogs out of one -- the drift this removes -- and
-    // would conceal that a gateway assignment exists at all.
+    // A device's gateway is its data path and its schema is what its telemetry is judged against;
+    // hiding them would make two dialogs out of one.
     await show(asOperator)
     openPanel()
     clickAction('Propose a Change')
@@ -207,9 +198,8 @@ describe('proposing a change from a device', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/proposals', expect.objectContaining({
       entity_type: 'devices',
       entity_id: DEVICE_ID,
-      // ONE KEY. The form is seeded from the current row, so sending every field would make a
-      // patch of five columns where the person changed one -- and an approver reading the diff
-      // could not tell which.
+      // One key: the form is seeded from the current row, so the patch carries only what changed
+      // and an approver can tell which.
       patch: { name: 'CNC_01_renamed' }
     })))
   })

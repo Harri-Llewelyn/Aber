@@ -5,14 +5,9 @@ import { ActionButton } from '../common/ActionButton'
 import { IconShieldAlert } from '../common/Icons'
 
 /**
- * Durations offered, rather than a free number.
- *
- * A capture stops at whichever of three caps is met first — duration, 100,000 messages, or 50 MiB —
- * so this is a ceiling and not a promise. The list is short on purpose: the useful question is
- * "roughly how long", and a spinbox invites 3600 from somebody who wanted a minute.
- *
- * TWO HOURS IS THE SCHEMA'S OWN LIMIT (`capture_jobs_caps_are_bounded`), so the last entry is the
- * largest value the gate will accept rather than a number chosen here.
+ * Durations offered, rather than a free number. A capture stops at whichever of three caps is met
+ * first (duration, 100,000 messages, or 50 MiB), so this is a ceiling. Two hours is the schema's
+ * own limit (`capture_jobs_caps_are_bounded`).
  */
 const DURATIONS = [
   { seconds: 30, label: '30 seconds' },
@@ -23,20 +18,11 @@ const DURATIONS = [
 ]
 
 /**
- * Start a capture, and — when one is already stored — confirm destroying it in the same breath.
- *
- * ONE DIALOG, NOT TWO, AND THAT IS THE POINT OF THE NOTE FIELD. The alternative was a generic
- * confirmation followed by a form, and it puts the two halves of the decision on different screens:
- * what you are about to LOSE, and what you are about to record. Together, the sentence an operator
- * reads is "overwrite the capture of Line 1 Gateway from 27 Aug 14:30 — pre-trip bearing vibration
- * baseline?", which is a different question from the same dialog without that last clause.
- *
- * That is the entire reason `captures.note` exists. Mitigating the destroy-a-rare-fault risk is
- * what the field is for, and a note visible only on the list does not do that job.
- *
- * THE CONFIRMATION IS NOT DECORATIVE HERE. `start_capture_job()` refuses when a capture of the
- * subject exists unless `p_replace` is true, so this dialog is a precondition in the database
- * rather than a convention of this client — an API caller that never saw it is refused too.
+ * Start a capture, and when one is already stored, confirm destroying it in the same dialog, so
+ * what is about to be lost and what is about to be recorded are read together. The note field
+ * exists so the existing capture can be named ("pre-trip bearing vibration baseline").
+ * `start_capture_job()` refuses when a capture of the subject exists unless `p_replace` is true, so
+ * the confirmation is a precondition in the database.
  */
 export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
   const [note, setNote] = useState('')
@@ -51,9 +37,8 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
     try {
       await onConfirm({ note: note.trim(), seconds, replace: !!existing })
     } catch (err) {
-      // SHOWN HERE RATHER THAN AS A TOAST, and left as the database wrote it. The two refusals this
-      // call produces both name something specific — the capture about to be destroyed, or the
-      // capture already running — and a toast would take that away from the dialog that asked.
+      // Shown here rather than as a toast, as the database wrote it: both refusals name something
+      // specific.
       setError(err.message)
     }
   })

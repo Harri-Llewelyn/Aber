@@ -1,52 +1,14 @@
 #!/usr/bin/env node
 /**
- * Assert that every Python module an image's sources import at module scope is COPIED into it.
+ * Assert that every Python module an image's sources import at module scope is copied into it. The
+ * Python suites import from the source tree, check-docs-drift asserts a build command exists, and
+ * check-image-tag-parity compares pins; a module left out of a Dockerfile's COPY is found only by
+ * the container crash-looping with ModuleNotFoundError. Module scope, because an import at column 0
+ * fails at interpreter start. Directory-local: a copied module's local imports resolve against its
+ * own source directory and must be copied by the same Dockerfile; third-party imports are
+ * requirements.txt's business.
  *
- * =================================================================================================
- * THE FAILURE THIS EXISTS FOR, WHICH A FULL GREEN RUN DID NOT SEE
- *
- * `ingestion/directory_publish.py` was added, unit-tested (20 tests), documented, given a broker
- * ACL rule with its own guard, wired into docker-compose and the Helm chart -- and left out of
- * `ingestion/Dockerfile`. Every suite passed. Every guard passed. The daemon then crash-looped on
- * the first boot that actually ran it:
- *
- *     ModuleNotFoundError: No module named 'directory_publish'
- *
- * NOTHING IN THE REPOSITORY COULD HAVE CAUGHT IT. The Python suites import from the source tree,
- * where the file plainly exists. check-docs-drift.mjs asserts that every image built here has a
- * documented build command, not what is inside one. check-image-tag-parity.mjs compares pins across
- * the two targets. The image contents were checked by nothing at all, and the only thing that
- * reports the gap is running the container.
- *
- * SO THE INVARIANT IS THE ONE THE DOCKERFILES ALREADY STATE IN PROSE, three times over -- next to
- * `metrics.py`, next to `capture_worker.py`/`capture.py`, and now next to `directory_publish.py`:
- * "imported at module scope, so a missing COPY here is a crash loop on start". A comment restating
- * a rule three times is a rule worth checking.
- *
- * =================================================================================================
- * WHY MODULE SCOPE, AND WHY THAT IS THE RIGHT LINE TO DRAW
- *
- * An import inside a function fails when that function is first called, which may be never. An
- * import at column 0 fails at interpreter start, before the daemon connects to anything -- which is
- * why these modules are deliberately imported there (see ingestion.py's own comment on
- * `import directory_publish`). This checks the imports whose absence is a startup failure, because
- * those are the ones a build must satisfy and the ones a container cannot work around.
- *
- * =================================================================================================
- * DIRECTORY-LOCAL, DELIBERATELY
- *
- * A copied module's local imports are resolved against ITS OWN source directory and must be copied
- * by the SAME Dockerfile. That is exactly what the flat `WORKDIR /app` layout of these images
- * means, it needs no model of how each COPY rewrites paths, and it is the whole of the failure
- * mode: `import capture` inside `capture_worker.py` finds a sibling or it finds nothing.
- *
- * Third-party imports (`paho`, `psycopg2`) are not this script's business -- requirements.txt is,
- * and pip fails loudly at build time. Only a name that resolves to a `.py` file sitting beside the
- * importer is checked, because only that one can be silently left behind.
- *
- * Usage:
- *   node scripts/check-image-sources.mjs
- *   node scripts/check-image-sources.mjs --verbose   # also list what each image ships
+ * Usage: node scripts/check-image-sources.mjs [--verbose]
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -57,8 +19,7 @@ const verbose = process.argv.includes('--verbose');
 
 /**
  * The Dockerfiles that ship Python. Listed rather than globbed so a new one is a decision somebody
- * makes here, with the chance to say why if it is genuinely exempt -- the same arrangement
- * check-image-tag-parity.mjs uses for the images built from this repository.
+ * makes here.
  */
 const DOCKERFILES = [
   'ingestion/Dockerfile',
@@ -72,11 +33,8 @@ const pass = (m) => console.log(`  ok    ${m}`);
 const note = (m) => console.log(`        ${m}`);
 
 /**
- * Physical lines joined on a trailing backslash, comments dropped.
- *
- * test-harness/Dockerfile copies four pairs of files across continuations, so a line-at-a-time
- * reader would see three of every four COPY arguments as free-standing text and silently ignore
- * them -- a checker that misses what it cannot parse is worse than none.
+ * Physical lines joined on a trailing backslash, comments dropped. test-harness/Dockerfile copies
+ * four pairs of files across continuations.
  */
 function instructions(text) {
   const out = [];
@@ -93,11 +51,8 @@ function instructions(text) {
 }
 
 /**
- * Every `.py` path a Dockerfile copies, repo-relative.
- *
- * The last argument of a COPY is the DESTINATION and is skipped. `--from=` and other flags are
- * skipped too: a stage-to-stage copy moves a build artefact, not a source file this can resolve
- * against the working tree.
+ * Every `.py` path a Dockerfile copies, repo-relative. The last argument of a COPY is the
+ * destination and is skipped, as are `--from=` and other flags.
  */
 function copiedPythonFiles(dockerfile) {
   const copied = [];
@@ -112,10 +67,8 @@ function copiedPythonFiles(dockerfile) {
 }
 
 /**
- * Module-scope imports: `import x`, `import x as y`, `from x import ...`, at column 0 only.
- *
- * `import a.b` yields `a`, which never resolves to a sibling file and is therefore ignored below --
- * these images have no packages, only flat modules.
+ * Module-scope imports: `import x`, `import x as y`, `from x import ...`, at column 0 only. `import
+ * a.b` yields `a`, which never resolves to a sibling file; these images have flat modules.
  */
 function moduleScopeImports(source) {
   const names = new Set();
@@ -139,10 +92,9 @@ for (const relative of DOCKERFILES) {
   const copied = copiedPythonFiles(text);
   if (copied.length === 0) { pass(`${relative} ships no Python`); continue; }
 
-  // GENERATED MODULES ARE NOT MISSING ONES. `sparkplug_b_pb2` is produced INSIDE the image by
-  // protoc from the `.proto` the Dockerfile copies, so it is importable while existing in no COPY.
-  // Derived from the Dockerfile rather than waived by name, so an image that stops running protoc
-  // stops being granted the exemption in the same edit.
+  // Generated modules are not missing ones: `sparkplug_b_pb2` is produced inside the image by
+  // protoc from the `.proto` the Dockerfile copies. Derived from the Dockerfile rather than waived
+  // by name.
   const generatesProto = /\bprotoc\b/.test(text);
 
   const shipped = new Set(copied.map((p) => basename(p, '.py')));

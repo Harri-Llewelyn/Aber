@@ -4,17 +4,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Model3DViewer, __resetModelViewerLoader } from '../components/common/Model3DViewer'
 
 /**
- * The viewer is a thin wrapper around a custom element, so what is worth pinning is not the
- * rendering -- jsdom cannot render it -- but the four things the wrapper is responsible for:
- *
- *   * the URL is COMPOSED from the stored object key, never read from the row;
- *   * the element carries the interaction attributes, since a static canvas of a machine is
- *     strictly worse than the filename it replaced;
- *   * a failure to load the viewer module and a failure to load the MODEL are reported
- *     differently, because they have different causes and different fixes;
- *   * nothing is rendered at all without a path.
- *
- * `@google/model-viewer` is stubbed globally in src/test/setup.js -- see the note there.
+ * The viewer is a thin wrapper around a custom element jsdom cannot render, so what is pinned is
+ * the wrapper's responsibilities: the URL is composed from the stored object key; the element
+ * carries the interaction attributes; a failed viewer module and a failed model are reported
+ * differently; nothing renders without a path. `@google/model-viewer` is stubbed globally in
+ * src/test/setup.js.
  */
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -52,8 +46,8 @@ describe('Model3DViewer', () => {
 
     const el = await screen.findByTestId('model-3d-viewer')
     // Present-but-empty, which is how <model-viewer> reads a boolean attribute. `toBe('')` rather
-    // than a truthiness check: React stringifying a boolean prop into "true" would also pass a
-    // loose assertion, and that is the specific thing this pins.
+    // than truthiness, because React stringifying a boolean prop into "true" would also pass a
+    // loose check.
     expect(el.getAttribute('camera-controls')).toBe('')
     expect(el.getAttribute('auto-rotate')).toBe('')
     expect(el.getAttribute('shadow-intensity')).toBe('1')
@@ -79,11 +73,9 @@ describe('Model3DViewer', () => {
     render(<Model3DViewer path={PATH} name="Sim_CNC_Mill_01" />)
 
     const el = await screen.findByTestId('model-3d-viewer')
-    // The element reports a bad object through an event, which is invisible to React -- the
-    // regression this guards is the one where that goes unhandled and a dead object renders as a
-    // permanently blank box indistinguishable from one still loading.
-    // In act(), because the listener sets state and the event is dispatched on a DOM node rather
-    // than through fireEvent -- React has no way to batch it otherwise.
+    // The element reports a bad object through an event, invisible to React; unhandled, a dead
+    // object renders as a blank box indistinguishable from one still loading. In act(), because the
+    // listener sets state from a DOM-dispatched event.
     act(() => { el.dispatchEvent(new Event('error')) })
 
     await waitFor(() => expect(screen.getByTestId('model-3d-viewer-error')).toBeInTheDocument())
@@ -95,9 +87,8 @@ describe('Model3DViewer', () => {
     render(<Model3DViewer path={PATH} name="Sim_CNC_Mill_01" />)
 
     expect(screen.getByTestId('model-3d-viewer-loading')).toHaveClass('model-viewer-frame')
-    // The element does not carry the class itself -- React 18 will not map `className` onto a
-    // custom element -- so the frame is its PARENT. Asserted here because getting this wrong
-    // renders an unstyled element at zero height, which looks identical to no model at all.
+    // React 18 will not map `className` onto a custom element, so the frame is its parent. Getting
+    // this wrong renders an unstyled element at zero height.
     const el = await screen.findByTestId('model-3d-viewer')
     expect(el.parentElement).toHaveClass('model-viewer-frame')
 

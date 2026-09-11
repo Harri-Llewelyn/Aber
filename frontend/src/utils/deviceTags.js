@@ -1,41 +1,25 @@
 /**
  * Schema conformance of a device's declared metrics, derived at read time.
- *
- * `devices.last_birth_metrics` is what the device declared in its most recent DBIRTH, written
- * by ingestion.py. Which of those metrics its assigned schema fails to account for is worked
- * out here rather than stored, so that editing a schema reclassifies its devices immediately
- * instead of at their next birth -- rebirths are rare by design and may be weeks apart. Same
- * client-side, no-backend-cron pattern as deviceProvisioning.js and gatewayStatus.js.
+ * `devices.last_birth_metrics` is what the device declared in its last DBIRTH; which of those its
+ * schema fails to account for is computed here, so editing a schema reclassifies its devices
+ * immediately rather than at their next birth.
  */
 
 import { deriveMetricGroup } from './metricGroup'
 
 /**
- * The metric names a schema accounts for.
- *
- * `schema_definition` is free-form JSONB: only schemas produced by the Schema Builder are
- * guaranteed the `{ type, properties, required }` shape. Schemas seeded by a migration, or written
- * straight to PostgREST, may carry either key or neither -- the builder being the only path in the
- * UI does not make it the only path into the column. The union of both is taken so a schema listing
- * metrics in only one of them is still read correctly.
- *
- * Returns null -- not an empty set -- when neither key is present. That is "this schema cannot
- * be evaluated", which is a different answer from "this schema models nothing", and the
- * difference decides whether a device gets flagged. See unmodelledMetrics().
- *
- * MIRRORED BY `modelled_metrics()` IN `ingestion/validate.py`, and the two are held together by
- * `test-harness/fixtures/modelled-metrics.json` -- see `__tests__/modelledMetricsContract.test.js`.
+ * The metric names a schema accounts for. `schema_definition` is free-form JSONB, so the union of
+ * `properties` and `required` is taken. Returns null, not an empty set, when neither key is
+ * present: cannot be evaluated is a different answer from models nothing, and decides whether a
+ * device is flagged. Mirrored by `modelled_metrics()` in ingestion/validate.py, held together by
+ * test-harness/fixtures/modelled-metrics.json.
  */
 export function modelledMetrics(schema) {
   const def = schema?.schema_definition
   if (!def) return null
 
-  // `!Array.isArray` IS LOAD-BEARING, and its absence was a live divergence from the Python
-  // mirror rather than a hypothetical one. `typeof [] === 'object'`, so an array reached
-  // `Object.keys`, which yields its INDICES -- a schema with `properties: ['Temp','Pressure']`
-  // was read here as modelling two metrics named '0' and '1', so nearly everything the device
-  // published came back Unmodelled, while validate.py read the same schema as having no model at
-  // all. An array is not a valid JSON Schema `properties` object; it contributes nothing.
+  // `!Array.isArray` is load-bearing: `typeof [] === 'object'`, and `Object.keys` on an array
+  // yields its indices. An array is not a valid `properties` object and contributes nothing.
   const hasProperties =
     def.properties && typeof def.properties === 'object' && !Array.isArray(def.properties)
   const properties = hasProperties ? Object.keys(def.properties) : []
@@ -46,20 +30,15 @@ export function modelledMetrics(schema) {
 }
 
 /**
- * Metrics the device declared that its schema does not account for.
- *
- * Empty when the device conforms, when it has never been seen, when it has no schema, or when
- * the schema cannot be evaluated. Those last two are deliberately *not* treated as "everything
- * is unmodelled": "publishes beyond its model" and "has no model" are different findings, and
- * conflating them would flag every unschematised device until the tag meant nothing.
+ * Metrics the device declared that its schema does not account for. Empty when it conforms, has
+ * never been seen, has no schema, or the schema cannot be evaluated: publishes beyond its model and
+ * has no model are different findings.
  */
 export function unmodelledMetrics(device, schemaOrSchemas) {
   const declared = device?.last_birth_metrics
   if (!Array.isArray(declared) || declared.length === 0) return []
 
-  // Across every attached submodel: a metric modelled by any one of them is modelled. Judging
-  // against a single schema would flag a device for publishing what another of its own submodels
-  // accounts for.
+  // Across every attached submodel: a metric modelled by any one of them is modelled.
   const modelled = modelledMetricsAcross(schemaOrSchemas)
   if (!modelled) return []
 
@@ -71,27 +50,15 @@ export function hasUnmodelledMetrics(device, schemaOrSchemas) {
   return unmodelledMetrics(device, schemaOrSchemas).length > 0
 }
 
-/**
- * Resolve the schema assigned to a device from a loaded schema list.
- *
- * The list comes from `/api/v1/schemas`, which keys rows as `schema_uuid`; `devices.schema_id`
- * holds the same value.
- */
+/** Resolve the schema assigned to a device from a loaded schema list, keyed as `schema_uuid`. */
 export function schemaForDevice(device, schemas) {
   if (!device?.schema_id) return null
   return (schemas || []).find(s => s.schema_uuid === device.schema_id) || null
 }
 
 /**
- * Every schema attached to a device, as an array.
- *
- * Reads `submodel_schema_ids` -- the device_submodels join added in archived migration 0034, one AAS
- * Submodel per entry -- and falls back to the 1:1 `schema_id` for a device that has no rows there.
- * The fallback is what lets a device provisioned by any path still resolve, and is why 0034 keeps
- * `devices.schema_id` rather than dropping it.
- *
- * Returns [] rather than [null] when nothing is attached, so "has no model" stays distinguishable
- * from "has a model that could not be found".
+ * Every schema attached to a device. Reads `submodel_schema_ids` (the device_submodels join) and
+ * falls back to the 1:1 `schema_id`. Returns [] rather than [null] when nothing is attached.
  */
 export function schemasForDevice(device, schemas) {
   const ids = Array.isArray(device?.submodel_schema_ids) && device.submodel_schema_ids.length > 0
@@ -102,22 +69,14 @@ export function schemasForDevice(device, schemas) {
   return ids.map(id => byId.get(id)).filter(Boolean)
 }
 
-/**
- * Normalise the second argument of every derived function below.
- *
- * They each take "the device's schema(s)" and were written when that was exactly one. Accepting
- * either shape keeps every existing call site correct while multi-submodel callers pass an array,
- * rather than forcing a simultaneous edit of six components and their tests.
- */
+/** Normalise the second argument of every derived function below: one schema or an array. */
 function asSchemaList(schemaOrSchemas) {
   if (Array.isArray(schemaOrSchemas)) return schemaOrSchemas.filter(Boolean)
   return schemaOrSchemas ? [schemaOrSchemas] : []
 }
 
 /**
- * The union of every metric modelled across a device's schemas, or null when none of them can be
- * evaluated. Null rather than an empty set for the same reason modelledMetrics() returns it: "no
- * evaluable model" and "models nothing" decide different things.
+ * The union of every metric modelled across a device's schemas, or null when none can be evaluated.
  */
 export function modelledMetricsAcross(schemaOrSchemas) {
   const list = asSchemaList(schemaOrSchemas)
@@ -138,17 +97,9 @@ export function modelledMetricsAcross(schemaOrSchemas) {
 export const UNMODELLED_TAG = 'Unmodelled'
 
 /**
- * The device-type tags implied by its schema: the distinct groups of the metrics that schema
- * models. A schema covering `Axes/C/ANGLE` and `Environmental/HUMIDITY_RELATIVE` tags its devices
- * both `Axes` and `Environmental` -- multiple tags without needing multiple schemas.
- *
- * Drawn from the *schema*, not from what the device was last seen publishing. Two consequences,
- * both wanted:
- *   - a provisioned device is tagged before its first birth, so it can be found by tag while you
- *     are still waiting for it to appear;
- *   - a metric the device publishes but its schema does not model contributes no tag. It reports
- *     as Unmodelled instead, which is the signal to fix the schema -- letting it quietly confer
- *     its group would legitimise the drift and hide it.
+ * The device-type tags implied by its schema: the distinct groups of the metrics it models. Drawn
+ * from the schema rather than from what the device last published, so a provisioned device is
+ * tagged before its first birth and an unmodelled metric confers no tag.
  */
 export function deviceGroupTags(device, schemaOrSchemas) {
   const modelled = modelledMetricsAcross(schemaOrSchemas)
@@ -166,24 +117,11 @@ export function deviceGroupTags(device, schemaOrSchemas) {
 export const OUT_OF_VOCABULARY_TAG = 'Out of vocabulary'
 
 /**
- * Metrics whose last reported value is not in the vocabulary their catalog entry declares.
- *
- * DERIVED, NEVER STORED -- same as Unmodelled above, gateway staleness and resolved device
- * location. Nothing writes this and no migration records it: it is a comparison between two things
- * already on screen, and the moment it were stored it could disagree with either.
- *
- * The failure it makes visible is a quiet one. A device publishing `RUNNING` where MTConnect says
- * `ACTIVE` sends a valid string in a valid DDATA against a real metric, so ingestion accepts it,
- * the historian stores it, and a dashboard renders it -- and every downstream consumer that keys
- * on the state is silently wrong. This actually happened here: the Node-RED demo flow set
- * `Controller/EXECUTION` to `RUNNING`, a value MTConnect does not define.
- *
- * `latestValues` is `metric_name -> last reported value` for this device, from `telemetry_latest`.
- * Absent or empty means no finding -- "we have not looked" and "we looked and it is fine" are
- * different, and only the second deserves a clean bill.
- *
- * A metric with no `permitted_values` is unconstrained and never contributes: most metrics are,
- * and every continuous SAMPLE is.
+ * Metrics whose last reported value is not in the vocabulary their catalog entry declares. Derived,
+ * never stored. A device publishing `RUNNING` where MTConnect says `ACTIVE` passes ingestion and
+ * the historian, and every consumer keying on the state is silently wrong. `latestValues` is
+ * metric_name to last value from `telemetry_latest`; absent or empty means no finding, not a clean
+ * bill. A metric with no `permitted_values` never contributes.
  */
 export function outOfVocabularyMetrics(latestValues, catalog) {
   if (!latestValues || !catalog) return []
@@ -203,9 +141,8 @@ export function outOfVocabularyMetrics(latestValues, catalog) {
     if (!permitted) continue
     // Nothing reported is not a violation; it is the absence of evidence either way.
     if (value === null || value === undefined || value === '') continue
-    // Compared as strings because a discrete Sparkplug metric is published as one, and the
-    // vocabulary is a list of strings. A numeric enum would compare on its rendered form, which
-    // is what the historian holds anyway.
+    // Compared as strings: a discrete Sparkplug metric is published as one, and the vocabulary is a
+    // list of strings.
     if (!permitted.includes(String(value))) {
       findings.push({ name, value: String(value), permitted })
     }
@@ -219,13 +156,9 @@ export function hasOutOfVocabularyValues(latestValues, catalog) {
 }
 
 /**
- * Every tag a device carries: its schema's metric groups, plus `Unmodelled` when it declared
- * metrics outside that schema, plus `Out of vocabulary` when it reported a value its metric does
- * not permit. Ordered with the two findings last, since they are findings rather than
- * classifications.
- *
- * `latestValues` and `catalog` are optional: a caller that has not loaded telemetry gets the tags
- * it can actually justify rather than a silently absent finding.
+ * Every tag a device carries: its schema's metric groups, then `Unmodelled` and `Out of vocabulary`
+ * last, since those are findings. `latestValues` and `catalog` are optional: without telemetry the
+ * finding is absent rather than clean.
  */
 export function deviceTagList(device, schemaOrSchemas, latestValues, catalog) {
   const tags = deviceGroupTags(device, schemaOrSchemas)
@@ -241,14 +174,12 @@ export function deviceHasTag(device, schemaOrSchemas, tag, latestValues, catalog
 }
 
 /**
- * Every tag present across a fleet, for populating a filter. Unmodelled is offered only when at
- * least one device actually has it -- an empty finding is not worth a filter option.
+ * Every tag present across a fleet, for a filter. Unmodelled is offered only when a device has it.
  */
 /**
- * `latestFor` is a FUNCTION from device to its last reported values, not a map, because telemetry
- * is keyed on `sparkplug_id` while a device row is keyed on its uuid. Passing the map would put
- * that mismatch in every caller, and getting it wrong produces no finding rather than an error --
- * a filter option that silently never appears.
+ * `latestFor` is a function from device to its last values, not a map: telemetry is keyed on
+ * `sparkplug_id`, a device row on its uuid, and a wrong key produces no finding rather than an
+ * error.
  */
 export function availableTags(devices, schemas, latestFor, catalog) {
   const groups = new Set()

@@ -1,33 +1,17 @@
 #!/usr/bin/env node
 /**
- * First-boot provisioning for an ACS-Cymru physical gateway appliance.
+ * First-boot provisioning for an ACS-Cymru physical gateway appliance. Once: redeems the single-use
+ * enrolment token in .env against enroll-gateway, writes the broker CA, writes /data/flows.json
+ * from flows.template.json with this gateway's identity substituted, writes /data/flows_cred.json
+ * encrypted through Node-RED's own credential runtime, writes /data/settings.js with a generated
+ * admin password printed once, and writes /data/gateway.env for the node-red service to source.
  *
- * WHAT IT DOES, ONCE:
- *   1. redeems the single-use enrolment token in .env against the platform's enroll-gateway
- *   2. writes the broker CA, so this appliance can VERIFY the broker rather than trust it
- *   3. writes /data/flows.json from flows.template.json, with this gateway's identity substituted
- *   4. writes /data/flows_cred.json, ENCRYPTED, through Node-RED's own credential runtime
- *   5. writes /data/settings.js with a locally generated admin password, printed once
- *   6. writes /data/gateway.env, which the node-red service sources at start
+ * The token is single-use, so the script is once-only, guarded by /data/.enrolled.json: a re-run
+ * against a provisioned volume exits 0 having done nothing. Only a 503 carrying `retryable: true`
+ * is retried, the platform saying it released the claim; every other failure is terminal.
  *
- * ---------------------------------------------------------------------------------------------
- * THE TOKEN IS SINGLE-USE, AND EVERYTHING ABOUT THE CONTROL FLOW FOLLOWS FROM THAT.
- *
- * A second successful run is impossible: the platform consumed the token the first time. So this
- * script is not idempotent in the usual sense -- it is ONCE-ONLY, guarded by /data/.enrolled.json,
- * and a re-run against a provisioned volume exits 0 having done nothing. That is deliberate: the
- * alternative (attempt, fail, exit non-zero) would make `docker compose up` on an already-working
- * appliance report a failure.
- *
- * RETRYING IS THEREFORE NARROW AND EXPLICIT. Only a 503 carrying `retryable: true` is retried --
- * that is the platform saying, in as many words, that it RELEASED the claim and the same token is
- * still good. Every other failure is terminal, because retrying a spent token cannot succeed and
- * would only bury the real error under a wall of 401s.
- *
- * Usage:
- *   node /bundle/bootstrap.mjs                          # first boot; no-op once enrolled
- *   node /bundle/bootstrap.mjs --reset-admin-password    # new editor password, keeps enrolment
- *   node /bundle/bootstrap.mjs --force                   # re-enrol with a NEW token in .env
+ * Usage: `node /bundle/bootstrap.mjs` (first boot; no-op once enrolled), `--reset-admin-password`
+ * (new editor password, keeps enrolment), `--force` (re-enrol with a new token in .env).
  */
 import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import {
@@ -38,9 +22,8 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import process from 'node:process';
 
-// An ESM module gets no implicit require(). One is needed because bcryptjs is CommonJS and has to
-// be loaded by ABSOLUTE PATH: this file runs from /bundle, so a bare specifier would resolve
-// against /bundle/node_modules and /node_modules, never the image's own module directory.
+// bcryptjs is CommonJS and must be loaded by absolute path: this file runs from /bundle, so a bare
+// specifier would never resolve against the image's own module directory.
 const require = createRequire(import.meta.url);
 
 const DATA_DIR = process.env.NODE_RED_DATA_DIR || '/data';
@@ -59,9 +42,8 @@ const CA_PATH = join(DATA_DIR, 'certs', 'ca.crt');
 const GITOPS_DIR = join(DATA_DIR, 'gitops');
 const DEPLOY_KEY = join(GITOPS_DIR, 'id_ed25519');
 const REPOSITORY = join(GITOPS_DIR, 'repository.json');
-// The forge's own public key, so `git` can VERIFY it rather than trust whatever answers on the
-// first connection. Written from the enrolment response, which arrives over TLS on a single-use
-// token -- see step 5b.
+// The forge's own public key, written from the enrolment response, so `git` verifies the host
+// rather than trusting the first connection. See step 5b.
 const KNOWN_HOSTS = join(GITOPS_DIR, 'known_hosts');
 // What flow-sync.mjs authenticates to the LOCAL Node-RED admin API with. See syncCredential().
 const SYNC_CREDENTIAL = join(GITOPS_DIR, 'nodered.json');
@@ -77,20 +59,12 @@ const die = (message, hint) => {
   process.exit(1);
 };
 
-// -------------------------------------------------------------------------------------------------
 // Configuration, from .env via compose's env_file
-// -------------------------------------------------------------------------------------------------
 const SUPABASE_URL = (process.env.ACS_SUPABASE_URL || '').replace(/\/+$/, '');
-// THE GATEWAY CREDENTIAL, in whichever format the bundle carries.
-//
-// The platform's gateway accepts the legacy anon JWT and the new `sb_publishable_*` key at the
-// same time, so an appliance does not care which it was given -- it presents the string and the
-// gateway matches it. This appliance sends it as `apikey` AND as the bearer, which is safe for an
-// opaque key because the gateway synthesises the JWT its upstreams need.
-//
-// THE FALLBACK IS FOR BUNDLES, NOT FOR INSTALLS. A bundle downloaded before the platform minted
-// a publishable key carries only ACS_SUPABASE_ANON_KEY, and an appliance commissioned from one of
-// those must still boot -- the token in it is single-use and a failed first boot spends it.
+// The gateway credential, in whichever format the bundle carries. The platform's gateway accepts
+// the legacy anon JWT and the `sb_publishable_*` key alike; it is sent as `apikey` and as the
+// bearer. The fallback to ACS_SUPABASE_ANON_KEY is for bundles downloaded before the platform
+// minted a publishable key, whose single-use token would be spent by a failed first boot.
 const ANON_KEY =
   process.env.ACS_SUPABASE_PUBLISHABLE_KEY || process.env.ACS_SUPABASE_ANON_KEY || '';
 const TOKEN = (process.env.ACS_ENROLLMENT_TOKEN || '').trim();
@@ -99,70 +73,41 @@ const AGENT_VERSION = process.env.ACS_AGENT_VERSION || 'unknown';
 const CREDENTIAL_SECRET = process.env.NODERED_CREDENTIAL_SECRET || '';
 
 /**
- * The retry budget for a RELEASED claim.
- *
- * Six attempts over roughly two minutes. Long enough to ride out a broker restart or a rolling
- * update of the platform, short enough that an appliance whose platform is genuinely down reports
- * so while somebody is still standing next to it. There is no unbounded retry: a bootstrap that
- * never exits is indistinguishable from one that is stuck.
+ * The retry budget for a released claim: six attempts over roughly two minutes, enough to ride out
+ * a broker restart, bounded so a bootstrap that cannot reach the platform reports so while somebody
+ * is still standing next to it.
  */
 const MAX_ATTEMPTS = 6;
 const BACKOFF_MS = [2000, 5000, 10000, 20000, 30000];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// -------------------------------------------------------------------------------------------------
 // The admin password
-// -------------------------------------------------------------------------------------------------
 /**
- * A generated password and its bcrypt hash.
- *
- * GENERATED, NEVER TAKEN FROM .env. A password in the bundle would be identical on every appliance
- * built from it, would sit in a file that travels by USB stick, and would survive in the download
- * folder of whoever provisioned the fleet. This one exists in exactly two places: this process's
- * stdout, once, and a bcrypt hash in settings.js.
- *
- * base64url, so it survives being copied through a terminal, a ticket and a password manager
- * without an escaping accident.
+ * A generated password and its bcrypt hash. Generated, never taken from .env, so it is not
+ * identical on every appliance built from the bundle; it exists only in this process's stdout,
+ * once, and as a hash in settings.js. base64url, so it survives a terminal, a ticket and a password
+ * manager.
  */
 function generateAdminPassword() {
   const bcrypt = require(`${RUNTIME_DIR}/bcryptjs`);
   const password = randomBytes(18).toString('base64url');
-  // Cost 10: Node-RED's own default for adminAuth hashes. Higher costs a noticeable pause on the
-  // low-power hardware these appliances usually run on, for a credential that is already 144 bits
+  // Cost 10, Node-RED's own default for adminAuth hashes, for a credential that is already 144 bits
   // of entropy and never transmitted.
   return { password, hash: bcrypt.hashSync(password, 10) };
 }
 
-// -------------------------------------------------------------------------------------------------
 // settings.js
-// -------------------------------------------------------------------------------------------------
 /**
- * LOCAL adminAuth, deliberately -- see the Dockerfile header for why this appliance does not
+ * Local adminAuth with one user and no `default` user, so the editor and the /flows admin API are
+ * closed to an unauthenticated caller. See the Dockerfile header for why this appliance does not
  * federate to Supabase Auth.
- *
- * `type: 'credentials'` with one user. The hash is bcrypt; Node-RED compares it itself. There is no
- * `default` user, which is what keeps the editor and the /flows admin API closed to an
- * unauthenticated caller -- the failure mode this whole block exists to avoid is an appliance on a
- * plant network with an open flow editor.
  */
 /**
- * The flow-sync agent's own Node-RED login, generated and STORED -- unlike the admin password.
- *
- * WHY IT IS A SECOND ACCOUNT AND NOT THE ADMIN ONE. The admin password is printed once and written
- * nowhere, which is a property worth keeping: it is the credential a person uses, and a copy of it
- * on disk would outlive the person who read it. A machine that must authenticate unattended on
- * every timer tick cannot work that way, so it gets an identity of its own -- separately
- * revocable, obviously non-human in the audit log, and re-issued by rewriting settings.js.
- *
- * IT GRANTS NOTHING THE MOUNT DOES NOT ALREADY GRANT. flow-sync writes /data/flows.json directly
- * over the shared volume; a Node-RED admin token is strictly less authority than that. The token
- * exists because RELOADING is an API call -- Node-RED does not watch the flow file -- and not
- * because the agent needs permission to change anything.
- *
- * `permissions: '*'` because Node-RED's model has no narrower grant that includes POST /flows.
- * Stated rather than quietly accepted: if a future release adds a `flows.write` scope, this should
- * take it.
+ * The flow-sync agent's own Node-RED login, generated and stored, unlike the admin password: a
+ * machine that authenticates unattended cannot use a password that is printed once. It grants
+ * nothing the volume mount does not already grant; the token exists because reloading is an API
+ * call. `permissions: '*'` because Node-RED has no narrower grant that includes POST /flows.
  */
 function generateSyncCredential() {
   const bcrypt = require(`${RUNTIME_DIR}/bcryptjs`);
@@ -171,12 +116,8 @@ function generateSyncCredential() {
 }
 
 /**
- * Write the sync agent's password where flow-sync.mjs will read it, 0600.
- *
- * SEPARATE FROM settings.js ON PURPOSE. settings.js holds the bcrypt HASH, which is what Node-RED
- * verifies against; this file holds the plaintext the agent presents. Keeping them apart means the
- * file an operator is most likely to open, copy or paste into a ticket is the one with no secret
- * in it.
+ * Write the sync agent's password where flow-sync.mjs will read it, 0600. Separate from
+ * settings.js, which holds only the bcrypt hash.
  */
 function writeSyncCredential(username, password) {
   mkdirSync(GITOPS_DIR, { recursive: true, mode: 0o700 });
@@ -236,9 +177,7 @@ module.exports = {
 `;
 }
 
-// -------------------------------------------------------------------------------------------------
 // Enrolment
-// -------------------------------------------------------------------------------------------------
 async function enrol() {
   const url = `${SUPABASE_URL}/functions/v1/enroll-gateway`;
 
@@ -249,16 +188,14 @@ async function enrol() {
       response = await fetch(url, {
         method: 'POST',
         headers: {
-          // THE ANON KEY, and no user JWT. Kong gates /functions/v1/ with key-auth, so a key is
-          // required to get past the gateway -- but this appliance has no session and never will.
-          // The enrolment TOKEN is what authorises the call.
+          // The anon key and no user JWT: the gateway requires a key, and the enrolment token is
+          // what authorises the call.
           apikey: ANON_KEY,
           Authorization: `Bearer ${ANON_KEY}`,
           'Content-Type': 'application/json',
         },
-        // ssh_public_key is the PUBLIC half only, and it may be null on an appliance whose
-      // ssh-keygen failed. The platform treats a missing key as "no repository for this
-      // gateway" rather than as an error, so enrolment is unaffected either way.
+        // ssh_public_key is the public half only, and may be null if ssh-keygen failed; the
+        // platform treats a missing key as no repository rather than an error.
       body: JSON.stringify({
         token: TOKEN,
         agent_version: AGENT_VERSION,
@@ -285,11 +222,8 @@ async function enrol() {
 
     if (response.ok) return payload;
 
-    // ---------------------------------------------------------------------------------------
-    // THE ONLY RETRYABLE FAILURE. `retryable: true` is the platform stating that it released the
-    // claim, so this exact token is still live. Anything else -- above all a 401 -- means the
-    // token is spent or invalid, and retrying can only produce the same answer more slowly.
-    // ---------------------------------------------------------------------------------------
+    // The only retryable failure: `retryable: true` is the platform stating it released the claim,
+    // so this token is still live. Anything else, above all a 401, means the token is spent.
     if (response.status === 503 && payload?.retryable === true && attempt < MAX_ATTEMPTS) {
       const wait = BACKOFF_MS[attempt - 1] ?? 30000;
       log(`the platform released the claim and asked us to retry: ${payload.error}. ` +
@@ -317,19 +251,11 @@ async function enrol() {
   return null;
 }
 
-// -------------------------------------------------------------------------------------------------
 // Credentials, encrypted through Node-RED's own runtime
-// -------------------------------------------------------------------------------------------------
 /**
- * Write flows_cred.json the way Node-RED will read it.
- *
- * NOT hand-rolled AES. The file format is Node-RED's, and the one implementation guaranteed to
- * match what its runtime will decrypt is the runtime's own module. This is the same approach the
- * platform's scripts/node-red-init.mjs takes, for the same reason.
- *
- * IT ASSERTS CIPHERTEXT BEFORE WRITING. An export without the `$` envelope means encryption did not
- * happen -- and the failure of writing that file anyway is a broker password sitting in plaintext
- * on the appliance's disk, which nothing downstream would notice.
+ * Write flows_cred.json the way Node-RED will read it, through the runtime's own module rather than
+ * hand-rolled AES, as scripts/node-red-init.mjs does. Asserts ciphertext before writing: an export
+ * without the `$` envelope means encryption did not happen.
  */
 async function writeEncryptedCredentials(brokerNodeId, username, password) {
   const credentials = (
@@ -357,9 +283,7 @@ async function writeEncryptedCredentials(brokerNodeId, username, password) {
   writeFileSync(CREDS, JSON.stringify(exported), { mode: 0o600 });
 }
 
-// -------------------------------------------------------------------------------------------------
 // main
-// -------------------------------------------------------------------------------------------------
 mkdirSync(DATA_DIR, { recursive: true });
 
 // --reset-admin-password: a new editor password, nothing else touched. The appliance keeps its
@@ -377,11 +301,9 @@ if (resetPasswordOnly) {
     );
   }
   const { password, hash } = generateAdminPassword();
-  // THE SYNC CREDENTIAL IS RE-ISSUED HERE TOO, and this is deliberately the path that repairs an
-  // appliance enrolled before flow-sync existed: settings.js is rewritten whole, so the agent's
-  // account has to be written back into it or the reset would REMOVE it. It also means an operator
-  // who has lost only the editor password gets a working sync agent as a side effect rather than
-  // needing a second, differently named recovery command.
+  // The sync credential is re-issued here too: settings.js is rewritten whole, so the agent's
+  // account has to be written back or the reset would remove it. This is also the repair path for
+  // an appliance enrolled before flow-sync existed.
   const sync = generateSyncCredential();
   writeFileSync(SETTINGS, settingsJs(hash, CREDENTIAL_SECRET, sync.hash));
   writeSyncCredential(SYNC_USER, sync.password);
@@ -420,24 +342,11 @@ if (!/^[0-9a-f]{64}$/.test(TOKEN)) {
 }
 
 /**
- * This appliance's deploy key, generated HERE and never anywhere else.
- *
- * THE PRIVATE HALF NEVER LEAVES THE PLANT. Only the public half goes up with the enrolment
- * request, where the platform registers it against this gateway's repository as READ-ONLY. That is
- * the same decision as the editor password below -- generated on the appliance, so there is no
- * fleet-wide store of credentials to compromise, and revoking one gateway is deleting one key from
- * one repository.
- *
- * ed25519 rather than RSA: small, fast to generate on the low-power hardware these appliances run
- * on, and accepted by every forge worth pointing this at.
- *
- * REUSED IF IT EXISTS. A --force re-enrolment against a volume that kept its key sends the same
- * public half up again, which the platform records as already registered. Regenerating would
- * orphan the key the repository already trusts.
- *
- * NOT FATAL IF IT FAILS. An appliance with no key enrols, gets its broker credential and publishes
- * telemetry exactly as before; what it cannot do is converge to a reviewed flow. Refusing to boot
- * over it would trade the gateway's whole purpose for a feature it has never had.
+ * This appliance's deploy key, generated here. The private half never leaves the plant; the public
+ * half goes up with the enrolment request and is registered read-only against the gateway's
+ * repository. ed25519 for the low-power hardware. Reused if it exists, so a --force re-enrolment
+ * sends the same public half. Not fatal if it fails: the appliance still enrols and publishes; it
+ * cannot converge to a reviewed flow.
  */
 function generateDeployKey() {
   try {
@@ -475,10 +384,8 @@ mkdirSync(join(DATA_DIR, 'certs'), { recursive: true });
 writeFileSync(CA_PATH, enrolment.ca_cert, { mode: 0o644 });
 log(`wrote the broker CA to ${CA_PATH} (${createHash('sha256').update(enrolment.ca_cert).digest('hex').slice(0, 16)}…)`);
 
-// 2. The flow. PLACEHOLDER SUBSTITUTION, not environment variables inside the flow: a flow whose
-//    broker address is an unresolved ${VAR} still deploys, and fails at connect time with a message
-//    that names neither the variable nor the flow. Substituting here means the file on disk is the
-//    file that runs, and can be read to see exactly what this appliance will do.
+// 2. The flow. Placeholder substitution, not environment variables inside the flow, so the file on
+// disk is the file that runs and an unresolved value fails here rather than at connect time.
 const BROKER_NODE_ID = 'acs-broker';
 const template = readFileSync(join(BUNDLE_DIR, 'flows.template.json'), 'utf8');
 const flow = template
@@ -487,21 +394,10 @@ const flow = template
   .replaceAll('__SPARKPLUG_ID__', enrolment.sparkplug_id)
   .replaceAll('__SPARKPLUG_GROUP__', enrolment.sparkplug_group)
   .replaceAll('__GATEWAY_NAME__', GATEWAY_NAME)
-  // ---------------------------------------------------------------------------------------------
-  // THE CA PATH, AND WITHOUT IT THIS APPLIANCE ENROLS PERFECTLY AND NEVER CONNECTS.
-  //
-  // The tls-config node's `ca` is a PATH (certType: 'files'), read with fs.readFileSync at deploy
-  // time. Left empty -- which it was -- Node-RED verifies the broker against the SYSTEM TRUST
-  // STORE, which knows nothing about an internal CA. The broker node then reports only
-  //
-  //     Connection failed to broker: <clientid>@<url>
-  //
-  // the same line a wrong password produces, with certificates never mentioned. The CA was being
-  // written to disk correctly the whole time and simply nothing pointed at it.
-  //
-  // The platform's own provisioner refuses to start rather than reach this state -- see the
-  // MQTT_TLS_CA_FILE guard in scripts/node-red-init.mjs, which documents the identical failure.
-  // ---------------------------------------------------------------------------------------------
+  // The CA path. The tls-config node's `ca` is a path read at deploy time; left empty, Node-RED
+  // verifies the broker against the system trust store and reports only "Connection failed to
+  // broker", the same line a wrong password produces. scripts/node-red-init.mjs guards the
+  // identical failure with MQTT_TLS_CA_FILE.
   .replaceAll('__CA_FILE__', CA_PATH);
 
 if (flow.includes('__')) {
@@ -519,40 +415,21 @@ JSON.parse(flow); // Refuse to write a flow Node-RED cannot parse; it would star
 writeFileSync(FLOWS, flow);
 log(`wrote ${FLOWS}`);
 
-// ---------------------------------------------------------------------------------------------
-// THE THREE FACTS THE HEARTBEAT REPORTS THAT NODE-RED CANNOT WORK OUT FOR ITSELF.
-//
-// A function node runs in a sandbox with no `require`, no `fs` and no `process` -- settings.js
-// declares `functionGlobalContext: {}` deliberately, and the flow's own comment records what
-// happens when something reaches past that (a ReferenceError thrown before the first publish,
-// leaving the appliance in AWAITING_BIRTH with the only evidence in its own logs). So these are
-// resolved HERE, where the files actually are, and handed to the flow as environment variables
-// that `env.get()` reads.
-//
-// ALL THREE ARE FIXED FOR THE LIFE OF AN ENROLMENT, which is what makes this the right place
-// rather than a periodic job: the CA, the flow and the bundle all change only by re-running this
-// script, and re-running it rewrites every one of these values.
-//
-// The caveat, stated because it is the one way these go stale: an operator who replaces
-// /data/certs/ca.crt or edits the flow in the Node-RED editor WITHOUT re-enrolling will keep
-// reporting the values recorded here. Re-enrolment is the supported path for both.
-// ---------------------------------------------------------------------------------------------
+// The three facts the heartbeat reports that Node-RED cannot work out for itself. A function node
+// runs in a sandbox with no `require`, `fs` or `process`, so these are resolved here and handed to
+// the flow as environment variables that `env.get()` reads. All three are fixed for the life of an
+// enrolment; an operator who replaces the CA or edits the flow in the editor without re-enrolling
+// keeps reporting the values recorded here.
 
 // The flow AS DELIVERED. Identifies which bundle's flow was installed -- not whether it has since
 // been edited in the editor, which would need the admin API and a credential to ask.
 const FLOW_HASH = createHash('sha256').update(flow).digest('hex');
 
 /**
- * `ACS_AGENT_VERSION` COMES FROM THE OPERATOR'S .env AND IS ABOUT TO ENTER A SHELL FILE.
- *
- * gateway.env is written as `export NAME='value'` and SOURCED by the node-red service's command.
- * A single quote in this value therefore closes the string and the rest becomes shell -- which at
- * best stops the appliance starting with a syntax error naming a file the operator has never
- * heard of, and at worst runs. Nothing else written below has this exposure: the hash is hex, the
- * expiry is digits, and the remaining values come from the platform's own enrolment response.
- *
- * Restricted rather than escaped, and capped at 64 to match what the daemon accepts for the
- * column: a version string is a label, and anything outside this set is not one.
+ * `ACS_AGENT_VERSION` comes from the operator's .env and is about to enter a shell file:
+ * gateway.env is written as `export NAME='value'` and sourced, so a single quote would close the
+ * string. Restricted to a safe character set rather than escaped, and capped at 64 to match the
+ * daemon's column.
  */
 const SAFE_AGENT_VERSION = AGENT_VERSION.replace(/[^A-Za-z0-9._+-]/g, '').slice(0, 64) || 'unknown';
 if (SAFE_AGENT_VERSION !== AGENT_VERSION) {
@@ -561,16 +438,10 @@ if (SAFE_AGENT_VERSION !== AGENT_VERSION) {
 }
 
 /**
- * The CA's notAfter, in epoch milliseconds.
- *
- * WHY THIS ONE MATTERS MOST. The CA is distributed by hand into every appliance's trust store, so
- * re-minting it does not fail loudly -- it succeeds, and the whole fleet drops off at once with no
- * signal but absence. Reporting the date this appliance actually holds is what turns that into a
- * warning with a month's notice.
- *
- * A CA THAT CANNOT BE PARSED IS NOT FATAL. The appliance still enrols, still connects and still
- * reports every other health metric; it simply does not claim an expiry date. Refusing to boot
- * over an unreadable date would trade a monitoring gap for an outage.
+ * The CA's notAfter, in epoch milliseconds. The CA is distributed by hand into every appliance's
+ * trust store, so re-minting it drops the whole fleet with no signal but absence; reporting the
+ * date each appliance holds gives a month's warning. A CA that cannot be parsed is not fatal: the
+ * appliance simply does not claim an expiry.
  */
 let caExpiresMs = '';
 try {
@@ -616,25 +487,12 @@ writeFileSync(
   { mode: 0o600 },
 );
 
-// 5b. WHERE THIS APPLIANCE PULLS FROM, if the platform gave it a repository.
-//
-//     RECORDED RATHER THAN DERIVED. The clone URL is the forge's own answer -- built from its
-//     ROOT_URL and SSH_DOMAIN -- so the appliance never has to reconstruct an address from parts it
-//     would have to be told separately. A null repository is a deployment with no forge, a bundle
-//     that sent no key, or a forge that was unreachable at enrolment; all three look the same here
-//     and none of them stops the gateway working.
-//
-//     THE HOST KEY ARRIVES WITH IT, AND THAT IS WHAT MAKES THE PULL VERIFIABLE. An appliance with
-//     no known_hosts entry could only trust whatever key answers on its first connection -- trust
-//     on first use, decided at the one moment an attacker would choose -- or be told to skip
-//     verification, which this platform refuses everywhere. THIS response is the alternative: it comes
-//     over TLS, authenticated by a single-use token bound to one gateway row, so the forge's
-//     identity is learned from the platform BEFORE the first clone. flow-sync.mjs points
-//     GIT_SSH_COMMAND at the file written here and never at a skip-verification switch.
-//
-//     A NULL host key is a forge that has not published one yet, and it is not an error. The
-//     appliance keeps its broker credential and publishes telemetry; flow-sync declines to
-//     converge and says why, which is the correct refusal rather than a degraded mode.
+// 5b. Where this appliance pulls from, if the platform gave it a repository. Recorded rather than
+// derived: the clone URL is the forge's own answer. The host key arrives with it, over TLS on a
+// single-use token bound to one gateway row, so the forge's identity is learned from the platform
+// before the first clone and flow-sync.mjs never needs a skip-verification switch. A null
+// repository or a null host key is not an error: the appliance keeps publishing, and flow-sync
+// declines to converge and says why.
 if (enrolment.repository && enrolment.repository.ssh_url) {
   const knownHosts = enrolment.repository.known_hosts || null;
   if (knownHosts) {
@@ -668,9 +526,8 @@ if (enrolment.repository && enrolment.repository.ssh_url) {
   log('the platform gave this gateway no repository; it will publish telemetry but not converge.');
 }
 
-// 6. The marker. LAST, so a crash part-way through leaves the appliance un-enrolled rather than
-//    marked enrolled with half a configuration -- though the token is spent either way, which is
-//    why every step above either succeeds or exits non-zero.
+// 6. The marker, last, so a crash part-way through leaves the appliance un-enrolled rather than
+// marked enrolled with half a configuration.
 writeFileSync(
   MARKER,
   JSON.stringify(
@@ -687,22 +544,10 @@ writeFileSync(
   ),
 );
 
-// -------------------------------------------------------------------------------------------------
-// HAND /data BACK TO uid 1000, WHICH IS WHAT NODE-RED RUNS AS.
-//
-// This script runs as ROOT, and it has to: the node-red image ships /data/flows.json owned by
-// root:root, Docker copies it into a fresh named volume with that ownership, and a non-root
-// bootstrap therefore cannot overwrite it -- EACCES, after enrolment has already spent the token.
-// See the `user: "0"` block in docker-compose.yml.
-//
-// The consequence is that everything written above is root-owned, and Node-RED (uid 1000) would then
-// fail to write flows.json when someone deploys from the editor -- the same failure moved one step
-// later, where it looks like a Node-RED bug rather than a provisioning one. So the ownership is
-// corrected here, before this container exits.
-//
-// Recursive and best-effort: a chown that fails on a stray file should not undo a successful
-// enrolment, but it must be reported, because it is the reason a later editor deploy would fail.
-// -------------------------------------------------------------------------------------------------
+// Hand /data back to uid 1000, which Node-RED runs as. This script runs as root because the image
+// ships /data/flows.json owned by root and a non-root bootstrap cannot overwrite it (see the `user:
+// "0"` block in docker-compose.yml). Left root-owned, Node-RED would fail to write flows.json on
+// the next editor deploy. Recursive and best-effort, but reported.
 function handBackOwnership(dir) {
   let changed = 0;
   const walk = (target) => {

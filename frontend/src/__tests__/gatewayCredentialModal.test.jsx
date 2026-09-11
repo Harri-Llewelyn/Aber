@@ -57,11 +57,9 @@ const confirmAndMint = async () => {
 
 describe('GatewayCredentialModal', () => {
   /**
-   * THE CONFIRMATION IS UNCONDITIONAL, which is the one place this deliberately differs from
-   * GatewayBundleModal. That modal skips its confirm step straight after creating a gateway,
-   * where there is provably nothing to destroy. Minting always REPLACES -- the broker holds one
-   * password per username -- so there is no equivalent safe moment, and a regression that added
-   * one would be invisible until it took a running connector offline.
+   * The confirmation is unconditional, unlike GatewayBundleModal, which skips its confirm step
+   * straight after creating a gateway. Minting always replaces, since the broker holds one password
+   * per username, so there is no safe moment.
    */
   it('opens on the confirmation step and mints nothing until the name matches', () => {
     renderModal()
@@ -99,10 +97,7 @@ describe('GatewayCredentialModal', () => {
     expect(api.mintGatewayCredential).toHaveBeenCalledWith(GATEWAY.gateway_id)
   })
 
-  /**
-   * The .env block has to agree with the fields shown above it. Two literals drift, and the
-   * failure is an operator pasting lines that disagree with what is on screen.
-   */
+  /** The .env block has to agree with the fields shown above it. */
   it('builds the .env block from the same values it displays', async () => {
     api.mintGatewayCredential.mockResolvedValue(CREDENTIAL)
     renderModal()
@@ -119,12 +114,8 @@ describe('GatewayCredentialModal', () => {
   })
 
   /**
-   * A PLAYBACK GATEWAY'S PASSWORD GOES SOMEWHERE ELSE ENTIRELY (0060). It has no Node-RED broker
-   * node, so the `acsCredentialsEnv` pairing is advice that cannot be followed -- and the operator
-   * only finds that out after the one dialog that will ever show the password has closed.
-   *
-   * The playback worker reads ONE variable keyed by sparkplug_id, and that key IS derivable, so
-   * this block is pasteable whole rather than carrying a placeholder.
+   * A playback gateway's password goes to the playback worker, not Node-RED: it has no broker node,
+   * and the worker reads one variable keyed by sparkplug_id, so the block is pasteable whole.
    */
   it('points a playback gateway at the playback worker, not at Node-RED', async () => {
     api.mintGatewayCredential.mockResolvedValue(CREDENTIAL)
@@ -146,9 +137,8 @@ describe('GatewayCredentialModal', () => {
   })
 
   /**
-   * A FAILED MINT MUST NOT ADVANCE THE STEP. Nothing was issued, so whatever credential the
-   * gateway had is still valid -- and dropping the operator onto an empty reveal screen would
-   * imply a password existed that they failed to catch.
+   * A failed mint must not advance the step: nothing was issued, so the gateway's existing
+   * credential is still valid.
    */
   it('stays on the confirmation step when the mint is refused', async () => {
     api.mintGatewayCredential.mockRejectedValue(
@@ -164,7 +154,7 @@ describe('GatewayCredentialModal', () => {
 
   /**
    * An unrecorded mint is the one successful outcome that still needs saying: the account exists
-   * and the record of it does not, which is the operator's to escalate rather than ours to hide.
+   * and the record of it does not.
    */
   it('surfaces a mint whose audit row could not be written', async () => {
     api.mintGatewayCredential.mockResolvedValue({ ...CREDENTIAL, audit_recorded: false })

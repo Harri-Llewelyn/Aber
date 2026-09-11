@@ -1,41 +1,13 @@
 /**
- * Revoke a decommissioned gateway's broker credential.
- *
- * ---------------------------------------------------------------------------------------------
- * WHY THIS EXISTS AS A FUNCTION AT ALL, when the database could call the credential service
- * directly and does so in one line of pg_net.
- *
- * IT COULD ON COMPOSE AND MUST NOT ON KUBERNETES. `templates/networkpolicy.yaml` permits exactly
- * one ingress to the credential-issuing sidecar -- `supabase-functions` -- and calls it "THE ONLY
- * EDGE INTO CREDENTIAL ISSUANCE, and the first of its two layers of protection (the bearer token
- * is the second)". A trigger dialling that port itself would be a second edge, admitted for the
- * convenience of removing a hop. The chart already allows `supabase-db -> supabase-kong` for
- * "pg_net: edge functions and REST called from SQL", so routing through here is the path that
- * already exists rather than a new one.
- *
- * The alternative -- widening the policy -- would have traded a stated security property for one
- * fewer moving part, in a change whose entire subject is credential lifetime.
- *
- * ---------------------------------------------------------------------------------------------
- * REVOCATION IS A ROTATION, NOT A DELETION, and that is settled in archived migration 0038's header rather
- * than here. In short: the credential service is add-only by design and a delete verb would turn
- * "can mint a confined account" into "can stop the entire fleet publishing". So this re-provisions
- * the account with a fresh random password THE SERVICE GENERATES AND NOBODY RECORDS, and throws
- * the response away. The appliance's credential stops working; the never-lose-an-account guard in
- * mergeCredential() is untouched.
- *
- * THE PASSWORD IS NEVER RETURNED TO THE CALLER. It is the one copy that will ever exist and it
- * exists only in this worker's memory, for the length of one request. Returning it -- even to a
- * caller holding the shared secret -- would turn a revocation endpoint into an issuance one.
- *
- * ---------------------------------------------------------------------------------------------
- * THE SECRET CHECK IS NOT OPTIONAL. The edge runtime boots with VERIFY_JWT="false" because each
- * function authorises itself, so a function that forgets to check is an open endpoint rather than
- * a 401. Kong's key-auth in front of /functions/v1/ proves only that the caller holds the anon
- * key, which ships inside every browser bundle -- it is not authorisation for anything.
- *
- * Same shape as `grafana-alert-webhook`: the caller presents a purpose-scoped shared secret, this
- * function verifies it, and only then uses the authority it holds.
+ * Revoke a decommissioned gateway's broker credential. A function rather than a direct pg_net call
+ * from the database because on Kubernetes `templates/networkpolicy.yaml` permits exactly one
+ * ingress to the credential-issuing sidecar, `supabase-functions`, and a trigger dialling that port
+ * itself would be a second edge into credential issuance. Revocation is a rotation, not a deletion:
+ * the credential service is add-only by design, so this re-provisions the account with a fresh
+ * password the service generates and nobody records, and throws the response away. The password is
+ * never returned to the caller. The secret check is not optional: the edge runtime boots with
+ * VERIFY_JWT="false", and the gateway's key-auth proves only that the caller holds the anon key.
+ * Same shape as `grafana-alert-webhook`.
  */
 const CREDENTIAL_URL = Deno.env.get("MQTT_CREDENTIAL_SERVICE_URL") ?? "";
 const CREDENTIAL_TOKEN = Deno.env.get("MQTT_CREDENTIAL_SERVICE_TOKEN") ?? "";
@@ -52,11 +24,8 @@ function json(status: number, body: unknown) {
 }
 
 /**
- * Constant-time comparison.
- *
- * A `===` on a secret leaks its prefix through timing. The volume here is one call per archived
- * gateway, so an attack is impractical anyway -- which is an argument for it being cheap to do
- * correctly, not for skipping it.
+ * Constant-time comparison: a `===` on a secret leaks its prefix through timing, and the mitigation
+ * is cheap.
  */
 function secretMatches(presented: string): boolean {
   const a = new TextEncoder().encode(presented);
@@ -70,9 +39,8 @@ function secretMatches(presented: string): boolean {
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json(405, { error: "method not allowed" });
 
-  // NOT CONFIGURED IS 503, NOT 401. A stack that never set the secret has not refused the caller;
-  // it has nothing to check against, and answering 401 would send whoever is debugging it looking
-  // for a wrong value rather than a missing one.
+  // Not configured is 503, not 401: a stack that never set the secret has nothing to check against,
+  // and 401 would send whoever is debugging it looking for a wrong value rather than a missing one.
   if (!REVOKE_SECRET || !CREDENTIAL_URL || !CREDENTIAL_TOKEN) {
     const missing = [
       !REVOKE_SECRET && "GATEWAY_REVOKE_SECRET",
@@ -97,9 +65,8 @@ Deno.serve(async (req: Request) => {
     return json(400, { error: "body is not valid JSON" });
   }
 
-  // Shape-checked before it reaches the credential service. That service creates an account for
-  // whatever id it is handed, so a malformed one does not fail -- it succeeds, and adds a junk
-  // account to the broker's password file that nothing will ever remove.
+  // Shape-checked before it reaches the credential service, which creates an account for whatever
+  // id it is handed; a malformed one would add a junk account nothing will ever remove.
   if (!SPARKPLUG_ID.test(sparkplugId)) {
     return json(400, { error: "sparkplug_id must match gwy[0-9a-f]{21}" });
   }
@@ -129,11 +96,10 @@ Deno.serve(async (req: Request) => {
       `revoked ${sparkplugId} by rotation (${result.replaced ? "replaced an existing account" : "no account existed"})`,
     );
 
-    // `replaced` is reported because it is the honest answer to "was there anything to revoke".
-    // False means the account did not exist and one has now been created holding an unrecorded
-    // password -- inert, but the caller should not be told that a credential was withdrawn when
-    // none was outstanding. archived migration 0038 avoids reaching here in that case by checking
-    // `enrolled_at`; this is the second line of that defence.
+    // `replaced` is the honest answer to "was there anything to revoke": false means the account
+    // did not exist and one has now been created holding an unrecorded password, inert but not a
+    // withdrawal. The trigger avoids reaching here in that case by checking `enrolled_at`; this is
+    // the second line of that defence.
     return json(200, { revoked: true, replaced: Boolean(result.replaced) });
   } catch (err) {
     console.error(`could not reach the credential service: ${(err as Error).message}`);

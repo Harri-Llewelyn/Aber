@@ -3,31 +3,11 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { IconX } from '../common/Icons'
 
 /**
- * ==================================================================================================
- * WHAT THE KEYBOARD DOES, LISTED IN ONE PLACE.
- * ==================================================================================================
- *
- * EVERY ROW HERE IS A SHORTCUT THAT EXISTS. That is the only rule this file has and it is the one
- * worth stating, because a shortcuts dialog is the easiest document in an application to write
- * optimistically -- it costs nothing to add a row for a binding somebody intends to implement, and
- * the reader has no way to tell an aspiration from a fact until they press the key and nothing
- * happens. A wrong row here is worse than a missing one: it spends the user's trust in the whole
- * list to save its author a search.
- *
- * So the list is short, and its shortness is accurate rather than a first draft. The application
- * binds four things -- the palette, its two movement keys, its opener -- plus Escape, which twenty-
- * five dialogs honour through one hook, and the standard focus keys the browser provides and this
- * app does not override.
- *
- * THE BROWSER'S OWN KEYS ARE INCLUDED DELIBERATELY, and Tab is the reason. It is the only way to
- * reach the navigation rail without a mouse, and it makes the rail expand -- which is behaviour
- * this application added to a key it did not invent. A reader who does not know Tab reaches the
- * rail cannot discover that from anywhere else.
- *
- * PLAIN STRINGS, NOT A KEY-EVENT MODEL. These are rendered, never matched against -- the bindings
- * themselves live with the components that own them, which is where they can be read beside the
- * behaviour they cause. A registry that both described AND dispatched would be the better design in
- * an app with fifty of them; with five it would be indirection charging rent.
+ * What the keyboard does, in one place. Every row is a shortcut that exists; the application binds
+ * the palette, its two movement keys and its opener, plus Escape through one hook. The browser's
+ * own keys are included because Tab is the only way to reach the navigation rail without a mouse,
+ * and it makes the rail expand. Plain strings, never matched against: the bindings live with the
+ * components that own them.
  */
 
 /** Windows and Linux say Ctrl, macOS says Cmd, and a shortcuts list that says the wrong one is worse than none. */

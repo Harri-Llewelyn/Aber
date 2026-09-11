@@ -4,18 +4,12 @@ import { IconCheck } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
- * `initialSchemaUuid` is the schema the caller already had in hand.
- *
- * THE SELECT STAYS, which is the part worth arguing. Opened from a schema's drawer the target is
- * already decided, so pre-selecting removes a step -- but "does this payload match v1 or v2?" is a
- * real question, and it is the one this modal answers best. Dropping the control to save a click
- * would have removed the only place in the product where two versions can be tested against the
- * same payload without retyping it.
+ * `initialSchemaUuid` is the schema the caller already had in hand. The select stays even then:
+ * "does this payload match v1 or v2?" is the question this modal answers best, and it is the only
+ * place two versions can be tested against the same payload.
  */
 export function ValidatePayloadModal({ schemas, initialSchemaUuid, onClose }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onClose)
 
   // Falls back to the first schema rather than to nothing: opened without a target -- which no

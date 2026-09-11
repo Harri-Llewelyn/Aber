@@ -118,9 +118,8 @@ describe('opcuaSections', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  // The seed carries six companion specifications, and a section with no hint renders as a bare
-  // spec number -- readable to whoever added it and to nobody else. This is the cheapest place to
-  // notice that a seventh was seeded without one.
+  // A section with no hint renders as a bare spec number. This is the cheapest place to notice that
+  // a seventh specification was seeded without one.
   it('has a hint for every companion specification the seed carries', () => {
     // In the order opcuaSections sorts them, which is lexical on the spec number -- so PackML's
     // 30050 leads, ahead of the 40000-series.

@@ -6,23 +6,11 @@ import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 
 /**
- * Links, formerly Document Links (issue #62).
- *
- * WHAT CHANGED IS THE VOCABULARY, NOT THE MODEL. `public.links` is
- * `(entity_type, entity_id, display_name, url, link_tag)` -- an arbitrary labelled URL against
- * an arbitrary entity. Nothing about it was ever document-specific, so the name was the only thing
- * stopping anyone attaching an asset-register entry or a file share. The issue asked for a new
- * asset-register FIELD on gateways and devices; a tag on this feature does the same job without a
- * migration, without a form field on two more pages, and without a second place asset URLs live.
- *
- * THE STORED TAG VALUES ARE UNCHANGED AND THESE TESTS PIN THAT. `link_tag` carries no CHECK
- * constraint, so the frontend's TAG_LABELS is the only enumeration of the vocabulary -- which makes
- * adding a tag free and makes renaming a key silent data loss: every row written before the rename
- * keeps the old string and renders as Other. Labels are display; keys are data.
- *
- * The endpoint and column are now `links` / `link_tag`, matching what the UI has always called
- * them -- migration 0049. The tag VALUES did not move with them, which is the
- * distinction the paragraph above turns on.
+ * Links, formerly Document Links. `public.links` is `(entity_type, entity_id, display_name, url,
+ * link_tag)`, an arbitrary labelled URL against an arbitrary entity; an asset-register entry is a
+ * tag rather than a new column. The stored tag values are pinned: `link_tag` carries no CHECK
+ * constraint, so TAG_LABELS is the only enumeration, and renaming a key would leave every existing
+ * row rendering as Other.
  */
 
 vi.mock('../api', async () => {
@@ -58,9 +46,7 @@ const tagSelect = () => document.querySelector('select.form-control')
 
 beforeEach(() => { vi.clearAllMocks() })
 
-// ---------------------------------------------------------------------------------------------
 // The vocabulary
-// ---------------------------------------------------------------------------------------------
 
 describe('the link vocabulary', () => {
   it('calls them Links, not Document Links', async () => {
@@ -92,12 +78,8 @@ describe('the link vocabulary', () => {
     expect(modal().queryByText(/Classification/i)).toBeNull()
   })
 
-  /*
-   * FILE REPOSITORY IS A DIFFERENT KIND OF ENTRY and its hint has to say so. Every other tag points
-   * at something that exists; this one points at where files BELONG. The platform deliberately
-   * stores no measurement data, so naming its home is the most it can usefully do -- and a hint
-   * implying the link opens a file would misdescribe the one tag that most needs explaining.
-   */
+  /* File Repository is a different kind of entry: every other tag points at something that exists,
+     this one points at where files belong, and its hint has to say so. */
   it('explains the selected tag, and says File Repository is a destination', async () => {
     await show()
     openForm()
@@ -117,9 +99,7 @@ describe('the link vocabulary', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // Stored values
-// ---------------------------------------------------------------------------------------------
 
 describe('stored tag values', () => {
   it('still renders a tag written before the rename', async () => {
@@ -157,9 +137,7 @@ describe('stored tag values', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // The empty and permission states
-// ---------------------------------------------------------------------------------------------
 
 describe('the states around the list', () => {
   it('says no links rather than no documents when empty', async () => {

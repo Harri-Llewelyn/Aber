@@ -17,9 +17,8 @@ const GATEWAY = {
 }
 
 /**
- * THE GATE IS A ROLE, NOT A PERMISSION, and GatewaysTab computes it as the two roles the forge's
- * own listener admits -- Administrator and Shopfloor_Manager. These tests take the resulting
- * boolean, which is the whole of this component's contract.
+ * The gate is a role, not a permission: GatewaysTab computes it as the two roles the forge's own
+ * listener admits, Administrator and Shopfloor_Manager. These take the resulting boolean.
  */
 describe('GatewayRepositoryPanel — who sees it', () => {
   it('links a role the forge admits to the gateway repository, under the organisation', () => {

@@ -1,20 +1,8 @@
 /**
- * Telemetry value formatting, shared by the device telemetry drawer, the export dialog and the
- * CSV writer.
- *
- * WHY A THREE-COLUMN ROW HAS ONE VALUE. The `telemetry` hypertable stores `val_double`,
- * `val_string` and `val_bool` side by side, and exactly one is populated per row -- the
- * ingestion daemon picks the column from the Sparkplug datatype and leaves the other two NULL.
- * So "the value" always means "whichever of the three is not null", and every consumer needs the
- * same precedence or the same reading renders differently in two places.
- *
- * BOOL IS CHECKED FIRST, and the order is load-bearing: `false` and `0` and `''` are all falsy,
- * so a `!row.val_bool` style test would report a genuine `false` reading as "no value". Each
- * column is tested for null/undefined explicitly rather than for truthiness.
- *
- * Extracted from TelemetryTab's local `fmtVal` when that page was dissolved into the Devices
- * page. The JSX-rendering half stayed with the UI; this module is the value half, so the CSV
- * writer can use it without pulling in React.
+ * Telemetry value formatting, shared by the device telemetry drawer, the export dialog and the CSV
+ * writer. The `telemetry` hypertable stores `val_double`, `val_string` and `val_bool` with exactly
+ * one populated per row, so "the value" is whichever is not null. Each column is tested for null
+ * explicitly, never for truthiness, so a genuine `false` or `0` is a value.
  */
 
 /** The metric's value as a primitive, or null when the row carries none. */
@@ -27,8 +15,8 @@ export function telemetryValue(row) {
 }
 
 /**
- * Which of the three columns this row used. Useful for a CSV column that would otherwise lose
- * the distinction between the string "true" and the boolean true.
+ * Which of the three columns this row used, for a CSV column that would otherwise lose the
+ * distinction between the string "true" and the boolean true.
  */
 export function telemetryValueType(row) {
   if (!row) return null
@@ -39,9 +27,8 @@ export function telemetryValueType(row) {
 }
 
 /**
- * Display text for a value. `emptyLabel` is what an absent value reads as -- the drawer passes
- * "— no data —" for a metric a device declared but has never published, which is a different
- * statement from a row whose columns are all null.
+ * Display text for a value. `emptyLabel` is what an absent value reads as; the drawer passes "— no
+ * data —" for a metric a device declared but has never published.
  */
 export function formatTelemetryValue(row, emptyLabel = 'null') {
   const value = telemetryValue(row)
@@ -51,10 +38,7 @@ export function formatTelemetryValue(row, emptyLabel = 'null') {
   return String(value)
 }
 
-/**
- * The CSS class the old Telemetry page used to colour a value by its type. Kept so the drawer
- * renders values identically to the page it replaced.
- */
+/** The CSS class that colours a value by its type. */
 export function telemetryValueClass(row) {
   const type = telemetryValueType(row)
   if (type === 'bool') return `telemetry-value val-bool-${row.val_bool}`

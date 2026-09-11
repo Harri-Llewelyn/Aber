@@ -63,12 +63,8 @@ const renderTab = (canManage = true) => render(
 )
 
 /**
- * Located by its heading, not by its position on the page.
- *
- * These used to be `document.querySelector('table')` and `tables[tables.length - 1]` -- the first
- * table was the catalog and the last was the registry. Then the two cards swapped order, and every
- * assertion in both files silently pointed at the wrong table. Naming what is wanted costs one
- * helper and cannot rot that way.
+ * Located by its heading, not by its position: the two cards have swapped order before, and a
+ * positional query silently points at the wrong table.
  */
 const cardTable = (heading) => {
   const title = [...document.querySelectorAll('.card-header .section-title')]
@@ -84,15 +80,9 @@ const rowFor = (name) => {
 }
 
 /**
- * Bring superseded versions into the registry.
- *
- * This was a dedicated "Show the N archived versions kept as history" button in the card header.
- * It is now an option in the status filter the registry gained with issue #60 -- isCurrentSchema()
- * is `status !== archived`, so the toggle was a status filter wearing a button, and leaving it
- * beside a status dropdown would have been two controls able to contradict each other.
- *
- * The behaviour these tests assert is unchanged: history is hidden until asked for, and asking is
- * one click. Only the control has moved, so this is a helper rather than an edit at each site.
+ * Bring superseded versions into the registry through the status filter. isCurrentSchema() is
+ * `status !== archived`, so a separate toggle would be a status filter able to contradict the
+ * dropdown.
  */
 const revealArchived = () => fireEvent.change(
   screen.getByLabelText('Filter schemas by lifecycle state'),
@@ -100,13 +90,9 @@ const revealArchived = () => fireEvent.change(
 )
 
 /**
- * Select a schema row and return its context panel.
- *
- * The Actions column is gone: View / Edit Draft / Create Version / More all moved into the
- * right-hand drawer, so the row now carries identity and state and the panel carries what you can
- * DO about it. These assertions moved with them -- the rules being checked (a published version is
- * never editable, a lineage holds one draft, a fork is blocked with a reason rather than hidden)
- * are unchanged; only where they are rendered has moved.
+ * Select a schema row and return its context panel, where View / Edit Draft / Create Version live.
+ * The rules checked: a published version is never editable, a lineage holds one draft, a fork is
+ * blocked with a reason rather than hidden.
  */
 const panelFor = (name) => {
   fireEvent.click(within(registryTable()).getByText(name))
@@ -257,10 +243,8 @@ describe('Downloading a version definition', () => {
 
   beforeEach(() => {
     captured = []
-    // `URL.createObjectURL` and `Blob.prototype.text` are polyfilled in src/test/setup.js -- jsdom
-    // ships neither, and without them this spy throws and the assertions below cannot read the
-    // bytes. Spying on the real Blob rather than stubbing the constructor keeps this a test of
-    // what downloadJSON() actually wrote.
+    // `URL.createObjectURL` and `Blob.prototype.text` are polyfilled in src/test/setup.js. Spying
+    // on the real Blob keeps this a test of what downloadJSON() wrote.
     vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
       captured.push(blob)
       return 'blob:mock'
@@ -278,9 +262,7 @@ describe('Downloading a version definition', () => {
   }
 
   it('offers the download from the context panel, not from the row', async () => {
-    // It was the only item behind the row's "More" menu. With the Actions column gone, a
-    // three-dot menu holding one entry would have been a click to reveal a click, so the
-    // download became a direct panel action instead.
+    // The download is a direct panel action rather than the only item behind a More menu.
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
@@ -296,9 +278,8 @@ describe('Downloading a version definition', () => {
     await clickRowDownload('Robot_Arm_Schema')
 
     await waitFor(() => expect(captured.length).toBe(1))
-    // Byte-for-byte the schema_definition. A published version is immutable, so the file has to
-    // stay diffable against the database and against the previous version -- anything added here
-    // would appear in every one of those diffs as noise that exists nowhere in the schema.
+    // Byte-for-byte the schema_definition: a published version is immutable, so the file has to
+    // stay diffable against the database and the previous version.
     expect(JSON.parse(await downloadedText())).toEqual(V1.schema_definition)
   })
 
@@ -483,11 +464,8 @@ describe('Detail modal — read-only vs draft', () => {
 
 describe('validating a payload', () => {
   /**
-   * IT MOVED OUT OF THE CARD HEADER. From there it could not know what to validate against, so its
-   * first step was a dropdown of every schema name -- which means the reader had already decided
-   * WHICH schema and then had to pick it out of a list showing nothing but names. Nothing covered
-   * this button before, in either position, so the move was unverified in both directions: that it
-   * left the header, and that it arrived somewhere.
+   * Validate Payload is a schema's own action, not a page-level button that first asks which
+   * schema.
    */
   it('is a schema\'s own action rather than a page-level button', async () => {
     renderTab()

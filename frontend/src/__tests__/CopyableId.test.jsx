@@ -48,9 +48,8 @@ describe('CopyableId', () => {
     await waitFor(() => expect(onNotify).toHaveBeenCalledWith(expect.stringContaining('Copied'), 'success'));
   });
 
-  // The dashboard is served over plain HTTP on port 3000, so navigator.clipboard is undefined
-  // for anyone opening it by IP across the plant network. Without the fallback the button
-  // would silently do nothing for exactly the users most likely to need it.
+  // The dashboard is served over plain HTTP, so navigator.clipboard is undefined for anyone opening
+  // it by IP across the plant network.
   it('falls back to execCommand when the clipboard API is unavailable (non-secure context)', async () => {
     delete navigator.clipboard;
     const execCommand = vi.fn().mockReturnValue(true);

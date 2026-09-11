@@ -6,13 +6,9 @@ import { api } from '../api'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * The Devices tab's location UI (archived migration 0036).
- *
- * The distinction under test throughout is between the RESOLVED cell and the EXPLICIT override.
- * They render the same cell name in the common case, so a regression that confused the two --
- * displaying `cell_id` instead of `effective_cell_id`, or writing the resolved value back as an
- * override on save -- would look entirely correct on screen while quietly detaching every
- * inherited device from its gateway.
+ * The Devices tab's location UI. The distinction under test is between the resolved cell and the
+ * explicit override: they render the same name in the common case, so confusing them would look
+ * correct on screen while detaching every inherited device from its gateway on save.
  */
 
 vi.mock('../api', async () => {
@@ -74,13 +70,7 @@ const show = async (rows, options = {}) => {
   await waitFor(() => expect(screen.getByText(options.expect || 'CNC_01')).toBeTruthy())
 }
 
-/**
- * Open the edit form for a device.
- *
- * Two clicks now, not one: the row's Edit button moved into the context panel with the rest of the
- * ACTIONS column, so a device is selected first and edited from the drawer. The form itself, and
- * everything these tests assert about it, is unchanged.
- */
+/** Open the edit form for a device: select the row, then Edit from the drawer. */
 const openEdit = (name = 'CNC_01') => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
   fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
@@ -131,13 +121,9 @@ describe('the cell column', () => {
   })
 
   it('reports a simulated device as Simulated, not as Unassigned', async () => {
-    // THE BUG THIS COLUMN HAD. It tested `site_wide` by hand and let every other cell-less lane
-    // fall through to "no cell name, therefore Unassigned" -- so a whole simulated fleet was
-    // reported as a queue to drain while device_locations had answered `simulated` for all of it.
-    //
-    // The two are not interchangeable in either direction: Unassigned means nobody has decided,
-    // and it is the lane that should empty; Simulated means the decision cannot be taken, because
-    // gateways_synthetic_has_no_cell (0059) refuses the gateway a cell to inherit.
+    // Unassigned and Simulated are not interchangeable: Unassigned means nobody has decided and
+    // should empty; Simulated means the decision cannot be taken, because
+    // gateways_synthetic_has_no_cell refuses the gateway a cell.
     await show([device({
       active_gateway_id: 'gw-sim', effective_cell_id: null, gateway_cell_id: null,
       location_source: 'simulated'
@@ -157,9 +143,7 @@ describe('the cell column', () => {
   })
 
   it('does not offer unassigned advice to a simulated device', async () => {
-    // unassignedHint() has no advice for a synthetic asset, because there is none to give: you
-    // cannot file it in a cell, and you cannot give its gateway one either. The warning triangle
-    // was promising a fix that does not exist.
+    // unassignedHint() has no advice for a synthetic asset, because there is none to give.
     await show([device({
       active_gateway_id: 'gw-sim', effective_cell_id: null, gateway_cell_id: null,
       location_source: 'simulated'
@@ -291,10 +275,9 @@ describe('the edit form', () => {
   })
 
   it('disables the picker when the serving gateway is simulated, and says which lane instead', async () => {
-    // There is no CHECK on the device side, so a cell chosen here would be ACCEPTED and then
-    // ignored -- device_locations resolves `simulated` ahead of every cell arm. Offering the
-    // control would let somebody file an asset and watch it not move, which is worse than a
-    // refusal: nothing reports an error.
+    // There is no CHECK on the device side, so a cell chosen here would be accepted and then
+    // ignored, since device_locations resolves `simulated` ahead of every cell arm. The control is
+    // withheld.
     await show([device({ active_gateway_id: 'gw-sim', effective_cell_id: null, location_source: 'simulated' })])
     openEdit()
     expect(document.querySelector('#device-cell-zone').disabled).toBe(true)
@@ -302,9 +285,8 @@ describe('the edit form', () => {
   })
 
   it('keeps a cell already stored on a device whose gateway went simulated', async () => {
-    // DELIBERATELY UNLIKE THE GATEWAY FORM, which clears. Nothing here would be refused on save,
-    // so clearing would destroy an operator's filing to enforce a rule the database does not have
-    // -- and the value comes back into force by itself if the gateway stops being synthetic.
+    // Unlike the gateway form, which clears: nothing here would be refused on save, and the value
+    // comes back into force if the gateway stops being synthetic.
     api.put.mockResolvedValue({})
     await show([device({
       active_gateway_id: 'gw-sim', cell_id: CELL_2, effective_cell_id: null, location_source: 'simulated'
@@ -318,16 +300,8 @@ describe('the edit form', () => {
 })
 
 describe('the Sparkplug topic in the context panel', () => {
-  // The help text used to read "Click to copy" beneath a plain <span>. Nothing there was
-  // clickable -- only the id above it was -- so the dialog promised an affordance it did not have.
-  // A rendered string cannot be asserted to be copyable by eye, hence these.
-  //
-  // THESE MOVED FROM THE EDIT DIALOG TO THE PANEL, and the coverage is unchanged in substance.
-  // The dialog carried a duplicate of this topic alongside read-only Sparkplug ID and UUID blocks;
-  // all three were removed, because an edit form whose majority cannot be edited teaches the reader
-  // that its controls are decorative. The panel's copy is the one that was always the better answer
-  // to "what does this device publish on" -- it needs no dialog opened, and its group comes from the
-  // serving gateway rather than being left as a `<group>` hole to fill in by hand.
+  // The topic is a copy control in the panel, not help text beneath a plain span. Its group comes
+  // from the serving gateway.
   const topicButton = () =>
     within(document.querySelector('.context-panel')).getByRole('button', { name: /Copy sparkplug topic path/i })
 
@@ -417,9 +391,7 @@ describe('needs attention', () => {
 })
 
 describe('approving a quarantined device', () => {
-  // quarantine_id is the row's identity and the React key DevicesTab renders it under. Without
-  // it the key was undefined on every quarantine row -- the console warning this fixture was
-  // producing, and a real divergence from the API, which keys the table on it.
+  // quarantine_id is the row's identity and the React key DevicesTab renders it under.
   const quarantined = {
     quarantine_id: 'qtn-0000-4000-8000-000000000003',
     asset_id: 'cccccccc-0000-4000-8000-000000000003',
@@ -475,16 +447,9 @@ describe('approving a quarantined device', () => {
 
 
 /**
- * Shadow devices on the Devices page (archived migration 0060).
- *
- * `ensure_shadow_devices()` mints one per device a capture recorded, at the moment a playback
- * starts -- so a stack that has never replayed has none, and the first playback would otherwise
- * double the device list. Six machines become twelve rows, the new ones carrying the same schema
- * and similar readings as the machines they sit beside, with nothing saying which is which.
- *
- * The question a reader has about a number on this page is whether it HAPPENED, and a replay lane
- * answers that differently from a machine: its values did happen, on the real device, on the day
- * the capture was taken. That is worth a badge rather than a filter alone.
+ * Shadow devices on the Devices page. `ensure_shadow_devices()` mints one per captured device when
+ * a playback starts, so the first playback doubles the list; a replay lane's values did happen, on
+ * the real device, on the day of the capture, which is worth a badge rather than a filter alone.
  */
 describe('replay lanes', () => {
   const shadow = (overrides = {}) => device({
@@ -538,20 +503,9 @@ describe('replay lanes', () => {
 
 
 /**
- * Actions withdrawn from a shadow device (archived migration 0060).
- *
- * 0060 states both rules and gives the reason for each, so these are not taste:
- *
- *   "NO NAMEPLATE. device_nameplate (0011) is IDTA Nameplate -- manufacturer, SERIAL NUMBER, year
- *    of construction. A serial number identifies one physical object. Copying it would leave the
- *    platform holding two rows claiming to be serial XYZ-4471, and the AAS Part 5 export would emit
- *    two Asset Administration Shells asserting the same asset identity."
- *
- *   "NO LINKS. `links` are documents ABOUT the machine, and a copy goes stale the moment someone
- *    edits the original. `shadow_of` resolves them at read time instead."
- *
- * Offering either control would let an operator create by hand exactly what the migration exists to
- * prevent -- one field at a time, with nothing to stop them.
+ * Actions withdrawn from a shadow device: no nameplate, because a serial number identifies one
+ * physical object and a copy would export two shells asserting the same asset identity; no links,
+ * because a copy goes stale and `shadow_of` resolves them at read time.
  */
 describe('the actions a shadow device does not offer', () => {
   const shadowDevice = () => device({
@@ -581,16 +535,8 @@ describe('the actions a shadow device does not offer', () => {
   })
 
   it('still offers the AAS exports, which 0060 designed for', async () => {
-    /*
-     * DELIBERATELY KEPT, and this is the one of the three that the migration argues FOR rather than
-     * against: "A shadow exports without a Nameplate submodel, which is honest -- it is not a
-     * product and has no manufacturer." 0011's rule is that a device with no nameplate data has no
-     * row rather than a row of nulls, and the exporter omits an empty submodel entirely.
-     *
-     * So the export is defined, produces a shell with no asset identity to collide with, and is
-     * the thing the nameplate withdrawal above makes safe. Removing it would remove a capability
-     * the migration explicitly reasoned about.
-     */
+    /* Deliberately kept: a shadow exports without a Nameplate submodel, which produces a shell with
+       no asset identity to collide with. */
     const panel = await openShadowPanel()
     expect(panel.queryByText(/Export AAS JSON/)).not.toBeNull()
   })

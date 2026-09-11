@@ -27,6 +27,7 @@ import {
   IconShieldAlert,
   IconX
 } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
@@ -36,15 +37,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   /**
-   * A cell handed over from the Overview shopfloor map arrives as `?search=<cell_id>`.
-   *
-   * The URL wins over the prop, and both are read: the query string survives a reload and a
-   * shared link, while the prop covers a navigation that did not push one. Same arrangement as
-   * GatewaysTab and DevicesTab -- this page was the only drill-down target that implemented
-   * neither half, so clicking a cell on Overview landed on an unfiltered list.
-   *
-   * No new filter control is needed: the existing predicate below already matches cell_id OR
-   * cell_name, so an id drops straight into the search box.
+   * A cell handed over from the Overview map arrives as `?search=<cell_id>`. The URL wins over the
+   * prop and both are read, as on Gateways and Devices. The search predicate already matches
+   * cell_id or cell_name.
    */
   const getInitialSearch = () => {
     const params = new URLSearchParams(window.location.search)
@@ -79,9 +74,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   }, [initialSearchFilter])
 
   /**
-   * Clearing the search also strips `?search=` from the address bar and releases the lifted
-   * filter in App. Without both, a reload or a Back would silently re-apply a filter the user
-   * had just cleared.
+   * Clearing the search also strips `?search=` from the address bar and releases the lifted filter
+   * in App, so a reload or Back does not reapply it.
    */
   const clearSearch = useCallback(() => {
     setSearchQuery('')
@@ -93,20 +87,17 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
 
   const loadAll = useCallback(async (signal) => {
     try {
-      // /api/v1/cells embeds each cell's gateways only. Device membership is the resolved
-      // effective cell (devices.cell_id, else the gateway's), which is grouped from `assets`
-      // by groupDevicesByCell -- so this list is the source for both the cell cards and the
-      // unassigned counter, and is read once rather than once per view.
+      // /api/v1/cells embeds each cell's gateways only. Device membership is the resolved effective
+      // cell, grouped from `assets` by groupDevicesByCell and read once for the cards and the
+      // unassigned counter.
       const [c, a] = await Promise.all([
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/devices', { signal }),
       ])
       setCells(c); setAssets(a)
 
-      /* WHAT THIS PERSON HAS ALREADY ASKED FOR. Needed so the edit dialog can seed itself with an
-         open proposal's patch rather than silently replacing it -- 0086 allows one open proposal
-         per asset per person. RLS decides what comes back; tolerated rather than required, because
-         the cells page must not fail to load because the proposals endpoint did. */
+      /* This person's open proposals, so the edit dialog can seed itself with an open patch rather
+         than replace it. Tolerated rather than required. */
       try {
         const proposals = await api.get('/api/v1/proposals', { signal })
         setOpenProposals((proposals || []).filter(pr => pr.status === 'open'))
@@ -124,9 +115,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
 
   // Reconciliation loop, not the primary refresh -- see useRealtimeTable for why polling stays.
   usePolling(loadAll, refreshInterval())
-  // gateways and devices are watched too: a cell's rendered contents come from the embed
-  // (cells -> gateways -> devices), so a device moving between gateways changes this page
-  // without touching a single `cells` row.
+  // gateways and devices are watched too: a cell's contents come from the embed, so a device moving
+  // between gateways changes this page without touching a `cells` row.
   useRealtimeTable(['cells', 'gateways', 'devices'], loadAll, { enabled: REALTIME_ENABLED })
 
   // In-flight state for the form's Save and for whichever row is restoring. See
@@ -161,10 +151,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const archiveCell = async (days) => {
     try {
       await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
-      // Already closed after the request rather than before it, which is what lets ArchiveModal
-      // hold its Archiving… state for the whole round trip. Left alone deliberately -- the two
-      // place that DID dismiss on the click (ArchivesTab.purge) was the one that had to move.
-      // DirectoryTab's GitOps sync was the other, and it is gone with the flow it deployed.
+      // Closed after the request rather than before, so ArchiveModal holds its Archiving state for
+      // the whole round trip.
       setArchiveTarget(null); loadAll(); showToast(`Cell '${archiveTarget.cell_name}' archived (Out of Commission)`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
@@ -185,52 +173,29 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
   const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
 
-  /* ONE FORM, TWO ENDINGS. See frontend/src/utils/proposeFromForm.js: the approvals page used to
-     carry a second form listing these same columns as bare text inputs, and two forms describing
-     one cell is a drift generator. This dialog is now the only one; for somebody who may not save
-     it, its footer files a proposal instead of writing. Derived rather than stored, so it cannot
-     disagree with the permission that decides whether the write would be accepted. */
+  /* One form, two endings (utils/proposeFromForm.js): for somebody who may not save it, the footer
+     files a proposal. Derived rather than stored, so it cannot disagree with the permission. */
   const proposeMode = !canManage && canPropose
   const [editingProposal, setEditingProposal] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
 
-  // A device that resolves to no cell appears on no cell card, so surface it rather than letting
-  // it silently vanish -- but ONLY when that is an unanswered question.
-  //
-  // A Site-Wide device also resolves to no cell, and it is excluded here: that is the operator's
-  // deliberate answer, not an omission. Flagging it produced a permanent warning that no action
-  // could ever clear, which is worse than no warning at all -- it trains people to ignore the
-  // banner, and this is the same distinction the Devices page's "Needs attention" filter makes.
-  //
-  // `effective_cell_id`, not `cell_id`: the latter is the explicit override and is NULL for every
-  // device that merely inherits its cell.
-  //
-  // Simulated and Shadow are excluded for a stronger version of the Site-Wide reason (0059). A
-  // site-wide device COULD be filed and an operator chose not to; a synthetic one cannot be --
-  // gateways_synthetic_has_no_cell refuses the write. Warning about them would be a banner whose
-  // only remedy is refused by a CHECK constraint, which is the purest form of the "trains people
-  // to ignore the banner" failure this exclusion list exists to prevent.
+  // Devices that resolve to no cell, surfaced only when that is an unanswered question. Site-Wide
+  // is excluded as a deliberate answer; Simulated and Shadow are excluded because
+  // `gateways_synthetic_has_no_cell` refuses the only remedy. `effective_cell_id`, not `cell_id`,
+  // which is NULL for every device that inherits.
   const unlinkedDevices = assets.filter(a =>
     !a.is_archived && !a.effective_cell_id && !NON_CELL_SOURCES.has(a.location_source)
   )
 
-  // Cell membership, grouped from the device list this page already holds.
-  //
-  // /api/v1/cells deliberately does NOT return devices: a cell's devices are those that RESOLVE
-  // to it, which no PostgREST embed can express, and having the endpoint fetch them meant this
-  // page read the whole device table twice on every poll. Grouping here costs one pass over a
-  // list already in memory.
+  // Cell membership, grouped from the device list this page already holds: a cell's devices are
+  // those that resolve to it, which no PostgREST embed can express.
   const devicesByCell = useMemo(() => groupDevicesByCell(assets), [assets])
 
   const liveGateways = (c) => (c.gateways || []).filter(g => !g.is_archived)
   const liveDevices = (c) => (devicesByCell.get(c.cell_id) || []).filter(a => !a.is_archived)
 
-  // gatewayNeedsAttention(), NOT `gatewayLiveStatus(g) !== 'ONLINE'`.
-  //
-  // A physical gateway sits in PENDING_ENROLLMENT from creation until somebody carries its bundle to
-  // a machine, and in AWAITING_BIRTH until that machine publishes. Both are unfinished TASKS, not
-  // faults -- and under the old test, ordering four appliances on a Monday morning flagged every
-  // cell they belong to, which is precisely when this signal needs to still mean something.
+  // gatewayNeedsAttention(), not `gatewayLiveStatus(g) !== 'ONLINE'`: PENDING_ENROLLMENT and
+  // AWAITING_BIRTH are unfinished tasks, not faults.
   const cellNeedsAttention = (c) =>
     liveGateways(c).some(g => gatewayNeedsAttention(g)) ||
     liveDevices(c).some(a => a.is_quarantined)
@@ -256,9 +221,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const activeFilterCount =
     (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
 
-  // Arriving from a device's or gateway's Cell Zone chip, or the shopfloor map: the caller named ONE
-  // cell, so open it rather than leaving a one-card list to be clicked. Identifier equality only --
-  // this page's own search predicate also matches cell_name, and typing a name must open nothing.
+  // Arriving from a Cell Zone chip or the shopfloor map with one cell named: open it. Identifier
+  // equality only, since the search predicate also matches names.
   useArrivalSelection(
     searchQuery,
     cells,
@@ -275,10 +239,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   return (
     <div className="page-layout">
       <div className="page-main">
-      {/* ABOVE THE CARD, NOT INSIDE IT. This is a page-level finding -- devices that belong to no
-          cell at all -- and it is the first thing worth knowing on arrival, before any question
-          about which cells to look at. Inside the card body it sat below the filters, which is
-          behind a control an operator has no reason to touch until they have read this. */}
+      {/* Above the card: a page-level finding, and the first thing worth knowing on arrival. */}
       {unlinkedDevices.length > 0 && (
         <div style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px var(--inset)', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
           <IconShieldAlert size={18} />
@@ -291,22 +252,18 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         </div>
       )}
 
-      {/* ONE CARD, COMPOSED THE SAME WAY EVERY CARD IN THE APP IS: a title, a description, the
-          primary action, then the filters that narrow what is below.
-
-          The filter bar used to float above this card as a panel of its own. That was defensible on
-          a page with a single table -- nothing else it could have been filtering -- but it made the
-          page a different SHAPE from every card that does have a header, and on the pages where two
-          cards compete it actively misleads. A rule that holds everywhere is worth more than an
-          arrangement that is only ambiguous sometimes. */}
+      {/* One card, composed as every card is: title, primary action, then the filters that narrow
+          what is below. */}
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">
-            Shopfloor Cells <span className="section-count">{cells.length}</span>
+            Shopfloor Cells
+            <HelpTip
+              label="About cells"
+              text="A cell is a zone of the shopfloor and what groups the assets in it. A gateway belongs to one, and a device inherits its gateway's unless it names its own. The dashboard, the alerts and the Grafana folders are all organised by cell."
+            />
           </h3>
-          {/* The primary action moves into the header, where every other card keeps its. It sat at
-              the far end of the filter bar behind `.filter-bar-spacer`, which put "create a thing"
-              in the row for "narrow the things". */}
+          {/* The primary action in the header, where every card keeps its. */}
           <button
             className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
             style={{ marginLeft: 'auto' }}
@@ -319,16 +276,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         </div>
 
         <div className="card-body">
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-            A cell is a zone of the shopfloor, and what groups the assets in it. A gateway belongs
-            to one, and a device inherits its gateway's unless it names its own — so a cell is the
-            unit the dashboard, the alerts and the Grafana folders are all organised by.
-          </p>
-
       <div className="filter-bar">
-        {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
-            a filter like the rest, and having two filter surfaces on one page meant the header
-            row also crowded out the primary action. Counts are kept in the option labels. */}
+        {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
         <select
           className="form-control"
           style={{ width: '150px' }}
@@ -380,16 +329,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
 
         </div>{/* .card-body */}
 
-      {/* ONE TABLE, NOT A CARD PER CELL (issue #61).
-          Every cell rendered a card carrying its own header plus two full sub-tables -- gateways
-          with Sparkplug ID, status and heartbeat; devices with Sparkplug ID, status and gateway --
-          so three cells filled the viewport and the page could not be scanned at all. That detail
-          was already duplicated: the context drawer this page has carried since the actions moved
-          off the cards holds the UUID, both membership lists as linking chips, and every action.
-
-          So the card body is GONE rather than relocated, and what is left is the shape the other
-          two asset pages use. A cell now reads as one row, and the drawer is where its detail
-          lives -- which is what makes Gateways and Devices scannable at any fleet size. */}
+      {/* One table, not a card per cell: a cell reads as one row and the drawer holds its detail,
+          which is what keeps the page scannable at any fleet size. */}
         {loading ? (
           <div className="loading-wrap"><div className="spinner" /> Loading shopfloor cells…</div>
         ) : filteredCells.length === 0 ? (
@@ -402,11 +343,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             <table>
               <thead>
                 <tr>
-                  {/* The icon is the cell's own glyph, chosen in the New Cell form and until now
-                      visible only on the shopfloor map. It is what makes a row recognisable at a
-                      glance in a list where every other column is text. Its header is a screen
-                      reader label rather than a word: a 32px column cannot carry one, and a blank
-                      `th` announces as nothing at all. */}
+                  {/* The cell's own glyph, chosen in the New Cell form. Its header is a
+                      screen-reader label, because a 32px column cannot carry a word. */}
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
                   <th title="Human-readable cell zone name">Cell Name</th>
                   <th title="Cell zone unique UUID">Cell UUID</th>
@@ -440,9 +378,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                             <IconArchive size={11} /> ARCHIVED
                           </span>
                         )}
-                        {/* Kept from the card header. A zone with neither a gateway nor a device is
-                            usually half-provisioned, and saying so on the row is what stops it
-                            reading as a cell whose contents merely failed to load. */}
+                        {/* A zone with neither a gateway nor a device is usually half-provisioned,
+                            and saying so stops it reading as a failed load. */}
                         {isEmpty && !c.is_archived && (
                           <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', marginLeft: '8px' }} title="No gateways and no devices resolve to this cell">empty</span>
                         )}
@@ -452,14 +389,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                         {cellGateways.length === 0 ? (
                           <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No gateways assigned</span>
                         ) : (
-                          /* Collapsed past three, as the Gateways page's device column is: the
-                             count grows with the fleet rather than with a fixed vocabulary, so an
-                             uncollapsed list makes the row's height unbounded -- which is the
-                             failure this issue is about.
-
-                             AN ARCHIVED GATEWAY IS PINNED. It is the entry that explains a cell
-                             whose devices have gone quiet, and it would otherwise be the first
-                             thing hidden behind a "+N". */
+                          /* Collapsed past three, as the Gateways page's device column is. An
+                             archived gateway is pinned: it explains a cell whose devices have gone
+                             quiet. */
                           <TagList
                             limit={3}
                             tags={cellGateways.map(g => ({
@@ -479,14 +411,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                         {cellAssets.length === 0 ? (
                           <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No devices located here</span>
                         ) : (
-                          /* THE SAME SHAPE AS Connected Devices ON THE GATEWAYS PAGE, deliberately:
-                             it answers the same question about a different container, and two
-                             columns that mean the same thing should not have to be learned twice.
-
-                             The Online/Offline summary is pinned because it is what the column
-                             exists to answer -- hiding it behind a "+N" would defeat it -- and a
-                             quarantined device is pinned because it is the one entry that calls
-                             for action. */
+                          /* The same shape as Connected Devices on the Gateways page. The Online /
+                             Offline summary is pinned because it is what the column answers; a
+                             quarantined device is pinned because it calls for action. */
                           <TagList
                             limit={3}
                             tags={[
@@ -528,9 +455,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
               <input className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" title="Enter descriptive cell zone name" />
             </div>
             <div className="form-group">
-              {/* A GRID OF BUTTONS, NOT A <select>. The choice is visual -- the whole point is
-                  what the card will look like on the map -- and a dropdown of eight words asks
-                  the operator to imagine the result instead of showing it. */}
+              {/* A grid of buttons, not a select: the choice is visual. */}
               <label className="form-label">Cell Icon</label>
               <div className="icon-picker" role="radiogroup" aria-label="Cell icon">
                 {CELL_ICONS.map(({ key, label, Icon }) => (
@@ -553,9 +478,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
               <label className="form-label">Dashboard / UI URL (Optional)</label>
               <input className="form-control" value={formVal.access_url || ''} onChange={e => setFormVal(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:3002/d/cell-1" title="Enter Grafana dashboard or UI management URL" />
             </div>
-            {/* THE RATIONALE, ONLY WHERE THERE IS SOMEBODY TO READ IT. Saving your own change
-                explains itself; proposing one is writing to an approver who has not stood in the
-                cell. */}
+            {/* The rationale, only when proposing: it is written to an approver who has not stood
+                in the cell. */}
             {proposeMode && (
               <div className="form-group">
                 <label className="form-label" htmlFor="cell-propose-rationale">Why (optional)</label>
@@ -618,10 +542,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         fields={selectedCell ? [
           { label: 'Cell UUID', value: selectedCell.cell_id, mono: true, copyable: true },
           {
-            // A COMMA-JOINED STRING BECOMES CHIPS, and the reason is the same one that took the
-            // gateway's device list: this drawer named the neighbours and then stranded you. A cell
-            // is a junction -- it exists to relate gateways and devices -- so a cell panel that
-            // cannot reach either of them is the one panel where dead-ending costs most.
+            // Chips rather than a comma-joined string: a cell is a junction, and its panel must
+            // reach the gateways and devices it relates.
             label: 'Assigned Gateways',
             value: selectedCellGateways.length
               ? (
@@ -644,10 +566,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             title: 'Edge nodes serving this zone. Their devices resolve here unless a device carries a cell of its own.'
           },
           {
-            // THE COUNT IS KEPT, on the label rather than in place of the list. "12 (9 online)" was
-            // the whole value before, and it answers a real question -- how big is this zone, and is
-            // it healthy -- that twelve chips answer much more slowly. So both: the summary reads at
-            // a glance, the chips carry the navigation.
+            // The count stays on the label: how big is this zone and is it healthy reads at a
+            // glance, and the chips carry the navigation.
             label: selectedCellDevices.length
               ? `Located Devices (${selectedCellDevices.filter(a => a.status !== 'OFFLINE' && !a.is_archived).length}/${selectedCellDevices.length} online)`
               : 'Located Devices',
@@ -675,10 +595,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             title: "This zone's gateways' devices, plus any device filed here explicitly."
           },
           { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true },
-          // MOVED OFF THE CARD RATHER THAN DROPPED (issue #61). The card body carried a banner on
-          // every archived cell saying whether a purge timer was running and when it fires; the
-          // body is gone, and this is the one fact in it that lives nowhere else. A retention
-          // deadline is not something to discover by its passing.
+          // The purge timer, the one fact from the old card body that lives nowhere else.
           selectedCell.is_archived && {
             label: 'Retention',
             value: selectedCell.auto_delete_at
@@ -697,9 +614,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
             onClick: () => {
               setEditing(selectedCell)
-              // SEEDED WITH THE OPEN PROPOSAL'S PATCH, when there is one: 0086 allows one open
-              // proposal per asset per person, so a second field extends the request that exists
-              // rather than silently replacing it.
+              // Seeded with the open proposal's patch when there is one: one open proposal per
+              // asset per person, so a second field extends the request.
               const mine = proposeMode
                 ? openProposals.find(pr => pr.entity_type === 'cells' && pr.entity_id === selectedCell.cell_id)
                 : null
@@ -716,10 +632,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                   ? 'Requires Admin permissions'
                   : 'Edit cell configuration'
           },
-          /* WITHHELD FROM A READER WHO MAY NOT OPEN THE PAGE. The nav hides Digital Thread
-             without `digital_thread:read`; a drawer button that navigated there anyway would be
-             the one route into a page the app has decided not to show, landing them on an empty
-             table that explains nothing. `.filter(Boolean)` below drops it. */
+          /* Withheld from a reader who may not open the page: the nav hides Digital Thread without
+             `digital_thread:read`. `.filter(Boolean)` drops it. */
           canReadThread && {
             label: 'View Digital Thread', icon: <IconHistory size={13} />,
             onClick: () => onViewThread?.(selectedCell),
@@ -730,9 +644,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             onClick: () => setDocsForCell(selectedCell),
             title: 'Attach or edit links for this cell — documents, an asset register, a file repository, any URL'
           },
-          // The last control to leave the card. Archive is not a property of the card in the way
-          // the note there once claimed -- it is a thing done to one cell you have chosen, exactly
-          // like the four that went before it.
+          // Archive is a thing done to one cell you have chosen, like the actions before it.
           selectedCell.is_archived ? {
             label: 'Restore Cell', icon: <IconRefreshCw size={13} />,
             onClick: () => runRestore(selectedCell.cell_id, () => restoreCell(selectedCell.cell_id, selectedCell.cell_name)),

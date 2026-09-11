@@ -1,27 +1,19 @@
 /**
- * Gateway heartbeat helpers.
- *
- * The ingestion daemon stamps `gateways.last_heartbeat` on every Sparkplug B node-level
- * message (NBIRTH / NDATA / NDEATH). A gateway that stops beating never gets an explicit
- * OFFLINE write -- it just goes quiet -- so freshness has to be derived on read.
- *
- * MIRRORS public.gateway_status, and scripts/check-mirror-drift.mjs asserts the threshold matches.
- * The two must agree on the PENDING states as well; that is not machine-checked, so it is stated
- * here and in ensure_gateway_status_view() in identical terms.
+ * Gateway heartbeat helpers. Ingestion stamps `gateways.last_heartbeat` on every node-level
+ * message; a gateway that stops beating never gets an OFFLINE write, so freshness is derived on
+ * read. Mirrors public.gateway_status, and scripts/check-mirror-drift.mjs asserts the threshold
+ * matches. The PENDING states must agree with ensure_gateway_status_view() as well, which is not
+ * machine-checked.
  */
 
 // node_red_flow.json beats every 30s; allow three missed beats before calling it stale.
 export const HEARTBEAT_STALE_MS = 90_000;
 
 /**
- * The two states a REMOTE gateway passes through before it has ever published.
- *
- *   PENDING_ENROLLMENT  a bundle has been issued; the appliance has not redeemed it yet
- *   AWAITING_BIRTH      the appliance enrolled and holds a credential; no NBIRTH yet
- *
- * Both are written by the enrolment path (archived migration 0025), and both are cleared by the first
- * heartbeat -- process_node_message() writes `status` unconditionally, so the transition to ONLINE
- * needs no code anywhere.
+ * The two states a remote gateway passes through before it has published: PENDING_ENROLLMENT (a
+ * bundle issued, not redeemed) and AWAITING_BIRTH (enrolled and holding a credential, no NBIRTH
+ * yet). Both are cleared by the first heartbeat, since process_node_message() writes `status`
+ * unconditionally.
  */
 export const GATEWAY_STATUS_PENDING_ENROLMENT = 'PENDING_ENROLLMENT';
 export const GATEWAY_STATUS_AWAITING_BIRTH = 'AWAITING_BIRTH';
@@ -36,10 +28,7 @@ export function isGatewayPending(gateway) {
   return PENDING_STATUSES.has(gateway?.status);
 }
 
-/**
- * Human labels. The raw values are SCREAMING_SNAKE because they are on the wire and in the
- * database; neither belongs in a badge a shopfloor manager reads.
- */
+/** Human labels for the SCREAMING_SNAKE wire values. */
 export const GATEWAY_STATUS_LABELS = {
   [GATEWAY_STATUS_PENDING_ENROLMENT]: 'AWAITING SETUP',
   [GATEWAY_STATUS_AWAITING_BIRTH]: 'ENROLLED — NO DATA YET',
@@ -54,18 +43,10 @@ export function isHeartbeatStale(lastHeartbeat, now = Date.now()) {
 }
 
 /**
- * Status to display for a gateway: its stored status, downgraded to STALE when the
- * heartbeat has aged out. A gateway that has never reported keeps its stored status.
- *
- * THE PENDING STATES SHORT-CIRCUIT AHEAD OF THE STALENESS CHECK, and that ordering is the whole
- * point of this function existing rather than reading `status` directly.
- *
- * A gateway in PENDING_ENROLLMENT survives without it by luck: it has never beaten, so
- * `last_heartbeat` is NULL and the staleness arm is skipped. AWAITING_BIRTH does not. A gateway
- * being RE-ENROLLED -- new appliance, replaced hardware, a rotated credential -- carries the OLD
- * heartbeat from its previous life, which is minutes or months stale, so it would render STALE
- * while the truth is that it is waiting for its first message. That reads as a fault on a gateway
- * nobody has finished installing yet.
+ * Status to display: the stored status, downgraded to STALE when the heartbeat has aged out. The
+ * pending states short-circuit ahead of the staleness check: a re-enrolled gateway carries the old
+ * heartbeat from its previous life and would otherwise render STALE while waiting for its first
+ * message.
  */
 export function gatewayLiveStatus(gateway, now = Date.now()) {
   const status = gateway?.status || 'OFFLINE';
@@ -80,16 +61,8 @@ export function isGatewayOnline(gateway, now = Date.now()) {
 }
 
 /**
- * Does this gateway want an operator's attention?
- *
- * NOT SIMPLY `live_status !== 'ONLINE'`, which is what the Cells page asked before the enrolment
- * states existed. A gateway created ten seconds ago and waiting for its bundle to be carried to a
- * machine is not a fault -- and treating it as one turns the whole Cells page amber the moment
- * somebody provisions a few appliances, which is exactly when the attention signal needs to still
- * mean something.
- *
- * An ARCHIVED gateway is also excluded: it is decommissioned on purpose and the pages that show it
- * label it as such.
+ * Whether this gateway wants an operator's attention. Not `live_status !== 'ONLINE'`: a gateway
+ * waiting for its bundle to be carried to a machine is not a fault. Archived gateways are excluded.
  */
 export function gatewayNeedsAttention(gateway, now = Date.now()) {
   if (!gateway || gateway.is_archived) return false;
@@ -111,22 +84,15 @@ export function formatHeartbeat(lastHeartbeat, now = Date.now()) {
 }
 
 /**
- * APPLIANCE HEALTH, reported by the gateway itself on the heartbeat (archived migration 0035).
- *
- * These read columns that are NULL on every gateway that does not report them -- a virtual one, and
- * any appliance on a bundle predating that migration -- so each helper returns null rather than a
- * zero or a dash, and the caller decides how to say "not reported". A zero disk figure and an
- * unreported one must never render the same way.
+ * Appliance health, reported by the gateway itself on the heartbeat. The columns are NULL on every
+ * gateway that does not report them, so each helper returns null rather than a zero or a dash: a
+ * zero disk figure and an unreported one must never render the same way.
  */
 
 /**
- * The window the CA-expiry alert fires in.
- *
- * MIRRORS `acs-gateway-ca-expiring` in grafana/provisioning/alerting/alert-rules.yaml, whose
- * threshold is `lt 30`, and scripts/check-docs-drift.mjs asserts the two agree. They are one
- * decision -- long enough to schedule a fleet-wide trust-store update through a plant's change
- * process -- and a UI that warned on a different horizon from the alert would send an operator
- * looking for a rule that had not fired.
+ * The window the CA-expiry alert fires in. Mirrors `acs-gateway-ca-expiring` in
+ * grafana/provisioning/alerting/alert-rules.yaml (`lt 30`); scripts/check-docs-drift.mjs asserts
+ * the two agree.
  */
 export const CERT_EXPIRY_WARN_DAYS = 30;
 
@@ -139,11 +105,8 @@ export function certExpiryDays(certExpiresAt, now = Date.now()) {
 }
 
 /**
- * The CA expiry as a person reads it, or null when the appliance has not reported one.
- *
- * PAST IS SPELLED OUT RATHER THAN SIGNED. "in -3 days" is a number an operator has to decode at
- * exactly the moment they are least inclined to; an expired CA is the whole failure this column
- * exists to catch, so it says so.
+ * The CA expiry as a person reads it, or null when unreported. Past is spelled out rather than
+ * signed: an expired CA is the failure this column exists to catch.
  */
 export function formatCertExpiry(certExpiresAt, now = Date.now()) {
   const days = certExpiryDays(certExpiresAt, now);
@@ -160,11 +123,8 @@ export function isCertExpiring(certExpiresAt, now = Date.now()) {
 }
 
 /**
- * Bytes, at the precision an operator acts on.
- *
- * BINARY UNITS, because these come from node_exporter reading /proc, which counts in them -- and
- * because a disk figure that disagrees with what `df -h` on the appliance says is worse than no
- * figure at all. Zero is a real reading and formats as "0 B"; only null and undefined are absent.
+ * Bytes at the precision an operator acts on, in binary units, because node_exporter counts in them
+ * and `df -h` on the appliance agrees. Zero is a real reading; only null and undefined are absent.
  */
 export function formatBytes(bytes) {
   if (bytes === null || bytes === undefined || Number.isNaN(Number(bytes))) return null;
@@ -181,10 +141,8 @@ export function formatBytes(bytes) {
 }
 
 /**
- * Milliseconds until an enrolment token expires, or null when there is nothing to count down.
- *
- * Negative is NOT clamped to zero: the modal distinguishes "expires in 4 minutes" from "expired 20
- * minutes ago", and a caller that only wants the former can clamp it itself.
+ * Milliseconds until an enrolment token expires, or null. Negative is not clamped: the modal
+ * distinguishes expires in 4 minutes from expired 20 minutes ago.
  */
 export function tokenTimeRemaining(expiresAt, now = Date.now()) {
   if (!expiresAt) return null;

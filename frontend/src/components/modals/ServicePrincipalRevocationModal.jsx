@@ -5,31 +5,12 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { IconShieldAlert, IconX } from '../common/Icons'
 
 /**
- * Withdraw a whole service identity, or put one back.
- *
- * =================================================================================================
- * ONE DIALOG FOR BOTH DIRECTIONS, because they are the same decision seen from either side and the
- * thing a reader needs is the same in both: what happens to the TOKENS. Two components would have
- * stated that twice and drifted.
- *
- * =================================================================================================
- * WHY REVOKING AN IDENTITY IS NOT THE SAME AS REVOKING ITS TOKENS ONE BY ONE
- *
- * `auth_pre_request()` refuses on the `sub` claim, so this reaches every token naming the
- * principal -- including ones this stack holds no record of, and ones issued afterwards. Going
- * through the inventory dialog and withdrawing each jti does NOT do that: it reaches exactly the
- * tokens with a TOKEN_MINTED row, and the next mint works.
- *
- * That is the sentence this dialog exists to put in front of somebody, because the two controls
- * look interchangeable from the table and are not.
- *
- * =================================================================================================
- * REINSTATEMENT DOES NOT RETURN THE CREDENTIALS, AND THE ASYMMETRY IS DELIBERATE
- *
- * Revoking also denylists each outstanding token individually, so lifting the flag afterwards
- * restores the IDENTITY and not whatever was live when it was withdrawn. An operator reinstating
- * an identity is saying "this thing may hold credentials again", not "give it back the ones I took
- * away" -- and `revoke_service_token()` has no inverse in any case.
+ * Withdraw a whole service identity, or put one back. One dialog for both directions because what a
+ * reader needs is the same: what happens to the tokens. Revoking the identity makes
+ * `auth_pre_request()` refuse on the `sub` claim, which reaches every token naming the principal,
+ * including ones this stack has no record of and ones issued afterwards; withdrawing jtis one by
+ * one in the inventory dialog does not. Reinstatement restores the identity, not the credentials:
+ * revoking also denylists each outstanding token, and `revoke_service_token()` has no inverse.
  */
 export function ServicePrincipalRevocationModal({
   principal, principalName, revocation, activeTokens = 0, onClose, onChanged, showToast,

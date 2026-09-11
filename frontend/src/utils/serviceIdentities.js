@@ -141,7 +141,7 @@ export function isMintableFromPage(meta) {
  * on a role, because machine identities hold permissions of their own rather than a person's
  * role.
  */
-export const PERMISSION_REACH = {
+const PERMISSION_REACH = {
   'telemetry:read': 'Read-only across the asset inventory and live telemetry. Cannot read the audit trail.',
   'quarantine:view': 'Can see the onboarding quarantine queue, but cannot approve or reject anything in it.',
   'digital_thread:read': 'Can read the Digital Thread — every attributed change anyone has made to this stack.',

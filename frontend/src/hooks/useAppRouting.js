@@ -7,11 +7,15 @@ const getTabFromPath = () => {
 }
 
 /**
- * Custom hook to manage application tab routing and URL synchronization.
- * @param {Function} setSelectedDeviceFilter - State setter for device search filter
- * @param {Function} setSelectedGatewayFilter - State setter for gateway search filter
- * @param {Function} setSelectedSchemaFilter - State setter for the Devices page's schema filter
- * @param {Function} setSelectedCellFilter - State setter for the Cells page's search filter
+ * Tab routing and URL synchronisation.
+ *
+ * @param {Function} setSelectedDeviceFilter State setter for the Devices page's search filter
+ *
+ * @param {Function} setSelectedGatewayFilter State setter for the Gateways page's search filter
+ *
+ * @param {Function} setSelectedSchemaFilter State setter for the Devices page's schema filter
+ *
+ * @param {Function} setSelectedCellFilter State setter for the Cells page's search filter
  */
 export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter, setSelectedThreadEntity, setPendingVocabularyEntry) {
   const [tab, setTabState] = useState(getTabFromPath)
@@ -29,9 +33,8 @@ export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter,
     }
   }, [])
 
-  // Clicking a nav item is an explicit "start fresh", so cross-page filters handed over by a
-  // drill-down (Overview -> Devices, Schemas -> Devices) are dropped rather than silently
-  // narrowing a page the user navigated to directly.
+  // A nav click is an explicit start-fresh, so cross-page filters handed over by a drill-down are
+  // dropped.
   const handleNavClick = useCallback((tabId) => {
     if (setSelectedDeviceFilter) setSelectedDeviceFilter('')
     if (setSelectedGatewayFilter) setSelectedGatewayFilter('')

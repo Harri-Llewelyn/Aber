@@ -3,17 +3,11 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 /**
- * Runtime configuration resolution (src/config.js).
- *
- * The point of this layer is that ONE frontend image can serve any environment: Vite inlines
- * `import.meta.env` at build time, so without it a bundle carries whichever Supabase URL it was
- * built against. These tests pin the three properties that makes true -- runtime wins, build time
- * is the fallback, and an unsubstituted template placeholder counts as absent -- plus the drift
- * guard between the accessor's key list and the placeholder file a deployment overwrites.
- *
- * Every case re-imports the module under vi.resetModules(), because SUPABASE_URL and
- * SUPABASE_ANON_KEY are resolved once at module load (they are consumed as constants by
- * supabaseClient.js) and would otherwise be frozen at whatever the first test set.
+ * Runtime configuration resolution (src/config.js): one frontend image serves any environment.
+ * These pin that runtime wins, build time is the fallback, an unsubstituted template placeholder
+ * counts as absent, and the accessor's key list agrees with the placeholder file a deployment
+ * overwrites. Every case re-imports the module under vi.resetModules(), because SUPABASE_URL and
+ * SUPABASE_ANON_KEY are resolved once at module load.
  */
 
 const GLOBAL_KEY = '__ACS_CYMRU_CONFIG__'
@@ -55,9 +49,8 @@ describe('readSetting', () => {
   })
 
   it('ignores an unsubstituted template placeholder rather than using it as a value', async () => {
-    // A config.js rendered but never substituted is the likely deployment mistake, and a Supabase
-    // URL of "${VITE_SUPABASE_URL}" is worse than none: every request fails against a nonsense
-    // origin with nothing naming the cause.
+    // A config.js rendered but never substituted is the likely deployment mistake, and a URL of
+    // "${VITE_SUPABASE_URL}" is worse than none.
     for (const marker of ['${VITE_SUPABASE_URL}', '__VITE_SUPABASE_URL__']) {
       const { readSetting } = await loadConfig({ VITE_SUPABASE_URL: marker })
       expect(readSetting('VITE_SUPABASE_URL')).toBe('http://127.0.0.1:54321')
@@ -87,10 +80,8 @@ describe('readFlag', () => {
   })
 
   it('uses the fallback only when the setting is absent from both sources', async () => {
-    // A NAME THAT IS NOT A SETTING, deliberately. This used to use VITE_ALLOW_SIGNUP, which was
-    // retired when the sign-up path was removed -- the server-side GOTRUE_DISABLE_SIGNUP is the
-    // only switch now. Naming a live setting here would make the case depend on whether the test
-    // environment happens to bake a value for it.
+    // A name that is not a setting, deliberately, so the case does not depend on whether the test
+    // environment bakes a value for it.
     const { readFlag } = await loadConfig({})
     expect(readFlag('VITE_NOT_A_SETTING', true)).toBe(true)
     expect(readFlag('VITE_NOT_A_SETTING')).toBe(false)
@@ -145,20 +136,18 @@ describe('index.html load order', () => {
   const html = readFileSync(resolve(HERE, '../../index.html'), 'utf8')
 
   it('loads /config.js as a CLASSIC script, which is what makes it run first', () => {
-    // This is the real invariant, and it is not about document order: a classic script is
-    // parser-blocking and executes immediately, while a type="module" script is deferred and
-    // executes only after parsing. Adding type="module", defer or async here would invert that
-    // silently -- src/config.js would evaluate against an unset global and every deployment would
-    // fall back to whatever the bundle happened to bake in.
+    // The real invariant is not document order: a classic script is parser-blocking and executes
+    // immediately, while a type="module" script is deferred. Adding type="module", defer or async
+    // here would make src/config.js evaluate against an unset global.
     const tag = html.match(/<script[^>]*src="\/config\.js"[^>]*>/)
     expect(tag, '/config.js must be loaded from index.html').not.toBeNull()
     expect(tag[0]).not.toMatch(/\b(type=|defer\b|async\b)/)
   })
 
   it('declares /config.js in <head>, where vite build also injects the bundle', () => {
-    // Belt and braces on top of the classic-script rule. `vite build` injects the bundle's own
-    // <script type="module"> into <head>; with this tag left in <body> the BUILT index.html reads
-    // in the opposite order to the one it executes in, which invites someone to "fix" it later.
+    // Belt and braces on top of the classic-script rule: `vite build` injects the bundle's own
+    // module script into <head>, and a config tag left in <body> would read in the opposite order
+    // to the one it executes in.
     const headEnd = html.indexOf('</head>')
     const configTag = html.indexOf('src="/config.js"')
     expect(configTag).toBeGreaterThan(-1)

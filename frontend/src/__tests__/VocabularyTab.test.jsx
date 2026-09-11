@@ -7,13 +7,9 @@ import { VocabularyTab } from '../components/tabs/VocabularyTab'
 import { api } from '../api'
 
 /**
- * The Standard Vocabulary Reference, now a page of its own rather than a third card on Schemas.
- *
- * These assertions moved here wholesale from SchemasTab.test.jsx -- the panel's behaviour did not
- * change, only where it lives. What is new is the last group: Use no longer fills in a form on the
- * same page, it hands the selection to the Schemas page, so the contract to protect is the SHAPE
- * OF THAT HANDOVER. Its other half is covered in SchemasTab.test.jsx, which asserts the same
- * payload arrives and opens the form.
+ * The Standard Vocabulary Reference as a page of its own. Use hands the selection to the Schemas
+ * page rather than filling a form here, so the contract to protect is the shape of that handover;
+ * SchemasTab.test.jsx asserts the other half.
  */
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -83,12 +79,8 @@ const card = () =>
   within(screen.getAllByRole('heading', { name: /Standard Vocabulary Reference/ })[0].closest('.card'))
 
 /**
- * The standard pills live in the page's `.filter-bar`, not in the card.
- *
- * They used to sit inside it, under the header, with the search box floating in that header beside
- * the title -- so the two halves of one decision ("which vocabulary" and "which word in it") were
- * separated by a heading, and the title had to wrap around a 220px input unrelated to it. Both are
- * now one control row above the card, the shape every other page uses.
+ * The standard pills live in the page's `.filter-bar` with the search box, one control row above
+ * the card.
  */
 const standardTab = (name) => screen.getByRole('tab', { name })
 const ready = async () => {
@@ -180,8 +172,7 @@ describe('Vocabulary page — Use hands off to the Schemas page', () => {
     fireEvent.click(card().getByTitle(/^ActualPosition —/))
 
     // Both parts are required: opcua_vocabulary is keyed on (companion_spec, name) because two
-    // specifications legitimately define the same browse name, so a name-only handover would be
-    // ambiguous the moment a second spec defines ActualPosition.
+    // specifications can define the same browse name.
     expect(onUseEntry).toHaveBeenCalledWith({
       standard: 'OPC UA',
       companionSpec: 'OPC 40010 Robotics',
@@ -205,9 +196,7 @@ describe('Vocabulary page — Use hands off to the Schemas page', () => {
 
 describe('Vocabulary page — control row and description structure', () => {
   it('puts the standard pills and the search in one filter bar, outside the card', async () => {
-    // "Which vocabulary" and "which word in it" are two halves of one decision. They used to be
-    // separated by a heading: the pills sat inside the card under its header, and the search box
-    // floated in that header beside the title -- which the title then had to wrap around.
+    // "Which vocabulary" and "which word in it" are two halves of one decision, in one control row.
     renderTab()
     await ready()
 
@@ -256,18 +245,9 @@ describe('Vocabulary page — control row and description structure', () => {
 })
 
 /**
- * The explanatory text runs the full width of the card.
- *
- * It was capped at a measure (90ch on the subtitle, 96ch on the description) on the usual
- * reasoning that a very long line is one the eye loses its place returning to. That reasoning is
- * right for a column of body copy and wrong here: this is two or three sentences at the top of a
- * full-width card, and capping them stacked each into six short lines with the rest of the row
- * left empty -- more vertical space spent than readability gained, on a page whose whole purpose
- * is to get a long list of vocabulary terms on screen.
- *
- * jsdom does no layout, so this is asserted against App.css directly: a rendering test cannot
- * tell a wrapped line from an unwrapped one, and the cap is exactly the kind of thing that gets
- * reintroduced by someone applying the general rule without seeing this page.
+ * The explanatory text runs the full width of the card: a measure cap would stack two sentences
+ * into six short lines on a page whose purpose is to get a long list on screen. jsdom does no
+ * layout, so this is asserted against App.css directly.
  */
 describe('Vocabulary page — text is not measure-capped', () => {
   const rule = (selector) =>

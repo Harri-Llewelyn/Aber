@@ -6,8 +6,7 @@ import { SPARKPLUG_TYPES } from '../constants'
 
 /**
  * AAS V3's DataTypeDefXsd enumerates the XML Schema built-ins. Anything outside this set makes the
- * exported document invalid, and it fails at the consumer rather than at export time — which is
- * exactly why it is asserted here.
+ * exported document invalid at the consumer rather than at export time.
  */
 const DATA_TYPE_DEF_XSD = new Set([
   'xs:anyURI', 'xs:base64Binary', 'xs:boolean', 'xs:byte', 'xs:date', 'xs:dateTime', 'xs:decimal',

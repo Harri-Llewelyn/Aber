@@ -1,35 +1,18 @@
 /**
- * What KIND of gateway this is, as one word.
+ * What kind of gateway this is, as one word.
  *
- * =================================================================================================
- * ONE COLUMN, FOUR VALUES, AND THE SCHEMA STILL HOLDS TWO FACTS
+ * `gateways` carries `deployment` ('host' | 'remote') and `is_simulated` as two columns; `CHECK
+ * (NOT is_simulated OR deployment = 'host')` leaves three legal combinations, so one control can
+ * render them. If a remote simulator is ever wanted, the CHECK relaxes and this gains a fourth
+ * option.
  *
- * `gateways` carries `deployment` ('host' | 'remote') and `is_simulated`, deliberately separate,
- * as 0064 has it: folding them into one enum welds two independent facts together and makes a
- * simulator on a separate load-generation box unrepresentable. What makes a
- * SINGLE control honest anyway is the cross-column CHECK beside them,
- * `CHECK (NOT is_simulated OR deployment = 'host')`, which leaves exactly three legal combinations.
+ * Shadow is the fourth value and is not selectable: a simulated reading never happened, a shadow
+ * reading did, on the day the capture was recorded. Only the seeded Playback gateway is a shadow,
+ * and a trigger on `playback_jobs` refuses any other target, so `GATEWAY_TYPES` and
+ * `SELECTABLE_TYPES` differ.
  *
- * So this is not a collapse of the model. It is a rendering of the constraint, and if a remote
- * simulator is ever wanted the CHECK relaxes in one line and this gains a fourth option with no
- * data migration behind it.
- *
- * =================================================================================================
- * SHADOW IS THE FOURTH VALUE AND IS NOT OFFERED FOR SELECTION
- *
- * `is_shadow` (0059) is a lane of its own because provenance is not one axis: a SIMULATED spindle
- * reporting 4000 RPM never turned, and a SHADOW spindle reporting 4000 RPM did turn, on a real
- * machine, on the day the capture was recorded. Both are "not a machine running now" and they give
- * opposite answers to *is this number true* -- which is the question being asked at the moment
- * anyone reads this column.
- *
- * Nobody creates one by hand: 0060 seeds the single Playback gateway and a trigger on
- * `playback_jobs` refuses any other target. So it is a value this can REPORT and the editor cannot
- * SET, which is why `GATEWAY_TYPES` and `SELECTABLE_TYPES` are different lists.
- *
- * PRECEDENCE IS MOST-SPECIFIC-FIRST, matching `device_locations` and utils/cellResolution.js:
- * shadow > simulated > deployment. Both flags are true of a shadow gateway, so without an order it
- * would land in Simulated and the more informative answer would be unreachable.
+ * Precedence is most-specific-first, matching `device_locations` and utils/cellResolution.js:
+ * shadow, then simulated, then deployment.
  */
 
 export const GATEWAY_TYPES = {
@@ -53,12 +36,7 @@ const LABELS = {
   [GATEWAY_TYPES.SHADOW]: 'Shadow',
 }
 
-/**
- * The sentence a reader needs, not a restatement of the label.
- *
- * Each says what it means for the NUMBERS, because that is what somebody looking at a gateway row
- * is about to trust or not trust.
- */
+/** The sentence a reader needs, in terms of what it means for the numbers. */
 const DESCRIPTIONS = {
   [GATEWAY_TYPES.REMOTE]:
     'Runs on its own hardware out on the plant network. Enrolled with a bundle; its credential is '
@@ -92,10 +70,8 @@ export function gatewayType(gateway) {
   if (!gateway) return GATEWAY_TYPES.REMOTE
   if (gateway.is_shadow) return GATEWAY_TYPES.SHADOW
   if (gateway.is_simulated) return GATEWAY_TYPES.SIMULATED
-  // DEFAULTS TO REMOTE when `deployment` is absent, which is the safe direction: a row read through
-  // an older select list, or a fixture written before 0064, should not be reported as host-run.
-  // Host is the type with no appliance and no enrolment, so claiming it wrongly hides the one kind
-  // of gateway that needs setting up.
+  // Defaults to remote when `deployment` is absent: host is the type with no appliance and no
+  // enrolment, so claiming it wrongly hides the one kind of gateway that needs setting up.
   return gateway.deployment === 'host' ? GATEWAY_TYPES.HOST : GATEWAY_TYPES.REMOTE
 }
 
@@ -112,12 +88,8 @@ export function gatewayTypeTone(type) {
 }
 
 /**
- * The two columns a chosen type writes back.
- *
- * THE FORM HOLDS ONE VALUE AND THE DATABASE HOLDS TWO, so this is where the translation lives --
- * once, rather than in each page that offers the control. `shadow` is deliberately absent: it is
- * not selectable, and a caller that somehow asked for it would be asking to fabricate the one
- * gateway 0060 seeds.
+ * The two columns a chosen type writes back; the translation lives here once. `shadow` is absent
+ * because it is not selectable.
  */
 export function gatewayTypeFields(type) {
   switch (type) {
@@ -128,39 +100,18 @@ export function gatewayTypeFields(type) {
 }
 
 /**
- * Whether a DEVICE may be assigned to this gateway at all.
- *
- * =================================================================================================
- * MIRRORS THE GATE IN migration 0083, and is not a policy of its own.
- *
- * A shadow gateway's devices are REPLAY LANES. Each stands in for one real machine and records
- * which one in `shadow_of`, and they are minted by `ensure_shadow_devices()` when a capture is
- * played -- one per recorded device, reused across runs so a comparison chart holds still.
- *
- * Three pickers used to offer the Playback gateway like any other (#144). Choosing it worked: the
- * device landed on the shadow lane, correctly badged, with no `shadow_of`. Archived migration 0060
- * names that outcome while explaining why it refuses to create one -- "a shadow with no
- * `shadow_of` is an asset with no provenance, which is the thing this design exists to avoid
- * creating" -- and the dashboard was creating it around the back of the function that refuses to.
- *
- * The database now refuses it too, which is where the real guard belongs: `devices` is writable
- * through PostgREST and these three pickers are three doors of an unbounded number. This exists so
- * that an operator is not OFFERED a choice that will be refused.
- *
- * Null-safe in the permissive direction, matching gatewayAcceptsCell(): "no gateway yet" is the
- * Unassigned queue, not a lane.
+ * Whether a device may be assigned to this gateway. Mirrors the database gate: a shadow gateway's
+ * devices are replay lanes minted by `ensure_shadow_devices()` with a `shadow_of`, and a device
+ * assigned by hand would be a shadow with no provenance. Null-safe in the permissive direction: no
+ * gateway yet is the Unassigned queue.
  */
 export function gatewayAcceptsDevices(gateway) {
   return !gateway?.is_shadow
 }
 
 /**
- * Why this gateway takes no devices, as a sentence, or null when it does.
- *
- * Kept beside the predicate for the reason noCellReason() is: a control that silently omits or
- * disables an option is the version of this that generates support questions. An operator looking
- * for "Playback" in the list needs to be told it is not missing -- it is not assignable, and there
- * is a different gesture that does what they want.
+ * Why this gateway takes no devices, as a sentence, or null. An operator looking for Playback in
+ * the list needs to be told it is not assignable and that a different gesture does what they want.
  */
 export function noDeviceAssignmentReason(gateway) {
   if (gatewayAcceptsDevices(gateway)) return null

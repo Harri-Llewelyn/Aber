@@ -6,58 +6,20 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
- * Mint a broker credential for a VIRTUAL gateway and reveal it exactly once.
+ * Mint a broker credential for a virtual gateway and reveal it exactly once. The third caller of
+ * one verb: `gateway-credential-service` can add a Mosquitto account and nothing else, and nothing
+ * is added to it here. The mirror image of enroll-gateway, which has no user and is authorised by a
+ * token; this has a session and is authorised by role, and folding the two would mean one function
+ * accepting two unrelated proofs of authority. A virtual gateway needs this because its
+ * `sparkplug_id` is generated from its row, so the account can only be minted after the row, and
+ * there is no appliance to carry a bundle to.
  *
- * THE THIRD CALLER OF ONE VERB, AND DELIBERATELY NOT A SECOND VERB. `gateway-credential-service`
- * can add a Mosquitto account and do nothing else -- it cannot read a password back, delete an
- * account, or reach the database -- and its own header warns that "it is not a general credential
- * API and must not become one." Nothing is added to it here. What changes is who may ask, and how
- * they prove it.
- *
- * ---------------------------------------------------------------------------------------------
- * THE MIRROR IMAGE OF enroll-gateway, WHICH IS WHY IT IS A SEPARATE FUNCTION
- *
- * That function has NO USER: the caller is an appliance holding a single-use token, and possession
- * of the token is the authorisation. This one has no token and a real session, so it is authorised
- * by ROLE -- the same arrangement `gateway-bundle` uses for the other half of the same feature.
- *
- * Folding the two together would mean one function accepting two unrelated proofs of authority for
- * one act, and choosing between them on the shape of the request body. That is exactly the sort of
- * branch a reader has to hold entirely in their head to know whether a path is guarded.
- *
- * ---------------------------------------------------------------------------------------------
- * WHY THIS EXISTS AT ALL: THE WORKFLOW 0025 WAS WRITTEN TO ELIMINATE, STILL IN PLACE
- *
- * A gateway created in the dashboard gets a random UUID, so its `sparkplug_id` is not known in
- * advance -- and `mosquitto.acl` pins the topic's edge-node segment to the connecting username, so
- * the account can only be minted after the row and must be named exactly that id. For a PHYSICAL
- * gateway an enrolment bundle solves it. For a VIRTUAL one both halves of that path refuse outright
- * (0025), correctly: there is no appliance to carry a bundle to.
- *
- * So what was left for a virtual gateway was 0025's own description of the pre-enrolment world:
- * "create a row in the UI, then have an operator with shell access run a script and hand the
- * password over by some other means." Five steps, one of them a shell, for a gateway that runs on
- * the machine already running the stack.
- *
- * ---------------------------------------------------------------------------------------------
- * WHAT AUTHORITY THIS HOLDS, STATED PLAINLY BECAUSE IT IS MORE THAN gateway-bundle's
- *
- * `gateway-bundle` holds NO secret at all -- it mints through a SECURITY DEFINER RPC as the caller,
- * and its ceiling is what that caller could already do through PostgREST. This function cannot
- * match that, and pretending otherwise would be the wrong lesson to take from it: the broker's
- * password file is not reachable from SQL, so minting requires calling out, and calling out
- * requires MQTT_CREDENTIAL_SERVICE_TOKEN.
- *
- * What it does preserve is the part that matters: NO SERVICE-ROLE KEY. The registry entry in
- * main/index.ts grants it the credential token and nothing else, so it cannot read a table, cannot
- * write one outside the caller's RLS context, and cannot see any other function's secrets. The
- * authority it holds is "add one confined account to a password file", which is the narrowest
- * credential in the stack that can do this job at all.
- *
- * AND THE DECISION IS STILL THE DATABASE'S. `authorize_virtual_gateway_credential()` (0041) is
- * SECURITY DEFINER and checks `has_role()` itself, so the role check below is not the security
- * boundary -- it exists so a refusal answers 403 with a usable message rather than surfacing an
- * `insufficient_privilege` raise as a 500.
+ * The authority is more than gateway-bundle's, which holds no secret: the broker's password file is
+ * not reachable from SQL, so minting requires MQTT_CREDENTIAL_SERVICE_TOKEN. There is still no
+ * service-role key, so this cannot read or write a table outside the caller's RLS context. The
+ * decision is the database's: `authorize_virtual_gateway_credential()` is SECURITY DEFINER and
+ * checks `has_role()` itself, so the role check below exists only so a refusal answers 403 with a
+ * usable message.
  */
 
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
@@ -120,9 +82,9 @@ serve(async (req) => {
     });
   }
 
-  // AS THE CALLER, NOT AS THE SERVICE. The anon key plus the caller's Authorization header is what
-  // makes `auth.uid()` resolve inside the RPCs below -- which is what attributes the audit row to a
-  // person rather than to a machine credential, and what lets has_role() see a role at all.
+  // As the caller, not as the service: the anon key plus the caller's Authorization header is what
+  // makes `auth.uid()` resolve inside the RPCs, attributing the audit row to a person and letting
+  // has_role() see a role.
   const supabase = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: authHeader } },
   });
@@ -135,9 +97,9 @@ serve(async (req) => {
 
   const userRole = await resolveUserRole(supabase, user.id);
   if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
-    // Operator and Auditor land here, and NOTHING HAS BEEN MINTED -- the check is ahead of both the
-    // RPC and the credential service, so a refused request cannot leave an account in the broker's
-    // password file that no gateway row accounts for.
+    // Operator and Auditor land here, and nothing has been minted: the check is ahead of the RPC
+    // and the credential service, so a refused request cannot leave an unaccounted account in the
+    // broker's password file.
     return json(403, {
       error: "Forbidden: Insufficient privileges",
       details:
@@ -146,9 +108,9 @@ serve(async (req) => {
     });
   }
 
-  // 1. THE AUTHORITY DECISION, made by the database. Refuses a physical gateway (use a bundle), an
-  //    archived one (0037's hole), and a caller without the role -- and returns the GENERATED
-  //    sparkplug_id, which is the only thing the account may be named.
+  // 1. The authority decision, made by the database. Refuses a physical gateway (use a bundle), an
+  // archived one, and a caller without the role, and returns the generated sparkplug_id, the only
+  // thing the account may be named.
   const { data: authorized, error: authError } = await supabase
     .rpc("authorize_virtual_gateway_credential", { p_gateway_id: gatewayId });
 
@@ -171,22 +133,12 @@ serve(async (req) => {
     });
   }
 
-  // 1b. MAY THE PASSWORD BE DELIVERED TO THE PLAYBACK WORKER? (0078)
-  //
-  // A SECOND CALL RATHER THAN A COLUMN ON THE GATE ABOVE, and the reason is the migration model
-  // rather than the design. 0001 redeclares that function on every boot with CREATE OR REPLACE,
-  // which cannot change a return type -- so adding a column to it aborted the entire chain at file
-  // one on the second boot, with the FDW server already dropped by CASCADE. See 0078's header.
-  //
-  // STILL THE DATABASE'S ANSWER, which is the part that matters: `is_simulated`, the same predicate
-  // start_playback_job() gates on. Computing it here from the gateway row would make it a second
-  // definition of "is this a playback target", and two definitions eventually disagree -- the
-  // disagreement being a real machine's broker password written into a file the replay worker reads.
-  //
-  // FALSE ON ERROR, NEVER TRUE. A failure here must not fail the issue: the operator asked for a
-  // credential and is entitled to one. It must also not deliver on a guess -- so an unreachable
-  // answer means the password is shown once and placed by hand, which is the behaviour before this
-  // change and is safe.
+  // 1b. May the password be delivered to the playback worker? A second call rather than a column on
+  // the gate above, because the gate is redeclared on every boot with CREATE OR REPLACE, which
+  // cannot change a return type. Still the database's answer, `is_simulated`, the same predicate
+  // start_playback_job() gates on, so there is one definition of "is this a playback target". False
+  // on error, never true: a failure must not fail the issue and must not deliver on a guess, so the
+  // password is shown once and placed by hand.
   let deliverToPlayback = false;
   const { data: isPlaybackTarget, error: deliveryError } = await supabase
     .rpc("gateway_is_playback_delivery_target", { p_gateway_id: gatewayId });
@@ -197,9 +149,9 @@ serve(async (req) => {
     deliverToPlayback = isPlaybackTarget === true;
   }
 
-  // 2. THE MINT. No password is supplied: the credential service generates it at the point of use,
-  //    which is one fewer copy in transit and keeps the alphabet guarantee (base64url, an injection
-  //    boundary) with the code that depends on it. Same call enroll-gateway makes.
+  // 2. The mint. No password is supplied: the credential service generates it at the point of use,
+  // keeping the alphabet guarantee (base64url, an injection boundary) with the code that depends on
+  // it. Same call enroll-gateway makes.
   let credential: {
     password?: string;
     applied_to_running_broker?: boolean;
@@ -244,13 +196,10 @@ serve(async (req) => {
     });
   }
 
-  // 3. THE AUDIT ROW, written only now that the password is real. See 0041 for why this is a
-  //    separate call and not folded into the authorisation above.
-  //
-  //    A FAILURE HERE DOES NOT WITHHOLD THE PASSWORD. The account now EXISTS in the broker, and the
-  //    service stores only a hash -- so refusing to return it would strand an account nobody can
-  //    ever authenticate as, and the only repair would be minting again. The response says the
-  //    record failed instead, which is the one outcome an operator can actually act on.
+  // 3. The audit row, written only now that the password is real. A failure here does not withhold
+  // the password: the account exists in the broker and the service stores only a hash, so refusing
+  // to return it would strand an account nobody can authenticate as. The response says the record
+  // failed instead.
   let auditRecorded = true;
   const { error: auditError } = await supabase
     .rpc("record_gateway_credential_issued", { p_gateway_id: gatewayId });
@@ -263,22 +212,16 @@ serve(async (req) => {
   return json(200, {
     gateway_name: identity.gateway_name,
     sparkplug_id: identity.sparkplug_id,
-    // THE USERNAME IS THE sparkplug_id AND CANNOT BE ANYTHING ELSE: mosquitto.acl pins the topic's
-    // edge-node segment to it. Returned under its own name so the dashboard can label the field
-    // without the reader having to know they are the same string.
+    // The username is the sparkplug_id and cannot be anything else: mosquitto.acl pins the topic's
+    // edge-node segment to it. Returned under its own name so the dashboard can label the field.
     mqtt_username: identity.sparkplug_id,
     password: credential.password,
     applied_to_running_broker: credential.applied_to_running_broker ?? false,
     audit_recorded: auditRecorded,
-    // WHETHER THE OPERATOR STILL HAS WORK TO DO, which is the difference between "issued" and
-    // "issued, and playback will now work". Three distinct states and the page must not merge them:
-    //
-    //   true   delivered -- the worker picks it up within its poll interval, nothing else to do
-    //   false  this IS a playback target and delivery FAILED -- the password must be placed by hand
-    //   null   not a playback target, so there was nothing to deliver
-    //
-    // `false` and `null` would collapse into "not delivered" if this were a plain boolean, and the
-    // first of those is the one that needs an operator.
+    // Whether the operator still has work to do. Three states the page must not merge: true,
+    // delivered and the worker picks it up within its poll interval; false, this is a playback
+    // target and delivery failed, so the password must be placed by hand; null, not a playback
+    // target.
     playback_delivered: deliverToPlayback
       ? (credential.playback_delivery?.delivered ?? false)
       : null,

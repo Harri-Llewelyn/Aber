@@ -26,23 +26,11 @@ import {
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
- * The tag vocabulary (issue #62).
- *
- * THESE KEYS ARE STORED VALUES AND MUST NOT BE RENAMED. `links.link_tag` carries no CHECK
- * constraint, so this object is the only place the vocabulary is enumerated -- which makes ADDING a
- * tag free, and makes renaming a key a silent data problem: every existing row keeps the old string
- * and falls through to Other. Labels below are display text and may be reworded at will.
- *
- * `asset_register` and `file_repository` are what generalised this feature from documents to links
- * of any kind:
- *
- *   - ASSET REGISTER is issue #62's actual request -- EZOfficeInventory and its equivalents. It is
- *     a tag rather than a column on gateways and devices, which is what the issue asked for,
- *     because a column means a migration per link type and a second place asset URLs live.
- *   - FILE REPOSITORY is a different KIND of entry from the rest, and the wording reflects it. Every
- *     other tag points at something that exists; this one points at where files BELONG -- the share
- *     measurement data is saved to. This platform deliberately stores no such files, so naming
- *     their home is the most it can usefully do.
+ * The tag vocabulary. These keys are stored values and must not be renamed: `links.link_tag`
+ * carries no CHECK constraint, so an existing row with an old key falls through to Other. Labels
+ * are display text and may be reworded. `asset_register` points at an external register such as
+ * EZOfficeInventory; `file_repository` points at where files belong, since this platform stores no
+ * such files.
  */
 const TAG_ICONS = {
   image:             <IconImage size={12} />,
@@ -91,15 +79,11 @@ function getDomainBadgeIcon(url = '') {
 }
 
 export function EntityLinksModal({ entityType, entityId, entityName, onClose, showToast, hasPermission }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onClose)
 
-  // `links` here AND on the wire, as of migration 0049. This component used to be the boundary
-  // between the two vocabularies -- Link everywhere a user could see, `documents` in the endpoint,
-  // the table and the payload key -- and 0049 removed the divergence rather than the boundary.
-  // Nothing here translates any more.
+  // `links` here and on the wire: the endpoint, the table and the payload key all use the same
+  // vocabulary.
   const [links, setLinks]             = useState([])
   const [loading, setLoading]         = useState(true)
   const [showForm, setShowForm]       = useState(false)
@@ -206,9 +190,8 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
             </div>
             <div className="form-group">
               <label className="form-label">Tag</label>
-              {/* Built from TAG_LABELS rather than written out again. The hand-written list here
-                  drifted from that object the moment a tag was added to one and not the other --
-                  which is how a stored tag ends up unselectable in the form that wrote it. */}
+              {/* Built from TAG_LABELS rather than written out again, so a stored tag is always
+                  selectable in the form that wrote it. */}
               <select className="form-control" value={form.link_tag} onChange={e => setForm(f => ({ ...f, link_tag: e.target.value }))}>
                 {Object.entries(TAG_LABELS).map(([value, label]) => (
                   <option key={value} value={value} title={TAG_HINTS[value]}>{label}</option>

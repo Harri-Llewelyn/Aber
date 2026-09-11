@@ -2,25 +2,12 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 /**
- * Identity + permissions endpoint for Node-RED's adminAuth.
- *
- * WHY THIS EXISTS RATHER THAN USING GoTrue's /oauth/userinfo, OR THE TOKEN'S OWN CLAIMS.
- *
- * GoTrue's OIDC server advertises only standard OIDC claims -- sub, email, email_verified,
- * name, picture, preferred_username and friends. `app_metadata` is not among them, so the role
- * that public.custom_access_token_hook() mirrors into the password-grant access token does not
- * reach an OIDC client at all. And reading `app_metadata.role` from a token the caller already
- * holds would be worse than useless: deleting a user's public.user_roles row IS how a role is
- * revoked, so a claim-based path re-grants the privilege the user held before the revocation
- * for as long as their token lives.
- *
- * public.user_roles is therefore the only source, and the absence of a row means no role.
- *
- * WHY IT IS SEPARATE FROM grafana-userinfo. The two differ in exactly one thing -- the
- * vocabulary they answer in -- but that thing is an authorisation decision. Grafana's client
- * reads `role` (Admin/Editor/Viewer); Node-RED's settings.js reads `permissions` ('*'/'read').
- * Serving both from one endpoint would mean a change made for one product's role model
- * silently moving the other's, on an endpoint whose name mentions only one of them.
+ * Identity and permissions endpoint for Node-RED's adminAuth. GoTrue's OIDC server advertises only
+ * standard claims, so the role in `app_metadata` does not reach an OIDC client, and reading it from
+ * the token would re-grant a revoked role for as long as the token lives. public.user_roles is the
+ * only source, and an absent row means no role. Separate from grafana-userinfo because the
+ * vocabulary each answers in is an authorisation decision: Grafana reads `role`, Node-RED's
+ * settings.js reads `permissions`.
  */
 
 import { resolveUserRole } from "../_shared/roles.ts";
@@ -28,26 +15,11 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
- * Supabase RBAC role -> Node-RED permissions.
- *
- * Node-RED has only '*' and 'read'. Everything below Administrator maps to 'read': none of them
- * should be able to deploy a flow, and a Node-RED `function` node executes arbitrary JavaScript
- * inside a container that holds the MQTT credential and can reach Mosquitto, Supabase and
- * TimescaleDB.
- *
- * SHOPFLOOR_MANAGER MOVED TO 'read' WITH 0069, and it had to move here as well as in
- * deploy-nodered or neither move would have meant anything. `gitops:manage` is now
- * Administrator-only, and this endpoint is the SECOND door onto the same capability: the Directory
- * page's Sync button goes through deploy-nodered, and the Node-RED editor deploys directly. Closing
- * one and leaving the other open would have produced a manager who cannot press the button and can
- * still deploy, which is a worse state than before -- it reads as a control.
- *
- * This map is deploy authority. It is not "who may look at the flows": a manager keeps 'read', so
- * the editor still opens and the running flow is still inspectable, which is most of what the page
- * is for when something on the shopfloor is misbehaving.
- *
- * The Auditor's actual privilege is over digital_thread in Supabase, enforced by RLS there.
- * Node-RED models nothing equivalent, so there is no tier to distinguish it from Operator.
+ * Supabase RBAC role to Node-RED permissions. Node-RED has only '*' and 'read', and everything
+ * below Administrator maps to 'read': a `function` node executes arbitrary JavaScript in a
+ * container that holds the MQTT credential. This map is deploy authority, not "who may look at the
+ * flows": a manager keeps 'read', so the editor still opens. Auditor and Operator cannot be
+ * distinguished in Node-RED's model.
  */
 const PERMISSION_MAP: Record<string, string> = {
   Administrator: "*",
@@ -78,11 +50,8 @@ export default async function handler(req: Request): Promise<Response> {
     const anonKey = gatewayKey();
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-    // Validate the bearer token by resolving it to a user. This is the authentication step.
-    // The token is either the one Node-RED just obtained from /oauth/token during an editor
-    // login, or the operator's own access token forwarded by deploy-nodered -- both are signed
-    // with the same JWT secret, so an invalid or expired one fails here rather than yielding a
-    // default permission.
+    // Validate the bearer token by resolving it to a user. This is the authentication step: an
+    // invalid or expired token fails here rather than yielding a default permission.
     const supabaseUser = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -97,21 +66,16 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    // Read the role with the service key, not the caller's token. user_roles is protected by
-    // "user_roles_select_own_or_privileged": a plain user can read their own row, but the
-    // roles(name) join is what actually matters here and reading it through the caller would
-    // couple this endpoint to the exact shape of that policy. The user id is already
-    // authenticated above, so this is a lookup, not an authorisation decision.
+    // Read the role with the service key, not the caller's token: the user id is already
+    // authenticated above, so this is a lookup rather than an authorisation decision.
     const supabaseAdmin = createClient(supabaseUrl, serviceKey);
-    // A failed lookup is not evidence of a role: resolveUserRole logs and returns null, and
-    // returning no permissions lets Node-RED refuse the login — the correct answer to "we could
-    // not determine this user's privileges".
+    // A failed lookup is not evidence of a role: returning no permissions lets Node-RED refuse the
+    // login.
     const supabaseRole = await resolveUserRole(supabaseAdmin, user.id);
     const permissions = supabaseRole ? PERMISSION_MAP[supabaseRole] : undefined;
 
-    // Fail closed. Omitting the `permissions` key entirely (rather than guessing 'read') is what
-    // lets settings.js refuse the login outright. An unmapped role is a provisioning error and
-    // should be visible as one, not silently downgraded to read-only access to the flows.
+    // Fail closed: omitting the `permissions` key entirely, rather than guessing 'read', is what
+    // lets settings.js refuse the login. An unmapped role is a provisioning error.
     const body: Record<string, unknown> = {
       sub: user.id,
       email: user.email,

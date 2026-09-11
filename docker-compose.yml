@@ -387,6 +387,18 @@ services:
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       # Closed by default. This is the only signup control; a frontend flag is not one.
       GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-true}
+      # Password reset. The link's target must be on this list, or GoTrue sends the browser to
+      # GOTRUE_SITE_URL and the dashboard opens instead of the reset form. SMTP is optional: with
+      # no host a reset request fails and the sign-in card tells the user to ask an administrator.
+      # Sign-up confirmation is off (GOTRUE_MAILER_AUTOCONFIRM), so this is the only mail sent.
+      GOTRUE_URI_ALLOW_LIST: ${FRONTEND_URL:-http://localhost:3000}/reset-password
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASSWORD:-}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_FROM:-}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-ACS Cymru}
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: "Reset your ACS Cymru password"
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
       # The OAuth 2.1 server Grafana, Node-RED, Studio's door and the forge's door authenticate

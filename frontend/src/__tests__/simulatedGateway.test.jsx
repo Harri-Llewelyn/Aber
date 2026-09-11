@@ -5,27 +5,11 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 
 /**
- * The Type column and the control behind it, in the Gateways tab.
- *
- * WHAT THIS REPLACED. Two badges beside the gateway name (VIRTUAL, SIMULATED) and two checkboxes in
- * the form. Between them they said three things -- where it runs, whether the numbers are real, and
- * in a tooltip "Cloud", which contradicted the first -- and the two checkboxes offered FOUR
- * combinations where the database permits three: `gateways_simulated_is_host` (0064) forbids a
- * remote simulator, so one of the four was a write that would be refused after it was ticked.
- *
- * WHAT IS ASSERTED HERE is the part that can mislead rather than the markup:
- *
- *   1. THE FOUR VALUES ARE NOT INTERCHANGEABLE, and Shadow is the one that earns the column its
- *      fourth. A SIMULATED spindle reporting 4000 RPM never turned; a SHADOW spindle reporting
- *      4000 RPM did turn, on a real machine, on the day the capture was recorded. Both are "not a
- *      machine running now" and they give opposite answers to *is this number true*.
- *   2. SHADOW CANNOT BE CHOSEN. 0060 seeds the single Playback gateway and a trigger refuses any
- *      other; offering it would be offering to fabricate one.
- *   3. ONE CONTROL STILL WRITES TWO COLUMNS. The schema keeps them separate on purpose, so the
- *      translation happens in one place and the form does not quietly become the model.
- *   4. IT IS NOT A DATA-PATH SWITCH. Choosing Simulated changes nothing about ingestion, and an
- *      operator who believed it quarantined or diverted the replayed data would be wrong in the
- *      direction that matters.
+ * The Type column and the control behind it, in the Gateways tab. What is asserted: the four values
+ * are not interchangeable, and Shadow earns the fourth because a shadow spindle's readings did
+ * happen on a real machine on the day of the capture; Shadow cannot be chosen, since the single
+ * Playback gateway is seeded and a trigger refuses any other; one control writes two columns, so
+ * the translation happens in one place; and it is not a data-path switch.
  */
 
 vi.mock('../api', async () => {
@@ -79,13 +63,9 @@ const openEdit = () => {
 
 const typeSelect = () => document.querySelector('#gateway-type')
 /**
- * The row's Type cell -- the one in the TABLE, not a badge in the drawer and not an option in the
- * filter bar.
- *
- * SCOPED TO THE TABLE, which it has to be: the type filter beside the search box renders an
- * <option> per selectable type, so a search across the whole page matched "Remote" in the filter
- * before reaching any row, and every one of these read Remote whatever the fixture said. The
- * previous scope only worked while nothing above the table happened to use these four words.
+ * The row's Type cell in the table, not a badge in the drawer or an option in the filter bar.
+ * Scoped to the table because the type filter renders an <option> per type and a page-wide search
+ * matched "Remote" there first.
  */
 const typeCell = () => within(document.querySelector('table')).getAllByText(
   /^(Host|Remote|Simulated|Shadow)$/
@@ -111,17 +91,15 @@ describe('the Type column', () => {
   })
 
   it('reports a shadow gateway as Shadow, not Simulated', async () => {
-    // THE PRECEDENCE THAT EARNS THE FOURTH VALUE. A shadow gateway is necessarily simulated too, so
-    // without an explicit order it lands in Simulated and the more informative answer -- these
-    // readings actually happened -- becomes unreachable.
+    // The precedence that earns the fourth value: a shadow gateway is necessarily simulated too, so
+    // without an explicit order it lands in Simulated.
     await show([gateway({ deployment: 'host', is_simulated: true, is_shadow: true })])
     expect(typeCell().textContent).toBe('Shadow')
   })
 
   it('reports a row with no deployment as Remote rather than Host', async () => {
-    // A row read through an older select list, or a fixture written before 0064. Host is the type
-    // with no appliance and no enrolment, so claiming it wrongly hides the kind that needs setting
-    // up -- the safe direction is the one that says "there may be hardware to install".
+    // A row with no deployment set: Host is the type with no appliance and no enrolment, so the
+    // safe direction is the one that says there may be hardware to install.
     const g = gateway()
     delete g.deployment
     await show([g])
@@ -145,9 +123,8 @@ describe('the Type control', () => {
   })
 
   it('does not offer Shadow', async () => {
-    // 0060 seeds the one shadow gateway and a BEFORE INSERT trigger on playback_jobs refuses any
-    // other target. Offering it here would be offering to fabricate the row that exists to be
-    // unique.
+    // The one shadow gateway is seeded and a BEFORE INSERT trigger refuses any other, so offering
+    // it here would be offering to fabricate the row that exists to be unique.
     await show([gateway()])
     openEdit()
     expect([...typeSelect().options].map(o => o.value)).not.toContain('shadow')
@@ -175,9 +152,8 @@ describe('the Type control', () => {
   })
 
   it('clears the simulated flag when the type moves back to Remote', async () => {
-    // The combination the database refuses. Leaving is_simulated set while deployment became
-    // 'remote' would send a write that gateways_simulated_is_host rejects -- an error an operator
-    // caused by choosing something the form offered.
+    // The combination the database refuses: leaving is_simulated set while deployment became
+    // 'remote' would send a write gateways_simulated_is_host rejects.
     api.put.mockResolvedValue({})
     await show([gateway({ deployment: 'host', is_simulated: true })])
     openEdit()
@@ -208,28 +184,18 @@ describe('the Type control', () => {
 })
 
 /**
- * THE CELL ZONE CONTROL, which the Type control governs.
- *
- * `gateways_synthetic_has_no_cell` (0059) makes the two mutually exclusive in the database:
- *
- *     CHECK (((NOT is_simulated) AND (NOT is_shadow)) OR cell_id IS NULL)
- *
- * so everything here is a rendering of that constraint, in the same relationship the Type control
- * has to `gateways_simulated_is_host`. The failure it prevents is the one the two checkboxes had:
- * a combination the form offers and the database then refuses.
+ * The Cell Zone control, which the Type control governs. `gateways_synthetic_has_no_cell` is CHECK
+ * (((NOT is_simulated) AND (NOT is_shadow)) OR cell_id IS NULL), so everything here renders that
+ * constraint.
  */
 describe('the Cell Zone control', () => {
 
   const cellSelect = () => document.querySelector('#gateway-cell-zone')
 
   it('reports no cell zone for a simulated gateway, whatever scope is stored', async () => {
-    // THE REPORTED INCONSISTENCY, in one assertion. Four simulated gateways showed three different
-    // cell zones between them: the one seeded `site_wide` read "Site-Wide" and the rest read "No
-    // cell" -- a difference with no behaviour behind it, since device_locations resolves
-    // `simulated` ahead of both. "No cell" is also rendered as a warning promising devices in the
-    // Unassigned queue, and theirs are in the Simulated lane.
-    // The first keeps the harness's name so show() can wait on it; the pair is what matters here,
-    // since the bug was the two of them disagreeing.
+    // The reported inconsistency in one assertion: simulated gateways must agree with each other
+    // about their cell zone, since device_locations resolves `simulated` ahead of any cell. The
+    // first keeps the harness's name so show() can wait on it.
     await show([
       gateway({ gateway_id: 'gw-a', deployment: 'host', is_simulated: true,
                 cell_id: null, location_scope: 'site_wide' }),
@@ -267,8 +233,7 @@ describe('the Cell Zone control', () => {
   })
 
   it('does not show a stored site-wide scope on a gateway that cannot hold a cell', async () => {
-    // The same inconsistency one layer in: the seeded BMS simulator carries `site_wide` from before
-    // 0059 made the flag win, and a disabled box reading "Site-Wide" directly above a note saying
+    // The same inconsistency one layer in: a disabled box reading "Site-Wide" above a note saying
     // simulated gateways have no cell contradicts itself.
     await show([gateway({ deployment: 'host', is_simulated: true, cell_id: null, location_scope: 'site_wide' })])
     openEdit()
@@ -276,9 +241,8 @@ describe('the Cell Zone control', () => {
   })
 
   it('clears a cell when the type changes to Simulated, rather than letting the save be refused', async () => {
-    // WITHOUT THIS THE SAVE IS A CONSTRAINT VIOLATION, and an unusually cruel one: the offending
-    // field is disabled by the same change, so the operator cannot see or clear the value being
-    // rejected.
+    // Without this the save is a constraint violation, and the offending field is disabled by the
+    // same change, so the operator cannot see or clear the value being rejected.
     api.put.mockResolvedValue({})
     await show([gateway({ deployment: 'remote', cell_id: 'cell-1' })])
     openEdit()

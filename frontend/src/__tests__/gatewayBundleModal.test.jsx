@@ -69,10 +69,9 @@ const typeName = (value = GATEWAY.gateway_name) =>
 
 describe('GatewayBundleModal — straight after creating the gateway', () => {
   /**
-   * NO CONFIRMATION ON THIS ROUTE. The gateway is seconds old, so there is no earlier bundle for
-   * this one to invalidate -- the entire reason the confirm step exists is absent -- and saving a
-   * gateway with "Virtual" unchecked is already an explicit request for a bundle it cannot be
-   * finished without. Asking again would be a step to click through, not a safeguard.
+   * No confirmation on this route: the gateway is seconds old, so there is no earlier bundle to
+   * invalidate, and saving a gateway with "Virtual" unchecked is already an explicit request for a
+   * bundle.
    */
   it('downloads on open, with no intermediate confirm step', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
@@ -90,8 +89,8 @@ describe('GatewayBundleModal — straight after creating the gateway', () => {
   })
 
   /**
-   * Minting consumes any live token, so a double-invoked effect would issue two bundles and leave
-   * the modal showing a token that had already invalidated the file the browser just saved.
+   * Minting consumes any live token, so a double-invoked effect would issue two bundles and show a
+   * token that had already invalidated the file the browser saved.
    */
   it('mints exactly once per mount', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
@@ -134,10 +133,9 @@ describe('GatewayBundleModal — straight after creating the gateway', () => {
   })
 
   /**
-   * THE PRICE OF AUTO-DOWNLOADING, said out loud. Opening this modal invalidates any bundle already
-   * in transit, and an appliance started with the stale one fails at enroll-gateway with a 401 that
-   * deliberately cannot say why. This banner is the only place that fact reaches the operator while
-   * they still know which bundle is which.
+   * The price of auto-downloading, said out loud: opening this modal invalidates any bundle in
+   * transit, and an appliance started with the stale one fails at enroll-gateway with a 401 that
+   * cannot say why.
    */
   it('warns that any earlier download has stopped working', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
@@ -185,8 +183,7 @@ describe('GatewayBundleModal — Copy Commands', () => {
 
   /**
    * navigator.clipboard is undefined outside a secure context, and this dashboard is served over
-   * plain HTTP -- so it is present on localhost and absent for anyone reaching the app by IP across
-   * the plant, which is how most operators will. A silent no-op there is worse than an error.
+   * plain HTTP, so it is absent for anyone reaching the app by IP.
    */
   it('reports a failure rather than silently doing nothing', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
@@ -214,8 +211,8 @@ describe('GatewayBundleModal — footer actions', () => {
   })
 
   /**
-   * RE-ISSUING ASKS FIRST, even from inside the dialog that just handed over a working bundle --
-   * this is the click that destroys it, and the operator may have the folder open on a machine.
+   * Re-issuing asks first, even from inside the dialog that just handed over a working bundle: this
+   * is the click that destroys it.
    */
   it('Re-issue Bundle asks before minting anything', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
@@ -245,9 +242,8 @@ describe('GatewayBundleModal — footer actions', () => {
   })
 
   /**
-   * CANCELLING A RE-ISSUE MUST NOT CLOSE THE DIALOG. Answering "no" cannot also throw away the
-   * commands and the countdown the operator is working from -- those cannot be got back without
-   * minting again, which is the very act they just declined.
+   * Cancelling a re-issue must not close the dialog: the commands and the countdown cannot be got
+   * back without minting again.
    */
   it('Cancel returns to the bundle rather than closing over it', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
@@ -265,10 +261,9 @@ describe('GatewayBundleModal — footer actions', () => {
 })
 
 /**
- * THE DRAWER'S ROUTE IN. Unlike creation, this gateway already exists and may already hold a live
- * token somebody downloaded -- or, at AWAITING_BIRTH, a broker credential an appliance is holding.
- * Issuing destroys whichever it has, and the appliance started with the dead bundle fails at
- * enroll-gateway with a 401 that deliberately cannot say why. Hence a typed name, not a click.
+ * The drawer's route in. This gateway may already hold a live token somebody downloaded, or at
+ * AWAITING_BIRTH a broker credential an appliance is holding, and issuing destroys whichever it
+ * has. Hence a typed name.
  */
 describe('GatewayBundleModal — confirm before issuing', () => {
   const renderConfirm = (props = {}) => renderModal({ confirmFirst: true, ...props })
@@ -301,9 +296,8 @@ describe('GatewayBundleModal — confirm before issuing', () => {
   })
 
   /**
-   * AND IT LOOKS SHUT. The `disabled` attribute changes nothing about how a button reads in this
-   * stylesheet -- `.btn-disabled` is what greys it -- so without the class the operator meets a
-   * bright primary button that silently ignores the click.
+   * And it looks shut: the `disabled` attribute changes nothing in this stylesheet, `.btn-disabled`
+   * is what greys it.
    */
   it('looks refused while it is refusing', () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
@@ -317,10 +311,7 @@ describe('GatewayBundleModal — confirm before issuing', () => {
       .not.toContain('btn-disabled')
   })
 
-  /**
-   * MATCHED LOOSELY, on purpose. The gate stops an accidental click, not a determined typist;
-   * demanding exact capitalisation adds failed attempts without adding safety.
-   */
+  /** Matched loosely: the gate stops an accidental click, not a determined typist. */
   it('accepts the name with stray case and whitespace', () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
     renderConfirm()
@@ -372,9 +363,8 @@ describe('GatewayBundleModal — confirm before issuing', () => {
   })
 
   /**
-   * A FAILED ISSUE LEAVES THE PREVIOUS BUNDLE ALIVE -- nothing was minted, so nothing was consumed.
-   * Staying on the confirm screen says that; landing on an empty setup screen would imply the
-   * gateway now has a bundle that does not exist.
+   * A failed issue leaves the previous bundle alive, since nothing was minted. Staying on the
+   * confirm screen says that.
    */
   it('keeps the operator on the question when the issue fails', async () => {
     api.downloadGatewayBundle.mockRejectedValue(new Error('Enrolment is temporarily unavailable'))
@@ -391,8 +381,7 @@ describe('GatewayBundleModal — confirm before issuing', () => {
 
   /**
    * AWAITING_BIRTH is the worse case and is named as such: the appliance already redeemed its token
-   * and is holding a broker credential, which re-issuing revokes. That is a different loss from
-   * "your download stopped working", and the operator is told which one they are about to cause.
+   * and is holding a broker credential, which re-issuing revokes.
    */
   it('names the broker credential when the gateway has already enrolled', () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
@@ -447,8 +436,8 @@ describe('StatusBadge — the enrolment states', () => {
   }
 
   /**
-   * DISTINCT VARIANTS, not both amber. `badge-warning` means "look at this", and a gateway waiting
-   * for somebody to carry a bundle to a machine is an unfinished task rather than a fault.
+   * Distinct variants, not both amber: `badge-warning` means look at this, and a gateway waiting
+   * for its bundle is an unfinished task rather than a fault.
    */
   it('gives the two pending states their own, different variants', () => {
     expect(classOf('PENDING_ENROLLMENT')).toContain('badge-pending')

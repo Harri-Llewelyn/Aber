@@ -19,29 +19,12 @@ vi.mock('../lib/supabaseClient', () => ({
 import App from '../App'
 
 /**
- * THE SIGN-IN FORM MUST NOT CARRY A CREDENTIAL.
- *
- * It used to. `AuthScreen` initialised its two fields to `admin@acs-cymru.local` and the seeded
- * Administrator password, which was a convenience while the stack was being built and a
- * credential disclosure the moment it was deployed: those literals are compiled into the
- * production JavaScript bundle, which is served to anyone who can reach the page, BEFORE
- * authenticating and whether or not they ever do. The account they unlock administers the
- * platform.
- *
- * WHY THE FIX IS BLANK FIELDS AND NOT A ROTATED PASSWORD. The seeded password is public on
- * purpose -- it is in `supabase/seed.sql` and in the README, because a demo stack needs
- * reproducible accounts, and every backend suite authenticates with it. The defect was never that
- * the string exists somewhere; it is that the LOGIN FORM offered it, so any stack whose seeded
- * accounts had not been rotated was one click from administrator access by design. Rotating would
- * have moved the problem; blank fields remove it even when nothing has been rotated.
- *
- * Two assertions, because they fail for different reasons. The rendered one catches the state
- * initialiser coming back. The source one catches every other way a value reaches those inputs --
- * a `defaultValue`, a `placeholder` showing the password, a constant lifted to module scope --
- * none of which the rendered check would see if someone also changed how the field is bound.
- *
- * scripts/check-docs-drift.mjs carries the wider version of the source rule: the seeded password,
- * read out of seed.sql so a rotation follows it, must appear nowhere under frontend/src at all.
+ * The sign-in form must not carry a credential. The seeded password is public on purpose (seed.sql,
+ * the README, every backend suite), so the defect is a login form that offers it, and the fix is
+ * blank fields rather than a rotation. Two assertions because they fail for different reasons: the
+ * rendered one catches the state initialiser, the source one catches a `defaultValue`, a
+ * placeholder or a module-scope constant. scripts/check-docs-drift.mjs carries the wider rule that
+ * the seeded password appears nowhere under frontend/src.
  */
 
 const stripComments = (src) =>
@@ -88,22 +71,15 @@ describe('the sign-in form ships no credentials', () => {
   })
 
   it('annotates both fields for a password manager', () => {
-    /*
-     * THIS IS WHAT REPLACES THE PREFILL, and it is why it is tested rather than left to taste.
-     * The prefill's only legitimate purpose was saving an operator from retyping one credential.
-     * A password manager does that properly -- per user, per browser, never in the bundle -- but
-     * only if the inputs are annotated. Without these, removing the prefill is a pure usability
-     * regression, and a usability regression is the kind of change that gets quietly reverted.
-     */
+    /* What replaces the prefill: a password manager, which only works if the inputs are annotated.
+       Without these, removing the prefill is a usability regression that would get reverted. */
     expect(APP_JSX).toMatch(/autoComplete="username"/)
     expect(APP_JSX).toMatch(/autoComplete="current-password"/)
   })
 
   it('does not resurrect the prefill through the browser', async () => {
-    // A `value` bound to empty state is not enough on its own if the input also opts into
-    // Chrome's aggressive form restoration under a generic autocomplete token. `username` and
-    // `current-password` are the tokens that make the browser offer a SAVED credential -- an
-    // explicit user choice -- rather than replay whatever it last saw in an unnamed field.
+    // `username` and `current-password` are the tokens that make the browser offer a saved
+    // credential rather than replay whatever it last saw in an unnamed field.
     render(<App />)
     const password = await screen.findByLabelText(/^Password$/i)
     await waitFor(() => expect(password).toHaveAttribute('autocomplete', 'current-password'))

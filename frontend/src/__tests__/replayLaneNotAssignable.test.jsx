@@ -7,26 +7,12 @@ import { api } from '../api'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../utils/gatewayType'
 
 /**
- * A device cannot be assigned to the Playback gateway (#144).
- *
- * WHAT THE BUG WAS. Three pickers offered every un-archived gateway, the Playback one included.
- * Choosing it worked, and the result was not obviously wrong on screen: the device appeared on the
- * shadow lane, correctly badged, because `is_shadow` is a property of the GATEWAY and devices
- * inherit it. What it did not have was `shadow_of` -- the machine the lane stands in for -- and
- * archived migration 0060 names that state precisely, while explaining why it refuses to mint one:
- * "a shadow with no `shadow_of` is an asset with no provenance, which is the thing this design
- * exists to avoid creating."
- *
- * WHAT IS ASSERTED HERE, and what is not. The real guard is migration 0083, whose suite is
- * supabase/migrations/test_shadow_lane_is_not_assignable.py -- `devices` is writable through
- * PostgREST, so a UI check is a courtesy and a database check is the fix. These tests cover the
- * courtesy, and one property of it that is easy to get wrong:
- *
- *   DISABLED, NOT FILTERED. The tempting implementation is to drop shadow gateways from the list.
- *   That breaks a device which IS a replay lane: its own gateway would be absent from the select,
- *   the control would fall back to "Unassigned", and SAVING THE FORM WOULD SILENTLY MOVE IT OFF
- *   THE LANE -- a data-losing regression introduced by a fix for a cosmetic one, and invisible
- *   until somebody noticed a playback had stopped having anywhere to publish.
+ * A device cannot be assigned to the Playback gateway: it would appear on the shadow lane without
+ * `shadow_of`, an asset with no provenance. The real guard is in the database
+ * (supabase/migrations/test_shadow_lane_is_not_assignable.py); these cover the UI courtesy, and one
+ * property of it: disabled, not filtered. Dropping shadow gateways from the list would leave a
+ * replay-lane device's own gateway absent from the select, and saving the form would silently move
+ * it off the lane.
  */
 
 vi.mock('../api', async () => {
@@ -111,9 +97,9 @@ describe('gatewayAcceptsDevices', () => {
   })
 
   it('accepts a merely simulated gateway', () => {
-    // THE TWO ARE NOT THE SAME LANE and only one of them is minted. A simulator's devices are
-    // created by an operator exactly like any other; it is the replay lane that stands in for a
-    // real machine and must record which one.
+    // The two are not the same lane and only one is minted: a simulator's devices are created by an
+    // operator like any other; the replay lane stands in for a real machine and must record which
+    // one.
     expect(gatewayAcceptsDevices({ is_simulated: true, is_shadow: false })).toBe(true)
   })
 

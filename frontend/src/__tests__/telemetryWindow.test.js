@@ -2,17 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { api, telemetryLowerBound, TELEMETRY_DEFAULT_WINDOW_MINUTES } from '../api';
 
 /**
- * THE PROPERTY UNDER TEST IS "NEVER UNBOUNDED", NOT "THE DEFAULT IS 60".
- *
- * `public.telemetry` is a postgres_fdw projection: the wrapper pushes WHERE down but not LIMIT,
- * so `.range()` bounds what Supabase RETURNS, never what TimescaleDB SCANS AND SHIPS. A query
- * with no lower time bound therefore drags an asset's whole history across the wrapper before
- * the ORDER BY can start, and the symptom -- a slow database -- names nothing about the caller
- * that omitted an argument.
- *
- * So the assertion that matters is that `gte('time', ...)` is present on EVERY path out of
- * queryTelemetry, including the ones no UI code takes today. Asserting the number 60 would pass
- * just as happily if some future branch stopped calling the helper at all.
+ * The property under test is "never unbounded", not "the default is 60". `public.telemetry` is a
+ * postgres_fdw projection: the wrapper pushes WHERE down but not LIMIT, so a query with no lower
+ * time bound drags an asset's whole history across the wrapper. `gte('time', ...)` must be present
+ * on every path out of queryTelemetry, including the ones no UI code takes today.
  */
 
 const calls = { gte: [], lte: [], eq: [], in: [], range: [] };
@@ -102,9 +95,8 @@ describe('queryTelemetry always bounds time', () => {
   });
 
   // The /latest routes read `telemetry_latest`, where the DISTINCT ON has already happened
-  // remotely. They still carry a lower bound -- as a STALENESS filter now rather than a scan
-  // window -- so that a machine which last reported months ago does not present that reading as
-  // its current state.
+  // remotely. They still carry a lower bound as a staleness filter, so a machine that last reported
+  // months ago does not present that reading as current.
   it('bounds the fleet-wide latest query', async () => {
     await api.get('/api/v1/telemetry/latest');
     expect(timeBounds()).toHaveLength(1);

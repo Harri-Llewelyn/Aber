@@ -1,59 +1,16 @@
 /**
- * Every Compose service has a chart workload, and every chart workload has a Compose service --
- * or is listed here with the reason it does not.
+ * Every Compose service has a chart workload, and every chart workload has a Compose service, or is
+ * listed here with the reason it does not. It catches a service that exists on one target and
+ * nowhere on the other, the class the other guards miss.
  *
- * =================================================================================================
- * WHY THIS EXISTS, WHICH IS SIX FAILURES AND NOT A HYPOTHESIS
+ * It parses templates rather than rendering the chart: half the workloads are behind an `enabled`
+ * flag, so a render answers what one values file switches on, and the question is what the chart
+ * knows how to deploy. Two idioms are read, `{{- $component := "name" -}}` and a literal
+ * `app.kubernetes.io/component:`.
  *
- * When CI came back after the August 2026 billing outage, `main` was red and every failure had the
- * same shape: work landed on Compose and the chart did not follow. In one branch:
- *
- *   1. four chart file copies stale since cold archival merged  -- caught by sync-helm-chart-files
- *   2. `values-dev.yaml` missing the two historian secrets      -- caught by validateSecrets
- *   3. `cold_archive.sql` never added to the mirror allow-list  -- db-init FAILED on Kubernetes
- *   4. the storage ceiling never split from the model limit     -- storage-init FAILED
- *   5. the two machine-principal keys left empty                -- ingestion CrashLoopBackOff
- *   6. METRICS_JWT_SECRET carried in the Secret, never passed   -- realtime CrashLoopBackOff
- *
- * Three of those six were caught by an existing guard. The other three were found by installing the
- * chart, ten minutes at a time, one pod per CI round. Nothing compared the two targets as SETS.
- *
- * THIS DOES NOT CATCH ALL SIX. It catches the class the others miss: a service that exists on one
- * target and nowhere on the other. `cold-archiver` is the standing example -- it ships
- * on Compose, the chart has no workload for it, and the only reason anybody noticed is that
- * `0068`'s self-check made db-init fail loudly. A subsystem that failed QUIETLY would still be
- * undiscovered.
- *
- * =================================================================================================
- * WHY IT PARSES TEMPLATES RATHER THAN RENDERING THE CHART
- *
- * `helm template` is the accurate answer and the wrong one here. Half these workloads are behind an
- * `enabled` flag -- `playback` is off by default deliberately, `supabase-envoy` is off until the
- * Kong migration finishes -- so a render answers "what does THIS values file switch on", and the
- * question is "what does the chart KNOW HOW TO DEPLOY". A render would report `playback` as missing
- * from the chart, which is false, and would need helm on the path for a check that is otherwise a
- * string comparison.
- *
- * TWO IDIOMS, because the chart uses both. Most templates declare `{{- $component := "name" -}}` and
- * build their labels from it; `messaging/gateway-credential.yaml` writes
- * `app.kubernetes.io/component:` literally. Reading only the first misses it, and a check that
- * silently missed a workload would be worse than none -- it would certify a parity it had not
- * examined.
- *
- * =================================================================================================
- * TWO KINDS OF DIFFERENCE, AND CONFLATING THEM IS THE FAILURE MODE
- *
- * `SHAPED_DIFFERENTLY` is a service the other target does the same job for by another mechanism: an
- * initContainer instead of a one-shot container, the Prometheus Operator instead of a Prometheus
- * pod. Those are decisions, they are permanent, and listing them costs one line.
- *
- * `KNOWN_GAPS` is a service that is genuinely absent. Those are NOT exemptions in the ordinary
- * sense: the check passes with them present, and PRINTS THEM ON EVERY RUN, because the failure this
- * guard exists to prevent is a gap nobody is looking at. A gap silently reclassified as a design
- * difference is this check lying, which is worse than not having it.
- *
- * Both lists are checked for staleness in the other direction: an entry that no longer describes a
- * real difference fails, so a gap that gets closed cannot leave its excuse behind.
+ * `SHAPED_DIFFERENTLY` is a service the other target does the same job for by another mechanism.
+ * `KNOWN_GAPS` is a service genuinely absent; the check passes with them present and prints them on
+ * every run. Both lists are checked for staleness in the other direction.
  *
  * Usage: node scripts/check-compose-chart-parity.mjs
  */
@@ -70,11 +27,8 @@ const outstanding = [];
 
 /**
  * A Compose service name and the chart component that is the same thing under another name.
- *
- * SHORT AND IT SHOULD STAY SHORT. Every entry is a place the two targets disagree about what to
- * call one workload, and each one is a small tax on anybody reading both. They are recorded rather
- * than renamed because a chart component name is in the labels of a running cluster and a Compose
- * service name is in every `docker compose` command anybody has in their shell history.
+ * Recorded rather than renamed because a chart component name is in the labels of a running cluster
+ * and a Compose service name is in shell history.
  */
 const ALIASES = {
   'supabase-realtime': 'realtime',
@@ -105,10 +59,7 @@ const CHART_ONLY = {
 };
 
 /**
- * Genuinely absent, with the reason and where it is tracked.
- *
- * NOT SILENT. These print on every run. An entry here is a promise that somebody knows, not
- * permission to stop noticing.
+ * Genuinely absent, with the reason and where it is tracked. Not silent: these print on every run.
  */
 const KNOWN_GAPS = {
   'cold-archiver': 'cold telemetry archival ships on Compose only. The chart applies cold_archive.sql so the manifest exists and db-init succeeds, but no workload exports or drops -- the catalogue is permanently empty on Kubernetes. See supabase/README.md "Cold telemetry archival"',
@@ -117,14 +68,9 @@ const KNOWN_GAPS = {
   'docker-socket-proxy': 'exists only to narrow the Docker API for alloy, so it is absent wherever alloy is. It has no Kubernetes analogue at all: there is no Docker socket to front, and pod metadata comes from the kubelet rather than from a container runtime API'
 };
 
-// -------------------------------------------------------------------------------------------------
-// The Compose side.
-//
-// Parsed by SHAPE rather than with a YAML dependency, matching check-docs-drift.mjs -- this
-// repository deliberately carries none for its guards. Bounded to the `services:` block, because
-// `volumes:` uses the same two-space mapping shape and would otherwise arrive as a dozen services
-// the chart is obviously missing.
-// -------------------------------------------------------------------------------------------------
+// The Compose side. Parsed by shape rather than with a YAML dependency, matching
+// check-docs-drift.mjs. Bounded to the `services:` block, because `volumes:` uses the same mapping
+// shape.
 const composeServices = new Set();
 {
   let inServices = false;
@@ -136,9 +82,7 @@ const composeServices = new Set();
   }
 }
 
-// -------------------------------------------------------------------------------------------------
 // The chart side.
-// -------------------------------------------------------------------------------------------------
 const chartComponents = new Set();
 {
   const walk = (dir) => {
@@ -167,9 +111,7 @@ if (composeServices.size === 0 || chartComponents.size === 0) {
 
 const asComponent = (service) => ALIASES[service] || service;
 
-// -------------------------------------------------------------------------------------------------
 // 1. Compose -> chart.
-// -------------------------------------------------------------------------------------------------
 {
   const unaccounted = [];
   for (const service of composeServices) {
@@ -190,9 +132,7 @@ const asComponent = (service) => ALIASES[service] || service;
   }
 }
 
-// -------------------------------------------------------------------------------------------------
-// 2. Chart -> Compose. The direction that catches a workload nobody can run locally.
-// -------------------------------------------------------------------------------------------------
+// 2. Chart -> Compose, the direction that catches a workload nobody can run locally.
 {
   const composeAsComponents = new Set([...composeServices].map(asComponent));
   const unaccounted = [...chartComponents].filter(
@@ -210,12 +150,8 @@ const asComponent = (service) => ALIASES[service] || service;
   }
 }
 
-// -------------------------------------------------------------------------------------------------
-// 3. The lists themselves, in the other direction.
-//
-// An exemption that has stopped describing a real difference is worse than a missing one: it is a
-// note explaining why something is absent, sitting next to the thing, present.
-// -------------------------------------------------------------------------------------------------
+// 3. The lists themselves, in the other direction: an exemption that has stopped describing a real
+// difference fails.
 {
   const stale = [];
   for (const service of [...Object.keys(SHAPED_DIFFERENTLY), ...Object.keys(KNOWN_GAPS)]) {
@@ -246,9 +182,7 @@ const asComponent = (service) => ALIASES[service] || service;
   }
 }
 
-// -------------------------------------------------------------------------------------------------
 // 4. The gaps, stated every time.
-// -------------------------------------------------------------------------------------------------
 for (const [service, why] of Object.entries(KNOWN_GAPS)) {
   outstanding.push(`${service}: ${why}`);
 }

@@ -1,23 +1,14 @@
 /**
- * Where an asset IS, as opposed to how its data gets here.
+ * Where an asset is, as opposed to how its data gets here. `device -> gateway` is the data path;
+ * `device -> cell` is a location overlay. A device's effective cell is its own `cell_id`, else its
+ * gateway's, else nothing; a site-wide asset has none by assertion.
  *
- * `device -> gateway` is a data path: it is in the Sparkplug topic and it is what telemetry is
- * keyed through. `device -> cell` is a location overlay that appears in no topic and no payload.
- * A device's effective cell is its own `cell_id` when it has one, otherwise its gateway's,
- * otherwise nothing -- and a site-wide asset has none by assertion.
+ * Mirror of `public.device_locations` in supabase/migrations/0001_baseline_schema.sql; the view is
+ * the authority. Field names are the view's own snake_case, so a row from the view and a row
+ * derived here are interchangeable.
  *
- * KEEP IN STEP WITH public.device_locations (supabase/migrations/0001_baseline_schema.sql).
- * The view is the authority; this is the local mirror, the same obligation utils/sparkplugId.js,
- * utils/metricGroup.js and utils/gatewayStatus.js already carry against their SQL. The returned
- * field names are deliberately the view's own snake_case rather than a second camelCase
- * vocabulary: a row read from the view and a row derived here are then interchangeable, which is
- * what lets deviceLocationOf() prefer the server's answer without any translation layer, and it
- * makes a drift between the two visible as a field that stops matching rather than as a value
- * that quietly disagrees.
- *
- * NULL cell_id MEANS INHERIT. It is not a stored "unassigned" value -- the column has no default,
- * precisely so that inheritance is the absence of a decision rather than a precedence rule
- * competing with one. Unassigned is derived from the resolution running out of arms.
+ * NULL cell_id means inherit. Unassigned is derived from the resolution running out of arms, never
+ * stored.
  */
 
 export const SCOPE_CELL = 'cell'
@@ -28,13 +19,9 @@ export const LOCATION_SCOPES = [SCOPE_CELL, SCOPE_SITE_WIDE]
 
 /**
  * Which arm of the resolution answered. `explicit` and `inherited` look identical once resolved,
- * but only one of them moves when the gateway is reassigned -- which is the whole reason the view
- * reports the source rather than just the cell.
- *
- * `shadow` and `simulated` are read off the GATEWAY rather than the device (archived migration 0059). They
- * are not places, and that is the point: an asset whose telemetry is generated or replayed is not
- * unfiled, it is unfileable, and every hint unassignedHint() can offer is advice that cannot be
- * taken for one. Keeping them out of Unassigned is what keeps Unassigned a queue that drains.
+ * but only one moves when the gateway is reassigned. `shadow` and `simulated` are read off the
+ * gateway: such an asset is unfileable rather than unfiled, which keeps Unassigned a queue that
+ * drains.
  */
 export const SOURCE_EXPLICIT = 'explicit'
 export const SOURCE_INHERITED = 'inherited'
@@ -58,46 +45,26 @@ export function locationSourceLabel(source) {
 }
 
 /**
- * The sources that resolve to NO cell, as one set rather than four inequalities.
- *
- * Every consumer that reports "devices with no cell" has to exclude these, and every one of them
- * had its own hand-written list -- which is how Site-Wide ended up correctly excluded from the
- * Cells banner and the Devices filter while a third caller quietly counted it. Adding a lane
- * should not require finding those call sites again.
- *
- * `unassigned` is NOT in here: it also resolves to no cell, but it is the one that MEANS "nobody
- * has decided", which is exactly what such a consumer is trying to count.
+ * The sources that resolve to no cell, as one set. Every consumer that reports devices with no cell
+ * excludes these. `unassigned` is not in here: it also resolves to no cell, but it means nobody has
+ * decided, which is what such a consumer counts.
  */
 export const NON_CELL_SOURCES = new Set([SOURCE_SITE_WIDE, SOURCE_SIMULATED, SOURCE_SHADOW])
 
 /**
- * Whether a cell can be stored against this gateway at all.
- *
- * MIRRORS `gateways_synthetic_has_no_cell` (0059):
- *
- *     CHECK (((NOT is_simulated) AND (NOT is_shadow)) OR cell_id IS NULL)
- *
- * so this is a rendering of a constraint, not a policy of its own -- the same relationship the
- * Type control has to `gateways_simulated_is_host`. A form that offers a cell here is offering a
- * write the database refuses, which is the failure mode the two checkboxes had before 0064.
- *
- * IT ALSO ANSWERS THE SOFTER QUESTION for a DEVICE behind such a gateway, where there is no CHECK
- * and the value would be accepted and then ignored: `device_locations` resolves `simulated` and
- * `shadow` AHEAD of any cell, so a cell stored there is inert. Offering the picker would let
- * somebody file an asset and watch it not move.
- *
- * Null-safe in the permissive direction: a device with no gateway yet can still be given a cell.
+ * Whether a cell can be stored against this gateway. Mirrors `gateways_synthetic_has_no_cell`:
+ * `CHECK (((NOT is_simulated) AND (NOT is_shadow)) OR cell_id IS NULL)`. It also answers for a
+ * device behind such a gateway, where a stored cell is accepted and then ignored because
+ * `device_locations` resolves `simulated` and `shadow` first. Null-safe in the permissive
+ * direction: a device with no gateway can still be given a cell.
  */
 export function gatewayAcceptsCell(gateway) {
   return !(gateway?.is_simulated || gateway?.is_shadow)
 }
 
 /**
- * Why the cell picker is unavailable, as a sentence, or null when it is available.
- *
- * Kept beside the predicate because a disabled control with no explanation is the version of this
- * that generates support questions -- and the two kinds of synthetic gateway are disabled for
- * reasons an operator would act on differently.
+ * Why the cell picker is unavailable, as a sentence, or null when it is available. The two kinds of
+ * synthetic gateway call for different actions.
  */
 export function noCellReason(gateway) {
   if (gatewayAcceptsCell(gateway)) return null
@@ -107,34 +74,27 @@ export function noCellReason(gateway) {
 }
 
 /**
- * Resolve one device against its serving gateway.
- *
- * `gateway` may be null -- a device with no gateway is unassigned rather than an error, which is
- * the state every auto-discovered device starts in.
- *
- * Mirror of the view's two CASE expressions and its cell_mismatch predicate.
+ * Resolve one device against its serving gateway. `gateway` may be null: a device with no gateway
+ * is unassigned, not an error. Mirror of the view's two CASE expressions and its cell_mismatch
+ * predicate.
  */
 export function resolveDeviceLocation(device, gateway) {
   const scope = device?.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : SCOPE_CELL
   const explicit = device?.cell_id || null
   const inherited = gateway?.cell_id || null
 
-  // Read off the gateway, and inherited rather than stored -- devices carry no copy, which is what
-  // makes "no simulated device on a real gateway" true by construction instead of by trigger.
-  // A device with no gateway yields false for both and falls through to the arms below.
+  // Read off the gateway and inherited rather than stored; a device with no gateway yields false
+  // for both.
   const shadow = !!gateway?.is_shadow
   const simulated = !!gateway?.is_simulated
 
-  // A site-wide asset resolves to no cell at all. Its own cell_id is already NULL -- the
-  // devices_site_wide_has_no_cell CHECK guarantees it -- so this is about not inheriting the
-  // gateway's either. Synthetic and replayed assets resolve to no cell for a different reason:
-  // they belong to a lane rather than to the plant, and gateways_synthetic_has_no_cell (0059)
-  // guarantees there is no gateway cell for them to inherit in the first place.
+  // A site-wide asset resolves to no cell, so it must not inherit the gateway's either. Synthetic
+  // and replayed assets belong to a lane, and `gateways_synthetic_has_no_cell` guarantees there is
+  // no gateway cell to inherit.
   const effective = (shadow || simulated || scope === SCOPE_SITE_WIDE) ? null : (explicit || inherited)
 
-  // SHADOW BEFORE SIMULATED, mirroring the view. A shadow gateway is necessarily simulated -- 0056
-  // refuses a playback target that is not, and a CHECK states it -- so testing simulated first
-  // would make the shadow lane unreachable without any arm being individually wrong.
+  // Shadow before simulated, mirroring the view: a shadow gateway is necessarily simulated, so
+  // testing simulated first would make the shadow lane unreachable.
   let source
   if (shadow) source = SOURCE_SHADOW
   else if (simulated) source = SOURCE_SIMULATED
@@ -149,20 +109,16 @@ export function resolveDeviceLocation(device, gateway) {
     gateway_cell_id: inherited,
     effective_cell_id: effective,
     location_source: source,
-    // Filed somewhere its own gateway does not serve. Legitimate on a shared or host-run
-    // connector, and also exactly what a mis-click looks like -- so it is reported, not
-    // prevented, and the explicit value still wins.
+    // Filed somewhere its own gateway does not serve. Legitimate on a shared or host-run connector,
+    // and also what a mis-click looks like, so it is reported rather than prevented.
     cell_mismatch: scope === SCOPE_CELL && !!explicit && !!inherited && explicit !== inherited
   }
 }
 
 /**
  * The location of a device, preferring a row already merged from `device_locations` over local
- * derivation -- same arrangement as metricGroupOf() and the sparkplug_id helpers.
- *
- * `location_source` is the field tested rather than `effective_cell_id`, because the resolved
- * cell is legitimately null for both site-wide and unassigned devices; the source is the only
- * field that is always populated when the view has been read.
+ * derivation. `location_source` is tested because the resolved cell is legitimately null for
+ * site-wide and unassigned devices.
  */
 export function deviceLocationOf(device, gateway) {
   if (device?.location_source) {
@@ -191,31 +147,9 @@ export function isUnassigned(device, gateway) {
   return deviceLocationOf(device, gateway).location_source === SOURCE_UNASSIGNED
 }
 
-/** Telemetry generated rather than observed -- a simulator, or a playback target. */
-export function isSimulatedAsset(device, gateway) {
-  const source = deviceLocationOf(device, gateway).location_source
-  return source === SOURCE_SIMULATED || source === SOURCE_SHADOW
-}
-
 /**
- * A replay lane: real readings, recorded from a real machine, republished under a stand-in.
- *
- * Narrower than isSimulatedAsset() on purpose. "Invented" and "recorded from your own plant" are
- * both synthetic in provenance and opposite in truth, and a caller asking whether a number ever
- * happened wants this one.
- */
-export function isShadowAsset(device, gateway) {
-  return deviceLocationOf(device, gateway).location_source === SOURCE_SHADOW
-}
-
-/**
- * Whether an operator still has to say where this device is.
- *
- * True exactly when the resolution ran out of arms. Site-Wide is NOT included: it is the
- * deliberate answer to this question, not an unanswered one -- which is the distinction that
- * keeps the Unassigned lane a queue that can actually drain. Simulated and Shadow are excluded
- * for a stronger reason (0059): they are not unfiled but unfileable, and every hint
- * unassignedHint() can offer is advice that cannot be taken for one.
+ * Whether an operator still has to say where this device is: true exactly when the resolution ran
+ * out of arms. Site-Wide is a deliberate answer; Simulated and Shadow are unfileable.
  */
 export function needsCellAssignment(device, gateway) {
   return isUnassigned(device, gateway)
@@ -226,14 +160,9 @@ export const UNASSIGNED_GATEWAY_HAS_NO_CELL = 'gateway_has_no_cell'
 export const UNASSIGNED_GATEWAY_SITE_WIDE = 'gateway_site_wide'
 
 /**
- * Why a device is unassigned, or null if it is not.
- *
- * The three cases call for different fixes, which is why they are not collapsed. A REMOTE gateway
- * with no cell is fixed once on the Gateways page and every device behind it follows; a site-wide
- * or HOST-RUN gateway can never supply a cell by inheritance, so each of its devices has to be
- * filed individually. Telling an operator to "assign the gateway a cell" when the gateway is a
- * host-run proxy is advice that cannot be taken -- which is why this asks where the connector runs
- * rather than what `is_virtual` used to mean.
+ * Why a device is unassigned, or null. The three cases call for different fixes: a remote gateway
+ * with no cell is fixed once on the Gateways page; a site-wide or host-run gateway cannot supply a
+ * cell by inheritance, so each device is filed individually.
  */
 export function unassignedReason(device, gateway) {
   if (!isUnassigned(device, gateway)) return null
@@ -255,21 +184,10 @@ export function unassignedHint(device, gateway) {
 }
 
 /**
- * Bucket devices by the cell they resolve to, returning a Map of cell id -> devices.
- *
- * This is what "the devices in this cell" means now, and it is deliberately a client-side
- * grouping rather than a field on the cells payload. A cell's devices cannot be embedded --
- * `cells?select=*,gateways(devices(...))` returns them by inheritance only, so an explicit
- * override lands on the wrong card -- and having the cells endpoint fetch every device to
- * bucket them server-side made every consumer read the device list twice, since all of them
- * already load it for their own purposes. Overview polls at 3s, so that was the expensive one.
- *
- * Devices resolving to no cell -- shadow, simulated, site-wide and unassigned -- are omitted rather
- * than collected under a null key. They belong to no card, and the four are different states that
- * must not be merged into one "everything else" bucket.
- *
- * Rows are expected to carry `location_source` from `device_locations` (api.js merges it), in
- * which case deviceLocationOf() takes the server's answer verbatim.
+ * Bucket devices by the cell they resolve to: a Map of cell id to devices. Client-side, because a
+ * cell's devices cannot be embedded (an explicit override lands on the wrong card) and every
+ * consumer already holds the device list. Devices resolving to no cell are omitted rather than
+ * collected under a null key. Rows carrying `location_source` take the server's answer verbatim.
  */
 export function groupDevicesByCell(devices) {
   const byCell = new Map()
@@ -283,34 +201,17 @@ export function groupDevicesByCell(devices) {
 }
 
 /**
- * Overlay a set of staged, uncommitted relocations onto a device list.
+ * Overlay staged, uncommitted relocations onto a device list. It re-resolves rather than
+ * overwriting the two columns: deviceLocationOf() prefers the server-supplied `location_source`, so
+ * a staged device would otherwise keep its stale resolution and never move. This is also what makes
+ * the Unassigned lane honest before the commit: a device whose gateway serves a cell re-inherits it
+ * at the drop. `staged: true` rides along so pending renders differently from durable.
  *
- * Rearrange mode stages drops and applies them as one transaction (archived migration 0033), so between
- * the drop and the Apply there is a view of the shopfloor that exists only in the browser. This
- * builds it.
+ * @param devices rows as the page holds them, carrying merged `device_locations` fields
  *
- * IT RE-RESOLVES RATHER THAN JUST OVERWRITING THE TWO COLUMNS, and that is the whole subtlety.
- * api.js merges `device_locations` onto every device row, and deviceLocationOf() PREFERS that
- * server-supplied `location_source` over local derivation -- correctly, because the server is the
- * authority. A staged device still carries the server's answer about where it used to be, so
- * setting `cell_id` alone leaves every consumer (groupDevicesByCell, the lane filters) reading
- * the stale resolution and the chip does not move. The view fields have to be recomputed from the
- * staged values, which is exactly what resolveDeviceLocation() does.
- *
- * THIS IS ALSO WHAT MAKES THE UNASSIGNED LANE HONEST BEFORE THE COMMIT RATHER THAN AFTER IT.
- * Dropping onto Unassigned stages `cell_id: null` with cell scope, and a device whose gateway
- * serves a cell then re-inherits that cell and visibly springs back the moment it is dropped --
- * not once a write has completed. Unassigned is the resolution running out of arms, so it is not
- * settable, and a staged view that showed the device sitting in the lane would be telling the one
- * lie this location model exists to avoid.
- *
- * `staged: true` rides along so the caller can render pending differently from durable. With
- * immediate writes the tile did not move until the reload landed; now it moves at once, and
- * without that distinction an operator cannot tell what is already saved.
- *
- * @param devices  rows as the page holds them, carrying merged `device_locations` fields
  * @param gateways rows keyed by `gateway_id` or `id`
- * @param staged   Map of device id -> { cell_id, location_scope }
+ *
+ * @param staged Map of device id to { cell_id, location_scope }
  */
 export function applyStagedMoves(devices, gateways, staged) {
   if (!staged || staged.size === 0) return devices || []
@@ -329,11 +230,8 @@ export function applyStagedMoves(devices, gateways, staged) {
 }
 
 /**
- * Resolve a whole list at once, returning a Map keyed by device id.
- *
- * Callers that already loaded `device_locations` should merge that instead; this is for the
- * paths that hold devices and gateways but no view read -- optimistic updates, and any test or
- * component rendering fixtures.
+ * Resolve a whole list at once: a Map keyed by device id. For paths that hold devices and gateways
+ * but no view read.
  */
 export function resolveDeviceLocations(devices, gateways) {
   const byId = new Map((gateways || []).map(g => [g.gateway_id ?? g.id, g]))

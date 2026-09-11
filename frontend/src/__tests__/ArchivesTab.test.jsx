@@ -72,21 +72,12 @@ describe('ArchivesTab Component', () => {
 })
 
 /**
- * Permanent Delete: the manual half of the retention policy.
- *
- * `auto_delete_at` already purges on a timer, and this page has always SHOWN that date without
- * offering any way to act on it -- so an asset archived by mistake sat in the list for thirty
- * days with no control that could clear it. The row is really deleted; only the digital thread
- * survives, which archived migration 0006 guarantees by making audit rows immutable and independent of
- * the entity they describe.
+ * Permanent Delete: the manual half of the retention policy. The row is really deleted; only the
+ * digital thread survives, because audit rows are immutable and independent of the entity.
  */
 /**
- * Open the dialog and satisfy its typed-name gate (issue #38).
- *
- * The three tests below assert what happens AFTER a confirmed delete, so each has to get past
- * the gate first. Sharing one helper keeps that setup from being restated -- and means the gate's
- * own behaviour is asserted in exactly one place, in its own describe, rather than incidentally in
- * three tests that are about something else.
+ * Open the dialog and satisfy its typed-name gate, so the tests about what happens after a
+ * confirmed delete do not restate the setup. The gate itself is asserted in its own describe.
  */
 const confirmPurge = async (name = 'Assembly Line 1') => {
   fireEvent.click(purgeButton())
@@ -167,10 +158,8 @@ describe('ArchivesTab permanent delete', () => {
   })
 
   /**
-   * Restore is the ordinary move; Permanent Delete is the irreversible one. They are deliberately
-   * not peers -- restore is a ghost button, and delete only takes on its danger colour when
-   * pointed at. Two filled buttons side by side invite the wrong one to be clicked at a glance,
-   * and the wrong one here cannot be undone.
+   * Restore is a ghost button and Permanent Delete only takes its danger colour when pointed at:
+   * two filled buttons side by side invite the wrong one to be clicked.
    */
   it('does not dress the two actions as equals', async () => {
     await showArchives()
@@ -183,14 +172,9 @@ describe('ArchivesTab permanent delete', () => {
 })
 
 /**
- * The typed-name gate on permanent delete (issue #38).
- *
- * WHY THIS ONE DIALOG AND NOT ALL OF THEM. `ConfirmModal` has ten callers and every other one
- * guards something recoverable -- archiving is a soft flag with a Restore button beside it,
- * deprecating a metric is reversible, discarding a draft costs a retype. Gating them all would
- * train an operator to type through the single dialog where reading it matters, which is the
- * opposite of what the issue asks for. Friction only buys attention while it is rare, so the
- * prop is opt-in and these tests pin that it stays opt-in.
+ * The typed-name gate on permanent delete. Every other ConfirmModal caller guards something
+ * recoverable, and friction only buys attention while it is rare, so the prop is opt-in and these
+ * tests pin that.
  */
 describe('permanent delete asks for the name back', () => {
   beforeEach(() => { vi.clearAllMocks() })
@@ -245,10 +229,8 @@ describe('permanent delete asks for the name back', () => {
   })
 
   it('leaves every other confirmation ungated', async () => {
-    /*
-     * THE OPT-IN, ASSERTED. Archiving is the reversible neighbour of this action and shares the
-     * dialog; if a future change flipped `requireTyped` on by default, this is what would notice.
-     */
+    /* The opt-in, asserted: archiving shares the dialog, and this is what notices if `requireTyped`
+       becomes the default. */
     const { ConfirmModal } = await import('../components/modals/ConfirmModal')
     const { container } = render(
       <ConfirmModal message="Archive it?" onConfirm={vi.fn()} onCancel={vi.fn()} />
@@ -260,19 +242,10 @@ describe('permanent delete asks for the name back', () => {
 })
 
 /**
- * Restore asks before it acts (issue #100).
- *
- * WHY IT IS NOT GATED ON TYPING THE NAME, unlike the delete above. The rule that dialog sets holds:
- * friction only buys attention while it is rare, and restore IS recoverable -- you can archive it
- * again. What restore is not is consequence-free, and a one-click act on a table of look-alike
- * mixed-type rows is how the wrong one gets hit.
- *
- * THE TWO CONSEQUENCES ARE THE POINT OF THE WORDING, because "you can just archive it again" is
- * what would make this dialog look like ceremony, and it is not quite true:
- *   * the retention timer is CLEARED rather than paused, so the undo does not restore the clock;
- *   * an archived gateway's broker credential was rotated to a password nobody records, and
- *     restore flips `is_archived` and nothing else -- so it returns looking active and cannot
- *     authenticate.
+ * Restore asks before it acts but is not gated on typing the name, since it is recoverable. The
+ * wording names two consequences: the retention timer is cleared rather than paused, and an
+ * archived gateway's broker credential was rotated away, so restore returns it looking active and
+ * unable to authenticate.
  */
 const ARCHIVED_GATEWAY = {
   entity_id: 'gwy-1', name: 'Line_A_Gateway', entity_type: 'gateway',
@@ -367,9 +340,8 @@ describe('ArchivesTab restore asks first', () => {
   })
 
   it('warns that a restored gateway does not get its broker credential back', async () => {
-    // Archiving rotated it to a password nobody records; restore flips is_archived and nothing
-    // else. Without this the gateway returns to the asset pages looking active and silently
-    // cannot publish -- and the failure surfaces at the broker, not on this page.
+    // Archiving rotated the credential; restore flips is_archived and nothing else, so the failure
+    // would land at the broker, not on this page.
     await showArchives(() => true, [ARCHIVED_GATEWAY])
     fireEvent.click(restoreButton())
 
@@ -379,9 +351,8 @@ describe('ArchivesTab restore asks first', () => {
   })
 
   it('does not raise the credential warning for a gateway that never held one', async () => {
-    // `credential_revoked_at` is the fact, not the entity type. A gateway archived before it was
-    // ever given an account has nothing to re-mint, and telling somebody to go and rotate a
-    // credential that does not exist sends them to a page with nothing to do on it.
+    // `credential_revoked_at` is the fact, not the entity type: a gateway archived before it was
+    // given an account has nothing to re-mint.
     await showArchives(() => true, [{ ...ARCHIVED_GATEWAY, credential_revoked_at: null }])
     fireEvent.click(restoreButton())
 

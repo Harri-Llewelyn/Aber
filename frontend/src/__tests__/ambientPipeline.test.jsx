@@ -4,15 +4,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import AmbientPipeline from '../components/common/AmbientPipeline'
 
 /**
- * The sign-in screen's ambient canvas.
- *
- * These assertions are about the three ways an animated background goes wrong in an application,
- * as opposed to on a demo page. None of them is about how it looks.
- *
- *   - it must stop when it is unmounted, or signing out and back in leaves a
- *     requestAnimationFrame loop per visit running against a detached canvas;
- *   - it must not animate at all under prefers-reduced-motion;
- *   - it must never take the sign-in screen down, whatever the canvas API does.
+ * The sign-in screen's ambient canvas. Three ways an animated background goes wrong in an
+ * application: it must stop when unmounted, must not animate under prefers-reduced-motion, and must
+ * never take the sign-in screen down whatever the canvas API does.
  */
 
 /** A 2d context that records nothing and answers everything. */
@@ -80,9 +74,8 @@ describe('AmbientPipeline', () => {
 
     render(<AmbientPipeline theme="dark" />)
 
-    // A STILL FRAME COSTS NOTHING PER FRAME. Continuous drift behind a login form is a
-    // vestibular trigger, and honouring the preference by running the same work and discarding
-    // it would still burn the battery it is reasonable to expect us to save.
+    // A still frame costs nothing per frame: running the same work and discarding it would still
+    // burn battery.
     expect(raf).not.toHaveBeenCalled()
   })
 
@@ -102,9 +95,8 @@ describe('AmbientPipeline', () => {
     setReducedMotion(false)
     getContextSpy.mockImplementation(() => { throw new Error('canvas disabled') })
 
-    // getContext is SPECIFIED to return null when unavailable and THROWS in jsdom and in
-    // browsers with canvas switched off. A null check alone lets that escape a passive effect
-    // and take the sign-in screen with it -- this is decoration and must fail quietly.
+    // getContext is specified to return null when unavailable and throws in jsdom and in browsers
+    // with canvas switched off. Decoration must fail quietly.
     const { container } = render(<AmbientPipeline theme="dark" />)
     expect(container.querySelectorAll('canvas')).toHaveLength(0)
   })
@@ -121,12 +113,9 @@ describe('AmbientPipeline', () => {
     setReducedMotion(true)
     vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(1)
 
-    // THE REGRESSION. React runs effects children-first, and useTheme lives in the PARENT
-    // (AuthScreen) -- so on a toggle this component's effect ran while data-theme still held the
-    // outgoing value, and the canvas resolved --bg-base and --accent one theme behind. On screen
-    // that was a light card on a dark field, and a dark card on a pale one. It looked correct
-    // only after a reload with the dark theme stored, because a root carrying no data-theme
-    // resolves to `:root`, which is itself the dark palette -- agreement by coincidence.
+    // The regression: React runs effects children-first and useTheme lives in the parent, so on a
+    // toggle this effect ran while data-theme still held the outgoing value and the canvas resolved
+    // its colours one theme behind.
     document.documentElement.setAttribute('data-theme', 'dark')
 
     const { unmount } = render(<AmbientPipeline theme="light" />)

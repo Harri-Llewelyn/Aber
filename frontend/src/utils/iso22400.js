@@ -1,13 +1,7 @@
 /**
- * The ISO 22400-2 KPI vocabulary, as served from `iso22400_vocabulary` (archived migration 0030).
- *
- * Unlike MTConnect, a KPI is not composed from parts: `AVAILABILITY` is the whole concept, and the
- * only thing left to choose is which group it files under. So the picker here selects an entry
- * whole and prefills the form from it, rather than offering a component/type/subtype composition.
- *
- * The unit, the semantic id and the KPI's family all come from the vocabulary row -- they are
- * properties of the standard, not choices. The form still lets them be overridden, because a
- * deployment may legitimately report a ratio in a different unit.
+ * The ISO 22400-2 KPI vocabulary, as served from `iso22400_vocabulary`. A KPI is picked whole
+ * rather than composed: the picker selects an entry and prefills the form from it. Unit, semantic
+ * id and family come from the vocabulary row and may be overridden.
  */
 
 import { STANDARDS } from './standards'
@@ -16,11 +10,9 @@ import { STANDARDS } from './standards'
 const KPI_DATATYPE = 10
 
 /**
- * The MTConnect observation category recorded alongside an ISO KPI.
- *
- * `metric_catalog.category` is CHECK-constrained to MTConnect's three values, and a KPI is a
- * continuously-varying measurement, so SAMPLE is the honest fit. It also keeps the Units column
- * meaningful: units only apply to SAMPLE, and every KPI here has one.
+ * The MTConnect observation category recorded alongside an ISO KPI. `metric_catalog.category` is
+ * CHECK-constrained to MTConnect's three values, and a KPI is a continuously varying measurement
+ * with a unit, so SAMPLE.
  */
 export const KPI_CATEGORY = 'SAMPLE'
 
@@ -40,13 +32,7 @@ export function kpiByName(vocabulary, name) {
 /** The KPI names, for a picker. */
 export const kpiNames = (vocabulary) => kpis(vocabulary).map(k => k.name)
 
-/**
- * The vocabulary arranged into browsable sections, one per KPI family.
- *
- * Families rather than one flat list because the eight KPIs answer three different questions --
- * how effective was the equipment, how good was the output, how reliable is the asset -- and the
- * OEE family is the one most people arrive looking for.
- */
+/** The vocabulary arranged into browsable sections, one per KPI family. */
 export function iso22400Sections(vocabulary) {
   const buckets = new Map()
   for (const kpi of kpis(vocabulary)) {
@@ -78,11 +64,8 @@ export function iso22400Sections(vocabulary) {
 }
 
 /**
- * The Add Metric form state a KPI implies.
- *
- * `group` is the KPI's family, which is why archived migration 0030 registers those families as metric
- * groups -- so the name a KPI composes into (`OEE/AVAILABILITY`) matches what is already in the
- * catalog rather than forking a second spelling of the same group.
+ * The Add Metric form state a KPI implies. `group` is the KPI's family, which the seed data
+ * registers as metric groups, so `OEE/AVAILABILITY` matches what is already in the catalog.
  */
 export function iso22400Prefill(kpi) {
   if (!kpi) return null

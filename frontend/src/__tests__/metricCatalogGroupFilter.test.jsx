@@ -1,27 +1,11 @@
 /**
- * Metric Catalog: the Data Point picker is scoped to the selected group (issue #33).
- *
- * WHAT WAS REPORTED. "Selecting PackML for group would allow me to see data points for OPC UA
- * Machinery for example." The Group and Data Point selects were independent, so any group could be
- * paired with any data point in the vocabulary.
- *
- * WHY THAT IS WORSE THAN IT SOUNDS. The pairing does not survive: `opcuaPrefill()` re-derives the
- * group from the chosen point's browse path and overwrites whatever was selected. So the form did
- * not produce an invalid metric -- it produced a DIFFERENT metric from the one the operator
- * described, silently, with the group select snapping to a value they did not pick. A validation
- * error would have been better; this told them nothing.
- *
- * THE FILTER KEYS ON `suggestedGroup()`, THE SAME FUNCTION THE PREFILL WRITES FROM. That is what
- * makes it self-consistent rather than a second rule to maintain: a point can only appear under the
- * group it would itself set, so a visible point can never overwrite the group it was listed under.
- * The tests below pin that property rather than a hard-coded pairing, because a hard-coded one
- * would pass just as happily against two rules that had drifted apart.
- *
- * AND THE MIRROR CASE, which the filter creates and which `handleGroupChange` closes: moving the
- * group after choosing a point hides that point, leaving `newMetric.type` holding a value absent
- * from the options. That is the identical trap `handleStandardChange` was already written to
- * prevent for the group picker -- the select renders blank while the form still composes a name
- * from the hidden value.
+ * Metric Catalog: the Data Point picker is scoped to the selected group. Independent selects let
+ * any group be paired with any point, and `opcuaPrefill()` then re-derived the group from the point
+ * and silently overwrote the selection. The filter keys on `suggestedGroup()`, the same function
+ * the prefill writes from, so a visible point can never overwrite the group it was listed under;
+ * the tests pin that property rather than a pairing. The mirror case, moving the group after
+ * choosing a point, is closed by `handleGroupChange` as `handleStandardChange` already does for the
+ * group picker.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
@@ -36,9 +20,8 @@ vi.mock('../api', async () => {
 })
 
 /**
- * Two points under DIFFERENT groups and different companion specs, which is the whole fixture
- * requirement: `Manufacturer` sits under `Machine` (OPC 40001 Machinery) and `ActualPosition` under
- * `MotionDevice` (OPC 40010 Robotics). Selecting one group must hide the other's point.
+ * Two points under different groups and companion specs: `Manufacturer` under `Machine` (OPC 40001
+ * Machinery) and `ActualPosition` under `MotionDevice` (OPC 40010 Robotics).
  */
 const OPCUA_VOCABULARY = [
   {
@@ -125,11 +108,8 @@ describe('the Data Point picker is scoped to the selected group', () => {
   })
 
   it('only ever offers points that would set the group they are listed under', async () => {
-    /*
-     * THE PROPERTY, rather than an example of it. The filter and the prefill must agree, and they
-     * agree by construction because both call suggestedGroup(). Asserting the invariant is what
-     * catches the two drifting apart; asserting a pairing would not.
-     */
+    /* The property, rather than an example of it: the filter and the prefill agree by construction
+       because both call suggestedGroup(). */
     await openOpcuaForm()
 
     for (const group of ['Machine', 'MotionDevice']) {
@@ -159,11 +139,8 @@ describe('the Data Point picker is scoped to the selected group', () => {
 
 describe('changing the group cannot orphan the selected data point', () => {
   it('clears a point the new group does not offer', async () => {
-    /*
-     * The mirror of handleStandardChange. Left alone, `type` would hold a value absent from the
-     * options: the select renders blank while the form still composes a name from it, and the
-     * metric is created against a data point the form appears not to have selected.
-     */
+    /* The mirror of handleStandardChange: left alone, `type` would hold a value absent from the
+       options, and the select renders blank while the form still composes a name from it. */
     await openOpcuaForm()
     fireEvent.change(selectByLabel('Data Point'),
       { target: { value: 'OPC 40001 Machinery::Manufacturer' } })

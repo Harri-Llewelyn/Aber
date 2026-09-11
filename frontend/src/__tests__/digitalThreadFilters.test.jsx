@@ -1,11 +1,7 @@
 /**
- * Digital Thread filter bar and actor attribution.
- *
- * The attribution half exists because `changed_by IS NULL` was the normal case, not an anomaly:
- * on a stack with one simulated gateway and one device the audit table was taking 175 anonymous
- * rows/hour, of which every one was either a heartbeat stamp or a write where `old_data =
- * new_data`. archived migration 0005 stops recording those and stamps `actor_source` on what remains, so
- * a blank author now means a genuine gap rather than "a machine did something routine".
+ * Digital Thread filter bar and actor attribution. The audit trigger stops recording heartbeat
+ * stamps and no-op writes and stamps `actor_source` on what remains, so a blank author means a
+ * genuine gap.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
@@ -15,19 +11,8 @@ import path from 'node:path'
 import { DigitalThreadTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow } from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
 
-/*
- * NEWLINES NORMALISED ON READ, because `cssRule()` below matches multi-line SELECTORS and its
- * patterns are written with `\n`.
- *
- * .gitattributes normalises this file to LF in the repository and checks it out with the
- * platform's native ending, so on Windows it arrives as CRLF and every one of those patterns
- * silently matches nothing -- `cssRule()` returns undefined and the failure reads as
- * ".toMatch() expects to receive a string". Three guards here were failing for that reason alone,
- * on a working tree whose CSS was correct, while CI on Linux passed.
- *
- * Normalising is the right fix rather than teaching each pattern about \r?\n: the guards are about
- * what the rules SAY, and line endings are not part of that.
- */
+/* Newlines normalised on read, because `cssRule()` matches multi-line selectors with `\n` and
+   .gitattributes checks this file out with the platform's native ending, CRLF on Windows. */
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
 
 vi.mock('../api', async () => {
@@ -43,9 +28,8 @@ const DEVICES = [
 ]
 
 /**
- * These fixtures are dated 2026-08-02 and are never refreshed, which is deliberate: the page's
- * default range is All time, and a suite that only passed while its fixtures were recent would
- * be asserting the calendar rather than the component.
+ * These fixtures are dated 2026-08-02 and never refreshed: the page's default range is All time,
+ * and a suite that only passed while its fixtures were recent would be asserting the calendar.
  */
 const EVENTS = [
   {
@@ -61,18 +45,16 @@ const EVENTS = [
     changed_by: null, actor_source: 'ingestion',
     old_data: null, new_data: { id: 'gw-1', name: 'Virtual_Gateway_NodeRED', status: 'ONLINE' }
   },
-  // A cell that no longer exists, which is what a DELETE means: it is absent from CELLS above
-  // because /api/v1/cells cannot return a row that was deleted. The join can therefore never
-  // name it -- but its final snapshot can, which is the second fall of the resolver.
+  // A cell that no longer exists, which is what a DELETE means: absent from CELLS because
+  // /api/v1/cells cannot return a deleted row, so only its final snapshot can name it.
   {
     event_id: 3, entity_type: 'cells', entity_id: 'cell-gone', event_type: 'DELETE',
     timestamp: '2026-08-02T10:00:00Z', description: 'Action DELETE on cells [cell-gone]',
     changed_by: null, actor_source: null,
     old_data: { id: 'cell-gone', name: 'Decommissioned Line' }, new_data: null
   },
-  // A schema rebinding, which is what separates the amber class from the blue one. There is no
-  // SCHEMA action in the database -- it is an UPDATE that touched `schema_id` -- so this row is
-  // the only thing standing between the classifier and a timeline with three colours.
+  // A schema rebinding, which separates the amber class from the blue one. There is no SCHEMA
+  // action in the database; it is an UPDATE that touched `schema_id`.
   {
     event_id: 4, entity_type: 'devices', entity_id: 'dev-2', event_type: 'UPDATE',
     timestamp: '2026-08-02T09:00:00Z', description: 'Action UPDATE on devices [dev-2]',
@@ -113,11 +95,8 @@ beforeEach(() => {
 })
 
 /**
- * Ready when the lanes are drawn.
- *
- * This used to wait on a row's description text, which the swimlane no longer prints -- a lane is
- * one ASSET and a description belongs to one EVENT, so it moved into the marker's tooltip and the
- * drawer. The lane label is the equivalent signal that the page has resolved its joins.
+ * Ready when the lanes are drawn: the lane label is the signal that the page has resolved its
+ * joins.
  */
 const show = async () => {
   render(<DigitalThreadTab />)
@@ -125,16 +104,9 @@ const show = async () => {
 }
 
 /**
- * Render with purged assets INCLUDED.
- *
- * Hiding them is the page default (issue #44). Several suites below are ABOUT the two purged
- * entities in the fixture -- `cell-gone` carries the deleted-name fallback and the only DELETE,
- * and the orphan uuid on event 6 is the only entity with no name anywhere -- so for those the
- * toggle is the subject of the test rather than incidental setup.
- *
- * Turning it on here rather than relaxing each assertion is deliberate: the alternative was to
- * expect the smaller numbers, which would have quietly converted tests about three sections and a
- * DELETE marker into tests about two sections and no DELETE.
+ * Render with purged assets included. Hiding them is the page default, and several suites below are
+ * about the two purged entities in the fixture, so the toggle is the subject rather than incidental
+ * setup.
  */
 const showAll = async () => {
   await show()
@@ -163,10 +135,8 @@ describe('Digital Thread filter bar', () => {
     expect(document.querySelector('.filter-bar')).toBeTruthy()
     expect(screen.getByTitle(/Show only events against one kind of asset/)).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/Search by entity name or ID/)).toBeInTheDocument()
-    // The wording is load-bearing, not incidental. This control filters `digital_thread.action`,
-    // while the coloured markers below it show a DERIVED classification -- two taxonomies on one
-    // screen, which issue #37 reported as a single one with a missing option. See
-    // digitalThreadActionFilter.test.jsx.
+    // The wording is load-bearing: this control filters `digital_thread.action`, while the coloured
+    // markers show a derived classification. See digitalThreadActionFilter.test.jsx.
     expect(screen.getByTitle(/Filter by the database action/)).toBeInTheDocument()
     expect(rangeSelect()).toBeInTheDocument()
   })
@@ -219,13 +189,9 @@ describe('Digital Thread filter bar', () => {
 })
 
 /**
- * The time range.
- *
- * PUSHED DOWN, and that is the whole point of the control rather than an implementation detail.
- * `limit=200` is applied by the database to rows ordered newest-first, so a window filtered in
- * the browser would spend its entire row budget on events outside the window and then discard
- * them -- "Last 30 Days" could legitimately render fewer events than "Last 24 Hours". These
- * assert on the URL because that is where the difference is observable.
+ * The time range is pushed down: `limit=200` is applied by the database to rows ordered
+ * newest-first, so a window filtered in the browser would spend its row budget on events outside
+ * the window. These assert on the URL because that is where the difference is observable.
  */
 describe('Digital Thread time range', () => {
   it('defaults to All time and sends no bound at all', async () => {
@@ -236,12 +202,8 @@ describe('Digital Thread time range', () => {
     expect(lastThreadUrl()).not.toContain('until=')
   })
 
-  /*
-    The default matters more here than a default usually does. The page's main entry path is a
-    handover -- "Digital Thread" on a device row -- and under any rolling default an asset whose
-    last edit was at install time answers that click with an empty timeline. These fixtures are
-    two weeks old and must still render.
-  */
+  /* The default is unbounded: the page's main entry path is a handover from a device row, and under
+     a rolling default an asset last edited at install time would answer with an empty timeline. */
   it('renders events far older than any rolling window, because the default is unbounded', async () => {
     await showAll()
     expect(nodes().length).toBe(EVENTS.length)
@@ -269,9 +231,8 @@ describe('Digital Thread time range', () => {
 
     await waitFor(() => expect(lastThreadUrl()).toContain('until='))
     const params = new URL(lastThreadUrl(), 'http://x').searchParams
-    // LOCAL, not UTC: an operator choosing 09:30 means 09:30 where they are standing. The end
-    // bound is widened to the end of that MINUTE, or everything during 09:45 would be excluded by
-    // a range the operator read as including it.
+    // Local, not UTC: an operator choosing 09:30 means 09:30 where they stand. The end bound is
+    // widened to the end of that minute.
     expect(new Date(params.get('since')).getTime())
       .toBe(new Date('2026-08-01T09:30:00.000').getTime())
     expect(new Date(params.get('until')).getTime())
@@ -279,12 +240,8 @@ describe('Digital Thread time range', () => {
   })
 
   it('takes a window narrower than a day, which the date pickers could not express', async () => {
-    /*
-     * THE WHOLE POINT OF THE SUB-DAY ZOOM WORK. `type="date"` bounded the narrowest
-     * expressible window at 24 hours, so on a stack commissioned this morning "All time" and
-     * "today" drew the same picture -- and a commissioning burst stayed in a few pixel columns
-     * however the page was filtered.
-     */
+    /* The point of the sub-day zoom: `type="date"` bounded the narrowest window at 24 hours, so on
+       a stack commissioned this morning "All time" and "today" drew the same picture. */
     await show()
     fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
     fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T16:11' } })
@@ -298,15 +255,9 @@ describe('Digital Thread time range', () => {
   })
 
   it('still understands a date-only bound, tested on the function rather than the input', () => {
-    /*
-     * A `datetime-local` input REFUSES a date-only value -- the browser and jsdom both leave the
-     * field empty rather than accept `2026-08-01` -- so this cannot be driven through the DOM, and
-     * a test that tried would be asserting that the input rejected it.
-     *
-     * The branch is kept because `timeWindow` is an exported pure function with its own contract:
-     * a bare date means the whole of that day. It is no longer reachable from this page's controls,
-     * which is why it is tested here and not through them.
-     */
+    /* A `datetime-local` input refuses a date-only value, so this cannot be driven through the DOM.
+       `timeWindow` is an exported pure function whose contract says a bare date means the whole of
+       that day, so it is tested directly. */
     const { since, until } = timeWindow('custom', '2026-08-01', '2026-08-03')
     expect(new Date(since).getTime()).toBe(new Date('2026-08-01T00:00:00.000').getTime())
     expect(new Date(until).getTime()).toBe(new Date('2026-08-03T23:59:59.999').getTime())
@@ -348,15 +299,9 @@ describe('Digital Thread time range', () => {
     await waitFor(() => expect(screen.getByText(/Widen it, or switch back to All time/)).toBeInTheDocument())
   })
 
-  // A source guard on the pushdown itself. The component can only be observed asking for a
-  // window; that the API turns the ask into a SQL predicate rather than a client-side filter is
-  // the part that would be silently reverted, and the symptom would be a wrong row count rather
-  // than an error.
-  //
-  // THE MECHANISM MOVED AND THE GUARD FOLLOWED IT. The bounds used to be `query.gte(...)` on a
-  // PostgREST builder; archived migration 0039 made this page an RPC, because the deleted-asset filter is
-  // an anti-join PostgREST cannot express. They are arguments now. What must stay true is
-  // unchanged: the window reaches the database, and is not applied to rows the limit already cut.
+  // A source guard on the pushdown: the window must reach the database as RPC arguments and not be
+  // applied to rows the limit already cut, and a silent reversion would show as a wrong row count
+  // rather than an error.
   it('applies the bounds as arguments to the page RPC, not as a client-side filter', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../api.js'), 'utf8')
     expect(source).toMatch(/supabase\.rpc\('digital_thread_page'/)
@@ -369,11 +314,8 @@ describe('Digital Thread time range', () => {
 })
 
 /**
- * The swimlanes.
- *
- * One lane per audited entity, ordered busiest first. Stable ordering is asserted because lanes
- * that reshuffle between refreshes are worse than a flat list: the marker under the cursor is
- * not the one that gets clicked.
+ * The swimlanes: one lane per audited entity, ordered busiest first. Stable ordering is asserted
+ * because lanes that reshuffle between refreshes put a different marker under the cursor.
  */
 describe('Digital Thread swimlanes', () => {
   it('draws one lane per entity, not one row per event', async () => {
@@ -403,14 +345,8 @@ describe('Digital Thread swimlanes', () => {
     expect(screen.getByRole('button', { name: /Copy entity id dev-1/ })).toBeInTheDocument()
   })
 
-  /*
-    Name resolution, all three falls.
-
-    The second one is the one that earns its keep. A deleted entity is gone from /api/v1/cells, so
-    the join can NEVER resolve it -- but its final audit snapshot holds the name it had when it
-    died, which is the name an operator remembers it by. Without that fall, every deleted asset on
-    this page is a UUID.
-  */
+  /* Name resolution, all three falls. The second earns its keep: a deleted entity is gone from
+     /api/v1/cells, but its final audit snapshot holds the name it had when it died. */
   it('resolves a name by joining against the live entities', async () => {
     await show()
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
@@ -433,13 +369,8 @@ describe('Digital Thread swimlanes', () => {
     expect(within(lane).queryByText('deleted')).toBeNull()
   })
 
-  /*
-    Sections.
-
-    The cap is applied BEFORE the cut, not per section: fifteen lanes each would be forty-five rows
-    on a page whose point is that one asset's history is comparable against its neighbours' without
-    scrolling.
-  */
+  /* Sections. The cap is applied before the cut, not per section, so one asset's history is
+     comparable against its neighbours' without scrolling. */
   it('groups lanes under Cells, Gateways and Devices, in containment order', async () => {
     await showAll()
     const headings = [...document.querySelectorAll('.dt-section .dt-section-name')]
@@ -475,14 +406,8 @@ describe('Digital Thread swimlanes', () => {
   })
 
   it('folds the long tail of lanes behind a toggle', async () => {
-    /*
-     * FORTY LANES, against a cap of thirty. This used to build twenty against a cap of fifteen --
-     * which stopped demonstrating anything once the cap moved, because twenty no longer overflows.
-     *
-     * The bulk assets are also returned by the devices lookup, so none of them reads as purged.
-     * Without that they would all be hidden by default and the page would draw nothing at all,
-     * making this a test of the purge filter wearing a lane-fold test's clothes.
-     */
+    /* Forty lanes against a cap of thirty. The bulk assets are also returned by the devices lookup,
+       so none reads as purged and hidden by default. */
     const many = Array.from({ length: 40 }, (_, i) => ({
       event_id: 100 + i, entity_type: 'devices', entity_id: `bulk-${i}`, event_type: 'UPDATE',
       timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: null, actor_source: 'service'
@@ -506,12 +431,8 @@ describe('Digital Thread swimlanes', () => {
 })
 
 /**
- * The time axis.
- *
- * ONE RULE, asserted directly rather than through the DOM: two adjacent ticks must never print the
- * same string. Every band exists because the coarser format above it collapses at that span --
- * five ticks across ten minutes all read `14:03`, and five across a 31-day span all read
- * `Aug 2026`. A label that repeats is not an axis.
+ * The time axis. One rule, asserted directly: two adjacent ticks must never print the same string.
+ * Every band exists because the coarser format above it collapses at that span.
  */
 describe('Digital Thread time axis', () => {
   const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR
@@ -544,11 +465,8 @@ describe('Digital Thread time axis', () => {
     expect(allDistinct(20 * DAY)).toBe(true)
   })
 
-  /*
-    The band that catches people out. `MMM YYYY` is the obvious label past thirty days and it is
-    the one that breaks: five ticks across a 31-day span sit about eight days apart and all read
-    the same month. An ISO date never repeats at any span this rule covers.
-  */
+  /* The band that catches people out: `MMM YYYY` past thirty days repeats across five ticks over a
+     31-day span. An ISO date never repeats at any span this rule covers. */
   it('never repeats a label at any span, including the ones just past a month', () => {
     for (const span of [31 * DAY, 45 * DAY, 90 * DAY, 182 * DAY, 400 * DAY, 3 * 365 * DAY]) {
       expect(allDistinct(span), `${span / DAY} days produced a repeated tick label`).toBe(true)
@@ -570,12 +488,9 @@ describe('Digital Thread time axis', () => {
 })
 
 /**
- * The derived marker taxonomy.
- *
- * `digital_thread.action` is written from TG_OP and holds only INSERT / UPDATE / DELETE -- there
- * is no QUARANTINE action, no ARCHIVE action and no SCHEMA action in the database. Archiving,
- * quarantining and schema rebinding are all UPDATEs, distinguished only by what the diff touched,
- * so the classifier is the only thing that tells them apart and it is worth pinning down.
+ * The derived marker taxonomy. `digital_thread.action` holds only INSERT / UPDATE / DELETE;
+ * archiving, quarantining and schema rebinding are all UPDATEs distinguished by what the diff
+ * touched, so the classifier is the only thing that tells them apart.
  */
 describe('Digital Thread event classification', () => {
   const classOf = (pattern) => nodeFor(pattern).className
@@ -609,12 +524,9 @@ describe('Digital Thread event classification', () => {
     expect(critical.length).toBe(2)
   })
 
-  /*
-    Shapes taken from a reseeded stack rather than invented, because the classifier's failure mode
-    is not an error -- it is a plausible-looking wrong colour. On 40 real audit rows the commonest
-    event by far is a device's first DBIRTH, and it arrives as ONE update touching three columns
-    at once. Classifying on any of the three in isolation gets it wrong.
-  */
+  /* Shapes taken from a reseeded stack: the commonest event is a device's first DBIRTH, which
+     arrives as one update touching three columns at once, and classifying on any one in isolation
+     gets it wrong. */
   it('calls a real first DBIRTH operational, not governance', () => {
     const event = {
       event_type: 'UPDATE',
@@ -634,12 +546,8 @@ describe('Digital Thread event classification', () => {
     expect(classifyEvent(event, diffFields(event.old_data, event.new_data))).toBe('operational')
   })
 
-  /*
-   * THE DATABASE'S JUDGEMENT, PROMOTED INTO THE ROW (0070). `classifyEvent()` used to derive
-   * "is this about who may do what" by hand, in the one place it could not enforce anything.
-   * `audit_domain` is now stamped at insert time by one closed classifier, so the browser reads
-   * the decision rather than re-making it -- and the two cannot disagree.
-   */
+  /* The database's judgement, read from the row: `audit_domain` is stamped at insert time by one
+     closed classifier, so the browser does not re-derive "is this about who may do what". */
   it('calls any security-domain row governance, whatever its verb', () => {
     // A service principal's INSERT is the case that used to come out green. Nothing was created
     // on the shopfloor; somebody was given a way to reach the stack.
@@ -676,11 +584,8 @@ describe('Digital Thread event classification', () => {
 })
 
 /**
- * The drawer.
- *
- * The diff is built HERE, in the page, and handed to ContextPanel through `beforeActions`.
- * ContextPanel is presentational by contract and knows nothing about audit payloads; teaching it
- * to read `old_data` would make it a fifth thing with one caller.
+ * The drawer. The diff is built here and handed to ContextPanel through `beforeActions`;
+ * ContextPanel is presentational and knows nothing about audit payloads.
  */
 describe('Digital Thread event drawer', () => {
   it('stays shut until an event is clicked', async () => {
@@ -714,9 +619,9 @@ describe('Digital Thread event drawer', () => {
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
-    // archived migration 0005 already suppresses heartbeat-ONLY updates at the source. This is the
-    // residue: a real edit that also bumped the heartbeat, which would otherwise open every
-    // diff with a line nobody came to read.
+    // The trigger already suppresses heartbeat-only updates. This is the residue: a real edit that
+    // also bumped the heartbeat, which would otherwise open every diff with a line nobody came to
+    // read.
     expect(within(document.querySelector('.dt-diff-table')).queryByText('last_heartbeat')).toBeNull()
   })
 
@@ -748,16 +653,9 @@ describe('Digital Thread event drawer', () => {
     expect(screen.getByRole('button', { name: /Copy mutation id 1$/ })).toBeInTheDocument()
   })
 
-  /*
-    The property names collided with the values beside them, and the cause was INHERITED.
-
-    The global `th` rule sets `white-space: nowrap`, `text-transform: uppercase` and 0.8px of
-    letter-spacing for every table header in the app. Each property name here is a
-    `<th scope="row">`, so it took all three: `last_birth_metrics_at` rendered as
-    LAST_BIRTH_METRICS_AT on one unbreakable line, straight across the value beside it. Wrapping
-    rules cannot help while `nowrap` stands -- there is nothing for them to act on -- so the reset
-    is the fix and is what these assert. jsdom does no layout; the guard is on the rule.
-  */
+  /* The global `th` rule sets `white-space: nowrap`, `text-transform: uppercase` and letter-spacing
+     for every table header, and each property name here is a `<th scope="row">`. The reset is the
+     fix and is what these assert; jsdom does no layout, so the guard is on the rule. */
   const cssRule = (s) =>
     APP_CSS.match(new RegExp(`\\n${s.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
   const CELL_RULE = '.dt-diff-table th,\n.dt-diff-table td'
@@ -821,23 +719,17 @@ describe('Digital Thread event drawer', () => {
 })
 
 /**
- * Stepping through one asset's history.
- *
- * ASCENDING, against the descending order the list is fetched in. This is the one place on the
- * page that reads as a story rather than a feed: Previous has to go back in time and Next
- * forward, which is the only mapping that survives someone thinking about it.
+ * Stepping through one asset's history: ascending, against the descending fetch order, because
+ * Previous has to go back in time and Next forward.
  */
 describe('Digital Thread drawer navigation', () => {
   const prev = () => screen.getByRole('button', { name: /Previous/ })
   const next = () => screen.getByRole('button', { name: /Next/ })
   const position = () => document.querySelector('.dt-drawer-nav-pos').textContent
 
-  /*
-    Targeted by TOOLTIP, not by lane. Press_02's two markers carry the same aria-label prefix and
-    sit in DOM order newest-first, so picking "the first UPDATE on Press_02" silently selects the
-    LATEST event -- and a Next test that starts at the end passes without stepping anything. The
-    tooltip names the classification, which is what distinguishes these two.
-  */
+  /* Targeted by tooltip, not by lane: Press_02's two markers carry the same aria-label prefix and
+     sit newest-first, so "the first UPDATE on Press_02" would select the latest event. The tooltip
+     names the classification. */
   const markerByTooltip = (substr) => nodes().find(n => n.getAttribute('title').includes(substr))
   const OLDEST = 'UPDATE · Lifecycle'      // the 08:00 archival
   const NEWEST = 'UPDATE · Configuration'  // the 09:00 schema rebind
@@ -910,12 +802,9 @@ describe('Digital Thread drawer navigation', () => {
 })
 
 /**
- * Actor attribution.
- *
- * It moved from a badge on every row into the drawer and the marker tooltip: an actor belongs to
- * one EVENT, and a lane is one ASSET. The substance is unchanged -- `changed_by IS NULL` was the
- * normal case rather than an anomaly until archived migration 0005 stopped recording machine non-events
- * and stamped `actor_source` on what remained, so a blank author now means a genuine gap.
+ * Actor attribution, in the drawer and the marker tooltip: an actor belongs to one event, and a
+ * lane is one asset. A blank author means a genuine gap, since the trigger no longer records
+ * machine non-events.
  */
 describe('Digital Thread attribution', () => {
   it('labels a user-made change as User', async () => {
@@ -956,9 +845,8 @@ describe('Digital Thread attribution', () => {
   })
 })
 
-// The "Any device type" tag filter was a holdover and has been removed. Asserted negatively so
-// it cannot drift back in: it also pulled a /api/v1/schemas fetch and the whole deviceTags
-// derivation into a page that has no other use for either.
+// There is no tag filter on this page. Asserted negatively so it cannot drift back: it also pulled
+// a /api/v1/schemas fetch and the deviceTags derivation into a page with no other use for them.
 describe('Digital Thread — removed tag filter', () => {
   it('offers no device-type filter', async () => {
     await show()
@@ -970,10 +858,9 @@ describe('Digital Thread — removed tag filter', () => {
   it('leaves exactly four filter controls, six in the custom range mode', async () => {
     await show()
 
-    // Direct children only. Export and auto-refresh fold into the right-hand end of this same
-    // bar (`.filter-bar-actions`), and the refresh interval is a <select> -- so a descendant
-    // selector would count a control that filters nothing and this guard would be asserting the
-    // wrong thing.
+    // Direct children only: Export and auto-refresh fold into `.filter-bar-actions`, and the
+    // refresh interval is a <select>, so a descendant selector would count a control that filters
+    // nothing.
     const controls = () => document.querySelectorAll('.filter-bar > select, .filter-bar > input')
     expect(controls().length).toBe(4)
 
@@ -984,20 +871,9 @@ describe('Digital Thread — removed tag filter', () => {
   })
 
   it('puts export in the card header, where a card keeps its actions', async () => {
-    /*
-     * THIS ASSERTED THE FILTER BAR, AND THE REASONING HAS MOVED ON TWICE.
-     *
-     * Export began in a `.page-actions` row of its own -- a band holding one button -- and was
-     * folded into the filter bar on the grounds that what it writes is decided by the filters, so
-     * it belonged at the end of the row that decides it.
-     *
-     * That is an argument about PROXIMITY. The stronger one is about what the control IS: it does
-     * not filter anything, and a card keeps its actions in the header at title height. So it sits
-     * there now, and the count stays the FILTERED count -- which is the half of the proximity
-     * argument worth keeping, because the button still says how many rows it will write.
-     *
-     * `.page-actions` must still not come back. That part of the original finding stands.
-     */
+    /* Export sits in the card header at title height, because it does not filter anything, and the
+       count stays the filtered count so the button says how many rows it will write.
+       `.page-actions` must not come back. */
     await show()
 
     expect(document.querySelector('.page-actions')).toBeNull()
@@ -1010,13 +886,8 @@ describe('Digital Thread — removed tag filter', () => {
   })
 
   it('no longer offers the auto-refresh control, having replaced it with a poll (issue #42)', async () => {
-    /*
-     * WHAT WAS REPORTED: the field was unneeded, because a default auto-update does the same job.
-     *
-     * It defaulted to Off, so the page was static until somebody noticed the control and picked a
-     * value -- and it then offered 1s and 5s against an audit log that only changes when an
-     * operator does something. Neither end of that range was useful.
-     */
+    /* The refresh-interval field is gone: a default auto-update does the job, and 1s and 5s options
+       were never useful against an audit log that only changes when an operator acts. */
     await show()
 
     expect(screen.queryByTitle('Auto-refresh interval')).not.toBeInTheDocument()
@@ -1024,14 +895,9 @@ describe('Digital Thread — removed tag filter', () => {
   })
 
   it('polls every 60 seconds without blanking the timeline (issue #42)', async () => {
-    /*
-     * THE HALF THAT MATTERS. Removing a control and adding nothing would leave a page that never
-     * updates, and the assertion above -- that the control is gone -- would still pass.
-     *
-     * `load(false)`, not `load(true)`: the flag raises the loading state and swaps the timeline for
-     * a spinner, which is right on first paint and a flicker every minute afterwards. This asserts
-     * the refetch happens AND that the lanes are still on screen when it does.
-     */
+    /* The half that matters: removing the control and adding nothing would leave a page that never
+       updates. `load(false)`, not `load(true)`, so the lanes stay on screen during the refetch
+       rather than swapping for a spinner every minute. */
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       render(<DigitalThreadTab />)
@@ -1052,38 +918,22 @@ describe('Digital Thread — removed tag filter', () => {
     }
   })
 
-  /*
-   * Hiding events whose asset is gone (issue #44).
-   *
-   * WHAT WAS REPORTED: a Test gateway created in error, never brought online, since deleted -- and
-   * still occupying the timeline. The reporter also proposed deleting the records outright; that
-   * half is deliberately NOT built here. `digital_thread` is append-only and 0026 revoked DELETE
-   * even from `service_role`, so removing rows is an administrative act, not a filter. Hiding is
-   * the part that answers the complaint without asserting anything about what was kept.
-   *
-   * THE FIXTURE ALREADY CONTAINED THE CASE: `cell-gone` and the orphan UUID on event 6 appear in
-   * EVENTS and in none of CELLS/GATEWAYS/DEVICES, which is exactly what a purged asset looks like.
-   */
+  /* Hiding events whose asset is gone. `digital_thread` is append-only and DELETE is revoked even
+     from `service_role`, so hiding is a filter and removal is an administrative act. The fixture
+     already contains the case: `cell-gone` and the orphan UUID on event 6. */
   describe('events for assets that no longer exist', () => {
     const toggle = () => screen.getByRole('button', { name: /Show deleted assets/i })
 
     it('counts distinct ASSETS, not the events belonging to them', async () => {
-      /*
-       * The reported bug: the control read "(54)" on a page whose own header said 16 assets, so the
-       * number could only be parsed as a count of something else. Two purged entities in the
-       * fixture -- `cell-gone` and the orphan uuid on event 6 -- so the answer is 2 however many
-       * rows they own between them.
-       */
+      /* The control counts purged entities, not their rows: two in the fixture, however many rows
+         they own. */
       await show()
       expect(toggle()).toHaveTextContent('Show deleted assets (2)')
     })
 
     it('hides them by default, and that is not an active filter', async () => {
-      /*
-       * The resting view is the live plant. A deleted Test gateway is noise on every visit, and
-       * Clear filters must not appear merely because the page is in its default state -- the
-       * contract every other control in this bar has is that clearing restores the resting view.
-       */
+      /* The resting view is the live plant, and Clear filters must not appear merely because the
+         page is in its default state. */
       await show()
 
       expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)')
@@ -1109,12 +959,9 @@ describe('Digital Thread — removed tag filter', () => {
     })
 
     it('is styled as the toggle Gateways and Cells already use', async () => {
-      /*
-       * Has quarantined devices (Gateways) and Empty (Cells) are both `btn btn-sm`, ghost at rest
-       * and primary when engaged, with an icon and a count. This was a bare checkbox -- the only
-       * control of its kind in the app. Unlit at rest is also why the label says Show rather than
-       * Hide: with hiding as the default, a Hide button would load already pressed.
-       */
+      /* The same control shape as Has quarantined devices and Empty: `btn btn-sm`, ghost at rest
+         and primary when engaged, with an icon and a count. The label says Show because hiding is
+         the default. */
       await show()
       expect(toggle()).toHaveClass('btn', 'btn-sm', 'btn-ghost')
       expect(toggle()).not.toHaveClass('btn-primary')
@@ -1136,11 +983,8 @@ describe('Digital Thread — removed tag filter', () => {
     })
 
     it('hides the control when nothing would be hidden', async () => {
-      /*
-       * The overwhelmingly common case on a healthy stack. A permanent control reading "(0)" is one
-       * whose relationship to the page has to be guessed at -- the same reasoning that keeps the
-       * custom date inputs out of the bar until the custom preset is chosen.
-       */
+      /* The common case on a healthy stack: a permanent control reading "(0)" is one whose
+         relationship to the page has to be guessed at. */
       api.get.mockImplementation((path) => {
         if (path.startsWith('/api/v1/digital-thread')) {
           return Promise.resolve(EVENTS.filter(e => ['dev-1', 'dev-2', 'gw-1'].includes(e.entity_id)))
@@ -1156,15 +1000,9 @@ describe('Digital Thread — removed tag filter', () => {
     })
 
     it('hides nothing while the asset lookups are still outstanding', async () => {
-      /*
-       * THE BUG THIS PREVENTS, and it would have been silent. The purged test is absence from the
-       * three lookups, and before those resolve EVERY entity_id is absent -- so filtering eagerly
-       * would classify the whole page as deleted and, with hiding now the DEFAULT, blank it
-       * outright with no interaction at all.
-       *
-       * Lookups that never resolve are the same situation as lookups still in flight, so this also
-       * covers the failure path: unable to tell purged from live means hide nothing.
-       */
+      /* The purged test is absence from the three lookups, and before those resolve every entity_id
+         is absent, so filtering eagerly would blank the page. Lookups that never resolve are the
+         same situation: unable to tell purged from live means hide nothing. */
       api.get.mockImplementation((path) => {
         if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
         return new Promise(() => {})   // never resolves
@@ -1177,13 +1015,8 @@ describe('Digital Thread — removed tag filter', () => {
     })
 
     it('does not treat an ARCHIVED asset as deleted', async () => {
-      /*
-       * The distinction the whole filter rests on, and it matters more now that hiding is the
-       * default: /api/v1/devices does not filter is_archived, so an archived device is still in the
-       * lookup and is therefore still live as far as this filter is concerned. Getting it wrong
-       * would silently drop a retired -- but recoverable -- asset's whole history from the resting
-       * view.
-       */
+      /* An archived device is still in the /api/v1/devices lookup and is therefore live as far as
+         this filter is concerned; getting it wrong would drop a recoverable asset's whole history. */
       api.get.mockImplementation((path) => {
         if (path.startsWith('/api/v1/digital-thread')) {
           return Promise.resolve(EVENTS.filter(e => e.entity_id === 'dev-2'))
@@ -1202,16 +1035,12 @@ describe('Digital Thread — removed tag filter', () => {
     })
   })
 
-  /*
-   * The swimlane redesign: contained track cards rather than ruled rows.
-   *
-   * ASSERTED THROUGH THE STYLESHEET, using the `cssRule()` helper this file already uses for the
-   * other CSS guards. The rules are what make a lane read as one asset's stretch of time; jsdom
-   * applies no layout, so the DOM cannot answer whether a track has edges.
+  /* The swimlane redesign: contained track cards rather than ruled rows, asserted through the
+     stylesheet because jsdom applies no layout. */
+  /**
+   * The rule body for a selector, from the stylesheet on disk. Local to these two describes; the
+   * diff-table guards further down carry their own.
    */
-  /** The rule body for a selector, from the stylesheet on disk. jsdom applies no layout, so a
-      question about whether a track has edges can only be asked of the CSS. Local to these two
-      describes; the diff-table guards further down carry their own. */
   const ruleFor = (selector) => {
     const escaped = selector.replace(/[.:()\-*+?^${}|[\]\\]/g, '\\$&')
     return APP_CSS.match(new RegExp(`\\n${escaped} \\{([\\s\\S]*?)\\n\\}`))?.[1]
@@ -1233,11 +1062,8 @@ describe('Digital Thread — removed tag filter', () => {
     })
 
     it('keeps a centre guideline lighter than the container edge', async () => {
-      /*
-       * At the old 2px in the border colour, the guideline weighed the same as the track's own
-       * border and a lane read as three stacked rules. It says where the timeline runs; the
-       * markers are what the eye should find.
-       */
+      /* The guideline is lighter than the track's own border so a lane does not read as three
+         stacked rules. */
       const rule = ruleFor('.dt-track::before')
       expect(rule).toMatch(/height:\s*1px/)
       expect(rule).toMatch(/opacity:/)
@@ -1252,13 +1078,9 @@ describe('Digital Thread — removed tag filter', () => {
     })
 
     it('draws the label as a pill without breaking its scroll-under opacity', async () => {
-      /*
-       * TWO JOBS IN TENSION. The label is sticky so markers pass UNDER it, which needs an opaque
-       * background in the card's colour; it should also read as a container, which wants a lighter
-       * inset surface. The pill is therefore drawn by ::before, and the element itself stays
-       * opaque -- if that were swapped for a translucent pill background, dots would show through
-       * the asset name as they scrolled past.
-       */
+      /* Two jobs in tension: the label is sticky so markers pass under it, which needs an opaque
+         background in the card's colour, and it should read as a container. The pill is drawn by
+         ::before and the element stays opaque. */
       expect(ruleFor('.dt-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
       expect(ruleFor('.dt-lane-label::before')).toMatch(/border-radius:/)
     })
@@ -1275,33 +1097,22 @@ describe('Digital Thread — removed tag filter', () => {
 
   describe('the selected marker is findable among the ones it is stacked with', () => {
     it('rings the active node in a solid accent rather than a halo', async () => {
-      /*
-       * `--accent-glow` alone is translucent: it reads well against the card background and almost
-       * disappears against the neighbours a dense stretch of track puts either side of it. The
-       * inner gap in the card colour is what separates the selected mark from what it sits among.
-       */
+      /* `--accent-glow` alone is translucent and almost disappears in a dense stretch of track; the
+         inner gap in the card colour separates the selected mark. */
       const rule = ruleFor('.dt-node-selected')
       expect(rule).toMatch(/var\(--accent\)/)
       expect(rule).toMatch(/var\(--bg-card\)/)
     })
 
     it('is shared with the cluster badge rather than being a .dt-node compound', async () => {
-      /*
-       * WHAT LETS A BADGE CARRY THE RING while the drawer steps through the events inside it. If
-       * this were written `.dt-node.dt-node-selected`, a selected group would show no highlight
-       * at all -- and the page would look, at exactly the densest moments, as though Previous and
-       * Next were doing nothing.
-       */
+      /* What lets a badge carry the ring while the drawer steps through the events inside it.
+         Written `.dt-node.dt-node-selected`, a selected group would show no highlight. */
       expect(APP_CSS).toContain('\n.dt-node-selected {')
       expect(APP_CSS).not.toContain('.dt-node.dt-node-selected {')
     })
 
     it('paints the cluster badge outside the four-colour classification', async () => {
-      /*
-       * A BADGE IS NOT A KIND OF EVENT, it is a count -- and a group routinely holds two or three
-       * of the four kinds, so borrowing any one of their fills would assert a classification the
-       * group does not have. Guarded because the tempting shortcut is to reach for --accent.
-       */
+      /* A badge is a count, not a kind of event, so it borrows none of the four fills. */
       const rule = ruleFor('.dt-cluster')
       expect(rule).toMatch(/var\(--cluster/)
       for (const kind of ['--accent', '--success', '--warning', '--danger']) {
@@ -1329,13 +1140,8 @@ describe('Digital Thread — removed tag filter', () => {
   })
 
   it('fetches schemas to NAME them, not to derive tags from them', async () => {
-    // THE FETCH IS BACK, FOR A DIFFERENT REASON, and the distinction is the point of this test.
-    // It was removed with the tag filter, which was the only thing deriving anything from a
-    // schema's definition. It returned when the audit log needed to say WHICH schema an event was
-    // about: 0070 put `schemas` in the audit trigger and this page's name lookup was never
-    // widened, so every schema event rendered as a bare uuid -- and, because absence from that
-    // lookup is how this page recognises a PURGED asset, was also being counted as an event about
-    // something deleted.
+    // The schema fetch exists so the audit log can say which schema an event was about: schemas are
+    // audited, and absence from the name lookup is how this page recognises a purged asset.
     await show()
 
     const urls = api.get.mock.calls.map(c => c[0])
@@ -1364,9 +1170,8 @@ describe('Digital Thread — removed tag filter', () => {
     })
     render(<DigitalThreadTab />)
 
-    // THE VERSION IS PART OF THE NAME. A lineage is a chain of rows sharing one `schema_name` and
-    // differing only in `version`, so the name alone would label three rows identically -- and
-    // which version something happened to is the whole point of a schema's audit trail.
+    // The version is part of the name: a lineage is a chain of rows sharing one `schema_name`, and
+    // which version something happened to is the point of a schema's audit trail.
     await waitFor(() => expect(screen.getByText('Test-Schema v2')).toBeInTheDocument())
     expect(screen.queryByText(SCHEMA_ID)).toBeNull()
   })
@@ -1380,14 +1185,9 @@ describe('Digital Thread — removed tag filter', () => {
 })
 
 /**
- * Timeline density and layout.
- *
- * jsdom does no layout, so the numbers are read from App.css. The point of guarding them is that
- * each encodes a decision that looks arbitrary to the next person to open the file: a lane is
- * 32px because ~200 audit rows across a dozen assets have to fit on a screen, and the label is
- * sticky because the drawer is a flex SIBLING of this list -- opening it takes 360px off the
- * width, and without the sticky label the assets scroll out of view exactly when an operator is
- * comparing one against the drawer.
+ * Timeline density and layout, read from App.css since jsdom does no layout: a lane is 32px so ~200
+ * audit rows across a dozen assets fit on a screen, and the label is sticky because opening the
+ * drawer takes width off this list.
  */
 describe('Digital Thread timeline density', () => {
   const rule = (selector) =>

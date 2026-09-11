@@ -5,40 +5,16 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { IconShieldAlert, IconX } from '../common/Icons'
 
 /**
- * One principal's tokens, and the only place a token can be withdrawn.
- *
- * =================================================================================================
- * WHY A DIALOG AND NOT A BUTTON IN THE ROW
- *
- * A principal has N tokens, not one. `tokenStatus()` exists because a re-mint ADDS a credential
- * rather than replacing one, so "revoke this principal's token" is not a well-formed instruction --
- * there is no single token to name. A row-level Revoke button would have to pick one, and whichever
- * rule it used (newest? earliest-expiring?) would be a guess the operator could not see being made.
- *
- * So the row shows the COUNT and this dialog shows the LIST. Revocation is per-jti, which is what
- * `revoke_service_token()` takes and what the denylist is keyed on.
- *
- * =================================================================================================
- * WHAT THIS DIALOG HAS TO SAY THAT THE BADGE CANNOT
- *
- * A revoked token is not a deleted one. `auth_pre_request()` is a PostgREST hook, so withdrawing a
- * jti stops it reaching the API and leaves it working at storage, realtime, the edge runtime and
- * Studio until its own expiry. An operator who reads "Revoked" as "gone" will stop looking for it,
- * which is the wrong conclusion to draw from a control this dialog is offering -- so the scope is
- * stated once at the top and the expiry stays visible on every withdrawn row.
- *
- * =================================================================================================
- * NO TYPE-TO-CONFIRM, AND NO UNDO
- *
- * Revocation is not destructive in the way GatewayCredentialModal's mint is -- it takes a credential
- * OUT of service rather than replacing one something is holding -- so a name-typing barrier would be
- * ceremony. But it is one-way: `revoke_service_token()` has no inverse, and a withdrawn token cannot
- * be reinstated. The button says so rather than asking twice.
+ * One principal's tokens, and the only place a token can be withdrawn. A principal has N tokens
+ * because a re-mint adds a credential, so the row shows the count and this dialog the list;
+ * revocation is per jti, which is what `revoke_service_token()` takes. A revoked token is not a
+ * deleted one: `auth_pre_request()` is a PostgREST hook, so a withdrawn jti still works at storage,
+ * realtime, the edge runtime and Studio until its own expiry, which is why the scope is stated at
+ * the top and the expiry stays visible on every withdrawn row. No type-to-confirm, and no undo.
  */
 export function ServiceTokenInventoryModal({ principalName, status, onClose, onChanged, showToast }) {
   // The jtis this dialog has withdrawn during its own lifetime, so a row updates the moment it is
-  // acted on. THE SERVER IS STILL THE AUTHORITY -- `onChanged` reloads the page's three reads on
-  // close -- and this is only what keeps the list from lying between the click and that reload.
+  // acted on. The server is still the authority: `onChanged` reloads on close.
   const [justRevoked, setJustRevoked] = useState(() => new Set())
   const [busyJti, setBusyJti] = useState(null)
   const [errors, setErrors] = useState(() => new Map())
@@ -60,9 +36,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
       setJustRevoked(prev => new Set(prev).add(jti))
       showToast?.('Token withdrawn — the API will refuse it from now on', 'success')
     } catch (err) {
-      // PER-ROW, NOT A DIALOG-LEVEL BANNER. Several tokens can be withdrawn in one visit, and a
-      // single error slot would attribute the third failure to whichever row the reader was
-      // looking at.
+      // Per-row, not a dialog-level banner: several tokens can be withdrawn in one visit.
       setErrors(prev => new Map(prev).set(jti, err.message))
       showToast?.(err.message, 'error')
     } finally {
@@ -70,9 +44,8 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
     }
   }, [showToast])
 
-  // NEWEST FIRST, which is the reverse of tokenStatus()'s ordering and deliberate. That function
-  // sorts by earliest expiry because it needs the next date something breaks; a person looking for
-  // the token they just issued wants it at the top.
+  // Newest first, the reverse of tokenStatus(), which sorts by earliest expiry. A person looking
+  // for the token they just issued wants it at the top.
   const rows = useMemo(
     () => [...(status?.rows || [])].sort((a, b) => b.expiresAtMs - a.expiresAtMs),
     [status]
@@ -135,9 +108,9 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
                         {new Date(t.expiresAtMs).toLocaleDateString()}
                       </td>
                       <td>
-                        {/* EXPIRED IS CHECKED BEFORE REVOKED, because the signature check refuses
-                            an expired token everywhere -- including the four services a revocation
-                            never reaches -- so it is the stronger statement of the two. */}
+                        {/* Expired is checked before revoked: the signature check refuses an
+                            expired token everywhere, including the services a revocation never
+                            reaches. */}
                         <span className={`badge badge-${expired ? 'neutral' : revoked ? 'warning' : 'ok'}`}
                           style={{ fontSize: '11px' }}>
                           {expired ? 'EXPIRED' : revoked ? 'WITHDRAWN' : 'ACTIVE'}
@@ -149,11 +122,8 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
                         )}
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        {/* OFFERED ONLY WHERE IT WOULD DO SOMETHING. An expired token is already
-                            refused by the signature check, and revoke_service_token() refuses it
-                            outright rather than recording a withdrawal that changed nothing -- so
-                            a button here would exist only to produce an error. A jti-less row (a
-                            mint recorded before 0043 stamped one) cannot be addressed at all. */}
+                        {/* Offered only where it would do something: revoke_service_token() refuses
+                            an expired token outright, and a jti-less row cannot be addressed. */}
                         {!expired && !revoked && t.jti && (
                           <ActionButton
                             pending={busyJti === t.jti}

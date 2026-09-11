@@ -1,13 +1,7 @@
 /**
- * Report Bug -> GitHub issue.
- *
- * THE BUG THIS PINS. The target repository was hardcoded to
- * `Harri-Llewelyn/acs-cymru`, which is not this repository -- so every issue
- * filed through this button went to a tracker nobody working on this code reads. It failed
- * silently and looked like it worked: the tab opened, the toast said "Redirected to GitHub Issue
- * creation", and the report went nowhere useful.
- *
- * It is now read from VITE_GITHUB_REPO_URL, with a fallback to this repository.
+ * Report Bug opens a GitHub issue. The target repository is read from VITE_GITHUB_REPO_URL, with a
+ * fallback to this repository; a hardcoded wrong repository once sent every report to a tracker
+ * nobody reads.
  */
 import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'

@@ -2,11 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import CopyableId from '../common/CopyableId'
-// No ActionButton or usePendingKey here any more: both actions on this page run from inside a
-// ConfirmModal, which owns its own pending state. A row-level spinner would have nothing to
-// report -- the row's buttons now only open a dialog.
+// No ActionButton or usePendingKey here: both actions run from inside a ConfirmModal, which owns
+// its own pending state.
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { IconArchive, IconRefreshCw, IconTrash } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 
 export function ArchivesTab({ showToast, hasPermission }) {
   const [archives, setArchives] = useState([])
@@ -31,20 +31,16 @@ export function ArchivesTab({ showToast, hasPermission }) {
   }
 
   /**
-   * The manual half of the retention policy.
-   *
-   * `auto_delete_at` already purges on a timer; this is the same destruction on demand, for the
-   * ordinary case of an asset archived by mistake or decommissioned for good before its timer
-   * runs. It is a real DELETE, not another soft flag -- the row leaves the table and the digital
-   * thread keeps its history, because archived migration 0006 makes the audit rows immutable and
-   * independent of the entity they describe.
+   * The manual half of the retention policy. `auto_delete_at` purges on a timer; this is the same
+   * destruction on demand. A real DELETE, not another soft flag: the row leaves the table and the
+   * digital thread keeps its history, because audit rows are immutable and independent of the
+   * entity.
    */
   const purge = async (item) => {
     try {
       await api.delete(`/api/v1/${item.entity_type}s/${item.entity_id}`)
-      // Dismissed AFTER the delete, not before. Clearing it first closed the dialog on the click
-      // and ran the irreversible half unobserved -- for the one action in the app that cannot be
-      // undone, the confirmation is exactly where the wait belongs.
+      // Dismissed after the delete, not before, so the one irreversible action in the app runs
+      // while the confirmation is still on screen.
       setConfirmPurge(null)
       load(); showToast(`Entity '${item.name}' permanently deleted`, 'success')
     } catch (e) { showToast(e.message, 'error') }
@@ -54,25 +50,17 @@ export function ArchivesTab({ showToast, hasPermission }) {
 
   return (
     <>
-      {/* Heading, description and the action row all gone -- this page has no actions of its own,
-          so it starts directly on its table. The count the h2 carried moved into the card header
-          below, which costs no extra row because the card needed a top edge either way. */}
+      {/* This page has no actions of its own, so it starts directly on its table; the count is in
+          the card header. */}
       <div className="card">
         <div className="card-header">
-          <h3 className="section-title">Archived Entities (Out of Commission) <span className="section-count">{archives.length}</span></h3>
-        </div>
-
-        {/* A DESCRIPTION, IN THE BODY. The sentence about retention was already here as a `<span>`
-            in the HEADER, sharing the row with the title -- so it was competing with the title for
-            the same line rather than explaining it, and it stopped at the one fact it had room for.
-            Cards carry their description in the body; this is that. */}
-        <div className="card-body">
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
-            An archived entity is out of commission but not gone: it keeps its identity and its
-            history, stops appearing on the asset pages, and runs a retention timer to an auto-purge
-            date. Restore returns it to service with everything intact — which is what makes
-            archiving the reversible half of decommissioning, and deletion the other one.
-          </p>
+          <h3 className="section-title">
+            Archived Entities (Out of Commission)
+            <HelpTip
+              label="About archived entities"
+              text="An archived entity is out of commission but not gone: it keeps its identity and history, leaves the asset pages, and runs a retention timer to an auto-purge date. Restore returns it to service with everything intact."
+            />
+          </h3>
         </div>
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading archives…</div> :
          archives.length === 0 ? (
@@ -98,10 +86,9 @@ export function ArchivesTab({ showToast, hasPermission }) {
                          <span className="badge badge-neutral">Permanent (No Auto-Purge)</span>
                        )}
                      </td>
-                     {/* Restore is the ordinary move and Permanent Delete is the irreversible
-                         one, so they are deliberately NOT peers: restore is a ghost button and
-                         delete only takes on its danger colour when pointed at. A row of two
-                         filled buttons invites the wrong one to be clicked at a glance. */}
+                     {/* Restore is the ordinary move and Permanent Delete the irreversible one, so
+                         they are not peers: restore is a ghost button and delete only takes its
+                         danger colour when pointed at. */}
                      <td className="row-actions">
                        <button
                          className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
@@ -128,34 +115,14 @@ export function ArchivesTab({ showToast, hasPermission }) {
          )}
       </div>
 
-      {/* Named in the prompt, not just "this entity": the archives table is a mixed list of
-          cells, gateways and devices, and the wrong row is easy to hit.
-
-          AND THE NAME HAS TO BE TYPED BACK (issue #38). This is the one irreversible action in
-          the application, so it is the one dialog that asks for it. Every other ConfirmModal --
-          here and elsewhere -- guards something recoverable, archiving being a soft flag with a
-          Restore button beside it, and gating all of them would train people to type through the
-          one dialog where reading it matters. Friction only buys attention while it is rare. */}
-      {/* RESTORE ASKS FIRST NOW (issue #100), AND IT IS NOT GATED ON TYPING THE NAME.
-          The rule the dialog below sets stands: friction only buys attention while it is rare, and
-          restore is recoverable -- you can archive it again. What restore is NOT is consequence-free,
-          which is why this asks at all rather than being left as a one-click act on a table of
-          look-alike rows.
-
-          IT NAMES THE TWO CONSEQUENCES THAT ARE NOT OBVIOUS, because "you can just archive it
-          again" is the reason a confirmation here could look like ceremony, and it is not quite
-          true:
-
-            * THE RETENTION TIMER IS CLEARED, not paused. `/restore` sets `auto_delete_at` to NULL,
-              and re-archiving computes a fresh window from today -- so an entity one day from
-              auto-purge, restored by accident and put back, is now thirty days from it. The undo
-              does not restore the clock.
-
-            * A GATEWAY'S BROKER CREDENTIAL DOES NOT COME BACK. Archiving one rotates it to a
-              password nobody records (0038, repredicated by 0063); restore flips `is_archived` and
-              nothing else. So the gateway returns to the asset pages looking active and cannot
-              authenticate -- the failure lands at the broker, not here. This says so, from
-              `credential_revoked_at` rather than from a guess about whether it ever had one. */}
+      {/* Named in the prompt, because the archives table is a mixed list of cells, gateways and
+          devices. The name has to be typed back: this is the one irreversible action in the
+          application, and the only dialog that asks for it. */}
+      {/* Restore asks first but is not gated on typing the name, since it is recoverable. It names
+          the two consequences that are not obvious: the retention timer is cleared, not paused
+          (`/restore` sets `auto_delete_at` to NULL and re-archiving computes a fresh window), and a
+          gateway's broker credential does not come back (archiving rotated it; restore flips
+          `is_archived` only), reported from `credential_revoked_at`. */}
       {confirmRestore && (
         <ConfirmModal
           message={

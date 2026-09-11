@@ -6,18 +6,10 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { patchFromForm, submitProposal } from '../../utils/proposeFromForm'
 
 /**
- * Edit a device's IDTA 02006 Digital Nameplate (archived migration 0011).
- *
- * WHY THIS IS NOT ON THE SCHEMAS PAGE. A nameplate is a fact about one physical asset. The Schemas
- * page is entirely type-level -- what a metric may be named, what a standard defines, what shape a
- * payload should take -- and none of it is about a particular machine. This sits two clicks from
- * the Export AAS button whose output it changes, which is the whole argument for its placement.
- *
- * THE READ-ONLY FIELDS ARE THE POINT, NOT A LIMITATION. The AAS exporter prefers a value the
- * device published at DBIRTH over anything stored here, joining on `semantic_id` rather than on
- * metric name. A form that let an operator type a serial number the device already publishes would
- * accept the edit, save it, and then never show it in the export -- with nothing on screen saying
- * why. So a field the device answers for itself is locked, and says so.
+ * Edit a device's IDTA 02006 Digital Nameplate. On the device rather than the Schemas page, because
+ * a nameplate is a fact about one physical asset. The read-only fields are the point: the AAS
+ * exporter prefers a value the device published at DBIRTH, joining on `semantic_id`, so a field the
+ * device answers for itself is locked and says so.
  */
 
 /** Mirrors `device_nameplate`'s columns and the template's ordinal, so the form reads like the spec. */
@@ -38,9 +30,7 @@ const FIELDS = [
 const blankForm = () => Object.fromEntries(FIELDS.map(f => [f.column, '']))
 
 export function DeviceNameplateModal({ asset, onClose, showToast, canManage, canPropose }) {
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
+  // Escape closes via the shared stack, so a ConfirmModal on top answers first.
   useEscapeKey(onClose)
 
   const [form, setForm] = useState(blankForm)
@@ -54,9 +44,8 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
   const [stored, setStored] = useState({})
   const [rationale, setRationale] = useState('')
 
-  /* THIS DIALOG FILES ITS OWN PROPOSAL. It used to hand over to a composer on the Approvals page,
-     which listed these same eleven columns as bare text inputs -- a second form for one nameplate.
-     The composer is gone; the footer button below changes what this form DOES instead. */
+  /* This dialog files its own proposal: the footer button changes what the form does for a reader
+     who may not save. */
   const proposeMode = !canManage && canPropose
 
   useEffect(() => {
@@ -139,16 +128,9 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
           optional — a nameplate is filled in as it is discovered.
         </p>
 
-        {/* NO BANNER FOR A READER WHO CAN PROPOSE.
-            The first cut explained the read-only state in a strip above the form AND offered the
-            route there, while a dead Save button sat at the bottom -- three pieces of furniture
-            for one fact. The footer button below now carries the whole of it: it says "Propose a
-            change" instead of "Save", which states what this dialog will do for this reader in
-            the one place they were already going to look.
-
-            THE STRIP SURVIVES ONLY WHERE THERE IS NOTHING TO OFFER. Without `onPropose` -- a role
-            that holds neither `device:manage` nor `proposal:create` -- the footer has nothing to
-            say, and a form whose only control is Cancel needs to explain itself somewhere. */}
+        {/* No banner for a reader who can propose: the footer button says Propose a change. The
+            strip survives only where there is nothing to offer, for a role holding neither
+            `device:manage` nor `proposal:create`. */}
         {!loading && !canManage && !proposeMode && (
           <div className="readonly-notice" role="status">
             <IconLock size={13} />
@@ -190,9 +172,8 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                 const element = byIdShort.get(field.idShort)
                 const deviceValue = published[field.column]
                 const isPublished = deviceValue !== undefined
-                // Explicit htmlFor/id rather than a wrapping label: a disabled input inside a
-                // label is not reliably announced, and these fields are disabled whenever the
-                // device publishes them.
+                // Explicit htmlFor/id: a disabled input inside a wrapping label is not reliably
+                // announced.
                 const inputId = `nameplate-${field.column}`
                 return (
                   <div key={field.column}>
@@ -273,20 +254,8 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
           <button className="btn btn-ghost" onClick={() => onClose(false)} disabled={saving}>
             Cancel
           </button>
-          {/* Was a bare text swap to 'Saving…' with no spinner and no busy state. The label was
-              already right; this puts it on the same standardized control as every other
-              submission in the app, which is where the spinner and aria-busy come from. */}
-          {/* ONE PRIMARY CONTROL, SAYING WHAT IT WILL ACTUALLY DO.
-              A disabled Save is the right answer to a TEMPORARY refusal -- an invalid year, a save
-              already in flight -- because it tells you the button becomes yours once you fix the
-              thing. It is the wrong answer to a permanent one: it leaves the dialog's primary
-              action sitting there dead, and the reader's own conclusion is that the app is broken.
-              (It also never LOOKED disabled here, because `.btn:disabled` is not styled -- so the
-              greyed-out state this was relying on was greyed out in name only.)
-
-              Swapping the label instead means the footer is never dead and never lies. The
-              proposer's route keeps the same shape as the manager's: fill nothing in here, press
-              the button, and say what you want changed on the form it opens. */}
+          {/* One primary control, saying what it will do. A disabled Save is right for a temporary
+              refusal and wrong for a permanent one, so the label swaps instead. */}
           {canManage ? (
             <ActionButton
               pending={saving}

@@ -1,16 +1,8 @@
 /**
- * A count of API calls currently in flight, and a way to be told when it changes.
- *
- * WHY A MODULE-LEVEL COUNTER RATHER THAN REACT STATE. The thing that knows a request started is
- * `api`, which is not a component and has no provider above it. The alternative -- every tab
- * reporting its own in-flight state up to App through a context -- means every mutation site in
- * the app has to remember to report, and the one that forgets is invisible: the bar simply does
- * not light, and nothing fails. Counting at the single choke point every request already passes
- * through cannot be forgotten.
- *
- * DELIBERATELY FRAMEWORK-FREE. api.js is imported by tests that mock React away entirely, and by
- * the module graph long before any component mounts. It also means the tests for the indicator
- * can drive this directly instead of staging a real network call.
+ * A count of API calls in flight, and a way to be told when it changes. A module-level counter
+ * rather than React state because `api`, which knows a request started, is not a component;
+ * counting at the one choke point cannot be forgotten. Framework-free so api.js can be imported by
+ * tests that mock React away.
  */
 
 let inFlight = 0;
@@ -27,11 +19,8 @@ export function beginRequest() {
 }
 
 /**
- * Called when a request settles, however it settled.
- *
- * Clamped at zero. An unbalanced end -- a double-settle, or a caller that ends a request it never
- * began -- would otherwise drive the count negative and leave the indicator stuck OFF for the rest
- * of the session, which is the failure mode that hides every subsequent request.
+ * Called when a request settles, however it settled. Clamped at zero so an unbalanced end cannot
+ * leave the indicator stuck off for the session.
  */
 export function endRequest() {
   inFlight = Math.max(0, inFlight - 1);
@@ -49,12 +38,8 @@ export function subscribeToApiActivity(fn) {
 }
 
 /**
- * Wrap every function on an api object so calls to it are counted.
- *
- * Applied once, to the whole object, rather than by hand at each method: `api` has grown a method
- * at a time and a per-method opt-in is a list that silently falls out of date.
- *
- * Non-function properties (TELEMETRY_PAGE_SIZE and friends) are copied through untouched.
+ * Wrap every function on an api object so calls to it are counted. Applied once to the whole object
+ * rather than per method; non-function properties are copied through untouched.
  */
 export function withActivityTracking(target) {
   const wrapped = {};
@@ -84,12 +69,8 @@ export function withActivityTracking(target) {
 }
 
 /**
- * Count one call that does not go through `api`.
- *
- * The two approve-quarantine calls in DevicesTab invoke the Edge Function on the supabase client
- * directly, so the wrapper above never sees them -- and approving a quarantined device is one of
- * the slowest mutations in the app, which makes it the last one that should leave the indicator
- * dark.
+ * Count one call that does not go through `api`, such as the approve-quarantine calls in DevicesTab
+ * that invoke the Edge Function directly.
  */
 export async function trackRequest(fn) {
   beginRequest();

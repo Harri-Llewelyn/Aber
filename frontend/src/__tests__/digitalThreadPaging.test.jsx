@@ -1,14 +1,7 @@
 /**
- * The Digital Thread's second page, and the two ways paging loses data silently.
- *
- * =================================================================================================
- * WHY THIS SUITE EXISTS AT ALL
- *
- * `truncated` was returned by the server, stored in this component, and never rendered -- for long
- * enough that nobody could say when it broke, because a page showing the newest 200 of several
- * thousand events looks exactly like a page showing all of them. Every failure paging can have is
- * that shape: nothing throws, nothing is empty, the reader simply sees less than they believe they
- * are seeing. So these assert what is ON SCREEN and what was ASKED FOR, not internal state.
+ * The Digital Thread's second page, and the ways paging loses data silently. A page showing the
+ * newest 200 of several thousand events looks exactly like a page showing all of them, so these
+ * assert what is on screen and what was asked for, not internal state.
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -17,22 +10,17 @@ import { DigitalThreadTab, mergeFirstPage } from '../components/tabs/DigitalThre
 import { api } from '../api'
 import { DIGITAL_THREAD_ENTITY_TYPES } from '../constants'
 
-// SPREAD FROM THE REAL MODULE, not replaced. api.js exports constants the tab reads at import time
-// as well as the client, and a bare stub silently drops them -- which renders as an empty timeline
-// rather than as a missing-export error, so every assertion here fails for a reason that has
-// nothing to do with paging.
+// Spread from the real module, not replaced: api.js exports constants the tab reads at import time,
+// and a bare stub drops them, which renders as an empty timeline.
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
 /**
- * One audit row, shaped as `mapDigitalThreadRow` leaves it.
- *
- * ITS GATEWAY MUST EXIST IN THE LOOKUPS BELOW. The tab hides events whose asset is absent from
- * /api/v1/{cells,gateways,devices} -- that is the purged-asset filter -- so a fixture with an
- * entity nothing can name renders as an empty timeline and every assertion here fails for a reason
- * that is not paging.
+ * One audit row, shaped as `mapDigitalThreadRow` leaves it. Its gateway must exist in the lookups
+ * below, or the purged-asset filter hides it and every assertion fails for a reason that is not
+ * paging.
  */
 function event (id, recordedAt = '2026-01-01T00:00:00.000Z') {
   return {
@@ -66,8 +54,8 @@ function page (events, { nextCursor = null, truncated = false, purgedAssets = 0 
 }
 
 /**
- * Everything the tab fetches that is not the thread itself resolves empty, so the component
- * mounts. The thread request is the one under test and is matched by path.
+ * Everything the tab fetches that is not the thread itself resolves empty. The thread request is
+ * matched by path.
  */
 function respond (threadHandler) {
   api.get.mockImplementation((url) => {
@@ -84,12 +72,8 @@ const threadCalls = () =>
 beforeEach(() => { vi.clearAllMocks() })
 afterEach(() => { vi.useRealTimers() })
 
-// -------------------------------------------------------------------------------------------------
-// mergeFirstPage -- the poll's bookkeeping, tested directly.
-//
-// Its failure mode is a reader losing pages they scrolled back to, sixty seconds after loading
-// them, with nothing on screen to say so.
-// -------------------------------------------------------------------------------------------------
+// mergeFirstPage, the poll's bookkeeping, tested directly. Its failure mode is a reader losing
+// pages they scrolled back to, sixty seconds after loading them.
 describe('mergeFirstPage', () => {
   it('keeps deeper pages when a poll returns what is already held', () => {
     const held = [event(10), event(9), event(8), event(7)]
@@ -107,9 +91,8 @@ describe('mergeFirstPage', () => {
     expect(reset).toBe(false)
   })
 
-  // THE CASE THAT MUST NOT MERGE. If more events arrived than a page holds, the polled page and
-  // the held list no longer touch -- splicing them would produce one list with a hole in the
-  // middle and no indication there was one.
+  // The case that must not merge: if more events arrived than a page holds, the polled page and the
+  // held list no longer touch, and splicing them would leave a hole.
   it('starts again when the polled page and the held list do not overlap', () => {
     const held = [event(3), event(2), event(1)]
     const polled = [event(99), event(98)]
@@ -133,9 +116,7 @@ describe('mergeFirstPage', () => {
   })
 })
 
-// -------------------------------------------------------------------------------------------------
 // The control, and what it asks the server for.
-// -------------------------------------------------------------------------------------------------
 describe('DigitalThreadTab paging', () => {
   it('offers no Load more when the first page is the whole thread', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null }))
@@ -214,16 +195,8 @@ describe('DigitalThreadTab paging', () => {
 })
 
 /**
- * Every lane the header counts is a lane the timeline draws.
- *
- * THE BUG THIS PINS was a header reading "28 assets · 167 events" above a single drawn row.
- * `sections` kept only the kinds a hardcoded list named, and the list had three entries while
- * `ENTITY_KIND` had seven -- so role assignments (20 lanes, 136 events), service identities and
- * schemas were counted and silently discarded. The whole security lane of the audit, which is the
- * half an Auditor comes for, could not be rendered at all.
- *
- * These assert the INVARIANT rather than the four kinds that were missing: a section list is a
- * presentation choice and must never also act as a filter.
+ * Every lane the header counts is a lane the timeline draws. A section list is a presentation
+ * choice and must never also act as a filter, so these assert the invariant rather than the kinds.
  */
 describe('DigitalThreadTab section coverage', () => {
   const laneEvent = (id, entityType, entityId) => ({
@@ -260,12 +233,8 @@ describe('DigitalThreadTab section coverage', () => {
   })
 
   it('offers every kind it can draw, so a drawable lane is never unaskable', async () => {
-    // THE HALF THAT SURVIVED THE FIRST FIX. Extending SECTIONS made the security lane drawable
-    // and left the filter at four hardcoded options against seven kinds, so a reader could see
-    // role assignments only by clearing the filter and could not ask for them at all.
-    //
-    // Asserted against the shared table rather than against a list of seven, because the failure
-    // was never the number -- it was that two lists of the same thing could disagree.
+    // The filter is asserted against the shared table rather than a list of kinds, because the
+    // failure was two lists of the same thing disagreeing.
     respond(() => page([laneEvent(1, 'gateways', 'gw-1')], { nextCursor: null }))
 
     render(<DigitalThreadTab />)

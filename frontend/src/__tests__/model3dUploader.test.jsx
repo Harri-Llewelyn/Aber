@@ -11,9 +11,9 @@ vi.mock('../api', async () => {
     api: { uploadDeviceModel: vi.fn(), removeDeviceModel: vi.fn() },
     model3dPublicUrl: (path) =>
       path ? `http://localhost:54321/storage/v1/object/public/asset-3d-models/${path}` : null,
-    // The download variant carries `?download=<filename>`, which is what makes storage answer with
-    // `Content-Disposition: attachment`. Mocked separately from the plain URL because the two are
-    // used for different things -- the plain one for the size HEAD, this one for the button.
+    // The download variant carries `?download=<filename>`, which makes storage answer with
+    // `Content-Disposition: attachment`. Mocked separately from the plain URL, which is used for
+    // the size HEAD.
     model3dDownloadUrl: (path) =>
       path
         ? `http://localhost:54321/storage/v1/object/public/asset-3d-models/${path}` +
@@ -152,13 +152,8 @@ describe('Model3DUploader', () => {
     expect(screen.getByText(/anyone with the link can read it/i)).toBeInTheDocument()
   })
 
-  /*
-   * Getting the file out (issue #43).
-   *
-   * WHAT WAS REPORTED: the only way to reach the model was a small "Open" label beside the file
-   * size, while Replace and Remove sat below it as full-sized buttons -- so the control used most
-   * often was the least visible thing in the card, and the two destructive-ish ones were the most.
-   */
+  /* Getting the file out: a Download button beside Replace and Remove, not a small link beside the
+     file size. */
   describe('downloading the attached model', () => {
     it('offers Download as a button rather than a label beside the size', async () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
@@ -171,12 +166,9 @@ describe('Model3DUploader', () => {
     })
 
     it('asks storage for an attachment, not a navigation', async () => {
-      /*
-       * `?download=` IS THE LOAD-BEARING PART. The bucket is a different origin from the dashboard,
-       * and browsers ignore the `download` attribute cross-origin -- so without the query parameter
-       * a .glb would download (the browser cannot render it) while a .gltf, being JSON, would open
-       * in the tab. The control would have worked for some models and not others.
-       */
+      /* `?download=` is the load-bearing part: the bucket is a different origin and browsers ignore
+         the `download` attribute cross-origin, so without it a .gltf, being JSON, would open in the
+         tab. */
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
 
@@ -198,13 +190,8 @@ describe('Model3DUploader', () => {
     })
 
     it('stays available to a role that cannot manage devices', async () => {
-      /*
-       * THE REGRESSION THIS PREVENTS. The "Open" link it replaces sat OUTSIDE the `canManage`
-       * gate, so every role could reach the file. Putting Download in the write-gated row would
-       * have quietly removed that -- from Operators and Auditors, who are the roles most likely to
-       * want a model and least likely to be replacing one. Reading a public-read object is not a
-       * write.
-       */
+      /* Download sits outside the `canManage` gate: reading a public-read object is not a write,
+         and Operators and Auditors are the roles most likely to want a model. */
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage={false} showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
 

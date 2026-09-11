@@ -4,21 +4,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { AlertPill } from '../components/common/AlertPill'
 
 /**
- * The Topbar's alert counter.
- *
- * What is worth pinning here is not the markup but the judgements:
- *
- *   * IT IS PERMANENT, INCLUDING WHEN HEALTHY. This is a reversal -- it used to render nothing on a
- *     quiet floor -- and the reason is that an element which is absent when healthy is
- *     indistinguishable from one that has BROKEN. A wall display showing no alert chip could mean
- *     nothing is wrong, or that the webhook secret went stale on Tuesday, and the operator cannot
- *     tell which. So the "renders nothing" test below is inverted rather than deleted, with the
- *     reasoning kept, so nobody restores the old behaviour as a tidy-up.
- *   * a critical alert is not averaged away by warnings beside it
- *   * the count is spelled out rather than carried by colour alone
- *   * the HEALTHY state does not pulse, and the firing states do -- because a permanently animated
- *     element in a header is decoration, and the firing states only read as urgent if the resting
- *     state is quiet
+ * The top bar's alert counter. What is pinned: it is permanent, including when healthy, because an
+ * element absent when healthy is indistinguishable from one that is broken; a critical alert is not
+ * averaged away by warnings; the count is spelled out rather than carried by colour; the healthy
+ * state does not pulse and the firing states do.
  */
 
 const alert = (over = {}) => ({
@@ -32,20 +21,15 @@ const alert = (over = {}) => ({
   ...over
 })
 
-// Matched on the trailing "firing alert(s)", which is the pill's aria-label in all three states and
-// is NOT a substring of "Close alert list" or of a row's "Show <id> on the Devices page". A looser
-// /alert/i would find three buttons the moment the panel is open.
+// Matched on the trailing "firing alert(s)", the pill's aria-label in all three states, which is
+// not a substring of "Close alert list" or a row's "Show <id> on the Devices page".
 const pill = () => screen.getByRole('button', { name: /firing alerts?$/i })
 
 describe('AlertPill', () => {
   describe('the healthy state', () => {
     /**
-     * STILL RENDERS, AND THAT IS THE HALF THAT MATTERS. The control used to say `0 Alerts`; it now
-     * says nothing in words at all. What it must NOT do is disappear -- an element that is absent
-     * when healthy is indistinguishable from one that is broken, and a wall display with no alert
-     * control could equally mean nothing is wrong or that Grafana has been down since Tuesday.
-     *
-     * The standing glyph is the positive statement that replaced the standing sentence.
+     * Still renders when nothing is firing: a wall display with no alert control could mean nothing
+     * is wrong or that Grafana has been down since Tuesday.
      */
     it('still renders when nothing is firing, so silence is distinguishable from absence', () => {
       render(<AlertPill alerts={[]} />)
@@ -55,11 +39,7 @@ describe('AlertPill', () => {
       expect(button.querySelector('svg')).toBeTruthy()
     })
 
-    /**
-     * NO ZERO, AND NO WORD. `0 Alerts` was ~62px of bar spent on the least interesting sentence the
-     * application can say, restated on every page for the whole of a normal day. The healthy shield
-     * already means zero, so the digit was saying it twice.
-     */
+    /** No zero and no word: the healthy glyph already means zero. */
     it('prints no digit and no label when the count is zero', () => {
       render(<AlertPill alerts={[]} />)
       const button = screen.getByRole('button', { name: /no firing alerts/i })
@@ -93,13 +73,8 @@ describe('AlertPill', () => {
 
   describe('the firing states', () => {
     /**
-     * THE DIGIT COMES BACK EXACTLY WHEN IT CARRIES INFORMATION, and this is the one part of the
-     * reduction worth arguing about. Dropping the count entirely would have been simpler and would
-     * have left colour as the only signal -- but "something is wrong" and "twelve things are wrong"
-     * are different operational situations on a shopfloor, and no hue distinguishes them. An
-     * operator would have to open the panel to find out whether to walk over.
-     *
-     * Zero is the one count that needs no digit, because the healthy shield already says it.
+     * The digit comes back exactly when it carries information: one thing wrong and twelve things
+     * wrong are different situations, and no hue distinguishes them.
      */
     it('shows the count once there is one, since colour cannot say how many', () => {
       render(<AlertPill alerts={[alert(), alert({ id: 'a2', fingerprint: 'fp-2' })]} />)
@@ -170,13 +145,7 @@ describe('AlertPill', () => {
       expect(screen.getByText(/Evaluated by Grafana/i)).toBeInTheDocument()
     })
 
-    /**
-     * The Live/Polling chip's replacement.
-     *
-     * That chip was removed from the bar because it was read off a BUILD FLAG rather than off the
-     * socket -- a permanently lit green dot that could not go out. The fact it carried is still worth
-     * having, and it belongs where the count whose freshness it describes is: in this footer.
-     */
+    /** The feed mode lives in this footer, beside the count whose freshness it describes. */
     it.each([
       [true, /Delivered live, reconciled every 60s/i],
       [false, /Polled every 3s/i]
@@ -217,10 +186,9 @@ describe('AlertPill', () => {
       expect(screen.getByText('Emergency Stop Engaged')).toBeInTheDocument()
     })
 
-    // Queried by TITLE, not by accessible name: the row's name is computed from its contents (the
-    // rule name, Grafana's summary and the id), so "Show <id> on the Devices page" is hover text
-    // rather than the label. Asserting the title is also the more useful guard -- it is the only
-    // thing telling the operator that a row full of read-only detail is a navigation.
+    // Queried by title, not accessible name: the row's name is computed from its contents, so "Show
+    // <id> on the Devices page" is hover text, and the only thing telling the operator the row
+    // navigates.
     const row = () => screen.queryByTitle(/on the Devices page$/)
 
     it('navigates to the device on a row click, and closes on the way', () => {
@@ -258,15 +226,9 @@ describe('AlertPill', () => {
   })
 
   /**
-   * WHERE A ROW GOES, which was a single destination and should never have been.
-   *
-   * Of the ten rules shipped in grafana/provisioning/alerting/, four are `entity_type: gateway`,
-   * five are `platform`, and none is a device -- so "every row opens the Devices page" was wrong
-   * for every alert this stack can currently raise. A stale gateway sent an operator to a Devices
-   * search for a `gwy...` id that no device row can match.
-   *
-   * The tests below pin the DECLARED scope as the thing that decides, not the id's prefix. The two
-   * usually agree; only one of them is a statement the rule made about itself.
+   * Where a row goes is decided by the alert's declared scope, not the id's prefix: of the rules
+   * shipped, four are gateway-scoped and five platform-scoped, and a stale gateway must not send an
+   * operator to a Devices search.
    */
   describe('routing by the subject the alert is about', () => {
     const gatewayAlert = (over = {}) => alert({
@@ -358,9 +320,8 @@ describe('AlertPill', () => {
       fireEvent.click(pill())
 
       const link = document.querySelector('a.alert-pill-item-link')
-      // A REAL ANCHOR, target=_blank -- the same treatment ContextPanel gives this link, so
-      // middle-click and "copy link address" work on the thing most likely to be pasted to whoever
-      // owns the rule.
+      // A real anchor with target=_blank, as in ContextPanel, so middle-click and copy link address
+      // work.
       expect(link).toBeTruthy()
       expect(link.getAttribute('href')).toContain('/alerting/list?search=')
       expect(link.getAttribute('href')).toContain(encodeURIComponent('Ingestion Pipeline Silent'))
@@ -379,11 +340,7 @@ describe('AlertPill', () => {
     })
   })
 
-  /**
-   * DISMISSAL. The panel is a popover in a header, not a dialog: no backdrop, no focus trap. It
-   * stayed open over whatever the operator did next, covering the top-right of the page they had
-   * moved on to, with the only exits being Escape or a close control they had to go and find.
-   */
+  /** Dismissal. The panel is a popover in a header, not a dialog: no backdrop, no focus trap. */
   describe('closing', () => {
     it('closes when a pointer goes down outside it', () => {
       render(

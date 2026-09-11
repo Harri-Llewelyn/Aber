@@ -1,12 +1,7 @@
 /**
- * Render one value as a CSV cell.
- *
- * `String(value)` alone is what wrote `[object Object]` into every Digital Thread export: those
- * rows carry `old_data`, `new_data` and `metadata` as JSONB objects, so the three columns that
- * held the actual audit evidence exported as the same eleven characters on every row. An object
- * is serialised rather than stringified, and a Date is written in ISO 8601 rather than in the
- * viewer's locale -- an export is read by a spreadsheet or a script, and `08/17/2026, 14:03:22`
- * is neither sortable nor unambiguous.
+ * Render one value as a CSV cell. Objects are serialised (audit rows carry JSONB in `old_data`,
+ * `new_data` and `metadata`) and a Date is written in ISO 8601, since an export is read by a
+ * spreadsheet or a script.
  */
 const cellText = (value) => {
   if (value === null || value === undefined) return '';
@@ -25,9 +20,8 @@ const cellText = (value) => {
 
 export const downloadCSV = (dataArray, filename) => {
   if (!dataArray || dataArray.length === 0) return;
-  // The UNION of every row's keys, not the first row's. Audit rows are heterogeneous -- an
-  // INSERT has no `old_data` and a DELETE has no `new_data` -- so keying off row zero silently
-  // dropped whole columns from the file depending on which event happened to sort first.
+  // The union of every row's keys, not the first row's: audit rows are heterogeneous, an INSERT has
+  // no `old_data` and a DELETE no `new_data`.
   const headers = [...new Set(dataArray.flatMap(row => Object.keys(row || {})))];
   const csvContent = [
     headers.join(','),

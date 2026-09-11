@@ -5,12 +5,9 @@ import {
 } from '../utils/deviceTags'
 
 /**
- * The finding archived migration 0012 exists to make visible.
- *
- * The motivating bug is real and is quoted in the migration header: the Node-RED demo flow set
- * `Controller/EXECUTION` to `RUNNING`, which MTConnect does not define. It was a valid string in a
- * valid DDATA against a real metric, so ingestion accepted it, the historian stored it and the
- * dashboard rendered it. Nothing in the stack could say it was wrong.
+ * The finding the vocabulary check exists to make visible: a demo flow once set
+ * `Controller/EXECUTION` to `RUNNING`, which MTConnect does not define, and nothing in the stack
+ * could say it was wrong.
  */
 const CATALOG = [
   {
@@ -54,8 +51,7 @@ describe('outOfVocabularyMetrics', () => {
 
   it('says nothing when no telemetry has been loaded', () => {
     // "We have not looked" and "we looked and it is fine" are different, and only the second
-    // deserves a clean bill -- the same distinction unmodelledMetrics draws for a device with no
-    // schema.
+    // deserves a clean bill, as unmodelledMetrics draws for a device with no schema.
     expect(outOfVocabularyMetrics(null, CATALOG)).toEqual([])
     expect(outOfVocabularyMetrics({}, CATALOG)).toEqual([])
     expect(outOfVocabularyMetrics({ 'Controller/EXECUTION': 'RUNNING' }, null)).toEqual([])

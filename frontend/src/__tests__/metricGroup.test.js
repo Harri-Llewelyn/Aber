@@ -237,9 +237,8 @@ describe('isValidMetricName', () => {
   })
 
   it('rejects characters outside the Factory+ segment alphabet', () => {
-    // Factory+ permits only alphanumerics and the underscore inside a segment. '.' is the one
-    // worth pinning: it is the separator a reader coming from another stack reaches for first,
-    // and it is not a legal character in a Factory+ metric name at all.
+    // Factory+ permits only alphanumerics and the underscore inside a segment. '.' is the separator
+    // a reader from another stack reaches for first.
     expect(isValidMetricName('Legacy.Dotted.Name')).toBe(false)
     expect(isValidMetricName('has spaces')).toBe(false)
     expect(isValidMetricName('Axes/C-Axis/ANGLE')).toBe(false)
@@ -248,9 +247,8 @@ describe('isValidMetricName', () => {
   })
 
   it('accepts every metric the seeded catalog actually uses', () => {
-    // archived migration 0007 adds the same rule as a CHECK. If these two ever disagree the operator is
-    // told one thing by the form and another by a 400 -- and `name` is immutable, so a name that
-    // slipped past the client can never be corrected, only deprecated.
+    // The database adds the same rule as a CHECK. `name` is immutable, so a name that slipped past
+    // the client can never be corrected, only deprecated.
     for (const name of [
       'Axes/C/ANGULAR_VELOCITY/ACTUAL', 'Axes/DISPLACEMENT', 'Controller/EMERGENCY_STOP',
       'Controller/EXECUTION', 'Controller/FIRMWARE', 'Machine/OperatingMode',
@@ -294,9 +292,8 @@ describe('metricNameError', () => {
   })
 })
 
-// The Add Metric form's Group picker filters by the selected Standard. Kept as its own function
-// rather than a parameter on groupOptionsByStandard(), whose contract is "every known group,
-// bucketed" -- a property the tests above assert directly.
+// The Add Metric form's Group picker filters by the selected Standard. Its own function, since
+// groupOptionsByStandard()'s contract is every known group, bucketed.
 describe('groupOptionsForStandard', () => {
   const registry = [
     { name: 'Axes', standard: 'MTConnect' },
@@ -316,10 +313,9 @@ describe('groupOptionsForStandard', () => {
   })
 
   it('always includes local groups, whatever the standard', () => {
-    // Nothing ties a group to a standard: metric_groups.standard records where a group came
-    // from, not what may use it, and the metric name derives its group by string prefix with no
-    // knowledge of provenance. A deployment that invented `Hydraulic` must be able to file an
-    // MTConnect data item under it.
+    // Nothing ties a group to a standard: metric_groups.standard records where a group came from,
+    // not what may use it, so a deployment that invented `Hydraulic` can file an MTConnect data
+    // item under it.
     for (const standard of ['MTConnect', 'ISO 22400', 'OPC UA']) {
       expect(namesFor(standard)).toContain('Hydraulic')
     }

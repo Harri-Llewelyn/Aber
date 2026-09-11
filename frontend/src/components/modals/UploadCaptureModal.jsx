@@ -6,20 +6,10 @@ import { ActionButton } from '../common/ActionButton'
 import { IconShieldAlert } from '../common/Icons'
 
 /**
- * Take a capture file and file it against a subject.
- *
- * WHY A DIALOG RATHER THAN A BARE FILE PICKER. A capture is stored PER SUBJECT -- one per gateway,
- * one per device -- so a file on its own is not enough to store it: something has to say which
- * subject it belongs to. The old path answered that by hiding a file input behind a per-row button,
- * which works and is invisible; this asks the question out loud, which also makes a page-level drop
- * zone possible.
- *
- * IT VALIDATES BEFORE IT ASKS ANYTHING. `uploadCapture()` checks the same things again on the way
- * out -- it has to, because it is also reachable from elsewhere -- but a file that is not a capture
- * should be refused before the operator has chosen a subject for it, not after.
- *
- * THE REPLACE WARNING IS THE SAME DECISION `StartCaptureModal` GUARDS, and it names the same facts:
- * a stored capture of a rare fault can be destroyed by an upload just as easily as by a re-record.
+ * Take a capture file and file it against a subject. A capture is stored per subject, so the dialog
+ * asks which one; that also makes a page-level drop zone possible. It validates the file before
+ * asking, though `uploadCapture()` checks again on the way out since it is reachable from
+ * elsewhere. The replace warning guards the same decision StartCaptureModal does.
  */
 export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, onCancel }) {
   const [subjectKey, setSubjectKey] = useState(

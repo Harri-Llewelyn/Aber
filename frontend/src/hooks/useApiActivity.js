@@ -2,30 +2,21 @@ import { useEffect, useState } from 'react';
 import { subscribeToApiActivity, activeRequestCount } from '../lib/apiActivity';
 
 /**
- * How long a request has to be outstanding before the indicator paints at all.
- *
- * THIS IS THE WHOLE DESIGN, not a tuning knob. Every list tab polls -- every 3s with Realtime
- * off, every 60s with it on -- and those reads normally settle in tens of milliseconds. An
- * indicator that lit on each of them would blink several times a minute on an idle screen, and a
- * light that is always flickering tells an operator nothing about whether THEIR click is being
- * worked on. Below this threshold the request is, by definition, not the kind of wait the
- * indicator exists to explain.
+ * How long a request must be outstanding before the indicator paints. Every list tab polls and
+ * those reads settle in tens of milliseconds; an indicator that lit on each would blink constantly
+ * on an idle screen.
  */
 export const ACTIVITY_SHOW_DELAY_MS = 200;
 
 /**
- * Once it has painted, the minimum time it stays up.
- *
- * A request that crosses the delay by a millisecond would otherwise paint and clear inside one
- * frame, which reads as a glitch rather than as progress.
+ * Once painted, the minimum time it stays up, so a request that just crosses the delay does not
+ * flash for one frame.
  */
 export const ACTIVITY_MIN_VISIBLE_MS = 400;
 
 /**
- * True while API work has been outstanding long enough to be worth showing.
- *
- * Reads the count maintained in lib/apiActivity, which every call through `api` feeds -- so this
- * covers mutations and the polling reconciliation fetches alike, with no per-call-site wiring.
+ * True while API work has been outstanding long enough to show. Reads the count in lib/apiActivity,
+ * which every call through `api` feeds.
  */
 export function useApiActivity() {
   const [busy, setBusy] = useState(false);

@@ -6,7 +6,7 @@ Platform settings an administrator owns: retention windows, thresholds, and the 
 
 - **Each setting carries its own bounds.** A retention window has a floor and a ceiling, and the field refuses a value outside them -- because the settings most worth changing are the ones where a typo is a silent outage weeks later, not an error today.
 - **Enabled / Disabled** switches turn scheduled behaviour on and off. They take effect on the next run of whatever they gate, not retroactively.
-- **The description under each field** is what the setting actually controls. It is worth reading before the value is changed, because several of them read like each other and act very differently.
+- **The `?` beside each field** explains what the setting actually controls. It is worth reading before the value is changed, because several of them read like each other and act very differently.
 
 ## What the states mean
 

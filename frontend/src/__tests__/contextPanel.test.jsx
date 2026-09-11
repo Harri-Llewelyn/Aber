@@ -10,17 +10,9 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
 
 /**
- * The right-hand context drawer.
- *
- * The thing worth guarding is not that it renders -- it is the three properties that make it
- * different from the modal it replaced:
- *
- *   1. IT PUSHES, IT DOES NOT COVER. The list stays visible and clickable while it is open, which
- *      is the entire reason for building a drawer instead of reusing a dialog.
- *   2. IT STAYS LIVE. It holds an entity ID and re-resolves it every render, so a polled update
- *      reaches the panel and not just the row. Capturing the object instead is the obvious
- *      implementation and it silently freezes the panel -- nothing on screen says it is stale.
- *   3. IT DOES NOT SWALLOW ROW BUTTONS. Rows are now both selectors and containers of actions.
+ * The right-hand context drawer. Three properties distinguish it from a modal: it pushes rather
+ * than covers, so the list stays clickable; it stays live, holding an entity ID and re-resolving it
+ * every render; and it does not swallow row buttons.
  */
 
 vi.mock('../api', async () => {
@@ -66,12 +58,9 @@ const device = {
 const cell = { cell_id: 'cell-1', cell_name: 'Assembly Line 1', is_archived: false, gateways: [gateway], gateway_count: 1 }
 
 const routeGet = (overrides = {}) => (path) => {
-  // The sub-routes go FIRST. `/api/v1/devices/dev-1/telemetry/latest` starts with
-  // `/api/v1/devices`, so the collection route below was answering it -- handing TelemetryModal a
-  // list containing a DEVICE object as though it were a telemetry row. It keys those on
-  // `metric_name`, which a device has none of, so the modal rendered one metric named `undefined`
-  // and React warned about the undefined key. Nothing asserted on the table's contents, so the
-  // test passed while exercising a shape the API cannot return.
+  // The sub-routes go first: `/api/v1/devices/dev-1/telemetry/latest` starts with
+  // `/api/v1/devices`, so the collection route would answer it with a device object as though it
+  // were a telemetry row.
   if (path.includes('/telemetry')) return Promise.resolve(overrides.telemetry ?? [])
   if (path.includes('/config')) return Promise.resolve(overrides.config ?? [])
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(overrides.cells ?? [cell])
@@ -96,8 +85,8 @@ const isOpen = () => panel()?.classList.contains('context-panel-open')
 // the point of it, and makes a bare screen.getByText ambiguous the moment it opens.
 const list = () => within(document.querySelector('.page-main'))
 // The poll is a setTimeout chain (see usePolling), so a fresh api.get mock only reaches the
-// component when the clock is advanced past the interval.
-// Runs `open`, then returns the (now open) panel element.
+// component when the clock is advanced past the interval. Runs `open`, then returns the open panel
+// element.
 const panel_after = (open) => { open(); return document.querySelector('.context-panel') }
 const nextPoll = () => act(async () => { await vi.advanceTimersByTimeAsync(4000) })
 
@@ -213,9 +202,8 @@ describe('rowSelectHandler', () => {
 
 describe('Panel layout pushes rather than covers', () => {
   it('puts the list and the drawer in one flex row, with the list able to shrink', () => {
-    // `min-width: 0` on the main column is what actually lets it give up width -- a flex item
-    // defaults to `min-width: auto` and refuses to shrink below its content, so without it a wide
-    // table overflows the viewport and the drawer is pushed off screen instead.
+    // `min-width: 0` on the main column is what lets it give up width: a flex item defaults to
+    // `min-width: auto` and refuses to shrink below its content.
     const layout = APP_CSS.match(/\.page-layout \{([\s\S]*?)\n\}/)[1]
     const main = APP_CSS.match(/\.page-main \{([\s\S]*?)\n\}/)[1]
     expect(layout).toMatch(/display:\s*flex/)
@@ -225,18 +213,9 @@ describe('Panel layout pushes rather than covers', () => {
     const closed = APP_CSS.match(/\.context-panel \{([\s\S]*?)\n\}/)[1]
     expect(closed).not.toMatch(/position:\s*fixed/)
     expect(closed).toMatch(/width:\s*0/)
-    /*
-     * SCOPED TO THE RULE, which the previous form was not. It read
-     *   /\.context-panel-open \{[\s\S]*?width:\s*360px/
-     * whose unbounded `[\s\S]*?` walked straight past the desktop block and matched the
-     * `width: 360px` inside the @media (max-width: 1100px) override 250 lines later. So it
-     * asserted nothing about the width it named, and went on passing when that width changed.
-     *
-     * The invariant worth pinning is not a NUMBER anyway (issue #35 made it responsive): it is
-     * that the open panel and its inner shell agree. They are separate rules and a drawer whose
-     * shell is wider than its slot clips its own content, so the two are declared once as
-     * --context-panel-width and this checks both read it.
-     */
+    /* Scoped to the rule: an unbounded `[\s\S]*?` walked past the desktop block into the
+       media-query override. The invariant is that the open panel and its inner shell agree, so both
+       are declared once as --context-panel-width and this checks both read it. */
     const openRule  = APP_CSS.match(/\.context-panel-open \{([^}]*)\}/)[1]
     const innerRule = APP_CSS.match(/\.context-panel-inner \{([^}]*)\}/)[1]
     expect(openRule).toMatch(/width:\s*var\(--context-panel-width\)/)
@@ -300,9 +279,8 @@ describe('Gateways page drawer', () => {
   })
 
   it('follows the entity, not a snapshot of it', async () => {
-    // The panel holds an ID and re-resolves it every render. Capturing the object instead is the
-    // obvious implementation, and it freezes the drawer while the row beside it keeps updating --
-    // with nothing on screen to say the panel is stale.
+    // The panel holds an ID and re-resolves it every render. Capturing the object freezes the
+    // drawer while the row beside it keeps updating.
     renderTab()
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
     fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
@@ -335,9 +313,8 @@ describe('Gateways page drawer', () => {
 
 describe('Devices page drawer', () => {
   it('reports the RESOLVED cell and its source, not the raw column', async () => {
-    // The fixture device inherits its cell from its gateway and carries no cell_id of its own.
-    // Showing the raw column would render an empty cell for a device that is plainly located --
-    // the exact confusion archived migration 0036 exists to prevent.
+    // The fixture device inherits its cell from its gateway and carries no cell_id of its own;
+    // showing the raw column would render an empty cell for a device that is plainly located.
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
@@ -356,9 +333,7 @@ describe('Devices page drawer', () => {
 
 describe('Cells page drawer', () => {
   it('opens from the row, and marks the row it opened', async () => {
-    // The page was a card per cell, and the CARD TITLE was the click target -- a card-wide handler
-    // would have fired on the gateway and device rows nested inside it. It is one table now
-    // (issue #61), so the whole row is the target, exactly as on Gateways and Devices.
+    // The page is one table, so the whole row is the click target, as on Gateways and Devices.
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
@@ -375,9 +350,8 @@ describe('Cells page drawer', () => {
 
 describe('Identifiers in the panel are copyable', () => {
   it('renders every identifier as a copy button, not as plain text', async () => {
-    // This panel is where someone gets a UUID or a topic path out of the app and into a query,
-    // an MQTT client or a support ticket. Transcribing 36 characters by eye is how the wrong
-    // device gets debugged.
+    // This panel is where a UUID or a topic path leaves the app; transcribing 36 characters by eye
+    // is how the wrong device gets debugged.
     render(
       <ContextPanel
         open
@@ -437,14 +411,9 @@ describe('Identifiers in the panel are copyable', () => {
 
 describe('Tables shed what the panel now carries', () => {
   it('drops the Serving Edge Gateway column and offers the gateway as a link in the panel', async () => {
-    // ~170px of every row spent on a write almost nobody performs -- and a dropdown in a row
-    // someone is trying to READ is one mis-scroll from silently rebinding a device.
-    //
-    // THE PANEL NO LONGER CARRIES THE PICKER EITHER, and that is the later correction. An inline
-    // <select> in the panel people open to READ has the same hazard one layer in: a scroll wheel
-    // over it silently moves a device's data path with no confirmation step. Reassignment lives in
-    // Edit Details, behind an explicit save. What the field is actually asked -- "which gateway is
-    // this, take me to it" -- is what it now does.
+    // The panel does not carry a gateway picker: a scroll wheel over an inline select in a panel
+    // opened to read would silently move a device's data path. Reassignment lives in Edit Details;
+    // the field navigates to the gateway.
     const onSelectGateway = vi.fn()
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
@@ -507,9 +476,7 @@ describe('Tables shed what the panel now carries', () => {
   })
 
   it('leaves no action buttons on a cell row at all', async () => {
-    // Six buttons per card meant the action cluster was wider than the cell name beside it, and
-    // every one of them was something you do to ONE cell you have already decided to look at.
-    // Archive was the last to go; the cards themselves followed with issue #61.
+    // The cells are rows, and the per-cell action cluster is in the drawer.
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
@@ -586,17 +553,8 @@ describe('The panel is the single home for entity actions', () => {
 })
 
 describe('Links accordion no longer duplicates the panel action', () => {
-  /*
-   * ONE WAY IN, and the assertion has to identify the accordion by something the action does not
-   * share. It used to name the accordion's own controls -- "Manage Links" and "View Links" -- which
-   * worked while the surviving action was called "Manage Documents". Issue #62 renamed that action
-   * to Manage Links, so those strings now match the very control that is supposed to remain: the
-   * old negative assertions would fail against a panel that is entirely correct.
-   *
-   * So the accordion is identified by its HEADING, which nothing else renders, and the action by
-   * there being exactly one of it. That is the invariant either way -- the duplication this
-   * describe block is named for was two entry points, not two spellings.
-   */
+  /* One way in: the accordion is identified by its heading, which nothing else renders, and the
+     Manage Links action by there being exactly one of it. */
   it('leaves one way into link editing, and no accordion beside it', async () => {
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
@@ -611,18 +569,16 @@ describe('Links accordion no longer duplicates the panel action', () => {
   })
 
   it('keeps one device figure on a cell, not two ways of counting them', async () => {
-    // "Located Devices" and "Directly Assigned Devices" answered nearly the same question and
-    // differed only in a subtlety -- inherited versus pinned -- that the Devices page states per
-    // device. Two counts on a cell invited the reader to work out why they disagreed.
+    // One device count on a cell: "Located" and "Directly Assigned" differed only in inherited
+    // versus pinned, which the Devices page states per device.
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
     fireEvent.click(list().getByText('Assembly Line 1'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    // The label now carries the online/total figure ("Located Devices (1/1 online)") because the
-    // value beneath it became a list of chips. That is still ONE count -- which is what this guards
-    // -- so the match is anchored rather than exact.
+    // The label carries the online/total figure because the value beneath it is a list of chips.
+    // Still one count, so the match is anchored rather than exact.
     expect(within(panel()).getByText(/^Located Devices\b/)).toBeTruthy()
     expect(within(panel()).queryByText(/Directly Assigned Devices/i)).toBeNull()
     expect(within(panel()).queryByText(/Explicitly Filed Here/i)).toBeNull()
@@ -631,20 +587,9 @@ describe('Links accordion no longer duplicates the panel action', () => {
 
 describe('A card is a composition: header, description, filters, table', () => {
   /**
-   * THIS USED TO ASSERT THE OPPOSITE, and the history is the point.
-   *
-   * Each page began with a `.page-actions` row of its own -- a 34px band holding one button above a
-   * filter bar that was already the page's control surface -- so the button was folded INTO the
-   * filter bar and this suite pinned it there. That fixed the wasted band and left a subtler
-   * problem: "create a thing" was sitting in the row for "narrow the things", and the filter bar
-   * floated above the card it filtered as a panel in its own right.
-   *
-   * The rule now is compositional rather than corrective: a card is a title, a description, its
-   * actions, and the filters that narrow what is below it. So the bar moved inside the card and the
-   * primary action moved into the header -- and what is asserted is that arrangement, on every page
-   * that has one, because a rule applied to three pages and forgotten on the fourth is not a rule.
-   *
-   * `.page-actions` must still not come back: that part of the original finding stands.
+   * A card is a title, a description, its actions, and the filters that narrow what is below it.
+   * The bar sits inside the card and the primary action in the header, asserted on every page that
+   * has one. `.page-actions` must not come back.
    */
   const composedCard = (label) => {
     const card = document.querySelector('.page-main .card')
@@ -655,10 +600,11 @@ describe('A card is a composition: header, description, filters, table', () => {
     const btn = within(header).getByRole('button', { name: label })
     expect(btn.className).toMatch(/btn-primary/)
 
-    // The description and the filters are in the body, and the body is inside the card.
+    // The description is behind a "?" on the title; the filters are in the body, inside the card.
+    expect(header.querySelector('.section-title .help-tip')).toBeTruthy()
     const body = card.querySelector('.card-body')
     expect(body).toBeTruthy()
-    expect(body.querySelector('p')).toBeTruthy()
+    expect(body.querySelector('p')).toBeNull()
     expect(body.querySelector('.filter-bar')).toBeTruthy()
 
     // Nothing floats outside the card any more.
@@ -698,13 +644,7 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
 
   it('hands a clicked gateway and device over to their own pages, from the drawer', async () => {
     // A gateway or device named against a cell is the same entity as the one on its own page, and
-    // this page is where you find out it exists -- so reading a name and then hunting for it by
-    // hand was the missing half of this page.
-    //
-    // THE LINKS MOVED, THE BEHAVIOUR DID NOT. They were rows in the two sub-tables each cell card
-    // carried; those tables are what made three cells fill a viewport (issue #61), so they are
-    // gone and the drawer's chips -- which already called these same handlers -- are now the one
-    // place the hand-over happens.
+    // the drawer's chips are the one place the hand-over happens.
     const onSelectGateway = vi.fn()
     const onSelectDevice = vi.fn()
     renderCells({ onSelectGateway, onSelectDevice })
@@ -744,9 +684,7 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
   })
 
   it('renders a cell with nothing in it as one row, marked empty', async () => {
-    // A floor mid-setup was a column of full-height cards each saying "nothing here" twice, with
-    // the cells that DO have contents pushed below them. A row cannot have that problem -- but it
-    // still has to say the cell is empty rather than looking like one whose contents failed to load.
+    // An empty cell has to say it is empty rather than look like one whose contents failed to load.
     api.get.mockImplementation(routeGet({
       cells: [cell, { cell_id: 'cell-empty', cell_name: 'TEST2', is_archived: false, gateways: [], gateway_count: 0 }]
     }))
@@ -773,9 +711,8 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
 
 describe('Gateway topic path carries the real Sparkplug group', () => {
   it('uses the recorded group rather than a wildcard', async () => {
-    // archived migration 0008 made the edge node address (group, node) rather than node alone, so a
-    // wildcard threw away half an address the row already knows -- and a topic you have to edit
-    // before pasting it into an MQTT client is not much of an answer.
+    // The edge node address is (group, node), so the topic is the full address the row already
+    // knows, ready to paste into an MQTT client.
     api.get.mockImplementation(routeGet({
       gateways: [{ ...gateway, sparkplug_group: 'Wales' }]
     }))
@@ -818,10 +755,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
 
 describe('Context panel layout invariants', () => {
   it('keeps the cells table to one row per cell', async () => {
-    // THE INVARIANT THIS REPLACED was that the two tables INSIDE a cell card shared a column grid,
-    // so the eye ran straight down Name / Sparkplug ID / Status across both. Those tables are gone
-    // (issue #61) and with them the reason to align anything -- a cell is one row now, and the
-    // detail they carried is in the drawer. What is worth pinning is that it stayed that way.
+    // A cell is one row and the detail is in the drawer; this pins that it stayed that way.
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 

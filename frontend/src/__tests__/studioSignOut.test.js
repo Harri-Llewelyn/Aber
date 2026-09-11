@@ -13,8 +13,7 @@ describe('ending the session the gateway holds in front of Studio', () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe('http://127.0.0.1:54323/oauth2/signout');
     // Without `credentials: include` the request carries no cookie, so the gateway has no session
-    // to clear and answers 302 having done nothing -- the exact failure this helper exists to
-    // avoid, and one that looks identical to success from here.
+    // to clear and answers 302 having done nothing, which looks identical to success from here.
     expect(init.credentials).toBe('include');
     // Following the 302 would pull the browser into Studio's login flow to no purpose.
     expect(init.redirect).toBe('manual');

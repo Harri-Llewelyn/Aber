@@ -3,17 +3,10 @@ import { iso22400Sections, kpiTooltip } from '../../utils/iso22400'
 import { STANDARDS } from '../../utils/standards'
 
 /**
- * The ISO 22400 tab of the unified Standard Vocabulary Reference card.
- *
- * Kept a distinct tab rather than folded into MTConnect's sections, because they are different
- * kinds of thing. MTConnect gives you words to build an observation name from; ISO 22400 gives you
- * whole computed KPIs with formulas. Merging them would imply a device could report either the same
- * way, and would hide the distinction that matters most here -- MTConnect's `AVAILABILITY` is an
- * EVENT meaning "the device is connected", which is not the ISO 22400 availability ratio.
- *
- * "In use" is decided by semantic id where the catalog has one, falling back to the name token.
- * That is `semantic_id` earning its keep: a metric named anything at all is recognised as this KPI
- * once it carries the KPI's semanticId, which is the whole point of recording one.
+ * The ISO 22400 tab of the Standard Vocabulary Reference card. A distinct tab because ISO 22400
+ * gives whole computed KPIs with formulas, not words to build an observation name from; MTConnect's
+ * `AVAILABILITY` is an EVENT meaning connected, not the ISO ratio. In use is decided by semantic id
+ * where the catalog has one, falling back to the name token.
  */
 export function iso22400VocabularyTab({ vocabulary, catalog, onUseKpi }) {
   const sections = iso22400Sections(vocabulary).map(s => ({

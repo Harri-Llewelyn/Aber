@@ -1,27 +1,11 @@
 /**
- * AAS export: emit an Asset Administration Shell (IEC 63278) V3 document for one device, as JSON
- * or as an `.aasx` package.
- *
- * An *adapter*, not a migration: the database keeps its own shape and this function projects it
- * into AAS on the way out. Nothing upstream knows AAS exists. Archived migration 0029's header records why
- * a native AAS metamodel was rejected (recursive RLS, a third identifier namespace, a fourth type
- * system).
- *
- * THE MAPPING ITSELF NO LONGER LIVES HERE. It moved to `../_shared/aas/shell.ts` when `aas-api`
- * began serving the same object graph over the IDTA 02001/02002 REST surface. Two constructions of
- * one shell would eventually disagree, and the disagreement would be invisible: the `.aasx` a
- * customer holds and the endpoint their ERP queries would describe the same machine differently,
- * both reporting success. What remains here is what is genuinely export-only -- the role ladder,
- * the OPC packaging, and the decision about what to do when a bundled model cannot be reached.
- *
- * The three emission rules that shape the document (telemetry linked rather than inlined, an
- * unmapped semanticId omitted rather than emptied, one Submodel per attached schema) are stated
- * and enforced in the shared module, beside the code that applies them.
- *
- * SECURITY. The caller's own JWT resolves their role; the service-role client is used only after
- * that check passes. Broader disclosure than any single table it reads -- a shell aggregates
- * nameplate, configuration and documentation into one payload. `aas-api` deliberately does NOT
- * hold that key: see its header for why a live REST surface must read as the caller.
+ * AAS export: emit an Asset Administration Shell (IEC 63278) V3 document for one device, as JSON or
+ * as an `.aasx` package. An adapter, not a migration: the database keeps its own shape and this
+ * projects it on the way out. The mapping lives in `../_shared/aas/shell.ts`, shared with `aas-api`
+ * so the two cannot describe the same machine differently; what remains here is the role ladder,
+ * the OPC packaging, and what to do when a bundled model cannot be reached. The caller's JWT
+ * resolves their role, and the service-role client is used only after that check; `aas-api`
+ * deliberately does not hold that key.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -44,17 +28,16 @@ import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
-// Read access, deliberately wider than approve-quarantine's write access: an export is a read, and
-// Operator/Auditor are the roles that would actually need to hand a shell to a partner. Still an
-// allow-list, so an unmapped role is refused rather than defaulted.
+// Read access, wider than approve-quarantine's write access: Operator and Auditor are the roles
+// that hand a shell to a partner. Still an allow-list, so an unmapped role is refused.
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor"];
 
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 
 /**
- * AAS Part 5 media type for an AASX package. The `+xml` suffix looks wrong for a ZIP and is not --
- * an AASX *is* an Open Packaging Conventions container, and OPC's registered types carry it.
+ * AAS Part 5 media type for an AASX package. The `+xml` suffix is correct: an AASX is an Open
+ * Packaging Conventions container, and OPC's registered types carry it.
  */
 const AASX_MEDIA_TYPE = "application/asset-administration-shell-package+xml";
 
@@ -62,33 +45,14 @@ const AASX_MEDIA_TYPE = "application/asset-administration-shell-package+xml";
 const AASX_SPEC_PART = "aasx/aasenv-root.json";
 
 /**
- * Package an AAS Environment as an `.aasx` (OPC / ISO 29500 container).
- *
- * OPC is a ZIP with a mandated discovery chain, and every part of it is load-bearing -- a reader
- * that cannot walk the chain rejects the package rather than guessing:
- *
- *   [Content_Types].xml        declares a media type for every extension in the archive. Omit it
- *                              and the container is not an OPC package at all.
- *   _rels/.rels                package-level relationships. Points at the aasx-origin part.
- *   aasx/aasx-origin           a deliberately EMPTY marker part. It exists purely to be the anchor
- *                              the origin relationship targets, which is how a reader finds the
- *                              AAS content without knowing our file names.
- *   aasx/_rels/aasx-origin.rels  origin-level relationships. Points at the actual payload.
- *   aasx/aasenv-root.json      the Environment, byte-identical to what ?format=json returns.
- *
- * Stored uncompressed (`level: 0`) for [Content_Types].xml is not required by OPC, so everything is
- * simply deflated; readers handle both.
- *
- * SUPPLEMENTARY FILES extend the chain by one more link. A 3D model bundled into the package is a
- * part in its own right, and needs all three of:
- *
- *   an `aas-suppl` relationship FROM THE SPEC PART, not from the origin -- a supplementary file
- *     belongs to the Environment that references it, so its relationship lives in
- *     aasx/_rels/aasenv-root.json.rels;
- *   a [Content_Types] entry for its extension, or the package is malformed (OPC requires every
- *     extension in the archive to be declared, and .glb is not one of the defaults);
- *   a `File.value` rewritten to the part name, since a package-relative reference is the point of
- *     bundling. That rewrite happens in the caller, not here.
+ * Package an AAS Environment as an `.aasx` (OPC / ISO 29500 container). OPC is a ZIP with a
+ * mandated discovery chain, every part of which a reader requires: `[Content_Types].xml` declares a
+ * media type for every extension; `_rels/.rels` points at the aasx-origin part; `aasx/aasx-origin`
+ * is an empty marker the origin relationship targets; `aasx/_rels/aasx-origin.rels` points at the
+ * payload; `aasx/aasenv-root.json` is the Environment, byte-identical to the JSON export. A bundled
+ * 3D model needs an `aas-suppl` relationship from the spec part (aasx/_rels/aasenv-root.json.rels),
+ * a [Content_Types] entry for its extension, and a `File.value` rewritten to the part name, which
+ * the caller does.
  */
 type SupplementaryFile = { part: string; bytes: Uint8Array; contentType: string };
 
@@ -194,9 +158,8 @@ export default async function handler(req: Request): Promise<Response> {
       return json({ error: "device_id must be a device UUID" }, 400);
     }
 
-    // Accepted from either the query string or the body. supabase-js's functions.invoke() sends a
-    // body and does not expose the URL, so a body-only parameter would be unreachable from the UI
-    // and a query-only one unreachable from curl; supporting both costs one line.
+    // Accepted from either the query string or the body: supabase-js's functions.invoke() sends a
+    // body and does not expose the URL, and curl the reverse.
     const requestedFormat = String(
       new URL(req.url).searchParams.get("format") ?? body.format ?? "json",
     ).toLowerCase();
@@ -220,14 +183,9 @@ export default async function handler(req: Request): Promise<Response> {
       const supplements: SupplementaryFile[] = [];
       let bundled3dModel = false;
 
-      // Bundle the model INTO the package rather than leaving a URL in it. Self-containment is the
-      // whole reason AASX exists: a package handed to a partner on removable media has to render
-      // without reaching back to a host they may have no route to.
-      //
-      // Best-effort, deliberately. If the object cannot be fetched -- Storage down, object deleted
-      // out from under the row -- the export still succeeds with the URL form it would have used
-      // anyway. Failing the whole shell because one artefact is unavailable would be the wrong
-      // trade: everything else in it is still accurate and useful.
+      // Bundle the model into the package rather than leaving a URL in it: self-containment is the
+      // reason AASX exists. Best-effort: if the object cannot be fetched, the export still succeeds
+      // with the URL form.
       if (modelPath && modelUrl) {
         try {
           const { data: blob, error: dlError } = await supabaseAdmin.storage
@@ -246,10 +204,9 @@ export default async function handler(req: Request): Promise<Response> {
           const part = `aasx/files/${modelPath}`;
           supplements.push({ part, bytes, contentType: modelContentType(modelPath) });
 
-          // Rewrite the reference to the part name. This is the ONE element where the packaged
-          // Environment deliberately differs from the JSON export: a package-relative path is what
-          // makes the bundle self-contained, and is what AAS Part 5 specifies for a supplementary
-          // file. The test asserts that this is the only difference.
+          // Rewrite the reference to the part name. This is the one element where the packaged
+          // Environment differs from the JSON export, as AAS Part 5 specifies for a supplementary
+          // file; the test asserts it is the only difference.
           for (const submodel of environment.submodels as { idShort?: string }[]) {
             if (submodel.idShort !== "VisualRepresentation") continue;
             for (const element of (submodel as unknown as { submodelElements: { idShort: string; value: string }[] }).submodelElements) {
@@ -266,22 +223,11 @@ export default async function handler(req: Request): Promise<Response> {
         }
       }
 
-      // REFUSE TO SHIP A PACKAGE WHOSE ONLY MODEL REFERENCE IS UNREACHABLE.
-      //
-      // This is the degraded path and nothing else: the device has a model, bundling did not
-      // happen (over the size cap, Storage unavailable, object deleted), so the package falls back
-      // to the URL form -- and that URL points at loopback. The result is an AASX that opens
-      // cleanly, validates, claims a VisualRepresentation, and whose one File element resolves to
-      // nothing on any machine but this one. Nobody downstream can tell that from a working
-      // package until they try to render it.
-      //
-      // Failing loudly is the right trade HERE and not in the JSON path, because self-containment
-      // is the entire reason to produce an AASX rather than a JSON environment. A package that
-      // silently is not self-contained is worse than no package.
-      //
-      // It cannot fire on the ordinary local path: a model small enough to bundle IS bundled, and
-      // a device with no model never reaches this branch. Reaching it means something is already
-      // wrong and this says which thing.
+      // Refuse to ship a package whose only model reference is unreachable: bundling did not happen
+      // and the URL fallback points at loopback, so the AASX would validate and claim a
+      // VisualRepresentation that resolves on no other machine. Failing loudly is right here and
+      // not in the JSON path, because self-containment is the reason to produce an AASX. This
+      // cannot fire on the ordinary local path, where a model small enough to bundle is bundled.
       if (modelPath && !bundled3dModel && MODEL_BASE_IS_LOOPBACK) {
         console.error(`[aas-export] refusing to package an unreachable model URL. ${MODEL_BASE_ADVICE}`);
         return json({
@@ -310,21 +256,9 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    /*
-     * A JSON SHELL CARRYING A LOOPBACK MODEL URL IS STILL A VALID SHELL, so this warns rather than
-     * refuses -- which is the opposite of the AASX branch above, and deliberately so. Self-
-     * containment is the entire reason to produce an AASX, so a package that is not self-contained
-     * is worse than none; a JSON environment is a document that REFERENCES things by URL, and one
-     * unreachable reference does not make the rest of it wrong.
-     *
-     * BUT SILENCE WAS THE WRONG ANSWER TOO. The export succeeded, the file downloaded, and the one
-     * File element in it resolved to the exporter's own laptop -- discoverable only by opening the
-     * shell somewhere else and finding a dead link. The operator who ran the export is the person
-     * best placed to fix it and the last person who would find out.
-     *
-     * It fires on the URL actually emitted, not on configuration in the abstract: a device with no
-     * model has no reference to be unreachable.
-     */
+    /* A JSON shell carrying a loopback model URL is still a valid shell, so this warns rather than
+       refuses, unlike the AASX branch above. It fires on the URL actually emitted: a device with no
+       model has no reference to be unreachable. */
     const modelUrlIsUnreachable = Boolean(device.model_3d_path) && MODEL_BASE_IS_LOOPBACK;
 
     return new Response(

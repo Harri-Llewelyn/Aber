@@ -10,9 +10,8 @@ import paho.mqtt.client as mqtt
 import sparkplug_b_pb2
 from datetime import datetime, timezone
 
-# The report is written with ✅/❌ markers. A Windows console defaults to cp1252, where printing
-# those raises UnicodeEncodeError -- which surfaces as a crash inside the *reporting* code and
-# looks like a validation failure rather than a console limitation. Force UTF-8 on the streams.
+# The report is written with ✅/❌ markers, which raise UnicodeEncodeError on a cp1252 Windows
+# console. Force UTF-8 on the streams.
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         try:
@@ -20,27 +19,19 @@ for _stream in (sys.stdout, sys.stderr):
         except Exception:
             pass
 
-# Configuration. Defaults target a HOST run against Docker Compose; an in-cluster Job overrides
-# them with Service names. Everything is env-overridable so one file serves both.
-# Running it either way: ../ingestion/README.md -> "End-to-end validation"
-#
-# THE PORT DEFAULTS ARE CONDITIONAL ON THEIR HOST BEING SET, and that is what makes both paths work
-# from one file: 5433/54322 are the ports Compose PUBLISHES to avoid colliding with a local
-# PostgreSQL, not the ports the servers listen on. Naming a host means the caller is addressing the
-# service directly, so 5432 is right. See docs/kubernetes-architecture.md §2.5 and §8.1.
+# Configuration. Defaults target a host run against Docker Compose; an in-cluster Job overrides them
+# with Service names. See ../ingestion/README.md, "End-to-end validation". The port defaults are
+# conditional on their host being set: 5433/54322 are the ports Compose publishes, and naming a host
+# means the service is addressed directly on 5432.
 TIMESCALEDB_HOST = os.getenv("DB_HOST", "localhost")
 TIMESCALEDB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None else "5432")
 TIMESCALEDB_NAME = os.getenv("DB_NAME", "postgres")
 TIMESCALEDB_USER = os.getenv("DB_USER", "postgres")
 TIMESCALEDB_PASS = os.getenv("DB_PASSWORD", "postgres")
 
-# Supabase's own PostgreSQL, addressed directly rather than through PostgREST. Needed only by
-# the audit-row cleanup, which archived migration 0003 deliberately put out of reach of `service_role`.
-#
-# The port default mirrors TIMESCALEDB_PORT's conditional, and for the same reason: 54322 is the
-# published port, 5432 is what the server listens on. Without this an in-cluster run that set
-# SUPABASE_DB_HOST=supabase-db would inherit 54322, and the cleanup would fail to connect -- which
-# surfaces as leftover fixture rows in an append-only audit table rather than as a config error.
+# Supabase's own PostgreSQL, addressed directly rather than through PostgREST. Needed only by the
+# audit-row cleanup, which the append-only trigger puts out of reach of `service_role`. The port
+# default mirrors TIMESCALEDB_PORT's conditional for the same reason.
 SUPABASE_DB_HOST = os.getenv("SUPABASE_DB_HOST", "localhost")
 SUPABASE_DB_PORT = os.getenv(
     "SUPABASE_DB_PORT", "54322" if os.getenv("SUPABASE_DB_HOST") is None else "5432"
@@ -55,20 +46,12 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
-# Node-RED, as reached from the HOST -- the published port, not the compose-internal name, for
-# the same reason MQTT_HOST and DB_HOST default to localhost here. Check 7 asserts this address
-# refuses unauthenticated callers.
-#
-# No conditional default here, unlike the two ports above: there is no separate host variable to
-# key off, and guessing from something like KUBERNETES_SERVICE_HOST would be magic that reads
-# worse than the one env var an in-cluster Job has to set anyway.
+# Node-RED as reached from the host, the published port. Check 7 asserts this address refuses
+# unauthenticated callers. No conditional default: there is no separate host variable to key off.
 NODERED_BASE_URL = os.getenv("NODERED_BASE_URL", "http://localhost:1880")
 
-# Identifiers for validation.
-#
-# Names are labels only. Identity on the wire is the `sparkplug_id` each row is issued, which
-# is derived from its UUID primary key -- so the seeded ids are read back after insert rather
-# than being knowable up front.
+# Identifiers for validation. Names are labels only; identity on the wire is the `sparkplug_id` each
+# row is issued, derived from its UUID, so the seeded ids are read back after insert.
 VAL_CELL_NAME = "VALIDATE Cell 1"
 VAL_GW_NAME = "VALIDATE_Gateway_01"
 VAL_KNOWN_DEVICE = "VALIDATE_Device_001"
@@ -77,19 +60,17 @@ VAL_MISMATCH_DEVICE = "VALIDATE_Mismatch_Device_001"
 VAL_QUARANTINE_DEVICE = "VALIDATE_Quarantine_Device_001"
 VAL_MALFORMED_DEVICE = "VALIDATE_Malformed_Device_001"
 VAL_RENAMED_DEVICE = "VALIDATE_Device_001_Renamed"
-# A device of its own for the alias suite. It cannot share VAL_KNOWN_DEVICE: an extra DBIRTH there
-# would rewrite last_birth_metrics and break checks 6 and 6b, which assert an exact declared set
-# and an untouched timestamp.
+# A device of its own for the alias suite: an extra DBIRTH on VAL_KNOWN_DEVICE would rewrite
+# last_birth_metrics and break checks 6 and 6b.
 VAL_ALIAS_DEVICE = "VALIDATE_Alias_Device_001"
 VAL_SCHEMA_NAME = "VALIDATE_Schema_Robot_Standard"
-# A second schema attached to the same device through device_submodels (archived migration 0034). It exists
-# to prove the modelled set is the UNION across every attached submodel: VAL_KPI_METRIC is declared
-# at birth and modelled ONLY here, so a reader that looked at one schema would wrongly flag it.
+# A second schema attached to the same device through device_submodels, to prove the modelled set is
+# the union across every attached submodel: VAL_KPI_METRIC is declared at birth and modelled only
+# here.
 VAL_KPI_SCHEMA_NAME = "VALIDATE_Schema_OEE"
 
-# The schema attached to the registered device, and a metric deliberately left out of it. The
-# device declares the extra metric at birth, so it must surface as unmodelled -- and stop being
-# unmodelled once the schema is widened, without the device rebirthing.
+# The schema attached to the registered device, and a metric deliberately left out of it, so it
+# surfaces as unmodelled and stops being unmodelled once the schema is widened, without a rebirth.
 VAL_SCHEMA_METRICS = ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller/EMERGENCY_STOP"]
 VAL_UNMODELLED_METRIC = "Environmental/HUMIDITY_RELATIVE"
 VAL_KPI_METRIC = "OEE/AVAILABILITY"
@@ -100,40 +81,22 @@ UNKNOWN_DEVICE_ID = "dev" + "f" * 21
 # The same id one character short -- the truncation case the format check exists to diagnose.
 MALFORMED_DEVICE_ID = "dev" + "f" * 20
 
-# The Sparkplug Group ID every message in this run is published under. Named rather than inlined
-# because the alias table and the rebirth topic are both scoped by it.
-# Must match gateways.sparkplug_group, whose column default is 'ACS-Cymru' (archived migration 0008).
-# It was "Group1" while ingestion discarded the group entirely; now that resolution is
-# group-qualified, publishing under a group the seeded gateway is not registered under would
-# exercise the DEPRECATED fallback arm on every check rather than the current path.
+# The Sparkplug Group ID every message in this run is published under; the alias table and the
+# rebirth topic are both scoped by it. Must match gateways.sparkplug_group, whose default is
+# 'ACS-Cymru', or every check would exercise the deprecated fallback arm.
 VAL_GROUP = "ACS-Cymru"
 
-# ---------------------------------------------------------------------------------------------
-# The validator's gateway UUID is PINNED, and that is what lets it hold an ordinary per-gateway
-# MQTT credential instead of a wildcard one.
-#
-# mosquitto.acl confines every client to `spBv1.0/+/+/%u/#`, so an account's username must equal
-# the edge-node segment of the topics it publishes -- and that segment must be the gateway row's
-# `sparkplug_id` or verify_gateway_binding() rejects the message. `sparkplug_id` is GENERATED
-# ('gwy' + the first 21 hex characters of the UUID), so it is a pure function of this constant:
-#
-#     11000000-0000-4000-8000-000000000001  ->  gwy110000000000400080000
-#
-# A database-allocated UUID would differ on every run and so be unprovisionable in advance, which
-# is what would force a wildcard account back into this script.
-#
-# ONLY THE GATEWAY IS PINNED. The devices are still created at runtime with database-allocated
-# UUIDs, because they sit in the FIFTH topic segment, which the ACL's trailing `#` covers. So the
-# onboarding and quarantine checks still exercise genuinely unknown device ids.
-#
-# The first 21 hex characters are what matter: 11000000-…-0002 would collide with -0001, since
-# they differ only past that cut. Do not derive a second fixture id by incrementing the last group.
+# The validator's gateway UUID is pinned so it can hold an ordinary per-gateway MQTT credential:
+# mosquitto.acl confines a client to `spBv1.0/+/+/%u/#`, so the username must equal the gateway
+# row's generated `sparkplug_id`, which is a pure function of this constant
+# (11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000). Only the gateway is pinned;
+# devices sit in the fifth topic segment, which the ACL's trailing `#` covers. The first 21 hex
+# characters are what matter, so do not derive a second fixture id by incrementing the last group.
 VAL_GW_UUID = "11000000-0000-4000-8000-000000000001"
 VAL_GW_SPARKPLUG_ID = "gwy110000000000400080000"
 
 # Sparkplug metric aliases for check 8. 100 is declared by the gateway's NBIRTH and used by a
-# DEVICE's DDATA -- that pair is the whole point, since Sparkplug scopes alias uniqueness to the
-# edge node including its devices, and a per-device table would silently fail to resolve it.
+# device's DDATA: Sparkplug scopes alias uniqueness to the edge node including its devices.
 ALIAS_NODE_SCOPED = 100
 ALIAS_TEMPERATURE = 101
 ALIAS_EXECUTION = 102
@@ -163,10 +126,8 @@ except Exception as e:
     print(f"Warning: Supabase client init failed: {e}")
 
 def modelled_metrics(schema_definition):
-    """
-    Python mirror of frontend/src/utils/deviceTags.js modelledMetrics(): the union of a schema's
-    `properties` keys and its `required` list, or None when it declares neither and so cannot be
-    evaluated. Kept in step with the JS deliberately -- both answer the same question.
+    """Python mirror of frontend/src/utils/deviceTags.js modelledMetrics(): the union of a schema's
+    `properties` keys and its `required` list, or None when it declares neither.
     """
     if not isinstance(schema_definition, dict):
         return None
@@ -179,13 +140,9 @@ def modelled_metrics(schema_definition):
 
 
 def modelled_metrics_across(schema_definitions):
-    """
-    Python mirror of modelledMetricsAcross() in frontend/src/utils/deviceTags.js: the union of the
-    metrics every attached submodel models, or None when none of them can be evaluated.
-
-    A device may have several schemas attached through device_submodels (archived migration 0034), one AAS
-    Submodel each. A metric modelled by any one of them is modelled -- judging against a single
-    schema would flag a device for publishing what another of its own submodels accounts for.
+    """Python mirror of modelledMetricsAcross() in frontend/src/utils/deviceTags.js: the union of the
+    metrics every attached submodel models, or None when none can be evaluated. A metric modelled by
+    any one of a device's submodels is modelled.
     """
     union = set()
     evaluable = False
@@ -199,10 +156,8 @@ def modelled_metrics_across(schema_definitions):
 
 
 def unmodelled_metrics(declared, schema_definitions):
-    """
-    Metrics declared at the last birth that no attached submodel accounts for.
-
-    Accepts a single definition or a list of them, so existing single-schema callers keep working.
+    """Metrics declared at the last birth that no attached submodel accounts for. Accepts a single
+    definition or a list of them.
     """
     if not declared:
         return []
@@ -215,11 +170,8 @@ def unmodelled_metrics(declared, schema_definitions):
 
 
 def device_schema_definitions(device_uuid):
-    """
-    Every schema definition attached to a device, resolved through the `device_schemas` view.
-
-    The view is the union of device_submodels and the legacy 1:1 devices.schema_id, so this is the
-    same resolution the exporter and the frontend use rather than a third one that could disagree.
+    """Every schema definition attached to a device, resolved through the `device_schemas` view, the
+    same resolution the exporter and the frontend use.
     """
     if not supabase_client or not device_uuid:
         return []
@@ -234,19 +186,10 @@ def device_schema_definitions(device_uuid):
 
 
 def probe_nodered_editor_login():
-    """
-    Drive the browser sign-in handshake against Node-RED and use the session it mints.
-
-    Returns (ok, detail). See check 7b for why this exists as well as the 401 probes.
-
-    The demo password is the seeded one from supabase/seed.sql, documented in the README --
-    this only ever runs against a stack seeded with those accounts.
-
-    NOT parse_qs ON THE EXCHANGE CODE. Node-RED redirects with `?code=` UNENCODED
-    (completeGenericStrategyAuth), the code is base64, and parse_qs maps a literal '+' to a
-    space -- so roughly a third of runs would fail with "Invalid exchange code" and look like a
-    product bug. The editor itself is unaffected: it lifts the code with a raw regex and lets
-    jQuery re-encode it. unquote(), never unquote_plus().
+    """Drive the browser sign-in handshake against Node-RED and use the session it mints. Returns (ok,
+    detail); see check 7b. The demo password is the seeded one from supabase/seed.sql. Not parse_qs
+    on the exchange code: Node-RED redirects with `?code=` unencoded, the code is base64, and
+    parse_qs maps a literal '+' to a space. unquote(), never unquote_plus().
     """
     import http.cookiejar
     import urllib.parse as urlparse
@@ -337,11 +280,9 @@ def probe_nodered_editor_login():
                            f"{settings_res.status}. adminAuth.users is the usual cause -- "
                            "bearerStrategy resolves the user by username on every request.")
 
-        # AND THAT IT CARRIES THE PERMISSIONS, not merely a username. runtime/api/settings.js
-        # copies `permissions` off whatever adminAuth.users returned, and the editor draws a
-        # PADLOCK ON DEPLOY when it is missing -- so an administrator goes read-only in the UI
-        # while the API would still accept the deploy. Status alone cannot see that: a bare
-        # {username} answers 200 here and looks entirely healthy.
+        # And that it carries the permissions, not merely a username: the editor draws a padlock on
+        # Deploy when `permissions` is missing, while the API would still accept the deploy, so a
+        # bare {username} looks healthy here and is not.
         user = json.loads(settings_res.read()).get("user") or {}
         if user.get("permissions") != "*":
             return False, (f"editor session reports permissions={user.get('permissions')!r} for an "
@@ -371,18 +312,10 @@ def get_timescaledb_connection():
 
 
 def get_supabase_admin_connection():
-    """
-    A direct owner connection to the Supabase database, used only to clear this run's audit rows.
-
-    WHY NOT THROUGH POSTGREST, WHICH IS HOW EVERYTHING ELSE HERE IS DONE. archived migration 0003 makes
-    public.digital_thread genuinely append-only: a BEFORE UPDATE OR DELETE trigger rejects the
-    operation for every application role, `service_role` included. That is the point of the
-    change -- the service key ships in .env and is held by ingestion and all four edge functions,
-    so an audit trail that key could rewrite was not much of an audit trail.
-
-    Clearing fixture rows is therefore, deliberately, an act that needs owner authority. The
-    trigger exempts `postgres` because a role that can issue DDL can drop the trigger anyway, so
-    pretending otherwise would be theatre.
+    """A direct owner connection to the Supabase database, used only to clear this run's audit rows.
+    public.digital_thread is append-only for every application role, `service_role` included, so
+    clearing fixture rows needs owner authority; the trigger exempts `postgres` because a role that
+    can issue DDL can drop the trigger anyway.
     """
     return psycopg2.connect(
         host=SUPABASE_DB_HOST,
@@ -394,26 +327,11 @@ def get_supabase_admin_connection():
 
 
 def preflight_supabase_admin():
-    """
-    Prove the owner connection works BEFORE the suite runs. Returns True if it is usable.
-
-    WHY THIS EXISTS. The owner connection is a second database connection with different
-    credentials, configured by a different set of environment variables (SUPABASE_DB_*), and it was
-    used in exactly one place: clearing this run's audit rows, at the very end. Nothing exercised
-    it until then, and `cleanup_validation_data()` swallows its failures into a generic
-    `Supabase cleanup warning:` — so a wrong host, port or password produced a full green run that
-    silently left fixture audit rows behind, and the next run inherited them.
-
-    Failing at the start instead costs one connection and turns "why does the digital thread have
-    VALIDATE_ rows in it" into a line at the top of the log naming the variable to fix.
-
-    IT TESTS AUTHORITY, NOT REACHABILITY, and the distinction is the whole point. Connecting proves
-    nothing here: `service_role` connects perfectly well and is refused by 0003's append-only
-    trigger, which is exactly the situation this connection exists to escape. So the check performs
-    the real DELETE inside a transaction and rolls it back — the one operation cleanup depends on,
-    against a real row, with no side effect. A permissions probe that asked `SELECT current_user`
-    and compared it to a hardcoded 'postgres' would pass for any owner-named role and fail for a
-    correctly-privileged one with another name.
+    """Prove the owner connection works before the suite runs. Returns True if it is usable. The owner
+    connection is configured by its own SUPABASE_DB_* variables and used only at cleanup, whose
+    failures are swallowed, so a wrong value would leave fixture audit rows behind silently. It
+    tests authority, not reachability: `service_role` connects and is refused by the append-only
+    trigger, so the check performs the real DELETE inside a transaction and rolls it back.
     """
     label = f"{SUPABASE_DB_USER}@{SUPABASE_DB_HOST}:{SUPABASE_DB_PORT}/{SUPABASE_DB_NAME}"
     try:
@@ -458,14 +376,9 @@ def cleanup_validation_data():
     print("Cleaning up validation data...")
     if supabase_client:
         try:
-            # Audit rows are keyed by entity_id, and log_digital_thread_event() only ever writes
-            # 'devices' / 'gateways' / 'cells' into entity_type -- so the ids have to be collected
-            # while the rows carrying the VALIDATE_ names still exist. Deleting the entities first
-            # loses the only link back to their audit trail.
-            #
-            # This previously filtered `entity_type LIKE '%VALIDATE%'`, which matches none of those
-            # three values and so silently deleted nothing on every run since it was written. The
-            # audit rows from every validation run were left in an append-only table for good.
+            # Audit rows are keyed by entity_id, and log_digital_thread_event() writes only
+            # 'devices' / 'gateways' / 'cells' into entity_type, so the ids have to be collected
+            # while the rows carrying the VALIDATE_ names still exist.
             stale_ids = []
             for table, column, value in (
                 ("devices", "name", "VALIDATE_%"),
@@ -486,15 +399,10 @@ def cleanup_validation_data():
             supabase_client.table("schemas").delete().like("schema_name", "VALIDATE_%").execute()
 
             # Guarded: an empty `in_` list is not a no-op filter, and an unfiltered delete against
-            # digital_thread would wipe the whole audit history.
-            #
-            # Routed through an owner connection rather than PostgREST because 0003's append-only
-            # trigger refuses DELETE for service_role -- see get_supabase_admin_connection().
-            # NOT inside the surrounding try's generic handler, deliberately. Folded in with the
-            # PostgREST deletes, a failure here printed `Supabase cleanup warning: ...` among
-            # routine noise and the run still reported success -- while the audit rows it was
-            # supposed to remove stayed in an append-only table for every later run to inherit.
-            # The preflight above should mean this never fires; if it does, it says what happened.
+            # digital_thread would wipe the whole audit history. Routed through the owner connection
+            # because the append-only trigger refuses DELETE for service_role, and kept out of the
+            # surrounding try's generic handler so a failure here is reported rather than printed
+            # among routine noise.
             if stale_ids:
                 try:
                     audit_conn = get_supabase_admin_connection()
@@ -572,11 +480,9 @@ def make_sparkplug_payload(asset_id, metrics_dict, timestamp_ms, asset_name=None
 
 
 def make_aliased_birth_payload(asset_id, aliased_metrics, timestamp_ms):
-    """
-    A birth certificate that binds each metric to an integer alias, as an optimised gateway does.
-
-    `aliased_metrics` is {name: (alias, value)}. Both name and alias are present here -- that is
-    what a birth is for. The DATA that follows carries the alias alone.
+    """A birth certificate that binds each metric to an integer alias, as an optimised gateway does.
+    `aliased_metrics` is {name: (alias, value)}; both name and alias are present here, and the DATA
+    that follows carries the alias alone.
     """
     payload = sparkplug_b_pb2.Payload()
     payload.timestamp = timestamp_ms
@@ -597,12 +503,9 @@ def make_aliased_birth_payload(asset_id, aliased_metrics, timestamp_ms):
 
 
 def make_alias_only_payload(metrics_by_alias, timestamp_ms):
-    """
-    A DATA payload carrying aliases and NO names -- what a real Sparkplug gateway publishes once
-    it has birthed, and what this daemon used to ingest nothing at all from.
-
-    Deliberately carries no Asset_ID either: an optimised gateway does not repeat identity on
-    every DATA message, so the topic is the only identity available. That is the realistic case.
+    """A DATA payload carrying aliases and no names, what a real Sparkplug gateway publishes once it
+    has birthed. No Asset_ID either: the topic is the only identity available, which is the
+    realistic case.
     """
     payload = sparkplug_b_pb2.Payload()
     payload.timestamp = timestamp_ms
@@ -643,10 +546,8 @@ def seed_supabase():
     # by entity_id, and the cell's id is otherwise not recoverable once the row is deleted.
     SEEDED["cell_uuid"] = cell_id
 
-    # Seed gateway AT ITS PINNED UUID -- see VAL_GW_UUID for why the id cannot be left to the
-    # database. UPSERT rather than INSERT: the id is now fixed, so a previous run that died before
-    # cleanup leaves the row behind and a plain insert would fail on the primary key from then on,
-    # permanently, until someone deleted it by hand.
+    # Seed the gateway at its pinned UUID; see VAL_GW_UUID. UPSERT rather than INSERT, so a previous
+    # run that died before cleanup does not make every later insert fail on the primary key.
     g_res = (
         supabase_client.table("gateways")
         .upsert(
@@ -659,9 +560,8 @@ def seed_supabase():
     SEEDED["gateway_uuid"] = gateway.get("id")
     SEEDED["gateway_id"] = gateway.get("sparkplug_id")
 
-    # The generated id is what the MQTT credential is named after, so a mismatch means every
-    # publish below is dropped by the broker with nothing logged at either end -- and the run
-    # would fail as "no telemetry ingested", naming the wrong subsystem entirely.
+    # The generated id is what the MQTT credential is named after, so a mismatch means every publish
+    # below is dropped by the broker with nothing logged at either end.
     if SEEDED["gateway_id"] != VAL_GW_SPARKPLUG_ID:
         raise SystemExit(
             f"Seeded gateway sparkplug_id is {SEEDED['gateway_id']!r} but the MQTT credential is "
@@ -687,18 +587,11 @@ def seed_supabase():
         SEEDED[key + "_uuid"] = row.get("id")
         SEEDED[key + "_id"] = row.get("sparkplug_id")
 
-    # Seed a schema and attach it to the registered device, so birth-declared metrics have
-    # something to be judged against. Without an assigned schema a device is deliberately never
-    # flagged as unmodelled -- "publishes beyond its model" and "has no model" are different
-    # findings -- so this is a prerequisite of checks 6c/6d, not decoration.
-    #
-    # SEEDED AS A DRAFT, deliberately. Archived migration 0037 freezes every column but `status` on an
-    # `active` or `archived` schema, and that guard applies to `service_role` as well as to
-    # `authenticated` -- deliberately, since a trusted key is still not a reason to redefine a
-    # contract devices are provisioned against. Check 6d widens this schema in place to prove the
-    # unmodelled verdict is derived rather than stored, so the fixture has to be in the one state
-    # that is editable. A fixture that had to be forked to be edited would be testing versioning,
-    # not derivation.
+    # Seed a schema and attach it to the registered device, so birth-declared metrics have something
+    # to be judged against; a device with no schema is never flagged as unmodelled. Seeded as a
+    # draft, because every column but `status` is frozen on an `active` or `archived` schema, for
+    # `service_role` too, and check 6d widens this schema in place to prove the unmodelled verdict
+    # is derived rather than stored.
     s_res = supabase_client.table("schemas").insert({
         "schema_name": VAL_SCHEMA_NAME,
         "description": "End-to-end validation schema",
@@ -756,31 +649,15 @@ def seed_supabase():
 
 def run_simulation():
     print("Connecting validation publisher to MQTT broker...")
-    # MQTT 5, matching the daemon and the i3X server. THE VALIDATOR HAS TO SPEAK WHAT THE FLEET
-    # SPEAKS: it stands in for a physical edge node, so a validator left on 3.1.1 would be
-    # exercising a transport no gateway uses and would not notice a v5-only regression at all.
-    # paho 1.6.1's v1 callback API is unchanged -- only paho 2.x forces VERSION2 signatures.
+    # MQTT 5, matching the daemon and the i3X server: the validator stands in for a physical edge
+    # node and must speak what the fleet speaks. paho 1.6.1's v1 callback API is unchanged.
     client = mqtt.Client(protocol=mqtt.MQTTv5)
-    # Connects as ITS OWN GATEWAY, exactly as a physical edge node does -- username ==
-    # VAL_GW_SPARKPLUG_ID, confined by mosquitto.acl to its own edge-node subtree. There is no
-    # wildcard account to fall back on any more, so a mismatch between this credential and
-    # VAL_GW_UUID shows up as every publish being silently dropped by the broker.
-    #
-    # READ FROM MQTT_VALIDATOR_*, the same names docker-compose hands mosquitto-init, so .env is
-    # the single source and there is no second spelling to drift out of step.
-    #
-    # IT DELIBERATELY NO LONGER READS `MQTT_USER`/`MQTT_PASSWORD`. Those are the GENERIC names the
-    # ingestion service is given (`MQTT_USER: ${MQTT_INGESTION_USER}` in docker-compose), and that
-    # principal may only read spBv1.0/# and publish NCMD -- it cannot publish DBIRTH or DDATA at
-    # all. Sourcing an environment that defines them would connect this publisher as the ingestion
-    # daemon, be accepted by the broker, and then have every publish discarded by the ACL: the
-    # silent-drop failure the comment above warns about, arriving from the environment rather than
-    # from a typo.
-    #
-    # AND THERE IS NO DEFAULT PASSWORD ANY MORE. `acscymru123` dates from before per-gateway
-    # credentials existed. Once it stopped being a real account it stopped being a convenience and
-    # became a way to fail invisibly -- the broker rejects it, and every check that depends on
-    # telemetry fails for reasons that have nothing to do with the credential.
+    # Connects as its own gateway, exactly as a physical edge node does: username ==
+    # VAL_GW_SPARKPLUG_ID, confined by mosquitto.acl to its own subtree, so a mismatch shows as
+    # every publish silently dropped. Read from MQTT_VALIDATOR_*, the names docker-compose hands
+    # mosquitto-init. Not `MQTT_USER`/`MQTT_PASSWORD`, the ingestion daemon's credential, which may
+    # only read and publish NCMD; sourcing them would connect as the daemon and have every publish
+    # discarded by the ACL. No default password: a stale default fails invisibly.
     mqtt_user = os.getenv("MQTT_VALIDATOR_USER") or VAL_GW_SPARKPLUG_ID
     mqtt_pass = os.getenv("MQTT_VALIDATOR_PASSWORD") or ""
     if not mqtt_pass:
@@ -793,27 +670,20 @@ def run_simulation():
         )
     client.username_pw_set(mqtt_user, mqtt_pass)
 
-    # Capture the daemon's own NCMD rebirth requests. Check 9 asserts one is issued for an
-    # unknown alias and that the second is suppressed, so both the presence and the ABSENCE of a
-    # message are assertions -- which means the subscription has to be live before either.
+    # Capture the daemon's own NCMD rebirth requests. Check 9 asserts one is issued for an unknown
+    # alias and the second is suppressed, so the subscription has to be live before either.
     def on_ncmd(_client, _userdata, msg):
         CAPTURED_NCMD.append((msg.topic, msg.payload))
 
     client.message_callback_add("spBv1.0/+/NCMD/+", on_ncmd)
-    # THE CONNACK RETURN CODE IS THE POINT, and discarding it was the second half of the same bug.
-    #
-    # paho's connect() completes the TCP handshake and returns; the broker's verdict on the
-    # CREDENTIAL arrives asynchronously, in this callback, and nowhere else. The previous
-    # `lambda c, *_: c.subscribe(...)` accepted every argument and ignored all of them, so a
-    # rejected login was indistinguishable from a good one -- `connected = True`, loop_start(),
-    # and then a full run in which every publish went nowhere. Observed: nine failures across
-    # telemetry, rename safety, alias resolution, rebirth and i3X live values, and the single line
-    # naming the cause was in the BROKER's log, not this one.
+    # The CONNACK return code is the point: paho's connect() completes the TCP handshake and
+    # returns, and the broker's verdict on the credential arrives in this callback and nowhere else.
+    # A callback that ignored it made a rejected login indistinguishable from a good one, with the
+    # only line naming the cause in the broker's log.
     connack = []
 
-    # `properties` is the v5 signature, defaulted so this stays callable under either protocol.
-    # `rc` is a ReasonCodes under v5; `== 0` still holds and `connack` keeps recording the object,
-    # which prints as its reason string ("Success", "Not authorized") rather than as a bare number.
+    # `properties` is the v5 signature, defaulted so this stays callable under either protocol. `rc`
+    # is a ReasonCodes under v5; `== 0` still holds and it prints as its reason string.
     def on_connect(c, _userdata, _flags, rc, properties=None):
         connack.append(rc)
         if rc == 0:
@@ -837,9 +707,8 @@ def run_simulation():
 
     client.loop_start()
 
-    # Nothing may be published until the broker has ACCEPTED the connection. Waiting here rather
-    # than trusting connect() is what turns an authentication failure into one line naming the
-    # credential, instead of a passing-looking run whose every assertion is about something else.
+    # Nothing may be published until the broker has accepted the connection, so an authentication
+    # failure becomes one line naming the credential.
     for _ in range(50):
         if connack:
             break
@@ -851,9 +720,8 @@ def run_simulation():
             "  broker is reachable but never answered the CONNECT -- check the mosquitto logs."
         )
     if connack[0] != 0:
-        # 4 and 5 are the two this actually produces: 4 is bad username/password, 5 is
-        # not-authorised. Both mean the credential, not the topic ACL -- an ACL refusal happens
-        # later, per-publish, and is silent by design.
+        # 4 and 5 are the two this produces: bad username/password, and not-authorised. Both mean
+        # the credential, not the topic ACL, whose refusal happens later, per publish, silently.
         meaning = {
             1: "unacceptable protocol version",
             2: "identifier rejected",
@@ -890,9 +758,8 @@ def run_simulation():
     print(f"\n--- DDATA from registered device: {VAL_KNOWN_DEVICE} ({SEEDED.get('known_id')}) ---")
     publish("DDATA", SEEDED["known_id"], {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE", "Controller/EMERGENCY_STOP": "ARMED"})
 
-    # 4. DBIRTH under a truncated id -> quarantined with a message naming the length mismatch.
-    #    This is the whole point of the fixed 24-character format: a misconfigured gateway is
-    #    diagnosable rather than just another anonymous unknown device.
+    # 4. DBIRTH under a truncated id: quarantined with a message naming the length mismatch, which
+    # is the point of the fixed 24-character format.
     print(f"\n--- DBIRTH from a malformed (23-character) device id: {MALFORMED_DEVICE_ID} ---")
     publish("DBIRTH", MALFORMED_DEVICE_ID, {"firmware": "v1.0.0"}, asset_name=VAL_MALFORMED_DEVICE)
 
@@ -901,18 +768,16 @@ def run_simulation():
     print(f"\n--- DDATA with contradictory Asset_ID: {VAL_MISMATCH_DEVICE} ---")
     publish("DBIRTH", SEEDED["mismatch_id"], {"firmware": "v1.0.0"}, asset_id=UNKNOWN_DEVICE_ID)
 
-    # 6. Legacy device still publishing its name -> resolved by name during the migration
-    #    window, flagged identity_source = 'legacy_name'. The birth is what records how the
-    #    device was resolved, so it has to be sent before the DDATA.
+    # 6. Legacy device still publishing its name: resolved by name during the migration window and
+    # flagged identity_source = 'legacy_name'. The birth records how the device was resolved, so it
+    # is sent before the DDATA.
     print(f"\n--- DBIRTH/DDATA from a legacy name-addressed device: {VAL_LEGACY_DEVICE} ---")
     publish("DBIRTH", VAL_LEGACY_DEVICE, {"firmware": "v0.9.0"})
     publish("DDATA", VAL_LEGACY_DEVICE, {"Systems/TEMPERATURE": 30.0, "Controller/EXECUTION": "ACTIVE"})
 
-    # 7. DBIRTH for the registered device declaring one metric its schema does not model.
-    #    Published twice, identically: the daemon must record the declared set the first time
-    #    and then write nothing at all the second, because log_digital_thread_event() fires on
-    #    every UPDATE to `devices` and an unchanged rewrite per rebirth would append an audit
-    #    row each time to a deliberately append-only table.
+    # 7. DBIRTH for the registered device declaring one metric its schema does not model. Published
+    # twice, identically: the daemon must record the declared set the first time and write nothing
+    # the second, since log_digital_thread_event() fires on every UPDATE to `devices`.
     print(f"\n--- DBIRTH from registered device declaring an unmodelled metric: {VAL_UNMODELLED_METRIC} ---")
     birth_metrics = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE",
                      "Controller/EMERGENCY_STOP": "ARMED", VAL_UNMODELLED_METRIC: 55.2,
@@ -936,25 +801,16 @@ def run_simulation():
         print(f"\n--- Renaming {VAL_KNOWN_DEVICE} -> {VAL_RENAMED_DEVICE}, then publishing again ---")
         supabase_client.table("devices").update({"name": VAL_RENAMED_DEVICE}).eq("id", SEEDED["known_uuid"]).execute()
         time.sleep(6)  # outlast the daemon's 5s device-resolution cache
-        # The sentinel goes on a local test metric rather than on Controller/EXECUTION, whose
-        # values MTConnect constrains to READY/ACTIVE/INTERRUPTED/... Putting an arbitrary marker
-        # there would make the validator publish exactly the kind of standard-name/non-standard-
-        # value payload the simulator was just moved off.
+        # The sentinel goes on a local test metric rather than Controller/EXECUTION, whose values
+        # MTConnect constrains.
         publish("DDATA", SEEDED["known_id"],
                 {"Systems/TEMPERATURE": 43.5, "VALIDATE/RENAME_SENTINEL": "RUNNING_AFTER_RENAME"})
 
-    # 9. SPARKPLUG B ALIAS RESOLUTION.
-    #
-    # Sparkplug binds each metric name to an integer alias in a BIRTH and thereafter publishes
-    # DATA carrying the alias alone. Before this was implemented the daemon read only `.name`, so
-    # an alias-optimised gateway -- which is the normal production configuration -- ingested
-    # NOTHING, with no error logged. This is the end-to-end guard for that.
-    #
-    # The three-step sequence is deliberate and each step tests a different rule:
-    #   9.1 NBIRTH declares an alias at NODE level and RESETS the node's table.
-    #   9.2 DBIRTH declares two more at DEVICE level and MERGES, leaving 9.1's intact.
-    #   9.3 alias-only DDATA uses all three, including the node-declared one -- which only
-    #       resolves if the table is keyed per edge node rather than per device.
+    # 9. Sparkplug B alias resolution. Sparkplug binds each metric name to an integer alias in a
+    # BIRTH and thereafter publishes DATA carrying the alias alone. Three steps, each testing a
+    # rule: 9.1 NBIRTH declares an alias at node level and resets the node's table; 9.2 DBIRTH
+    # declares two more at device level and merges; 9.3 alias-only DDATA uses all three, including
+    # the node-declared one, which resolves only if the table is keyed per edge node.
     alias_dev = SEEDED.get("alias_id")
     if alias_dev:
         print(f"\n--- NBIRTH declaring a NODE-scoped alias on edge node {gw} ---")
@@ -987,12 +843,9 @@ def run_simulation():
         )
         time.sleep(3)
 
-        # 10. REBIRTH ON AN UNKNOWN ALIAS, AND ITS RATE LIMIT.
-        #
-        # The alias table is in-memory, so it is empty after every restart and a stable device may
-        # not birth again for weeks. Asking is the only recovery -- but asking once per message
-        # would hold a gateway that reboots on rebirth in a loop, so the second request inside the
-        # window must be suppressed. Both halves are asserted.
+        # 10. Rebirth on an unknown alias, and its rate limit. The alias table is in-memory, so
+        # asking is the only recovery after a restart, but the second request inside the window must
+        # be suppressed or a gateway that reboots on rebirth is held in a loop.
         SEEDED["ncmd_baseline"] = len(CAPTURED_NCMD)
         print(f"\n--- DDATA carrying an undeclared alias ({ALIAS_UNDECLARED}) -> expect one NCMD ---")
         client.publish(
@@ -1040,17 +893,11 @@ def verify_results():
                     print("✅ 1c. NAME HINT: the device's Asset_Name metric labelled the new row.")
             else:
                 print(f"❌ 1. SUPABASE QUARANTINE FAIL: no quarantined device reported '{UNKNOWN_DEVICE_ID}'.")
-                # WHAT WAS THERE INSTEAD, said at the moment we looked.
-                #
-                # THREE DIFFERENT BUGS PRODUCE THE LINE ABOVE and it distinguishes none of them:
-                # the row was never inserted; the row exists with a different reported_identity;
-                # the row exists and is_quarantined is false. On Kubernetes this check failed while
-                # 1d, 1e and 1f -- the other quarantine paths -- all passed, and the message sent
-                # the reader to the daemon's logs, which had scrolled.
-                #
-                # IT HAS TO BE HERE RATHER THAN IN CI, because the cleanup below runs in a `finally`
-                # and therefore ON FAILURE TOO. Anything that queries afterwards finds nothing and
-                # reads it as the first of those three.
+                # What was there instead, said at the moment we looked. Three different bugs produce
+                # the line above: the row was never inserted, it exists with a different
+                # reported_identity, or it exists with is_quarantined false. It has to be here
+                # rather than in CI, because the cleanup below runs in a `finally` and anything that
+                # queries afterwards finds nothing.
                 try:
                     probe = supabase_client.table("devices").select(
                         "name,sparkplug_id,reported_identity,is_quarantined,quarantine_reason"
@@ -1119,10 +966,9 @@ def verify_results():
             print(f"❌ 1f. LEGACY FALLBACK ERROR: {e}")
             passed = False
 
-        # 5. asset_config must be populated from the birth certificate. This is the regression
-        # guard for a rename that left three stale `asset_id` references in
-        # store_birth_parameters(), making it raise NameError on every DBIRTH -- swallowed by
-        # process_dbirth's except, so the Config view was simply always empty and CI never knew.
+        # 5. asset_config must be populated from the birth certificate. The regression guard for a
+        # store_birth_parameters() that raised on every DBIRTH, swallowed by process_dbirth's
+        # except.
         try:
             res = supabase_client.table("asset_config").select("metric_name").eq(
                 "asset_id", SEEDED.get("known_id")
@@ -1176,9 +1022,8 @@ def verify_results():
             else:
                 print("⚠️  6b. CHANGE-ONLY WRITE: skipped, no baseline timestamp captured.")
 
-            # 6c. The verdict is derived, never stored: no attached submodel models
-            # VAL_UNMODELLED_METRIC, so exactly that metric must come out as unmodelled -- while
-            # VAL_KPI_METRIC, modelled only by the second submodel, must NOT.
+            # 6c. The verdict is derived, never stored: exactly VAL_UNMODELLED_METRIC must come out
+            # as unmodelled, while VAL_KPI_METRIC, modelled only by the second submodel, must not.
             definitions = device_schema_definitions(SEEDED.get("known_uuid"))
             s_res = supabase_client.table("schemas").select("schema_definition").eq(
                 "id", SEEDED.get("schema_uuid")
@@ -1191,10 +1036,8 @@ def verify_results():
                 print(f"❌ 6c. UNMODELLED DETECTION FAIL: expected ['{VAL_UNMODELLED_METRIC}'], got {extra}.")
                 passed = False
 
-            # 6d. The acceptance test for deriving rather than storing the verdict: widening the
-            # schema must clear the finding immediately, with no rebirth from the device. Had
-            # ingestion written a flag instead, this would stay wrong until the device next
-            # birthed -- which for a stable device can be weeks.
+            # 6d. Widening the schema must clear the finding immediately, with no rebirth from the
+            # device.
             widened = dict(definition or {})
             widened["properties"] = {**(widened.get("properties") or {}),
                                      VAL_UNMODELLED_METRIC: {"type": "number"}}
@@ -1227,9 +1070,8 @@ def verify_results():
             print(f"❌ 6. BIRTH METRIC OBSERVATION ERROR: {e}")
             passed = False
 
-        # 6e. The modelled set is the union across every attached submodel. Asserted by
-        # showing the same metric flips verdict depending on whether the second submodel is counted
-        # -- otherwise this check would pass even if device_submodels were ignored entirely.
+        # 6e. The modelled set is the union across every attached submodel, asserted by showing the
+        # same metric flips verdict depending on whether the second submodel is counted.
         try:
             definitions = device_schema_definitions(SEEDED.get("known_uuid"))
             primary_only = unmodelled_metrics(declared, definition)
@@ -1250,16 +1092,10 @@ def verify_results():
             print(f"❌ 6e. MULTI-SUBMODEL ERROR: {e}")
             passed = False
 
-        # 2. Verify Digital Thread triggers
-        #
-        # Scoped to the entities this run created. Selecting the whole table and asserting it is
-        # non-empty -- which is what this did -- passes on audit rows from any source: a migration,
-        # the demo device booting, an edit made in the UI. It could never fail once the table was
-        # non-empty for any reason, so it did not actually exercise the trigger.
-        #
-        # Both actions are required because log_digital_thread_event() is one function serving
-        # INSERT, UPDATE and DELETE, and the run performs the first two: the seed inserts a cell,
-        # a gateway and three devices, and the rename updates one of them.
+        # 2. Verify Digital Thread triggers. Scoped to the entities this run created; asserting the
+        # whole table is non-empty would pass on audit rows from any source. Both actions are
+        # required because log_digital_thread_event() serves INSERT, UPDATE and DELETE, and the run
+        # performs the first two.
         try:
             run_entity_ids = [
                 SEEDED[key] for key in ("cell_uuid", "gateway_uuid", "known_uuid", "legacy_uuid",
@@ -1356,21 +1192,11 @@ def verify_results():
         print(f"❌ 4. QUARANTINE TELEMETRY GATING ERROR: {e}")
         passed = False
 
-    # 7. Verify Node-RED refuses unauthenticated callers
-    #
-    # WHY THIS IS AN END-TO-END CHECK AND NOT A UNIT TEST. Node-RED's editor, its /flows admin
-    # API and its http-in nodes were open to anyone who could reach port 1880: flows could be
-    # read or replaced, which is arbitrary code execution on the edge host (a `function` node
-    # runs JavaScript in a container holding the MQTT credential), and POST /hooks/quarantine
-    # accepted anything. The fix is spread across a generated settings.js, an image that carries
-    # the modules it requires, and an init script that must reconcile the file onto an existing
-    # volume -- so every part of it is a runtime property of the assembled stack. Nothing short
-    # of asking the running port can tell you it holds.
-    #
-    # THE THREE PROBES ARE NOT REDUNDANT. adminAuth covers httpAdminRoot; httpNodeAuth covers
-    # httpNodeRoot. They are separate Express mounts, so a settings.js declaring only the first
-    # secures /flows and leaves the webhook receiver wide open -- which is exactly the shape the
-    # original report described and the state a partial fix would leave behind.
+    # 7. Verify Node-RED refuses unauthenticated callers. An end-to-end check because the fix is
+    # spread across a generated settings.js, an image carrying the modules it requires, and an init
+    # script that reconciles the file onto an existing volume. The three probes are not redundant:
+    # adminAuth covers httpAdminRoot and httpNodeAuth covers httpNodeRoot, separate Express mounts,
+    # so a settings.js declaring only the first leaves the webhook receiver open.
     try:
         probes = [
             ("GET", "/flows", None, "admin API read"),
@@ -1388,27 +1214,19 @@ def verify_results():
                     status = resp.status
             except urllib.error.HTTPError as http_err:
                 status = http_err.code
-            # 401 is the expected answer. Anything in the 2xx range means the endpoint served an
-            # unauthenticated caller; a 5xx is not a pass either, since it says the request got
-            # past authentication and failed somewhere behind it.
+            # 401 is the expected answer. A 2xx served an unauthenticated caller; a 5xx says the
+            # request got past authentication and failed behind it.
             if status != 401:
                 unauthenticated.append(f"{method} {path} -> {status} ({label})")
 
         if not unauthenticated:
             print("✅ 7. NODE-RED AUTHENTICATION: admin API and webhook receiver both answer 401 "
                   "to unauthenticated callers.")
-            # 7b. AND THAT A REAL SIGN-IN STILL WORKS.
-            #
-            # THIS HALF IS NOT OPTIONAL, and its absence already cost one shipped defect. Check 7
-            # above proves only that the door is shut. Node-RED's editor resolves the user twice
-            # by two different routes -- adminAuth.authenticate at login, then adminAuth.users on
-            # EVERY request after it (bearerStrategy: Tokens.get -> Users.get) -- and a
-            # settings.js providing only the first logs in successfully and then 401s the entire
-            # editor with no error displayed. The machine path (adminAuth.tokens) never touches
-            # Users.get, so probing /flows with a Supabase token passes throughout.
-            #
-            # So this drives the real browser handshake and then asks a question only a working
-            # EDITOR SESSION can answer.
+            # 7b. And that a real sign-in still works. Node-RED's editor resolves the user twice,
+            # adminAuth.authenticate at login and adminAuth.users on every request after it, and a
+            # settings.js providing only the first logs in and then 401s the entire editor. So this
+            # drives the real browser handshake and asks a question only a working editor session
+            # can answer.
             ok_login, detail = probe_nodered_editor_login()
             if ok_login:
                 print(f"✅ 7b. NODE-RED EDITOR SIGN-IN: {detail}")
@@ -1427,13 +1245,9 @@ def verify_results():
         print(f"❌ 7. NODE-RED AUTHENTICATION ERROR: could not probe {NODERED_BASE_URL}: {e}")
         passed = False
 
-    # 8. SPARKPLUG B ALIAS RESOLUTION
-    #
-    # The regression guard for a silent total data-loss path: before alias resolution the daemon
-    # read only `metric.name`, so DDATA from an alias-optimised gateway -- the normal production
-    # configuration -- ingested zero metrics and logged nothing. Every assertion below is on the
-    # RESOLVED NAME, because that is the thing that was missing; row counts alone would pass on a
-    # daemon that wrote three rows named "".
+    # 8. Sparkplug B alias resolution: the regression guard for a daemon that read only
+    # `metric.name` and ingested nothing from an alias-optimised gateway. Every assertion is on the
+    # resolved name; row counts alone would pass on rows named "".
     alias_key = SEEDED.get("alias_id")
     if alias_key:
         try:
@@ -1466,10 +1280,9 @@ def verify_results():
                       f"{rows.get('Controller/EXECUTION')}, expected 'ACTIVE'.")
                 passed = False
 
-            # 8b. THE ONE THAT PINS THE SCOPE. This alias was declared by the GATEWAY's NBIRTH and
-            # used by a DEVICE's DDATA. Sparkplug scopes alias uniqueness to the whole edge node
-            # including its devices, so a per-device table would resolve 8 and 8a perfectly and
-            # fail only here -- silently, on exactly the gateways that declare shared metrics once.
+            # 8b. The one that pins the scope: this alias was declared by the gateway's NBIRTH and
+            # used by a device's DDATA, so a per-device table would resolve 8 and 8a and fail only
+            # here.
             if rows.get(ALIAS_NODE_METRIC, (None, None))[1] == "RESOLVED_VIA_NODE_TABLE":
                 print("✅ 8b. NODE-SCOPED ALIASES: an alias declared in the gateway's NBIRTH "
                       "resolved for a DEVICE's DDATA — the table is keyed per edge node.")
@@ -1479,9 +1292,8 @@ def verify_results():
                       "device cannot then use an alias its own edge node declared.")
                 passed = False
 
-            # 8c. An undecodable metric must not become a nameless row. The daemon skips it and
-            # asks for a rebirth (check 9); writing it under an empty name would corrupt the
-            # historian with something no query could ever find again.
+            # 8c. An undecodable metric must not become a nameless row; the daemon skips it and asks
+            # for a rebirth (check 9).
             if "" not in rows and None not in rows:
                 print("✅ 8c. NO NAMELESS ROWS: unresolvable aliases were skipped, not written "
                       "under an empty metric name.")
@@ -1494,12 +1306,8 @@ def verify_results():
     else:
         print("⚠️  8. ALIAS RESOLUTION: skipped, the alias fixture device was not seeded.")
 
-    # 9. NCMD REBIRTH REQUEST, AND ITS RATE LIMIT
-    #
-    # This is what closes the alias cold start: the table is in-memory, so an ingestion restart
-    # leaves every alias-optimised device undecodable until it births again -- which for a stable
-    # device may be weeks. Both halves are assertions, and the second is an assertion about a
-    # message that must NOT appear.
+    # 9. NCMD rebirth request, and its rate limit. This closes the alias cold start after an
+    # ingestion restart. The second half is an assertion about a message that must not appear.
     try:
         baseline = SEEDED.get("ncmd_baseline")
         after_first = SEEDED.get("ncmd_after_first")
@@ -1523,9 +1331,8 @@ def verify_results():
                       "'Node Control/Rebirth'.")
                 passed = False
 
-            # 9b. THE RATE LIMIT. A gateway that answers a rebirth by restarting would otherwise
-            # be asked once per message and held in a reboot loop by the mechanism meant to
-            # recover it. A second unknown alias immediately after must produce nothing.
+            # 9b. The rate limit: a second unknown alias immediately after must produce nothing, or
+            # a gateway that answers a rebirth by restarting would be held in a loop.
             if after_second == after_first:
                 print(f"✅ 9b. REBIRTH RATE LIMIT: a second unknown alias inside the "
                       f"{os.getenv('REBIRTH_REQUEST_INTERVAL_SECONDS', '300')}s window produced "
@@ -1544,11 +1351,9 @@ def verify_results():
         print(f"❌ 9. REBIRTH REQUEST ERROR: {e}")
         passed = False
 
-    # 10. DEVICE LIVENESS WATCHDOG
-    #
-    # A device that stops publishing writes nothing and emits no DDEATH, so without the watchdog
-    # it stays ONLINE forever. Conditional on the configured window, because the default is 300s
-    # and a CI job must not stall for five minutes waiting for it.
+    # 10. Device liveness watchdog. A device that stops publishing emits no DDEATH, so without the
+    # watchdog it stays ONLINE forever. Conditional on the configured window, because the default is
+    # 300s.
     if not supabase_client or not SEEDED.get("alias_uuid"):
         print("⚠️  10. DEVICE WATCHDOG: skipped, no Supabase client or fixture device.")
     elif WATCHDOG_TIMEOUT <= 0:
@@ -1579,10 +1384,9 @@ def verify_results():
                       "DEVICE_OFFLINE_TIMEOUT_SECONDS this shell does.")
                 passed = False
 
-            # 10a. Written once, not once per sweep tick. log_digital_thread_event() fires on
-            # every UPDATE to `devices`, so a watchdog rewriting OFFLINE each tick would append to
-            # a deliberately append-only audit table forever -- at a 30s interval, twice a minute
-            # per device, indefinitely. This is the check that would catch that.
+            # 10a. Written once, not once per sweep tick: log_digital_thread_event() fires on every
+            # UPDATE to `devices`, so a watchdog rewriting OFFLINE each tick would append to the
+            # audit table forever.
             audit = supabase_client.table("digital_thread").select("id,new_data").eq(
                 "entity_id", SEEDED["alias_uuid"]
             ).eq("action", "UPDATE").execute()
@@ -1602,16 +1406,10 @@ def verify_results():
             print(f"❌ 10. DEVICE WATCHDOG ERROR: {e}")
             passed = False
 
-    # 11. FACTORY+ DIRECTORY ADAPTER
-    #
-    # The whole point of the adapter is to be reachable by a client that holds NO Supabase apikey,
-    # which means these routes are exempt from Kong's key-auth and the edge function is the only
-    # thing standing in front of the data. Check 11b is therefore the security assertion for the
-    # entire surface: if it ever passes when it should not, the fleet's address space is public.
-    #
-    # All three are probed with raw urllib rather than the Supabase client, deliberately -- the
-    # client would attach an apikey and a token automatically, which is exactly what must NOT be
-    # required for 11a and exactly what must be absent for 11b.
+    # 11. Factory+ Directory adapter. These routes are exempt from the gateway's key-auth and the
+    # edge function is the only thing in front of the data, so check 11b is the security assertion
+    # for the whole surface. Probed with raw urllib rather than the Supabase client, which would
+    # attach an apikey and token automatically.
     try:
         def probe(path, headers=None):
             req = urllib.request.Request(f"{SUPABASE_URL}{path}", headers=headers or {})
@@ -1665,9 +1463,8 @@ def verify_results():
             except Exception:
                 parsed = None
 
-            # A UUID LIST, matching the Factory+ Directory's own shape. Asserting the SHAPE and
-            # not merely the status is the point: a 200 carrying an error object would pass a
-            # status-only check while telling a client nothing it can use.
+            # A UUID list, matching the Factory+ Directory's own shape. Asserting the shape and not
+            # merely the status is the point.
             if status == 200 and isinstance(parsed, list) and all(
                 isinstance(x, str) and len(x) == 36 for x in parsed
             ):
@@ -1712,24 +1509,11 @@ def verify_results():
         passed = False
 
 
-    # ---------------------------------------------------------------------------------------------
-    # 12. The i3X server.
-    #
-    # DELIBERATELY NOT A CONFORMANCE CHECK. CESMII publishes a 60-test suite and CI runs it; writing
-    # our own reading of the spec beside it would be grading our own homework, which is exactly how
-    # the hand-written AAS structural tests came to pass three real metamodel violations.
-    #
-    # What is asserted here is everything the suite CANNOT know, because it is a property of this
-    # deployment rather than of i3X:
-    #
-    #   * that the address space is scoped to the CALLER, not served from a service-role key --
-    #     the suite authenticates with one token and has no second identity to compare against;
-    #   * that values are the live MQTT ones rather than a database read, which is the whole reason
-    #     this is a long-lived service;
-    #   * that `/info` is reachable with no credential at all, which the suite checks, but here also
-    #     doubles as the container health probe;
-    #   * that writes are refused, which the suite records only as "optional feature omitted".
-    # ---------------------------------------------------------------------------------------------
+    # 12. The i3X server. Deliberately not a conformance check: CESMII publishes a 60-test suite and
+    # CI runs it. What is asserted is what the suite cannot know, because it is a property of this
+    # deployment: the address space is scoped to the caller, not served from a service-role key;
+    # values are the live MQTT ones rather than a database read; `/info` is reachable with no
+    # credential and doubles as the container health probe; writes are refused.
     try:
         i3x_base = os.getenv("I3X_BASE_URL", "http://localhost:8090").rstrip("/") + "/v1"
 
@@ -1786,9 +1570,8 @@ def verify_results():
                       f"{anon_status}, expected 401.")
                 passed = False
 
-            # 12c. The address space contains this run's device, and its parent is a LOCATION --
-            # a cell or the synthetic Unassigned -- never its gateway. That distinction is the one
-            # modelling decision i3X forced here and it is worth pinning.
+            # 12c. The address space contains this run's device, and its parent is a location, a
+            # cell or the synthetic Unassigned, never its gateway.
             status, body = i3x("GET", "/objects", {"Authorization": f"Bearer {token}"})
             objects = json.loads(body).get("result", []) if status == 200 else []
             device = next((o for o in objects if o.get("elementId") == SEEDED["known_id"]), None)
@@ -1807,9 +1590,8 @@ def verify_results():
                       f"({len(objects)} objects returned).")
                 passed = False
 
-            # 12d. Exactly one root. `parentId: null` means root in i3X, so a second one would make
-            # the hierarchy ambiguous -- which is precisely why Unassigned is a synthetic object
-            # under the site rather than a second root.
+            # 12d. Exactly one root: `parentId: null` means root in i3X, which is why Unassigned is
+            # a synthetic object under the site rather than a second root.
             roots = [o["elementId"] for o in objects if o.get("parentId") is None]
             if roots == ["i3x:site"]:
                 print("✅ 12d. i3X SINGLE ROOT: exactly one object has a null parentId (i3x:site)")
@@ -1817,9 +1599,8 @@ def verify_results():
                 print(f"❌ 12d. i3X SINGLE ROOT FAIL: roots are {roots}, expected ['i3x:site'].")
                 passed = False
 
-            # 12e. Values come from MQTT, not from the database. Asserted by reading a metric that
-            # this run PUBLISHED -- if the value path were a telemetry query it would still pass,
-            # so the timestamp is checked to be recent rather than merely present.
+            # 12e. Values come from MQTT, not the database. Asserted by reading a metric this run
+            # published and checking the timestamp is recent rather than merely present.
             status, body = i3x("POST", "/objects/value",
                                {"Authorization": f"Bearer {token}",
                                 "Content-Type": "application/json"},
@@ -1835,14 +1616,10 @@ def verify_results():
                       f"{SEEDED['known_id']}. HTTP {status}, body {body[:200]}")
                 passed = False
 
-            # 12f. THE RLS ASSERTION, and the reason this check exists at all. The value cache is a
-            # plain dict keyed by sparkplug_id with no notion of policy, so serving from it directly
-            # would let any authenticated caller read every device on the site. A caller whose token
-            # cannot see the device must be told "not found" -- indistinguishable from absent.
-            #
-            # Probed with a DELIBERATELY INVALID token rather than a second user: it exercises the
-            # same code path (resolve through PostgREST as the caller, serve nothing that did not
-            # come back) without needing a second seeded identity and its RLS policies.
+            # 12f. The RLS assertion. The value cache is a plain dict keyed by sparkplug_id with no
+            # notion of policy, so a caller whose token cannot see the device must be told "not
+            # found". Probed with a deliberately invalid token rather than a second user: it
+            # exercises the same code path without a second seeded identity.
             status, body = i3x("POST", "/objects/value",
                                {"Authorization": "Bearer not.a.valid.token",
                                 "Content-Type": "application/json"},
@@ -1859,34 +1636,16 @@ def verify_results():
     except Exception as e:
         print(f"⚠️  12.  i3X SERVER: skipped, could not reach {os.getenv('I3X_BASE_URL', 'http://localhost:8090')}: {e}")
 
-    # ---------------------------------------------------------------------------------------------
-    # 13. The `anon` privilege baseline.
-    #
-    # WHY THIS IS AN END-TO-END CHECK AND NOT A CODE REVIEW. `public.ensure_cron_job` is SECURITY
-    # DEFINER with no authorisation check, and migration 0001 -- a pg_dump baseline, which records
-    # only POSITIVE grants -- granted EXECUTE on it to `anon`. The result was reachable from the
-    # network with nothing but the published anon key:
-    #
-    #     POST /rest/v1/rpc/ensure_cron_job  ->  HTTP 204, and the job appeared in cron.job
-    #
-    # scheduling arbitrary SQL as `postgres`, which carries rolbypassrls and rolcreaterole. Reading
-    # 0001 does not reveal this: it contains `REVOKE ALL ... FROM PUBLIC` two lines above the GRANT
-    # that undoes it, so the file looks correct in the region where it is wrong. Only asking the
-    # running database, as an unauthenticated caller, gives a truthful answer.
-    #
-    # archived migration 0009 withdraws it and self-checks at boot. This is the second gate, and it is the
-    # one that survives someone re-running pg_dump: a regenerated baseline would reintroduce the
-    # grant silently, and db-init's own check runs BEFORE any of this stack is up.
-    # ---------------------------------------------------------------------------------------------
+    # 13. The `anon` privilege baseline. `public.ensure_cron_job` is SECURITY DEFINER with no
+    # authorisation check, and a pg_dump baseline records only positive grants, so a GRANT to `anon`
+    # on it would let an unauthenticated caller schedule arbitrary SQL as `postgres`. Only asking
+    # the running database as an unauthenticated caller gives a truthful answer, and this survives
+    # someone re-running pg_dump.
     try:
         def anon_rpc(fn, args):
-            """
-            Call a PostgREST RPC as the ANON role and nothing else.
-
-            Raw urllib rather than the Supabase client, and the anon key in BOTH headers: the point
-            is to be exactly the caller an attacker is -- someone holding the published key from
-            .env.example and no session at all. A client that silently attached a service token
-            would answer a different question.
+            """Call a PostgREST RPC as the anon role and nothing else. Raw urllib rather than the
+            Supabase client, and the anon key in both headers: the point is to be exactly the caller
+            an attacker is.
             """
             anon_key = os.getenv("SUPABASE_ANON_KEY", "")
             req = urllib.request.Request(
@@ -1921,22 +1680,11 @@ def verify_results():
                   f"0009 should have revoked it. Response: {body[:200]}")
             passed = False
 
-        # The general form. A single named function is one regression; a grant to `anon` on
-        # anything in `public` is the class.
-        #
-        # THE ALLOW-LIST WAS EMPTY BY DESIGN UNTIL 0074, AND HAS EXACTLY ONE ENTRY NOW.
-        # `auth_pre_request()` is PostgREST's `db-pre-request` hook -- `PGRST_DB_PRE_REQUEST` in
-        # docker-compose.yml names it -- and PostgREST runs that function AFTER switching to the
-        # request's role. For an unauthenticated request that role IS `anon`, so revoking this one
-        # does not harden anything: it takes the entire anonymous API surface down, /ping included.
-        # The function's own body is written around that fact, returning quietly when there are no
-        # claims because "no claims" is the ordinary majority rather than an anomaly.
-        #
-        # IT IS AN EXEMPTION FOR ONE FUNCTION, NOT A RELAXATION OF THE RULE. The entry is matched on
-        # name AND arity so an overload cannot arrive under its cover, and everything else in
-        # `public` must still come back empty -- which is the property that makes a real finding
-        # visible instead of hiding it among harmless ones. Adding a second entry here should be
-        # about as hard as this one was.
+        # The general form: a grant to `anon` on anything in `public` is the class. The allow-list
+        # has exactly one entry: `auth_pre_request()` is PostgREST's `db-pre-request` hook, run
+        # after switching to the request's role, which for an unauthenticated request is `anon`;
+        # revoking it would take the entire anonymous API surface down. Matched on name and arity so
+        # an overload cannot arrive under its cover.
         ANON_EXECUTE_ALLOWED = {("auth_pre_request", 0)}
         try:
             audit_conn = get_supabase_admin_connection()
@@ -1984,19 +1732,11 @@ if __name__ == "__main__":
     parser.add_argument("--keep-data", action="store_true", help="Keep test data after running validation")
     args = parser.parse_args()
 
-    # Print the resolved endpoints before doing anything, because BOTH ways of misconfiguring
-    # this script fail somewhere other than at the cause:
-    #
-    #   * From the HOST against Compose, published ports are needed (localhost:5433 / 54322 /
-    #     1883 / 54321). Sourcing the compose .env wholesale instead points it at in-network
-    #     service names ("timescaledb", "mosquitto") and every connection dies with "Temporary
-    #     failure in name resolution".
-    #   * IN-CLUSTER as a Kubernetes Job, the service names are the correct ones -- but a host
-    #     left at its default sends the script to its own pod's localhost, where nothing listens.
-    #
-    # Showing every resolved target up front makes either obvious from the log alone. Supabase's
-    # own database is listed too: it is reached separately from the API and only the cleanup path
-    # touches it, so a wrong value there surfaces late, as leftover fixture rows.
+    # Print the resolved endpoints before doing anything, because both ways of misconfiguring this
+    # script fail somewhere other than at the cause: from the host, sourcing the compose .env
+    # wholesale points it at in-network service names; in-cluster, a host left at its default points
+    # it at its own pod. Supabase's own database is listed too, since only the cleanup path touches
+    # it.
     print("Validation targets:")
     print(f"  MQTT broker  : {MQTT_HOST}:{MQTT_PORT}")
     print(f"  TimescaleDB  : {TIMESCALEDB_HOST}:{TIMESCALEDB_PORT}/{TIMESCALEDB_NAME}")
@@ -2006,9 +1746,9 @@ if __name__ == "__main__":
     print(f"  Service role key: {'set' if SUPABASE_SERVICE_ROLE_KEY else 'MISSING'}")
     print()
 
-    # Checked here rather than discovered at cleanup. The suite still runs when this fails -- its
-    # assertions are worth reporting either way -- but the exit status carries the failure, because
-    # a run that cannot clear its own audit rows leaves the next one seeded with this one's.
+    # Checked here rather than discovered at cleanup. The suite still runs when this fails, but the
+    # exit status carries the failure, because a run that cannot clear its own audit rows leaves the
+    # next one seeded with this one's.
     admin_ok = preflight_supabase_admin()
     print()
 

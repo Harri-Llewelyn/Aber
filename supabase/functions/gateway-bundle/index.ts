@@ -8,68 +8,39 @@ import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
  * Package the physical gateway bootstrap bundle as a ZIP, with a freshly minted enrolment token.
+ * The mirror image of enroll-gateway: no token, authorised by role (Administrator or
+ * Shopfloor_Manager). The token is minted through `issue_gateway_enrollment_token()`, SECURITY
+ * DEFINER and checking `public.has_role()` itself, as the caller and not with the service-role key,
+ * so the role check below exists only so a refusal answers 403 with a usable message. This function
+ * holds no service-role key; its ceiling is what the caller could already do through PostgREST.
  *
- * THE MIRROR IMAGE OF enroll-gateway. That function has no user and is authorised by a token; this
- * one has no token and is authorised by a ROLE. Issuing a bundle mints a claim that an appliance
- * exchanges for a broker credential, so it carries the same authority as every other
- * gateway-management act: Administrator or Shopfloor_Manager, and nothing else.
- *
- * ---------------------------------------------------------------------------------------------
- * THE TOKEN IS MINTED THROUGH THE RPC, AS THE CALLER, NOT WITH THE SERVICE-ROLE KEY.
- *
- * `issue_gateway_enrollment_token()` is SECURITY DEFINER and checks `public.has_role()` itself, so
- * the database makes the authority decision -- once, in the same place the RLS policies make it.
- * The role check below is therefore not the security boundary; it exists so a refusal answers 403
- * with a usable message instead of surfacing an `insufficient_privilege` raise as a 500.
- *
- * This function holds NO service-role key. It cannot read the token table, cannot reach the
- * credential service, and cannot enrol anything. Its ceiling is what the caller could already do
- * through PostgREST.
- *
- * ---------------------------------------------------------------------------------------------
- * WHAT IS IN THE BUNDLE, AND WHAT IS DELIBERATELY NOT.
- *
- * A CLAIM, NEVER A CREDENTIAL. There is no broker password anywhere in the archive -- the appliance
- * obtains one for itself at first boot, which is the entire reason a short-lived single-use token is
- * used instead. A password in a file that travels through a downloads folder, a USB stick and
- * probably an email would have no revocation story at all.
- *
- * The `NODERED_CREDENTIAL_SECRET` is generated PER BUNDLE. It encrypts the appliance's local
- * flows_cred.json once enrolment has produced a password to put in it. A constant here would mean
- * one appliance's credential file could be decrypted with any other bundle's .env.
+ * The bundle carries a claim, never a credential: there is no broker password in the archive, and
+ * the appliance obtains one at first boot. `NODERED_CREDENTIAL_SECRET` is generated per bundle, so
+ * one appliance's credential file cannot be decrypted with another bundle's .env.
  */
 
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
 
 /**
- * The bundle's own version. Stamped into .env, sent back in a header, and recorded on the gateway
- * at enrolment.
- *
- * A bundle generated once lives on somebody's hardware indefinitely, so "which vintage is this
- * appliance running" has to be answerable from the dashboard rather than by getting a shell on it.
- * Bump this when the template changes in a way an already-deployed appliance would care about.
+ * The bundle's own version, stamped into .env, sent back in a header, and recorded on the gateway
+ * at enrolment, so the dashboard can say which vintage an appliance runs. Bump when the template
+ * changes in a way a deployed appliance would care about.
  */
 const BUNDLE_VERSION = "1.1.0";
 
 /**
- * The template files, delivered through the environment.
- *
- * READ BY THE ENTRYPOINT, NOT BY THIS WORKER, and that is the same constraint deploy-nodered
- * documents: an edge-runtime USER WORKER has no filesystem access to the mounted volumes, so these
- * files cannot be opened here even though they are on disk in the container. main/index.ts forwards
- * every env var to each worker it spawns, so the entrypoint reads them once at start-up.
- *
- * Module IMPORTS are unaffected (see _shared/roles.ts) -- reading FILES at runtime is a different
- * mechanism and a different permission.
+ * The template files, delivered through the environment: an edge-runtime user worker has no
+ * filesystem access to the mounted volumes, so the entrypoint reads them once at start-up and the
+ * router forwards them. Module imports are unaffected (see _shared/roles.ts).
  */
 const TEMPLATE_ENV: Record<string, string> = {
   "docker-compose.yml": "GW_BUNDLE_COMPOSE",
   "Dockerfile": "GW_BUNDLE_DOCKERFILE",
   "bootstrap.mjs": "GW_BUNDLE_BOOTSTRAP",
   "flows.template.json": "GW_BUNDLE_FLOWS",
-  // THE PULLER (flow-sync.mjs). Without it in this map the appliance's compose file names a service whose
-  // script is not in the archive, and `docker compose up` fails on a bundle that looks complete --
-  // so this entry, the entrypoint that exports it and main's allowlist move together or not at all.
+  // The puller (flow-sync.mjs). Without it in this map the appliance's compose file names a service
+  // whose script is not in the archive, so this entry, the entrypoint that exports it and main's
+  // allowlist move together.
   "flow-sync.mjs": "GW_BUNDLE_FLOW_SYNC",
   "README.md": "GW_BUNDLE_README",
 };
@@ -82,11 +53,8 @@ function json(status: number, body: unknown) {
 }
 
 /**
- * A filesystem- and header-safe slug.
- *
- * Constrained to [\w.-] because the result lands in a Content-Disposition filename and in a
- * directory name inside the archive. A gateway called `Cell 4 / Press Line` would otherwise produce
- * a path separator in a zip entry, which unpacks somewhere nobody asked for.
+ * A filesystem- and header-safe slug, constrained to [\w.-] because it lands in a
+ * Content-Disposition filename and in a directory name inside the archive.
  */
 function slug(name: string): string {
   return (name || "gateway")
@@ -126,9 +94,8 @@ export default async function handler(req: Request): Promise<Response> {
 
     const userRole = await resolveUserRole(supabaseUser, user.id);
     if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
-      // Operator and Auditor land here, and NOTHING HAS BEEN MINTED YET -- the check is ahead of
-      // the RPC deliberately, so a refused request cannot consume a gateway's live token and
-      // invalidate a bundle somebody else is holding.
+      // Operator and Auditor land here, and nothing has been minted yet: the check is ahead of the
+      // RPC, so a refused request cannot consume a gateway's live token.
       return json(403, {
         error: "Forbidden: Insufficient privileges",
         details:
@@ -148,18 +115,10 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // THE PUBLIC URL IS CHECKED BEFORE ANYTHING IS MINTED.
-    //
-    // This is the address the APPLIANCE dials, and it cannot be derived from SUPABASE_URL: inside
-    // the stack that is `supabase-kong:8000` (or a loopback address on Compose), which resolves for
-    // nothing on a shopfloor. A bundle carrying it enrols... nothing -- bootstrap fails at the first
-    // fetch with a connection error naming a URL that looks plausible.
-    //
-    // Same reasoning as AAS_MODEL_PUBLIC_BASE and as enroll-gateway's MQTT_PUBLIC_HOST guard, and
-    // checked ahead of the RPC for the same reason as the role check: a deployment fault must not
-    // cost a token.
-    // ---------------------------------------------------------------------------------------------
+    // The public URL is checked before anything is minted. It is the address the appliance dials
+    // and cannot be derived from SUPABASE_URL, which resolves for nothing on a shopfloor; a bundle
+    // carrying it would fail at the first fetch. Checked ahead of the RPC so a deployment fault
+    // does not cost a token.
     const publicUrl = (Deno.env.get("SUPABASE_PUBLIC_URL") || "").replace(/\/+$/, "");
     if (!publicUrl || /supabase-kong|127\.0\.0\.1|localhost|::1/.test(publicUrl)) {
       console.error(`SUPABASE_PUBLIC_URL is '${publicUrl}', which no appliance can reach`);
@@ -186,9 +145,8 @@ export default async function handler(req: Request): Promise<Response> {
       return json(404, { error: "No such gateway" });
     }
     if (gateway.deployment === "host") {
-      // The RPC refuses this too; caught here so the message names the reason rather than arriving
-      // as a database error. A host-run gateway has no appliance, so a bundle for one would mint a
-      // broker credential nothing could ever present.
+      // The RPC refuses this too; caught here so the message names the reason. A host-run gateway
+      // has no appliance, so a bundle for one would mint a broker credential nothing could present.
       return json(400, {
         error: "That gateway is virtual",
         details:
@@ -213,9 +171,7 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Mint the token. THE DATABASE decides whether this caller may.
-    // ---------------------------------------------------------------------------------------------
+    // Mint the token. The database decides whether this caller may.
     const { data: issued, error: issueError } = await supabaseUser
       .rpc("issue_gateway_enrollment_token", {
         p_gateway_id: gatewayId,
@@ -237,12 +193,8 @@ export default async function handler(req: Request): Promise<Response> {
       return json(500, { error: "The enrolment token could not be minted" });
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Assemble the archive.
-    // ---------------------------------------------------------------------------------------------
-    // ONE TOP-LEVEL FOLDER, NAMED FOR THE GATEWAY. Four appliances provisioned in a morning means
-    // four downloads in one place, and an archive that unpacks its files into the current directory
-    // is both indistinguishable from its siblings and liable to overwrite one of them.
+    // Assemble the archive. One top-level folder named for the gateway, so four downloads in one
+    // place stay distinguishable and do not overwrite each other on unpacking.
     const folder = `acs-gateway-${slug(gateway.name)}-${gateway.sparkplug_id}`;
 
     // 32 bytes of hex. Encrypts the appliance's flows_cred.json; generated per bundle so no two
@@ -257,20 +209,12 @@ export default async function handler(req: Request): Promise<Response> {
       files[`${folder}/${name}`] = strToU8(Deno.env.get(envVar)!);
     }
 
-    // THE .env IS GENERATED, NOT TEMPLATED -- it is the only file that differs per gateway and the
-    // only one carrying the token. Written as a real .env rather than an .env.example so
-    // `docker compose up` works with no editing: an appliance being commissioned by an electrician
-    // should not need a text editor.
-    //
-    // EVERY NAME HERE IS READ BY bootstrap.mjs. They are not free-form: ACS_SUPABASE_URL,
-    // ACS_SUPABASE_ANON_KEY, ACS_ENROLLMENT_TOKEN, ACS_AGENT_VERSION, ACS_GATEWAY_NAME and
-    // NODERED_CREDENTIAL_SECRET are what that script looks up, and a rename on either side produces
-    // an appliance that reports a missing variable at first boot with the token already spent.
-    //
-    // WHICH IS WHY THE NEW KEY IS ADDED RATHER THAN SUBSTITUTED. Bundles already downloaded carry
-    // ACS_SUPABASE_ANON_KEY and nothing else; an appliance commissioned from one of those must
-    // still boot. So both are written, bootstrap.mjs prefers the publishable one, and a bundle
-    // generated on a legacy-only install simply carries an empty value for it.
+    // The .env is generated, not templated: it is the only file that differs per gateway and the
+    // only one carrying the token. Written as a real .env so `docker compose up` works with no
+    // editing. Every name here is read by bootstrap.mjs: ACS_SUPABASE_URL, ACS_SUPABASE_ANON_KEY,
+    // ACS_ENROLLMENT_TOKEN, ACS_AGENT_VERSION, ACS_GATEWAY_NAME and NODERED_CREDENTIAL_SECRET. The
+    // publishable key is added beside the anon key rather than substituted, so bundles already
+    // downloaded and bundles from a legacy-only install both boot.
     files[`${folder}/.env`] = strToU8(`# =============================================================================
 # ACS-Cymru physical gateway -- ${gateway.name}
 #
@@ -339,9 +283,8 @@ See README.md for the rest, including what to do if the token has expired.
 `);
 
     const archive = zipSync(files, {
-      // STORED, not deflated. These are small text files, the appliance unpacks them once, and a
-      // stored archive can be read with anything -- including `unzip -p` on a machine with no
-      // tooling, which is the situation this bundle is designed for.
+      // Stored, not deflated: small text files that can be read with `unzip -p` on a machine with
+      // no tooling.
       level: 0,
       mtime: new Date(),
     });
@@ -357,9 +300,9 @@ See README.md for the rest, including what to do if the token has expired.
       status: 200,
       headers: {
         ...corsHeaders,
-        // application/zip, and the caller MUST use a raw fetch() rather than supabase-js's
-        // functions.invoke(): invoke decodes anything that is not JSON or octet-stream as TEXT,
-        // which silently corrupts the archive. Same constraint as the AASX path in aas-export.
+        // application/zip, and the caller must use a raw fetch() rather than supabase-js's
+        // functions.invoke(), which decodes anything that is not JSON or octet-stream as text and
+        // corrupts the archive. Same constraint as the AASX path in aas-export.
         "Content-Type": "application/zip",
         "Content-Disposition": `attachment; filename="${filename}"`,
         // A binary body has nowhere to carry these. Separate headers rather than one JSON blob so a

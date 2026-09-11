@@ -21,12 +21,8 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('tokenStatus with a denylist', () => {
   /**
-   * THE COUNT IS THE POINT OF THIS WHOLE CHANGE, not the button.
-   *
-   * tokenStatus() exists because reporting fewer credentials than exist UNDERSTATES exposure on
-   * the one page whose job is to state it. Once revocation exists the same error is available in
-   * the other direction: a badge reading "5 active tokens" when four are withdrawn OVERSTATES it,
-   * and an operator acting on that number withdraws things that are already dead.
+   * The count is the point: a badge reading "5 active tokens" when four are withdrawn overstates
+   * exposure, and an operator acting on it withdraws things that are already dead.
    */
   it('stops counting a withdrawn token as active', () => {
     const mints = [mint('a', 10), mint('b', 20), mint('c', 30)]
@@ -39,9 +35,8 @@ describe('tokenStatus with a denylist', () => {
   })
 
   /**
-   * MARKED, NOT DROPPED. "There were three and two are withdrawn" is the useful sentence, and a
-   * caller that had filtered them out before calling could not say it -- nor could the dialog list
-   * them, which is how an operator confirms a withdrawal actually took.
+   * Marked, not dropped: "there were three and two are withdrawn" is the useful sentence, and the
+   * dialog lists them so an operator can confirm a withdrawal took.
    */
   it('still returns the withdrawn rows, flagged', () => {
     const status = tokenStatus([mint('a', 10), mint('b', 20)], NOW, new Set(['a']))
@@ -67,8 +62,7 @@ describe('tokenStatus with a denylist', () => {
 
   /**
    * A Shopfloor_Manager cannot read `revoked_service_tokens`, and RLS returns no rows rather than
-   * an error -- so the default must be the pre-0074 reading rather than a page that quietly claims
-   * every token is live because it could not see the denylist.
+   * an error, so with no denylist the default counts everything unexpired.
    */
   it('defaults to counting everything unexpired when no denylist is supplied', () => {
     expect(tokenStatus([mint('a', 10), mint('b', 20)], NOW).outstanding).toBe(2)
@@ -98,10 +92,9 @@ describe('ServiceTokenInventoryModal', () => {
   })
 
   /**
-   * `revoke_service_token()` refuses an expired jti outright rather than recording a withdrawal
-   * that changed nothing, so a button here would exist only to produce an error. The signature
-   * check already refuses the token everywhere -- including the four services a revocation never
-   * reaches -- which is why EXPIRED is shown in preference to WITHDRAWN.
+   * `revoke_service_token()` refuses an expired jti outright, so a button would exist only to
+   * produce an error. EXPIRED is shown in preference to WITHDRAWN because the signature check
+   * refuses the token everywhere.
    */
   it('offers no Revoke on an expired token', () => {
     openWith([mint('old-one', -1)])
@@ -120,10 +113,7 @@ describe('ServiceTokenInventoryModal', () => {
     expect(within(rowFor('doomed')).queryByRole('button', { name: /Revoke/i })).toBeNull()
   })
 
-  /**
-   * PER-ROW, NOT A DIALOG BANNER. Several tokens can be withdrawn in one visit, and a single error
-   * slot would attribute the third failure to whichever row the reader happened to be looking at.
-   */
+  /** Per-row, not a dialog banner: several tokens can be withdrawn in one visit. */
   it('reports a failure against the row it belongs to and leaves the button', async () => {
     api.revokeServiceToken.mockRejectedValue(new Error('insufficient privileges'))
     openWith([mint('stubborn', 10)])
@@ -152,10 +142,7 @@ describe('ServiceTokenInventoryModal', () => {
     expect(onChanged).toHaveBeenCalled()
   })
 
-  /**
-   * A withdrawn token is not a deleted one, and an operator who reads "Revoked" as "gone" stops
-   * looking for it. The scope is stated where the control is offered, not only in the row tooltip.
-   */
+  /** A withdrawn token is not a deleted one; the scope is stated where the control is offered. */
   it('states that withdrawing reaches the API only, and cannot be undone', () => {
     const { container } = openWith([mint('one', 10)])
     const copy = container.textContent.replace(/\s+/g, ' ')

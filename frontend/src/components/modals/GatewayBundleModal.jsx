@@ -11,49 +11,18 @@ import {
 const COPY_FEEDBACK_MS = 1600
 
 /**
- * Names are compared LOOSELY -- trimmed, inner whitespace collapsed, case-folded.
- *
- * The guard exists to stop an accidental click, not a determined typist. Demanding exact
- * capitalisation of "Cell 4 Press Line" adds failed attempts without adding safety, and a gate that
- * feels arbitrary is one operators learn to paste their way past, which defeats it entirely.
+ * Names are compared loosely (trimmed, whitespace collapsed, case-folded): the guard stops an
+ * accidental click, not a determined typist.
  */
 const normalise = (value) => (value || '').trim().replace(/\s+/g, ' ').toLowerCase()
 
 /**
- * The setup step for a REMOTE gateway: one dialog.
- *
- * "Remote", not "physical" -- the word the Type column, the filter and
- * the create form all use. It is also the accurate one for what this dialog does: the bundle exists
- * because the connector runs on hardware this stack cannot reach, which is a fact about DEPLOYMENT.
- * Whether that hardware is a physical panel PC or a VM in somebody's cloud was never the question,
- * and `is_virtual` meaning both was how the old word came to mean three things at once.
- *
- * ---------------------------------------------------------------------------------------------
- * WHY ISSUING IS GUARDED AT ALL.
- *
- * Minting a token CONSUMES any live token for the gateway, and only one can exist at a time. So
- * issuing a bundle silently kills a bundle somebody may already be carrying to a machine, and an
- * appliance started with the dead one fails at `enroll-gateway` with a 401 that deliberately cannot
- * say WHY -- unknown, expired and already-redeemed are indistinguishable by design. The operator
- * holding the USB stick has no way to find out what went wrong.
- *
- * That is not a click to make casually, and a permission check does not prevent it either:
- * everybody who can reach this dialog can already do it, because gateway:manage IS the authority to
- * issue bundles. Narrowing the role would only decide WHO can make the mistake.
- *
- * ---------------------------------------------------------------------------------------------
- * SO THE GUARD IS PLACED WHERE THE DAMAGE IS, and nowhere else.
- *
- *   * `confirmFirst` -- the drawer's Download Setup Bundle / Re-issue Bundle, and the modal's own
- *     Re-issue action. The gateway already exists and may already hold a live token or, once
- *     enrolled, a working broker credential. Confirm by typing the gateway's name.
- *   * default -- straight after CREATING the gateway. There is no earlier bundle to destroy,
- *     because the row is seconds old, so the download starts immediately. Asking whether you want
- *     the thing you just asked for is a step to click through, not a safeguard.
- *
- * THE FIRST DOWNLOAD FIRES ONCE PER MOUNT, guarded by a ref. Without it a double-invoked effect --
- * React StrictMode, a re-render on a changed prop -- would mint twice and the modal would show a
- * token that had already invalidated the file the browser just saved.
+ * The setup step for a remote gateway. Minting a token consumes any live token for the gateway, so
+ * issuing a bundle kills one somebody may be carrying to a machine, and the appliance then fails at
+ * `enroll-gateway` with a 401 that cannot say why. `confirmFirst` (the drawer's Download and
+ * Re-issue routes) asks for the gateway's name; the default route, straight after creating the
+ * gateway, downloads immediately because there is nothing to destroy. The first download fires once
+ * per mount, guarded by a ref against a double-invoked effect.
  */
 export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst = false }) {
   const [step, setStep] = useState(confirmFirst ? 'confirm' : 'ready')
@@ -86,9 +55,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
     try {
       const result = await api.downloadGatewayBundle(gateway.gateway_id)
 
-      // SAVED THROUGH AN OBJECT URL rather than a data: URL. A bundle is tens of kilobytes today and
-      // will grow with the template; a data: URL puts the whole archive in the DOM as base64 and
-      // some browsers cap that length silently, producing a truncated download.
+      // Saved through an object URL rather than a data: URL, which some browsers cap silently.
       const url = URL.createObjectURL(result.blob)
       const link = document.createElement('a')
       link.href = url
@@ -104,9 +71,8 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
       setStep('ready')
       showToast?.(`Bundle downloaded for '${gateway.gateway_name}'`, 'success')
     } catch (err) {
-      // THE STEP IS NOT ADVANCED ON FAILURE. Nothing was minted, so the previous bundle -- if there
-      // was one -- is still live and still works. Leaving the operator on the confirm screen says
-      // that; dropping them onto an empty setup screen would imply the opposite.
+      // The step is not advanced on failure: nothing was minted, so the previous bundle is still
+      // live.
       setError(err.message)
       showToast?.(err.message, 'error')
     } finally {
@@ -144,11 +110,8 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
   const askToReissue = useCallback(() => { setTyped(''); setError(null); setStep('confirm') }, [])
 
   /**
-   * Escape BACKS OUT OF THE CONFIRM STEP when there is a bundle behind it, rather than closing.
-   *
-   * Answering "no" to a question must not also throw away the instructions the operator is working
-   * from -- those commands and that countdown cannot be got back without minting again, which is
-   * the very act they just declined. With nothing behind it, Escape closes as usual.
+   * Escape backs out of the confirm step when there is a bundle behind it, rather than closing:
+   * declining must not throw away instructions that cannot be got back without minting again.
    */
   const backOut = useCallback(() => {
     if (step === 'confirm' && bundle) { setTyped(''); setError(null); setStep('ready') }
@@ -186,14 +149,11 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
             </div>
 
             <div className="form-group">
-              {/* THE NAME GOES IN THE LABEL, NOT IN A PLACEHOLDER. A greyed-out placeholder inside
-                  the box looks like text that is already there, and the operator is left staring at
-                  a dead button beside a field that appears filled in. */}
+              {/* The name goes in the label, not in a placeholder, which looks like text already
+                  entered. */}
               <label className="form-label" htmlFor="gw-bundle-confirm">
-                {/* AND IT IS EXEMPTED FROM THE LABEL'S UPPERCASING. `.form-label` shouts, which is
-                    fine for "TYPE ... TO CONFIRM" and wrong for the name itself: rendering
-                    "CELL 4 PRESS LINE" tells the operator to type capitals that are not in the
-                    gateway's name. */}
+                {/* Exempted from the label's uppercasing, so the operator is not told to type
+                    capitals that are not in the name. */}
                 Type <span className="mono" style={{ textTransform: 'none', color: 'var(--text-primary)' }}>
                   {gateway.gateway_name}
                 </span> to confirm
@@ -222,9 +182,8 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                 pending={busy}
                 pendingLabel="Issuing…"
                 disabled={!confirmed}
-                // THE ATTRIBUTE IS NOT THE APPEARANCE in this stylesheet -- `.btn-disabled` is, and
-                // call sites apply it. Without the class a refusing button looks exactly like an
-                // armed one, so the operator clicks a bright primary button and nothing happens.
+                // `.btn-disabled` is the appearance; the attribute alone leaves a refusing button
+                // looking armed.
                 className={`btn btn-primary${confirmed ? '' : ' btn-disabled'}`}
                 onClick={generate}
                 title={confirmed
@@ -264,9 +223,8 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
 
             {bundle && (
               <>
-                {/* THE COUNTDOWN, and its two states read very differently on purpose. Amber while
-                    the clock runs is a deadline; red once it has passed is a dead artefact that will
-                    fail at the appliance with a message that cannot tell the operator why. */}
+                {/* The countdown: amber while the clock runs, red once it has passed and the bundle
+                    is a dead artefact. */}
                 <div
                   className="form-group"
                   style={{

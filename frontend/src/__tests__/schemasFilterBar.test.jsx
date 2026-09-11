@@ -5,19 +5,10 @@ import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
 
 /**
- * The schema registry's filter bar and its scroll cap (issue #60).
- *
- * WHY THIS LIST AND NOT ANOTHER. The registry gains a row per PUBLISH, not per schema -- every
- * version a lineage has ever held is a row -- so it is the fastest-growing list on the page, and
- * it was the only list page with no filter bar at all. Its one narrowing control was an Archived
- * Versions toggle sitting in the card header among the primary actions, and nothing bounded its
- * height: a floor with a few versioned schemas pushed the metric catalog, the thing schemas are
- * built FROM, off the bottom of the page.
- *
- * THE TOGGLE IS NOW AN OPTION IN THE STATUS SELECT, which several assertions below are really
- * about. isCurrentSchema() is `status !== archived`, so that button was a status filter wearing a
- * different hat; keeping it beside a status dropdown would have been two controls able to
- * contradict each other, with no rule for which one wins.
+ * The schema registry's filter bar and its scroll cap. The registry gains a row per publish, so it
+ * is the fastest-growing list on the page and needs a filter bar and a bounded height. Archived
+ * versions are an option in the status select rather than a separate toggle: isCurrentSchema() is
+ * `status !== archived`, and two controls on one axis could contradict each other.
  */
 
 vi.mock('../api', async () => {
@@ -71,11 +62,8 @@ const renderTab = (props = {}) => render(
 )
 
 /**
- * The registry table, located by its card heading rather than by position.
- *
- * The same reason SchemasTab.test.jsx does it this way: the catalog and the registry have already
- * swapped places on this page once, and every positional selector silently pointed at the wrong
- * table when they did.
+ * The registry table, located by its card heading rather than by position, for the reason
+ * SchemasTab.test.jsx does.
  */
 const registryCard = () => [...document.querySelectorAll('.card-header .section-title')]
   .find(h => h.textContent.includes('Registered Schemas'))?.closest('.card')
@@ -91,17 +79,11 @@ const ready = async () => {
   await waitFor(() => expect(registryRows().length).toBeGreaterThan(0))
 }
 
-// ---------------------------------------------------------------------------------------------
 // The default view
-// ---------------------------------------------------------------------------------------------
 
 describe('schema registry default view', () => {
-  /*
-   * THE DEFAULT IS `current`, NOT `all`, and that is what preserves the behaviour the toggle had.
-   * Superseded versions are history; interleaving them with the working set is what isCurrentSchema()
-   * exists to prevent. Getting this wrong would silently double the length of every registry on
-   * every floor -- the exact complaint issue #60 raised.
-   */
+  /* The default is `current`, not `all`: superseded versions are history, and interleaving them
+     would double the length of every registry. */
   it('hides superseded versions until they are asked for', async () => {
     renderTab()
     await ready()
@@ -130,9 +112,7 @@ describe('schema registry default view', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // Search
-// ---------------------------------------------------------------------------------------------
 
 describe('schema registry search', () => {
   it('narrows by schema name', async () => {
@@ -144,13 +124,9 @@ describe('schema registry search', () => {
     expect(registryNames()).toEqual(['Robot_Arm_Profile'])
   })
 
-  /*
-   * UUID AND CHANGE DESCRIPTION ARE MATCHED TOO, which is a deliberate divergence from the metric
-   * catalog's name-only search directly below on the same page. The catalog matches one field
-   * because matching more would return rows whose reason for matching is invisible in the table.
-   * Every field matched here IS a column of this table, so a hit can always be seen -- same rule,
-   * different table. A schema also arrives from a log line as a UUID far more often than as a name.
-   */
+  /* UUID and change description are matched too, unlike the metric catalog's name-only search
+     below: every field matched here is a column of this table, so a hit can always be seen, and a
+     schema arrives from a log line as a UUID more often than as a name. */
   it('narrows by UUID', async () => {
     renderTab()
     await ready()
@@ -184,9 +160,7 @@ describe('schema registry search', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
-// The status filter that replaced the toggle
-// ---------------------------------------------------------------------------------------------
+// The status filter
 
 describe('schema registry status filter', () => {
   it('shows only drafts when Draft is selected', async () => {
@@ -217,9 +191,7 @@ describe('schema registry status filter', () => {
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // Clearing, and the count that says a list is narrowed
-// ---------------------------------------------------------------------------------------------
 
 describe('clearing schema filters', () => {
   it('offers Clear only while something is filtering, and counts what is on', async () => {
@@ -241,35 +213,25 @@ describe('clearing schema filters', () => {
     expect(registryNames()).not.toContain('CNC_Mill_Profile_v1')
   })
 
-  /*
-   * FILTERED OF TOTAL. A narrowed registry showing a bare count reads as a short registry, which
-   * is the wrong thing to believe about a version history -- and the reader has no way to tell
-   * that a filter is the reason.
-   */
-  it('reports the count as filtered-of-total only while narrowed', async () => {
+  /* Filtered of total, and only then: a narrowed registry showing a bare count reads as a short
+     registry. Unfiltered, the title carries no badge. */
+  it('shows a filtered-of-total badge only while narrowed', async () => {
     renderTab()
     await ready()
 
     fireEvent.change(statusSelect(), { target: { value: 'all' } })
-    expect(registryCard().querySelector('.section-count')).toHaveTextContent('3')
+    expect(registryCard().querySelector('.card-header .section-count')).toBeNull()
 
     fireEvent.change(searchBox(), { target: { value: 'robot' } })
-    expect(registryCard().querySelector('.section-count')).toHaveTextContent('1/3')
+    expect(registryCard().querySelector('.card-header .section-count')).toHaveTextContent('1/3')
   })
 })
 
-// ---------------------------------------------------------------------------------------------
 // Arriving from another page
-// ---------------------------------------------------------------------------------------------
 
 describe('arriving on a schema that a filter would hide', () => {
-  /*
-   * A navigation has already chosen its target, so a filter must not be able to veto it.
-   * useArrivalSelection matches over every schema rather than the filtered list -- correctly --
-   * which without this would open the drawer on a row the table is not showing. That was reachable
-   * before this issue (arriving on a superseded version while the toggle hid archived versions);
-   * a search box and a status filter multiply the ways in.
-   */
+  /* A navigation has already chosen its target, so a filter must not veto it: useArrivalSelection
+     matches over every schema, and the filter is widened so the selected row is visible. */
   it('widens the status filter so the selected row is visible', async () => {
     renderTab({ initialSchemaId: '22222222-0000-4000-8000-000000000002' })
     await ready()

@@ -1,13 +1,7 @@
 import React from 'react'
 
-// =================================================================================================
-// Cell icons -- the closed set `cells.icon` may hold (archived migration 0021).
-//
-// KEPT IN STEP WITH THE CHECK CONSTRAINT BY HAND, and that is deliberate rather than lazy: a value
-// the database accepts and this file cannot render is a cell that draws nothing, so adding one is
-// meant to be two edits. CELL_ICONS below is the single place both the picker and every renderer
-// resolve through, so there is no third list to forget.
-// =================================================================================================
+// Cell icons: the closed set `cells.icon` may hold, kept in step with the CHECK constraint by hand.
+// CELL_ICONS is the single place the picker and every renderer resolve through.
 
 export const IconBot = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -77,9 +71,7 @@ export const IconRadio = ({ size = 16, className = "" }) => (
   </svg>
 )
 
-// A filled record dot inside a ring: the universal "this is recording" mark, and deliberately not
-// IconRadio, which the Gateways tab already owns. Two tabs sharing an icon is how a nav stops being
-// scannable at the density this page's arrival pushes it to.
+// A filled record dot inside a ring, distinct from IconRadio, which the Gateways tab owns.
 export const IconRecord = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <circle cx="12" cy="12" r="9" />
@@ -104,9 +96,8 @@ export const IconCpu = ({ size = 16, className = "" }) => (
   </svg>
 )
 
-// Accepts `style` like IconFileText: the telemetry drawer tints it with var(--accent) to match
-// the document drawer's header icon, and a dropped style prop would leave the two subtly
-// different colours with nothing to explain why.
+// Accepts `style` like IconFileText: the telemetry drawer tints it with var(--accent) to match the
+// document drawer's header icon.
 export const IconActivity = ({ size = 16, className = "", style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
@@ -138,12 +129,8 @@ export const IconAlertTriangle = ({ size = 16, className = "" }) => (
 )
 
 /**
- * The CRITICAL counterpart to IconAlertTriangle.
- *
- * Two glyphs rather than one recoloured triangle, because a colour difference is the whole signal
- * otherwise -- and these render at 11px in a table cell beside a status badge, which is exactly the
- * size and the context where red-versus-amber stops being reliable. A circle reads as a distinct
- * mark at a glance; the same triangle in a different fill does not.
+ * The CRITICAL counterpart to IconAlertTriangle. A distinct glyph rather than a recoloured
+ * triangle, because at 11px beside a status badge red-versus-amber is not reliable.
  */
 export const IconAlertCircle = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -173,12 +160,8 @@ export const IconArchive = ({ size = 14, className = "" }) => (
 )
 
 /**
- * Lucide `database` — the Cold Storage tab.
- *
- * DELIBERATELY NOT IconArchive, which the Archives tab directly above it already uses. Those two
- * pages mean different things by "archive" -- entity lifecycle against telemetry tiering -- and
- * sharing a glyph would undo, in the one place a reader looks first, the naming separation the
- * labels are careful about.
+ * Lucide `database`, for the Cold Storage tab. Not IconArchive, which the Archives tab uses: entity
+ * lifecycle and telemetry tiering are different things.
  */
 export const IconDatabase = ({ size = 14, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -216,13 +199,6 @@ export const IconBookOpen = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
     <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-  </svg>
-)
-
-export const IconRefresh = ({ size = 14, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <polyline points="23 4 23 10 17 10" />
-    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
   </svg>
 )
 
@@ -455,9 +431,7 @@ export const IconChevronRight = ({ size = 14, className = "", style = {} }) => (
   </svg>
 )
 
-// The "this row is the one Enter will take" marker in the search palette. A return-arrow glyph
-// rather than the word, because it sits at the right-hand edge of a row whose left half is the
-// destination's own name and must not compete with it.
+// The marker for the row Enter will take in the search palette.
 export const IconCornerDownLeft = ({ size = 14, className = "", style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
     <polyline points="9 10 4 15 9 20" />
@@ -465,10 +439,8 @@ export const IconCornerDownLeft = ({ size = 14, className = "", style = {} }) =>
   </svg>
 )
 
-// The help control in the top bar (issue #39). A question mark rather than a life ring or an
-// "i": the bar already carries a triangle and a circle for alert severity, and a third round glyph
-// beside them would be one more thing to tell apart at a glance. The mark is what the reader is
-// looking for.
+// The help control in the top bar. A question mark rather than a life ring or an "i": the bar
+// already carries a triangle and a circle for alert severity.
 export const IconHelp = ({ size = 14, className = "", style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
     <circle cx="12" cy="12" r="10" />
@@ -483,5 +455,28 @@ export const IconKeyboard = ({ size = 14, className = "", style = {} }) => (
     <path d="M6 8h.01" /><path d="M10 8h.01" /><path d="M14 8h.01" /><path d="M18 8h.01" />
     <path d="M6 12h.01" /><path d="M10 12h.01" /><path d="M14 12h.01" /><path d="M18 12h.01" />
     <path d="M8 16h8" />
+  </svg>
+)
+
+export const IconEye = ({ size = 14, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+)
+
+export const IconEyeOff = ({ size = 14, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+    <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+    <line x1="1" y1="1" x2="23" y2="23" />
+  </svg>
+)
+
+export const IconPanelLeft = ({ size = 14, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <line x1="9" y1="3" x2="9" y2="21" />
   </svg>
 )

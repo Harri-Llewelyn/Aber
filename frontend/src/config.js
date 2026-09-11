@@ -10,7 +10,7 @@
  */
 
 /** The global a deployment-supplied `config.js` assigns. */
-export const RUNTIME_CONFIG_GLOBAL = '__ACS_CYMRU_CONFIG__';
+const RUNTIME_CONFIG_GLOBAL = '__ACS_CYMRU_CONFIG__';
 
 /**
  * Every setting resolvable through this module. `frontend/public/config.js` must declare exactly

@@ -170,9 +170,8 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    // Selected by its visible label rather than its title text, so that rewording the
-    // tooltip does not break the test -- which is exactly what happened when quarantined
-    // devices were removed from this table and the tooltip had to stop mentioning them.
+    // Selected by its visible label rather than its title text, so rewording the tooltip does not
+    // break the test.
     fireEvent.click(screen.getByRole('button', { name: /Needs attention/i }))
 
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
@@ -180,10 +179,8 @@ describe('DevicesTab filters', () => {
     expect(screen.getByText('Robot_03')).toBeTruthy()
   })
 
-  // Regression: quarantined devices used to render BOTH in the onboarding queue and again in
-  // the table below, so every pending device appeared twice on one screen -- once with
-  // approve/reject actions and once with edit/archive actions that do not apply to a device
-  // which has not been admitted yet.
+  // A quarantined device renders in the onboarding queue only, not again in the table below with
+  // edit/archive actions that do not apply to it.
   it('lists a quarantined device in the onboarding queue but not in the devices table', async () => {
     api.get.mockImplementation(routeGet())
     renderDevices()
@@ -212,9 +209,8 @@ describe('DevicesTab filters', () => {
     expect(tableNames.some(t => t.includes('Unknown_Thing'))).toBe(false)
   })
 
-  // The badge must agree with what switching the filter on actually reveals. Quarantined
-  // devices are counted by the queue's own badge instead, so counting them here too would
-  // both double-count them and overstate the table's row count.
+  // The badge must agree with what switching the filter on reveals. Quarantined devices are counted
+  // by the queue's own badge.
   it('excludes quarantined devices from the needs-attention count', async () => {
     api.get.mockImplementation(routeGet())
     renderDevices()
@@ -265,11 +261,9 @@ describe('GatewaysTab filters', () => {
   })
 
   it('separates gateways by the type the column reports', async () => {
-    // The filter asked "physical or virtual" once, and `virtual` meant three things at
-    // once. It then asked where the connector RUNS -- better, but still not the question the Type
-    // column answers: a simulated gateway is host-run, so "On this host" returned it alongside the
-    // real connectors and no option separated them. It filters on the derived type now, through
-    // the same helper that prints the column.
+    // The filter reads the derived type through the same helper that prints the column: a simulated
+    // gateway is host-run, so filtering on `deployment` alone cannot separate it from the real
+    // connectors.
     api.get.mockImplementation(routeGet())
     renderGateways()
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
@@ -280,10 +274,8 @@ describe('GatewaysTab filters', () => {
   })
 
   it('tells a simulated gateway apart from the host-run connector it shares a deployment with', async () => {
-    // THE CASE THE OLD FILTER COULD NOT EXPRESS AT ALL. Both of these are `deployment: 'host'` --
-    // gateways_simulated_is_host (0064) requires it of the simulated one -- so a filter reading
-    // that column alone returned the pair together under "On this host", with nothing to separate
-    // them. The Type column had told them apart since 0064; the filter beside it could not.
+    // The case a `deployment` filter cannot express: both are `deployment: 'host'`, which
+    // gateways_simulated_is_host requires of the simulated one.
     api.get.mockImplementation(routeGet({
       gateways: [
         { ...staleVirtualGateway, gateway_name: 'Host_Connector', is_simulated: false },
@@ -334,6 +326,5 @@ describe('CellsTab filters', () => {
   })
 })
 
-// The TelemetryTab metric-filter tests lived here. That page was dissolved into the Devices
-// page's per-device telemetry drawer, which has no fleet-wide metric picker to test -- the row
-// IS the device. Its replacement coverage is in deviceTelemetryAccordion.test.jsx.
+// The fleet-wide metric filter has no equivalent in the per-device telemetry drawer; see
+// deviceTelemetryAccordion.test.jsx.

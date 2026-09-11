@@ -1,50 +1,16 @@
 #!/usr/bin/env node
 /**
- * Asserts that the migration chain COMPLETED, by checking the objects a partial run leaves missing.
+ * Asserts that the migration chain completed, by checking the objects a partial run leaves missing.
+ * `docker compose up -d` prints db-init's failure once and the stack runs; there is no
+ * applied-migrations ledger. An aborted chain does not leave the database merely stale: `0001` runs
+ * `DROP SERVER IF EXISTS timescaledb_server CASCADE`, which drops every foreign table in the
+ * `timescale` schema and the `public` views over them, recreated further down the chain. Grafana's
+ * datasource health check reports OK throughout, since a connection test is not a permission test.
+ * Only the objects downstream of that CASCADE are checked, and each is selected, not merely looked
+ * up in the catalog: `to_regclass` does not say the foreign table can be reached.
  *
- * =================================================================================================
- * WHY THIS EXISTS -- GitHub issue #40
- * =================================================================================================
- *
- * `docker compose up -d` prints `service "supabase-db-init" didn't complete successfully: exit 3`
- * exactly once, and then the stack runs. Nothing else notices. There is no applied-migrations
- * ledger by design, so there is also nothing that says the chain got to the end.
- *
- * That would be survivable if an aborted chain left the database merely out of date. It does not,
- * and the reason is `0001` section 3:
- *
- *     DROP SERVER IF EXISTS timescaledb_server CASCADE;
- *
- * The CASCADE takes every foreign table in the `timescale` schema with it, AND the `public` views
- * that select from them. They are recreated further down the chain -- `public.telemetry` later in
- * `0001`, the rollups in `0010`, `storage_footprint` in `0027`. So a migration that aborts anywhere
- * between them leaves the read surface DROPPED rather than stale.
- *
- * Observed on this stack: a deadlock at `0023` aborted the chain, `0027` never ran, and
- * `public.storage_footprint` stayed dropped. Grafana's datasource health check reported
- * `{"message":"Database Connection OK","status":"OK"}` throughout while every data-lifecycle panel
- * queried a view that no longer existed -- which is the trap timescaledb/roles.sql already names:
- * "A connection test is not a permission test."
- *
- * =================================================================================================
- * WHAT IT CHECKS, AND WHY NOT SOMETHING BROADER
- * =================================================================================================
- *
- * Only the objects downstream of that CASCADE. A full schema comparison would be a second, drifting
- * description of the migration chain -- the thing this repository refuses to keep in two places --
- * and it would fail on every legitimate schema change. This list is different: it is not "what the
- * schema looks like" but "what `0001` destroys and a later file must put back". It changes only
- * when the FDW projection changes.
- *
- * EACH IS SELECTED, NOT MERELY LOOKED UP IN THE CATALOG. `to_regclass` returning non-null says a
- * relation exists; it does not say the foreign table behind it can be reached, that the user
- * mapping authenticates, or that the remote still has the table. Those are exactly the failures
- * that present as a healthy stack with broken panels, so the check issues a real query.
- *
- * Usage:
- *   node scripts/check-schema-surface.mjs
- *
- * Environment: DB_CONTAINER (default supabase-db), DB_USER_NAME (postgres), DB_NAME (postgres).
+ * Usage: node scripts/check-schema-surface.mjs. Environment: DB_CONTAINER (default supabase-db),
+ * DB_USER_NAME (postgres), DB_NAME (postgres).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -60,8 +26,7 @@ const note = (m) => console.log(`        ${m}`);
 
 /**
  * Everything `0001`'s `DROP SERVER ... CASCADE` removes, with the migration that must put it back.
- * The `created_by` column is the diagnostic: it turns "storage_footprint is missing" into "the
- * chain did not reach 0027", which is the sentence somebody can act on.
+ * The `created_by` column turns "storage_footprint is missing" into "the chain did not reach 0027".
  */
 const SURFACE = [
   { relation: 'public.telemetry',            created_by: '0001' },

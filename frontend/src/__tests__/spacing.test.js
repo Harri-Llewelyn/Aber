@@ -3,20 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 /**
- * The inset scale.
- *
- * WHAT THIS GUARDS IS AGREEMENT, NOT A VALUE. Before it there were four insets for one
- * relationship -- the page used 24px, a card 20px, the filter bar and the context panel 14px, and a
- * table cell 16px -- and every one of them was defensible on its own. That is the whole difficulty:
- * nothing looked wrong at any single call site, and the drift was only visible by measuring two
- * pages against each other, which is how it was eventually reported.
- *
- * So the failure mode this catches is not "somebody chose a bad number". It is "somebody chose a
- * reasonable number without knowing there was already one", which is what happened four times.
- *
- * jsdom computes no layout, so this reads the stylesheet and the components directly. That is the
- * right level anyway: what is being asserted is that one value is written once and referred to,
- * which is a fact about the source rather than about the render.
+ * The inset scale. What this guards is agreement, not a value: the failure it catches is somebody
+ * choosing a reasonable number without knowing there was already one. jsdom computes no layout, so
+ * this reads the stylesheet and the components directly, which is the right level for asserting
+ * that one value is written once and referred to.
  */
 
 const SRC = path.resolve(__dirname, '..')
@@ -48,11 +38,9 @@ describe('the tokens', () => {
   })
 
   /**
-   * THE VALUE WAS NOT INVENTED, IT WAS THE ONE ALREADY IN USE. `th`/`td` have used 16px since the
-   * type scale was raised, and a table is the densest thing this app draws -- so it is the inset
-   * that has actually been read at a metre on a shopfloor terminal, rather than the one that looked
-   * comfortable in a design. If a cell ever diverges from the token, one of the two moved without
-   * the other and the card's edge no longer lines up with its own table.
+   * The token is the table cell inset that was already in use, the one read at a metre on a
+   * shopfloor terminal. If a cell diverges from the token, the card's edge no longer lines up with
+   * its own table.
    */
   it('matches the table cell inset the token was derived from', () => {
     for (const selector of ['th', 'td']) {
@@ -83,10 +71,8 @@ describe('every container refers to the token rather than restating it', () => {
   })
 
   /**
-   * THE TWO THAT WERE FOUND BY SWEEPING RATHER THAN BY LOOKING. Both sit inside a card and both had
-   * been hand-set to 20px to line up with `.card-body` as it was -- so reducing the card's inset
-   * would have left them 4px proud of the text above them, which is the kind of misalignment nobody
-   * reports and everybody notices.
+   * The two found by sweeping: both sit inside a card and must follow its inset, or they end up
+   * proud of the text above them.
    */
   it.each([['.callout'], ['.vocab-description']])('%s follows the card it sits in', (selector) => {
     expect(rule(selector)).toMatch(/(padding|margin):[^;]*var\(--inset\)/)
@@ -96,11 +82,8 @@ describe('every container refers to the token rather than restating it', () => {
 describe('the scrollbar gutter', () => {
 
   /**
-   * THE BUG THAT STARTED THIS. The custom scrollbar is taken out of `.content`'s content box, so a
-   * page long enough to scroll drew its cards narrower than one that was not -- and the gap on the
-   * right therefore changed as you navigated. Reserving the track unconditionally is what makes
-   * every page's right edge the same, and it is not something a later refactor can drop without
-   * bringing the inconsistency back.
+   * The custom scrollbar is taken out of `.content`'s content box, so reserving the track
+   * unconditionally is what makes every page's right edge the same.
    */
   it('is held open on every page, scrolling or not', () => {
     expect(rule('.content')).toMatch(/scrollbar-gutter:\s*stable/)
@@ -117,25 +100,12 @@ describe('the scrollbar gutter', () => {
 describe('components do not reintroduce an inset of their own', () => {
 
   /**
-   * THE ABANDONED BAND, 17px TO 24px. Every container inset that used to live in that range is now
-   * the token, so an inline style landing back in it is somebody hand-picking a value beside the
-   * one they could not see. Below 17px is left alone deliberately: those are genuinely smaller
-   * things -- chips, buttons, a tag -- and this is not an attempt to own every number in the app.
-   *
-   * SCOPED TO THE PAGES, AND THE SCOPE IS THE ASSERTION'S MEANING RATHER THAN A CONVENIENCE. The
-   * token describes ONE relationship: the inset from the edge of something laid out on the page
-   * grid to its content. Three kinds of surface are not on that grid and are correctly excluded
-   * rather than exempted --
-   *
-   *   a MODAL floats, sizes itself, and answers to nothing on the page behind it;
-   *   the LOGIN SCREEN renders instead of the dashboard, not inside it;
-   *   a WIDGET like the 3D dropzone is a control whose padding is its own affordance -- a drop
-   *     target is deliberately large, and shrinking it to match a card would make it worse.
-   *
-   * Run this over all of them and it reports five things that are not the defect it was written
-   * for, which is how a guard teaches people to skip it. The vocabulary panel, which WAS a real
-   * offender and lives outside this directory, stays covered by the `.vocab-description` assertion
-   * above -- at the level where its inset is actually declared.
+   * The abandoned band, 17px to 24px: every container inset in that range is now the token, so an
+   * inline style landing back in it is a hand-picked value beside the one they could not see. Below
+   * 17px is left alone. Scoped to the pages because the token describes one relationship, the inset
+   * from a page-grid edge to its content: a modal floats, the login screen renders instead of the
+   * dashboard, and a widget's padding is its own affordance. The vocabulary panel is covered by the
+   * `.vocab-description` assertion above.
    */
   const files = jsxFiles(path.join(SRC, 'components', 'tabs'))
 

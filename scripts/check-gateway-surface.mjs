@@ -1,68 +1,21 @@
 #!/usr/bin/env node
 /**
- * Assert the API gateway's ROUTING AND AUTHENTICATION SURFACE against a declared inventory.
+ * Assert the API gateway's routing and authentication surface against a declared inventory.
+ * `validate.py` asserts the 401s that should happen; nothing can assert the absence of a route
+ * nobody wrote, and a gateway translation that quietly widened an exemption would pass every other
+ * test. Three modes: (default) template hygiene over `supabase/envoy.yaml`: every credential is
+ * still an `__UPPER_SNAKE__` placeholder, the placeholder set is known to both substituters, and
+ * Compose no longer reads kong.yml while the chart still does. `--runtime`: the route surface
+ * against a live gateway, every row in EXPECTED, gated routes refused before their upstream and
+ * open ones through, worded so it reads identically against Kong and Envoy. `--authenticated`:
+ * extends --runtime with a credentialled pass, presenting a valid key by header and by query and an
+ * unregistered key, and asserting that on a route which hides credentials the header and query
+ * forms are indistinguishable upstream. Both modes share EXPECTED so two inventories cannot drift.
  *
- * WHY THIS EXISTS, and it is not the same claim `validate.py` makes. `validate.py` asserts the 401s
- * that SHOULD happen -- the Directory's `/v1/device`, i3X's `/objects`, Node-RED's admin API. Those
- * are positive assertions about routes somebody wrote. NOTHING IN THIS REPOSITORY CAN ASSERT THE
- * ABSENCE OF A ROUTE NOBODY WROTE, because absence is not probeable: there is no request that
- * demonstrates a route was never added, and no test fails when one is.
- *
- * That gap is what makes a gateway migration dangerous rather than tedious. The gateway fronts
- * nine services, gates four of them, and leaves six routes open across FOUR deliberate
- * exemptions -- each open for a stated reason and each load bearing. A translation that quietly
- * widened one would pass every other test in this repository. So would a route added and gated
- * nowhere.
- *
- * WHAT IT CHECKS, in three modes:
- *
- *   (default)   TEMPLATE HYGIENE, over `supabase/envoy.yaml`. Every credential is still an
- *               `__UPPER_SNAKE__` placeholder (a real key here is a leaked key, and it matters
- *               more in envoy.yaml than it did in kong.yml -- the key is inlined into a Lua
- *               string the filter compares against); the placeholder set is known to BOTH
- *               substituters, so one taught to only one target cannot become a boot failure on
- *               the other; and Compose no longer reads kong.yml while the chart still does.
- *
- *   --runtime   THE ROUTE SURFACE, against a LIVE gateway. Every row in EXPECTED: gated routes
- *               must be refused before their upstream sees them, open ones must get through. It
- *               names no gateway concept, so it reads identically against Kong and Envoy -- which
- *               is what let it steer the migration rather than needing to be rewritten alongside
- *               the thing it was guarding.
- *
- *   --authenticated
- *               extends --runtime with a CREDENTIALLED pass, and it is the difference between a
- *               comparison and a promotion gate. The unauthenticated pass sends no key at all, so
- *               it is blind to everything the gateway does WITH one -- which is how the first
- *               Envoy translation passed every assertion here while forwarding the apikey from the
- *               query string to PostgREST, where it was read as a column filter. Presents a valid
- *               key by header and by query, an unregistered key, and asserts that on a route which
- *               hides credentials the header and query forms are indistinguishable upstream.
- *
- * WHAT WENT WITH KONG. The default mode used to PARSE `kong.yml` and assert its shape -- services,
- * routes, strip_path, plugins, consumers, and the agreement between its header's counts and
- * supabase/README.md. All of that was Kong vocabulary describing a file the stack no longer
- * deploys on Compose, so it is retired. Two of those eight assertions were never about Kong and
- * survive above: no literal credential, and both substituters knowing every placeholder.
- *
- * It does not check that the routes WORK. That is `validate.py`'s half, live against a running
- * stack, and the two are complementary: this one proves the surface is what was intended, that one
- * proves the intended surface behaves.
- *
- * Both share EXPECTED on purpose. Two inventories would drift, and the one that drifted would be
- * the one nobody ran.
- *
- * Usage:
- *   node scripts/check-gateway-surface.mjs
- *   node scripts/check-gateway-surface.mjs --verbose
- *   node scripts/check-gateway-surface.mjs --runtime [baseUrl]
- *   node scripts/check-gateway-surface.mjs --runtime --authenticated [baseUrl]   # needs SUPABASE_ANON_KEY
- *
- * The base URL is the first non-flag argument, or SUPABASE_URL. Running it twice against two
- * gateways and diffing the output is the equivalence test a gateway change is steered by.
- *
- * No dependencies: this runs in CI before any `npm install`, and the runtime modes speak HTTP
- * through `node:http` rather than fetch -- see the note on probeOnce for the Windows exit
- * crash that forced it.
+ * Usage: node scripts/check-gateway-surface.mjs [--verbose] | --runtime [baseUrl] | --runtime
+ * --authenticated [baseUrl] (needs SUPABASE_ANON_KEY). The base URL is the first non-flag argument,
+ * or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the runtime modes
+ * use `node:http`; see probeOnce.
  */
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
@@ -81,14 +34,9 @@ const fail = (m) => problems.push(m);
 const pass = (m) => ok.push(m);
 
 
-// -------------------------------------------------------------------------------------------------
-// THE INVENTORY. This is the specification, not a mirror of the file -- every row was read from
-// kong.yml once, by hand, and each `why` is the reason recorded at that service's own definition.
-//
-// A row here is a claim that this route is MEANT to exist with this posture. Adding a route to
-// kong.yml without adding it here fails, which is the whole point: the default for a new route is
-// "not reviewed", not "inherits whatever the file says".
-// -------------------------------------------------------------------------------------------------
+// The inventory. This is the specification, not a mirror of the file: a row is a claim that this
+// route is meant to exist with this posture, and a route added to the gateway without a row here
+// fails.
 
 /** The four recorded exemptions, and what each one is for. Open routes must name one of these. */
 const EXEMPTIONS = {
@@ -117,12 +65,9 @@ const EXPECTED = [
   { service: 'storage-v1-public', route: 'storage-v1-public-routes',
     paths: ['/storage/v1/object/public/'], strip: true,
     auth: 'open', exemption: 'public-objects',
-    // `statusCode` is storage-api's ERROR ENVELOPE, not one particular error. It was
-    // `"error":"not_found"` until this ran against a cluster whose storage RLS policies had not
-    // been applied, where the same upstream answered `"error":"Unauthorized"` instead -- the
-    // request reached it either way, which is the only thing this row asserts. A marker pinned to
-    // an OUTCOME couples the probe to database state; one pinned to the upstream's identity does
-    // not, and identity is what "did it get through" needs.
+    // `statusCode` is storage-api's error envelope, not one particular error: the same upstream
+    // answers `not_found` or `Unauthorized` depending on database state, and the request reaching
+    // it is the only thing this row asserts.
     probe: '/storage/v1/object/public/asset-3d-models/__probe__', marker: 'statusCode' },
 
   { service: 'storage-v1', route: 'storage-v1-routes', paths: ['/storage/v1/'], strip: true,
@@ -140,9 +85,8 @@ const EXPECTED = [
     auth: 'open', exemption: 'oauth-userinfo',
     probe: '/functions/v1/nodered-userinfo', marker: '"error"' },
 
-  // strip_path FALSE on both, unlike every other route here. The function reads the first path
-  // segment to pick a worker, so the matched prefix has to survive; stripping it hands the runtime
-  // an empty service name and it answers 400.
+  // strip_path false on both, unlike every other route: the function reads the first path segment
+  // to pick a worker, so the matched prefix has to survive.
   { service: 'fplus-directory', route: 'fplus-directory-ping', paths: ['/ping'], strip: false,
     auth: 'open', exemption: 'fplus-directory',
     probe: '/ping', marker: '"service":"fplus-directory"' },
@@ -165,9 +109,8 @@ const EXPECTED_CONSUMERS = ['anon', 'service_role'];
 const EXPECTED_GLOBAL_PLUGINS = ['prometheus', 'cors'];
 
 /**
- * On Kong 3.x these three default to FALSE, and 2.8 emitted them from a bare `- name: prometheus`.
- * Losing them removes `kong_http_status`, `kong_latency_*` and `kong_bandwidth` while /metrics keeps
- * answering 200 -- an unmeasured gateway that reads as an idle one.
+ * On Kong 3.x these three default to false. Losing them removes `kong_http_status`,
+ * `kong_latency_*` and `kong_bandwidth` while /metrics keeps answering 200.
  */
 const PROMETHEUS_FLAGS = ['status_code_metrics', 'latency_metrics', 'bandwidth_metrics'];
 
@@ -179,51 +122,22 @@ const EXPECTED_PLACEHOLDERS = [
   '__SUPABASE_SERVICE_ROLE_KEY__',
 ];
 
-// =================================================================================================
-// RUNTIME MODE  --  `node scripts/check-gateway-surface.mjs --runtime [baseUrl]`
-//
-// WHY A SECOND MODE RATHER THAN A SECOND SCRIPT. Everything above reads `kong.yml` and asserts its
-// SHAPE. That is the right check while Kong is the gateway and worthless the moment it is not:
-// Envoy's configuration is `lds.yaml` and `cds.yaml`, and a checker that parses Kong's indentation
-// has nothing to say about it. What survives a gateway swap is not the config -- it is the
-// OBSERVABLE POSTURE of each route, and that is what this mode asserts.
-//
-// So the inventory above is shared deliberately. Two inventories would drift, and the one that
-// drifted would be the one nobody ran.
-//
-// THE DISCRIMINATOR IS "DID THE REQUEST REACH THE UPSTREAM", NOT THE STATUS CODE, and the
-// difference is the whole reason this is not three lines of curl. An OPEN route may legitimately
-// answer 401 -- `/v1/device` and both userinfo endpoints are exempt from the gateway precisely so
-// they can authenticate the caller THEMSELVES, and they answer 401 when nobody is signed in. A
-// check that read 401 as "gated" would call those four correctly gated while they were wide open,
-// which is the exact failure this exists to catch.
-//
-// So each row carries a `marker`: a string only its UPSTREAM emits. Present means the request got
-// through; absent on a gated route means the gateway refused it. That test is worded in terms of
-// the upstreams rather than the gateway, so it reads identically against Kong and against Envoy --
-// whose refusal body will differ from Kong's `No API key found in request` and does not need to be
-// known here.
-//
-// EVERY REQUEST IS SENT WITH NO `apikey` AND NO `Authorization`. That is the only condition under
-// which the gate is observable at all: with a valid key every route answers from its upstream and
-// the gated and open sets become indistinguishable.
-// -------------------------------------------------------------------------------------------------
+// Runtime mode: `node scripts/check-gateway-surface.mjs --runtime [baseUrl]`. What survives a
+// gateway swap is the observable posture of each route, so the inventory above is shared. The
+// discriminator is whether the request reached the upstream, not the status code: an open route may
+// legitimately answer 401 (`/v1/device` and the userinfo endpoints authenticate the caller
+// themselves), so each row carries a `marker`, a string only its upstream emits. Every request is
+// sent with no `apikey` and no `Authorization`, the only condition under which the gate is
+// observable.
 
 const RUNTIME = process.argv.includes('--runtime');
 /** Extends --runtime with the credentialled pass. See the block at the end of that mode. */
 const AUTHENTICATED = process.argv.includes('--authenticated');
 
 if (RUNTIME) {
-  // THE FIRST NON-FLAG ARGUMENT, not "whatever follows --runtime".
-  //
-  // It was the latter, and the failure was silent and total: `--runtime --authenticated <url>`
-  // read `--authenticated` as the base, rejected it for starting with `--`, and fell back to
-  // SUPABASE_URL. Every run that was supposed to be probing the second gateway probed the first
-  // one instead, and reported a clean pass for it under the other one's name. Caught by diffing
-  // two runs that should have differed and did not.
-  //
-  // Order-independent now, so `--runtime <url> --authenticated` and
-  // `--runtime --authenticated <url>` mean the same thing.
+  // The first non-flag argument, not whatever follows --runtime, so `--runtime <url>
+  // --authenticated` and `--runtime --authenticated <url>` mean the same thing; the latter once
+  // fell back to SUPABASE_URL and probed the wrong gateway under the other one's name.
   const argBase = process.argv.slice(2).find((a) => !a.startsWith('--'));
   const base = (
     argBase || process.env.SUPABASE_URL || 'http://127.0.0.1:54321'
@@ -232,23 +146,18 @@ if (RUNTIME) {
   const runtimeProblems = [];
   const runtimeOk = [];
 
-  // A row with no `probe` is a declaration this mode cannot check, and saying so is the point --
-  // silence would read as a pass. `realtime-v1` is the case: it upgrades to a WebSocket, so an
-  // ordinary GET never reaches a body its upstream authored.
+  // A row with no `probe` is a declaration this mode cannot check, and saying so is the point.
+  // `realtime-v1` upgrades to a WebSocket, so an ordinary GET never reaches a body its upstream
+  // authored.
   const unprobeable = EXPECTED.filter((r) => !r.probe || r.marker === null);
 
   const probes = EXPECTED.filter((r) => r.probe && r.marker !== null);
 
   /**
-   * One unauthenticated GET.
-   *
-   * DELIBERATELY `node:http` AND NOT `fetch`. Node's fetch holds its sockets open in a keep-alive
-   * pool, and `process.exit()` below while undici still owns one aborts the process on Windows with
-   * `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` -- AFTER the report has printed. The
-   * run reads as a pass that crashed, and in CI as a failure with a green-looking log above it.
-   * `agent: false` gives each request its own socket and closes it, so exit has nothing to trip on.
-   *
-   * NO HEADERS BEYOND Accept. Sending no `apikey` and no `Authorization` is the whole experiment.
+   * One unauthenticated GET. `node:http` and not `fetch`: Node's fetch holds sockets in a
+   * keep-alive pool, and `process.exit()` while undici owns one aborts the process on Windows with
+   * a libuv assertion after the report has printed. `agent: false` gives each request its own
+   * socket. No headers beyond Accept.
    */
   const probeOnce = (url, extraHeaders = {}) => new Promise((resolveProbe) => {
     let mod, opts;
@@ -356,40 +265,15 @@ if (RUNTIME) {
     + (unprobeable.length ? `, ${unprobeable.length} not probeable over plain HTTP.` : '.')
   );
 
-  // ===============================================================================================
-  // AUTHENTICATED MODE  --  `--runtime --authenticated`
-  //
-  // WHY THE UNAUTHENTICATED PASS IS NOT A PROMOTION GATE ON ITS OWN, learned the hard way: the
-  // Envoy translation passed every unauthenticated assertion above while `hide_credentials` was
-  // stripping the apikey from the HEADER and not from the QUERY STRING. A client sending
-  // `?apikey=...` -- which Kong accepts and then removes -- got its key forwarded to PostgREST,
-  // which parsed it as a COLUMN FILTER and answered PGRST100 where Kong answered 200. Every probe
-  // above was green throughout, because none of them presented a credential at all.
-  //
-  // So this pass presents one, three ways, and asserts what each is for:
-  //
-  //   header    a valid key in `apikey:` reaches the upstream          (the gate opens)
-  //   query     a valid key in `?apikey=` reaches the upstream         (key_in_query, which
-  //                                                                     Realtime cannot live
-  //                                                                     without -- a browser sets
-  //                                                                     no header on a handshake)
-  //   invalid   a wrong key is refused 401 and reaches nothing         (the gate is a check, not
-  //                                                                     a presence test)
-  //
-  // AND THE ONE THAT CAUGHT THE BUG: on a route that hides credentials, the header form and the
-  // query form must produce the SAME STATUS. That comparison is worded against neither gateway nor
-  // upstream -- it says only "how the caller passed the key must not change the answer" -- which is
-  // exactly the invariant `hide_credentials` exists to provide and the one a translation silently
-  // drops. 400-vs-200 is what it looked like when it was broken.
-  //
-  // ITS LIMIT, MEASURED RATHER THAN ASSUMED. Re-introducing the bug on purpose fails `rest-v1` on
-  // both counts and leaves `functions-v1` GREEN: a stray `apikey=` corrupts a PostgREST request
-  // because PostgREST reads unknown query parameters as column filters, and is simply ignored by
-  // the edge runtime. So this detects FORWARDING only where the upstream is sensitive to it, and
-  // `rest-v1` is the row carrying that weight. The half it cannot see is the leak -- a forwarded
-  // service-role key sitting in an upstream access log -- which no black-box probe can observe
-  // from outside. Stated here so the green on the other rows is not read as more than it is.
-  // ===============================================================================================
+  // Authenticated mode: `--runtime --authenticated`. The unauthenticated pass presents no
+  // credential, so it is blind to everything the gateway does with one: an Envoy translation once
+  // passed it while forwarding a query-string apikey to PostgREST, which parsed it as a column
+  // filter. This pass presents a valid key by header (the gate opens), by query (key_in_query,
+  // which Realtime needs since a browser sets no header on a handshake), and an invalid key
+  // (refused 401), and asserts that on a route which hides credentials the header and query forms
+  // produce the same status. Its limit: this detects forwarding only where the upstream is
+  // sensitive to it, which is `rest-v1`; a forwarded key sitting in an upstream access log cannot
+  // be observed from outside.
 
   if (AUTHENTICATED) {
     const anonKey = process.env.SUPABASE_ANON_KEY || '';
@@ -408,10 +292,9 @@ if (RUNTIME) {
     const authProblems = [];
     const authOk = [];
 
-    // Exempt routes are checked too, and for a reason that is not symmetry: an exemption that
-    // starts REFUSING a request carrying a key is just as broken as a gate that stops applying,
-    // and presenting a credential to an open route is the ordinary case for the two userinfo
-    // endpoints -- an OAuth client may well send one.
+    // Exempt routes are checked too: an exemption that starts refusing a request carrying a key is
+    // as broken as a gate that stops applying, and an OAuth client may well send one to the
+    // userinfo endpoints.
     for (const row of EXPECTED) {
       if (!row.probe || row.marker === null) continue;
 
@@ -512,31 +395,12 @@ if (RUNTIME) {
   process.exit(0);
 }
 
-// =================================================================================================
-// TEMPLATE HYGIENE  --  the default mode, and what is LEFT of the static one.
-//
-// The Kong static mode is gone with Kong. It read `kong.yml`'s indentation and asserted its shape:
-// services, routes, strip_path, plugins, consumers. Every one of those was Kong vocabulary, and
-// Envoy's configuration is a bootstrap of listeners and clusters that the parser could not read a
-// word of. Keeping it would have meant maintaining a checker for a file the stack no longer has.
-//
-// TWO OF ITS EIGHT ASSERTIONS WERE NOT ABOUT KONG AT ALL, and those are here. Both are about the
-// TEMPLATE rather than the gateway, so they survived the migration unchanged in meaning:
-//
-//   * Assertion 5 -- NO LITERAL CREDENTIAL IS COMMITTED. Every key in the template must still be
-//     an `__UPPER_SNAKE__` placeholder. A real key here is a leaked key, not a config change, and
-//     it is MORE dangerous in envoy.yaml than it was in kong.yml: the key is inlined into a Lua
-//     string the filter compares against, so it appears in the file as ordinary source.
-//
-//   * Assertion 7 -- BOTH SUBSTITUTERS KNOW EVERY PLACEHOLDER. Compose's `supabase-envoy-init`
-//     and the chart's initContainer each scan for leftovers AT RUNTIME, so a placeholder added to
-//     the template and taught to only one of them is a per-target divergence that surfaces as a
-//     boot failure on whichever target was forgotten. Comparing the three lists statically is
-//     cheaper than discovering it on deploy.
-//
-// The ROUTE surface is no longer checkable from a file, and that is the point of `--runtime`: it
-// asserts posture against a live gateway instead, in terms no gateway owns.
-// =================================================================================================
+// Template hygiene, the default mode. Two assertions about the template rather than the gateway: no
+// literal credential is committed (every key must be an `__UPPER_SNAKE__` placeholder, and in
+// envoy.yaml the key is inlined into a Lua string), and both substituters know every placeholder
+// (Compose's `supabase-envoy-init` and the chart's initContainer each scan for leftovers at
+// runtime, so one taught to only one target is a boot failure on the other). The route surface is
+// asserted by `--runtime`.
 
 const ENVOY_TEMPLATE = 'supabase/envoy.yaml';
 const COMPOSE_FILE = 'docker-compose.yml';
@@ -545,9 +409,8 @@ const CHART_ENVOY = 'deploy/helm/acs-cymru/templates/supabase/envoy.yaml';
 /** Substituted by BOTH targets. All three lists below must agree. */
 const TEMPLATE_PLACEHOLDERS = [
   '__CORS_ORIGINS__',
-  // Not a credential -- a bare `true`/`false` substituted into the Lua filter, deciding whether the
-  // legacy anon and service-role JWTs are still accepted at all. Both substituters validate the
-  // value, because anything else is a config Envoy refuses to parse.
+  // Not a credential: a bare `true`/`false` substituted into the Lua filter, deciding whether the
+  // legacy anon and service-role JWTs are still accepted. Both substituters validate the value.
   '__LEGACY_KEYS_ACCEPTED__',
   '__REALTIME_UPSTREAM_ADDRESS__',
   '__REALTIME_UPSTREAM_HOST__',
@@ -555,9 +418,8 @@ const TEMPLATE_PLACEHOLDERS = [
   '__SUPABASE_PUBLISHABLE_KEY__',
   '__SUPABASE_SECRET_KEY__',
   '__SUPABASE_SERVICE_ROLE_KEY__',
-  // The studio listener's four (0081). The last is the HS256 signing secret as an `oct` JWKS key,
-  // and it is the reason this list is worth reading before adding to it: unlike the two keys
-  // above, it is not a credential the gateway PRESENTS -- it is the one it VERIFIES with.
+  // The studio listener's four. The last is the HS256 signing secret as an `oct` JWKS key: not a
+  // credential the gateway presents but the one it verifies with.
   '__SUPABASE_JWT_SECRET_B64URL__',
   '__SUPABASE_PUBLIC_URL__',
   '__STUDIO_PUBLIC_URL__',
@@ -571,9 +433,8 @@ const template = read(ENVOY_TEMPLATE);
 
 // ---- 1. Every placeholder in the template is declared, and nothing else looks like one. --------
 {
-  // Comment lines are excluded for the reason the substituters exclude them: the template's header
-  // documents the convention BY NAME, so a whole-file scan flags the documentation of the rule as
-  // a violation of it.
+  // Comment lines are excluded, as the substituters exclude them: the template's header documents
+  // the convention by name.
   const found = new Set(
     template
       .split('\n')
@@ -612,11 +473,9 @@ const template = read(ENVOY_TEMPLATE);
       + 'ROTATE THE KEY -- it is in the git history now.'
     );
   }
-  // AND THE NEW FORMAT, which the JWT shape above cannot see. `sb_publishable_*` and `sb_secret_*`
-  // are opaque strings with no structure to match, so the PREFIX is the only thing that identifies
-  // one -- which is the second reason upstream's prefixes are worth keeping rather than minting a
-  // bare random string. The template's own comments name both prefixes, so the scan excludes
-  // comment lines exactly as assertion 1 does: documenting the rule must not violate it.
+  // And the new format, which the JWT shape above cannot see: `sb_publishable_*` and `sb_secret_*`
+  // are opaque strings, so the prefix is the only thing that identifies one. Comment lines are
+  // excluded as in assertion 1.
   const newKey = template
     .split('\n')
     .filter((l) => !/^\s*(#|\s*--)/.test(l))
@@ -653,14 +512,9 @@ const template = read(ENVOY_TEMPLATE);
 
 // ---- 4. Kong is retired from COMPOSE, and still present for Kubernetes. -----------------------
 {
-  // NOT "kong.yml is gone", which is what this asserted for exactly one commit and which broke
-  // `helm install` outright: the chart still deploys Kong by default, because its Envoy templates
-  // have never run in a cluster. Deleting the shared template took the mirror with it and the
-  // default render failed on a missing file. `helm lint` passed throughout, which is why that was
-  // not caught until the render was actually exercised.
-  //
-  // So the claim worth asserting is the narrower true one: COMPOSE no longer reads it. That flips
-  // to "gone" when the chart stops deploying Kong, and this comment is the reminder.
+  // Not "kong.yml is gone": the chart still deploys Kong on demand, and deleting the shared
+  // template broke `helm install` on a missing file while `helm lint` passed. The claim asserted is
+  // the narrower true one: Compose no longer reads it.
   const compose = read(COMPOSE_FILE);
   if (/kong\.yml/.test(compose)) {
     fail(
@@ -671,14 +525,10 @@ const template = read(ENVOY_TEMPLATE);
     pass(`${COMPOSE_FILE} no longer reads kong.yml`);
   }
 
-  // The converse, and it is the half that actually bites. supabase/kong.yml is mirrored into the
-  // chart and read by templates/supabase/kong.yaml.
-  //
-  // KONG IS NOW OFF BY DEFAULT ON KUBERNETES TOO, and this assertion did NOT relax
-  // with it. The template is still there and still reads the mirror, so `supabaseKong.enabled=true`
-  // -- the documented revert -- is a broken `helm install` the moment this file goes. A retained
-  // config for a disabled component looks like dead weight to anyone tidying, which is exactly when
-  // an assertion earns its keep. It can go when the template does, and not before.
+  // The converse: supabase/kong.yml is mirrored into the chart and read by
+  // templates/supabase/kong.yaml. Kong is off by default on Kubernetes too, and this did not relax
+  // with it: `supabaseKong.enabled=true` is the documented revert, and it is a broken `helm
+  // install` the moment this file goes. It can go when the template does.
   let present = true;
   try {
     read('supabase/kong.yml');

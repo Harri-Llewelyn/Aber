@@ -15,37 +15,18 @@ import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import {
   IconDownload, IconPlay, IconRecord, IconShieldAlert, IconTrash, IconUpload, IconX
 } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 
 /**
  * Recording the broker, and publishing a recording back.
  *
- * `ingestion/capture.py record` records live Sparkplug traffic to a file and publishes it back
- * rebased onto now — a dashboard verified against a machine that was on site for two hours, a fault
- * reproduced by editing a value by hand, a load test at a multiple of real time. Until this page a
- * capture was a file on whoever's laptop happened to run the recorder, which is the wrong place for
- * the only copy of a fault nobody can reproduce on demand.
- *
- * ---------------------------------------------------------------------------------------------
- * NOTHING ON THIS PAGE RECORDS OR PUBLISHES ANYTHING. A browser cannot open an MQTT subscription:
- * mosquitto listens on 1883 TCP with no WebSocket listener, and both credentials are server-side
- * secrets a bundle would publish. The page queues a row and one of two server processes does the
- * work — the ingestion daemon for a capture, the playback worker for a publication.
- *
- * What that means here is that every action is a database call and every result arrives
- * asynchronously over Realtime. There is no request whose response is the outcome.
- *
- * ---------------------------------------------------------------------------------------------
- * TWO CARDS, BECAUSE THEY ARE TWO ACTS WITH DIFFERENT STAKES. Capture consumes: it reads what is
- * already on the wire. Playback WRITES, under a gateway's own identity, into the historian that
- * everything downstream reads. Putting a running playback in among the capture rows made the more
- * consequential of the two the quieter one on the page.
- *
- * ONE CAPTURE AT A TIME AND ONE STORED CAPTURE PER SUBJECT, both enforced by partial unique
- * indexes rather than by this component: two browser tabs cannot race a database constraint. The
- * cards and the disabled buttons are the interface to those facts, not an implementation of them.
- *
- * THE ROLE GATES MIRROR THE RLS, THEY DO NOT IMPLEMENT IT. `0055` and `0056` grant SELECT to
- * Administrator, Shopfloor_Manager and Auditor, and refuse every write to anyone but the first two.
+ * Nothing on this page records or publishes: a browser cannot open an MQTT subscription, so the
+ * page queues a row and the ingestion daemon (capture) or the playback worker (publication) does
+ * the work, with results arriving over Realtime. Two cards, because capture reads the wire and
+ * playback writes into the historian under a gateway's identity. One capture at a time and one
+ * stored capture per subject are partial unique indexes, not rules of this component. The role
+ * gates mirror the RLS: SELECT for Administrator, Shopfloor_Manager and Auditor, writes for the
+ * first two.
  */
 export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const [subjectKind, setSubjectKind] = useState('gateway')
@@ -83,23 +64,18 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
   const canManage = userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 
-  // ------------------------------------------------------------------------------------------
   // Loading
-  // ------------------------------------------------------------------------------------------
   const loadSubjects = useCallback(async () => {
     const [gws, devs, schemaList] = await Promise.all([
       api.get('/api/v1/gateways'),
       api.get('/api/v1/devices'),
-      // Read only to NAME a device's schema in the panel. Defaulted rather than allowed to reject
-      // the batch: a page that cannot record a capture because a schema list failed would be
-      // trading the whole feature for a label.
+      // Read only to name a device's schema in the panel; defaulted rather than allowed to reject
+      // the batch.
       api.get('/api/v1/schemas').catch(() => [])
     ])
     setSchemas(schemaList || [])
-    // ARCHIVED SUBJECTS ARE LEFT OUT rather than shown and disabled. `start_capture_job()` refuses
-    // them — an archived gateway publishes nothing, so the capture would run its full duration and
-    // produce an empty file — and a row that exists only to be refused is a row that invites the
-    // click that gets refused.
+    // Archived subjects are left out: `start_capture_job()` refuses them, since an archived gateway
+    // publishes nothing.
     setGateways((gws || []).filter(g => !g.is_archived))
     setDevices((devs || []).filter(d => !d.is_archived && d.gateway_id))
   }, [])
@@ -140,13 +116,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }, [loadSubjects, loadCaptures, loadJobs])
 
   /**
-   * Progress arrives over Realtime, which is why both job tables are in the publication and carry
-   * REPLICA IDENTITY FULL.
-   *
-   * PAIRED WITH A TIMER, not trusted alone, for the reason useRealtimeTable's own header gives:
-   * Realtime has no replay, so a dropped socket loses every change in the gap and the client is
-   * never told. A job that finished during that gap would leave a card counting up forever. The
-   * timer runs ONLY while something is in flight — an idle page opens no interval at all.
+   * Progress arrives over Realtime, which is why both job tables are in the publication with
+   * REPLICA IDENTITY FULL. Paired with a timer because Realtime has no replay: a job finishing
+   * during a dropped socket would otherwise count up forever. The timer runs only while something
+   * is in flight.
    */
   useRealtimeTable(['capture_jobs', 'playback_jobs'], refreshAll,
     { enabled: REALTIME_ENABLED, debounceMs: 400 })
@@ -165,9 +138,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     if (lastJobId.current) { lastJobId.current = null; loadCaptures().catch(() => {}) }
   }, [activeJob, loadCaptures])
 
-  // ------------------------------------------------------------------------------------------
   // Rows
-  // ------------------------------------------------------------------------------------------
   const captureBySubject = useMemo(() => {
     const map = new Map()
     for (const capture of captures) {
@@ -192,16 +163,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }, [gateways])
 
   const allRows = useMemo(() => {
-    // THE PLAYBACK LANE IS NOT A CAPTURE SUBJECT, in either tab.
-    //
-    // A shadow gateway publishes only while a playback is running, so recording from it means
-    // capturing a capture -- a file whose contents are another file, replayed. Its shadow devices
-    // are the same thing one level down: `shadow_of` says they exist to receive a replay, not to
-    // report a machine.
-    //
-    // Offering them read as an oversight rather than a choice, because everything else on this page
-    // is a subject somebody might genuinely want to record. Starting a playback is unaffected:
-    // `playbackTargets()` selects on `is_shadow` and is a different query for a different question.
+    // The playback lane is not a capture subject in either tab: a shadow gateway publishes only
+    // while a playback runs, and its shadow devices exist to receive a replay. `playbackTargets()`
+    // is a different query for a different question.
     const source = (subjectKind === 'gateway' ? gateways : devices)
       .filter(s => subjectKind === 'gateway' ? !s.is_shadow : !s.shadow_of)
     return source.map(subject => ({
@@ -214,10 +178,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         ? (gatewayName.get(subject.gateway_id) || 'Unbound')
         : null,
       gatewayId: subjectKind === 'device' ? subject.gateway_id : subject.id,
-      // THE TYPE OF THE GATEWAY, for a device row as much as a gateway one: a device's readings are
-      // as synthetic as the edge node publishing them, and the device rows are where an operator is
-      // most likely to forget that. `gatewayType()` reads three fields and applies the lane
-      // precedence, so Shadow does not present as Simulated.
+      // The type of the gateway, for a device row as much as a gateway one: a device's readings are
+      // as synthetic as the edge node publishing them. `gatewayType()` applies the lane precedence
+      // so Shadow does not present as Simulated.
       type: gatewayType(
         subjectKind === 'gateway' ? subject : gatewayById.get(subject.gateway_id)
       ),
@@ -258,9 +221,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }))
   ]), [gateways, devices, captureBySubject])
 
-  // Resolved from the CURRENT rows rather than captured on click: this page refreshes on a timer
-  // and over Realtime, so a held object would freeze at the moment it was selected — the panel
-  // would show a capture that had since been replaced, beside a table row that had updated.
+  // Resolved from the current rows rather than captured on click: this page refreshes on a timer
+  // and over Realtime, so a held object would freeze.
   const selected = allRows.find(r => r.id === selectedId) || null
 
   // `schemasForDevice` handles both attachment paths -- the device_submodels join and the legacy
@@ -270,9 +232,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     [selected, schemas]
   )
 
-  // ------------------------------------------------------------------------------------------
   // Actions
-  // ------------------------------------------------------------------------------------------
   const onStart = async ({ note, seconds, replace }) => {
     const row = startFor
     await api.startCapture({ subjectKind: row.kind, subjectId: row.id, note, seconds, replace })
@@ -343,17 +303,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }
 
   /**
-   * A file dropped on the Playback card: store it, then publish it.
-   *
-   * THE SUBJECT IS INFERRED FROM THE FILE AND OFFERED, NOT ASSUMED. A capture records the edge node
-   * it came from, so an edited file almost always belongs to the subject it was downloaded from --
-   * but "almost always" is exactly why the dialog still shows the choice rather than filing it
-   * silently. A guess that is usually right and occasionally files a capture against the wrong
-   * gateway is worse than no guess.
-   *
-   * Reading the file twice is deliberate: this pass only looks at `identities`, and
-   * UploadCaptureModal does the validation. Splitting them keeps the guess from becoming a second
-   * place that decides what a valid capture is.
+   * A file dropped on the Playback card: store it, then publish it. The subject is inferred from
+   * the file's `identities` and offered, not assumed. The file is read twice on purpose:
+   * UploadCaptureModal does the validation, so this guess is not a second definition of a valid
+   * capture.
    */
   const onPlayFileChosen = async (file) => {
     let preset = null
@@ -395,10 +348,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     showToast(`Uploaded ${messages} message${messages === 1 ? '' : 's'} for ${subject.name}.`, 'success')
     await refreshAll()
 
-    // STRAIGHT INTO THE PLAYBACK DIALOG when the file arrived on the Playback card. Built from what
-    // the upload returned rather than found by re-reading the list: `refreshAll` has just replaced
-    // that array, and searching it for "the one that appeared" is a race with a definite answer
-    // sitting in the response.
+    // Straight into the playback dialog when the file arrived on the Playback card. Built from what
+    // the upload returned rather than found in the refreshed list.
     if (chain) {
       setPlayFor({
         id,
@@ -422,28 +373,20 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     <div className="page-layout">
       <div className="page-main">
 
-        {/* ====================================================================================
-            PLAYBACK, IN A CARD OF ITS OWN AND ABOVE CAPTURE.
-            It is the act with consequences: it writes into the historian under a gateway's own
-            identity, and everything downstream reads that. As one banner among the capture rows it
-            was the quieter of the two, which is backwards.
-            ==================================================================================== */}
+        {/* Playback in a card of its own, above capture: it writes into the historian under a
+            gateway's identity. */}
         <div className="card" style={{ marginBottom: 'var(--stack)' }}>
-          {/* "Playback", not "Broker Playback". The page is Capture, the description says broker in
-              its first line, and a two-word title where one will do is a word the reader has to
-              skip on every visit. Same for the card below. */}
           <div className="card-header">
-            <h3 className="section-title">Playback</h3>
+            <h3 className="section-title">
+              Playback
+              <HelpTip
+                label="About playback"
+                text="Publish a stored capture back into the stack as a simulated gateway, through the real broker and the real ingestion path, rebased onto now. Every captured identity is rewritten onto the target's own assets."
+              />
+            </h3>
           </div>
 
           <div className="card-body">
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-              Publish a stored capture back into the stack as a simulated gateway — through the real
-              broker, down the real ingestion path, rebased onto now. Every captured identity is
-              rewritten onto the target's own assets, because the broker pins each topic's edge-node
-              segment to the account that publishes it.
-            </p>
-
             <PlaybackCard
               job={activePlayback}
               onStop={onStopPlayback}
@@ -452,22 +395,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             />
             <RecentFailures jobs={recentPlaybacks} kind="playback" />
 
-            {/* PUBLISH A FILE STRAIGHT FROM DISK, WHICH IS A DIFFERENT ERRAND FROM THE PANEL'S DROP
-                ZONE. That one stores a capture against a subject. This one is the end of a loop the
-                design already invites: the capture format is JSON *specifically* so it can be
-                hand-edited, so download-edit-play is a first-class workflow and it was
-                the one path that still went through three separate screens.
-
-                IT CANNOT SKIP THE STORING STEP, and pretending otherwise would be the wrong
-                shortcut. A playback reads its capture out of Storage -- `playback_jobs` holds a
-                path, and the worker is confined by RLS to the object its running job names -- so a
-                file has to land somewhere before it can be published. What this does is chain the
-                two dialogs: file in, subject confirmed, then straight into the playback dialog with
-                the new capture selected.
-
-                THE SUBJECT IS GUESSED FROM THE FILE, not assumed. A capture records the edge node
-                it came from, so an edited file usually belongs to the subject it was downloaded
-                from -- but "usually" is why the dialog still shows the choice. */}
+            {/* Publish a file straight from disk, chaining the two dialogs: file in, subject
+                confirmed, then the playback dialog with the new capture selected. It cannot skip
+                the storing step, because a playback reads its capture out of Storage and the worker
+                is confined by RLS to the object its job names. */}
             {canManage && (
               <div
                 role="button"
@@ -503,19 +434,19 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
-              Capture <span className="section-count">{withCapture}</span>
+              Capture
+              <HelpTip
+                label="About capture"
+                text="Record what a gateway or a single device actually said, and keep it. One capture is stored per subject; a new recording replaces it. Select a row to inspect it, upload a capture, or publish one."
+              />
             </h3>
 
-            {/* THE SUBJECT SWITCH LIVES IN THE HEADER, NOT THE FILTER BAR. It changes WHAT IS
-                LISTED rather than narrowing a list, and the counts belong beside it. Same markup
-                the Vocabulary panel uses for its standards: `btn btn-sm` with the selected one
-                primary, inside a flex `role="tablist"`. */}
+            {/* The subject switch lives in the header because it changes what is listed rather than
+                narrowing it. Same markup the Vocabulary panel uses for its standards. */}
             <div
               role="tablist"
               aria-label="Capture subject"
-              // 8px, not the 4px this started with: at 4 the two pills read as one segmented
-              // control with a hairline in it, which is what a segmented control looks like when
-              // it is broken. They are two buttons and should look like two.
+              // 8px, so the two pills read as two buttons rather than a broken segmented control.
               style={{ display: 'flex', gap: '8px', marginLeft: 'auto' }}
             >
               <button
@@ -540,12 +471,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           </div>
 
           <div className="card-body">
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
-              Record what a gateway or a single device actually said, and keep it. One capture is
-              stored per subject, and a new recording replaces it. Select a row to inspect it,
-              upload a capture, or publish one.
-            </p>
-
             {error && (
               <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
                 <IconShieldAlert size={14} className="callout-icon" />
@@ -580,10 +505,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 <option value="without">Without a capture ({allRows.length - withCapture})</option>
               </select>
 
-              {/* ONLY ON THE DEVICES TAB, because on the Gateways tab it would filter a list of
-                  gateways by gateway. A device's gateway is the one fact about it this page shows
-                  that is not its own -- and on a real fleet it is how you find the four devices
-                  behind the machine you are actually investigating. */}
+              {/* Only on the Devices tab, where a device's gateway is how the four devices behind
+                  one machine are found. */}
               {subjectKind === 'device' && (
                 <select
                   className="form-control"
@@ -673,12 +596,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         </div>
       </div>
 
-      {/* ======================================================================================
-          THE ACTIONS LEFT THE TABLE AND LIVE HERE.
-          Five controls in a last column is what this had, and `.table-wrap` is `overflow-x: auto`,
-          so they were the first thing to go off the right-hand edge on a narrow viewport. The panel
-          also has room to say WHY an action is unavailable, which a greyed-out icon cannot.
-          ====================================================================================== */}
+      {/* The actions left the table and live here: five controls in a last column went off the
+          right-hand edge on a narrow viewport, and the panel has room to say why an action is
+          unavailable. */}
       <ContextPanel
         open={!!selected}
         onClose={() => setSelectedId(null)}
@@ -707,10 +627,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               { label: 'Via gateway', value: selected.context },
               {
                 label: 'Schema',
-                // A BUTTON THAT NAVIGATES, not a bare label. The schema is what says which metrics
-                // this device is SUPPOSED to publish, and the natural next question from a capture
-                // that recorded something unexpected is "what was it meant to send?" -- which lives
-                // on the Schemas page. Answering it should not mean copying a name across two tabs.
+                // A button that navigates: the schema says which metrics this device is supposed to
+                // publish, which is the next question after a capture recorded something
+                // unexpected.
                 value: selectedSchemas.length > 0
                   ? (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
@@ -724,7 +643,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                           disabled={!onSelectSchema}
                         >
                           {s.schema_name}
-                          {s.version ? <span className="section-count" style={{ marginLeft: '6px' }}>v{s.version}</span> : null}
+                          {s.version ? <span className="badge badge-neutral" style={{ marginLeft: '6px' }}>v{s.version}</span> : null}
                         </button>
                       ))}
                     </div>
@@ -743,14 +662,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             { label: 'Recorded', value: formatWhen(capture.recorded_at) },
             { label: 'Size', value: formatSize(capture.size_bytes) },
             { label: 'Messages', value: String(capture.message_count) },
-            /* THE RATE IS HERE TO ANSWER "HOW LONG WILL THIS TAKE", which is the question between
-               choosing a capture and starting a job. Message count alone does not: 40,000 messages
-               is four minutes at 160/s and eleven hours at 1/s, and a playback runs at the recorded
-               pace unless the speed multiplier is changed.
-
-               Recorded rather than derived, because the two disagree: this is the rate the plant
-               actually published at, while message_count over the window would flatten a burst
-               followed by silence into an average that describes neither. */
+            /* The rate answers how long a replay will take, which the message count alone does not.
+               Recorded rather than derived: an average over the window would flatten a burst
+               followed by silence. */
             ...(typeof capture.manifest?.observed_rate_hz === 'number' ? [{
               label: 'Recorded rate',
               value: `${capture.manifest.observed_rate_hz} msg/s`,
@@ -773,10 +687,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 ? (capture.manifest?.uses_aliases
                   ? 'No birth certificate, and this capture uses metric aliases — a playback cannot resolve them, so every aliased metric is dropped on ingest.'
                   : 'No birth certificate. Every metric carries its full name, so a playback resolves them; it will not announce the devices, which stay OFFLINE until they birth on their own.')
-                /* WHERE THE BIRTH CAME FROM, when the recorder had to ask for it. A capture that
-                   waited for a natural NBIRTH and one that requested a rebirth are both complete,
-                   but only the second interrupted the plant to get there -- which is worth knowing
-                   when the same subject is recorded repeatedly. */
+                /* Where the birth came from when the recorder had to ask for it: only a requested
+                   rebirth interrupted the plant. */
                 : capture.manifest?.rebirth_requested
                   ? 'The recording contains a birth certificate, obtained by requesting a rebirth from the edge node. A playback can resolve metric aliases and announce the devices.'
                   : 'The recording contains a birth certificate, so a playback can resolve metric aliases and announce the devices.',
@@ -787,18 +699,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         beforeActions={(capture?.manifest?.metric_names?.length > 0
           || capture?.manifest?.device_ids?.length > 0) && (
           <>
-          {/* WHAT A REPLAY WILL CREATE, ANSWERED BEFORE ONE IS STARTED.
-              `ensure_shadow_devices()` mints one lane per device THIS CAPTURE recorded, so this
-              list is exactly the set of shadow devices a playback will bring into being -- and the
-              only place to see it without starting a job and counting what appears.
-
-              IT IS ALSO HOW YOU TELL TWO CAPTURES APART. A gateway's recording and one of its
-              devices' recordings have the same subject name, the same schema and similar sizes;
-              the device list is what distinguishes "the whole cell" from "one machine".
-
-              Edge nodes are shown beside them because an UPLOADED capture can carry a node this
-              stack has never seen. `start_playback_job()` will still replay it under the target
-              gateway, so the recorded ids are the only evidence of where the file came from. */}
+          {/* What a replay will create: `ensure_shadow_devices()` mints one lane per device this
+              capture recorded. It is also how a gateway's recording and one of its devices'
+              recordings are told apart. Edge nodes are shown because an uploaded capture can carry
+              a node this stack has never seen. */}
           {capture?.manifest?.device_ids?.length > 0 && (
             <div style={{ marginBottom: '12px' }}>
               <div className="context-panel-section-label">
@@ -819,9 +723,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
                   Recorded under{' '}
                   <span className="mono">{capture.manifest.edge_node_ids.join(', ')}</span>
-                  {/* Named rather than implied: a replay publishes as the PLAYBACK gateway, not as
-                      whatever recorded it, which is the whole reason a recording cannot be mistaken
-                      for live plant data. */}
+                  {/* Named rather than implied: a replay publishes as the Playback gateway, not as
+                      whatever recorded it. */}
                   {' '}— a replay republishes under the Playback gateway, not under this.
                 </div>
               )}
@@ -835,10 +738,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 {capture.manifest.metric_name_count ?? capture.manifest.metric_names.length}
               </span>
             </div>
-            {/* PILLS RATHER THAN A COMMA-SEPARATED RUN. A Sparkplug metric name is a path --
-                `Axes/X/POSITION` -- so a comma list of them is a wall of slashes in which the
-                boundary between one name and the next is the least visible character. Each pill is
-                one metric, which is the unit an operator is scanning for. */}
+            {/* Pills rather than a comma-separated run: a Sparkplug metric name is a path, and each
+                pill is one metric. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
               {capture.manifest.metric_names.map(name => (
                 <span
@@ -905,9 +806,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           }
         ].filter(Boolean) : []}
       >
-        {/* THE DROP ZONE KNOWS ITS SUBJECT, which the page-level one it replaces did not — that one
-            had to ask afterwards. This is the Model3DUploader gesture on the Devices page: a
-            control that belongs to the entity the panel is describing. */}
+        {/* The drop zone knows its subject, like the Model3DUploader on the Devices page: a control
+            that belongs to the entity the panel describes. */}
         {canManage && selected && (
           <div>
             <div className="context-panel-section-label">
@@ -943,11 +843,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         )}
       </ContextPanel>
 
-      {/* TWO INPUTS, because the two drop zones do different things with what they are given: one
-          stores a capture against the selected subject, the other stores it and then publishes it.
-          Sharing one input would mean a flag deciding which errand a file was on, set by whichever
-          zone was clicked last -- and a stale flag would silently publish a file somebody meant
-          only to store. */}
+      {/* Two inputs, because the two drop zones do different things with a file: one stores it, the
+          other stores and publishes it. A shared input with a flag could publish a file somebody
+          meant only to store. */}
       <input
         ref={fileRef}
         type="file"
@@ -1006,12 +904,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 }
 
 /**
- * The one running capture.
- *
- * COUNTS UP RATHER THAN DOWN, which is not the obvious choice. A countdown implies the number is a
- * promise, and it is not: the recording stops at whichever of the three caps is met first, and the
- * message and size caps routinely arrive before the clock does. Elapsed against the duration cap
- * says the same thing without claiming to know which one will bind.
+ * The one running capture. Counts up rather than down: the recording stops at whichever of three
+ * caps binds first, so a countdown would be a promise the message or size cap can break.
  */
 function RunningCard({ job, onStop, stopPending, canManage }) {
   if (!job) return null
@@ -1033,12 +927,8 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
           </div>
         ) : (
           <>
-            {/* A BAR FOR THE CLOCK, NUMBERS FOR THE OTHER TWO CAPS, and the split is the point.
-                A recording stops at whichever of THREE limits binds first -- duration, 100,000
-                messages, 50 MiB -- so a single bar at 10% would promise 90% remaining when the
-                message cap might fire in two seconds. The bar is labelled as the DURATION only and
-                the other two stay as figures beside it, which is the same reason this card counts
-                up rather than down. */}
+            {/* A bar for the clock and numbers for the other two caps: a single bar at 10% would
+                promise 90% remaining when the message cap might fire in two seconds. */}
             <div
               style={{
                 height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
@@ -1071,10 +961,9 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
             </div>
           </>
         )}
-        {/* THE BANNER SETTLES RATHER THAN VANISHING. This warning is only on screen while the card
-            is, which is exactly the window nobody is watching — so it also resolves into
-            `birth_captured` on the finished record, where a file that cannot replay properly stops
-            looking identical to one that can. */}
+        {/* The banner settles rather than vanishing: it also resolves into `birth_captured` on the
+            finished record, where a file that cannot replay properly stops looking identical to one
+            that can. */}
         {!pending && !job.birth_captured && job.elapsed_seconds > 10 && (
           <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
             No <code>NBIRTH</code> or <code>DBIRTH</code> has arrived. A capture without one replays
@@ -1099,12 +988,8 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
 }
 
 /**
- * The playback in flight, or the reason there is not one.
- *
- * IT RENDERS AN EMPTY STATE RATHER THAN NOTHING, unlike the capture card above it. This one owns a
- * card of its own, and a card whose body disappears entirely reads as a broken section rather than
- * an idle one — and the empty state is where the two-step "select a capture, then publish it"
- * gets explained.
+ * The playback in flight, or the reason there is not one. It renders an empty state rather than
+ * nothing: this card owns its own box, and the empty state explains the select-then-publish step.
  */
 function PlaybackCard({ job, onStop, stopPending, canManage }) {
   if (!job) {
@@ -1129,15 +1014,9 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
           <strong>{pending ? 'Queued' : 'Publishing'} as {target}</strong>
           <span style={{ color: 'var(--text-muted)' }}> · {job.speed}× speed</span>
         </div>
-        {/* A BAR IS UNAMBIGUOUS HERE, WHICH IT IS NOT ON THE CAPTURE CARD ABOVE.
-            A recording stops at whichever of three caps binds first, so a single bar there would
-            promise remaining time the message cap might take away. A playback has exactly one
-            total -- the messages in the plan -- so the fraction means what it looks like.
-
-            RENDERED ONLY WHEN THE TOTAL IS KNOWN AND THE JOB HAS STARTED. `messages_total` is
-            written by the worker's first progress call, so a queued job has none; a bar at 0% with
-            no denominator would say "nothing has happened" when the truth is "nothing has been
-            measured yet", and the line below already says which. */}
+        {/* A bar is unambiguous here, unlike the capture card: a playback has exactly one total.
+            Rendered only once `messages_total` is written by the worker's first progress call, so a
+            queued job shows no bar at 0%. */}
         {!pending && total > 0 && (
           <div
             style={{
@@ -1181,30 +1060,15 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
 }
 
 /**
- * How long a finished failure stays on the page.
- *
- * IT USED TO BE FOREVER, and that was wrong in a way a screenshot made obvious: the query takes the
- * last four finished jobs, so a failure sat at the top of the page until four more jobs pushed it
- * out — which on a stack where nobody captures daily is indefinitely. It read as a live fault.
- *
- * This banner exists to explain "the thing you just did failed", because the running card clears on
- * failure and the table otherwise looks exactly as it did before. That job is minutes old. Anything
- * older is history, and history belongs in the job record rather than shouting from a card.
+ * How long a finished failure stays on the page. This banner explains that the thing you just did
+ * failed; anything older is history in the job record.
  */
 const FAILURE_VISIBLE_MS = 15 * 60 * 1000
 
 /**
- * Which failures this viewer has already read.
- *
- * DISMISSAL HAS TO SURVIVE A RELOAD, which is the whole complaint: a banner that comes back when
- * the page does has not been dismissed, it has been hidden until the next render. `localStorage`
- * is the right home -- "I have read this" is a fact about one person at one browser, not about the
- * job, and putting it in the database would mean one operator's acknowledgement silently clearing
- * the notice for everybody else.
- *
- * Every accessor is wrapped: a private window, cleared site data, or a browser set to refuse
- * storage all throw here rather than returning empty, and a page that fails to render a table
- * because it could not read a dismissal list would be a far worse bug than the one being fixed.
+ * Which failures this viewer has already read. Dismissal must survive a reload, and it is a fact
+ * about one person at one browser, so `localStorage` rather than the database. Every accessor is
+ * wrapped because a private window or a browser refusing storage throws.
  */
 const DISMISSED_KEY = 'acs-cymru.capture.dismissed-failures'
 
@@ -1219,9 +1083,7 @@ function readDismissed() {
 
 function writeDismissed(ids) {
   try {
-    // CAPPED, because this list is only ever appended to. A stack that has run for a year would
-    // otherwise carry every failure id it has ever shown, and the 15-minute window means anything
-    // older than the last few is unreachable anyway.
+    // Capped: the list is only appended to, and the 15-minute window makes older ids unreachable.
     window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...ids].slice(-50)))
   } catch {
     // Nothing to do and nothing worth saying: the banner simply reappears on the next load.
@@ -1229,19 +1091,9 @@ function writeDismissed(ids) {
 }
 
 /**
- * A failure that has just happened, until it is read.
- *
- * TWO WAYS OUT, AND BOTH ARE DELIBERATE. The 15-minute window handles the operator who never
- * returns to this page; the dismiss button handles the one who is looking at it now and wants it
- * gone. Neither alone is enough -- the window left a notice sitting there for a quarter of an hour
- * with no way to say "seen it", and dismissal alone would leave a year-old failure waiting for
- * somebody to click it.
- *
- * NOT A MODAL, which is what was asked for, and the reason is when these arrive. A capture fails
- * asynchronously and the page may not be open; a dialog would then be waiting to block whatever
- * the operator came to the page to do, for something that happened ten minutes ago. Worse, three
- * failures would be three dialogs. Dismissal is the acknowledgement a modal was for, without
- * seizing the page to get it.
+ * A failure that has just happened, until it is read. The 15-minute window covers the operator who
+ * never returns; the dismiss button covers the one looking now. Not a modal: failures arrive
+ * asynchronously, and a dialog would block whatever the operator came to do.
  */
 function RecentFailures({ jobs, kind = 'capture' }) {
   const [dismissed, setDismissed] = useState(readDismissed)
@@ -1305,10 +1157,8 @@ function SubjectRow({ row, selected, onSelect }) {
         <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{row.context}</td>
       )}
       <td><CopyableId value={row.sparkplugId} label="Sparkplug ID" /></td>
-      {/* A COLUMN RATHER THAN A BADGE ON THE NAME, matching the Gateways page. The badge said
-          SIMULATED or nothing, which left three of the four kinds looking identical -- and on this
-          page the kind decides something: only a simulated gateway may be a playback target, and a
-          shadow one is where a playback lands. */}
+      {/* A column rather than a badge on the name, matching the Gateways page: on this page the
+          kind decides something, since only a simulated gateway may be a playback target. */}
       <td>
         <span
           className={`badge badge-${gatewayTypeTone(row.type)}`}
@@ -1332,12 +1182,9 @@ function SubjectRow({ row, selected, onSelect }) {
               )}
               {/* THE ONE BADGE IN THIS TABLE THAT CHANGES A DECISION. Everything else here is
                   provenance; this says whether the file will actually replay. */}
-              {/* THE OLD TOOLTIP SAID THIS CAPTURE "drops every metric", AND THAT WAS NOT TRUE.
-                  A missing birth certificate costs metrics only when the recording actually depends
-                  on the alias table -- a metric carrying an alias and no name. This fleet publishes
-                  full names, so its birthless captures replay perfectly well, and the warning was
-                  telling operators their good capture was broken. `uses_aliases` is recorded at
-                  capture time so the two cases can be told apart instead of assumed. */}
+              {/* A missing birth certificate costs metrics only when the recording depends on the
+                  alias table; `uses_aliases` is recorded at capture time so the two cases are told
+                  apart rather than assumed. */}
               {capture.manifest?.birth_captured === false && (
                 <span
                   className={`badge ${capture.manifest?.uses_aliases ? 'badge-warning' : 'badge-neutral'}`}
@@ -1362,7 +1209,7 @@ function SubjectRow({ row, selected, onSelect }) {
 
 /** Bytes → a short human string. Local rather than shared: the only other one is the 3D uploader's,
  *  and that is tuned for megabyte models. */
-export function formatSize(bytes) {
+function formatSize(bytes) {
   if (bytes === null || bytes === undefined) return '—'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`

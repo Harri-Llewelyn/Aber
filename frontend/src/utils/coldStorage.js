@@ -1,20 +1,9 @@
 /**
- * The cold telemetry catalogue, as the page needs it.
- *
- * =================================================================================================
- * THE STATE IS DERIVED IN SQL, NOT HERE, and this file deliberately does not recompute it.
- *
- * `cold_storage_rows()` (0068) returns a `state` column because the ordering it encodes --
- * claimed -> exported -> verified -> archived -- is enforced by CHECK constraints on the historian,
- * and a second implementation in JavaScript would be a fourth place that has to agree. What lives
- * here is what the STATE MEANS to a reader: its label, its tone, and the one sentence that says
- * whether the data is still in the hypertable.
- *
- * =================================================================================================
- * `archived` IS THE ONLY STATE WHERE THE RAW ROWS ARE GONE, and every other piece of copy on the
- * page exists to keep that distinction visible. The intermediate states are not failures and must
- * not read as them: a chunk that is `exported` but not yet `verified` has its data in BOTH places,
- * which is the safest state in the whole flow.
+ * The cold telemetry catalogue, as the page needs it. The state is derived in SQL by
+ * `cold_storage_rows()` (claimed, exported, verified, archived, enforced by CHECK constraints on
+ * the historian) and is not recomputed here. This file holds what each state means to a reader:
+ * label, tone, and whether the rows are still in the hypertable. `archived` is the only state where
+ * the raw rows are gone.
  */
 
 export const COLD_STATES = {
@@ -34,10 +23,8 @@ const STATE_LABELS = {
 }
 
 /**
- * What each state means for the DATA, which is the question a reader actually has.
- *
- * Every one of these says where the rows are, because that is what decides whether anything needs
- * doing. "Verified" sounds finished and is not; "Failed" sounds like data loss and is the opposite.
+ * What each state means for the data. Every entry says where the rows are, because that decides
+ * whether anything needs doing.
  */
 const STATE_MEANINGS = {
   [COLD_STATES.CLAIMED]:
@@ -57,12 +44,9 @@ const STATE_MEANINGS = {
 }
 
 /**
- * Badge tone.
- *
- * `archived` IS NOT A SUCCESS COLOUR, and that is the one deliberate choice here. It is the normal
- * end state, but it is also the only one where deleting the object destroys history — so it reads
- * as a statement rather than as a tick. `failed` is a warning rather than an error for the reason
- * its meaning gives: nothing was lost, an export needs re-running.
+ * Badge tone. `archived` is not a success colour: it is the only state where deleting the object
+ * destroys history. `failed` is a warning, not an error: nothing was lost, an export needs
+ * re-running.
  */
 const STATE_TONES = {
   [COLD_STATES.CLAIMED]: 'neutral',
@@ -85,11 +69,8 @@ export function coldStateTone(state) {
 }
 
 /**
- * Bytes as something a person reads.
- *
- * BINARY UNITS, matching what `storage-init.mjs` sets the bucket limits in and what Docker reports.
- * A page saying "1.1 GB" beside a bucket configured for 1073741824 invites the reader to work out
- * which of the two numbers is wrong.
+ * Bytes as something a person reads. Binary units, matching what `storage-init.mjs` sets the bucket
+ * limits in and what Docker reports.
  */
 export function formatBytes(bytes) {
   if (bytes === null || bytes === undefined) return '—'
@@ -104,12 +85,8 @@ export function formatBytes(bytes) {
 }
 
 /**
- * The totals worth putting above the table.
- *
- * ROWS AND BYTES ARE COUNTED ONLY FOR WHAT IS ACTUALLY ARCHIVED. A total that included chunks still
- * sitting in the hypertable would answer no question: it is neither how much has been moved off the
- * operational database nor how much storage is in use. `pending` is counted separately because it
- * is the number that means "there is work outstanding".
+ * The totals above the table. Rows and bytes count only what is archived; `pending` is counted
+ * separately as the work outstanding.
  */
 export function coldStorageSummary(rows) {
   const list = rows || []

@@ -7,10 +7,8 @@ import { ActionButton } from '../common/ActionButton'
 export function ArchiveModal({ entityType, entityId, displayName, onArchive, onCancel }) {
   const [archiving, runArchive] = usePendingAction()
 
-  // Escape closes. Via the shared stack rather than a listener of this component's own,
-  // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both. Inert while the archive is in flight -- see ConfirmModal
-  // for why it stays on the stack rather than sitting out.
+  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
+  // Inert while the archive is in flight; see ConfirmModal.
   useEscapeKey(archiving ? () => {} : onCancel)
 
   const [retentionDays, setRetentionDays] = useState(30)

@@ -45,11 +45,8 @@ const show = async (rows, hasPermission = () => true) => {
 const inRow = () => within(document.querySelector('.page-main'))
 
 /**
- * Every action the row used to hold, now in the panel it opens.
- *
- * Scoped to `.context-panel-actions`, not to the whole drawer: the 3D uploader renders below the
- * action list and has controls of its own, and one of the tests below turns on the uploader NOT
- * being advertised as an action.
+ * Every action the row used to hold, now in the panel it opens. Scoped to `.context-panel-actions`:
+ * the 3D uploader renders below the action list with controls of its own.
  */
 const panelLabels = () => {
   openPanel()
@@ -58,14 +55,10 @@ const panelLabels = () => {
 }
 
 /**
- * Select a device row and return its context panel.
- *
- * The documents accordion, the 3D model uploader and the telemetry inspector used to be mounted
- * once PER ROW, collapsed. They now belong to the selected device instead: one drawer rather than
- * one per device, and a table that is a table again instead of alternating data and drawers.
- *
- * The rules being checked are unchanged -- lazy fetch, the uploader beside the empty state, the
- * read-only role told the state but not offered the write. Only where they render has moved.
+ * Select a device row and return its context panel. The documents accordion, the 3D uploader and
+ * the telemetry inspector belong to the selected device, one drawer rather than one per row; the
+ * rules checked are lazy fetch, the uploader beside the empty state, and the read-only role told
+ * the state but not offered the write.
  */
 const openPanel = (name = 'CNC_01') => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
@@ -128,24 +121,18 @@ describe('device row actions', () => {
     const btn = (name) => panel.getByText(name).closest('button')
     expect(btn(/Archive Device/i).disabled).toBe(true)
     expect(btn('Edit Details').disabled).toBe(true)
-    // These reads are not gated: an export is a read, and so -- now that the 3D uploader has
-    // moved out of it -- is Configuration Parameters. It shows what the device declared at birth,
-    // which is not a privileged fact.
+    // These reads are not gated: an export is a read, and Configuration Parameters shows what the
+    // device declared at birth.
     expect(btn(/Export AAS JSON/i).disabled).toBe(false)
     expect(btn(/Configuration Parameters/i).disabled).toBe(false)
 
-    // THE AUDIT TRACE IS NOT ONE OF THEM, and this line used to claim it was. `digital_thread`
-    // has its own RLS, and without `digital_thread:read` it returns NO ROWS rather than an error
-    // -- so the button led to a page that renders an empty table and explains nothing. It is
-    // withdrawn rather than disabled, because the nav hides the page from this reader entirely
-    // and a disabled button would advertise a destination that no longer exists for them.
+    // The audit trace is withdrawn, not disabled: without `digital_thread:read` the page returns no
+    // rows rather than an error, and the nav hides it from this reader entirely.
     expect(panel.queryByText(/Digital Thread/i)).toBeNull()
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {
-    // The accordion is gone from both places. It was mounted once per row (a hundred collapsed
-    // drawers on a hundred-device page), then once in the drawer -- where it was a cramped list
-    // in a 360px column. Manage Links opens the full editor instead.
+    // The accordion is gone from the row and the drawer; Manage Links opens the full editor.
     await show([device()])
 
     expect(inRow().queryByText('Attached Document Links')).toBeNull()
@@ -156,15 +143,11 @@ describe('device row actions', () => {
   })
 })
 
-// The 3D model moved out of the Configuration modal and into the row's document accordion. It is
-// an attachment, like a document link -- and it was the only control in that modal that wrote
-// anything, which is why the modal is now open to every role.
+// The 3D model is an attachment like a document link, in the row's document accordion; the
+// Configuration modal is read-only and open to every role.
 describe('device 3D model attachment', () => {
   it('offers the uploader as its own panel section', async () => {
-    // It was the documents accordion's footer, and outlived it: a 3D model is an attachment like
-    // a document link -- which is why it is not in the Configuration modal, a read-only view of
-    // what the device REPORTED -- and one upload control fits a narrow column perfectly well,
-    // unlike a list of links.
+    // One upload control fits a narrow column, unlike a list of links.
     await show([device()])
 
     expect(screen.queryByTestId('model-3d-input')).not.toBeInTheDocument()
@@ -195,9 +178,8 @@ describe('device 3D model attachment', () => {
     await show([device()], () => false)
     openPanel()
 
-    // Both sides asserted, so this cannot pass just because the copy changed: a read-only role
-    // is told the state ("No 3D model attached") and is NOT offered the drop prompt. RLS refuses
-    // the write regardless -- this is the affordance, not the gate.
+    // Both sides asserted: a read-only role is told the state and is not offered the drop prompt.
+    // RLS refuses the write regardless; this is the affordance.
     await waitFor(() => expect(screen.getByText('No 3D model attached')).toBeInTheDocument())
     expect(screen.queryByText(/Drop a 3D model here/i)).not.toBeInTheDocument()
   })

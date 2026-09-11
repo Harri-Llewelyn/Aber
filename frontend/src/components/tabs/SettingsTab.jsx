@@ -1,31 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { IconSettings, IconX } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 
 /**
- * The runtime configuration plane (archived migration 0031), as a page.
- *
- * WHAT THIS PAGE DELIBERATELY CANNOT DO: add a setting, or delete one. The key set is closed in
- * the database -- RLS grants UPDATE and nothing else -- so there is no "New setting" button here
- * and its absence is the feature rather than an omission. A settings row exists because some code
- * reads it; one an operator invented would be a control that does nothing, and nothing on the page
- * could say so.
- *
- * THE ROLE GATE ON THE TAB IS A COURTESY, NOT A CONTROL. `App.jsx` hides this tab from anyone who
- * is not an Administrator, and that gate is worth nothing on its own -- the same PATCH can be sent
- * with curl. What actually refuses is the RLS policy, which is why `api.patchSetting` treats "zero
- * rows affected" as an error: a non-Administrator's write does not fail, it silently matches
- * nothing, and a page that only checked for an exception would report success.
+ * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
+ * closed in the database, where RLS grants UPDATE and nothing else, and a row exists because some
+ * code reads it. The role gate on the tab is a courtesy; RLS refuses the write, which is why
+ * `api.patchSetting` treats zero rows affected as an error.
  */
 
 /**
- * Cast a form field back to the JSON type the row is declared to hold, and check its bounds.
- *
- * THE BOUNDS ARE CHECKED HERE *AND* BY A CHECK CONSTRAINT, which is not redundancy for its own
- * sake. The constraint is what makes the rule true -- a curl request never reaches this function.
- * This exists so the operator is told before the round trip, in the words the setting uses, rather
- * than reading `new row for relation "system_settings" violates check constraint
- * "system_settings_value_within_bounds"` and having to work out which number was wrong.
+ * Cast a form field back to the JSON type the row is declared to hold, and check its bounds. The
+ * CHECK constraint is what makes the rule true; this tells the operator before the round trip, in
+ * the setting's own words.
  */
 export function coerceValue(raw, valueType, bounds = {}) {
   if (valueType === 'number') {
@@ -73,9 +61,8 @@ function SettingRow({ setting, onSaved, showToast }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
-  // A refresh replaces every setting object, and a draft the operator has not saved must survive
-  // that -- but one they HAVE saved should show the stored value. Keyed on the stored value, so
-  // the field re-seeds only when the row actually changed underneath.
+  // A refresh replaces every setting object. An unsaved draft survives it; a saved one shows the
+  // stored value. Keyed on the stored value so the field re-seeds only when the row changed.
   useEffect(() => {
     setDraft(displayValue(setting.value, setting.value_type))
   }, [setting.value, setting.value_type])
@@ -111,14 +98,15 @@ function SettingRow({ setting, onSaved, showToast }) {
   return (
     <div className="setting-row">
       <div className="setting-meta">
-        <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>
-        {setting.description && <p className="setting-description">{setting.description}</p>}
+        <div className="setting-label-row">
+          <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>
+          {setting.description && <HelpTip label={`About ${setting.label}`} text={setting.description} />}
+        </div>
         <div className="setting-provenance">
           <span className="mono setting-key" title="The key the code reads. Immutable.">{setting.key}</span>
-          {/* NAMED, BECAUSE AN ABSENT ROW IS NOT AN ABSENT VALUE. What applies when this has never
-              been changed is the env var or constant below, which is what keeps a local boot
-              zero-configuration -- and is the first thing to check when a setting appears to do
-              nothing. */}
+          {/* Named, because an absent row is not an absent value: what applies when this has never
+              been changed is the env var or constant below, and the first thing to check when a
+              setting appears to do nothing. */}
           {setting.fallback_source && (
             <span className="setting-fallback" title="What applies if this setting is never changed">
               falls back to <span className="mono">{setting.fallback_source}</span>
@@ -160,9 +148,8 @@ function SettingRow({ setting, onSaved, showToast }) {
           />
         )}
 
-        {/* THE RANGE IS SHOWN, NOT ONLY ENFORCED. `min`/`max` on the input give a browser its
-            spinner limits and nothing a reader can see; an operator who types 0 and is told
-            "Must be 1 or more" should have been able to know that before typing. */}
+        {/* The range is shown, not only enforced: `min`/`max` on the input give a browser its
+            spinner limits and nothing a reader can see. */}
         {setting.value_type === 'number' && (setting.min_value != null || setting.max_value != null) && (
           <div className="setting-bounds">
             {setting.min_value != null && setting.max_value != null
@@ -223,14 +210,9 @@ export function SettingsTab({ showToast }) {
   return (
     <div className="page-layout">
       <div className="page-main">
-        {/* THE PAGE STATES ITS OWN LIMITS, because both are surprising and both are deliberate:
-            the list cannot be added to from here, and nothing secret is stored here. Someone
-            looking for where to put an S3 key should find the answer on this page rather than
-            after putting it somewhere it can be read by every signed-in user. */}
-        {/* THE PAGE ALREADY HAD ITS DESCRIPTION; what it did not have was the shape every other
-            card uses. `.settings-preamble-title` was a 12px uppercase div doing a heading's job,
-            so this page named its one section differently from the eleven others -- the same
-            improvised-style problem the Access Control page was corrected for. Header, then body. */}
+        {/* The page states its own limits, because both are surprising and deliberate: the list
+            cannot be added to from here, and nothing secret is stored here. */}
+        {/* Header, then body, the shape every other card uses. */}
         <div className="card settings-preamble" style={{ marginBottom: '12px' }}>
           <div className="card-header">
             <h3 className="section-title">

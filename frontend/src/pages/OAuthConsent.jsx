@@ -2,21 +2,12 @@ import React, { useEffect, useState } from 'react'
 import { supabase, SUPABASE_URL } from '../lib/supabaseClient'
 
 /**
- * OAuth consent screen for Supabase Auth's OIDC server.
- *
- * WHY THE APPLICATION HAS TO HOST THIS.
- *
- * GoTrue implements the OAuth 2.1 authorization server but ships no consent UI. On
- * /oauth/authorize it creates a pending row in auth.oauth_authorizations and redirects the
- * browser to GOTRUE_SITE_URL + GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH with
- * ?authorization_id=... The deploying application is expected to render the screen below and
- * POST the user's decision back. With no path configured, /oauth/authorize fails outright
- * with "oauth authorization path not configured" and no OIDC client can complete a login.
- *
- * CONSEQUENCE FOR THE UX: the user must already be signed in to the ACS-Cymru dashboard for
- * Grafana SSO to work, because approving requires their Supabase access token. Arriving here
- * without a session shows a prompt to sign in first rather than a second login form -- this
- * page is deliberately not an identity provider login screen.
+ * OAuth consent screen for Supabase Auth's OIDC server. GoTrue implements the OAuth 2.1
+ * authorization server but ships no consent UI: on /oauth/authorize it creates a pending row in
+ * auth.oauth_authorizations and redirects to GOTRUE_SITE_URL +
+ * GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH with ?authorization_id=..., and this page POSTs the
+ * decision back. Approving requires the user's Supabase access token, so arriving without a session
+ * shows a prompt to sign in first; this is not an identity provider login screen.
  */
 const API_BASE = `${SUPABASE_URL}/auth/v1`
 
@@ -53,11 +44,9 @@ export function OAuthConsent() {
           return
         }
 
-        // Previously-granted consent is remembered in auth.oauth_consents. When GoTrue finds a
-        // matching grant it skips the prompt entirely and answers this GET with the finished
-        // redirect (code + state) instead of the authorization's details. Following it is the
-        // whole of the flow -- rendering a consent screen here would strand the user on a
-        // dialog for a decision that has already been made.
+        // Previously granted consent is remembered in auth.oauth_consents. When GoTrue finds a
+        // matching grant it answers this GET with the finished redirect (code + state) instead of
+        // the authorization's details, and following it is the whole of the flow.
         if (body.redirect_url) {
           window.location.replace(body.redirect_url)
           return
@@ -90,9 +79,8 @@ export function OAuthConsent() {
         setSubmitting(false)
         return
       }
-      // GoTrue returns the redirect back to the OAuth client, carrying the authorization code
-      // (or the denial). Navigating here is what completes the flow -- there is no automatic
-      // redirect from the API itself.
+      // GoTrue returns the redirect back to the OAuth client, carrying the authorization code or
+      // the denial. Navigating there completes the flow.
       if (body.redirect_url) {
         window.location.replace(body.redirect_url)
       } else {

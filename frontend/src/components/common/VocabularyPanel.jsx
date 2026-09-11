@@ -2,21 +2,10 @@ import React, { useState, useMemo } from 'react'
 import { IconChevronDown, IconChevronUp, IconCheck, IconX } from './Icons'
 
 /**
- * One browsable reference card covering every standard vocabulary.
- *
- * Previously three stacked cards, one per standard. They asked the same two questions -- "does the
- * standard define a word for this?" and "have we adopted it yet?" -- and answered them identically,
- * so three cards meant three search boxes, three scroll targets, and a page whose length grew with
- * every standard adopted. One card with a standard selector is a single place to look, and makes
- * the standards read as alternatives to pick between, which is what they are at the moment of
- * naming a metric.
- *
- * What differs per standard arrives as a tab descriptor rather than as three near-identical
- * components: how sections are derived, what an entry's tooltip says, and what counts as "already
- * in use". See common/MTConnectVocabularyPanel.jsx and its siblings.
- *
- * Sections start collapsed -- MTConnect alone is ~600 entries. Searching expands only the sections
- * that match, so a query answers "where does this live?" as well as "does it exist?".
+ * One browsable reference card covering every standard vocabulary, with a standard selector. What
+ * differs per standard arrives as a tab descriptor (how sections are derived, what an entry's
+ * tooltip says, what counts as in use); see common/MTConnectVocabularyPanel.jsx and its siblings.
+ * Sections start collapsed, and searching expands only the sections that match.
  */
 export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subtitle, tabs, canAddMetric }) {
   const available = (tabs || []).filter(Boolean)
@@ -69,10 +58,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
         </div>
       </div>
 
-      {/* Lead sentence, then the caveats as separate labelled lines.
-          This was one paragraph of six sentences that ran the width of the card, and the two facts
-          in it that stop someone making a mistake -- "reference only, not what your devices
-          publish", and how a name is actually composed -- were buried mid-run. */}
+      {/* Lead sentence, then the caveats as separate labelled lines. */}
       <div className="vocab-description">
         <p>{active.description}</p>
         {(active.notes || []).map((note, i) => (
@@ -83,22 +69,12 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
         ))}
       </div>
 
-      {/* ONE CONTROL ROW, the shape every other page uses: what you are looking at on the left,
-          what you are looking for on the right. The standard pills used to sit inside the card
-          under its header and the search box floated in that header beside the title, so the two
-          halves of one decision were separated by a heading -- and the title and its explanation
-          had to wrap around a 220px input that had nothing to do with them.
-
-          IT IS NOW INSIDE THE CARD, BELOW THE DESCRIPTION, like every other list page: a card is a
-          title, a description, its actions and then the filters that narrow what is below. It
-          floated above the card, which made it read as a page-level control when the only thing it
-          affects is this card. */}
+      {/* One control row inside the card, below the description, like every other list page: what
+          you are looking at on the left, what you are looking for on the right. */}
       <div className="card-body">
       <div className="filter-bar">
-        {/* A segmented control rather than a dropdown because the whole point is that all four
-            counts are visible at once -- that is what tells you the vocabularies are different
-            sizes and different kinds of thing. The search text deliberately survives a switch, so
-            "which standard has a word for this?" is one query rather than four. */}
+        {/* A segmented control rather than a dropdown so all four counts are visible at once. The
+            search text survives a switch, so one query asks every standard. */}
         <div role="tablist" aria-label="Standard" style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           {available.map(tab => {
             const selected = tab.id === active.id
@@ -154,9 +130,8 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
                 aria-expanded={open}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: '7px',
-                  /* 10px -> 6px. With ~14 sections per standard this was ~56px of padding alone
-                     between the first heading and the last, on a page whose job is to let someone
-                     scan a list of section names. */
+                  /* Tight padding: with ~14 sections per standard the headings are scanned as a
+                     list. */
                   padding: '6px 2px', background: 'none', border: 'none', cursor: 'pointer',
                   color: 'var(--text)', textAlign: 'left', font: 'inherit'
                 }}

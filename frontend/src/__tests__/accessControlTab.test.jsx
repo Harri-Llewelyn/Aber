@@ -76,10 +76,9 @@ beforeEach(() => {
 
 describe('AccessControlTab', () => {
   /**
-   * THE CASE THE WHOLE PAGE IS DESIGNED AROUND. A demonstration stack has four working credentials
-   * issued by `provision-gateways.mjs` and no record of any of them, because
-   * record_gateway_credential_issued() cannot be called for a script. The page must say what it
-   * actually knows -- that IT has no record -- and must not claim the gateway has no credential.
+   * The case the page is designed around: a demonstration stack has working credentials issued by
+   * `provision-gateways.mjs` and no record of them. The page must say it has no record, not that
+   * the gateway has no credential.
    */
   it('reports a script-provisioned gateway as having no platform record, not no credential', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
@@ -111,13 +110,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * THE EXPLANATION IS A PROPERTY OF THE STATE, NOT OF THE ROW, and it must not be rendered as
-   * visible text once per row. Four gateways in one state used to produce the same four-line
-   * paragraph four times, crowding out the badge and the date -- the only things that vary -- and
-   * repeating verbatim a caveat the preamble already makes in red directly above.
-   *
-   * It briefly became a legend under the table, which was a third copy of the same sentence. It is
-   * a tooltip on the badge: reachable from the row, and taking no vertical space at all.
+   * The explanation is a property of the state, not the row, so it is a tooltip on the badge rather
+   * than a paragraph repeated down the column.
    */
   it('carries the explanation as a tooltip rather than repeating it down the column', async () => {
     api.listGatewayCredentials.mockResolvedValue([
@@ -150,9 +144,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * The two reads have DIFFERENT authority -- credentials accept Shopfloor_Manager, principals are
-   * Administrator-only (0042) -- so a refusal on one must not blank the other. Folding them into
-   * one error state would blame the whole page for a refusal that applies to one section.
+   * The two reads have different authority (credentials accept Shopfloor_Manager, principals are
+   * Administrator-only), so a refusal on one must not blank the other.
    */
   it('still renders the credential inventory when the principal read is refused', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
@@ -172,34 +165,19 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
-    // BOTH ORIGINS, which is the assertion rather than the exact sentence. The tooltip used to say
-    // the identity "was created by a migration" and send the reader to grep for it -- confident,
-    // and wrong for the case that actually turns up on a long-lived stack, where the answer is an
-    // RLS suite that seeded a fixture and did not clean up. A reader who greps the migrations and
-    // finds nothing is left with less than they started with, so the wording has to admit the
-    // second origin and this test is what holds it to that.
+    // Both origins, which is the assertion rather than the exact sentence: an unknown principal may
+    // come from a migration or from an RLS suite that seeded a fixture and did not clean up.
     expect(screen.getByTitle(/by a migration, or by a test suite/i)).toBeTruthy()
-    // NO GRANT OF ITS OWN, said in a COLUMN rather than a tooltip, because it is the answer to
-    // "what can this reach" rather than background on what it is.
-    //
-    // THE SENTENCE CHANGED WITH 0080 AND THE CORRECTION IS THE POINT OF RE-READING IT. It used to
-    // claim "every RLS policy refuses it", which was false in the reassuring direction: the asset
-    // inventory reads are `TO authenticated USING (true)`, so a signed token reaches them with no
-    // role and no grant at all. What a grant adds is what has_authority() gates.
+    // No grant of its own, said in a column because it answers "what can this reach". The wording
+    // must not claim every policy refuses it: the asset inventory reads are `TO authenticated USING
+    // (true)`, so a signed token reaches them with no grant at all.
     expect(screen.getByText(/reaches only what is open to any authenticated caller/i)).toBeTruthy()
   })
 
   /**
-   * THE FALLBACK ABOVE IS FOR PRINCIPALS NOBODY COULD HAVE WRITTEN DOWN, not for the ones that ship.
-   *
-   * Two of the three principals this stack seeds rendered as "Undocumented principal" — 0046's
-   * Service_Ingestor and 0056's Service_Playback — because each migration added one and neither
-   * updated KNOWN_PRINCIPALS. The page stayed honest and simply said it did not know, which is the
-   * fallback working; what it then asked an operator to do was go and identify a bare uuid in the
-   * migrations, on the one page whose job is to say what can reach the stack.
-   *
-   * `check-docs-drift.mjs` (11d) is what stops it happening again, since the miss was invisible to
-   * every test that existed. This asserts the visible half.
+   * The fallback is for principals nobody could have written down, not the ones that ship.
+   * `check-docs-drift.mjs` stops a seeded principal going undocumented; this asserts the visible
+   * half.
    */
   it('names the two principals npm run setup signs keys for', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -215,16 +193,9 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * THE MINT BUTTON IS OFFERED WHERE A TOKEN IS ACTUALLY READ, AND NOWHERE ELSE.
-   *
-   * This is the same distinction the per-principal mintCommand column was built for, arriving
-   * through a control instead of a copied line. `mint-mcp-token.mjs` would happily sign a token for
-   * Service_Ingestor -- same subject, same secret, entirely valid -- and no worker would ever read
-   * it, because the daemon takes its key from the environment. A button on that row means an
-   * operator following the page issues a privileged credential that fixes nothing.
-   *
-   * Asserted per row rather than by counting buttons: a global count would pass if the button
-   * appeared on the WRONG row and vanished from the right one.
+   * Issue Token is offered where a token is read, and nowhere else: the two environment-keyed
+   * daemons take their key from the environment, so a minted token for them fixes nothing. Asserted
+   * per row rather than by counting buttons.
    */
   it('offers Issue Token for an MCP-style principal and not for the two environment keys', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -244,10 +215,9 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * A principal `create_service_principal()` made at runtime HAS no entry in KNOWN_PRINCIPALS and
-   * must still be mintable -- describePrincipal()'s fallback names the MCP command for it, and the
-   * button follows that rather than a hardcoded list of ids. Keyed the other way round, adding a
-   * runtime principal would mean editing the frontend before anybody could issue it a token.
+   * A principal `create_service_principal()` made at runtime has no entry in KNOWN_PRINCIPALS and
+   * must still be mintable, so the button follows describePrincipal()'s fallback rather than a
+   * hardcoded list.
    */
   it('offers Issue Token for an undocumented principal, because the fallback mint command is the MCP one', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -273,9 +243,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * THE BADGE IS THE WAY IN, because it already carries the count and a revocation follows from it.
-   * A row-level Revoke button could not work: a principal has N tokens, `revoke_service_token()`
-   * takes one jti, so the row would have to PICK -- a guess the operator cannot see being made.
+   * The badge is the way in: a principal has N tokens and `revoke_service_token()` takes one jti,
+   * so a row-level Revoke button would have to guess.
    */
   it('opens the token inventory from the count badge, carrying the rows it counted', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -297,10 +266,7 @@ describe('AccessControlTab', () => {
       .toBe('MCP read-only client:2'))
   })
 
-  /**
-   * The count must not include what has been withdrawn. Overstating exposure is the same class of
-   * error as understating it, and this page is the one that must do neither.
-   */
+  /** The count must not include what has been withdrawn. */
   it('excludes a withdrawn token from the active count', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockResolvedValue(new Map([[
@@ -327,8 +293,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * WITHDRAW SITS BESIDE ISSUE, because a page that hands out credentials with no control that
-   * takes the identity back is the asymmetry the retired revocable-tokens roadmap item refused to ship in the first place.
+   * Withdraw sits beside Issue, so the page that hands out credentials also has the control that
+   * takes the identity back.
    */
   it('offers Withdraw beside Issue Token for a live identity', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -340,9 +306,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * MINTING IS NOT OFFERED FOR A WITHDRAWN IDENTITY, and the swap is not cosmetic:
-   * record_service_token_issued() refuses one outright (0076), so the button would sign nothing
-   * and return an error. Reinstating is the action actually available.
+   * Minting is not offered for a withdrawn identity: record_service_token_issued() refuses one
+   * outright, so Reinstate is the action available.
    */
   it('replaces Issue Token with Reinstate once the identity is withdrawn', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -381,10 +346,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * The wire identity and the principal id are the two values on this page an operator retypes
-   * somewhere else -- into a broker node's credential pair, and into a token's `sub` claim. A
-   * 24-character string transcribed by eye is a client that authenticates and is then refused by
-   * something that never says why.
+   * The wire identity and the principal id are the two values an operator retypes elsewhere, into a
+   * broker credential pair and a token's `sub` claim.
    */
   it('makes both identifiers copyable rather than selectable text', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
@@ -393,18 +356,15 @@ describe('AccessControlTab', () => {
     // CopyableId renders a button, which is what makes it keyboard-reachable and announced as an
     // action -- a clickable span would be neither.
     await waitFor(() => expect(screen.getByRole('button', { name: /gwy120000000000400080000/ })).toBeTruthy())
-    // EXACT, because the mint command in the next column also contains this id -- and a loose
-    // matcher that happens to find two buttons is one that would keep passing if the id column
-    // were deleted outright.
-    // CopyableId's accessible name is `Copy <label> <value>`, so naming the label is what makes
-    // this exact rather than a substring that also matches the mint command in the next column.
+    // Exact, because the mint command in the next column also contains this id. CopyableId's
+    // accessible name is `Copy <label> <value>`, so naming the label makes this exact.
     expect(screen.getByRole('button', { name: 'Copy principal id b0000000-0000-4000-8000-000000000001' })).toBeTruthy()
   })
 
   /**
-   * MINTING STAYS ON THE HOST (Machine Identities, supabase/README.md): these tokens cannot be revoked, so issuing one should
-   * cost more than a click. What the page removes is the error-prone part -- transcribing a UUID --
-   * so the whole command is copyable and carries the principal already in it.
+   * Minting stays on the host (Machine Identities, supabase/README.md): these tokens cannot be
+   * revoked, so issuing one should cost more than a click. The whole command is copyable with the
+   * principal already in it.
    */
   it('offers the mint command rather than a mint button', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -419,10 +379,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * THE COUNT IS OF OUTSTANDING TOKENS, NOT OF THE LATEST MINT. A re-mint does not invalidate the
-   * previous token -- PostgREST validates the signature and consults no table -- so two mints a
-   * week apart are two live credentials. Reporting only the newer one would state half the
-   * exposure, on the one page whose job is to state all of it.
+   * The count is of outstanding tokens, not the latest mint: a re-mint does not invalidate the
+   * previous token, so two mints a week apart are two live credentials.
    */
   it('counts every unexpired token, not just the most recent', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -437,12 +395,8 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
-    // The EARLIEST expiry is the one reported: it is the next date on which something stops working.
-    //
-    // READ OFF THE TOOLTIP, because the detail used to be rendered twice -- as this badge's `title`
-    // AND as a paragraph beneath it, the same string in a 34ch column, reading as two facts when it
-    // is one. The badge carries the state and the tooltip carries the detail, matching the Identity
-    // column beside it.
+    // The earliest expiry is the one reported: the next date on which something stops working. Read
+    // off the tooltip; the badge carries the state and the tooltip the detail.
     expect(screen.getByText('2 active tokens').getAttribute('title')).toMatch(/in 12 days/i)
   })
 
@@ -451,37 +405,23 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
-    // The same distinction the credential column makes, and stated rather than left to be inferred:
-    // the page reports what it RECORDED, and an empty cell is a fact about the record. On the badge's
-    // tooltip now — see the note on the test above.
+    // An empty cell is a fact about the record, not the credential, stated on the badge's tooltip.
     expect(screen.getByText('No token on record').getAttribute('title'))
       .toMatch(/not the same as none existing/i)
   })
 
   /**
-   * THE COVERAGE NOTE, and why an empty inventory needed one.
-   *
-   * Two of the three principals this stack ships with hold keys that are in use right now --
-   * SUPABASE_INGESTION_KEY and SUPABASE_PLAYBACK_KEY -- and an unlabelled empty list is read as "no
-   * credentials outstanding", on a stack where the two most powerful ones are outstanding. This
-   * inventory is the compensating control README.md's Accepted risks section names by name, so its
-   * coverage belongs on its face rather than in a migration header nobody reading the page will see.
-   *
-   * THE NOTE CHANGED WITH #101 AND THIS TEST CHANGED WITH IT. It used to say the two could NEVER
-   * appear -- true of a ten-year token, which record_service_token_issued() refuses outright. They
-   * are 90-day keys now, so the permanent exclusion became a temporary one: `npm run setup` still
-   * signs the FIRST pair before the database exists, and rotating records them. A note still
-   * claiming they can never appear would now be teaching an operator not to bother.
+   * The coverage note: the two environment keys are outstanding on every stack, and an unlabelled
+   * empty list reads as none. They are 90-day keys, so the exclusion is temporary: `npm run setup`
+   * signs the first pair before the database exists, and rotating records them.
    */
   it('states the credentials it cannot see, so an empty list is not read as none', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
-    // ON THE ROW, NOT IN A FOOTER. The caveat used to be a paragraph under the table and the cell
-    // pointed at it; it is now carried by the badge itself, per principal, where somebody reading a
-    // specific row actually looks. What matters is that the page still says an empty cell is a
-    // statement about the RECORD rather than about the credential -- #91's whole point.
+    // On the row, not in a footer: the badge itself says an empty cell is a statement about the
+    // record.
     expect(screen.getByText('No token on record').getAttribute('title'))
       .toMatch(/not the same as none existing/i)
     expect(screen.getByText('No token on record').getAttribute('title'))
@@ -499,13 +439,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * AND IT GOES AWAY WHEN IT STOPS BEING TRUE, which is what a permanent footer could not do.
-   *
-   * After a rotation both service principals show "1 active token", and a note beneath them saying
-   * they "are not here and cannot be" contradicts the rows above it -- reconcilable only by parsing
-   * "the first" very carefully, which nobody does to a footer. Deleting it outright was the other
-   * option and would reopen #91 on a fresh stack, where the list genuinely is empty for the two most
-   * powerful credentials on the box. So it is conditional on the state it describes.
+   * The note goes away when it stops being true: after a rotation both principals show a recorded
+   * token, and a footer saying they cannot appear would contradict the rows above it.
    */
   it('drops the coverage note once every principal has a recorded token', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -524,13 +459,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * THE MINT COLUMN IS PER-PRINCIPAL, AND THE DEFAULT WAS ACTIVELY WRONG FOR TWO OF THREE ROWS.
-   *
-   * Every row rendered `mint-mcp-token.mjs --principal <id>`. That script would happily sign a
-   * token for Service_Ingestor -- same subject, same secret, entirely valid -- and no worker would
-   * ever read it, because the daemon takes its key from the environment at boot. An operator
-   * following the page would issue a second unrevocable credential for a privileged identity and
-   * fix nothing. Rotation is the only operation that changes what these processes present.
+   * The mint column is per principal: the two keys that live in .env are rotated, never minted,
+   * because the daemons read their key from the environment at boot.
    */
   it('offers rotation, not a fresh mint, for the two keys that live in .env', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -543,11 +473,8 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     const rowOf = (name) => screen.getByText(name).closest('tr')
 
-    // ASSERTED ON WHAT WOULD BE COPIED, NOT ON WHAT IS DRAWN. Both rows now render the same
-    // "Copy Command" label -- the full command was ~70 characters and was taking more width than
-    // the four columns carrying the actual answer -- so the command survives in the accessible
-    // name, which is also the thing an operator ends up with on their clipboard. Asserting the
-    // visible text here would only re-assert the label.
+    // Asserted on what would be copied, not what is drawn: both rows render the same "Copy Command"
+    // label, and the command survives in the accessible name.
     expect(within(rowOf('Service_Ingestor')).getByLabelText(/npm run keys:rotate/)).toBeTruthy()
     expect(within(rowOf('Service_Ingestor')).queryByLabelText(/mint-mcp-token/)).toBeNull()
     // The MCP client is the one that command IS right for, so it keeps it.
@@ -555,17 +482,10 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * THE COPY CONTROL IS STYLED AS A BUTTON, WHICH IS A LEGIBILITY REQUIREMENT RATHER THAN A TASTE.
-   *
-   * `.copyable-id` is deliberately understated -- no background, transparent border, icon hidden
-   * until hover -- because that is right for an identifier inside a dense cell, where the VALUE is
-   * what is being read. With a fixed "Copy Command" label there is no value to read and the element
-   * IS the affordance, and the understated treatment was reported as hard to read in dark mode.
-   *
-   * `.btn-ghost` paints --text-primary on --bg-glass with a real border, and that is the pairing
-   * themeContrast.test.js already measures against AA and APCA in BOTH themes -- so asserting the
-   * class here is what ties this control to that guarantee. Reverting it to the understated form
-   * would take the contrast cover away silently, which is how the first version got through.
+   * The copy control is styled as a ghost button. `.copyable-id` is understated for identifiers in
+   * dense cells; with a fixed label the element is the affordance. `.btn-ghost` is the pairing
+   * themeContrast.test.js measures in both themes, so asserting the class ties this control to that
+   * guarantee.
    */
   it('renders the copy control as a ghost button, not as an understated identifier', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -579,9 +499,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * `digital_thread:read` is a separate permission from listing principals. A caller without it
-   * must still see the identities -- blanking the section over a missing history would hide the
-   * very thing the page exists to show.
+   * `digital_thread:read` is separate from listing principals; a caller without it must still see
+   * the identities.
    */
   it('still lists identities when the token history cannot be read', async () => {
     api.listGatewayCredentials.mockResolvedValue([])

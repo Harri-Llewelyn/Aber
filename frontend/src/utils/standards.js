@@ -1,16 +1,8 @@
 /**
- * The standards a catalog metric can be built from.
- *
- * `metric_catalog.standard` is provenance, not a constraint -- it records which vocabulary a metric
- * was named after, and NULL is a legitimate value meaning "local extension". Every standard adopted
- * here explicitly permits extension, so the Custom option is part of the design rather than an
- * escape hatch bolted on.
- *
- * The three are complementary, not alternatives, which is why the form offers a choice rather than
- * a migration path between them:
- *   MTConnect  -- machine tools: the component/data-item vocabulary (archived migration 0018)
- *   ISO 22400  -- computed KPIs, which MTConnect deliberately excludes (archived migration 0030)
- *   OPC UA     -- robotics and general machinery companion specs (archived migration 0031)
+ * The standards a catalog metric can be built from. `metric_catalog.standard` is provenance; NULL
+ * means a local extension, which every adopted standard permits. The three are complementary:
+ * MTConnect for machine tools, ISO 22400 for computed KPIs, OPC UA for robotics and machinery
+ * companion specs.
  */
 
 export const STANDARDS = {
@@ -23,9 +15,8 @@ export const STANDARDS = {
 }
 
 /**
- * Options for the Standard selector, in the order they are offered. MTConnect leads because it is
- * the largest vocabulary and the one most metrics come from; Custom is last because it should be a
- * deliberate choice rather than the path of least resistance.
+ * Options for the Standard selector, in the order offered: MTConnect leads as the largest
+ * vocabulary, and Custom is last so it is a deliberate choice.
  */
 export const STANDARD_OPTIONS = [
   {
@@ -56,12 +47,8 @@ export const STANDARD_OPTIONS = [
 ]
 
 /**
- * The AAS (IEC 63278) Reference types `semantic_id_type` may take.
- *
- * Mirrors the CHECK constraint in 0001_baseline_schema.sql -- keep the two in step, same obligation
- * as utils/sparkplugId.js and utils/metricGroup.js carry against their own migrations. An
- * unconstrained value would produce an invalid AAS Reference at export time rather than an error
- * here, which is the expensive place to discover it.
+ * The AAS (IEC 63278) Reference types `semantic_id_type` may take. Mirrors the CHECK constraint in
+ * 0001_baseline_schema.sql; keep the two in step.
  */
 export const SEMANTIC_ID_TYPES = ['IRI', 'IRDI', 'ModelReference']
 
@@ -69,24 +56,15 @@ export const SEMANTIC_ID_TYPES = ['IRI', 'IRDI', 'ModelReference']
 export const DEFAULT_SEMANTIC_ID_TYPE = 'IRI'
 
 /**
- * The namespace this deployment mints semantic ids under.
- *
- * Local by design and visibly so. Neither MTConnect nor ISO publishes resolvable per-concept IRIs,
- * and no maintained ECLASS/IEC CDD crosswalk to either is known, so an id minted in *their*
- * namespace would assert an interoperability that does not exist. `acs-cymru.local` says plainly
- * whose identifier it is: stable, deterministic and resolvable within this deployment, which is
- * enough for an AAS export to emit today and cheap to replace by a single UPDATE if a published
- * crosswalk appears. What it does not do is make two organisations agree.
+ * The namespace this deployment mints semantic ids under. Local and visibly so: neither MTConnect
+ * nor ISO publishes resolvable per-concept IRIs, and an id in their namespace would assert an
+ * interoperability that does not exist.
  */
 export const LOCAL_SEMANTIC_NAMESPACE = 'https://acs-cymru.local/semantics'
 
 /**
- * MTConnect concept namespace, pinned to the *major* version.
- *
- * The vocabulary is generated from MTConnect schema 2.8 (`SCHEMA_VERSION` in
- * scripts/generate-mtconnect-vocabulary.mjs), but an id that changed every time the schema was
- * regenerated would defeat the point of having a stable identifier. The major line is the
- * granularity at which the concepts themselves actually change.
+ * MTConnect concept namespace, pinned to the major version: the vocabulary is generated from schema
+ * 2.8, and an id that changed on every regeneration would not be an identifier.
  */
 export const MTCONNECT_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/mtconnect/v2.0`
 
@@ -94,15 +72,10 @@ export const MTCONNECT_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/mtconne
 export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400`
 
 /**
- * The semantic id for an MTConnect metric, derived from its full name.
- *
- * Mirror of the SQL in archive/20260101000032 (folded into 0002_seed_data.sql):
- *   'https://acs-cymru.local/semantics/mtconnect/v2.0/' || name
- * Keep the two in step -- same obligation as utils/metricGroup.js and utils/sparkplugId.js carry.
- *
- * The *whole* name, not just the data item type: a catalog entry is a specific data item on a
- * specific component path (`Axes/C/ANGLE`), which is what an AAS SubmodelElement corresponds to.
- * The type-level concept id (`.../DataItemType/ANGLE`) lives on `mtconnect_vocabulary` instead.
+ * The semantic id for an MTConnect metric, from its full name. Mirror of the SQL in
+ * 0002_seed_data.sql: `'https://acs-cymru.local/semantics/mtconnect/v2.0/' || name`. The whole
+ * name, because a catalog entry is a data item on a component path, which is what an AAS
+ * SubmodelElement corresponds to.
  */
 export function mtconnectSemanticId(metricName) {
   const name = (metricName || '').trim()
@@ -120,10 +93,8 @@ const VOCABULARY_KIND_SEGMENT = {
 }
 
 /**
- * The concept-level semantic id for an MTConnect vocabulary entry.
- *
- * Scoped by kind because the MTConnect vocabularies are separate namespaces that can collide -- a
- * component and a data item type could share a name, and `(kind, name)` is the table's own key.
+ * The concept-level semantic id for an MTConnect vocabulary entry, scoped by kind because `(kind,
+ * name)` is the table's key.
  */
 export function mtconnectVocabularySemanticId(kind, name) {
   const n = (name || '').trim()
@@ -132,12 +103,9 @@ export function mtconnectVocabularySemanticId(kind, name) {
 }
 
 /**
- * Best guess at which kind of AAS Reference an identifier is, for prefilling the type alongside a
- * pasted id. Deliberately conservative: it recognises the two shapes that are unambiguous and
- * leaves everything else to the operator rather than guessing wrong and being believed.
- *
- * An IRDI (ISO/IEC 11179-6) looks like `0173-1#02-AAO677#002` -- a registration authority code, a
- * `#`-delimited item code, and a version.
+ * Best guess at which kind of AAS Reference an identifier is. Conservative: it recognises the two
+ * unambiguous shapes and leaves the rest to the operator. An IRDI looks like
+ * `0173-1#02-AAO677#002`.
  */
 export function inferSemanticIdType(value) {
   const v = (value || '').trim()

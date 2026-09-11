@@ -1,42 +1,14 @@
 #!/usr/bin/env node
-// =================================================================================================
 // Environment drift: between docker-compose.yml and .env.example, and between .env.example and a
-// developer's working .env.
+// developer's working .env. Two checks: A, every variable Compose requires must be declared in
+// .env.example, runs everywhere including CI; B, template against .env in both directions, runs
+// only where a `.env` exists, so it is advisory and skips loudly in CI rather than reporting ok for
+// a property it did not examine. A is scoped to required variables, those written `${VAR}` with no
+// default: Compose substitutes empty for those and the failure is silent and downstream, whereas
+// the defaulted tuning knobs would bloat the template.
 //
-// NOTHING CHECKED EITHER DIRECTION BEFORE THIS. A working `.env` accumulates keys that were retired
-// from the template and misses keys that were added to it, and both fail silently: Compose
-// substitutes its own default and the stack comes up looking correct while running on a value
-// nobody chose. `VITE_ALLOW_SIGNUP` is the worked example -- a frontend flag that was removed
-// outright once it was understood not to be an access control, and which still sits in working
-// `.env` files doing nothing.
-//
-// TWO CHECKS, AND ONLY ONE OF THEM CAN RUN IN CI. That asymmetry is the whole design:
-//
-//   A. compose -> template.   Every variable Compose REQUIRES must be declared in .env.example.
-//                             Runs everywhere, including CI, because both files are committed.
-//
-//   B. template <-> .env.     Both directions. Can only run where a `.env` exists, which is a
-//                             developer's machine and never CI -- `.env` is gitignored, and it
-//                             holds real credentials precisely so it is not.
-//
-// Check B is therefore ADVISORY BY CONSTRUCTION and this script says so rather than pretending
-// otherwise. A guard that silently no-ops in the place it is enforced is worse than no guard: it
-// reports "ok" in CI for a property it did not examine. So B skips loudly, and A is the one wired
-// into the pipeline.
-//
-// WHY A IS SCOPED TO *REQUIRED* VARIABLES rather than to everything Compose reads. 88 variables are
-// referenced in docker-compose.yml and 66 are declared in the template; the 22-way difference is
-// almost entirely internal tuning knobs with safe defaults -- I3X_PORT, PROMETHEUS_PORT,
-// NODE_RED_FORCE_SEED. Demanding those be documented would bloat the template with settings nobody
-// sets and train everyone to add entries to silence a check, which is how an allow-list becomes
-// meaningless. A variable written `${VAR}` with NO default is different in kind: Compose
-// substitutes empty, and the failure is silent and downstream. That set is currently EMPTY of
-// violations, which is what makes this worth asserting -- it is an invariant that holds today and
-// would be broken by the ordinary act of adding a required variable and forgetting the template.
-//
-// Usage:  node scripts/check-env-drift.mjs
-// Exit:   0 = no enforceable drift (advisory findings may still be printed), 1 = check A failed.
-// =================================================================================================
+// Usage: node scripts/check-env-drift.mjs. Exit: 0 = no enforceable drift (advisory findings may
+// still be printed), 1 = check A failed.
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -59,12 +31,9 @@ const compose = read('docker-compose.yml').replace(/\$\$/g, '');
 const template = read('.env.example');
 const declared = declaredIn(template);
 
-// -------------------------------------------------------------------------------------------------
-// A. Every variable Compose requires is declared in the template.
-// -------------------------------------------------------------------------------------------------
-// A name counts as OPTIONAL if ANY reference supplies a default (`${VAR:-x}` or `${VAR-x}`), because
-// one defaulted reference is enough to keep the stack up. Only a name that is defaulted NOWHERE is
-// required. Collecting both sets and subtracting is why this is not a single regex.
+// A. Every variable Compose requires is declared in the template. A name counts as optional if any
+// reference supplies a default (`${VAR:-x}` or `${VAR-x}`); only a name defaulted nowhere is
+// required.
 {
   const optional = new Set();
   const referenced = new Set();
@@ -92,9 +61,7 @@ const declared = declaredIn(template);
   }
 }
 
-// -------------------------------------------------------------------------------------------------
 // B. The working .env against the template, both directions. Advisory; local only.
-// -------------------------------------------------------------------------------------------------
 if (!existsSync(join(REPO, '.env'))) {
   note('no .env in this checkout -- skipping the working-file comparison (expected in CI)');
 } else {
@@ -104,9 +71,8 @@ if (!existsSync(join(REPO, '.env'))) {
   // Compose defaults to, which is the failure this is here to make visible.
   const missing = [...declared].filter((v) => !working.has(v)).sort();
 
-  // EXTRA splits in two, and the distinction is the useful part of this check. A name Compose still
-  // reads is one the TEMPLATE is missing; a name nothing reads is a dead key in the working file.
-  // Reporting them together would put a template bug and a stale local setting under one heading.
+  // EXTRA splits in two: a name Compose still reads is one the template is missing; a name nothing
+  // reads is a dead key in the working file.
   const extra = [...working].filter((v) => !declared.has(v)).sort();
   const stillRead = extra.filter((v) => new RegExp(`\\$\\{${v}[^A-Z0-9_]`).test(compose));
   const dead = extra.filter((v) => !stillRead.includes(v));

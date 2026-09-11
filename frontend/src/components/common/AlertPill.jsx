@@ -5,76 +5,33 @@ import { useClickOutside } from '../../hooks/useClickOutside'
 import { REALTIME_ENABLED, grafanaAlertUrl } from '../../constants'
 
 /**
- * The Topbar's alert counter, and the list behind it.
+ * The top bar's alert counter, and the list behind it.
  *
- * PERMANENT, INCLUDING WHEN NOTHING IS FIRING. It used to render nothing on a quiet floor, on the
- * reasoning that absence is the cheapest signal and a standing "0" claims attention it has not
- * earned. That reasoning holds for a notification badge and is wrong for a shopfloor display, for
- * one reason: an element that is absent when healthy is indistinguishable from an element that is
- * BROKEN. A dashboard on a wall showing no alert chip could mean nothing is wrong, or that the
- * webhook secret is stale, or that Grafana has been down since Tuesday -- and the operator has no
- * way to tell which without opening another tab. A standing icon is a positive statement that the
- * pipeline is answering, which is a different claim from silence and the one worth making.
+ * Permanent, including when nothing is firing: an element absent when healthy is indistinguishable
+ * from one that is broken, and a standing glyph says the pipeline is answering. The glyph carries
+ * the state by shape, colour and animation; the count appears as a badge only when it is not zero,
+ * because whether one thing or twelve is wrong decides whether an operator walks over.
  *
- * THE WORD AND THE ZERO ARE GONE; THE ICON AND THE COUNT-WHEN-FIRING ARE NOT. It read `0 Alerts`
- * on a floor with nothing wrong, which is ~62px of bar spent on the least interesting sentence the
- * application can say, and it said it in exactly the same shape whether the answer was zero or
- * nine. What replaced it is a single glyph that carries the state three ways -- shape (shield ->
- * triangle -> circle), colour, and animation on the firing states only.
+ * A row goes where its subject lives, decided by the rule's `entity_type` label (checked by
+ * `platform_alerts_entity_type_valid`), not by the id prefix. A platform alert has no asset and
+ * opens the rule in Grafana Alerting.
  *
- * THE COUNT SURVIVES, AS A BADGE, AND ONLY WHEN IT IS NOT ZERO. Dropping it entirely would have
- * been simpler and is the one thing here worth arguing about: on a wall display "something is
- * wrong" and "twelve things are wrong" are different operational situations, and a colour cannot
- * tell them apart -- the operator would have to open the panel to learn whether to walk over. Zero
- * is the one count that needs no digit, because the healthy shield already says it. So the resting
- * bar is one quiet glyph, and the digit appears exactly when it carries information.
+ * @param {Array} alerts Rows from `platform_alerts_active`; see hooks/usePlatformAlerts.
  *
- * The healthy state is deliberately the quietest thing in the bar: muted, unanimated, no border
- * colour of its own.
+ * @param {Function} onSelectDevice Called with a sparkplug_id when a `device` row is clicked.
+ * Optional.
  *
- * THE COUNT IS THE HEADLINE, THE DETAIL IS ON DEMAND. A toast already fired when each alert arrived;
- * this is the answer to "what is still wrong", which is a different question and wants a list rather
- * than a queue of notifications. Clicking opens it inline instead of navigating, because the operator
- * asking is usually mid-task on another tab -- and each row then navigates to its own SUBJECT, which
- * is the one case where leaving the current page is what was wanted.
+ * @param {Function} onSelectGateway The same for a `gateway` row. Optional and separate, so a
+ * consumer with one page and not the other degrades to an inert row.
  *
- * A ROW GOES WHERE ITS SUBJECT LIVES, WHICH IS NOT ALWAYS A DEVICE. Every row used to call
- * `onSelectDevice`, from the days when every rule was a machine condition. It has not been true
- * since the platform rules landed: of the ten rules shipped today FOUR are `entity_type: gateway`
- * and five are `platform`, and NONE is a device -- so the single destination was wrong for every
- * alert this stack can currently raise. A stale gateway sent an operator to the Devices page to
- * search for a `gwy...` id no device row will ever match.
- *
- * `entity_type` IS THE ANSWER AND THE PREFIX IS NOT. A `gwy`/`dev` prefix on the wire id would
- * usually agree, but it is a naming convention being asked to carry an authorisation-shaped
- * decision: the alert's scope is declared by the Grafana rule's own `entity_type` label, checked by
- * `platform_alerts_entity_type_valid` (0023) and resolved in the right id space by the webhook. The
- * column says what the row is about; reading it is not a heuristic.
- *
- * A PLATFORM ALERT HAS NO ASSET, AND ITS DESTINATION IS GRAFANA. `platform_alerts_asset_has_wire_id`
- * makes `sparkplug_id` null for exactly these -- the ingestion pipeline going silent, the quarantine
- * queue filling -- so there is no page in this application about the subject. Such a row used to be
- * inert, which read as a broken link rather than as an honest one. It now opens the rule in Grafana
- * Alerting, which is where its state history and its silence controls actually are, and which the
- * panel's own footer already tells the operator. Same anchor treatment as ContextPanel's: a real
- * link, so middle-click and "copy link address" work.
- *
- * @param {Array}    alerts          Rows from `platform_alerts_active` -- see hooks/usePlatformAlerts.
- * @param {Function} onSelectDevice  Called with a sparkplug_id when a `device` row is clicked.
- *                                   Optional: the panel is still worth opening read-only without it.
- * @param {Function} onSelectGateway The same for a `gateway` row. Optional for the same reason, and
- *                                   separately, so a consumer that has one page and not the other
- *                                   degrades to an inert row rather than to a wrong one.
- * @param {boolean}  realtime        Whether Realtime is carrying updates. Defaults to the deployment
- *                                   flag; a parameter only so tests can pin both branches.
+ * @param {boolean} realtime Whether Realtime is carrying updates; a parameter so tests can pin both
+ * branches.
  */
 export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realtime = REALTIME_ENABLED }) {
   const [open, setOpen] = useState(false)
   useEscapeKey(() => setOpen(false), open)
-  // A click anywhere else closes it. The panel is a popover in a header, not a dialog: it takes no
-  // focus trap and no backdrop, so without this it stayed open over whatever the operator went on to
-  // do -- covering the top-right of a page they were now working on, with the only way out being a
-  // control they had to look for. The ref goes on the WRAPPER so the pill's own click still toggles.
+  // A click anywhere else closes it: a popover in a header with no focus trap or backdrop. The ref
+  // goes on the wrapper so the pill's own click still toggles.
   const wrapRef = useClickOutside(() => setOpen(false), open)
 
   const count = alerts.length
@@ -130,9 +87,8 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
           </div>
 
           {healthy ? (
-            /* The empty state states what is TRUE rather than what is missing. "No alerts" alone
-               would leave the same ambiguity the permanent pill exists to remove -- nothing wrong,
-               or nothing arriving -- so it names the evaluator by name. */
+            /* The empty state says what is true: it names the evaluator, so nothing wrong and
+               nothing arriving are told apart. */
             <div className="alert-pill-empty">
               <IconShieldCheck size={20} />
               <div className="alert-pill-empty-title">No active alerts</div>
@@ -140,16 +96,14 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
           ) : (
             <ul className="alert-pill-list">
               {alerts.map((a) => {
-                // `device` IS THE DEFAULT HERE FOR THE SAME REASON IT IS IN THE WEBHOOK: a rule that
-                // declares no scope is a machine rule, and a row written before the column existed
-                // is one of the three original ones. Reading it as unknown instead would make every
-                // historical alert inert.
+                // `device` is the default for the same reason it is in the webhook: a rule that
+                // declares no scope is a machine rule, and the three original rows predate the
+                // column.
                 const kind = a.entity_type || 'device'
                 const onSelect = kind === 'gateway' ? onSelectGateway : kind === 'device' ? onSelectDevice : null
                 const page = kind === 'gateway' ? 'Gateways' : 'Devices'
-                // A row is a button only when it can go somewhere. An alert whose sparkplug_id
-                // matched no row -- which the webhook records rather than drops -- has nothing to
-                // navigate TO, and a dead-looking button is worse than plain text.
+                // A row is a button only when it can go somewhere: an alert whose sparkplug_id
+                // matched no row has nothing to navigate to.
                 const navigable = Boolean(onSelect && a.sparkplug_id)
                 // The fleet-wide rules. No asset, so no page here -- Grafana is the subject's home.
                 const external = !a.sparkplug_id && kind === 'platform'
@@ -159,8 +113,7 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                     <div className="alert-pill-item-body">
                       <div className="alert-pill-item-name">{a.alert_name}</div>
                       {/* The summary is Grafana's own annotation, already templated with the device
-                          and the values that tripped the rule -- so it is the one string worth
-                          showing and does not need re-assembling here. */}
+                          and the values. */}
                       {a.summary && <div className="alert-pill-item-summary">{a.summary}</div>}
                       {/* A fleet-wide alert names no asset, and an empty mono line reads as a
                           failed lookup. It says what the scope IS instead. */}
@@ -177,9 +130,8 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                       <button
                         className="alert-pill-item-link"
                         onClick={() => { setOpen(false); onSelect(a.sparkplug_id) }}
-                        /* The sparkplug id, not a name: `platform_alerts` does not carry one. The
-                           webhook resolves the NAME only far enough to template Grafana's summary,
-                           and the id is what each page's search matches on anyway. */
+                        /* The sparkplug id, not a name: `platform_alerts` carries none, and the id
+                           is what each page's search matches on. */
                         title={`Show ${a.sparkplug_id} on the ${page} page`}
                       >
                         {body}
@@ -203,11 +155,8 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
           )}
 
           <div className="alert-pill-foot">
-            {/* THE FEED MODE LIVES HERE NOW, not as its own chip in the bar. The Live/Polling
-                indicator was a permanently-lit dot that never changed within a deployment -- it is
-                read off a build flag, not off the socket's health -- so it spent header width
-                restating a constant. The question it actually answers is "is this count fresh",
-                which is asked while looking at the count. */}
+            {/* The feed mode lives here rather than as its own chip in the bar: it is read off a
+                build flag, and the question it answers is whether this count is fresh. */}
             Evaluated by Grafana. Thresholds and silences live there, not here.
             {' '}{realtime
               ? 'Delivered live, reconciled every 60s.'

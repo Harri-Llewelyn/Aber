@@ -5,42 +5,12 @@ import { buildTargets, matchTargets } from '../../searchIndex'
 import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconFactory, IconClipboardList } from './Icons'
 
 /**
- * ==================================================================================================
- * ONE BOX THAT ANSWERS THREE QUESTIONS.
- * ==================================================================================================
- *
- * It occupies the space the tab strip used to. That is not a coincidence of layout: the strip was
- * thirteen destinations laid out in advance for a reader who had to recognise the right one, and
- * this is the same set narrowed by what they can already say about it. The rail keeps the strip's
- * one genuine virtue -- everything visible at once -- so this can be the other half.
- *
- * THE THREE QUESTIONS, AND WHY THE THIRD IS THE ONE THAT WAS ASKED FOR:
- *
- *   "Where is the page called X"      -> matched against the nav.
- *   "Where is the card called X"      -> matched against `searchIndex.js`. The motivating case is
- *                                        Metric Catalog, which lives on the Schemas page and whose
- *                                        name contains no clue that it does.
- *   "What is 8f3c...?"                -> resolved against the database. A UUID arrives from a
- *                                        Grafana alert, a Sparkplug topic, a log line or a
- *                                        colleague, and what its holder lacks is not the id but
- *                                        which of four pages it belongs on.
- *
- * A UUID IS DETECTED, NOT DECLARED. There is no "search by id" mode to select, because a 36-character
- * hyphenated hex string is unambiguous -- nothing in the static index can look like one -- and a mode
- * switch would be a control to find before you can use the thing you came here to use.
- *
- * IT SEARCHES THE ESTATE BY NAME TOO, and that is a change from how this file was first written.
- * The original argument was that each asset page already has a search box over its own table, so a
- * shallower one in the chrome would answer the same question worse. What that missed is that the
- * page-level box can only be used by somebody who already knows WHICH PAGE the thing is on --
- * which is the same gap the id lookup exists to close, arrived at from the other direction. A
- * person holding the name of a machine and not knowing whether it was provisioned as a device or
- * as a gateway had nowhere to type it.
- *
- * SO THE DIVISION IS BY DEPTH RATHER THAN BY SUBJECT. This finds the thing and takes you to it;
- * the page's own box, with that page's filters and columns beside it, is where you work with a SET
- * of them. The estate lookup is capped per kind for exactly that reason -- see `searchAssets` --
- * so it stays a way of finding one row rather than a bad table.
+ * One box that answers three questions: where is the page called X (the nav), where is the card
+ * called X (`searchIndex.js`), and what is this UUID (resolved against the database). A UUID is
+ * detected, not declared: nothing in the static index can look like one. Names are searched too,
+ * because the page-level box can only be used by somebody who knows which page the thing is on. The
+ * estate lookup is capped per kind (see `searchAssets`): this finds one thing, and the page's own
+ * box works with a set.
  */
 
 const ENTITY_LABEL = {
@@ -75,30 +45,16 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
 
   const targets = useMemo(() => buildTargets(tabs), [tabs])
   const matches = useMemo(
-    // An id is not matched against the static index at all. It cannot hit anything -- no page or
-    // card contains a hex string -- and running it would only mean the "nothing found" message
-    // appeared for a moment before the lookup came back.
+    // An id is not matched against the static index: no page or card contains a hex string.
     () => (looksLikeId || !trimmed ? [] : matchTargets(trimmed, targets)),
     [trimmed, targets, looksLikeId]
   )
 
-  /*
-   * THE ID LOOKUP, DEBOUNCED AND SEQUENCED.
-   *
-   * `isUuid` only passes a complete id, so typing one by hand fires exactly once, at the last
-   * character -- the debounce is for the paste-then-edit case and costs nothing otherwise.
-   *
-   * `stale` is the half that matters. Four table reads race each other and two lookups can be in
-   * flight when somebody corrects a digit; without the guard, the slower FIRST reply can land after
-   * the second and leave the palette showing the asset for an id no longer in the box.
-   */
+  /* The id lookup, debounced and sequenced. `isUuid` only passes a complete id, so the debounce is
+     for the paste-then-edit case. `stale` stops a slower first reply landing after the second. */
   useEffect(() => {
-    // TWO LOOKUPS BEHIND ONE EFFECT, because from here they are the same question -- "which asset
-    // is this?" -- asked with the two things a person might be holding. Which one runs is decided
-    // by the shape of what was typed, not by a mode the user has to pick.
-    //
-    // THE NAME SEARCH NEEDS TWO CHARACTERS. One letter matches most of an estate, and a palette
-    // that fills with everything on the first keystroke is one people stop typing into.
+    // Two lookups behind one effect, decided by the shape of what was typed. The name search needs
+    // two characters: one letter matches most of an estate.
     const searchable = looksLikeId || trimmed.length >= 2
     if (!searchable) {
       setEntities([])
@@ -112,10 +68,8 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
         const hits = looksLikeId ? await api.resolveId(trimmed) : await api.searchAssets(trimmed)
         if (!stale) setEntities(hits)
       } catch {
-        // A failed lookup is reported as "not found" rather than as an error toast. There is
-        // nothing for the user to do about it, and the box they are typing in is not the place to
-        // learn that PostgREST is unreachable -- the activity line and the page they are on will
-        // both say so louder.
+        // A failed lookup reads as not found rather than an error toast: the activity line and the
+        // page will say so louder.
         if (!stale) setEntities([])
       } finally {
         if (!stale) setResolving(false)
@@ -138,10 +92,8 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
     // merge and a "nothing found" flash while the lookup runs would be the only effect.
     if (looksLikeId) return assetHits
 
-    // PAGES AND CARDS FIRST, ASSETS AFTER. The static index answers instantly and the estate
-    // lookup arrives 180ms later, so putting assets on top would push a result the user was
-    // already reaching for out from under the cursor. Navigation is also the commoner intent --
-    // somebody typing "dev" almost always wants the Devices page, not a machine called Dev.
+    // Pages and cards first, assets after: the static index answers instantly and the estate lookup
+    // arrives later, so assets on top would move under the cursor.
     return [...matches.map(m => ({
       key: m.key,
       kind: m.kind,
@@ -195,10 +147,8 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       else if (kind === 'cell') onSelectCell?.(id)
       else if (kind === 'schema') onSelectSchema?.(id)
     } else {
-      // A CARD NAVIGATES TO ITS PAGE AND NO FURTHER. Scrolling to the section would need an anchor
-      // on every card, which does not exist today; claiming to jump to a heading and landing at the
-      // top of the page is worse than plainly landing at the top of the page. The result already
-      // did the work that was asked of it -- it said WHICH page the card is on.
+      // A card navigates to its page and no further: there are no anchors on cards, and claiming to
+      // jump to a heading would be worse than landing at the top.
       onNavigate?.(result.target.tabId)
     }
     dismiss()
@@ -258,10 +208,8 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
           )}
 
           {looksLikeId && !resolving && results.length === 0 && (
-            /* SAYS WHAT WAS SEARCHED AND STOPS THERE. RLS returns no rows rather than an error, so
-               "no such asset" and "not an asset you may see" are the same reply from here -- and
-               asserting the first would tell an Operator that an id they are not cleared for does
-               not exist. */
+            /* Says what was searched and stops: RLS returns no rows rather than an error, so not
+               found and not cleared for are the same reply. */
             <div className="global-search-empty">
               No cell, gateway, device or schema with that id is visible to you.
             </div>
@@ -293,10 +241,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
             </button>
           ))}
 
-          {/* The keyboard contract, printed once at the foot. The arrow keys and Enter are not
-              discoverable in a box that looks like a filter field, and a user who does not know
-              they work will reach for the mouse on every result -- which is the slower half of
-              what this control is for. */}
+          {/* The keyboard contract, printed once at the foot. */}
           {currentTab && (
             <div className="global-search-foot" aria-hidden="true">
               <span>↑↓ to move · ↵ to open · esc to dismiss</span>

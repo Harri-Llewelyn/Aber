@@ -1,27 +1,10 @@
 /**
- * Digital Thread: events too close together to draw separately.
- *
- * WHAT WAS REPORTED. "Most of the assets only appear to have one event, a green created event, even
- * though they also have a blue operational event that occurred seconds later. The first event
- * overlaps the second, making it appear that assets only have one event."
- *
- * THE FIRST ANSWER WAS A VERTICAL FAN, and these tests are the second. The fan displaced colliding
- * markers up and down off the lane's centre line, which fixed the reported pair and then failed
- * where the page is most interesting: the track is 32px and a marker is 15px with its ring, so it
- * had three slots and a fourth event cycled back into the first and overlapped anyway. Worse, three
- * fanned dots and five fanned dots look alike -- and "how many happened here" is the question being
- * asked. A badge carrying the count answers it at any density.
- *
- * WHAT DID NOT CHANGE, and what several tests below exist to keep that way:
- *
- *   * X IS UNTOUCHED. A badge sits at the mean of its members' positions, so the time axis still
- *     tells the truth. Nudging markers apart along time would be zoom-dependent -- 8px reads as
- *     twelve minutes over a ten-hour range and as one minute over an hour.
- *   * THE CAUSATION SIGNAL SURVIVES, and is now stated rather than implied. Rows written in one
- *     transaction share a timestamp exactly, so they always land in one badge; the hover says "One
- *     transaction" when every member shares a causation_id, which a pile of dots could only hint at.
- *   * THE THRESHOLD IS IN PIXELS. That is what makes the range control a zoom: narrow it and the
- *     same events move further apart on screen until the badge dissolves into its members.
+ * Digital Thread: events too close together to draw separately are collapsed into a badge carrying
+ * the count. What must stay true: x is untouched, since a badge sits at the mean of its members'
+ * positions and the time axis keeps telling the truth; the causation signal survives, stated as
+ * "One transaction" when every member shares a causation_id; and the threshold is in pixels, so
+ * narrowing the range control zooms a badge apart into its members. Why a badge rather than a fan:
+ * ../README.md, Migrated design notes.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
@@ -67,21 +50,15 @@ describe('events that do not touch are drawn as themselves', () => {
 
 describe('events that pile up become one badge carrying the count', () => {
   it('groups the reported pair', () => {
-    /*
-     * THE REPORTED CASE: a Created and an Operational seconds apart, which at an all-time range
-     * land on the same pixel. One badge reading 2, rather than one dot that looks like one event.
-     */
+    /* The reported case: a Created and an Operational seconds apart, which at an all-time range
+       land on the same pixel. */
     const [group] = items(at(0.5, 0.5001))
     expect(group.isCluster).toBe(true)
     expect(group.events.map(e => e.event_id)).toEqual([1, 2])
   })
 
   it('groups a burst larger than the fan could hold, which is why the fan was replaced', () => {
-    /*
-     * SIX. The vertical fan had three slots and cycled the rest back through them, so a
-     * commissioning burst -- routinely five or six rows -- was drawn as three dots with the
-     * remainder hidden underneath, and nothing on the page said so. The badge simply reads 6.
-     */
+    /* Six: a commissioning burst is routinely five or six rows, and the badge simply reads 6. */
     expect(shape(at(0.5, 0.5, 0.5, 0.5, 0.5, 0.5))).toEqual([6])
   })
 
@@ -99,11 +76,8 @@ describe('events that pile up become one badge carrying the count', () => {
   })
 
   it('draws every event exactly once, whether or not it was grouped', () => {
-    /*
-     * THE INVARIANT THAT MATTERS MOST. A badge is allowed to hide events visually; it is not
-     * allowed to lose them. If clustering ever dropped a member, the page would under-report an
-     * audit log -- which is the one thing this page exists not to do.
-     */
+    /* The invariant that matters most: a badge may hide events visually but may not lose them.
+       Dropping a member would under-report an audit log. */
     const events = at(0, 0.001, 0.002, 0.4, 0.9, 0.9005)
     const drawn = items(events).flatMap(i => i.events.map(e => e.event_id))
 
@@ -114,11 +88,8 @@ describe('events that pile up become one badge carrying the count', () => {
 
 describe('the collision test is chained, not measured from the start of the group', () => {
   it('treats a continuous run as one pile', () => {
-    /*
-     * Each 10px from the last, so every pair overlaps -- but the last is 30px from the first.
-     * Testing against the group's START would split this into badges that still overlap at their
-     * seams, which is the bug that shape of the algorithm invites.
-     */
+    /* Each 10px from the last, so every pair overlaps, but the last is 30px from the first. Testing
+       against the group's start would split this into badges that still overlap at their seams. */
     expect(shape(at(0, 0.01, 0.02, 0.03))).toEqual([4])
   })
 
@@ -135,19 +106,14 @@ describe('the collision test is chained, not measured from the start of the grou
 
 describe('width is measured, and an unmeasured track groups nothing', () => {
   it('draws every event singly when the width is unknown', () => {
-    /*
-     * NOT GROUPING IS THE STATUS QUO; guessing a width would fold together markers that do not
-     * actually touch. This is also the jsdom path -- `offsetWidth` is 0 with no layout engine --
-     * which is why this function is tested directly as well as through the DOM.
-     */
+    /* Not grouping is the status quo when there is no width; guessing one would fold together
+       markers that do not touch. This is also the jsdom path, where `offsetWidth` is 0. */
     expect(shape(at(0.5, 0.5, 0.5), 0)).toEqual([1, 1, 1])
   })
 
   it('is width-dependent, because whether two markers touch is a question about pixels', () => {
-    /*
-     * The same two positions at two viewport widths. On a narrow track they overlap; on a wide one
-     * they are comfortably apart. A hardcoded fraction would have to be wrong at one of them.
-     */
+    /* The same two positions at two viewport widths: on a narrow track they overlap, on a wide one
+       they are apart. */
     const events = at(0.5, 0.51)
     expect(shape(events, 400)).toEqual([2])       // 4px apart -- one badge
     expect(shape(events, 4000)).toEqual([1, 1])   // 40px apart -- two dots
@@ -166,12 +132,8 @@ describe('order is decided by position, not by the order events arrived', () => 
   })
 
   it('breaks a tie on event_id, so a badge opens on the first row the transaction wrote', () => {
-    /*
-     * `recorded_at` is transaction START time, so every row of one act carries the same timestamp
-     * and sorting by position alone leaves them in whatever order they arrived. `event_id` is the
-     * order the rows were WRITTEN -- the same tiebreak causationSiblings() uses, and for the same
-     * reason: inside one act that is the order it performed them.
-     */
+    /* `recorded_at` is transaction start time, so rows of one act share a timestamp. `event_id` is
+       the order they were written, the same tiebreak causationSiblings() uses. */
     const scrambled = [{ event_id: 9, f: 0.5 }, { event_id: 3, f: 0.5 }, { event_id: 7, f: 0.5 }]
     expect(items(scrambled)[0].events.map(e => e.event_id)).toEqual([3, 7, 9])
   })
@@ -190,11 +152,7 @@ describe('the hover summary', () => {
     ({ event_id: id, kind, timestamp, causation_id })
 
   it('counts by classification, in the legend order and the legend words', () => {
-    /*
-     * MARKERS order, not insertion order and not alphabetical, so the breakdown reads down the key
-     * printed directly above the timeline -- and in ITS labels rather than a second set of names
-     * for the same four things.
-     */
+    /* MARKERS order, so the breakdown reads down the key printed above the timeline, in its labels. */
     const summary = clusterSummary([
       ev(1, 'operational', '2026-08-21T09:00:00Z'),
       ev(2, 'creation',    '2026-08-21T09:00:00Z'),
@@ -205,10 +163,8 @@ describe('the hover summary', () => {
   })
 
   it('says outright when one transaction wrote them', () => {
-    /*
-     * THE FACT A BADGE WOULD OTHERWISE LOSE. A fan of dots showed it by accident -- perfect
-     * overlap was the signature of one act. Collapsed to a count, it has to be said in words.
-     */
+    /* The fact a badge would otherwise lose: perfect overlap was the signature of one act, and
+       collapsed to a count it has to be said in words. */
     const summary = clusterSummary([
       ev(1, 'creation',   '2026-08-21T09:00:00Z', 'tx-1'),
       ev(2, 'governance', '2026-08-21T09:00:00Z', 'tx-1')
@@ -218,11 +174,8 @@ describe('the hover summary', () => {
   })
 
   it('does not claim one transaction merely because the timestamps agree', () => {
-    /*
-     * Two different acts can commit in the same second, and every row written before migration
-     * 0026 carries no causation at all -- so a NULL must never match another NULL. Same rule
-     * causationSiblings() enforces, stated here because this is the other place it could be broken.
-     */
+    /* Two different acts can commit in the same second, and legacy rows carry no causation, so a
+       NULL must never match another NULL. */
     const summary = clusterSummary([
       ev(1, 'creation',    '2026-08-21T09:00:00Z'),
       ev(2, 'operational', '2026-08-21T09:00:00Z')
@@ -254,16 +207,10 @@ describe('the hover summary', () => {
 })
 
 
-/*
- * The wiring, exercised through the DOM.
- *
- * Everything above tests the pure functions, which leaves one thing unasserted: whether the
- * component actually USES them. jsdom reports `offsetWidth: 0` for every element, so the real page
- * takes the no-measurement path in tests and no amount of pure-function coverage would notice a
- * component that computed the groups and then drew every event singly anyway.
- *
- * So the measurement is stubbed and the rendered track is read back.
- */
+/* The wiring, exercised through the DOM. jsdom reports `offsetWidth: 0`, so the real page takes the
+   no-measurement path in tests and pure-function coverage would not notice a component that
+   computed the groups and drew every event singly. The measurement is stubbed and the rendered
+   track read back. */
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
@@ -272,13 +219,9 @@ vi.mock('../api', async () => {
 describe('the component draws the badges', () => {
   const DEVICES = [{ asset_id: 'dev-1', asset_name: 'Simulated_CNC_01', last_birth_metrics: [] }]
 
-  /*
-   * THREE EVENTS, AND THE THIRD IS LOAD-BEARING. The x axis is scaled to the events themselves, so
-   * a fixture of only the two close ones would put them at fractions 0 and 1 -- at opposite ends of
-   * the track, touching nothing, and the test would pass while proving the opposite of what it
-   * claims. The distant third stretches the domain to nine hours, which is what makes two events
-   * two seconds apart land on the same pixel: the reported situation.
-   */
+  /* Three events, and the third is load-bearing: the x axis is scaled to the events, so two close
+     ones alone would sit at opposite ends of the track. The distant third stretches the domain to
+     nine hours. */
   const BURST = [
     {
       event_id: 1, entity_type: 'devices', entity_id: 'dev-1', event_type: 'INSERT',
@@ -308,22 +251,16 @@ describe('the component draws the badges', () => {
     vi.clearAllMocks()
     api.get.mockImplementation((path) => {
       if (path.startsWith('/api/v1/digital-thread')) {
-        /*
-         * THE RANGE CONTROL IS HONOURED, because one test below is about what narrowing it does.
-         * The window is a query parameter rather than a client-side filter (see timeWindow), so a
-         * narrower range returns fewer rows -- which shrinks the DOMAIN, which is what actually
-         * spreads a burst across the track. A mock that ignored `since` would make that test a
-         * no-op that still passed.
-         */
+        /* The range control is honoured: the window is a query parameter, so a narrower range
+           returns fewer rows, which shrinks the domain and spreads a burst. A mock that ignored
+           `since` would make that test a no-op. */
         return Promise.resolve(path.includes('since=') ? BURST : EVENTS)
       }
       if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
       return Promise.resolve([])
     })
-    /*
-     * jsdom has no layout, so `offsetWidth` is 0 everywhere and the component takes its
-     * no-measurement path. Stubbed for the track only, which is the element it measures.
-     */
+    /* jsdom has no layout, so `offsetWidth` is stubbed for the track only, the element the
+       component measures. */
     originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')
     Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
       configurable: true,
@@ -337,9 +274,7 @@ describe('the component draws the badges', () => {
     }
   })
 
-  /** Badges on the timeline. Scoped to the track, so the legend's sample is not counted -- which
-   *  is also what pins the split between `.dt-cluster` the look and `.dt-track .dt-cluster` the
-   *  positioned marker. */
+  /** Badges on the timeline, scoped to the track so the legend's sample is not counted. */
   const badges = () => [...document.querySelectorAll('.dt-track .dt-cluster')]
   const dots = () => [...document.querySelectorAll('.dt-node')]
 
@@ -356,30 +291,20 @@ describe('the component draws the badges', () => {
     await draw()
 
     expect(badges()[0]).toHaveTextContent('2')
-    // The distant event collides with nothing, so it stays an ordinary coloured dot. A badge
-    // applied to everything would be as wrong as none at all -- it would claim density where
-    // there is none.
+    // The distant event collides with nothing, so it stays an ordinary dot.
     expect(dots()).toHaveLength(1)
   })
 
   it('applies the grouping even though the timeline does not exist on first paint', async () => {
-    /*
-     * THE BUG THIS CAUGHT WHEN THE FAN WAS BUILT, and it would have shipped invisibly. The
-     * measurement began as a `useEffect` with `[]` deps -- which runs while the page is still
-     * showing its spinner, finds no track to measure, records a width of 0, and never runs again.
-     * Grouping would then be disabled permanently, on a page that looked exactly as it did before.
-     */
+    /* The measurement must run after the track exists: a `useEffect` with `[]` deps runs while the
+       page is still showing its spinner, records a width of 0, and disables grouping permanently. */
     await draw()
     expect(badges()).toHaveLength(1)
   })
 
   it('leaves horizontal position untouched, which is the whole point', async () => {
-    /*
-     * THE PROPERTY THIS EXISTS TO PRESERVE. The badge must sit essentially where the two events
-     * are -- two seconds out of nine hours, so hard against the left end -- because grouping was
-     * chosen over nudging along the axis precisely so the time axis keeps telling the truth. If a
-     * future change displaced markers along x, this is what would catch it.
-     */
+    /* The property this exists to preserve: the badge sits where the two events are, hard against
+       the left end, because grouping was chosen over nudging along the axis. */
     await draw()
 
     expect(fractionOf(badges()[0].style.left)).toBeLessThan(0.001)
@@ -415,11 +340,8 @@ describe('the component draws the badges', () => {
   })
 
   it('keeps the badge ringed while Previous/Next steps through the events inside it', async () => {
-    /*
-     * The ring marks WHERE THE DRAWER IS. Stepping from the first member to the second does not
-     * move the drawer out of the group, so the highlight must not move either -- the events are
-     * both at that badge. Stepping once more leaves the group, and then it must.
-     */
+    /* The ring marks where the drawer is. Stepping from the first member to the second does not
+       leave the group, so the highlight must not move; stepping once more does. */
     await draw()
     fireEvent.click(badges()[0])
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
@@ -438,12 +360,8 @@ describe('the component draws the badges', () => {
   })
 
   it('dissolves the badge into individual markers when the range is narrowed', async () => {
-    /*
-     * THE RANGE CONTROL AS A ZOOM, end to end. Narrowing it drops the distant event from the
-     * result, which shrinks the domain from nine hours to two seconds -- and the same two events
-     * are now a track's width apart rather than a fraction of a pixel. Nothing about them changed;
-     * the pixels between them did, which is the whole basis of the threshold.
-     */
+    /* The range control as a zoom, end to end: narrowing it drops the distant event, the domain
+       shrinks to two seconds, and the same two events are a track's width apart. */
     await draw()
 
     fireEvent.change(screen.getByTitle('Limit the timeline to a time range'),

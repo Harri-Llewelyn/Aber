@@ -11,16 +11,10 @@ import { ActionButton } from './ActionButton'
 import { Model3DViewer } from './Model3DViewer'
 
 /**
- * Attach one 3D visual model to a device.
- *
- * The model becomes an AAS `File` element in a `VisualRepresentation` submodel on export, so this
- * is a publishing action, not just a convenience upload: the bucket is public-read (an arbitrary
- * AAS viewer has to be able to dereference the URL), and the banner says so rather than leaving an
- * operator to discover it from the migration.
- *
- * SIZE IS CHECKED HERE AS WELL AS ON THE BUCKET, and neither check is redundant. The bucket's
- * limit is the control -- it cannot be bypassed. This one exists so a 200 MB file is refused
- * instantly instead of after the operator has waited out a doomed upload.
+ * Attach one 3D visual model to a device. The model becomes an AAS `File` element in a
+ * `VisualRepresentation` submodel on export, so the bucket is public-read and the banner says so.
+ * Size is checked here as well as on the bucket, so an oversized file is refused before the upload
+ * rather than after.
  */
 export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const [busy, setBusy] = useState(false)
@@ -37,10 +31,8 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const MAX_BYTES = 50 * 1024 * 1024
 
   /**
-   * The stored size, fetched rather than remembered from the upload. A model attached in an
-   * earlier session -- or by another user -- has no size in this component's state, and reporting
-   * "attached" with no size while reporting it with one for a fresh upload would be an
-   * inconsistency the operator has to explain to themselves.
+   * The stored size, fetched rather than remembered from the upload, so a model attached in an
+   * earlier session or by another user reports the same way.
    */
   useEffect(() => {
     let cancelled = false
@@ -131,18 +123,11 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const downloadUrl = path ? model3dDownloadUrl(path) : null
 
   return (
-    /* NO HEADING OF ITS OWN. This used to carry "3D Visual Model" plus a line explaining that the
-       file becomes an AAS VisualRepresentation submodel -- two rows of chrome above a dropzone, in
-       a 360px column, restating the section label its container already prints beside the icon.
-       The AAS fact has not been lost: it is on the dropzone's own title, and the public-read
-       banner below still states the consequence that actually affects a decision. */
+    /* No heading of its own: the container prints the section label, and the AAS consequence is on
+       the dropzone's title and the public-read banner. */
     <div>
-      {/* THE MODEL ITSELF, ABOVE THE CONTROLS THAT MANAGE IT. A filename and a byte count identify
-          a file; they do not tell an operator whether the right machine is attached to the right
-          device, which is the one question this panel is opened to answer and the one a wrong
-          upload gets wrong silently. Only rendered when something is attached -- the dropzone
-          below is what the empty state looks like, and a placeholder canvas above it would be a
-          second empty state saying the same thing. */}
+      {/* The model itself, above the controls. Only rendered when something is attached; the
+          dropzone is the empty state. */}
       {path && <Model3DViewer path={path} name={device?.asset_name || device?.name} />}
 
       {path ? (
@@ -157,27 +142,21 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
             <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               Model attached: {modelFileName(path)}
             </div>
-            {/* THE SIZE ONLY. This line used to end with a small "Open" link, which was the only
-                way to reach the file and sat at 11px beside two full-sized buttons -- so the
-                control an operator wants most often was the least visible thing in the card
-                (issue #43). Getting the file is a Download button below now. */}
+            {/* The size only. Getting the file is the Download button below. */}
             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
               {size !== null ? formatFileSize(size) : 'size unavailable'}
             </div>
           </div>
-          {/* OUTSIDE THE `canManage` GATE, deliberately. The link this replaces was available to
-              every role, and moving downloading into the write-gated row would have taken the file
-              away from Operators and Auditors -- who are the roles most likely to want to open a
-              model and least likely to be replacing one. Reading a public-read object is not a
-              write, and the export already publishes the URL. */}
+          {/* Outside the `canManage` gate: reading a public-read object is not a write, and
+              Operators and Auditors are the roles most likely to open a model. */}
           <div style={{ display: 'flex', gap: '8px' }}>
             {downloadUrl && (
               <a
                 className="btn btn-primary"
                 href={downloadUrl}
-                /* Belt and braces: `download` is ignored cross-origin, so `?download=` on the URL
-                   is what actually sets Content-Disposition. Kept because it costs nothing and is
-                   what applies if the bucket is ever served same-origin. */
+                /* `download` is ignored cross-origin, so `?download=` on the URL is what sets
+                   Content-Disposition; the attribute applies if the bucket is ever served
+                   same-origin. */
                 download={modelFileName(path)}
                 title="Download this model file"
               >
@@ -218,9 +197,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
           role="button"
           tabIndex={canManage ? 0 : -1}
           aria-label="Upload a 3D model"
-          /* Where the removed heading's second line went. The AAS consequence still matters --
-             this is a publishing action, not a convenience upload -- but it is context for the
-             gesture rather than two permanent rows above it. */
+          /* The AAS consequence, as context for the gesture. */
           title="Attached models are exported as an AAS VisualRepresentation submodel"
           onKeyDown={(e) => {
             if ((e.key === 'Enter' || e.key === ' ') && canManage && !busy) {

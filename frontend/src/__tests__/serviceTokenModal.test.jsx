@@ -35,9 +35,9 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('isMintableFromPage', () => {
   /**
-   * THE RULE THAT KEEPS A BUTTON OFF TWO ROWS, and the reason it is keyed on the mint command
-   * rather than on a list of ids: a principal created at runtime must be mintable without anybody
-   * editing the frontend, and the two environment-key identities must not be.
+   * The rule that keeps a button off two rows, keyed on the mint command rather than a list of ids:
+   * a principal created at runtime must be mintable without editing the frontend, and the two
+   * environment-key identities must not be.
    */
   it('admits the MCP principal', () => {
     expect(isMintableFromPage(describePrincipal('b0000000-0000-4000-8000-000000000001'))).toBe(true)
@@ -73,16 +73,12 @@ describe('ServiceTokenModal', () => {
   )
 
   /**
-   * THE ONE FACT THAT DIFFERS FROM THE BROKER CREDENTIAL DIALOG, and the one most likely to be
-   * assumed wrong. That modal always replaces -- a broker holds one password per username -- so an
-   * operator who has used it will mint here to "rotate" and end up with two live credentials.
+   * The one fact that differs from the broker credential dialog: that modal always replaces, this
+   * one adds, so "rotating" here leaves two live credentials.
    */
   it('says a mint adds a credential rather than replacing one', () => {
     const { container } = open()
-    // ASSERTED ON THE FLATTENED TEXT, because `adds` and `not` are each wrapped in <strong> for
-    // emphasis -- so a text matcher looking for the whole sentence finds nothing even though the
-    // sentence is on screen. The emphasis is the point of the copy and should not be removed to
-    // suit the test.
+    // Asserted on the flattened text, because `adds` and `not` are each wrapped in <strong>.
     const copy = container.textContent.replace(/\s+/g, ' ')
     expect(copy).toContain('This adds a credential')
     expect(copy).toContain('does not replace any token this identity already holds')
@@ -109,9 +105,9 @@ describe('ServiceTokenModal', () => {
   })
 
   /**
-   * THE SCOPE IS READ FROM THE RESPONSE, not hardcoded here, so the dialog cannot claim coverage
-   * 0074 does not have. Revocation is a PostgREST hook; storage, realtime, the edge runtime and
-   * Studio verify the signature themselves and keep accepting a withdrawn token until it expires.
+   * The scope is read from the response, not hardcoded: revocation is a PostgREST hook, and
+   * storage, realtime, the edge runtime and Studio keep accepting a withdrawn token until it
+   * expires.
    */
   it('states that revoking reaches the API only', async () => {
     api.mintServiceToken.mockResolvedValue(MINTED)
@@ -122,9 +118,8 @@ describe('ServiceTokenModal', () => {
   })
 
   /**
-   * THE STEP MUST NOT ADVANCE ON FAILURE. The edge function discards a token it could not record
-   * rather than returning it, so a failure here means no credential exists -- and an empty reveal
-   * screen would tell the operator one does and that they missed it.
+   * The step must not advance on failure: the edge function discards a token it could not record,
+   * so a failure means no credential exists.
    */
   it('stays on the confirm step when the mint is refused', async () => {
     api.mintServiceToken.mockRejectedValue(new Error('that principal can sign in'))

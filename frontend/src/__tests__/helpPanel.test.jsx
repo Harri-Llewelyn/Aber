@@ -1,15 +1,8 @@
 /**
- * Contextual help: the corpus, the renderer, and the drawer that shows them (issue #39).
- *
- * WHAT IS WORTH ASSERTING HERE, given that `scripts/check-docs-drift.mjs` already checks the corpus
- * covers every page. The guard reads the DIRECTORY; these tests read what the BUNDLE actually
- * resolved. Those are two different claims, and the gap between them is a real failure mode: a
- * `?raw` glob that stops matching -- a moved directory, a changed Vite option -- leaves every file
- * on disk, passes the guard, and ships a help button that opens an empty drawer on every page.
- *
- * The renderer's tests are all about the ONE thing a restricted renderer must never do quietly,
- * which is render its own source text at the reader. Each case below is something that would look
- * fine in the file and wrong on the screen.
+ * Contextual help: the corpus, the renderer, and the drawer. `scripts/check-docs-drift.mjs` reads
+ * the directory; these read what the bundle resolved, so a `?raw` glob that stops matching fails
+ * here rather than shipping an empty drawer. The renderer tests are about the one thing a
+ * restricted renderer must never do quietly: render its own source text at the reader.
  */
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
@@ -20,17 +13,15 @@ import { TABS } from '../navigation'
 
 describe('the help corpus reaches the bundle', () => {
   it('resolves a help file for every navigable page', () => {
-    // Not a re-run of the drift check: that one lists the directory, this one asks what the glob
-    // in help/index.js actually imported. A guard that passes over files nothing bundles is the
-    // failure this catches.
+    // Not a re-run of the drift check: that one lists the directory, this one asks what the glob in
+    // help/index.js imported.
     const missing = TABS.map((t) => t.id).filter((id) => !HELP_CORPUS[id])
     expect(missing).toEqual([])
   })
 
   it('resolves each one to prose rather than to a module wrapper', () => {
-    // `import.meta.glob` without `import: 'default'` yields module objects, and `String(module)`
-    // is "[object Module]" -- which renders as a single grey paragraph on every page and looks
-    // deliberate. Assert the text is text.
+    // `import.meta.glob` without `import: 'default'` yields module objects, and `String(module)` is
+    // "[object Module]". Assert the text is text.
     for (const [id, source] of Object.entries(HELP_CORPUS)) {
       expect(typeof source, `help for ${id} is not a string`).toBe('string')
       expect(source.length, `help for ${id} is empty`).toBeGreaterThan(200)
@@ -59,9 +50,7 @@ describe('the help renderer', () => {
   })
 
   it('does not turn raw HTML in a help file into markup', () => {
-    // There is no `dangerouslySetInnerHTML` in the renderer and this is the assertion that keeps
-    // it that way. The corpus is ours, so this is not about defending against these files -- it is
-    // that the alternative leaves an HTML sink in the app for whatever is piped in next.
+    // There is no `dangerouslySetInnerHTML` in the renderer, and this keeps it that way.
     const { container } = render(<HelpMarkdown source={'<img src=x onerror="alert(1)">'} />)
     expect(container.querySelector('img')).toBeNull()
     expect(container.textContent).toContain('<img src=x')

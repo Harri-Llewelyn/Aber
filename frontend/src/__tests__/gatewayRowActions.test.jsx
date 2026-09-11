@@ -35,12 +35,8 @@ const show = async (rows, hasPermission = () => true) => {
   api.get.mockImplementation(routeGet(rows))
   render(<GatewaysTab showToast={vi.fn()} hasPermission={hasPermission} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-  /*
-   * THE PLAYBACK GATEWAY IS HIDDEN BY DEFAULT, so a fixture containing one has to reveal it before
-   * anything can be asserted about its row. That is the behaviour rather than an inconvenience:
-   * these tests are about which ACTIONS it offers, and the filter is a separate question with its
-   * own test. Revealing it here keeps each test about the thing it names.
-   */
+  /* The playback gateway is hidden by default, so a fixture containing one has to reveal it first.
+     The filter is a separate question with its own test. */
   if (rows.some(r => r.is_shadow)) {
     fireEvent.click(await screen.findByText(/Show playback gateway/))
   }
@@ -48,14 +44,8 @@ const show = async (rows, hasPermission = () => true) => {
 }
 
 /**
- * Select a gateway row and return its context panel.
- *
- * The overflow menu is gone. Digital Thread and Documents moved into the drawer, which left a
- * three-dot menu holding one item -- a click to reveal a click -- so Archive was promoted into the
- * row beside Edit and the menu was removed. The documents accordion moved with them: it was
- * mounted once per row, collapsed, and is now mounted once for the selected gateway.
- *
- * The rules under test are unchanged. Only where they render has moved.
+ * Select a gateway row and return its context panel, where the actions live. Archive sits in the
+ * row beside Edit; the documents accordion is mounted once for the selected gateway.
  */
 const openPanel = (name = 'Virtual_Gateway_NodeRED') => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
@@ -104,10 +94,8 @@ describe('gateway row actions', () => {
 
     expect(panel.getByText(/View Digital Thread/i)).toBeTruthy()
     expect(panel.getByText(/Manage Links/i)).toBeTruthy()
-    // EXACT, matching the three other assertions about this action in this file. The loose regex
-    // this replaces did substring matching across the whole panel, so it broke the moment another
-    // component in the drawer mentioned the control by name in its prose -- which is a false
-    // failure about an action that is still there.
+    // Exact, matching the other assertions about this action in this file: a loose regex broke when
+    // another component in the drawer mentioned the control by name.
     expect(panel.getByText('Edit Details')).toBeTruthy()
   })
 
@@ -133,17 +121,13 @@ describe('gateway row actions', () => {
     const panel = openPanel()
     expect(panel.getByText('Edit Details').closest('button').disabled).toBe(true)
     expect(panel.getByText(/Archive Gateway/i).closest('button').disabled).toBe(true)
-    // THE AUDIT TRACE IS WITHDRAWN, NOT MERELY DISABLED, as on Devices. `digital_thread` has its
-    // own RLS and returns no rows without `digital_thread:read`, so the button led to a page that
-    // renders an empty table and explains nothing -- and the nav now hides that page from this
-    // reader, so a disabled button would advertise a destination that no longer exists for them.
+    // The audit trace is withdrawn, not disabled, as on Devices: without `digital_thread:read` the
+    // page returns no rows, and the nav hides it from this reader.
     expect(panel.queryByText(/View Digital Thread/i)).toBeNull()
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {
-    // The accordion is gone from both places. It was mounted once per row (a hundred collapsed
-    // drawers on a hundred-gateway page), then once in the drawer -- where it was a cramped list
-    // in a 360px column. Manage Links opens the full editor instead.
+    // The accordion is gone from the row and the drawer; Manage Links opens the full editor.
     await show([gateway()])
 
     expect(inRow().queryByText('Attached Document Links')).toBeNull()
@@ -154,37 +138,14 @@ describe('gateway row actions', () => {
   })
 })
 
-/*
- * THE PAGE ASKS FOR NO DOCUMENT COUNTS, and that absence is the assertion.
- *
- * It used to fetch every gateway's document links on mount and group them by entity id, to feed a
- * badge on each row's accordion. The density refactor retired those accordions into the context
- * drawer and deleted the badge, but kept the request against a badge that might come back -- and
- * this block pinned the request so nobody tidied it away.
- *
- * That badge is not coming. The request has been removed from all three asset pages, so what needs
- * pinning is the opposite: a page load must not spend a round trip on a number nothing renders.
- * Documents are still reachable, and still counted -- EntityLinksModal issues its own
- * per-entity read when it opens, which is the only place the figure was ever shown.
- */
+/* The page asks for no document counts, and that absence is the assertion: a page load must not
+   spend a round trip on a number nothing renders. EntityLinksModal issues its own per-entity read
+   when it opens. */
 /**
- * THE PLAYBACK GATEWAY IS VISIBLE AND ALMOST INERT.
- *
- * It is seeded by 0060 and stays on this page deliberately -- it holds a broker credential an
- * operator has to mint, its shadow devices hang off it, and hiding it would make the one gateway
- * that needs setting up the one nobody can see. What it must NOT offer is the two actions that are
- * wrong for it, for different reasons:
- *
- *   * ARCHIVE removes the only edge node broker playback can publish as. ensure_shadow_devices()
- *     finds it by flag, so the failure lands weeks later when somebody starts a job, and the
- *     archive itself reports success. 0067 refuses it in the database; this is the button.
- *   * REQUEST REBIRTH is addressed to a node nobody is listening as. The playback worker only
- *     publishes -- it holds no subscription at all -- so the NCMD reaches nothing and the request
- *     records something that can never be answered.
- *
- * MINTING A CREDENTIAL IS NOT IN THAT LIST, and that is the point worth pinning: playback cannot
- * authenticate without one, and 0060's own NOTICE tells the operator to mint it here and put it in
- * MQTT_PLAYBACK_CREDENTIALS.
+ * The playback gateway is visible and almost inert. It stays on this page because it holds a broker
+ * credential an operator has to mint. It must not offer Archive (it is the only edge node playback
+ * can publish as; the database refuses it too) or Request Rebirth (the playback worker holds no
+ * subscription, so the NCMD reaches nothing). Minting a credential is not in that list.
  */
 describe('the playback gateway', () => {
   const playback = () => gateway({
@@ -207,15 +168,9 @@ describe('the playback gateway', () => {
   })
 
   /**
-   * EDIT IS WITHDRAWN BECAUSE THE FORM OFFERS WRITES THE DATABASE REFUSES, which is a stronger
-   * reason than "there is nothing worth editing".
-   *
-   * `gateways_shadow_is_simulated` (0059) is `NOT is_shadow OR is_simulated`, and this is the one
-   * row where is_shadow is true. The Type control offers Remote, Host and Simulated; the first two
-   * set is_simulated = false, so two of its three options come back a CHECK violation on this
-   * gateway. That is the failure the two checkboxes had before 0064 -- a combination an operator
-   * can pick and then have rejected -- reappearing on one row because the form cannot express
-   * "this one is already a fourth type".
+   * Edit is withdrawn because the form offers writes the database refuses:
+   * `gateways_shadow_is_simulated` is `NOT is_shadow OR is_simulated`, and two of the Type
+   * control's three options set is_simulated = false.
    */
   it('cannot have its details edited', async () => {
     await show([playback()])
@@ -270,14 +225,9 @@ describe('gateway document links', () => {
 
 
 /**
- * The Playback gateway is hidden from the fleet list by default.
- *
- * It is one seeded row that connects to no machine, and almost every action on it has been
- * withdrawn -- so in a list of real connectors it reads as a gateway that is permanently offline,
- * which is the one thing an operator scanning that page is looking for.
- *
- * IT IS HIDDEN, NOT REMOVED. Minting its broker credential is the single act an operator must
- * perform on it, and 0060's NOTICE names this page as where.
+ * The playback gateway is hidden from the fleet list by default: it connects to no machine and
+ * reads as permanently offline. Hidden, not removed, since minting its broker credential is done
+ * here.
  */
 describe('the playback gateway is filtered out by default', () => {
   const playbackRow = () => ({
@@ -313,12 +263,9 @@ describe('the playback gateway is filtered out by default', () => {
   })
 
   it('is not surfaced by choosing Simulated in the Type filter', async () => {
-    /*
-     * THE REGRESSION THIS GUARDS. A shadow gateway IS simulated -- gateways_shadow_is_simulated
-     * requires it -- so a Type filter that matched on the flag rather than on the derived type
-     * would quietly bring the Playback gateway back under "Simulated". That is the "one word
-     * meaning three things" problem returning by the back door, which 0064 removed.
-     */
+    /* The regression this guards: a shadow gateway is simulated, so a Type filter that matched on
+       the flag rather than the derived type would bring the playback gateway back under
+       "Simulated". */
     api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 

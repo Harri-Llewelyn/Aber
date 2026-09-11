@@ -1,34 +1,16 @@
 import React from 'react'
 
 /**
- * The smallest Markdown renderer that can carry the help corpus, and no more (issue #39).
+ * The smallest Markdown renderer that carries the help corpus: the corpus is written in this
+ * repository, so no dependency and no CommonMark. Every branch builds React elements, never
+ * `dangerouslySetInnerHTML`, so raw HTML in a help file is text. `scripts/check-docs-drift.mjs`
+ * fails the build on any construct outside this subset.
  *
- * WHY NOT react-markdown. The corpus is thirteen files this repository writes, reviews and ships
- * in its own bundle -- it is not untrusted input, and it does not need CommonMark. Against that,
- * a renderer is a dependency in the browser bundle, in Renovate's queue and in the monthly CVE
- * scan, added for a feature whose entire job is to show prose. The subset below is what the
- * corpus actually uses, and `scripts/check-docs-drift.mjs` fails the build if a help file uses
- * anything else -- so an unsupported construct is a red check rather than a paragraph that
- * renders with literal asterisks in it.
+ * Supported: `## Heading` (h3; the panel title is the h2), `### Heading` (h4), `- item`, `1. item`,
+ * paragraphs from consecutive lines, **bold**, `code`, and [label](https://...).
  *
- * NO `dangerouslySetInnerHTML`, ANYWHERE. Every branch below builds React elements, so raw HTML
- * in a help file is text and cannot become markup. That is not defence against these files --
- * they are ours -- it is that the alternative puts an HTML sink in the app permanently, and the
- * next thing piped into it will not be ours.
- *
- * THE SUPPORTED SUBSET, and it is deliberately closed:
- *
- *   ## Heading            a section within the panel (rendered <h3>; the panel title is the h2)
- *   ### Heading           a subsection (<h4>)
- *   - item                unordered list
- *   1. item               ordered list, for sequences that are genuinely ordered
- *   paragraph text        consecutive lines join into one paragraph
- *   **bold**  `code`  [label](https://...)
- *
- * LINKS MUST BE ABSOLUTE http(s). A relative link is correct in a repository and dead in a
- * browser -- `../../README.md` resolves against the dashboard's own routes and 404s. The renderer
- * therefore renders a non-absolute link as its label alone, and the drift check rejects one at
- * build time so nobody has to notice the difference at runtime.
+ * Links must be absolute http(s): a relative link resolves against the dashboard's routes and 404s,
+ * so a non-absolute link renders as its label and the drift check rejects it.
  */
 
 // One pass, one alternation: code first so `**` inside a code span stays literal, then bold, then

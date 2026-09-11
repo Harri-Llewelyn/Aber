@@ -1,13 +1,8 @@
 /**
- * The ASHRAE 223P vocabulary, as served from `ashrae223_vocabulary` (archived migration 0013).
- *
- * Unlike MTConnect and OPC UA, a 223P concept is NOT positional. `Fan` is a class of thing, not a
- * reading taken somewhere -- there is no browse path to derive a group from, and no instance for
- * the operator to name. So every concept files under one group, `Building`, and what the operator
- * supplies is which fan.
- *
- * ⚠ The standard is still in public review. These concepts come from a pre-publication ontology
- * release and may change before ASHRAE 223 is published; see the header of archived migration 0013.
+ * The ASHRAE 223P vocabulary, as served from `ashrae223_vocabulary`. A 223P concept is not
+ * positional: `Fan` is a class of thing, so every concept files under one group, `Building`, and
+ * the operator supplies which fan. The standard is still in public review, so these concepts may
+ * change before publication.
  */
 
 import { STANDARDS } from './standards'
@@ -30,12 +25,9 @@ export function conceptByName(vocabulary, name) {
 }
 
 /**
- * The vocabulary arranged into browsable sections.
- *
- * Sectioned by the immediate superclass rather than by `concept_kind`: 640 concepts under four
- * kind headings is not browsable, and "what kind of thing is this" is answered by the hierarchy an
- * operator already thinks in -- a Fan is Equipment. Concepts at the top of the hierarchy collect
- * under `Root`, which is where the abstract modelling constructs live.
+ * The vocabulary arranged into browsable sections, by immediate superclass rather than
+ * `concept_kind`, which is the hierarchy an operator thinks in. Concepts at the top of the
+ * hierarchy collect under `Root`.
  */
 export function ashrae223Sections(vocabulary) {
   const buckets = new Map()
@@ -61,12 +53,9 @@ export function ashrae223Sections(vocabulary) {
 }
 
 /**
- * The Add Metric form state a concept implies.
- *
- * `datatype` is deliberately absent. A 223P concept says what a thing IS, not what type its reading
- * has -- a `Sensor` may report a temperature, a pressure or a boolean occupancy -- so guessing one
- * here would put a wrong immutable datatype on a metric, which is the one field that cannot be
- * corrected afterwards. The operator picks it.
+ * The Add Metric form state a concept implies. `datatype` is absent: a 223P concept says what a
+ * thing is, not what type its reading has, and datatype is the one field that cannot be corrected
+ * afterwards.
  */
 export function ashrae223Prefill(concept) {
   if (!concept) return null

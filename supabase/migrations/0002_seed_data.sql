@@ -2342,8 +2342,10 @@ INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000006', 'Grafana Dashboards', 'MONITORING', 'http://localhost:3002', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000007', 'Supabase API Gateway (Kong)', 'API_GATEWAY', 'http://127.0.0.1:54321', 'UNKNOWN', NULL, NULL)
-ON CONFLICT (service_name) DO NOTHING;
+-- ON CONFLICT (id) for this row too: a database from before 0096 holds the id under the old name
+-- 'Supabase API Gateway (Kong)'. 0096 then does the rename.
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000007', 'Supabase API Gateway (Envoy)', 'API_GATEWAY', 'http://127.0.0.1:54321', 'UNKNOWN', NULL, NULL)
+ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000008', 'Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000009', 'Supabase PostgREST API', 'REST_API', 'http://127.0.0.1:54321/rest/v1', 'UNKNOWN', NULL, NULL)
@@ -7726,7 +7728,7 @@ BEGIN
   PERFORM vault.create_secret(v_url, 'supabase_functions_url',
     'Base URL of the edge function router on this target, read by revoke_gateway_credential().');
   PERFORM vault.create_secret(v_anon, 'supabase_anon_key',
-    'Anon key, used only to pass Kong key-auth on the revocation call. Not authorisation.');
+    'Anon key, used only to pass the gateway key check on the revocation call. Not authorisation.');
   PERFORM vault.create_secret(v_secret, 'gateway_revoke_secret',
     'Shared secret the revoke-gateway-credential function verifies. This is the authorisation.');
 END;

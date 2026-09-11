@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { useSetting } from '../../hooks/useSettings'
 import CopyableId from '../common/CopyableId'
 import { IconArchive, IconAlertTriangle } from '../common/Icons'
+import { HelpTip } from '../common/HelpTip'
 import {
   COLD_STATES,
   coldStateLabel,
@@ -13,39 +14,21 @@ import {
 } from '../../utils/coldStorage'
 
 /**
- * Cold Storage — telemetry that has been tiered out of the hypertable.
- *
- * =================================================================================================
- * NOT "ARCHIVES", AND THE NAME WAS SETTLED BEFORE THIS PAGE EXISTED.
- *
- * `ArchivesTab.jsx` means ENTITY archives -- archived cells, gateways and devices -- and carries a
- * Restore button and an auto-purge timer. This is chunk tiering: Parquet objects on storage, with
- * no restore and no timer. The two are kept apart deliberately: they share only the English
- * word, and putting them together would put a Restore control beside rows it cannot restore.
- *
- * =================================================================================================
- * WHAT THIS PAGE IS FOR, WHICH IS NARROWER THAN "SHOW THE MANIFEST"
- *
- * One question: WHERE IS MY HISTORY. Once a chunk is dropped the hypertable can no longer answer
- * how far back the data goes, and the only record is the manifest. So the page leads with the span
- * it covers and with what is outstanding, and the row list is the detail behind that.
- *
- * IT IS READ-ONLY, DELIBERATELY. Exporting and dropping are done by `python -m cold_archive`, and
- * a button here would put an irreversible act one click from a table -- the same reasoning that
- * keeps minting off the Access Control page: "these tokens cannot be revoked, so
- * issuing one should cost more than a click." Dropping a chunk is the stronger case.
+ * Cold Storage: telemetry that has been tiered out of the hypertable as Parquet objects. Not
+ * "Archives", which is entity archives with a Restore button and a purge timer; there is no restore
+ * here. The page leads with the span the manifest covers and what is outstanding, since the
+ * hypertable can no longer answer how far back the data goes. Read-only: exporting and dropping are
+ * done by `python -m cold_archive`.
  */
 /** The roles `cold_storage_rows()` returns rows to — kept in step with the function's own WHERE. */
-export const COLD_STORAGE_ROLES = ['Administrator', 'Shopfloor_Manager', 'Auditor']
+const COLD_STORAGE_ROLES = ['Administrator', 'Shopfloor_Manager', 'Auditor']
 
 export function ColdStorageTab({ showToast, userRole }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  // READ SO THE EMPTY STATE CAN TELL TWO SITUATIONS APART. "Nothing archived because the feature is
-  // off" and "nothing archived although it is on" call for opposite next steps, and the page cannot
-  // work out which from an empty list. Defaults to false, matching 0068's own default, so a failed
-  // settings read shows the more cautious of the two rather than claiming archiving is running.
+  // Read so the empty state can tell "archiving is off" from "on but nothing archived". Defaults to
+  // false, matching the setting's own default, so a failed read shows the more cautious of the two.
   const archiveEnabled = useSetting('archive.enabled', false)
 
   const load = useCallback((initial = false) => {
@@ -75,17 +58,12 @@ export function ColdStorageTab({ showToast, userRole }) {
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
-              Cold telemetry <span className="section-count">{summary.total}</span>
+              Cold telemetry
+              <HelpTip
+                label="About cold telemetry"
+                text="Telemetry past the retention threshold is exported to Apache Parquet on object storage, read back and checked, and only then dropped from the hypertable. Each row is one chunk. Nothing is deleted by this page: export and drop are run by the cold_archive process."
+              />
             </h3>
-          </div>
-
-          <div className="card-body">
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
-              Telemetry past the retention threshold is exported to Apache Parquet on object
-              storage, read back and checked, and only then dropped from the hypertable. Each row
-              below is one chunk. <strong>Nothing here is deleted by this page</strong> — export and
-              drop are run by <code>python -m cold_archive</code>.
-            </p>
           </div>
 
           {error && (
@@ -96,9 +74,7 @@ export function ColdStorageTab({ showToast, userRole }) {
             </div>
           )}
 
-          {/* THE SUMMARY LEADS, because the row list answers a narrower question than the page does.
-              "How far back can I go" is unanswerable from the hypertable once anything has been
-              dropped, and this is the only place it is recorded. */}
+          {/* The summary leads: how far back the history goes is recorded only here. */}
           {!error && summary.total > 0 && (
             <div className="card-body" style={{ paddingTop: 0, display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
               <Stat label="On cold storage" value={summary.archived} />
@@ -124,21 +100,17 @@ export function ColdStorageTab({ showToast, userRole }) {
           {!error && rows.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon"><IconArchive size={36} /></div>
-              {/* TWO DIFFERENT EMPTY STATES, because an empty list here is genuinely ambiguous.
-                  cold_storage_rows() gates on the role in its BODY, so a caller without one gets
-                  zero rows rather than a refusal -- exactly as every RLS read on this schema does.
-                  Resolving that from the session's role is honest; rendering "nothing archived" at
-                  someone who simply cannot see it would be a claim the page has no basis for. */}
+              {/* Two empty states. cold_storage_rows() gates on the role in its body, so a caller
+                  without one gets zero rows rather than a refusal, and "nothing archived" would be
+                  a claim the page has no basis for. */}
               {userRole && !COLD_STORAGE_ROLES.includes(userRole) ? (
                 <div className="empty-text">
                   Cold telemetry is readable by Administrator, Shopfloor_Manager and Auditor. This
                   list is empty because of your role, not because nothing is archived.
                 </div>
               ) : archiveEnabled ? (
-                /* ON, AND STILL EMPTY -- which is the state that had no wording and needed one.
-                   Turning the setting on arms the exporter; it does not run it, and nothing on a
-                   Compose stack does. Telling somebody who has just switched it on that "cold
-                   storage is off" is the one thing this cell must not say. */
+                /* On, and still empty. Turning the setting on arms the exporter; it does not run
+                   it, and nothing on a Compose stack does. */
                 <div className="empty-text">
                   Archiving is <strong>on</strong> and runs by itself — the{' '}
                   <code>cold-archiver</code> service exports, verifies and drops on a timer
@@ -186,9 +158,8 @@ export function ColdStorageTab({ showToast, userRole }) {
                       <td style={{ fontSize: '12px' }}>{Number(r.row_count || 0).toLocaleString()}</td>
                       <td style={{ fontSize: '12px' }}>{formatBytes(r.object_bytes)}</td>
                       <td>
-                        {/* The meaning is a tooltip and the dotted underline is what says so --
-                            the pattern the Access Control page uses, and for the same reason: it is
-                            read once and then in the way every time after. */}
+                        {/* The meaning is a tooltip and the dotted underline says so, as on the
+                            Access Control page. */}
                         <span
                           className={`badge badge-${coldStateTone(r.state)}`}
                           style={{
@@ -221,9 +192,8 @@ export function ColdStorageTab({ showToast, userRole }) {
             </div>
           )}
 
-          {/* THE ONE THING A READER MUST NOT MISS, and it is why this sits under the table rather
-              than in a tooltip: for every other bucket in this platform an object is a copy. Here
-              it is the original, and `docker compose down -v` takes it. */}
+          {/* Under the table rather than in a tooltip: for every other bucket an object is a copy.
+              Here it is the original, and `docker compose down -v` takes it. */}
           {summary.archived > 0 && (
             <div className="card-footer" style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
               <strong>These objects are the only copy.</strong> The rows behind

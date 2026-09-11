@@ -102,23 +102,17 @@ describe('usePermissions hook', () => {
     expect(result.current.hasPermission(PERMISSION_UUIDS.TELEMETRY_READ)).toBe(true)
     expect(result.current.hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)).toBe(true)
 
-    // The platform, which migration 0069 moved to Administrator. THIS HALF USED TO BE TRUE OF
-    // BOTH ROLES: the fallback map spelled Shopfloor_Manager `Object.values(PERMISSION_UUIDS)`,
-    // so the two names offered identical dashboards and the distinction was decoration.
-    //
-    // These are assertions about what is OFFERED. Each is enforced somewhere real: SCHEMA_MANAGE
-    // by the write policies on schemas, metric_catalog and metric_groups (0069), GITOPS_MANAGE by
-    // ALLOWED_ROLES in deploy-nodered. AUTHZ_MANAGE has no control to gate yet, which is the
-    // reason the split lands before the role-assignment UI rather than after it.
+    // The platform permissions belong to Administrator alone. These are assertions about what is
+    // offered; each is enforced server-side: SCHEMA_MANAGE by the write policies on schemas,
+    // metric_catalog and metric_groups, GITOPS_MANAGE by ALLOWED_ROLES in deploy-nodered.
     expect(result.current.hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.AUTHZ_MANAGE)).toBe(false)
   })
 
   it('grants an Administrator the three permissions a Shopfloor_Manager no longer holds', async () => {
-    // The other side of the pair above, and the one that would catch a fallback map narrowed too
-    // far. A split that took a capability from BOTH roles would leave nobody able to publish a
-    // schema, and every assertion in the manager test would still pass.
+    // The other side of the pair, which would catch a fallback map narrowed too far: a split that
+    // took a capability from both roles would leave nobody able to publish a schema.
     const session = {
       user: {
         id: 'user-admin-split',

@@ -75,21 +75,37 @@ export const DIGITAL_THREAD_ACTIONS = {
  * any consumer is left behind.
  */
 export const DIGITAL_THREAD_ENTITY_TYPES = [
-  { kind: 'CELL',             table: 'cells',              label: 'Cells' },
-  { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways' },
-  { kind: 'DEVICE',           table: 'devices',            label: 'Devices' },
+  { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset' },
+  { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset' },
+  { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset' },
   // The security lane (0070), in the order a reader meets it: who holds what, what the machines
   // are, then the contracts and settings that shape both.
-  { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments' },
-  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Service identities' },
-  { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas' },
-  { kind: 'SETTING',          table: 'system_settings',    label: 'Settings' },
+  { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security' },
+  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Service identities', domain: 'security' },
+  { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
+  { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
   // `device_nameplate` is keyed by the device id, so a nameplate approval also belongs to that
   // device's own history (the entity thread in api.js unions the two).
-  { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates' },
-  { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals' },
+  { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
+  { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
 ];
+
+/**
+ * The roles the `digital_thread_select_security` policy admits to the security domain. The asset
+ * domain is readable by every role that holds `digital_thread:read`.
+ */
+export const DIGITAL_THREAD_SECURITY_ROLES = ['Administrator', 'Auditor'];
+
+/**
+ * The entity types a role may ask the Digital Thread for. A kind the policy would return no rows
+ * for is left out of the filter, so a Shopfloor_Manager is not offered a lane that always reads
+ * "no events". An unknown role (still loading) is offered everything.
+ */
+export function digitalThreadEntityTypesFor(userRole) {
+  if (!userRole || DIGITAL_THREAD_SECURITY_ROLES.includes(userRole)) return DIGITAL_THREAD_ENTITY_TYPES;
+  return DIGITAL_THREAD_ENTITY_TYPES.filter(e => e.domain !== 'security');
+}
 
 /** Stored `entity_type` -> the UI's spelling. What the timeline reads rows through. */
 export const ENTITY_KIND_BY_TABLE = Object.fromEntries(
@@ -117,7 +133,7 @@ export const VALID_TABS = [
 // Realtime has no replay and usePolling carries the 401 stop and backoff (hooks/useRealtimeTable.js).
 export const REALTIME_ENABLED = readFlag('VITE_ENABLE_REALTIME');
 export const POLL_INTERVAL_MS = 3000;
-export const RECONCILE_INTERVAL_MS = 60000;
+const RECONCILE_INTERVAL_MS = 60000;
 
 /**
  * Where the Report Bug button files an issue. Configurable so a fork's reports do not land on the

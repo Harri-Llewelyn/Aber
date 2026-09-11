@@ -7,11 +7,8 @@ import { ContextPanel } from '../components/common/ContextPanel'
 import { grafanaAlertUrl, GRAFANA_URL } from '../constants'
 
 /**
- * Where an active alert SURFACES, once Grafana has raised it.
- *
- * Three places read the same `platform_alerts_active` row -- the Topbar counter, a badge in the Devices
- * table and a banner in the context drawer -- and the pill has its own file. What is pinned here is
- * the drawer banner and the one thing all three now share: NO EMOJI.
+ * Where an active alert surfaces once Grafana has raised it. The pill has its own file; what is
+ * pinned here is the drawer banner and the rule all three surfaces share: no emoji.
  */
 
 const alert = {
@@ -45,9 +42,8 @@ describe('context drawer alert banner', () => {
     const banner = document.querySelector('.context-alert')
     const fields = document.querySelector('.context-panel-fields')
     expect(banner).toBeTruthy()
-    // Everything below the banner is a stable fact read in its own time; an active alert is the one
-    // item with a deadline on it. Compared by document position rather than by class order, because
-    // the failure mode is a reordered JSX block that still renders both.
+    // An active alert is the one item with a deadline, so it precedes the metadata. Compared by
+    // document position, because the failure mode is a reordered JSX block that still renders both.
     expect(banner.compareDocumentPosition(fields) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
@@ -60,12 +56,8 @@ describe('context drawer alert banner', () => {
   })
 
   /**
-   * The deep link out.
-   *
-   * The banner says "raised by Grafana. Thresholds and silences live there, not here" -- which tells
-   * an operator their next step is in another application and then leaves them to find its port
-   * number on the Directory page. This closes that gap, so it is the one thing in this presentational
-   * panel that navigates on its own initiative.
+   * The deep link out. The banner says thresholds and silences live in Grafana, so this is the one
+   * thing in the presentational panel that navigates on its own.
    */
   describe('View in Grafana', () => {
     it('is a real anchor to a new tab, so middle-click and copy-link work', () => {
@@ -88,18 +80,9 @@ describe('context drawer alert banner', () => {
     })
 
     /**
-     * THE DEVICE FILTER IS THE BUG THIS GUARDS AGAINST, not an omission.
-     *
-     * The link also carried `label:sparkplug_id=<id>`, to land on one device's instance rather than
-     * on the rule covering all six. It returned an EMPTY LIST every time: /alerting/list searches
-     * rule DEFINITIONS, so `label:` matches the static labels declared in alert-rules.yaml -- which
-     * is `severity` and nothing else -- while `sparkplug_id` is a column in the rule's SQL that
-     * becomes a label on each evaluated SERIES. The two filters ANDed and the empty conjunct took
-     * the result with it.
-     *
-     * It is worth a test rather than a comment because the failure was silent AND plausible: an
-     * empty alert list reads as "the alert has cleared", which is the one wrong conclusion somebody
-     * following this link would act on. Adding the device back looks like an obvious improvement.
+     * The device filter is the bug this guards against: /alerting/list searches rule definitions,
+     * so `label:sparkplug_id=` matches nothing and the ANDed filter returns an empty list, which
+     * reads as the alert having cleared.
      */
     it('does NOT filter on sparkplug_id, which matches no rule definition', () => {
       panel({ alert })
@@ -121,10 +104,9 @@ describe('context drawer alert banner', () => {
       // The drawer is always mounted -- that is what makes the width transition possible -- so every
       // control in it has to be explicitly unreachable when collapsed.
       render(<ContextPanel open={false} type="DEVICE" title="x" onClose={vi.fn()} alert={alert} />)
-      // Queried out of the DOM rather than by role: the closed drawer carries `aria-hidden`, so it is
-      // already out of the accessibility tree and getByRole cannot see into it. That is the OTHER
-      // half of the same guarantee -- this asserts the tab order half, which aria-hidden alone does
-      // not give (a focusable element inside an aria-hidden subtree is still tabbable).
+      // Queried out of the DOM rather than by role: the closed drawer carries `aria-hidden`, so
+      // getByRole cannot see into it. This asserts the tab-order half, which aria-hidden alone does
+      // not give.
       const link = document.querySelector('.context-alert-link')
       expect(link).toBeTruthy()
       expect(link).toHaveAttribute('tabindex', '-1')
@@ -151,22 +133,12 @@ describe('grafanaAlertUrl', () => {
   })
 
   /**
-   * The three rule names it can be handed, taken from the provisioning file rather than invented.
-   *
-   * `alert_name` is Grafana's own `alertname` label, which IS the rule's `title:` -- so this is not a
-   * hardcoded list that can drift from the YAML, it is a check that the YAML's titles survive a
-   * round trip through the query string intact. A rule renamed to carry a character that needs
-   * escaping would otherwise produce a link that silently matched nothing.
+   * The rule names it can be handed, taken from the provisioning file. `alert_name` is Grafana's
+   * `alertname` label, which is the rule's `title:`, so this checks the YAML's titles survive a
+   * round trip through the query string.
    */
-  /*
-   * ONE RULE FILE NOW, AND IT USED TO BE TWO. The three MACHINE rules -- Thermal Excursion,
-   * Emergency Stop Engaged, Low OEE Availability -- lived in the demonstrator's own file and were
-   * retired with it, so reading a second path here is an ENOENT rather than a wider net.
-   *
-   * THE TITLES BELOW ARE DELIBERATELY AWKWARD ONES. What this pins is that a rule title survives a
-   * round trip through a query string, so the useful cases are the ones carrying spaces and mixed
-   * case -- not whichever titles happen to be first in the file.
-   */
+  /* One rule file. The titles picked are the awkward ones, carrying spaces and mixed case, since
+     round-tripping through a query string is what is pinned. */
   const ALERT_RULE_FILES = [
     '../../../grafana/provisioning/alerting/alert-rules.yaml',
   ]
@@ -185,22 +157,10 @@ describe('grafanaAlertUrl', () => {
 })
 
 /**
- * NO EMOJI ON ANY ALERT SURFACE.
- *
- * The Devices badge carried 🚨 and ⚠️, and the alert toasts carried 🚨 and ✅. Four problems, and the
- * cosmetic one is the least of them:
- *
- *   1. An emoji renders in the OS emoji font -- a full-colour raster on Windows, a flat outline on
- *      most Linux desktops -- at a size and weight the stylesheet does not control.
- *   2. It does NOT inherit `currentColor`, so the badge's text went red or amber and the glyph beside
- *      it stayed whatever the font shipped.
- *   3. Beside the ARCHIVED and AWAITING FIRST BIRTH badges in the same table column, which use Lucide
- *      SVGs, it meant one column drawn from two icon systems.
- *   4. On the toasts it was a duplicate: Toast already draws its own tick or cross from `type`, so
- *      "✅ Resolved" rendered a green tick immediately followed by a green tick.
- *
- * A SOURCE SCAN, not a render assertion, because the failure this guards against is somebody adding
- * a fifth one -- which no rendering test would fail on.
+ * No emoji on any alert surface: an emoji renders in the OS font at a weight the stylesheet does
+ * not control, does not inherit `currentColor`, mixes icon systems in one column, and duplicates
+ * the icon Toast already draws. A source scan, not a render assertion, because the failure is
+ * somebody adding another one.
  */
 describe('alert surfaces carry no emoji', () => {
   const ROOT = path.resolve(__dirname, '..')
@@ -213,10 +173,8 @@ describe('alert surfaces carry no emoji', () => {
     'utils/deviceStatus.js'
   ]
 
-  // Pictographic ranges plus VS-16. Deliberately NOT matching the dingbats block: `⚠` and `✓` appear
-  // in explanatory PROSE in this codebase (utils/opcua.js, utils/ashrae223.js), and a comment is not
-  // a rendered chip. What is banned is anything that reaches the DOM, so the check below strips
-  // comments before scanning.
+  // Pictographic ranges plus VS-16. Not the dingbats block: `⚠` and `✓` appear in prose comments in
+  // this codebase, and the check strips comments before scanning.
   const EMOJI = /[\u{1F300}-\u{1FAFF}]|\u{FE0F}|[\u{2700}-\u{27BF}]/u
 
   it.each(FILES)('%s renders no emoji', (rel) => {
