@@ -120,7 +120,7 @@ describe('App Component', () => {
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('Overview')).toBeInTheDocument()
+      expect(screen.getAllByText('Site Map').length).toBeGreaterThan(0)
     })
 
     const devicesTab = screen.getByText('Devices')

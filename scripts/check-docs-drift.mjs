@@ -518,7 +518,7 @@ function edgeFunctionNames() {
     // 0086 adds `device_nameplate` and `change_proposals` to the ASSET lane, which would otherwise
     // take the fail-closed 'security' branch. Rewritten in full because the classifier is one CASE.
     'public.platform_health_rows': '0092 narrows expected_publishers to devices behind a gateway that has reported at least once; 0001 holds the bound-to-a-gateway form that alerted on edge nodes nobody had deployed',
-    'public.audit_domain_for': '0086 adds device_nameplate and change_proposals to the asset lane; 0090 adds the three *_links lanes; 0097 adds areas',
+    'public.audit_domain_for': '0086 adds device_nameplate and change_proposals to the asset lane; 0090 adds the three *_links lanes; 0097 adds areas; 0098 adds area_floors',
     // 0087 narrows both gates from has_role(Administrator, Shopfloor_Manager) to
     // has_authority(schema:manage); the bodies are otherwise the baseline's.
     'public.fork_schema': '0087 narrows the gate to schema:manage; the baseline holds the pair',
@@ -526,10 +526,10 @@ function edgeFunctionNames() {
     // 0088 adds the queue's second lane and the functions that admit it in the same file; 0090
     // replaces the withdrawn schema lane with the asset and link lanes.
     'public.may_decide_proposal': '0090 replaces the withdrawn schema lane with cells, gateways and the three *_links lanes, all resolving authority rather than role names; 0088 holds the form that introduced it',
-    'public.proposable_columns': '0097 admits area_id on devices and gateways and area_id and floor on cells; 0090 adds cells, gateways and the three *_links lanes and empties the schema lane to withdraw it; 0088 added that lane; 0086 holds the asset-only form',
+    'public.proposable_columns': '0098 replaces floor with floor_id, plan_x and plan_y on cells; 0097 admits area_id on devices and gateways and area_id and floor on cells; 0090 adds cells, gateways and the three *_links lanes and empties the schema lane to withdraw it; 0088 added that lane; 0086 holds the asset-only form',
     'public.validate_change_proposal': '0090 resolves the target table per lane and adds the create-shaped link checks; 0088 branched it by lane; 0086 holds the device-only form',
     'public.reject_proposal': '0090 widens the outer gate to the lanes that replaced schemas; 0088 gates on may_decide_proposal(); 0086 holds the single-gate form',
-    'public.approve_proposal': '0097 assigns the area and floor columns the lanes now admit; 0090 adds the cell, gateway and link branches, drops the withdrawn publish branch and refuses a proposal already in place; 0088 added the per-lane gate and 0089 the author stamp; 0086 holds the asset-only form',
+    'public.approve_proposal': '0098 assigns floor_id and the place on cells; 0097 assigns the area and floor columns the lanes now admit; 0090 adds the cell, gateway and link branches, drops the withdrawn publish branch and refuses a proposal already in place; 0088 added the per-lane gate and 0089 the author stamp; 0086 holds the asset-only form',
     // 0097 adds the area_wide scope and its area_id to a move; the baseline holds the two-scope form.
     'public.relocate_devices': '0097 adds area_wide and area_id to a move; the baseline holds the cell-or-site_wide form',
     'public.approve_quarantined_device': '0097 drops the baseline signature and redeclares it with p_area_id and p_set_area for area_wide; the baseline holds the cell-or-site_wide form',

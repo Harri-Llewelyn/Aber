@@ -1690,64 +1690,16 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-muted);
 }
 
-/* A floor plan, not a list of cards. 280px is the minimum track; at 1920 that gives six columns
-   with the remainder distributed through `1fr`, and it degrades to five at 1600 and four at 1366.
-   `auto-fill`, not `auto-fit`: with `auto-fit` the tracks collapse when there are fewer cells than
-   columns, and the grid would change shape as cells are added. */
+/* The area thumbnails: three to a row at most, so each plan is legible. The track minimum is a
+   third of the width less its share of the gaps, or 320px, whichever is larger; the 320px floor
+   keeps them readable on a narrow window, where the row holds fewer. `min(…, 100%)` so a track
+   never overflows a container narrower than 320px. `auto-fill`, not `auto-fit`: the tracks stay
+   put when there are fewer areas than columns, so the grid keeps its shape as areas are added. */
 .shopfloor-grid {
   display: grid;
-  /* `min(280px, 100%)` rather than a bare 280px: a grid track with a fixed minimum larger than its
-     container overflows, and at 360px the container is narrower than 280 once the rail, the inset
-     and the scrollbar gutter are taken. The idiom degrades to one full-width column. */
-  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(max(320px, calc(33.333% - 8px)), 100%), 1fr));
   gap: 12px;
   align-items: start;
-}
-
-/* The lanes' row. `auto-fit` rather than the cell grid's `auto-fill` so the three always share the
-   full width evenly instead of leaving empty tracks beside them -- the count is fixed at three,
-   which is exactly the case the two functions differ on. */
-.shopfloor-lanes {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
-  align-items: start;
-  margin-bottom: 12px;
-}
-
-/* The derived lanes get a row of their own above the cells. Site-Wide, Simulated and Unassigned are
-   not cells; a grid of their own draws the boundary structurally, and `auto-fit` with the same
-   280px minimum keeps the tiles the same size as the cells. Position is the DOM order of the LANES
-   array. Each lane gets its own hue: blue is the infrastructure signal, amber the needs-a-decision
-   signal. The tints are single rgba literals, matching the .chip-* fills; themeContrast.test.js
-   measures --text-muted over both, which is what .zone-empty is set in. */
-/* A 4px coloured cap along the top of each lane. The cap does most of the work: the fills are
-   already at the strongest alpha that keeps `.zone-empty` clear of WCAG AA, so a darker tint is not
-   available. Only the top edge thickens, so the lanes keep the cells' shape. Every rule here is
-   compounded with .shopfloor-zone and must stay that way: that rule sets `background` and the
-   `border` shorthand and is declared later, so a single-class lane rule loses its cap, border
-   colour and tint on the tie. */
-.shopfloor-zone.shopfloor-lane {
-  border-style: solid;
-  border-width: 1px;
-  border-top-width: 4px;
-}
-
-.shopfloor-zone.shopfloor-lane-site {
-  border-color: var(--accent);
-  background: rgba(0, 212, 255, 0.05);
-}
-
-/* Area-Wide shares Site-Wide's hue: both are permanent homes for assets that belong to no single
-   cell, one building up and one campus up. */
-.shopfloor-zone.shopfloor-lane-area {
-  border-color: var(--accent);
-  background: rgba(0, 212, 255, 0.05);
-}
-
-.shopfloor-zone.shopfloor-lane-area:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 14px rgba(0, 212, 255, 0.2);
 }
 
 /* The rungs above the map: enterprise, then site. Small caps for the level, the name beside it. */
@@ -1782,141 +1734,439 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .site-hierarchy-sep { color: var(--text-dim); }
 
-/* The area selector above the map: one button per area, "All areas" first. */
-.shopfloor-areas {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+/* ===== The Overview card: the three lanes, side by side across the width ===== */
+/* One track each so the three always share the width evenly; below 720px they stack. Each lane is
+   a button that opens the panel, so the whole strip is the target. */
+.site-lanes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
   margin-bottom: 12px;
 }
 
-/* A floor heading inside the cell grid spans the row. */
-.shopfloor-floor-heading {
-  grid-column: 1 / -1;
+@media (max-width: 720px) {
+  .site-lanes { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Each lane keeps its own hue: blue is the infrastructure signal, grey is what not to trust, amber
+   is needs-a-decision. A 4px coloured cap along the top does most of the work: the fills are at the
+   strongest alpha that keeps --text-muted clear of WCAG AA over them (themeContrast.test.js
+   measures both tints), so a darker tint is not available. */
+.site-lane {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-style: solid;
+  border-width: 1px;
+  border-top-width: 4px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.site-lane-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.site-lane-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+
+.site-lane-site {
+  border-color: var(--accent);
+  background: rgba(0, 212, 255, 0.05);
+}
+
+.site-lane-site:hover,
+.site-lane-site.is-open { box-shadow: 0 0 14px rgba(0, 212, 255, 0.2); }
+
+.site-lane-simulated {
+  border-color: var(--text-dim);
+  background: rgba(133, 142, 163, 0.07);
+}
+
+.site-lane-simulated:hover,
+.site-lane-simulated.is-open { box-shadow: 0 0 14px rgba(133, 142, 163, 0.18); }
+
+.site-lane-queue {
+  border-color: var(--warning);
+  background: rgba(255, 179, 0, 0.06);
+}
+
+.site-lane-queue:hover,
+.site-lane-queue.is-open { box-shadow: 0 0 14px rgba(255, 179, 0, 0.2); }
+
+/* The open lane is the one the panel shows: the same outline the selected pin gets. */
+.site-lane.is-open { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ===== The Site Map card: floor plans and pins ===== */
+/* Area thumbnails share the cell grid's tracks. */
+.area-thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.area-thumb:hover {
+  border-color: var(--border-hover);
+  box-shadow: 0 0 14px var(--accent-dim);
+}
+
+/* Compounded so it keeps its border under `.area-thumb:hover`. */
+.area-thumb.area-thumb-alerting,
+.area-thumb.area-thumb-alerting:hover {
+  border-color: var(--danger);
+  box-shadow: 0 0 14px rgba(255, 77, 109, 0.25);
+}
+
+.area-thumb-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.area-thumb-header .zone-name { flex: 1 1 auto; }
+
+/* The counts sit at the top right, in the header's own line. */
+.area-thumb-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+
+.area-thumb-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* The floor selector: one button per floor between two arrows, the lowest floor leftmost, the
+   shown one pressed and always in the middle. It changes what the thumbnail draws without opening
+   the area. The arrows are pinned at the ends; the strip between them is clipped, not scrollable,
+   and the page slides the track so the pressed floor sits centred -- the arrows and the buttons
+   are the only way to move it, so nobody can drag it somewhere and lose their place. */
+.area-thumb-floors { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; }
+
+.area-thumb-floors .btn { padding: 2px 7px; white-space: nowrap; }
+
+.area-thumb-floors-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.area-thumb-floors-track {
+  display: flex;
+  gap: 4px;
+  width: max-content;
+  transition: transform 0.2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .area-thumb-floors-track { transition: none; }
+}
+
+
+/* The zoomed view: the floor rail and the tray in a side column, the plan beside them. */
+.site-map-view {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .site-map-view { grid-template-columns: minmax(0, 1fr); }
+}
+
+.site-map-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 8px;
+}
+
+/* The way back and the zoom: in the side column above the floor rail, or alone above the
+   empty state of an area with no floors. */
+.site-map-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.site-map-side .site-map-toolbar { margin-bottom: 0; }
+
+.floor-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.floor-rail .btn { justify-content: flex-start; }
+
+/* The glyph on a floor that carries an uploaded plan; a floor without one draws the outline. */
+.floor-plan-flag { display: inline-flex; align-items: center; margin-left: 4px; opacity: 0.75; }
+
+.floor-rail-level {
+  display: inline-block;
+  min-width: 22px;
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+/* The stage is as tall as the room below it, measured by the page, so the map fits without the
+   page scrolling; past zoom 1 the plan outgrows it and scrolls inside. The plan is as wide as the
+   stage or as wide as its height allows at the floor's aspect, whichever is less, and centred. */
+.site-map-stage {
+  overflow: auto;
+  max-height: calc(var(--map-fit-height, 72vh) * var(--map-zoom, 1));
+  overscroll-behavior: contain;
+}
+
+.site-map-stage-inner { min-width: 100%; }
+
+.site-map-stage .floor-plan {
+  width: min(100%, calc(var(--map-fit-height, 72vh) * var(--map-zoom, 1) * var(--plan-aspect, 1.3333)));
+  margin: 0 auto;
+}
+
+.floor-plan {
+  position: relative;
+  width: 100%;
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  user-select: none;
+}
+
+.floor-plan-interactive { cursor: crosshair; }
+
+.floor-plan-image,
+.floor-plan-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+/* The plan fills its box exactly, so a fraction of the box is a fraction of the drawing. */
+.floor-plan-image { object-fit: fill; }
+
+.floor-plan-outline .outline-frame {
+  fill: none;
+  stroke: var(--text-dim);
+  stroke-width: 2;
+  stroke-dasharray: 8 6;
+}
+
+.floor-plan-outline .outline-grid { stroke: var(--border); stroke-width: 1; }
+
+.floor-plan-caption {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+  pointer-events: none;
+}
+
+/* A pin: the disc sits on the place, the label hangs beneath. Colour names a state the legend
+   decodes and the `title` repeats it in words. */
+.floor-pin {
+  --pin-colour: var(--text-dim);
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-primary);
+  z-index: 2;
+  font: inherit;
+}
+
+.floor-pin-normal    { --pin-colour: var(--success); }
+.floor-pin-attention { --pin-colour: var(--warning); }
+.floor-pin-idle      { --pin-colour: var(--text-dim); }
+.floor-pin-alert     { --pin-colour: var(--danger); }
+.floor-pin-muted     { --pin-colour: var(--text-dim); opacity: 0.55; }
+
+.floor-pin-disc {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--pin-colour);
+  background: var(--bg-card);
+  color: var(--pin-colour);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.floor-pin-small .floor-pin-disc {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+  box-shadow: none;
+}
+
+.floor-pin-small { gap: 2px; }
+
+.floor-pin-selected .floor-pin-disc { box-shadow: 0 0 0 3px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25); }
+
+.floor-pin:focus-visible .floor-pin-disc { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.floor-pin-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--pin-colour);
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floor-pin-small .floor-pin-label { font-size: 11px; padding: 0 4px; max-width: 90px; }
+
+/* The alert ring: the one animated thing on the map, and it means what the legend's red means. */
+.floor-pin-alert .floor-pin-disc::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 3px solid var(--danger);
+  animation: floor-pin-pulse 1.4s ease-out infinite;
+}
+
+@keyframes floor-pin-pulse {
+  0%   { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-pin-alert .floor-pin-disc::after { animation: none; opacity: 0.6; }
+}
+
+/* Under the floor rail: the cells on this floor with no place, cells on no floor, and the area's
+   Area-Wide assets. On the all-areas view it holds the unfiled cells, beside the thumbnails. */
+.site-map-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shopfloor-grid + .site-map-tray { margin-top: 12px; }
+
+.site-map-tray-group {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* The chips wrap in the tray, and scroll once there are many: the side column must not push the
+   plan below the fold. */
+.site-map-tray-group .context-device-list { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
+
+.chip-link.is-selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.site-map-tray-title {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin: 4px 0 -4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-/* Simulated is grey rather than a fifth hue: --accent and --warning carry infrastructure and
-   act-on-this, and synthetic assets are the one thing on this map that wants less attention than a
-   real cell. */
-.shopfloor-zone.shopfloor-lane-simulated {
-  border-color: var(--text-dim);
-  background: rgba(133, 142, 163, 0.07);
+/* The placement picker in the cell form. */
+.floor-placement { display: flex; flex-direction: column; gap: 6px; }
+
+.floor-placement-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.shopfloor-zone.shopfloor-lane-simulated:hover {
-  border-color: var(--text-dim);
-  box-shadow: 0 0 14px rgba(133, 142, 163, 0.18);
+/* The floors editor in the area panel. */
+.area-floors { display: flex; flex-direction: column; gap: 6px; }
+
+.area-floors-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-/* The queue comes last: infrastructure first, then context about what is not real, then the thing
-   to act on, sitting immediately above the cells its contents are waiting to be filed into. */
-.shopfloor-zone.shopfloor-lane-queue {
-  border-color: var(--warning);
-  background: rgba(255, 179, 0, 0.06);
-}
-
-/* The cap must survive hover. `.shopfloor-zone:hover` repaints border-color and box-shadow for
-   every tile, which would drop a lane's identity exactly when someone is pointing at it -- and it
-   is declared later, so these need the compound (0-3-0) to beat it too. */
-.shopfloor-zone.shopfloor-lane-site:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 14px rgba(0, 212, 255, 0.2);
-}
-
-.shopfloor-zone.shopfloor-lane-queue:hover {
-  border-color: var(--warning);
-  box-shadow: 0 0 14px rgba(255, 179, 0, 0.2);
-}
-
-.shopfloor-zone {
-  background: var(--bg-glass);
+.area-floor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  overflow: hidden;
-  transition: var(--transition);
-  display: flex;
-  flex-direction: column;
-  /* Uniform tiles. Collapsing an empty one to its header used to be worth it when a card was
-     320px wide and 180px tall; at this size an empty tile costs about 110px in one of eight
-     columns, and a grid of ragged half-height tiles is harder to scan than one that is even. */
-  min-height: 112px;
-}
-
-.shopfloor-zone:hover {
-  border-color: var(--border-hover);
-  box-shadow: 0 0 14px var(--accent-dim);
-}
-
-/* An archived cell is still on the plan but out of commission, so it recedes rather than
-   disappearing; the header also carries an "ARCH" flag. Compounded so it keeps its border under
-   `.shopfloor-zone:hover` (0-2-0). */
-.shopfloor-zone.shopfloor-zone-archived {
-  border-color: var(--warning);
-  border-style: dashed;
-  opacity: 0.75;
-}
-
-.shopfloor-zone.shopfloor-zone-archived:hover {
-  border-color: var(--warning);
-}
-
-/* A tile holding moves that have not been applied. `pointer-events: none` makes the destination
-   refuse a second drop while the first is outstanding. Compounded and repeated for :hover, because
-   the pointer is by definition on this tile and a state that loses to `.shopfloor-zone:hover` would
-   never be seen. */
-.shopfloor-zone.shopfloor-zone-pending {
-  border-color: var(--accent);
-  pointer-events: none;
-  animation: shopfloor-zone-pending-pulse 1.2s ease-in-out infinite;
-}
-
-.shopfloor-zone.shopfloor-zone-pending:hover {
-  border-color: var(--accent);
-}
-
-@keyframes shopfloor-zone-pending-pulse {
-  0%, 100% { opacity: 0.55; }
-  50%      { opacity: 0.85; }
-}
-
-/* Held at the dimmer end rather than dropped to full opacity: the tile still has to read as
-   waiting, and opacity is the only part of this state that survives without the animation. */
-@media (prefers-reduced-motion: reduce) {
-  .shopfloor-zone.shopfloor-zone-pending {
-    animation: none;
-    opacity: 0.55;
-  }
-}
-
-.zone-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
   background: var(--bg-glass);
-  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-wrap: wrap;
 }
 
-/* `min-width: 0` is what lets the name actually truncate -- a flex item defaults to
-   `min-width: auto`, which refuses to shrink below its text and pushes the counts off the tile
-   instead of clipping the name. */
-.zone-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 1 1 auto;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-primary);
+.area-floor-row.is-busy { opacity: 0.6; }
+
+.area-floor-level {
+  min-width: 26px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-muted);
 }
+
+.area-floor-name { flex: 1 1 120px; min-width: 0; display: flex; flex-direction: column; }
+
+.area-floor-meta { font-size: 11px; color: var(--text-muted); }
+
+.area-floor-actions { display: flex; gap: 2px; flex-wrap: wrap; }
 
 .zone-name {
   overflow: hidden;
@@ -1924,19 +2174,8 @@ tbody tr:hover { background: var(--bg-glass); }
   white-space: nowrap;
 }
 
-/* The count pair, e.g. "GW: 2 | Dev: 4". Replaces the two "Active Edge Gateways (n)" /
-   "Operating Devices (n)" section headings inside the body, which cost ~40px per tile to say
-   what eleven characters say here. */
-.zone-counts {
-  flex-shrink: 0;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: -0.2px;
-}
-
-/* Cell health rollup dot: one per tile, the worst state of the devices resolving to it. Never
-   colour alone: the dot carries a `title` naming the state. */
+/* Health rollup dot: one per lane and thumbnail, the worst state of the devices resolving to it.
+   Never colour alone: the dot carries a `title` naming the state. */
 .tile-dot {
   width: 8px;
   height: 8px;
@@ -1951,9 +2190,12 @@ tbody tr:hover { background: var(--bg-glass); }
 .tile-dot-attention { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
 /* No glow: "nothing live in here" should not draw the eye the way something actionable does. */
 .tile-dot-idle      { background: var(--text-dim); }
+/* An area whose device Grafana has raised an alert against: the one red dot, and only on an area
+   card, where a pin inside is red for the same reason. The legend keeps the chip swatch. */
+.tile-dot-alert     { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
 
 /* Legend chip swatch: the alert entry describes a chip, not a dot, since an alert fires against one
-   device while the dots roll up a whole tile. Sized to sit on the same 8px optical line as
+   device while the dots roll up a whole lane or area. Sized to sit on the same 8px optical line as
    `.tile-dot`. */
 .legend-chip {
   width: 14px;
@@ -1966,65 +2208,13 @@ tbody tr:hover { background: var(--bg-glass); }
    the chip it describes is a legend that lies. */
 .legend-chip-danger { border-color: var(--danger); background: rgba(255, 77, 109, 0.15); }
 
-.zone-body {
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  flex: 1;
-}
-
-/* --text-muted, not --text-dim: this is the one text that sits directly on a tile's ground, and the
-   lane tints cost contrast. --text-dim measures exactly 4.50:1 on a bare card; --text-muted stays
-   clear over both lane fills. See themeContrast.test.js. */
+/* --text-muted, not --text-dim: --text-dim measures exactly 4.50:1 on a bare card; --text-muted
+   stays clear over the lane fills too. See themeContrast.test.js. */
 .zone-empty {
   font-size: 11px;
   color: var(--text-muted);
   font-style: italic;
   line-height: 1.35;
-}
-
-/* Bounded height, so one busy cell does not set the row height for all of them. 240px shows seven
-   whole chips and clips the eighth, so a list that scrolls looks like it scrolls.
-   `overscroll-behavior: contain` stops a flick inside a full cell from scrolling the page. */
-.zone-chips {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 240px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-/* The scrollbar is drawn in the card's own hairline colour. Firefox takes `scrollbar-color`; WebKit
-   needs the pseudo-elements. Transparent trough, because the lanes tint their background. */
-.zone-chips {
-  scrollbar-width: thin;
-  scrollbar-color: var(--rule) transparent;
-}
-
-.zone-chips::-webkit-scrollbar {
-  width: 6px;
-}
-
-.zone-chips::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.zone-chips::-webkit-scrollbar-thumb {
-  background: var(--rule);
-  border-radius: 3px;
-}
-
-.zone-chips::-webkit-scrollbar-thumb:hover {
-  background: var(--text-dim);
-}
-
-/* Slightly roomier chips inside a zone only; `.chip` is shared with the filter bar and the context
-   panel. No `margin-bottom`: `.zone-chips` already spaces these with `gap`, and a margin would
-   leave a trailing gap under the last chip. */
-.zone-chips .chip {
-  padding: 5px 8px;
 }
 
 /* A chip that navigates, used in the context drawers for Serving Gateway, Cell Zone and Schema. A

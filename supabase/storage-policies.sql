@@ -520,3 +520,75 @@ BEGIN
     'telemetry-archive policies reconciled (4 policies; the exporter writes and never deletes, no '
     'browser role writes, Administrator alone may delete the only copy).';
 END $$;
+
+-- =============================================================================================
+-- floor-plans -- the SVG drawings the Site Map renders, one per floor
+-- =============================================================================================
+-- Private, read by every signed-in role: the Overview is the page an Operator lives on, and a
+-- plan with no reader draws nothing. Writes are Administrator and Shopfloor_Manager, the roles
+-- that manage areas, and every object must live under `<area_id>/<floor_id>/` naming a floor
+-- that exists in that area, so a plan cannot be filed against a floor somebody made up.
+-- =============================================================================================
+
+DROP POLICY IF EXISTS "floor_plans_read_authenticated" ON storage.objects;
+CREATE POLICY "floor_plans_read_authenticated" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (bucket_id = 'floor-plans');
+
+DROP POLICY IF EXISTS "floor_plans_insert_privileged" ON storage.objects;
+CREATE POLICY "floor_plans_insert_privileged" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'floor-plans'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND public.is_floor_plan_path(storage.objects.name)
+  );
+
+DROP POLICY IF EXISTS "floor_plans_update_privileged" ON storage.objects;
+CREATE POLICY "floor_plans_update_privileged" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'floor-plans'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+  )
+  WITH CHECK (
+    bucket_id = 'floor-plans'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND public.is_floor_plan_path(storage.objects.name)
+  );
+
+DROP POLICY IF EXISTS "floor_plans_delete_privileged" ON storage.objects;
+CREATE POLICY "floor_plans_delete_privileged" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'floor-plans'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+  );
+
+-- ---------------------------------------------------------------------------------------------
+-- Reconcile: floor-plans
+-- ---------------------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_policies integer;
+  v_unconfined integer;
+BEGIN
+  SELECT count(*) INTO v_policies FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'floor_plans_%';
+  IF v_policies <> 4 THEN
+    RAISE EXCEPTION 'floor-plans has % policy/policies, expected 4 (select, insert, update, delete).', v_policies;
+  END IF;
+
+  -- Every write is confined to a real floor's prefix.
+  SELECT count(*) INTO v_unconfined FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'floor_plans_%'
+     AND cmd IN ('INSERT', 'UPDATE')
+     AND coalesce(with_check, '') NOT LIKE '%is_floor_plan_path%';
+  IF v_unconfined <> 0 THEN
+    RAISE EXCEPTION 'floor-plans: % write policy/policies do not confine the path to an existing floor.', v_unconfined;
+  END IF;
+
+  RAISE NOTICE 'floor-plans policies reconciled (4 policies; writes confined to <area_id>/<floor_id>/).';
+END $$;

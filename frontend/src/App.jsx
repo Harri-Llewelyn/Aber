@@ -348,7 +348,7 @@ function Dashboard({ session, onSignOut }) {
   // Separate from the device filter above: set by a device drawer's Schema chip and consumed by
   // SchemasTab, which opens that schema's drawer.
   const [selectedSchemaId, setSelectedSchemaId] = useState('')
-  // Set when a cell zone is clicked on the Overview shopfloor map; consumed by CellsTab.
+  // Set when a cell is opened from the Site Map; consumed by CellsTab.
   const [selectedCellFilter, setSelectedCellFilter] = useState('')
   // Set by a cell drawer's Area chip; consumed by AreasTab, which opens that area's drawer.
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
@@ -469,8 +469,8 @@ function Dashboard({ session, onSignOut }) {
         <button
           className="topbar-brand"
           onClick={() => handleNavClick('overview')}
-          title="ACS Cymru — go to the Overview page"
-          aria-label="ACS Cymru, go to the Overview page"
+          title="ACS Cymru — go to the Site Map page"
+          aria-label="ACS Cymru, go to the Site Map page"
         >
           <div className="brand-icon"><IconFactory size={18} /></div>
           <div className="brand-text">

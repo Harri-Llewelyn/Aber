@@ -5,7 +5,7 @@ A cell is a zone of the shopfloor -- a line, a bay, a machining area -- and it e
 ## What the controls do
 
 - **Cell Name** and **Cell Icon** are what the rest of the dashboard draws. The icon comes from a closed set: a value the picker accepts and the renderer cannot draw would be a cell that appears blank everywhere.
-- **Description** is optional free text. When a cell has one, a help tip appears beside its name on the Overview map and the text sits under its name in the table here.
+- **Description** is optional free text. When a cell has one, it shows in the cell's details panel on the Site Map and sits under its name in the table here.
 - **Cell UUID** is the identifier to quote in a query or a ticket, and it is copyable from the detail drawer -- which is most of why the drawer exists.
 - **A Grafana dashboard URL** can be attached to a cell. It is a link, not an embed: dashboards and thresholds live in Grafana and are not mirrored here.
 - **Assigned Gateways** and **Assigned Devices** list what is currently located in the cell. Assignment itself is edited from the Gateways and Devices pages, where the entity is.

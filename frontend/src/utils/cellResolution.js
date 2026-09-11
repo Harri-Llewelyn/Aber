@@ -15,6 +15,8 @@
  * stored.
  */
 
+import { sortFloors } from './floorPlans'
+
 export const SCOPE_CELL = 'cell'
 export const SCOPE_AREA_WIDE = 'area_wide'
 export const SCOPE_SITE_WIDE = 'site_wide'
@@ -254,64 +256,36 @@ export function groupCellsByArea(cells) {
 }
 
 /**
- * Cells of one area grouped by floor, ground first then upwards, basements last, and cells with no
- * floor after everything. Returns [{ floor, label, cells }] so a renderer draws headings in order.
+ * Cells of one area grouped by the floor rows they sit on, top-down as the floor picker lists
+ * them, with cells on no floor last under a null floor. Only floors holding a cell are returned.
+ * Returns [{ floor, label, cells }] so a renderer draws headings in order.
  */
-export function groupCellsByFloor(cells) {
+export function groupCellsByFloor(cells, floors) {
+  const known = sortFloors(floors || [])
+  const idOf = (f) => f?.floor_id ?? f?.id
   const byFloor = new Map()
   for (const cell of cells || []) {
-    const floor = Number.isInteger(cell?.floor) ? cell.floor : null
-    if (!byFloor.has(floor)) byFloor.set(floor, [])
-    byFloor.get(floor).push(cell)
+    const id = cell?.floor_id || null
+    const key = id && known.some(f => idOf(f) === id) ? id : null
+    if (!byFloor.has(key)) byFloor.set(key, [])
+    byFloor.get(key).push(cell)
   }
-  const floors = [...byFloor.keys()].filter(f => f !== null)
-  const ordered = [
-    ...floors.filter(f => f >= 0).sort((a, b) => a - b),
-    ...floors.filter(f => f < 0).sort((a, b) => b - a),
-    ...(byFloor.has(null) ? [null] : [])
-  ]
-  return ordered.map(floor => ({ floor, label: floorLabel(floor), cells: byFloor.get(floor) }))
-}
-
-/** The word for a floor number: ground is 0, basements negative, none is unspecified. */
-export function floorLabel(floor) {
-  if (!Number.isInteger(floor)) return 'No floor set'
-  if (floor === 0) return 'Ground floor'
-  if (floor < 0) return floor === -1 ? 'Basement' : `Basement ${-floor}`
-  return `Floor ${floor}`
+  const groups = known
+    .filter(f => byFloor.has(idOf(f)))
+    .map(f => ({ floor: f, label: f.name, cells: byFloor.get(idOf(f)) }))
+  if (byFloor.has(null)) groups.push({ floor: null, label: floorLabel(null), cells: byFloor.get(null) })
+  return groups
 }
 
 /**
- * Overlay staged, uncommitted relocations onto a device list. It re-resolves rather than
- * overwriting the columns: deviceLocationOf() prefers the server-supplied `location_source`, so a
- * staged device would otherwise keep its stale resolution and never move. This is also what makes
- * the Unassigned lane honest before the commit: a device whose gateway serves a cell re-inherits it
- * at the drop. `staged: true` rides along so pending renders differently from durable.
- *
- * @param devices rows as the page holds them, carrying merged `device_locations` fields
- *
- * @param gateways rows keyed by `gateway_id` or `id`
- *
- * @param staged Map of device id to { cell_id, area_id, location_scope }
- *
- * @param cellsById optional cell rows, so a staged cell-scoped device resolves its area too
+ * The word for a floor level: ground is 0, basements negative, none is unspecified. Mirrors
+ * public.floor_level_name(); the Add floor form offers it as the default name.
  */
-export function applyStagedMoves(devices, gateways, staged, cellsById) {
-  if (!staged || staged.size === 0) return devices || []
-  const byId = new Map((gateways || []).map(g => [g.gateway_id ?? g.id, g]))
-  return (devices || []).map(device => {
-    const move = staged.get(device?.asset_id ?? device?.id)
-    if (!move) return device
-    const scope = normaliseScope(move.location_scope)
-    const moved = {
-      ...device,
-      cell_id: scope === SCOPE_CELL ? (move.cell_id || null) : null,
-      area_id: scope === SCOPE_AREA_WIDE ? (move.area_id || null) : null,
-      location_scope: scope
-    }
-    const gateway = byId.get(device?.active_gateway_id ?? device?.gateway_id ?? null) || null
-    return { ...moved, ...resolveDeviceLocation(moved, gateway, cellsById), staged: true }
-  })
+export function floorLabel(level) {
+  if (!Number.isInteger(level)) return 'No floor set'
+  if (level === 0) return 'Ground floor'
+  if (level < 0) return level === -1 ? 'Basement' : `Basement ${-level}`
+  return `Floor ${level}`
 }
 
 /**

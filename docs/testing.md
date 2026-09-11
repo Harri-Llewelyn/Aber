@@ -234,6 +234,11 @@ python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
 python supabase/migrations/test_relocate_devices.py
+# Floors and places (0098). An area is born with a ground floor; a floor holding cells cannot be
+# deleted except through its area, and the guard tells the two apart by asking whether the area
+# row still exists; and the spacing between two cells on one plan is refused by the database, not
+# only by the picker, because an approved proposal writes the same columns.
+python supabase/migrations/test_area_floors.py
 # A device cannot be posted onto the replay lane by hand (0083, issue 144). The dashboard used to
 # offer the Playback gateway in three device pickers; choosing it produced a shadow device with no
 # `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid
