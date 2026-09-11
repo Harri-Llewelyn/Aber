@@ -221,7 +221,9 @@ webhook that records the head of `main` on the gateway row so a merge shows in t
 ([What a gateway's repository comes with](../supabase/README.md#what-a-gateways-repository-comes-with-and-how-the-forge-reports-back-0095)).
 Both teams may create repositories in the organisation. Gitea's own sign-out is the platform's.
 A sweep on a timer (`0099`) reconciles team membership with `user_roles`, re-registers a missing
-push webhook, and protects `main` on any repository made by hand in the organisation.
+push webhook, and protects `main` on any repository made by hand in the organisation. A flow the
+appliance deploys is a `FLOW_DEPLOYED` row in the digital thread (`0100`), written by the daemon
+from the heartbeat as `ingestion`; the puller never touches the database, so no fourth actor kind.
 
 **What remains.**
 
@@ -233,9 +235,6 @@ push webhook, and protects `main` on any repository made by hand in the organisa
   nowhere else. A repository from before `0095` gets its hook back from the sweep but not its
   incident template, which the machine account cannot commit to a protected `main`; an
   administrator adds it by pull request. Small, and not urgent.
-- **An actor kind for the audit row.** Recording a deployed revision in `digital_thread` needs an
-  actor: the trigger accepts `ingestion`, `service` and `migration`, and a puller on a timer is a
-  fourth kind. The approvals queue's expiry timer declares `service`; decide the two together.
 - **Backup and retention for the forge**, which 4 now owns.
 
 **Constraints.** Deploy only what is committed; a revert is a new commit and never a force-push

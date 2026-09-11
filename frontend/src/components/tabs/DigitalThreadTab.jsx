@@ -504,6 +504,7 @@ function EventDiff({ event, diff }) {
         {action === 'INSERT' ? 'Initial properties'
           : action === 'DELETE' ? 'Final properties'
             : action === 'SCHEMA_REJECTION' ? 'Rejected payload'
+              : action === 'FLOW_DEPLOYED' ? 'Deployed flow'
               : action === 'TOKEN_MINTED' ? 'Token issued'
                 // Two-sided, unlike TOKEN_MINTED: a revocation carries the original mint in
                 // `old_data` so the row stays readable after the denylist entry is pruned.
@@ -526,6 +527,7 @@ function EventDiff({ event, diff }) {
               <th>{action === 'DELETE' ? 'Deleted'
                 : action === 'INSERT' ? 'Created'
                   : action === 'SCHEMA_REJECTION' ? 'Observed'
+                    : action === 'FLOW_DEPLOYED' ? 'Reported'
                     : action === 'TOKEN_MINTED' ? 'Issued'
                       : action === 'TOKEN_REVOKED' ? 'Revoked'
                         : 'New'}</th>

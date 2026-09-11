@@ -522,6 +522,13 @@ function edgeFunctionNames() {
     // 0087 narrows both gates from has_role(Administrator, Shopfloor_Manager) to
     // has_authority(schema:manage); the bodies are otherwise the baseline's.
     'public.fork_schema': '0087 narrows the gate to schema:manage; the baseline holds the pair',
+    // 0100 subtracts every column a heartbeat writes (audit_telemetry_columns()) before deciding
+    // whether an UPDATE is an event; the baseline subtracts last_heartbeat alone, which recorded
+    // every health-carrying heartbeat as an event.
+    'public.log_digital_thread_event': '0100 subtracts audit_telemetry_columns(); the baseline subtracts last_heartbeat alone',
+    // 0100 records a changed flow hash as a FLOW_DEPLOYED row, since the trigger no longer sees
+    // that column; the writes to the seven health columns are the baseline's.
+    'public.ingest_record_gateway_health': '0100 adds the FLOW_DEPLOYED row on a changed flow hash; the baseline holds the health writes alone',
     'public.publish_schema_version': '0087 narrows the gate to schema:manage; the baseline holds the pair',
     // 0088 adds the queue's second lane and the functions that admit it in the same file; 0090
     // replaces the withdrawn schema lane with the asset and link lanes.
@@ -1610,15 +1617,20 @@ function edgeFunctionNames() {
 {
   const py = read('ingestion/ingestion.py');
   const block = py.match(/GATEWAY_HEALTH_METRICS\s*=\s*\{([\s\S]*?)\n\}/);
-  // In 0001 since the squash, with `$$` for the body tag rather than the `$fn$` 0047 wrote: the
-  // baseline is generated from a dump, and pg_dump chooses its own delimiter.
-  const sql = read('supabase/migrations/0001_baseline_schema.sql');
-  const fn = sql.match(/CREATE OR REPLACE FUNCTION public\.ingest_record_gateway_health[\s\S]*?\$\$;/);
+  // The LAST definition in the chain, since a tail file may redefine the gate (0100 does): the
+  // baseline's copy would pass this check while the one that runs dropped a column. `$$` for the
+  // body tag: the baseline is generated from a dump, and pg_dump chooses its own delimiter.
+  const fn = readdirSync(join(REPO, 'supabase/migrations'))
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => read(`supabase/migrations/${f}`).match(/CREATE OR REPLACE FUNCTION public\.ingest_record_gateway_health[\s\S]*?\$\$;/))
+    .filter(Boolean)
+    .at(-1);
 
   if (!block) {
     fail('check-docs-drift: could not find GATEWAY_HEALTH_METRICS in ingestion/ingestion.py.');
   } else if (!fn) {
-    fail('check-docs-drift: could not find ingest_record_gateway_health() in 0047.');
+    fail('check-docs-drift: could not find ingest_record_gateway_health() in any migration.');
   } else {
     // ("Metric_Name": ("column_name", "kind")) -- the column is what has to appear in the gate.
     // [a-z0-9_] and not [a-z_]: `load_1m` carries a digit, and a class without one drops it from

@@ -408,6 +408,14 @@ export const SUITES = {
       'simulated JWT claims, because the immutability guard deliberately exempts the owner -- a ' +
       'suite connecting as `postgres` would pass against a database with the trigger dropped.',
   },
+  'supabase/migrations/test_gateway_flow_deployed.py': {
+    lanes: ['db'],
+    why:
+      "0100's two halves: a heartbeat that only moves the health readings writes no audit row " +
+      '(it used to write one every thirty seconds per appliance), and an appliance reporting a ' +
+      'different flow hash writes exactly one FLOW_DEPLOYED row, pinned to ingestion and to no ' +
+      "user, carrying the digest before and after and whether it matched the forge's main.",
+  },
   'supabase/migrations/test_ingestion_rejection_rpc.py': {
     lanes: ['db'],
     why:

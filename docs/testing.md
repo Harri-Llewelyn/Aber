@@ -238,6 +238,7 @@ python supabase/migrations/test_playback_credential_delivery.py
 # default grants instead, and TRUNCATE raises no row trigger.
 python supabase/migrations/test_digital_thread_partitioning.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
+python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
 python supabase/migrations/test_relocate_devices.py

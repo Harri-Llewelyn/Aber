@@ -2654,6 +2654,19 @@ states and `scripts/check-gateway-flow-template.mjs` asserts the flow reads the 
 name. `test_forge_events.py` covers the signature, what is recorded and ignored, and one delivery
 sent by the forge itself for a freshly enrolled gateway.
 
+**A deployed flow is an event, and a reading is not (`0100`).** The audit trigger compared whole
+rows minus `last_heartbeat`, and an appliance rewrites six more columns on every heartbeat, so
+each one that carried health appended an UPDATE row: 2,880 a day per appliance, none an event.
+`audit_telemetry_columns()` names those columns and the trigger subtracts them all. The one
+reading that is an event, the flow hash, is in that list too, and `ingest_record_gateway_health()`
+records its change itself as a `FLOW_DEPLOYED` row: the digest before and after, the gateway's
+identity at the time, and what the forge's `main` held at that moment as `matches_main`. Actor
+`ingestion`, no user, as a schema rejection is: the puller never touches this database, the
+heartbeat is its only channel, and the daemon is the witness, so no fourth actor kind was needed
+and the approvals queue's expiry timer stays `service`. `cert_expires_at` and `agent_version` stay
+in the generic comparison, since a re-enrolment or an in-place upgrade is an event.
+`test_gateway_flow_deployed.py` proves both halves on the throwaway database.
+
 **The forge is swept on a timer (`0099`).** `forge-membership` acts on the way through the door,
 so a login whose role was revoked and who never returns keeps its team membership, usable over SSH
 if they had added a key. `sweep_forge()` asks the `forge-sweep` function for one pass every fifteen

@@ -1901,8 +1901,9 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
 
     # Not skippable: `public.gateway_status` derives staleness from `last_heartbeat` at read time,
     # so suppressing this write would make a live gateway read STALE. The audit trigger subtracts
-    # `last_heartbeat` before comparing, so a heartbeat-only write records no digital_thread row.
-    # The comparison below only decides the log level.
+    # the columns a heartbeat writes (audit_telemetry_columns(), 0100) before comparing, so a
+    # heartbeat records no digital_thread row; a changed Flow_Hash is the exception, which the gate
+    # records itself as a FLOW_DEPLOYED row. The comparison below only decides the log level.
     previous_status = gateway.get("status")
     transitioned = previous_status is not None and previous_status != status
 
