@@ -3,7 +3,8 @@ Unit tests for the batched telemetry write in process_ddata().
 
 WHAT CHANGED AND WHAT DID NOT. The metric loop's decisions -- alias resolution, the identity-metric
 filter, the timestamp sanity window, the value-column mapping -- are untouched. Only the write is:
-one `execute_values` per message instead of one `execute` per metric.
+one `execute_values` per message instead of one `execute` per metric, issued by the historian
+writer (test_telemetry_writer.py covers the writer itself; here it is flushed synchronously).
 
 WHAT THIS SUITE IS GUARDING AGAINST. The row tuple is positional, six columns wide, and three of
 its columns are mutually-exclusive nullable value slots. A transposition -- val_string into
@@ -11,10 +12,10 @@ val_bool, say -- would not raise, because every one of those columns is nullable
 NULLs, silently, on the hottest path in the system. So the tuples are asserted element by element
 rather than by count.
 
-FAILURE GRANULARITY IS DELIBERATELY UNCHANGED. The loop already ran inside `with db_conn:`, a
-transaction block that rolls back wholesale on any exception, so a bad row aborted the whole
-message before batching and aborts the whole message after it. Batching changes the number of
-round trips, not the atomicity -- see test_the_write_is_still_one_transaction_per_message.
+FAILURE GRANULARITY IS DELIBERATELY UNCHANGED. The write runs inside `with db_conn:`, a
+transaction block that rolls back wholesale on any exception, so a bad row aborts the whole
+message. Batching changes the number of round trips, not the atomicity -- see
+test_a_lone_message_is_written_in_a_transaction.
 
 Same stubbing approach as the sibling suites: the daemon's heavy imports are replaced before
 ingestion.py is loaded.
@@ -144,6 +145,9 @@ class BatchingTestCase(unittest.TestCase):
 
     def ingest(self, payload):
         ingestion.process_ddata(DEVICE, NODE, payload, group_id=GROUP, client=MagicMock())
+        # The callback thread decides; the writer thread writes. The suites never start that
+        # thread, so the queue is drained here, on this one.
+        ingestion._writer.flush()
 
     def batch_calls(self):
         return [c for c in self.execute_values.call_args_list
@@ -333,20 +337,23 @@ class TestEmptyAndFilteredBatches(BatchingTestCase):
         self.ingest(Payload([Metric("Systems/TEMPERATURE")]))
         self.assertEqual(self.batch_calls(), [])
 
+    def upsert_calls(self):
+        return [c for c in self.execute_values.call_args_list
+                if "INSERT INTO assets" in c[0][1]]
+
     def test_the_asset_upsert_still_runs_for_an_empty_payload(self):
         """
         The upsert is a separate statement BEFORE the batch and satisfies the telemetry table's
         foreign key. It must not have been folded into the guarded branch.
         """
         self.ingest(Payload([]))
-        upserts = [c for c in self.cursor.execute.call_args_list
-                   if "INSERT INTO assets" in c[0][0]]
-        self.assertEqual(len(upserts), 1)
+        self.assertEqual(len(self.upsert_calls()), 1)
+        self.assertEqual(self.upsert_calls()[0][0][2], [(DEVICE, "Sim_CNC_Mill_01")])
 
     def test_the_asset_upsert_precedes_the_batch(self):
         self.ingest(Payload([Metric("Systems/TEMPERATURE", double=42.0)]))
         self.assertEqual(len(self.batch_calls()), 1)
-        self.assertIn("INSERT INTO assets", self.cursor.execute.call_args_list[0][0][0])
+        self.assertIn("INSERT INTO assets", self.execute_values.call_args_list[0][0][1])
 
 
 class TestFilteringStillApplies(BatchingTestCase):
@@ -394,19 +401,19 @@ class TestFilteringStillApplies(BatchingTestCase):
 
 class TestTransactionSemantics(BatchingTestCase):
 
-    def test_the_write_is_still_one_transaction_per_message(self):
+    def test_a_lone_message_is_written_in_a_transaction(self):
         """
-        `with db_conn:` is what makes the batch atomic, and it is unchanged. This asserts the
-        transaction block is still entered, since dropping it would convert a rolled-back message
-        into a partially-committed one without any test noticing.
+        `with db_conn:` is what makes the batch atomic. This asserts the transaction block is
+        entered, since dropping it would convert a rolled-back message into a partially-committed
+        one without any test noticing. Several messages in one transaction: test_telemetry_writer.py.
         """
         self.ingest(Payload([Metric("Systems/TEMPERATURE", double=42.0)]))
         self.conn.__enter__.assert_called()
 
     def test_a_failing_batch_is_counted_and_does_not_propagate(self):
         """
-        A write failure must not kill the MQTT callback thread -- the next message has to be
-        processed. The counter is what makes the loss visible.
+        A write failure must not kill the writer thread -- the next message has to be processed.
+        The counter is what makes the loss visible.
         """
         self.execute_values.side_effect = RuntimeError("connection reset")
         self.ingest(Payload([Metric("Systems/TEMPERATURE", double=42.0)]))
