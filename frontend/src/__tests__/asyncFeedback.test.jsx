@@ -6,7 +6,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ActionButton } from '../components/common/ActionButton'
 import { ConfirmModal } from '../components/modals/ConfirmModal'
 import { ArchiveModal } from '../components/modals/ArchiveModal'
-import { OverviewTab } from '../components/tabs/OverviewTab'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { useApiActivity, ACTIVITY_SHOW_DELAY_MS, ACTIVITY_MIN_VISIBLE_MS } from '../hooks/useApiActivity'
 import { usePendingAction } from '../hooks/usePendingAction'
@@ -15,7 +14,7 @@ import { api } from '../api'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), relocateDevices: vi.fn() } }
+  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
 /**
@@ -352,152 +351,6 @@ describe('CellsTab save button', () => {
   })
 })
 
-// Drag and drop
-
-const dropGateway = {
-  gateway_id: 'gw-1', gateway_name: 'Virtual_Gateway_NodeRED', cell_id: 'cell-1',
-  location_scope: 'cell', status: 'ONLINE', deployment: 'host', is_archived: false,
-  last_heartbeat: new Date().toISOString(), device_count: 1, devices: []
-}
-
-const dropDevice = {
-  asset_id: 'dev-1', asset_name: 'Simulated_CNC_01', status: 'ONLINE',
-  active_gateway_id: 'gw-1', cell_id: null, location_scope: 'cell',
-  effective_cell_id: null, location_source: 'unassigned'
-}
-
-describe('shopfloor drop feedback', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    api.get.mockImplementation(routeGet({
-      cells: [{ ...cell, gateways: [dropGateway], gateway_count: 1 }],
-      gateways: [dropGateway],
-      devices: [dropDevice]
-    }))
-  })
-
-  const renderMap = (showToast = vi.fn()) => render(
-    <OverviewTab
-      onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} onSelectCell={vi.fn()}
-      showToast={showToast} hasPermission={() => true} onNavigateTab={vi.fn()}
-    />
-  )
-
-  const payload = () => ({
-    dataTransfer: { getData: () => JSON.stringify(dropDevice) }
-  })
-
-  /* What the pending mark means: a drop is staged, not written, so the chip moves at once and the
-     risk is that a staged move looks like it succeeded. The mark says the tile holds moves that
-     have not been written. */
-  it('marks the destination tile as holding unapplied moves, and writes nothing', async () => {
-    renderMap()
-
-    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
-
-    const zone = screen.getByTitle(/Drag device node here to reassign/)
-    fireEvent.drop(zone, payload())
-
-    await waitFor(() => expect(zone.className).toMatch(/shopfloor-zone-pending/))
-    expect(zone.getAttribute('title')).toMatch(/staged moves that have not been applied/)
-
-    // THE POINT OF THE WHOLE CHANGE. A drop must not write.
-    expect(api.put).not.toHaveBeenCalled()
-    expect(api.relocateDevices).not.toHaveBeenCalled()
-  })
-
-  it('marks only the destination, not every tile', async () => {
-    renderMap()
-
-    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
-
-    fireEvent.drop(screen.getByTitle(/Drag device node here to reassign/), payload())
-
-    await waitFor(() => expect(document.querySelectorAll('.shopfloor-zone-pending')).toHaveLength(1))
-  })
-
-  it('applies the staged batch in ONE call and clears the marks', async () => {
-    const showToast = vi.fn()
-    api.relocateDevices.mockResolvedValue({ causation_id: 42, requested: 1, applied: 1, unchanged: 0, devices: [] })
-    renderMap(showToast)
-
-    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
-    fireEvent.drop(screen.getByTitle(/Drag device node here to reassign/), payload())
-
-    const apply = await screen.findByRole('button', { name: /Apply 1 move/ })
-    await act(async () => { fireEvent.click(apply) })
-
-    expect(api.relocateDevices).toHaveBeenCalledTimes(1)
-    expect(api.relocateDevices).toHaveBeenCalledWith([
-      { device_id: 'dev-1', cell_id: 'cell-1', area_id: null, location_scope: 'cell' }
-    ])
-    // The message names the transaction, because that is the thing the batch bought.
-    expect(showToast).toHaveBeenCalledWith(
-      expect.stringMatching(/one transaction/), 'success'
-    )
-  })
-
-  it('disables Apply while the batch is in flight', async () => {
-    let release
-    api.relocateDevices.mockImplementation(() => new Promise(resolve => { release = resolve }))
-    renderMap()
-
-    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
-    fireEvent.drop(screen.getByTitle(/Drag device node here to reassign/), payload())
-
-    fireEvent.click(await screen.findByRole('button', { name: /Apply 1 move/ }))
-
-    // Same reasoning as every other pending button here: a dead-looking button gets clicked
-    // again, and a second click would send the same batch twice.
-    expect(await screen.findByRole('button', { name: /Applying…/ })).toBeDisabled()
-    expect(api.relocateDevices).toHaveBeenCalledTimes(1)
-
-    await act(async () => { release({ causation_id: 1, requested: 1, applied: 1, unchanged: 0, devices: [] }) })
-  })
-
-  it('KEEPS the batch staged when the apply fails', async () => {
-    const showToast = vi.fn()
-    api.relocateDevices.mockRejectedValue(new Error('Row level security'))
-    renderMap(showToast)
-
-    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
-
-    const zone = screen.getByTitle(/Drag device node here to reassign/)
-    fireEvent.drop(zone, payload())
-
-    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: /Apply 1 move/ })) })
-
-    // The work survives its own failure: the RPC refuses a batch in full, so the staged moves are
-    // kept rather than discarded.
-    expect(await screen.findByRole('button', { name: /Apply 1 move/ })).toBeInTheDocument()
-    expect(zone.className).toMatch(/shopfloor-zone-pending/)
-    // The exact failure, not a generic one -- an RLS refusal and a dropped connection need
-    // different responses from the operator.
-    expect(showToast).toHaveBeenCalledWith(
-      expect.stringMatching(/Row level security.*still staged/), 'error'
-    )
-  })
-
-  // A lane is a drop target too, and it is keyed by the lane name rather than by a cell_id.
-  it('marks a derived lane the same way', async () => {
-    renderMap()
-
-    await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
-
-    const lane = screen.getByTitle(/permanent home, not a queue/i)
-    fireEvent.drop(lane, payload())
-
-    await waitFor(() => expect(lane.className).toMatch(/shopfloor-zone-pending/))
-    expect(api.put).not.toHaveBeenCalled()
-  })
-})
-
 // The styles the markup above depends on
 
 describe('App.css carries the states the components ask for', () => {
@@ -541,13 +394,5 @@ describe('App.css carries the states the components ask for', () => {
     const block = APP_CSS.slice(APP_CSS.indexOf('@media (prefers-reduced-motion: reduce)'))
     expect(block).toMatch(/\.topbar-progress::before/)
     expect(block.slice(0, 400)).toMatch(/animation:\s*none/)
-  })
-
-  // `.shopfloor-zone:hover` (0-2-0) repaints border-color on every tile, and the pointer is by
-  // definition on the tile just dropped onto, so a single-class pending rule would never be seen.
-  it('states the pending tile at a specificity hover cannot take away', () => {
-    expect(APP_CSS).toMatch(/\.shopfloor-zone\.shopfloor-zone-pending \{/)
-    expect(APP_CSS).toMatch(/\.shopfloor-zone\.shopfloor-zone-pending:hover \{/)
-    expect(ruleFor('.shopfloor-zone.shopfloor-zone-pending')).toMatch(/pointer-events:\s*none/)
   })
 })

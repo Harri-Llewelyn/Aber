@@ -25,8 +25,7 @@ import {
   unassignedHint,
   locationSourceLabel,
   resolveDeviceLocations,
-  groupDevicesByCell,
-  applyStagedMoves
+  groupDevicesByCell
 } from '../utils/cellResolution';
 
 /**
@@ -146,13 +145,22 @@ describe('grouping cells by area and floor', () => {
     expect(byArea.get(null).map(c => c.cell_id)).toEqual(['c2', 'c3']);
   });
 
-  it('orders floors ground first, then up, then basements, then no floor', () => {
+  it('groups by the floor rows top-down, only the floors holding a cell, and cells on no floor last', () => {
+    const floors = [
+      { floor_id: 'f0', level: 0, name: 'Ground floor' },
+      { floor_id: 'f2', level: 2, name: 'Floor 2' },
+      { floor_id: 'f1', level: 1, name: 'Mezzanine' },
+      { floor_id: 'fb', level: -1, name: 'Basement' },
+      { floor_id: 'empty', level: 3, name: 'Roof' }
+    ];
     const groups = groupCellsByFloor([
-      { cell_id: 'b', floor: -1 }, { cell_id: 'two', floor: 2 }, { cell_id: 'g', floor: 0 },
-      { cell_id: 'none' }, { cell_id: 'one', floor: 1 }, { cell_id: 'b2', floor: -2 }
-    ]);
-    expect(groups.map(g => g.floor)).toEqual([0, 1, 2, -1, -2, null]);
-    expect(groups.map(g => g.label)).toEqual(['Ground floor', 'Floor 1', 'Floor 2', 'Basement', 'Basement 2', 'No floor set']);
+      { cell_id: 'b', floor_id: 'fb' }, { cell_id: 'two', floor_id: 'f2' }, { cell_id: 'g', floor_id: 'f0' },
+      { cell_id: 'none' }, { cell_id: 'one', floor_id: 'f1' }, { cell_id: 'gone', floor_id: 'deleted' }
+    ], floors);
+    expect(groups.map(g => g.floor?.floor_id ?? null)).toEqual(['f2', 'f1', 'f0', 'fb', null]);
+    expect(groups.map(g => g.label)).toEqual(['Floor 2', 'Mezzanine', 'Ground floor', 'Basement', 'No floor set']);
+    // A floor id the area no longer has reads as no floor, not as a crash.
+    expect(groups[4].cells.map(c => c.cell_id)).toEqual(['none', 'gone']);
   });
 
   it('labels a floor the way a person on the stairs would', () => {
@@ -285,118 +293,5 @@ describe('labels and bulk resolution', () => {
     const devices = [{ id: 'd1', gateway_id: 'gw-1', cell_id: null }];
     const resolved = resolveDeviceLocations(devices, [{ id: 'gw-1', cell_id: CELL_A }]);
     expect(resolved.get('d1').effective_cell_id).toBe(CELL_A);
-  });
-});
-
-/**
- * Staged, uncommitted relocations. Every device on the Overview page carries `location_source`
- * merged from `device_locations`, and deviceLocationOf() prefers that server answer, so overwriting
- * `cell_id` alone leaves the stale resolution in place and the chip does not move.
- */
-describe('applyStagedMoves', () => {
-  const withServerAnswer = (overrides = {}) => ({
-    asset_id: 'd1',
-    active_gateway_id: 'gw-1',
-    cell_id: null,
-    location_scope: SCOPE_CELL,
-    // What api.js merges in from the view. Present on every real row.
-    effective_cell_id: CELL_A,
-    location_source: SOURCE_INHERITED,
-    ...overrides
-  });
-
-  const gateways = [{ gateway_id: 'gw-1', cell_id: CELL_A, location_scope: SCOPE_CELL }];
-
-  it('re-resolves the view fields rather than only setting cell_id', () => {
-    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
-    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
-    expect(moved.cell_id).toBe(CELL_B);
-    // Both of these came from the server and would otherwise still say CELL_A / inherited.
-    expect(moved.effective_cell_id).toBe(CELL_B);
-    expect(moved.location_source).toBe(SOURCE_EXPLICIT);
-  });
-
-  it('groups a staged device under its new cell immediately', () => {
-    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
-    const byCell = groupDevicesByCell(applyStagedMoves([withServerAnswer()], gateways, staged));
-    expect(byCell.get(CELL_B)).toHaveLength(1);
-    expect(byCell.has(CELL_A)).toBe(false);
-  });
-
-  it('marks staged rows so pending can render differently from durable', () => {
-    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
-    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
-    expect(moved.staged).toBe(true);
-  });
-
-  it('leaves untouched devices exactly as they were, by identity', () => {
-    const device = withServerAnswer({ asset_id: 'd2' });
-    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
-    const [same] = applyStagedMoves([device], gateways, staged);
-    expect(same).toBe(device);
-  });
-
-  it('returns the original list when nothing is staged', () => {
-    const devices = [withServerAnswer()];
-    expect(applyStagedMoves(devices, gateways, new Map())).toBe(devices);
-  });
-
-  it('springs a device back to its gateway cell when staged onto Unassigned', () => {
-    /* Unassigned is not settable: dropping there clears the explicit cell and lets resolution run,
-       so a device whose gateway serves a cell re-inherits it, visibly at the drop. */
-    const device = withServerAnswer({ cell_id: CELL_B, location_source: SOURCE_EXPLICIT, effective_cell_id: CELL_B });
-    const staged = new Map([['d1', { cell_id: null, location_scope: SCOPE_CELL }]]);
-    const [moved] = applyStagedMoves([device], gateways, staged);
-    expect(moved.location_source).toBe(SOURCE_INHERITED);
-    expect(moved.effective_cell_id).toBe(CELL_A);
-  });
-
-  it('leaves a device unassigned when staged onto Unassigned with no gateway cell to inherit', () => {
-    const device = withServerAnswer({ cell_id: CELL_B, location_source: SOURCE_EXPLICIT, effective_cell_id: CELL_B });
-    const staged = new Map([['d1', { cell_id: null, location_scope: SCOPE_CELL }]]);
-    const [moved] = applyStagedMoves([device], [{ gateway_id: 'gw-1', cell_id: null }], staged);
-    expect(moved.location_source).toBe(SOURCE_UNASSIGNED);
-  });
-
-  it('clears the cell when staged Site-Wide, mirroring devices_site_wide_has_no_cell', () => {
-    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_SITE_WIDE }]]);
-    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
-    expect(moved.location_scope).toBe(SCOPE_SITE_WIDE);
-    expect(moved.effective_cell_id).toBeNull();
-    expect(moved.location_source).toBe(SOURCE_SITE_WIDE);
-  });
-
-  it('keeps a Site-Wide staged device out of every cell bucket', () => {
-    const staged = new Map([['d1', { cell_id: null, location_scope: SCOPE_SITE_WIDE }]]);
-    const byCell = groupDevicesByCell(applyStagedMoves([withServerAnswer()], gateways, staged));
-    expect(byCell.size).toBe(0);
-  });
-
-  it('stages an area-wide move with its area, clearing the cell, and resolves the area at the drop', () => {
-    const staged = new Map([['d1', { cell_id: CELL_B, area_id: AREA_1, location_scope: SCOPE_AREA_WIDE }]]);
-    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
-    expect(moved.location_scope).toBe(SCOPE_AREA_WIDE);
-    expect(moved.cell_id).toBeNull();
-    expect(moved.area_id).toBe(AREA_1);
-    expect(moved.effective_cell_id).toBeNull();
-    expect(moved.effective_area_id).toBe(AREA_1);
-    expect(moved.location_source).toBe(SOURCE_AREA_WIDE);
-  });
-
-  it('drops a stored area when staged back to a cell, mirroring devices_area_wide_names_its_area', () => {
-    const device = withServerAnswer({ location_scope: SCOPE_AREA_WIDE, area_id: AREA_1, location_source: SOURCE_AREA_WIDE, effective_cell_id: null });
-    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
-    const cells = new Map([[CELL_B, { cell_id: CELL_B, area_id: AREA_1 }]]);
-    const [moved] = applyStagedMoves([device], gateways, staged, cells);
-    expect(moved.area_id).toBeNull();
-    expect(moved.effective_cell_id).toBe(CELL_B);
-    // Derived through the cell now, not stored on the device.
-    expect(moved.effective_area_id).toBe(AREA_1);
-  });
-
-  it('does not touch the gateway, because a drop is not a data-path change', () => {
-    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
-    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
-    expect(moved.active_gateway_id).toBe('gw-1');
   });
 });

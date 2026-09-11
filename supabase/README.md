@@ -1335,6 +1335,43 @@ buildings are one ISA-95 site, so such a BMS is already Site-Wide; a join table 
 the view one row per pair, published each reading once per site, and let a per-site ACL leak a
 shared device.
 
+### A floor is a row, and a cell has a place on it (`0098`)
+
+`cells.floor` was an integer that grouped the Overview. `0098` makes a floor a row of its area,
+`public.area_floors`, one per (area, level), named, and carrying the SVG plan the Site Map draws.
+
+- **Every area has a ground floor** from the moment it exists: an AFTER INSERT trigger on
+  `areas` creates level 0. The old integer column is backfilled into rows, one per (area, level)
+  a cell named, and then dropped; the block is guarded on the column, so the replay does nothing.
+- **A cell files onto a floor of its own area** (`cells.floor_id`) and takes a place on that
+  floor's plan as two fractions of the plan's viewBox (`plan_x`, `plan_y`). `place_cell_on_its_
+  floor()` runs BEFORE INSERT OR UPDATE: a floor of another area is refused; when the area moves
+  under a floor that stayed — an unfiling, an area deletion, a proposal that changed only the
+  area — the floor and the place are cleared rather than refused; a place needs a floor; and two
+  placed cells on one floor keep `site_map.min_pin_spacing` between them, measured by
+  `plan_distance()` in units of the plan's shorter side so one number means the same on a wide
+  plan and a tall one. The picker on the Cells page refuses the click first; the trigger is the
+  authority, because an approved proposal writes the same columns.
+- **A floor holding cells cannot be deleted, nor an area's last floor**, except through the
+  area's own deletion, which cascades. `guard_floor_delete()` tells the two apart by asking
+  whether the area row still exists — inside the cascade it is already gone.
+- **The plan is an object, never markup.** `plan_path` names an object in the private
+  `floor-plans` bucket under `<area_id>/<floor_id>/`; `is_floor_plan_path()` confines the bucket's
+  write policies to a floor that exists. `plan_aspect` is read from the SVG at upload, because a
+  place is a fraction and the aspect is what turns it back into a distance. The dashboard renders
+  a plan through an `<img>` fed a blob URL, where an SVG's scripts, foreign objects and external
+  references cannot run.
+- **The proposal lane** for cells admits `floor_id`, `plan_x` and `plan_y` in place of `floor`,
+  and `approve_proposal()` assigns them. `area_floors` joins the asset audit domain.
+- **`areas` and `area_floors` join the `supabase_realtime` publication**, `REPLICA IDENTITY FULL`
+  like the other published tables, so a floor added on the Areas page reaches an open Overview at
+  once. `0098` adds them where they are created; `0001`'s intended list names them too, because
+  its `SET TABLE` replaces the whole membership on every replay.
+
+Unplaced is a state, not an error: a cell filed on a floor with no place is listed beside the
+plan. Filing a cell into an area is what puts its devices under the right Unified Namespace
+topic, and that must never wait on somebody opening a drawing.
+
 ### The playback gateway is visible and almost inert (`0067`)
 
 It stays on the Gateways and Access Control pages deliberately: it holds a broker credential an
@@ -2959,17 +2996,22 @@ not a capability.
 
 ## Storage buckets and why they differ
 
-Three buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
+Five buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
 first two are opposites in the one setting that matters, and the reasoning belongs together rather
-than split across comment blocks in the policy file.
+than split across comment blocks in the policy file. `telemetry-archive` is described with cold
+storage; `floor-plans` is the odd one out below.
 
-| | `asset-3d-models` | `gateway-backups` | `broker-captures` |
-| :--- | :--- | :--- | :--- |
-| Public read | **yes** | **no** | **no** |
-| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager | those two, plus the ingestion daemon for one path |
-| Read | anyone, including `anon` | those two plus **Auditor** | those two plus **Auditor** |
-| Operator | read | nothing | nothing |
-| Reached by | a plain public URL | a signed URL, minted after a role check | a signed URL, minted after a role check |
+| | `asset-3d-models` | `gateway-backups` | `broker-captures` | `floor-plans` |
+| :--- | :--- | :--- | :--- | :--- |
+| Public read | **yes** | **no** | **no** | **no** |
+| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager | those two, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing floor's prefix |
+| Read | anyone, including `anon` | those two plus **Auditor** | those two plus **Auditor** | every signed-in role |
+| Operator | read | nothing | nothing | read |
+| Reached by | a plain public URL | a signed URL, minted after a role check | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
+
+`floor-plans` is readable by every signed-in role because the Overview is the page an Operator
+lives on, and private because a plan is a drawing of the plant and SVG is active content: the
+bucket admits `image/svg+xml` only, and the dashboard never inlines it.
 
 ### `asset-3d-models` is public-read, and that is not laziness
 

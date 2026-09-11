@@ -176,6 +176,17 @@ const TELEMETRY_ARCHIVE_MIME_TYPES = [
   'application/octet-stream',
 ];
 
+/**
+ * A floor plan is SVG and nothing else. Exact, with no octet-stream fallback: every browser
+ * reports `image/svg+xml` for a .svg picked from disk, and the dashboard sets the type itself.
+ * SVG is active content, so the bucket is private and the dashboard renders a plan through an
+ * <img>, where scripts, foreign objects and external references cannot run.
+ */
+const FLOOR_PLAN_MIME_TYPES = ['image/svg+xml'];
+
+/** 5 MiB for a floor plan. A drawing larger than that is a CAD export, not a plan. */
+const FLOOR_PLAN_SIZE_LIMIT = 5242880;
+
 const BUCKETS = [
   {
     id: process.env.STORAGE_BUCKET || 'asset-3d-models',
@@ -233,6 +244,16 @@ const BUCKETS = [
     file_size_limit: TELEMETRY_ARCHIVE_SIZE_LIMIT,
     allowed_mime_types: TELEMETRY_ARCHIVE_MIME_TYPES,
     why: 'cold telemetry chunks as Parquet, under year=YYYY/month=MM/, referenced by telemetry_archive_manifest',
+  },
+  {
+    // Fixed, not an environment variable: supabase/storage-policies.sql and frontend/src/api.js
+    // name this bucket too, and a name that can be changed in one place is a bucket with no
+    // policies. Private: a plan is a drawing of the plant, and SVG is active content.
+    id: 'floor-plans',
+    public: false,
+    file_size_limit: FLOOR_PLAN_SIZE_LIMIT,
+    allowed_mime_types: FLOOR_PLAN_MIME_TYPES,
+    why: 'floor plans drawn by the Site Map, under <area_id>/<floor_id>/, referenced by area_floors.plan_path',
   },
 ];
 

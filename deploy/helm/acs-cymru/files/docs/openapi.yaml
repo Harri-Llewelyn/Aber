@@ -92,7 +92,9 @@ info:
     Above the cell sits the ISA-95 **area** (a building, `/rest/v1/areas`): `cells.area_id` files
     a cell, and a device's `effective_area_id` on the same view is its cell's area, or its own
     `area_id` when it is `area_wide`. The site is one campus and lives in `system_settings` as
-    `site.name`; the enterprise is each gateway's `sparkplug_group`.
+    `site.name`; the enterprise is each gateway's `sparkplug_group`. An area's **floors**
+    (`/rest/v1/area_floors`) are not a level of the hierarchy: a cell's `floor_id` and its
+    `plan_x`/`plan_y` place say where the Site Map draws it, and nothing else reads them.
 
     **No embed can express this.** `cells?select=*,gateways(devices(*))` returns devices by
     inheritance only, so a device explicitly placed in cell B whose gateway serves cell A comes
@@ -348,6 +350,68 @@ paths:
         '204': { description: Deleted. }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: An area-wide asset still names this area. }
+
+  /rest/v1/area_floors:
+    get:
+      tags: [Assets]
+      summary: List floors
+      description: |
+        The floors of the areas, one row per (area, level). Filter by `area_id=eq.<uuid>` and
+        order by `level` to read one area's floors as the floor picker lists them.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - { name: area_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+      responses:
+        '200':
+          description: Matching floors.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AreaFloor' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Assets]
+      summary: Add a floor to an area
+      description: 'Level and name are each unique within the area. The ground floor already exists: it is created with the area.'
+      parameters: [{ $ref: '#/components/parameters/Prefer' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AreaFloorWrite' }
+      responses:
+        '201': { description: Created. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: The level or the name is already taken in this area. }
+    patch:
+      tags: [Assets]
+      summary: Rename a floor or change its level
+      description: 'Always send a filter, e.g. `?id=eq.<uuid>`. `plan_path` and `plan_aspect` are set together or cleared together; the dashboard uploads the object to the `floor-plans` bucket first.'
+      parameters:
+        - { name: id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AreaFloorWrite' }
+      responses:
+        '204': { description: Updated. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Assets]
+      summary: Delete a floor
+      description: |
+        Refused while a cell sits on the floor, and refused for an area's last floor. Deleting the
+        area takes its floors with it and unfiles its cells.
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+      responses:
+        '204': { description: Deleted. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: The floor holds cells, or is the area''s last. }
 
   /rest/v1/gateways:
     get:
@@ -3222,6 +3286,10 @@ components:
           type: array
           description: Present only when embedded via `select`.
           items: { $ref: '#/components/schemas/Cell' }
+        area_floors:
+          type: array
+          description: Present only when embedded via `select=*,area_floors(*)`.
+          items: { $ref: '#/components/schemas/AreaFloor' }
 
     AreaWrite:
       type: object
@@ -3230,6 +3298,25 @@ components:
         description: { type: string, nullable: true }
         icon: { type: string, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap] }
 
+    AreaFloor:
+      type: object
+      description: One floor of an area. Every area has a ground floor (level 0) from creation. Not an ISA-95 level and not a topic segment; it groups the Site Map and carries the plan it draws.
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        area_id: { type: string, format: uuid }
+        level: { type: integer, description: 'Ground is 0, floors above positive, basements negative. Unique within the area.' }
+        name: { type: string, example: Mezzanine, description: 'Unique within the area.' }
+        plan_path: { type: string, nullable: true, description: 'Object path of the SVG plan in the private `floor-plans` bucket, `<area_id>/<floor_id>/<file>.svg`, or NULL for the default outline. Set through the dashboard, which uploads the object first.' }
+        plan_aspect: { type: number, nullable: true, description: 'Width over height of the plan''s viewBox; NULL exactly when `plan_path` is. Cell places are fractions of the plan, so this is what turns them back into a distance.' }
+        created_at: { type: string, format: date-time, readOnly: true }
+
+    AreaFloorWrite:
+      type: object
+      properties:
+        area_id: { type: string, format: uuid }
+        level: { type: integer }
+        name: { type: string }
+
     Cell:
       type: object
       description: A shopfloor cell zone — an ISA-95 work center.
@@ -3237,7 +3324,9 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         name: { type: string, example: Assembly Line 1, description: 'UNIQUE — cells are not addressed on the wire, so a stable name is safe here. It is the `<cell>` segment of its `uns/` topics, so a new name cannot contain `/`, `+` or `#`.' }
         area_id: { type: string, format: uuid, nullable: true, description: 'The area (building) this cell is filed in. NULL is unfiled, which the dashboard lists as a queue.' }
-        floor: { type: integer, nullable: true, description: 'Ground is 0, basements negative. A grouping, not a hierarchy level.' }
+        floor_id: { type: string, format: uuid, nullable: true, description: 'A floor of `area_id` (`area_floors.id`). A floor of another area is refused; when the area changes under it, the floor and the place are cleared. NULL is on no floor.' }
+        plan_x: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Where the cell sits on its floor''s plan, as a fraction of the plan''s width. Set with `plan_y` or not at all, requires `floor_id`, and is refused closer than `site_map.min_pin_spacing` (a fraction of the plan''s shorter side) to another cell on the same floor.' }
+        plan_y: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Fraction of the plan''s height, 0 at the top.' }
         description: { type: string, nullable: true, description: 'Free text, shown as a help tip beside the name on the Overview map when present.' }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean, default: false }
@@ -3254,7 +3343,9 @@ components:
       properties:
         name: { type: string, example: Assembly Line 1 }
         area_id: { type: string, format: uuid, nullable: true }
-        floor: { type: integer, nullable: true }
+        floor_id: { type: string, format: uuid, nullable: true }
+        plan_x: { type: number, nullable: true }
+        plan_y: { type: number, nullable: true }
         description: { type: string, nullable: true }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean }

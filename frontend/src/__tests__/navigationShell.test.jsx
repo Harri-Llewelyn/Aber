@@ -50,7 +50,7 @@ const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 // permission-gated page is absent: Archives, Approvals and Digital Thread. Capture stays visible
 // because it is gated on role, and the mocked session is an Administrator.
 const ALWAYS_VISIBLE = [
-  'Overview', 'Cells', 'Gateways', 'Devices',
+  'Site Map', 'Cells', 'Gateways', 'Devices',
   'Schemas', 'Vocabulary', 'Directory'
 ]
 
@@ -138,7 +138,7 @@ describe('Merged navigation shell', () => {
     const current = navTabs().filter(t => t.getAttribute('aria-current') === 'page')
     expect(current).toHaveLength(1)
     expect(current[0]).toHaveClass('active')
-    expect(current[0].querySelector('.sidebar-item-label').textContent).toBe('Overview')
+    expect(current[0].querySelector('.sidebar-item-label').textContent).toBe('Site Map')
   })
 
   /**
@@ -177,7 +177,7 @@ describe('Merged navigation shell', () => {
 
     const brand = topbar().querySelector('.topbar-brand')
     expect(brand.tagName).toBe('BUTTON')
-    expect(brand.getAttribute('aria-label')).toMatch(/overview/i)
+    expect(brand.getAttribute('aria-label')).toMatch(/site map/i)
 
     // Leave Overview, then click the mark to come back.
     fireEvent.click(screen.getByRole('button', { name: /^Devices$/ }))
@@ -476,14 +476,17 @@ describe('Merged navigation shell', () => {
 })
 
 /**
- * The shopfloor grid across the viewports. `repeat(auto-fill, minmax(280px, 1fr))` is one
- * declaration doing the work of a stack of media queries, so what is checked is the arithmetic: the
- * minimum yields the intended column count at each width and degrades rather than overflowing.
- * jsdom computes no layout, so the count is derived as floor((available + gap) / (min + gap)).
+ * The area thumbnails across the viewports. One track expression does the work of a stack of media
+ * queries: the minimum is a third of the row less its share of the gaps, or a fixed floor,
+ * whichever is larger, so a row holds three at most and fewer as the window narrows. What is checked
+ * is the arithmetic. jsdom computes no layout, so the count is derived as
+ * floor((available + gap) / (track + gap)).
  */
-describe('shopfloor grid across viewports', () => {
+describe('area thumbnail grid across viewports', () => {
   const gridRule = APP_CSS.match(/\n\.shopfloor-grid \{([\s\S]*?)\n\}/)[1]
-  const minWidth = Number(gridRule.match(/minmax\(min\((\d+)px/)[1])
+  const track = gridRule.match(/minmax\(min\(max\((\d+)px, calc\(33\.333% - (\d+)px\)\), 100%\), 1fr\)/)
+  const floorWidth = Number(track[1])
+  const thirdLess = Number(track[2])
   const gap = Number(gridRule.match(/gap:\s*(\d+)px/)[1])
 
   /* What the grid's container measures: the viewport less the rail, the content padding and the
@@ -497,24 +500,33 @@ describe('shopfloor grid across viewports', () => {
   // part of the width arithmetic.
   const gutter = Number(block(/::-webkit-scrollbar \{([^}]*)\}/).match(/width:\s*(\d+)px/)[1])
 
+  const availableAt = (viewport) => viewport - rail - inset * 2 - gutter
   const columnsAt = (viewport) => {
-    const available = viewport - rail - inset * 2 - gutter
-    // `minmax(min(280px, 100%), 1fr)`: the track never exceeds the container, so a container
-    // narrower than the tile yields one full-width column rather than an overflow.
-    const track = Math.min(minWidth, available)
-    return Math.floor((available + gap) / (track + gap))
+    const available = availableAt(viewport)
+    // The track is capped at the container, so a container narrower than the floor yields one
+    // full-width column rather than an overflow.
+    const min = Math.min(Math.max(floorWidth, available / 3 - thirdLess), available)
+    return Math.floor((available + gap) / (min + gap))
   }
 
-  it('fills six columns at 1920x1080, the primary target', () => {
-    expect(columnsAt(1920)).toBe(6)
+  // Three tracks share two gaps, so each gives up two thirds of one.
+  it('takes each track\'s share of the gaps off its third', () => {
+    expect(thirdLess).toBe(Math.round(gap * 2 / 3))
   })
 
-  it('degrades to four at 1366x768 without overflowing', () => {
-    const cols = columnsAt(1366)
-    expect(cols).toBe(4)
+  it('fills three columns at 1920x1080, the primary target, and never more at any width', () => {
+    expect(columnsAt(1920)).toBe(3)
+    for (const w of [2560, 3440, 3840]) expect(columnsAt(w), `${w}px exceeds three`).toBe(3)
+  })
+
+  it('still fills three at 1366x768, and degrades below three at 1024 without overflowing', () => {
+    expect(columnsAt(1366)).toBe(3)
+    const cols = columnsAt(1024)
+    expect(cols).toBeLessThan(3)
+    expect(cols).toBeGreaterThanOrEqual(1)
     // The check that matters: whatever the count, the row still fits.
-    const used = cols * minWidth + (cols - 1) * gap
-    expect(used).toBeLessThanOrEqual(1366 - rail - inset * 2 - gutter)
+    const used = cols * floorWidth + (cols - 1) * gap
+    expect(used).toBeLessThanOrEqual(availableAt(1024))
   })
 
   it('keeps at least one column at every width down to a phone', () => {
@@ -523,20 +535,11 @@ describe('shopfloor grid across viewports', () => {
     }
   })
 
-  // auto-fill, not auto-fit. With auto-fit a single cell would stretch across the entire 1920px
-  // row, which is what the shopfloor map looked like before the lanes were added to it.
-  it('uses auto-fill so one cell does not stretch across the row', () => {
+  // auto-fill, not auto-fit. With auto-fit a single area would stretch across the entire row and
+  // the grid would change shape as areas are added.
+  it('uses auto-fill so one area does not stretch across the row', () => {
     expect(gridRule).toMatch(/auto-fill/)
     expect(gridRule).not.toMatch(/auto-fit/)
-  })
-
-  /**
-   * The track must be capped at the container, which a bare `minmax(280px, 1fr)` is not: a track
-   * whose minimum exceeds its container overflows, and the narrowest viewport this suite checks
-   * falls under 280px once the rail takes its gutter.
-   */
-  it('caps the tile at the container width so it cannot overflow', () => {
-    expect(gridRule).toMatch(/minmax\(min\(\d+px,\s*100%\)/)
   })
 })
 
@@ -557,32 +560,40 @@ describe('sidebar warning tone', () => {
  * single-class lane rules tie at 0-1-0 and lose to source order, and every rendering assertion
  * still passes.
  */
-describe('Shopfloor tile variant specificity', () => {
-  const VARIANTS = ['shopfloor-lane', 'shopfloor-lane-site', 'shopfloor-lane-queue', 'shopfloor-zone-archived']
+describe('Overview lane hues', () => {
+  // Each lane is one button with its own hue: blue for Site-Wide, grey for Simulated, amber for
+  // Unassigned. The hue is a border colour plus a tint; themeContrast.test.js measures --text-muted
+  // over these exact tints, so they are quoted here to keep that measurement honest.
+  const HUES = [
+    ['site-lane-site', 'var(--accent)', 'rgba(0, 212, 255, 0.05)'],
+    ['site-lane-simulated', 'var(--text-dim)', 'rgba(133, 142, 163, 0.07)'],
+    ['site-lane-queue', 'var(--warning)', 'rgba(255, 179, 0, 0.06)']
+  ]
 
-  it.each(VARIANTS)('.%s is compounded with .shopfloor-zone', (variant) => {
-    const bare = new RegExp(`(^|[,\\s])\\.${variant}\\s*(:hover)?\\s*\\{`, 'm')
-    expect(
-      APP_CSS,
-      `.${variant} appears as a bare single-class selector. It ties 0-1-0 with .shopfloor-zone, ` +
-      'which is declared later and sets the `border` shorthand, so the variant silently loses. ' +
-      `Write it as .shopfloor-zone.${variant} instead.`
-    ).not.toMatch(bare)
-    expect(APP_CSS).toMatch(new RegExp(`\\.shopfloor-zone\\.${variant}\\s*(:hover)?\\s*\\{`))
+  it.each(HUES)('.%s sets its border colour and tint', (variant, border, tint) => {
+    const rule = APP_CSS.match(new RegExp(`\\.${variant}\\s*\\{([\\s\\S]*?)\\n\\}`))
+    expect(rule, `.${variant} has no rule`).toBeTruthy()
+    expect(rule[1]).toContain(`border-color: ${border}`)
+    expect(rule[1]).toContain(`background: ${tint}`)
   })
 
-  it('keeps the lane accents through hover', () => {
-    // .shopfloor-zone:hover repaints border-color for every tile at 0-2-0, so a lane's hover rule
-    // needs the compound to reach 0-3-0.
-    expect(APP_CSS).toMatch(/\.shopfloor-zone\.shopfloor-lane-site:hover\s*\{[\s\S]*?border-color:\s*var\(--accent\)/)
-    expect(APP_CSS).toMatch(/\.shopfloor-zone\.shopfloor-lane-queue:hover\s*\{[\s\S]*?border-color:\s*var\(--warning\)/)
-    expect(APP_CSS).toMatch(/\.shopfloor-zone\.shopfloor-zone-archived:hover\s*\{[\s\S]*?border-color:\s*var\(--warning\)/)
+  it('keeps the hues through hover and while open', () => {
+    // No generic `.site-lane:hover` or `.site-lane.is-open` rule repaints border-color: the hue
+    // rules are the only ones that set it, so pointing at a lane does not drop its identity.
+    const generic = APP_CSS.match(/\.site-lane(:hover|\.is-open)\s*\{([\s\S]*?)\n\}/g) || []
+    for (const block of generic) expect(block).not.toMatch(/border-color/)
+    expect(APP_CSS).toMatch(/\.site-lane\.is-open\s*\{[\s\S]*?outline/)
   })
 
-  it('gives the lanes a top cap the cells do not have', () => {
-    const lane = APP_CSS.match(/\.shopfloor-zone\.shopfloor-lane \{([\s\S]*?)\n\}/)[1]
+  it('gives every lane a top cap', () => {
+    const lane = APP_CSS.match(/\.site-lane \{([\s\S]*?)\n\}/)[1]
     expect(lane).toMatch(/border-top-width:\s*4px/)
     expect(lane).toMatch(/border-width:\s*1px/)
+  })
+
+  it('lays the three lanes side by side across the full width', () => {
+    const lanes = APP_CSS.match(/\.site-lanes \{([\s\S]*?)\n\}/)[1]
+    expect(lanes).toMatch(/grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/)
   })
 })
 

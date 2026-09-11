@@ -13,6 +13,9 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { AreaIcon } from '../../utils/areaIcon'
+import { groundFloor, formatPlace, isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/floorPlans'
+import { useSetting } from '../../hooks/useSettings'
+import { FloorPlacementPicker } from '../common/FloorPlacementPicker'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
@@ -38,7 +41,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   /**
-   * A cell handed over from the Overview map arrives as `?search=<cell_id>`. The URL wins over the
+   * A cell handed over from the Site Map arrives as `?search=<cell_id>`. The URL wins over the
    * prop and both are read, as on Gateways and Devices. The search predicate already matches
    * cell_id or cell_name.
    */
@@ -57,9 +60,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const [editing, setEditing]   = useState(null)
   // DEFAULT_CELL_ICON rather than the literal 'Factory': the column's default, the CHECK
   // constraint and this form all have to agree, and one imported constant is one place they can.
-  // `area_id` '' is unfiled and `floor` '' is unset; api.js turns both into NULL.
-  const blank = { cell_name: '', access_url: '', description: '', icon: DEFAULT_CELL_ICON, area_id: '', floor: '' }
+  // `area_id` '' is unfiled, `floor_id` '' is on no floor and `plan_x`/`plan_y` '' is unplaced;
+  // api.js turns each into NULL.
+  const blank = { cell_name: '', access_url: '', description: '', icon: DEFAULT_CELL_ICON, area_id: '', floor_id: '', plan_x: '', plan_y: '' }
   const [formVal, setFormVal]   = useState(blank)
+  // The spacing the database enforces between two cells on one plan; the picker refuses earlier.
+  const minSpacingSetting = useSetting(MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING)
+  const minSpacing = Number.isFinite(Number(minSpacingSetting)) ? Number(minSpacingSetting) : DEFAULT_MIN_PIN_SPACING
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [docsForCell, setDocsForCell] = useState(null)
   const [filterMode, setFilterMode] = useState('all')
@@ -121,7 +128,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   usePolling(loadAll, refreshInterval())
   // gateways and devices are watched too: a cell's contents come from the embed, so a device moving
   // between gateways changes this page without touching a `cells` row.
-  useRealtimeTable(['cells', 'gateways', 'devices'], loadAll, { enabled: REALTIME_ENABLED })
+  useRealtimeTable(['cells', 'gateways', 'devices', 'areas', 'area_floors'], loadAll, { enabled: REALTIME_ENABLED })
 
   // In-flight state for the form's Save and for whichever row is restoring. See
   // hooks/usePendingAction.js for why the row list needs a key rather than a second boolean.
@@ -132,10 +139,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     try {
       /* THE FORK IS AT THE END, not at the beginning: the fields, their validation and their null
          handling are shared, and only the last step differs -- by who is asking. */
-      // The floor arrives from a number input as text; the column is an integer, and a proposal
-      // carrying "2" against a row holding 2 would read as a change that changes nothing.
-      const floor = formVal.floor === '' || formVal.floor === null || formVal.floor === undefined ? '' : Number(formVal.floor)
-      const form = { ...formVal, floor }
+      // A place is a pair: half of one is none of it.
+      const placed = formVal.plan_x !== '' && formVal.plan_y !== '' && formVal.plan_x !== null && formVal.plan_y !== null
+      const form = { ...formVal, plan_x: placed ? Number(formVal.plan_x) : '', plan_y: placed ? Number(formVal.plan_y) : '' }
       if (proposeMode) {
         if (!editing) throw new Error('A cell can only be created by an Administrator.')
         const patch = patchFromForm('cell', editing, form)
@@ -198,6 +204,20 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   // Cell membership, grouped from the device list this page already holds: a cell's devices are
   // those that resolve to it, which no PostgREST embed can express.
   const devicesByCell = useMemo(() => groupDevicesByCell(assets), [assets])
+
+  // Floors come embedded on their areas; a cell's floor row is looked up through its area.
+  const areaOf = (areaId) => areas.find(a => a.area_id === areaId) || null
+  const floorOf = (cell) => (areaOf(cell?.area_id)?.floors || []).find(f => f.floor_id === cell?.floor_id) || null
+  const floorNameOf = (cell) => floorOf(cell)?.name || floorLabel(null)
+  const formArea = areaOf(formVal.area_id)
+  const formFloor = (formArea?.floors || []).find(f => f.floor_id === formVal.floor_id) || null
+
+  /** Filing into an area lands the cell on that area's ground floor; leaving one clears the floor and the place. */
+  const chooseArea = (areaId) => {
+    const ground = groundFloor(areaOf(areaId)?.floors || [])
+    setFormVal(f => ({ ...f, area_id: areaId, floor_id: ground?.floor_id || '', plan_x: '', plan_y: '' }))
+  }
+  const chooseFloor = (floorId) => setFormVal(f => ({ ...f, floor_id: floorId, plan_x: '', plan_y: '' }))
 
   const liveGateways = (c) => (c.gateways || []).filter(g => !g.is_archived)
   const liveDevices = (c) => (devicesByCell.get(c.cell_id) || []).filter(a => !a.is_archived)
@@ -355,7 +375,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                       screen-reader label, because a 32px column cannot carry a word. */}
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
                   <th title="Human-readable cell zone name">Cell Name</th>
-                  <th title="The ISA-95 area (area) and floor this cell is on">Area / Floor</th>
+                  <th title="The ISA-95 area this cell is in, the floor it is on, and whether it has a place on that floor's plan">Area / Floor</th>
                   <th title="Cell zone unique UUID">Cell UUID</th>
                   <th title="Edge gateways assigned to this cell zone">Assigned Gateways</th>
                   <th title="Devices located in this cell — its gateways' devices, plus any device filed here explicitly">Assigned Devices</th>
@@ -400,7 +420,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                         {c.area_id
                           ? <span>{areas.find(a => a.area_id === c.area_id)?.area_name || <span className="mono">{c.area_id}</span>}</span>
                           : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Not filed in any area — file it on the Areas page or in Edit Details">Unfiled</span>}
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{floorLabel(c.floor)}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {floorNameOf(c)}
+                          {c.floor_id && (
+                            isPlaced(c)
+                              ? <span title={`On the plan: ${formatPlace(c)}`}> · placed</span>
+                              : <span style={{ color: 'var(--warning-text)' }} title="On the floor but not yet placed on its plan — set a place in Edit Details"> · not placed</span>
+                          )}
+                        </div>
                       </td>
                       <td><CopyableId value={c.cell_id} label="cell UUID" onNotify={showToast} /></td>
                       <td>
@@ -474,7 +501,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="cell-description">Description (Optional)</label>
-              <input id="cell-description" className="form-control" value={formVal.description || ''} onChange={e => setFormVal(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Five-axis machining, two shifts" title="Shown as a help tip beside the cell's name on the Overview map" />
+              <input id="cell-description" className="form-control" value={formVal.description || ''} onChange={e => setFormVal(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Five-axis machining, two shifts" title="Shown in the cell's details panel on the Site Map" />
             </div>
             <div className="form-group">
               {/* A grid of buttons, not a select: the choice is visual. */}
@@ -496,38 +523,57 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 ))}
               </div>
             </div>
-            {/* Where the cell is in the area hierarchy. The area is a row on the Areas page;
-                the floor is a number on this cell and groups the Overview map. */}
+            {/* Where the cell is: its area, a floor of that area, and a place on the floor's plan.
+                Areas and floors are rows on the Areas page; the place is this cell's own. */}
             <div className="form-group">
               <label className="form-label" htmlFor="cell-area">Area</label>
               <select
                 id="cell-area"
                 className="form-control"
                 value={formVal.area_id || ''}
-                onChange={e => setFormVal(f => ({ ...f, area_id: e.target.value }))}
+                onChange={e => chooseArea(e.target.value)}
                 title="The ISA-95 area this cell is in. Unfiled cells are listed as a queue on the Areas page."
               >
                 <option value="">— Unfiled —</option>
                 {areas.map(a => <option key={a.area_id} value={a.area_id}>{a.area_name}</option>)}
               </select>
             </div>
-            <div className="form-group">
-              <label className="form-label" htmlFor="cell-floor">Floor</label>
-              <input
-                id="cell-floor"
-                type="number"
-                step="1"
-                className="form-control"
-                style={{ width: '120px' }}
-                value={formVal.floor ?? ''}
-                onChange={e => setFormVal(f => ({ ...f, floor: e.target.value }))}
-                placeholder="0"
-                title="Ground floor is 0, the first floor 1, a basement -1. Leave empty if it does not apply."
-              />
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                Ground is 0, basements are negative. {floorLabel(formVal.floor === '' || formVal.floor === null || formVal.floor === undefined ? undefined : Number(formVal.floor))}.
+            {formArea && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="cell-floor">Floor</label>
+                <select
+                  id="cell-floor"
+                  className="form-control"
+                  value={formVal.floor_id || ''}
+                  onChange={e => chooseFloor(e.target.value)}
+                  title="A floor of the chosen area. Floors are added on the Areas page."
+                >
+                  <option value="">— No floor —</option>
+                  {(formArea.floors || []).map(f => <option key={f.floor_id} value={f.floor_id}>{f.level}: {f.name}</option>)}
+                </select>
+                {(formArea.floors || []).length === 0 && (
+                  <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
+                    This area has no floors yet. Add one from the Areas page.
+                  </div>
+                )}
               </div>
-            </div>
+            )}
+            {formFloor && (
+              <div className="form-group">
+                <label className="form-label">Place on the plan</label>
+                <FloorPlacementPicker
+                  floor={formFloor}
+                  cells={cells}
+                  cellId={editing?.cell_id || null}
+                  cellIcon={formVal.icon}
+                  value={formVal.plan_x !== '' && formVal.plan_y !== '' && formVal.plan_x !== null && formVal.plan_y !== null
+                    ? { x: Number(formVal.plan_x), y: Number(formVal.plan_y) }
+                    : null}
+                  onChange={p => setFormVal(f => ({ ...f, plan_x: p ? p.x : '', plan_y: p ? p.y : '' }))}
+                  minSpacing={minSpacing}
+                />
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label">Dashboard / UI URL (Optional)</label>
               <input className="form-control" value={formVal.access_url || ''} onChange={e => setFormVal(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:3002/d/cell-1" title="Enter Grafana dashboard or UI management URL" />
@@ -612,7 +658,12 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               : 'Unfiled',
             title: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
           },
-          { label: 'Floor', value: floorLabel(selectedCell.floor), title: 'Ground floor is 0, basements negative' },
+          { label: 'Floor', value: floorNameOf(selectedCell), title: 'The floor of its area this cell is on; floors are managed on the Areas page' },
+          {
+            label: 'Place on plan',
+            value: selectedCell.floor_id ? (formatPlace(selectedCell) || 'Not placed — listed beside the plan on the Site Map') : null,
+            title: 'Where the Site Map draws this cell on its floor plan, as fractions of the plan'
+          },
           {
             // Chips rather than a comma-joined string: a cell is a junction, and its panel must
             // reach the gateways and devices it relates.
@@ -694,9 +745,11 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               setEditingProposal(mine || null)
               setFormVal({
                 ...selectedCell,
-                // The selects and the number input want '' for nothing, not null.
+                // The selects and the picker want '' for nothing, not null.
                 area_id: selectedCell.area_id || '',
-                floor: selectedCell.floor ?? '',
+                floor_id: selectedCell.floor_id || '',
+                plan_x: selectedCell.plan_x ?? '',
+                plan_y: selectedCell.plan_y ?? '',
                 ...formFromPatch('cell', mine?.patch)
               })
               setShowForm(true)

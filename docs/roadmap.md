@@ -13,7 +13,9 @@ it leaves this file and its substance moves into the documentation of the compon
 **Ordering.** 1–5 are the platform's own: the one item somebody else sets the deadline for, then
 the identity and operations chain. 6–8 are the edge chain, in dependency order: 6 makes a gateway's
 flow reviewable, 7 makes the appliance a managed artefact and shares 6's puller, 8 removes what 6
-replaced. 9 runs under every other item. 10 is a rename and sits last because nothing depends on it.
+replaced. 9 runs under every other item. 10 is a rename and sits second to last because nothing
+depends on it. 11 is last by rule: it folds the migration chain, so every entry that changes the
+schema must have landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -440,3 +442,35 @@ only its name changes. `sparkplug_id` and every topic are untouched: a cell is n
 wire.
 
 **Must not touch:** the `uns/` topic shape, which already uses the cell's name and not the table's.
+
+## 11 · The migration chain folds back into the baseline, and the codebase is audited
+
+**Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
+`scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)
+
+The first squash folded the beta chain into `0001` and `0002` and left a short corrective tail.
+The tail has grown, and later files now correct earlier ones. `0088` drops and re-adds the
+proposal entity constraint with three lanes and `0090` widens it to seven two files later; on a
+database holding a cells proposal the re-add scans the rows, fails, and aborts db-init with every
+file after it. `0097` re-adds the integer `cells.floor` on every boot and `0098` drops it again.
+Both are idempotent and both are tested, and both are the shape a squash exists to remove.
+
+**Decided:** the fold rule is the first squash's. An additive migration folds into the baseline,
+because a fresh install would do it anyway; a subtractive one stays in the tail until every
+database that could receive it has. Two rules found the hard way carry in: a file that creates a
+function states its own `REVOKE ... FROM PUBLIC, anon` rather than leaning on `0001`'s sweeper,
+which runs earlier and corrects the ACL one boot late; and no file re-asserts an absolute set that
+a later file widens. Constraints are added guarded, never dropped and re-added.
+
+**The audit** is scoped to what the Site Map work exposed, one sweep per surface: help pages and
+README rows that describe a design since replaced; stylesheet rules and the tests guarding them
+that nothing renders; comments that argue history rather than state the present, moved to the
+README or `incidents.md` they belong in; and every claim the drift checker could verify but does
+not yet, made checkable.
+
+**Done means:** a fresh boot and a second boot pass every self-check; every database suite passes
+on the throwaway cluster; the drift check is clean; and the chain is the baseline plus a tail
+short enough to read in one sitting.
+
+**Must not touch:** the replay contract. Every file still runs on every boot with no ledger, so
+nothing in the fold may depend on a file having run once.

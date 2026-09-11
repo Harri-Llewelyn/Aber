@@ -15,6 +15,7 @@ import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { HelpTip } from '../common/HelpTip'
+import { AreaFloorsPanel } from '../common/AreaFloorsPanel'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import {
   IconFactory,
@@ -34,7 +35,8 @@ import {
  * and Gateways pages report their unfinished business, and the area rows are drop targets. The
  * banner is gone once the queue drains; a cell leaves its area from its own form on the Cells
  * page, or by being dragged onto another area. Devices are not filed here: a device's area is its
- * cell's, or its own when it is Area-Wide, which is set on the Devices page.
+ * cell's, or its own when it is Area-Wide, which is set on the Devices page. An area's floors and
+ * their plans are managed from its details panel.
  */
 export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewThread, hasPermission, initialSearchFilter, onClearFilter }) {
   const [areas, setAreas]       = useState([])
@@ -85,7 +87,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   }, [])
 
   usePolling(loadAll, refreshInterval())
-  useRealtimeTable(['cells', 'gateways', 'devices'], loadAll, { enabled: REALTIME_ENABLED })
+  useRealtimeTable(['cells', 'gateways', 'devices', 'areas', 'area_floors'], loadAll, { enabled: REALTIME_ENABLED })
 
   const [saving, runSave] = usePendingAction()
 
@@ -203,7 +205,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             Areas
             <HelpTip
               label="About areas"
-              text="An area is the ISA-95 level between the site and its cells: one part of the campus, such as a building. Cells are filed into areas so the Unified Namespace can name where a reading came from, and so the Overview can show one area at a time."
+              text="An area is the ISA-95 level between the site and its cells: one part of the campus, such as a building. Cells are filed into areas so the Unified Namespace can name where a reading came from, and so the Site Map can show one area at a time."
             />
           </h3>
           <button
@@ -253,6 +255,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 <tr>
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
                   <th title="The area's name — also the <area> segment of its uns/ topics">Area</th>
+                  <th title="The area's floors, and how many carry a plan">Floors</th>
                   <th title="Cells filed in this area, by floor">Cells</th>
                   <th title="Devices resolving to a cell in this area, plus its Area-Wide assets">Devices</th>
                 </tr>
@@ -260,7 +263,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               <tbody>
                 {filteredAreas.map(a => {
                   const areaCells = (cellsByArea.get(a.area_id) || []).filter(c => !c.is_archived)
-                  const floors = groupCellsByFloor(areaCells)
+                  const floors = groupCellsByFloor(areaCells, a.floors)
+                  const planned = (a.floors || []).filter(f => f.plan_path).length
                   const wide = areaWideDevices(a.area_id).length + areaWideGateways(a.area_id).length
                   return (
                     <tr
@@ -277,12 +281,20 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                         {a.description && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{a.description}</div>}
                       </td>
                       <td>
+                        <span className="badge badge-neutral" title={(a.floors || []).map(f => `${f.level}: ${f.name}`).join(', ') || 'No floors'}>
+                          {(a.floors || []).length} floor{(a.floors || []).length === 1 ? '' : 's'}
+                        </span>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {planned === 0 ? 'No plans uploaded' : `${planned} with a plan`}
+                        </div>
+                      </td>
+                      <td>
                         {areaCells.length === 0 ? (
                           <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No cells filed here</span>
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {floors.map(f => (
-                              <div key={String(f.floor)} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <div key={f.floor?.floor_id ?? 'none'} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                 <span style={{ fontSize: '11px', color: 'var(--text-muted)', minWidth: '84px' }}>{f.label}</span>
                                 {f.cells.map(cellChip)}
                               </div>
@@ -358,7 +370,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
       {deleteTarget && (
         <ConfirmModal
-          message={`Delete area '${deleteTarget.area_name}'? Its cells are kept and become unfiled.`}
+          message={`Delete area '${deleteTarget.area_name}'? Its cells are kept and become unfiled; its floors and their plans are deleted.`}
+          requireTyped={deleteTarget.area_name}
+          requireTypedLabel="area name"
           confirmLabel="Delete area"
           pendingLabel="Deleting…"
           onConfirm={deleteArea}
@@ -386,8 +400,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             value: selectedCells.length
               ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {groupCellsByFloor(selectedCells).map(f => (
-                    <div key={String(f.floor)}>
+                  {groupCellsByFloor(selectedCells, selectedArea.floors).map(f => (
+                    <div key={f.floor?.floor_id ?? 'none'}>
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '3px' }}>{f.label}</div>
                       <div className="context-device-list">{f.cells.map(cellChip)}</div>
                     </div>
@@ -444,7 +458,18 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 : 'Delete this area. Its cells become unfiled.'
           }
         ].filter(Boolean) : []}
-      />
+      >
+        {selectedArea && (
+          <AreaFloorsPanel
+            area={selectedArea}
+            floors={selectedArea.floors || []}
+            cells={selectedCells}
+            canManage={canManage}
+            showToast={showToast}
+            onChanged={loadAll}
+          />
+        )}
+      </ContextPanel>
     </div>
   )
 }

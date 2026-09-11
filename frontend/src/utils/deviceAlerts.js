@@ -1,7 +1,7 @@
 import { effectiveSparkplugId } from './sparkplugId';
 
 /**
- * Matching a firing Grafana alert to the device it is about, shared by the Overview map, Cells,
+ * Matching a firing Grafana alert to the device it is about, shared by the Site Map, Cells,
  * Gateways and Devices. Device-scoped alerts only, filtered on `entity_type`, so a gateway or
  * platform alert can never colour a device chip; the top bar's pill does not filter. Indexed on
  * both `sparkplug_id` (the wire identity Grafana labels series with) and the nullable `entity_id`,

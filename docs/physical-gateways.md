@@ -147,7 +147,7 @@ The last transition needs no code: the ingestion daemon writes `status` on every
 so the first heartbeat clears the transitional state.
 
 **Neither pending state counts as a fault.** They do not turn a cell amber on the Cells page and are
-counted separately from *offline* on the Overview — a gateway waiting for somebody to carry a bundle
+counted separately from *offline* on the Site Map — a gateway waiting for somebody to carry a bundle
 to a machine is an unfinished task, and flagging it as broken would make the attention signal useless
 on the day a few appliances are ordered.
 
