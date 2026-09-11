@@ -1,14 +1,9 @@
 /**
- * Sparkplug B datatype code -> AAS `DataTypeDefXsd`, for a Submodel `Property.valueType`.
- *
- * Deliberate duplicate of SPARKPLUG_XSD_TYPES in frontend/src/utils/sparkplugDatatype.js. An edge
- * function runs in its own Deno isolate with only this directory mounted, so it cannot import from
- * the frontend bundle -- the same reason ingestion/validate.py carries a Python mirror of
- * utils/deviceTags.js. `test_aas_export.py` parses both files and fails if they drift.
- *
- * NOTE: there is no `xs:int32`. AAS V3's DataTypeDefXsd enumerates the XML Schema built-ins, where
- * a 32-bit signed integer is `xs:int`. A Property carrying an invented type name is an invalid AAS
- * document, and it fails at the consumer rather than here.
+ * Sparkplug B datatype code to AAS `DataTypeDefXsd`, for a Submodel `Property.valueType`.
+ * Deliberate duplicate of SPARKPLUG_XSD_TYPES in frontend/src/utils/sparkplugDatatype.js, since an
+ * edge function cannot import the frontend bundle; `test_aas_export.py` parses both files and fails
+ * if they drift. There is no `xs:int32`: a 32-bit signed integer is `xs:int`, and an invented type
+ * name is an invalid document that fails at the consumer.
  */
 export const SPARKPLUG_XSD_TYPES: Record<number, string> = {
   1: "xs:byte",           // Int8
@@ -34,11 +29,9 @@ export const SPARKPLUG_XSD_TYPES: Record<number, string> = {
 export const DEFAULT_XSD_TYPE = "xs:string";
 
 /**
- * The AAS `valueType` for a Sparkplug datatype code.
- *
- * Unknown and structured codes (16 DataSet, 19 Template) fall back to `xs:string` rather than
- * throwing: an export that drops one metric is far less useful than one that carries it in a
- * lossless form, and a Property is a scalar so a DataSet has no faithful representation anyway.
+ * The AAS `valueType` for a Sparkplug datatype code. Unknown and structured codes (16 DataSet, 19
+ * Template) fall back to `xs:string` rather than throwing, so the export carries the metric
+ * losslessly.
  */
 export function sparkplugToXsd(code: number | null | undefined): string {
   if (code === null || code === undefined) return DEFAULT_XSD_TYPE;

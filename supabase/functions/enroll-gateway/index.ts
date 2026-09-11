@@ -10,52 +10,21 @@ import {
 } from "../_shared/forge.ts";
 
 /**
- * Physical gateway enrolment: exchange a single-use token for a broker credential.
+ * Physical gateway enrolment: exchange a single-use token for a broker credential. The caller is an
+ * appliance, not a person, so there is no role to resolve: possession of the token is the
+ * authorisation. The anon key gets the request past the gateway; the token authorises it.
  *
- * THE CALLER IS AN APPLIANCE, NOT A PERSON, and everything about this function follows from that.
- * There is no user, no session and no role to resolve -- POSSESSION OF THE TOKEN IS THE
- * AUTHORISATION. That is why this is the one function in the registry that does not call
- * resolveUserRole(): asking "which role is this" of a Raspberry Pi in a machine shop has no answer,
- * and inventing one (a shared service account, say) would create a credential that outlives the
- * enrolment and can be replayed.
+ * The order is the design: 1. claim the token atomically (consume_gateway_enrollment_token); 2.
+ * issue the broker credential; 3. mark the gateway AWAITING_BIRTH; 4. create its repository and
+ * register its deploy key. Claiming first means a failure in step 2 has to be undone (the 503 path
+ * releases the claim), but validate-then-issue-then-consume would let two appliances receive a
+ * credential for one edge node and contend for one identity. Step 3 is last because a gateway
+ * marked AWAITING_BIRTH without a credential looks enrolled and is not. Step 4 is non-fatal and
+ * skipped on a deployment with no forge; see forge.ts.
  *
- * The token instead is short-lived, single-use, and bound to exactly one gateway. It reaches this
- * endpoint through Kong's `key-auth` with the ANON key -- public by construction, and the same key
- * the dashboard uses. The anon key is not the security boundary here and is not meant to be; it is
- * what gets the request past the gateway, and the token is what authorises it.
- *
- * ---------------------------------------------------------------------------------------------
- * THE ORDER OF OPERATIONS IS THE DESIGN, and it is not the obvious one.
- *
- *   1. CLAIM the token atomically      (consume_gateway_enrollment_token)
- *   2. issue the broker credential     (the gateway-credential service)
- *   3. mark the gateway AWAITING_BIRTH
- *   4. create its repository and register its deploy key   (the forge)
- *
- * STEP 4 IS NON-FATAL AND SITS LAST FOR THAT REASON. By then the token is spent and the broker
- * credential exists; refusing over a forge outage would leave a working broker account no bundle
- * can claim, and telemetry -- which is what a gateway is FOR -- needs nothing from the forge. It is
- * also skipped entirely on a deployment that has no forge configured, which is every install that
- * predates the forge. See forge.ts.
- *
- * Claiming FIRST looks wrong -- it means a failure in step 2 has to be undone -- but the
- * alternative is worse and is unfixable. A validate-then-issue-then-consume order lets two
- * appliances both observe an unconsumed token and both receive a credential for the same edge node;
- * and because mosquitto.acl pins the topic's edge-node segment to the connecting username, they
- * then contend for ONE identity, silently, with each rewriting the other's telemetry.
- *
- * So the claim is atomic and step 2's failure is handled by RELEASING it (see the 503 path below),
- * which turns a transient broker outage into a retry rather than into a manual re-issue per
- * appliance.
- *
- * Step 3 comes last because it is the only step that is not safely repeatable in the other order:
- * a gateway marked AWAITING_BIRTH that never received a credential looks enrolled and is not.
- *
- * ---------------------------------------------------------------------------------------------
- * WHAT THIS FUNCTION NEVER DOES. It does not create gateways, does not mint tokens (that is the
- * dashboard's, through a SECURITY DEFINER RPC gated on has_role), and does not read anything about
- * a gateway it was not handed a token for. The service-role key it holds is used for exactly three
- * calls, all of them named below.
+ * This function does not create gateways, does not mint tokens, and does not read anything about a
+ * gateway it was not handed a token for. The service-role key is used for exactly three calls,
+ * named below.
  */
 
 /** Every failed redemption answers with this, whatever the reason. */
@@ -95,17 +64,10 @@ export default async function handler(req: Request): Promise<Response> {
   const mqttHost = Deno.env.get("MQTT_PUBLIC_HOST") ?? "";
   const mqttTlsPort = Number.parseInt(Deno.env.get("MQTT_PUBLIC_TLS_PORT") ?? "8883", 10);
 
-  // ---------------------------------------------------------------------------------------------
-  // CONFIGURATION IS CHECKED BEFORE THE TOKEN IS TOUCHED.
-  //
-  // A misconfigured deployment must not consume an appliance's one-shot token discovering that it
-  // cannot finish. 503 with a named cause, and the bundle stays valid.
-  //
-  // MQTT_PUBLIC_HOST is included in that check deliberately. Its default would be `mosquitto`,
-  // which resolves on the container network and nowhere a gateway lives -- so an unset value
-  // produces a bundle that enrols perfectly and then cannot connect to anything, which is the
-  // hardest version of this failure to diagnose. Same reasoning as AAS_MODEL_PUBLIC_BASE.
-  // ---------------------------------------------------------------------------------------------
+  // Configuration is checked before the token is touched: a misconfigured deployment must not
+  // consume an appliance's one-shot token. 503 with a named cause, and the bundle stays valid.
+  // MQTT_PUBLIC_HOST is included because its default resolves on the container network and nowhere
+  // a gateway lives.
   const missing = [
     !serviceRoleKey && "SUPABASE_SERVICE_ROLE_KEY",
     !credentialUrl && "MQTT_CREDENTIAL_SERVICE_URL",
@@ -150,9 +112,8 @@ export default async function handler(req: Request): Promise<Response> {
   const agentVersion =
     typeof body.agent_version === "string" ? body.agent_version.slice(0, 64) : null;
 
-  // THE PUBLIC HALF OF A KEY THE APPLIANCE GENERATED, and the only thing about the forge that
-  // arrives in this request. The private half never leaves the plant -- same decision as the
-  // editor password bootstrap.mjs prints once. Shape-checked in forge.ts rather than trusted.
+  // The public half of a key the appliance generated, the only thing about the forge in this
+  // request. Shape-checked in forge.ts.
   const sshPublicKey = validPublicKey(body.ssh_public_key);
 
   // The service-role client. Its three uses are the RPCs below and one gateway UPDATE -- there is
@@ -166,9 +127,7 @@ export default async function handler(req: Request): Promise<Response> {
     },
   });
 
-  // ---------------------------------------------------------------------------------------------
-  // 1. CLAIM. One winner, decided by the database.
-  // ---------------------------------------------------------------------------------------------
+  // 1. Claim. One winner, decided by the database.
   const { data: claimed, error: claimError } = await admin
     .rpc("consume_gateway_enrollment_token", { p_token: token });
 
@@ -182,16 +141,14 @@ export default async function handler(req: Request): Promise<Response> {
 
   const identity = (claimed as GatewayIdentity[] | null)?.[0];
   if (!identity) {
-    // Unknown, expired and already-consumed are DELIBERATELY INDISTINGUISHABLE. The RPC returns no
-    // rows for all three, and reporting which would let an enumerator learn that a token value once
-    // existed. The appliance can do nothing different in any of the three cases.
+    // Unknown, expired and already-consumed are deliberately indistinguishable: reporting which
+    // would let an enumerator learn that a token value once existed, and the appliance can do
+    // nothing different in any case.
     console.warn("rejected an enrolment attempt with an invalid token");
     return json(401, REJECTION);
   }
 
-  // ---------------------------------------------------------------------------------------------
-  // 2. ISSUE. The one step that can fail after the claim, and therefore the one with a rollback.
-  // ---------------------------------------------------------------------------------------------
+  // 2. Issue. The one step that can fail after the claim, and therefore the one with a rollback.
   /** Put the claim back so the same bundle can be retried, and say whether that worked. */
   const releaseClaim = async (): Promise<boolean> => {
     const { data, error } = await admin
@@ -216,9 +173,8 @@ export default async function handler(req: Request): Promise<Response> {
         "Content-Type": "application/json",
         Authorization: `Bearer ${credentialToken}`,
       },
-      // NO PASSWORD SUPPLIED. The credential service generates it at the point of use, which is one
-      // fewer copy in transit and keeps the alphabet guarantee (base64url, an injection boundary)
-      // with the code that depends on it.
+      // No password supplied: the credential service generates it at the point of use, which keeps
+      // the alphabet guarantee (base64url, an injection boundary) with the code that depends on it.
       body: JSON.stringify({ sparkplug_id: identity.sparkplug_id }),
     });
 
@@ -262,17 +218,10 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 
-  // ---------------------------------------------------------------------------------------------
-  // NO CA MEANS NO ENROLMENT, and this is a refusal rather than a degradation.
-  //
-  // Physical gateways connect over MQTTS exclusively. An internal CA is in no system trust store,
-  // so an appliance without it cannot verify the broker -- and the only way to proceed would be to
-  // skip verification, which is indistinguishable from a successful interception. There is no such
-  // switch anywhere in this stack and this is not where the first one gets added.
-  //
-  // The claim is released: this is a deployment fault (TLS not provisioned), not a bad token, and
-  // the operator should be able to fix it and have the same bundle work.
-  // ---------------------------------------------------------------------------------------------
+  // No CA means no enrolment, and this is a refusal rather than a degradation: physical gateways
+  // connect over MQTTS only, and an appliance without the CA could only proceed by skipping
+  // verification, which this stack has no switch for. The claim is released, since this is a
+  // deployment fault and the same bundle should work once TLS is provisioned.
   if (!credential.ca_cert || !credential.ca_cert.includes("BEGIN CERTIFICATE")) {
     console.error("the credential service returned no CA certificate; refusing to enrol");
     const retryable = await releaseClaim();
@@ -285,9 +234,7 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 
-  // ---------------------------------------------------------------------------------------------
-  // 3. RECORD. Last, because a gateway marked enrolled without a credential looks fine and is not.
-  // ---------------------------------------------------------------------------------------------
+  // 3. Record. Last, because a gateway marked enrolled without a credential looks fine and is not.
   const { error: statusError } = await admin
     .from("gateways")
     .update({
@@ -298,19 +245,16 @@ export default async function handler(req: Request): Promise<Response> {
     .eq("id", identity.gateway_id);
 
   if (statusError) {
-    // NOT FATAL, AND NOT ROLLED BACK. The credential exists at the broker and the appliance is
-    // about to use it; failing here would leave a working account that no bundle can claim. The
-    // gateway's first NBIRTH sets it ONLINE regardless -- process_node_message() writes status
-    // unconditionally -- so the lifecycle self-corrects and only the intermediate label is lost.
+    // Not fatal, and not rolled back: the credential exists at the broker and the appliance is
+    // about to use it. The gateway's first NBIRTH sets it ONLINE regardless, so only the
+    // intermediate label is lost.
     console.error(
       `credential issued for ${identity.sparkplug_id} but the gateway status could not be ` +
       `updated: ${statusError.message}. Its first NBIRTH will set it ONLINE.`
     );
   }
 
-  // ---------------------------------------------------------------------------------------------
-  // 4. THE FORGE. Non-fatal by construction -- see the header, and forge.ts.
-  // ---------------------------------------------------------------------------------------------
+  // 4. The forge. Non-fatal by construction; see the header and forge.ts.
   const forge = forgeConfig();
   let repository:
     | { ssh_url: string; branch: string; known_hosts: string | null }
@@ -324,15 +268,10 @@ export default async function handler(req: Request): Promise<Response> {
       sshPublicKey,
     );
     if (repo) {
-      // THE HOST KEY TRAVELS WITH THE CLONE URL, and it has to be this response rather than a later
-      // call: this is the one moment the appliance is provably itself, holding a single-use token
-      // bound to one row. An appliance that learned the forge's identity any other way would be
-      // trusting the network -- trust on first use -- which this platform refuses everywhere.
-      //
-      // NULL IS A REAL ANSWER AND NOT AN ERROR. A forge that has not restarted since the host key
-      // began being published has none to give. The appliance then enrols, takes its broker
-      // credential and publishes telemetry; what it declines to do is converge, which is the
-      // correct refusal rather than a degraded mode. bootstrap.mjs says so in its own log.
+      // The host key travels with the clone URL, in this response, because this is the one moment
+      // the appliance is provably itself; learning the forge's identity any other way would be
+      // trust on first use. Null is a real answer: a forge that has not published a host key gives
+      // none, and the appliance enrols and publishes but declines to converge.
       const knownHosts = await forgeKnownHosts(forge, repo.ssh_url);
       repository = {
         ssh_url: repo.ssh_url,
@@ -347,9 +286,8 @@ export default async function handler(req: Request): Promise<Response> {
       }
     }
   } else if (forge && !sshPublicKey) {
-    // An appliance old enough not to send one, or a malformed key. Neither is a reason to fail an
-    // enrolment, and both are worth a line: the gateway will have no repository and nothing else
-    // in the system will remark on it.
+    // An appliance old enough not to send a key, or a malformed one. Neither fails an enrolment;
+    // both are worth a line, since the gateway will have no repository.
     console.warn(
       `${identity.sparkplug_id} sent no usable SSH public key, so it has no repository. Its ` +
       "bundle predates the forge, or the key was malformed.",
@@ -368,9 +306,9 @@ export default async function handler(req: Request): Promise<Response> {
     sparkplug_group: identity.sparkplug_group,
     mqtt_host: mqttHost,
     mqtt_tls_port: mqttTlsPort,
-    // The username IS the sparkplug_id and cannot be anything else: mosquitto.acl pins the topic's
+    // The username is the sparkplug_id and cannot be anything else: mosquitto.acl pins the topic's
     // edge-node segment to `%u`, and verify_gateway_binding() compares the same segment against the
-    // gateway row. Sent explicitly rather than left for the appliance to infer.
+    // gateway row.
     mqtt_username: identity.sparkplug_id,
     // RETURNED EXACTLY ONCE. mosquitto_passwd stores only a hash, so this response is the only copy
     // that will ever exist -- there is no endpoint that could re-read it.
@@ -378,12 +316,11 @@ export default async function handler(req: Request): Promise<Response> {
     ca_cert: credential.ca_cert,
     // Whether the running broker has already been reloaded. False means the credential is durable
     // but not yet live (the Kubernetes projected-Secret sync, up to ~90s), so the appliance should
-    // retry its first CONNECT rather than treat a refusal as a bad password.
+    // retry its first CONNECT.
     applied_to_running_broker: credential.applied_to_running_broker !== false,
-    // THE GATEWAY'S OWN REPOSITORY, or null. Null means one of three things and the appliance
-    // treats them alike: this deployment runs no forge, the bundle sent no key, or provisioning
-    // failed. The appliance enrols either way and publishes telemetry either way; what it cannot
-    // do without this is converge to a reviewed flow.
+    // The gateway's own repository, or null: no forge, no key sent, or provisioning failed. The
+    // appliance enrols and publishes either way; without this it cannot converge to a reviewed
+    // flow.
     repository,
   });
 }

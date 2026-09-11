@@ -1,44 +1,16 @@
 #!/usr/bin/env node
 /**
- * Assert the physical gateway's flow template is one an appliance can actually run.
+ * Assert the physical gateway's flow template is one an appliance can run. `flows.template.json` is
+ * JavaScript inside JSON inside a template, shipped to hardware nobody here can log into;
+ * `bootstrap.mjs` parses it on the appliance after the token is spent, and Node-RED evaluates a
+ * function node's body at the first tick. Checks: 1. every function node's body compiles, in the
+ * wrapper Node-RED puts around it; 2. no metric uses the `{ type, value }` encoding the daemon
+ * discards; 3. every placeholder is one `bootstrap.mjs` substitutes; 4. every wire resolves, the
+ * heartbeat is driven only by its injects, and the host-metric branch terminates in the cache; 5.
+ * every `env.get()` the flow reads is a variable `bootstrap.mjs` writes into /data/gateway.env. It
+ * does not check that the flow works; that needs a broker, an enrolment and hardware.
  *
- * WHY THIS EXISTS. `flows.template.json` is the only file in this repository that is JavaScript
- * inside JSON inside a template, shipped to hardware that nobody here can log into. Nothing
- * compiles it, nothing lints it, and the two things that read it both do so too late to help:
- * `bootstrap.mjs` parses it on the APPLIANCE, after the enrolment token has been spent, and
- * Node-RED evaluates a function node's body at the FIRST TICK rather than at deploy.
- *
- * THE FAILURE THAT PROMPTED IT WAS SILENT IN BOTH DIRECTIONS. Every metric in this flow was
- * encoded `{ name, type: 'String', value: 'ONLINE' }`. The daemon's JSON parser reads
- * `string_value` / `double_value` / `boolean_value` / `int_value`, so each metric arrived with a
- * NAME AND NO VALUE and every reading was discarded. It went unnoticed because the only metric it
- * mattered for was `Gateway_Status`, and a discarded status falls back to the one the message type
- * implies -- which for an NDATA is `ONLINE`, the same answer. The appliance appeared to report its
- * own state while the platform was inferring it, and would have swallowed every health metric
- * added afterwards the same way.
- *
- * The flow's own comments record a second one of the same shape: `process.uptime()` in a function
- * node throws `ReferenceError: process is not defined` at the first tick, BEFORE the first publish,
- * leaving an enrolled appliance in AWAITING_BIRTH with the only evidence in its own logs.
- *
- * WHAT IT CHECKS:
- *
- *   1. every function node's body compiles, in the wrapper Node-RED puts around it
- *   2. no metric uses the `{ type, value }` encoding the daemon discards
- *   3. every placeholder is one `bootstrap.mjs` substitutes -- it dies on any survivor, on the
- *      appliance, after the token is spent
- *   4. every wire resolves, the heartbeat is driven only by its injects, and the host-metric
- *      branch terminates in the cache instead of reaching the broker
- *   5. every `env.get()` the flow reads is a variable `bootstrap.mjs` actually writes into
- *      /data/gateway.env. A metric sourced from a variable nobody exports is simply absent, which
- *      on this path looks identical to an appliance that has nothing to report.
- *
- * WHAT IT DOES NOT CHECK: whether the flow WORKS. That needs a broker, an enrolment and hardware.
- * This is the class of fault that is invisible until it is on someone's shopfloor.
- *
- * Usage:
- *   node scripts/check-gateway-flow-template.mjs
- *   node scripts/check-gateway-flow-template.mjs --verbose
+ * Usage: node scripts/check-gateway-flow-template.mjs [--verbose]
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -73,9 +45,7 @@ const byId = Object.fromEntries(flow.map((n) => [n.id, n]));
 const functions = flow.filter((n) => n.type === 'function');
 log(`${flow.length} nodes, ${functions.length} function node(s)`);
 
-// -------------------------------------------------------------------------------------------------
 // 1. Every function body compiles, in the wrapper Node-RED builds around it.
-// -------------------------------------------------------------------------------------------------
 {
   if (!functions.length) {
     fail(`${TEMPLATE} declares no function nodes, which cannot be right -- the heartbeat is one.`);
@@ -84,9 +54,8 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   for (const n of functions) {
     try {
       // The same parameter list the runtime supplies, so a body referencing `env` or `flow`
-      // compiles here exactly as it does there -- and one reaching for `process` or `require`
-      // still compiles, because that failure is a ReferenceError at run time and no parser can
-      // see it. Assertion 5 is what covers the reachable half of that.
+      // compiles here as it does there. One reaching for `process` or `require` still compiles,
+      // since that is a ReferenceError at run time; assertion 5 covers the reachable half.
       new vm.Script(`(function (msg, node, context, flow, global, env, RED) {\n${n.func}\n})`);
     } catch (e) {
       broken += 1;
@@ -100,9 +69,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   if (!broken) pass(`all ${functions.length} function nodes compile`);
 }
 
-// -------------------------------------------------------------------------------------------------
 // 2. No metric uses the encoding the daemon cannot read.
-// -------------------------------------------------------------------------------------------------
 {
   const legacy = [...raw.matchAll(/\{\s*name:\s*'([^']+)',\s*type:\s*'(String|Int64|Int32|Float|Double|Boolean)'/g)];
   if (legacy.length) {
@@ -117,9 +84,8 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     pass('no metric uses the { name, type, value } encoding the daemon discards');
   }
 
-  // `int_value` is a uint32 in Sparkplug -- 4.29 GB -- and the daemon's JSON branch does not read
-  // `long_value` at all, so any byte count has to travel as a double. This catches the fix for
-  // that being undone by someone making the encoding "more correct".
+  // `int_value` is a uint32 in Sparkplug and the daemon's JSON branch does not read `long_value`,
+  // so any byte count has to travel as a double.
   const ints = [...raw.matchAll(/name:\s*'([A-Za-z_]*(?:Bytes|_s))',[^}]*int_value/g)];
   if (ints.length) {
     fail(
@@ -132,19 +98,9 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   }
 }
 
-// -------------------------------------------------------------------------------------------------
-// 2b. ON MQTT 5, THE SESSION-EXPIRY TRAP IS REACHABLE, so it is asserted shut.
-//
-// v5 lets a client keep its session alive across a disconnect (`sessionExpiry`) and lets the broker
-// hold its Last Will back for a while (will delay). Both look like resilience settings and both are
-// wrong here, for the same reason: NDEATH *IS* THE LAST WILL. process_node_message() marks the edge
-// node OFFLINE the moment it arrives, so delaying it leaves a dead gateway reading ONLINE with every
-// device beneath it apparently live -- the platform confidently reporting the opposite of the truth.
-//
-// Under 3.1.1 the fields did nothing and this check was unnecessary. It became necessary the moment
-// the template moved to protocolVersion 5, which is the sort of consequence a version bump has and
-// nobody remembers.
-// -------------------------------------------------------------------------------------------------
+// 2b. On MQTT 5 the session-expiry trap is reachable, so it is asserted shut. `sessionExpiry` and
+// will delay both look like resilience settings, and NDEATH is the Last Will: delaying it leaves a
+// dead gateway reading ONLINE. Under 3.1.1 the fields did nothing.
 {
   const brokers = flow.filter((n) => n.type === 'mqtt-broker');
   const offenders = brokers.filter((b) =>
@@ -165,9 +121,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   }
 }
 
-// -------------------------------------------------------------------------------------------------
 // 3. Placeholders are exactly what bootstrap substitutes.
-// -------------------------------------------------------------------------------------------------
 {
   const bootstrap = read(BOOTSTRAP);
   const substituted = [...new Set(
@@ -189,9 +143,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   }
 }
 
-// -------------------------------------------------------------------------------------------------
 // 4. The wiring: nothing dangling, and the collector cannot take the heartbeat down with it.
-// -------------------------------------------------------------------------------------------------
 {
   const ids = new Set(flow.map((n) => n.id));
   const dangling = [];
@@ -207,10 +159,9 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   if (!byId[HEARTBEAT]) {
     fail(`the heartbeat node '${HEARTBEAT}' is gone; it is what makes a gateway show ONLINE.`);
   } else {
-    // THE PROPERTY THAT MATTERS MOST HERE. Anything wired into the heartbeat can delay or fail it,
-    // and a gateway that stops beating is reported STALE and then OFFLINE. A host-metric collector
-    // must never be able to do that, which is why it writes to a cache the heartbeat reads instead
-    // of being chained into its path.
+    // Anything wired into the heartbeat can delay or fail it, and a gateway that stops beating is
+    // reported STALE and then OFFLINE. A host-metric collector writes to a cache the heartbeat
+    // reads instead of being chained into its path.
     const feeds = flow.filter((n) => (n.wires?.[0] || []).includes(HEARTBEAT)).map((n) => n.id).sort();
     const expected = ['acs-birth-tick', 'acs-data-tick'];
     if (JSON.stringify(feeds) !== JSON.stringify(expected)) {
@@ -234,9 +185,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   }
 }
 
-// -------------------------------------------------------------------------------------------------
 // 5. Every env.get() the flow reads is a variable bootstrap actually exports.
-// -------------------------------------------------------------------------------------------------
 {
   const bootstrap = read(BOOTSTRAP);
   const wanted = [...new Set(

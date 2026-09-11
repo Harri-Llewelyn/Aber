@@ -1,20 +1,9 @@
 /**
- * Edge Function router (main service).
- *
- * supabase/edge-runtime does NOT execute functions via in-process `import()`.
- * Each function must be spawned as an isolated user worker via
- * EdgeRuntime.userWorkers.create(), then handed the request. A previous version
- * of this file used `await import("../<name>/index.ts")` inside a bare try/catch,
- * which always failed and reported a misleading
- * `404 "Edge Function '<name>' not found"` while logging nothing -- surfacing in
- * the browser as the opaque "Edge Function returned a non-2xx status code".
- *
- * Because each function runs in its own isolate, every function keeps its own
- * `serve(handler)` entry point; that is required, not redundant.
- *
- * Note on auth: this stack runs with VERIFY_JWT="false" because each function
- * performs its own role check (Administrator / Shopfloor_Manager) and fails
- * closed. The gateway therefore does no JWT pre-verification here.
+ * Edge Function router (main service). supabase/edge-runtime does not execute functions via
+ * in-process `import()`; each function is spawned as an isolated user worker via
+ * EdgeRuntime.userWorkers.create() and handed the request, so every function keeps its own
+ * `serve(handler)` entry point. This stack runs with VERIFY_JWT="false" because each function
+ * performs its own role check and fails closed.
  */
 
 import { corsHeaders } from "../_shared/cors.ts";
@@ -22,36 +11,19 @@ import { corsHeaders } from "../_shared/cors.ts";
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
 /**
- * Environment every worker needs regardless of what it does: how to reach Supabase, and the
- * gateway credential, which is public by construction in either format.
- *
- * SUPABASE_PUBLISHABLE_KEY is the replacement for the anon key and is passed alongside it, not
- * instead of it. `_shared/gatewayKey.ts` prefers it and falls back, so a legacy-only install
- * leaves it empty and every function keeps working. `sb_secret_*` is NOT here for the same
- * reason SUPABASE_SERVICE_ROLE_KEY is not.
- *
- * SUPABASE_SERVICE_ROLE_KEY is deliberately NOT here. It is granted per function below, to the
- * three that genuinely need to act outside the caller's RLS context.
+ * Environment every worker needs: how to reach Supabase, and the gateway credential, which is
+ * public by construction in either format. SUPABASE_PUBLISHABLE_KEY is passed alongside the anon
+ * key; `_shared/gatewayKey.ts` prefers it and falls back. SUPABASE_SERVICE_ROLE_KEY and
+ * `sb_secret_*` are not here: the service key is granted per function below.
  */
 const COMMON_ENV = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_PUBLISHABLE_KEY"];
 
 /**
- * The function allow-list, and the secrets each function may see.
- *
- * WHY AN ALLOW-LIST. `serviceName` comes from the request path. Without this map, any directory
- * under /home/deno/functions was bootable by name -- including one added later whose author
- * forgot the role check. Kong does not pre-verify the JWT for this service
- * (VERIFY_JWT="false"), so "reachable" means reachable by anyone who can reach the gateway.
- * An unknown name must be a 404 decided here, not a worker that starts and then decides.
- *
- * WHY PER-FUNCTION ENV. This router previously forwarded `Deno.env.toObject()` -- the COMPLETE
- * environment -- to every worker it spawned. That handed SUPABASE_SERVICE_ROLE_KEY,
- * NODERED_ADMIN_TOKEN, POSTGRES_PASSWORD and GRAFANA_OAUTH_CLIENT_SECRET to every function
- * whether or not it had any use for them, so a single compromised or careless function leaked
- * the credentials of all the others. Each entry below lists only what that function reads.
- *
- * Adding a function means adding it here. That is the intended friction: it is the one place
- * where "what may this code reach" is stated.
+ * The function allow-list, and the secrets each function may see. An allow-list because
+ * `serviceName` comes from the request path and the gateway does not pre-verify the JWT, so an
+ * unknown name must be a 404 decided here. Per-function env because forwarding the whole
+ * environment would hand every function every other function's secrets. Adding a function means
+ * adding it here; this is the one place "what may this code reach" is stated.
  */
 const FUNCTION_REGISTRY: Record<string, string[]> = {
   // Writes to `devices` outside the caller's RLS context after checking the caller's role.
@@ -60,56 +32,28 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // Reads the committed flow from the environment and pushes it to Node-RED's admin API.
   // No service-role key: it makes no privileged database write.
 
-  // Mints a VIRTUAL gateway's broker credential and reveals it once. The mirror of enroll-gateway:
-  // that one has no user and is authorised by a single-use token; this one has a session and is
-  // authorised by role, through a SECURITY DEFINER RPC that checks has_role() itself (0041).
-  //
-  // NO SERVICE-ROLE KEY, WHICH IS THE POINT OF THE ENTRY. It holds the credential service's bearer
-  // token and nothing else -- and that token's whole authority is "add one confined account to a
-  // password file", which is narrower than any other way of reaching the broker. It cannot read a
-  // table, cannot write outside the caller's RLS context, and cannot see another function's
-  // secrets. gateway-bundle holds nothing at all; this cannot match that, because the password file
-  // is not reachable from SQL, and the registry is where that difference is stated rather than
-  // discovered.
+  // Mints a virtual gateway's broker credential and reveals it once, authorised by role through a
+  // SECURITY DEFINER RPC that checks has_role() itself. No service-role key: it holds the
+  // credential service's bearer token, whose whole authority is adding one confined account to a
+  // password file.
   "gateway-credential": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
 
-  // Signs a long-lived JWT for a service principal and reveals it once (the retired revocable-tokens roadmap item).
-  //
-  // JWT_SECRET IS THE ENTRY, AND IT IS THE WIDEST SECRET IN THIS MAP. It signs anything -- a
-  // `service_role` token included -- and such a token is accepted by storage, realtime, the edge
-  // runtime and Studio, none of which consult 0074's denylist. So this worker is the only one here
-  // that could, if it stopped checking its caller, produce a credential nobody can withdraw.
-  //
-  // THAT IS WHY IT IS SIGNED HERE RATHER THAN IN THE DATABASE, which is where the retired revocable-tokens roadmap item
-  // proposed putting it. The runtime already holds this key; the database holds nothing that can
-  // sign a Supabase token, and moving the key there would turn every path to SQL execution into a
-  // path to an unrevocable god credential. The key stays put and the mint comes to it.
-  //
-  // NO SERVICE-ROLE KEY, deliberately. It records through record_service_token_issued(), which is
-  // SECURITY DEFINER and re-checks the actor itself (0075) -- so the write needs no identity wider
-  // than the Administrator who asked, and this worker cannot read or write anything else.
+  // Signs a long-lived JWT for a service principal and reveals it once. JWT_SECRET is the widest
+  // secret in this map: it signs anything, including a `service_role` token that storage, realtime,
+  // the edge runtime and Studio accept without consulting the denylist. It is signed here rather
+  // than in the database because the runtime already holds the key, and moving it into SQL would
+  // turn every path to SQL execution into a path to an unrevocable credential. No service-role key:
+  // record_service_token_issued() is SECURITY DEFINER and re-checks the actor.
   "mint-service-token": ["JWT_SECRET"],
 
-  // Physical gateway enrolment. THE ONLY FUNCTION HERE WITH NO USER, by construction: the caller is
-  // an appliance holding a single-use token, and possession of that token is the authorisation. It
-  // holds the service-role key because the token table is reachable by nothing else (RLS on, no
-  // policies), and the credential service's bearer token because minting the broker account is the
-  // point. Both are narrow: the token is short-lived and bound to one gateway, and the credential
-  // service can only add an account to a password file.
-  //
-  // MQTT_PUBLIC_HOST is here because the response tells an appliance where to connect, and that
-  // address cannot be derived from SUPABASE_URL -- inside this network that is supabase-kong, which
-  // resolves for nothing on a shopfloor.
-  //
-  // THE FORGE CREDENTIAL IS THE THIRD PLANE, and it is the narrowest of the three the
-  // registry hands out. It authenticates as a machine account that is NOT a Gitea administrator:
-  // it owns the per-gateway repositories, so it can create one and attach a read-only deploy key,
-  // and it can do nothing to the platform playbook the fleet converges to. An admin credential
-  // here would be able to rewrite that playbook, from a function reachable through the gateway.
-  //
-  // ALL THREE OR NONE. The function treats a half-configured forge as disabled and says so in its
-  // log, rather than answering 401 once per appliance -- but a variable omitted HERE is invisible
-  // to it, so the same omission looks like a deployment that chose not to run a forge.
+  // Physical gateway enrolment, the only function here with no user: the caller is an appliance
+  // holding a single-use token. It holds the service-role key because the token table is reachable
+  // by nothing else, and the credential service's bearer token to mint the broker account.
+  // MQTT_PUBLIC_HOST is the address an appliance connects to, which cannot be derived from the
+  // in-network SUPABASE_URL. The forge credential authenticates as a machine account that is not a
+  // Gitea administrator: it can create a gateway repository and attach a read-only deploy key, and
+  // nothing else. All three forge variables or none; a variable omitted here looks to the function
+  // like a deployment that chose not to run a forge.
   "enroll-gateway": [
     "SUPABASE_SERVICE_ROLE_KEY",
     "MQTT_CREDENTIAL_SERVICE_URL",
@@ -126,29 +70,20 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   ],
 
   // Rotates a decommissioned gateway's broker account to a password nobody records, which is how
-  // this platform revokes -- the credential service is add-only by design (0038).
-  //
-  // CALLED BY THE DATABASE, not by a browser. A trigger on `gateways` reaches it through Kong with
-  // pg_net, because the NetworkPolicy admits only `supabase-functions` to the credential service
-  // and a trigger dialling that port itself would be a second edge into credential issuance.
-  //
-  // GATEWAY_REVOKE_SECRET must be listed here or the worker starts without it and answers 503 to
-  // every revocation: envForFunction() forwards ONLY what this registry names. Same failure the
-  // grafana-alert-webhook comment above describes.
+  // this platform revokes. Called by the database through the gateway with pg_net, because the
+  // NetworkPolicy admits only `supabase-functions` to the credential service. GATEWAY_REVOKE_SECRET
+  // must be listed here or the worker answers 503 to every revocation.
   "revoke-gateway-credential": [
     "MQTT_CREDENTIAL_SERVICE_URL",
     "MQTT_CREDENTIAL_SERVICE_TOKEN",
     "GATEWAY_REVOKE_SECRET",
   ],
 
-  // Packages the physical gateway bootstrap bundle as a ZIP.
-  //
-  // NO SERVICE-ROLE KEY, and that is the design rather than an omission. It reads the gateway and
-  // mints the enrolment token AS THE CALLER -- issue_gateway_enrollment_token() is SECURITY
-  // DEFINER and checks has_role() itself -- so this endpoint cannot produce a bundle for a gateway
-  // its caller could not have produced one for. The template files arrive through the environment
-  // because an edge worker cannot read the image's filesystem; SUPABASE_PUBLIC_URL is the address
-  // the APPLIANCE will dial, which cannot be derived from the in-network SUPABASE_URL.
+  // Packages the physical gateway bootstrap bundle as a ZIP. No service-role key: it reads the
+  // gateway and mints the enrolment token as the caller, through a SECURITY DEFINER function that
+  // checks has_role() itself. The template files arrive through the environment because an edge
+  // worker cannot read the image's filesystem; SUPABASE_PUBLIC_URL is the address the appliance
+  // will dial.
   "gateway-bundle": [
     "SUPABASE_PUBLIC_URL",
     "GW_BUNDLE_COMPOSE",
@@ -170,41 +105,22 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "STORAGE_MODEL_BUCKET",
   ],
 
-  // The IDTA 02001/02002 read surface over the same mapping aas-export uses.
-  //
-  // NO SERVICE-ROLE KEY, AND THE CONTRAST WITH THE ENTRY ABOVE IS THE POINT. aas-export composes a
-  // document on request and hands it to a caller whose role it has already checked; this is a live
-  // API over the whole asset space, so it authenticates and then reads AS THE CALLER and lets RLS
-  // answer. Granting the key here would turn every authenticated user's submodel lookup into a
-  // privileged one -- the same argument fplus-directory's entry below makes.
-  //
-  // IT IS ALSO WHY THESE ARE TWO FUNCTIONS RATHER THAN TWO ROUTES. envForFunction() forwards only
-  // what a function's entry names, so one worker cannot hold a key the other is denied; sharing a
-  // service path would mean sharing the environment, and the separation would become a convention
-  // instead of a boundary.
-  //
-  // The AAS_* set is duplicated deliberately: the identifiers this serves must be the identifiers
-  // aas-export mints, and they are derived from these variables. A deployment that set them for one
-  // worker and not the other would publish shells under one namespace and fail to resolve them
-  // under the other. No STORAGE_MODEL_BUCKET or AAS_MAX_BUNDLED_MODEL_BYTES: both belong to AASX
-  // packaging, which this does not serve.
+  // The IDTA 02001/02002 read surface over the same mapping aas-export uses. No service-role key: a
+  // live API over the whole asset space reads as the caller and lets RLS answer. Two functions
+  // rather than two routes, because envForFunction() forwards only what an entry names, so one
+  // worker cannot hold a key the other is denied. The AAS_* set is duplicated so the identifiers
+  // this serves are the identifiers aas-export mints; no STORAGE_MODEL_BUCKET or
+  // AAS_MAX_BUNDLED_MODEL_BYTES, which belong to AASX packaging.
   "aas-api": [
     "AAS_BASE_IRI",
     "AAS_HISTORIAN_ENDPOINT",
     "AAS_MODEL_PUBLIC_BASE",
   ],
 
-  // Records a Grafana alert notification in public.platform_alerts.
-  //
-  // TWO KEYS, AND THE ASYMMETRY IS THE WHOLE DESIGN. It holds the service-role key because it
-  // writes to a table whose only write policy is service_role -- but the CALLER never sees that
-  // key. Grafana presents GRAFANA_ALERT_WEBHOOK_SECRET, this function verifies it, and only then
-  // does it use its own privileged client. Giving Grafana the service-role key directly would hand
-  // a browser-SSO-fronted service the credential that bypasses RLS and can rewrite
-  // digital_thread -- the same shape as the `postgres` datasource credential that was removed.
-  //
-  // The secret must be listed here or the worker starts without it, and the function then answers
-  // 503 to every notification: envForFunction() forwards ONLY what this registry names.
+  // Records a Grafana alert notification in public.platform_alerts. It holds the service-role key
+  // because the table's only write policy is service_role, but the caller never sees that key:
+  // Grafana presents GRAFANA_ALERT_WEBHOOK_SECRET, which must be listed here or the worker answers
+  // 503 to every notification.
   "grafana-alert-webhook": [
     "SUPABASE_SERVICE_ROLE_KEY",
     "GRAFANA_ALERT_WEBHOOK_SECRET",
@@ -213,10 +129,8 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // Resolves a role from public.user_roles for Grafana's OIDC `api_url`.
   "grafana-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
 
-  // The same lookup for Node-RED, answering in Node-RED's permission vocabulary ('*' / 'read')
-  // rather than Grafana's org roles. Separate from grafana-userinfo because the mapping is an
-  // authorisation decision, and one endpoint serving both would let a change made for one
-  // product's role model silently move the other's.
+  // The same lookup for Node-RED, answering in Node-RED's permission vocabulary ('*' / 'read').
+  // Separate from grafana-userinfo because the mapping is an authorisation decision per product.
   "nodered-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
   // The forge listener's ext_authz step (0094): the role from user_roles, the placement through
   // the machine account. The same three forge variables enroll-gateway holds, for the same reason.
@@ -228,11 +142,11 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   ],
   // Gitea's own sign-out link, routed here by the forge listener: ends every GoTrue session the
   // caller holds, then sends the browser through the door's sign-out. Needs the service key to
-  // revoke; touches the forge not at all.
+  // revoke.
   "forge-signout": ["SUPABASE_SERVICE_ROLE_KEY"],
-  // Gitea's push webhook (0095): verifies the delivery's HMAC against GITEA_WEBHOOK_SECRET, records
-  // the head of main on the gateway row, and reads flows.json at that head through the machine
-  // account for its hash. The service key writes the row; the forge credential reads the file.
+  // Gitea's push webhook: verifies the delivery's HMAC against GITEA_WEBHOOK_SECRET, records the
+  // head of main on the gateway row, and reads flows.json at that head through the machine account
+  // for its hash.
   "forge-events": [
     "SUPABASE_SERVICE_ROLE_KEY",
     "GITEA_WEBHOOK_SECRET",
@@ -241,17 +155,15 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_MACHINE_PASSWORD",
   ],
 
-  // Factory+ Directory adapter. NO SERVICE-ROLE KEY, and that is the point: it is a live read
-  // API over the whole address space, so it authenticates the caller and then queries AS them,
-  // letting RLS decide what they see. Granting the service key here would turn every
-  // authenticated user's directory lookup into a privileged one. The common env is all it needs.
+  // Factory+ Directory adapter. No service-role key: it authenticates the caller and queries as
+  // them, letting RLS decide what they see. The common env is all it needs.
   "fplus-directory": [],
 };
 
 /**
- * Build the environment for one worker: the common set plus that function's declared secrets.
- * A declared variable that is unset in this deployment is skipped rather than forwarded as an
- * empty string, so a function's own "is it configured" check still sees the truth.
+ * Build the environment for one worker: the common set plus that function's declared secrets. A
+ * declared variable that is unset is skipped rather than forwarded as an empty string, so a
+ * function's own configuration check sees the truth.
  */
 function envForFunction(serviceName: string): string[][] {
   const allowed = [...COMMON_ENV, ...(FUNCTION_REGISTRY[serviceName] ?? [])];

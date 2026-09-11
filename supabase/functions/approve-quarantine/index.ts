@@ -15,11 +15,8 @@ function jsonResponse(body: unknown, status: number): Response {
 }
 
 /**
- * A 400 describing what the CALLER got wrong.
- *
- * Distinct from the server-side errors below, which deliberately say nothing specific: a
- * validation message is about the request the caller just sent, so it discloses nothing they
- * did not already know, whereas a database error describes the schema.
+ * A 400 describing what the caller got wrong. A validation message discloses nothing they did not
+ * already know, whereas a database error describes the schema.
  */
 function badRequest(message: string): Response {
   return jsonResponse({ error: message }, 400);
@@ -70,16 +67,14 @@ export default async function handler(req: Request): Promise<Response> {
       return badRequest("Missing required parameter: device_id");
     }
 
-    // Devices are addressed by their UUID primary key. This used to accept either a UUID or a
-    // Sparkplug B name, because the quarantine list handed out names; identity now lives on
-    // `sparkplug_id` and the list returns UUIDs like every other device view.
+    // Devices are addressed by their UUID primary key; the quarantine list returns UUIDs like every
+    // other device view.
     if (!isUuid(device_id)) {
       return badRequest("device_id must be a device UUID");
     }
 
-    // Validated for the same reason device_id is. Previously it was passed straight through to
-    // the query, so a malformed value surfaced as a 500 carrying a raw Postgres message rather
-    // than as the 400 it actually is.
+    // Validated for the same reason device_id is, so a malformed value is a 400 rather than a 500
+    // carrying a raw Postgres message.
     if (merge_into_device_id !== undefined && merge_into_device_id !== null) {
       if (!isUuid(merge_into_device_id)) {
         return badRequest("merge_into_device_id must be a device UUID");
@@ -89,17 +84,11 @@ export default async function handler(req: Request): Promise<Response> {
       }
     }
 
-    // LOCATION IS OPTIONAL AND OMITTED WHEN NOT ANSWERED, not defaulted.
-    //
-    // devices.cell_id is NULL-means-inherit with no column default, so a device approved onto a
-    // gateway that has a cell needs no answer here -- it inherits, and keeps tracking that
-    // gateway. Writing a value the operator did not choose would turn inheritance off
-    // permanently for every device approved through this path, which is exactly the failure the
-    // column was designed without a default to avoid.
-    //
-    // An explicitly empty cell_id is still meaningful: it is the picker's "Inherit" option. The
-    // `p_set_*` flags below are what carry that distinction into SQL, where a plain NULL
-    // argument cannot express "supplied, and cleared" separately from "not supplied".
+    // Location is optional and omitted when not answered, not defaulted: devices.cell_id is
+    // NULL-means-inherit with no column default, and writing a value the operator did not choose
+    // would turn inheritance off for every device approved here. An explicitly empty cell_id is the
+    // picker's Inherit option; the `p_set_*` flags carry the distinction between
+    // supplied-and-cleared and not-supplied into SQL.
     const setCell = cell_id !== undefined;
     let normalisedCell: string | null = null;
     if (setCell) {
@@ -121,20 +110,11 @@ export default async function handler(req: Request): Promise<Response> {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-    // ONE ATOMIC CALL, replacing four sequential PostgREST requests.
-    //
-    // The merge path used to re-key asset_config, update the surviving device, then delete the
-    // duplicate -- as three separate round trips with no transaction and no compensating
-    // rollback. A failure partway left asset_config pointing at a device that was never merged,
-    // or two un-quarantined rows claiming one physical asset. Postgres already gives us
-    // atomicity, so the orchestration is gone rather than wrapped in retries.
-    //
-    // `user.id` is passed explicitly because log_digital_thread_event() records auth.uid(), and
-    // this client authenticates as service_role, whose JWT carries no `sub`. Every approval and
-    // every merge was therefore logged with changed_by = NULL -- the audit trail could not say
-    // who admitted a device to the network. The RPC sets the actor for the transaction, and
-    // re-checks their role against public.user_roles so authorization does not rest solely on
-    // the check above.
+    // One atomic call. The RPC re-keys asset_config, updates the surviving device and deletes the
+    // duplicate in one transaction. `user.id` is passed explicitly because
+    // log_digital_thread_event() records auth.uid(), and this client authenticates as service_role,
+    // whose JWT carries no `sub`; the RPC sets the actor and re-checks their role against
+    // public.user_roles.
     const { data, error: rpcError } = await supabaseAdmin.rpc("approve_quarantined_device", {
       p_device_id: device_id,
       p_actor_id: user.id,
@@ -148,9 +128,8 @@ export default async function handler(req: Request): Promise<Response> {
     });
 
     if (rpcError) {
-      // Map the RPC's own SQLSTATEs onto honest HTTP codes, and do not relay the driver's
-      // message. A raw Postgres error discloses table, column and constraint names to whoever
-      // can reach the endpoint; the codes below are the ones this RPC raises deliberately.
+      // Map the RPC's own SQLSTATEs onto HTTP codes, and do not relay the driver's message, which
+      // discloses table, column and constraint names.
       const status = rpcError.code === "P0002" || rpcError.code === "no_data_found"
         ? 404
         : rpcError.code === "42501"

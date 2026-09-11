@@ -2,39 +2,16 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 /**
- * Grafana alert notification receiver.
- *
- * Grafana evaluates the rules in grafana/provisioning/alerting/alert-rules.yaml against the
- * historian and POSTs an Alertmanager-shaped payload here. This function records each alert
- * instance as an OCCURRENCE in public.platform_alerts, which Supabase Realtime then delivers to the
- * dashboard's toast and Topbar pill.
- *
- * ---------------------------------------------------------------------------------------------
- * IT AUTHENTICATES ON A NARROW SHARED SECRET, AND THAT IS THE POINT.
- *
- * The obvious way to let Grafana write to Supabase is to give it the service-role key. That key
- * bypasses RLS entirely and can rewrite `digital_thread`, and this stack has already corrected the
- * same shape once: Grafana used to reach the historian as the `postgres` superuser -- a service
- * fronted by browser SSO holding the credential that owns the database -- and the fix was the
- * read-only `grafana_reader` role.
- *
- * So Grafana holds `GRAFANA_ALERT_WEBHOOK_SECRET`, which authorises exactly one thing: recording an
- * alert. This function verifies it and then uses its own service-role client internally. Same shape
- * as `nodered_webhook_jwt_secret` for the quarantine webhook.
- *
- * THE CHECK IS NOT OPTIONAL AND CANNOT BE DELEGATED. The edge runtime boots with
- * VERIFY_JWT="false" because each function authorises itself, so a function that forgets to check
- * is an open write endpoint rather than a 401. Kong's key-auth in front of /functions/v1/ proves
- * only that the caller has the anon key -- which is shipped to every browser.
- *
- * ---------------------------------------------------------------------------------------------
- * IDENTITY COMES FROM `sparkplug_id`, NEVER FROM THE DEVICE NAME.
- *
- * `devices.name` is a mutable display label; `sparkplug_id` is generated from the row's primary key
- * and is what the ACL, the MQTT topic and the historian all key on. `identity_source =
- * 'legacy_name'` exists specifically to deprecate name matching and the UI badges it as a warning.
- * The alert rules therefore carry `sparkplug_id` as a label and this function resolves on it; the
- * device NAME travels too, but only so a summary can be read by a human.
+ * Grafana alert notification receiver. Grafana evaluates the rules in
+ * grafana/provisioning/alerting/alert-rules.yaml against the historian and POSTs an
+ * Alertmanager-shaped payload here; this records each alert instance as an occurrence in
+ * public.platform_alerts, which Realtime delivers to the dashboard. It authenticates on a narrow
+ * shared secret, GRAFANA_ALERT_WEBHOOK_SECRET, which authorises exactly one thing, and only then
+ * uses its own service-role client; giving Grafana the service-role key would hand a
+ * browser-SSO-fronted service the credential that bypasses RLS. The check cannot be delegated: the
+ * edge runtime boots with VERIFY_JWT="false", and the gateway's key-auth proves only that the
+ * caller has the anon key. Identity comes from `sparkplug_id`, never from the device name, which is
+ * a mutable label; the name travels only so a summary can be read.
  */
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -66,11 +43,8 @@ function jsonResponse(body: unknown, status: number): Response {
 }
 
 /**
- * Constant-time-ish comparison of the bearer token.
- *
- * A plain `!==` on a secret leaks its length and, in principle, its prefix through timing. This is
- * a shared secret on an internal network rather than a password database, so the exposure is small
- * -- but the mitigation is three lines and the alternative is explaining why it was skipped.
+ * Constant-time-ish comparison of the bearer token: a plain `!==` leaks its length and prefix
+ * through timing.
  */
 function secretMatches(presented: string, expected: string): boolean {
   if (presented.length !== expected.length) return false;
@@ -85,9 +59,8 @@ export function authorizeAlertWebhook(
   authHeader: string | null,
   expectedSecret: string,
 ): { ok: boolean; status: number; message: string } {
-  // FAIL CLOSED ON AN UNSET SECRET. An empty expected value would otherwise make `Bearer ` match,
-  // turning a misconfiguration into an unauthenticated write endpoint -- the exact inversion that
-  // makes a missing environment variable dangerous rather than merely broken.
+  // Fail closed on an unset secret: an empty expected value would otherwise make `Bearer ` match,
+  // turning a misconfiguration into an unauthenticated write endpoint.
   if (!expectedSecret) {
     return {
       ok: false,
@@ -109,24 +82,12 @@ export function authorizeAlertWebhook(
 }
 
 /**
- * Normalise one Grafana alert instance into a platform_alerts row.
- *
- * THE SUBJECT IS (entity_type, entity_id), NOT A DEVICE. Until the platform rules arrived every
- * alert was a machine condition, so an instance without a `sparkplug_id` label could only be
- * malformed and was dropped. That is no longer true: a rule about the quarantine queue depth or
- * the number of stuck enrolments is about the fleet, and has no asset to name.
- *
- * A rule therefore declares its own scope with an `entity_type` label -- `device` (the default,
- * so the three shipped machine rules are unchanged), `gateway`, or `platform`.
- *
- * RETURNS NULL ONLY FOR A MALFORMED INSTANCE, and that is still not an error condition: a
- * DatasourceError notification (which `execErrState: Error` produces when a rule's query breaks)
- * carries no labels at all, and neither does anything an operator adds through the Grafana UI. The
- * caller counts these and reports the count, so a rule that has started erroring is visible in
- * Grafana's own delivery log rather than being written in as an alert about nothing.
- *
- * AN ASSET SCOPE STILL REQUIRES A WIRE IDENTITY. `platform_alerts_asset_has_wire_id` enforces that
- * in the schema; refusing it here as well means the batch is not failed by one bad instance.
+ * Normalise one Grafana alert instance into a platform_alerts row. The subject is (entity_type,
+ * entity_id), not a device: a rule declares its scope with an `entity_type` label, `device` (the
+ * default), `gateway` or `platform`. Returns null only for a malformed instance, which is not an
+ * error: a DatasourceError notification carries no labels, and the caller counts and reports these.
+ * An asset scope still requires a wire identity, as `platform_alerts_asset_has_wire_id` enforces;
+ * refusing it here keeps one bad instance from failing the batch.
  */
 export function normalizeAlert(alert: GrafanaAlert): {
   fingerprint: string;
@@ -148,10 +109,9 @@ export function normalizeAlert(alert: GrafanaAlert): {
   const alertName = (labels.alertname ?? "").trim();
   if (!fingerprint || !alertName || !alert.startsAt) return null;
 
-  // DEFAULTS TO `device`, which is what keeps the three machine rules working untouched -- none of
-  // them carries this label. An unrecognised value is refused rather than coerced: the CHECK in
-  // 0023 would reject it anyway, and failing one instance here beats failing the whole batch's
-  // insert there.
+  // Defaults to `device`, which keeps the machine rules working without the label. An unrecognised
+  // value is refused rather than coerced, so one instance fails rather than the whole batch's
+  // insert.
   const entityType = (labels.entity_type ?? "device").trim().toLowerCase();
   if (!ENTITY_TYPES.has(entityType)) return null;
 
@@ -160,13 +120,12 @@ export function normalizeAlert(alert: GrafanaAlert): {
   if (entityType !== "platform" && !sparkplugId) return null;
 
   // Grafana sends `status: "resolved"` on recovery and "firing" otherwise. Anything unrecognised is
-  // treated as firing: a notification that arrived is evidence of a condition, and defaulting to
-  // resolved would silently clear the dashboard on a payload shape we do not know.
+  // treated as firing: defaulting to resolved would silently clear the dashboard on an unknown
+  // payload shape.
   const resolved = (alert.status ?? "").toLowerCase() === RESOLVED;
 
-  // An unset or zero endsAt is Alertmanager's "still open". Grafana sends 0001-01-01T00:00:00Z for
-  // a firing alert, which is not a timestamp anybody wants stored -- and the table's CHECK requires
-  // a resolved row to carry one, so this is where that gets settled.
+  // An unset or zero endsAt is Alertmanager's "still open"; Grafana sends 0001-01-01T00:00:00Z for
+  // a firing alert. The table's CHECK requires a resolved row to carry one.
   const rawEnds = alert.endsAt ?? "";
   const endsAt = resolved
     ? (rawEnds && !rawEnds.startsWith("0001-01-01") ? rawEnds : new Date().toISOString())
@@ -236,15 +195,9 @@ export default async function handler(req: Request): Promise<Response> {
     auth: { persistSession: false },
   });
 
-  // ONE ROUND TRIP PER SUBJECT TABLE, not one per alert. A multi-dimensional rule can deliver six
-  // instances in a single notification, and `sparkplug_id` is indexed on both tables -- so an `in`
-  // filter is two queries where a loop would be twelve.
-  //
-  // THE TWO ARE LOOKED UP SEPARATELY BECAUSE A WIRE ID IS ONLY UNIQUE WITHIN ITS KIND. Device ids
-  // are `dev`-prefixed and gateway ids `gwy`-prefixed today, so one combined map would happen to
-  // work -- but it would be relying on a naming convention to keep two id spaces apart, and
-  // `entity_type` already says which space to look in. Resolving by the declared kind means a
-  // future prefix change cannot silently attribute a gateway alert to a device.
+  // One round trip per subject table, not one per alert: a multi-dimensional rule can deliver six
+  // instances in one notification. The two kinds are looked up separately because a wire id is only
+  // unique within its kind, and `entity_type` says which space to look in.
   const idsFor = (kind: string) =>
     [...new Set(rows.filter((r) => r.entity_type === kind && r.sparkplug_id).map((r) => r.sparkplug_id!))];
 
@@ -261,9 +214,8 @@ export default async function handler(req: Request): Promise<Response> {
       .in("sparkplug_id", ids);
 
     if (error) {
-      // Recorded anyway, with a null entity_id. The alert is the event worth keeping; the id is a
-      // convenience for joining. Losing a real excursion because a metadata lookup failed would be
-      // the wrong trade.
+      // Recorded anyway, with a null entity_id: the alert is the event worth keeping, and the id is
+      // a convenience for joining.
       console.error(`[grafana-alert-webhook] ${table} lookup failed: ${error.message}`);
       continue;
     }
@@ -283,14 +235,10 @@ export default async function handler(req: Request): Promise<Response> {
     ends_at: r.ends_at,
   }));
 
-  // UPSERT ON (fingerprint, starts_at) -- the OCCURRENCE key, not the fingerprint alone.
-  //
-  // A Grafana fingerprint is a hash of the alert instance's labels and is therefore STABLE across
-  // every fire -> resolve -> fire cycle for the same series. Conflict-targeting it alone would make
-  // the second excursion overwrite the first, and the table would quietly become "latest occurrence
-  // per series" while still carrying starts_at/ends_at. Pairing it with starts_at gives one row per
-  // occurrence -- and because the resolve notification repeats the SAME startsAt, the resolve closes
-  // the row it opened instead of inserting a second one.
+  // Upsert on (fingerprint, starts_at), the occurrence key. A Grafana fingerprint is a hash of the
+  // instance's labels and is stable across every fire/resolve cycle, so conflicting on it alone
+  // would overwrite the first excursion with the second. The resolve notification repeats the same
+  // startsAt, so it closes the row it opened.
   const { error: writeError } = await supabaseAdmin
     .from("platform_alerts")
     .upsert(toWrite, { onConflict: "fingerprint,starts_at" });

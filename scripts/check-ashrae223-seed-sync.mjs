@@ -1,11 +1,8 @@
 /**
- * Verify the generated ASHRAE 223P block in 0002_seed_data.sql is intact.
- *
- * Same discipline as the MTConnect and OPC UA checks: the digest is recomputed from the file that
- * actually executes, and this needs no network, so it still says something useful when GitHub is
- * unreachable. CI runs the generator first and then this, which additionally catches an upstream
- * release moving under the pin -- and for 223P that matters more than for the others, because the
- * standard is still in public review and its concepts can genuinely change.
+ * Verify the generated ASHRAE 223P block in 0002_seed_data.sql is intact. As for the MTConnect and
+ * OPC UA checks, the digest is recomputed from the file that executes, with no network needed. CI
+ * runs the generator first and then this, which also catches an upstream release moving under the
+ * pin; 223P is still in public review, so its concepts can change.
  *
  * Usage: node scripts/check-ashrae223-seed-sync.mjs
  */

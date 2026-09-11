@@ -1,85 +1,26 @@
 #!/usr/bin/env node
 /**
- * =================================================================================================
- * THE PULLER. This appliance converges its own flow to what somebody approved.
- * =================================================================================================
+ * The puller: this appliance converges its own flow to what somebody approved. Everything is
+ * outbound, a `git fetch` over SSH and an HTTP call to Node-RED on this appliance's own network;
+ * nothing accepts a flow from a request, a queue or an environment variable. Deploy only what is
+ * committed.
  *
- * WHY PULL AND NOT PUSH. The platform never opens a connection to a gateway, and this is the piece
- * that would have made it do so. An inbound deployment path means a route through the plant firewall
- * per appliance, a static inventory that dynamic enrolment cannot supply, and a credential at the
- * centre that can write to every box. Everything here is outbound: a `git fetch` over SSH and an
- * HTTP call to Node-RED on this appliance's own compose network. Nothing anywhere assumes traffic
- * in the other direction -- the same rule `node_exporter` follows in the service beside it.
+ * The forge is verified, never trusted on sight: `known_hosts` is written by bootstrap.mjs from the
+ * enrolment response, and `StrictHostKeyChecking=yes` has no override anywhere in this file. With
+ * no known_hosts file this refuses to sync and says so.
  *
- * WHAT THIS REPLACED. A `deploy-nodered` edge function used to POST a flow INTO an appliance, and
- * it refused an inline flow array in the request body with a stated reason: a Node-RED `function`
- * node is arbitrary JavaScript inside a container holding the MQTT credential. That refusal is the
- * one thing worth keeping from it, and it generalises to this file as its whole contract:
+ * The trigger is the tracked branch advancing, not the working copy differing, so an editor session
+ * on the box is not discarded every tick; local drift is reported by the heartbeat's flow hash, not
+ * corrected here.
  *
- *      DEPLOY ONLY WHAT IS COMMITTED.
+ * The write is an overwrite, not a merge: measured against nodered/node-red:5.0.2, a flows.json
+ * written back and reloaded leaves flows_cred.json untouched. A commit whose broker node has a
+ * different id is dangerous and silent: the node gets `{}` for its credential, the gateway is
+ * refused with CONNACK 5, and the next deploy prunes the orphaned ciphertext for good.
+ * `assertBrokerCredentials()` therefore refuses to converge rather than warning.
  *
- * Nothing here accepts a flow from anywhere but the tracked branch of this gateway's own repository,
- * and there is no code path that takes one from a request, a queue or an environment variable.
- *
- * -------------------------------------------------------------------------------------------------
- * THE FORGE IS VERIFIED, NEVER TRUSTED ON SIGHT.
- *
- * `known_hosts` is written by bootstrap.mjs from the enrolment response -- over TLS, on a single-use
- * token bound to one gateway row. So this appliance knows the forge's host key BEFORE its first
- * clone, and `StrictHostKeyChecking=yes` below is a check that can actually fail rather than
- * decoration. There is deliberately no option, environment variable or flag anywhere in this file
- * that disables it: this platform refuses that switch everywhere, and a switch that exists is a switch
- * that ends up set on every appliance in a plant with a proxy.
- *
- * With no known_hosts file this REFUSES TO SYNC and says so. That is the correct failure: a gateway
- * that keeps publishing telemetry while declining to converge has lost a feature, where one that
- * pulls from an unverified forge has lost the guarantee the review step exists to give.
- *
- * -------------------------------------------------------------------------------------------------
- * IT CONVERGES ON A NEW REVISION, AND DOES NOT FIGHT THE EDITOR.
- *
- * The appliance's Node-RED editor is deliberately reachable -- bootstrap generates a password for it
- * precisely so somebody can work on the box in front of them. A sidecar that re-imposed the
- * committed flow on every tick would silently discard that work mid-edit, five minutes at a time,
- * and would make the editor unusable for the people it exists for.
- *
- * So the trigger is the TRACKED BRANCH ADVANCING, not the working copy differing. A missed deploy is
- * still caught up -- an appliance that was powered off when a proposal merged converges on its next
- * tick -- which is the self-healing property that matters. Local drift is a REPORTED fact rather
- * than a corrected one: the heartbeat already carries a flow hash, and comparing it to the committed
- * head is drift detection, which is a dashboard concern and not this file's.
- *
- * -------------------------------------------------------------------------------------------------
- * THE WRITE IS AN OVERWRITE AND NOT A MERGE, AND THAT WAS PROVED BEFORE IT WAS BUILT.
- *
- * Node-RED keys credentials by NODE ID and holds them in flows_cred.json, encrypted separately from
- * the flow. The question this file turned on was whether writing a flow back over /data would break
- * that binding. Measured against nodered/node-red:5.0.2, the tag this bundle pins: a flows.json
- * written back and reloaded leaves flows_cred.json untouched -- not rewritten, not re-encrypted --
- * and the broker node keeps its credential. So there is no merge strategy here, and there should not
- * be one.
- *
- * WHAT IS DANGEROUS IS A COMMIT WHOSE BROKER NODE HAS A DIFFERENT ID, and it is dangerous in a way
- * nothing else would report. Node-RED starts, logs `Started flows`, and hands that node `{}` for its
- * credential: no warning and no failed check. The gateway then authenticates with an empty username,
- * Mosquitto refuses with CONNACK 5, and the editor says only "Connection failed to broker". Worse,
- * it is DESTRUCTIVE on the next deploy -- the orphaned credential is pruned and the file rewritten to
- * an encrypted `{}`, at which point the ciphertext is gone, bootstrap will not re-mint behind its
- * once-only guard, and the enrolment token is long spent. The recovery is a new bundle.
- *
- * That is why `assertBrokerCredentials()` below is a REFUSAL TO CONVERGE rather than a warning. It
- * turns a silent drop off the broker into a visible, reversible stop.
- *
- * -------------------------------------------------------------------------------------------------
- * RELATIONSHIP TO `ansible-pull`, WHICH IS WHERE THIS IS GOING.
- *
- * docs/roadmap.md ("The appliance itself") puts `ansible-pull` on the appliance against a SHARED platform playbook repository: the
- * OS baseline, the container versions, the CA, and this gateway's flow. When that lands, the
- * scheduling and the platform convergence become Ansible's and the transport becomes a task rather
- * than a loop. What does NOT move is everything below `deployFlow()`: the shape checks, the broker
- * credential assertion and the reload semantics are Node-RED knowledge that a playbook would have to
- * call out to anyway. This file is written so that half can be invoked once and exit -- see
- * `--once`, which is exactly what an Ansible task would run.
+ * `--once` runs a single pass and exits, which is what an `ansible-pull` task would run when
+ * scheduling moves to Ansible.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -116,11 +57,8 @@ const log = (...m) => console.log('[flow-sync]', ...m);
 const warn = (...m) => console.warn('[flow-sync]', ...m);
 
 /**
- * Log a given message only once per process.
- *
- * A GATEWAY THAT CANNOT CONVERGE SAYS SO ONCE, NOT EVERY FIVE MINUTES. "no repository configured" is
- * a steady state on a deployment with no forge, and repeating it forever buries the lines that mean
- * something in a log somebody has to read over a plant VPN.
+ * Log a given message only once per process: "no repository configured" is a steady state on a
+ * deployment with no forge.
  */
 const said = new Set();
 const sayOnce = (key, ...m) => {
@@ -129,23 +67,12 @@ const sayOnce = (key, ...m) => {
   log(...m);
 };
 
-// =================================================================================================
 // Git, over SSH, with the forge's identity checked
-// =================================================================================================
 
 /**
- * The SSH command git runs, and the four options that make it verifiable.
- *
- * `IdentitiesOnly=yes` because an agent or a stray ~/.ssh key would otherwise be offered first and
- * the forge would refuse an identity this appliance was never issued -- which presents as a
- * permission error naming no key at all.
- *
- * `StrictHostKeyChecking=yes` with an explicit `UserKnownHostsFile`. Not `accept-new`, which is
- * trust-on-first-use with a friendlier name, and never `no`.
- *
- * `BatchMode=yes` so a prompt is an error rather than a hang. There is no terminal here to answer
- * one, and a sidecar blocked forever on an invisible question is the hardest of these failures to
- * diagnose.
+ * The SSH command git runs. `IdentitiesOnly=yes` so an agent or a stray key is not offered first;
+ * `StrictHostKeyChecking=yes` with an explicit `UserKnownHostsFile`, never `accept-new` and never
+ * `no`; `BatchMode=yes` so a prompt is an error rather than a hang.
  */
 function sshCommand() {
   return [
@@ -169,14 +96,10 @@ function git(args, cwd) {
 }
 
 /**
- * Bring the local checkout up to date with the tracked branch, and return both revisions.
- *
- * A FORCE-PUSH IS REFUSED RATHER THAN FOLLOWED, and that refusal belongs here rather than in the
- * dashboard. A revert must be a NEW COMMIT precisely because a rewritten history
- * cannot be told from a legitimate advance by anything downstream -- this would reconcile to the
- * rewritten head and report success, having deployed something no pull request ever showed. So the
- * remote head must be a descendant of what we last saw. When it is not, this stops and says so, and
- * a human decides.
+ * Bring the local checkout up to date with the tracked branch, and return both revisions. A
+ * force-push is refused rather than followed: the remote head must be a descendant of what we last
+ * saw, since a rewritten history cannot be told from a legitimate advance by anything downstream. A
+ * revert must be a new commit.
  */
 function fetchBranch(branch) {
   git(['fetch', '--quiet', 'origin', branch], CHECKOUT);
@@ -230,17 +153,12 @@ function syncCheckout(repository) {
   return remote;
 }
 
-// =================================================================================================
 // What is allowed to reach /data/flows.json
-// =================================================================================================
 
 /**
- * The same two shape checks the browser and the edge function already make, made a third time.
- *
- * NOT REDUNDANT: this is the LAST of the three and the only one on the appliance. The other two
- * guard a proposal; this guards a DEPLOY, and a repository can be reached by a route that never
- * passed through either -- a commit pushed with the machine account, a merge made in the forge's
- * own UI, a repository restored from a backup. What is written to /data is checked here or nowhere.
+ * The same two shape checks the browser and the edge function make, made a third time. This is the
+ * only one on the appliance, and a repository can be reached by a route that never passed the other
+ * two: a push with the machine account, a merge in the forge's UI, a restore from backup.
  */
 function flowRejectionReason(flow) {
   if (!Array.isArray(flow)) {
@@ -254,28 +172,13 @@ function flowRejectionReason(flow) {
 }
 
 /**
- * REFUSE A COMMIT WHOSE BROKER NODES HAVE NO CREDENTIAL ON THIS APPLIANCE.
- *
- * This is the check the whole design turns on -- see the header. A broker node whose id is not a key
- * in flows_cred.json gets `{}` from the runtime, silently, and the appliance drops off the broker
- * with a message that names nothing. The next deploy then PRUNES the orphaned entry and the
- * ciphertext is gone for good.
- *
- * READ THROUGH NODE-RED'S OWN CREDENTIALS RUNTIME, never by hand-rolling the decryption. The file
- * format is Node-RED's; the one implementation guaranteed to agree with what its runtime will do is
- * the runtime's own module. bootstrap.mjs writes the file the same way for the same reason.
- *
- * THE KEY GOES IN THROUGH `settings.get('credentialSecret')`, NOT `setKey()`, and the difference is
- * not cosmetic. `load()` chooses its key by asking settings and hashing the answer with sha256;
- * `setKey()` is what the WRITE path uses. Initialising with a bare `settings: {}` and calling
- * setKey -- the obvious reading, and the mirror of what bootstrap.mjs does to write -- makes load()
- * conclude encryption is disabled and throw `Failed to decrypt credentials` against a file that is
- * perfectly good. Measured against nodered/node-red:5.0.2, the tag this bundle pins.
- *
- * AN UNREADABLE CREDENTIAL STORE IS ALSO A REFUSAL. If the secret is wrong or the file is corrupt,
- * this cannot tell "the ids match" from "I could not look", and deploying on the strength of a check
- * that did not run is the failure it exists to prevent. The runtime helps here: a wrong key THROWS
- * rather than returning an empty set, so the two are distinguishable -- also measured.
+ * Refuse a commit whose broker nodes have no credential on this appliance: such a node gets `{}`
+ * from the runtime, the appliance drops off the broker with a message that names nothing, and the
+ * next deploy prunes the orphaned ciphertext. Read through Node-RED's own credentials runtime, with
+ * the key supplied through `settings.get('credentialSecret')`, not `setKey()`: `load()` hashes the
+ * settings answer, and initialising with bare settings makes it conclude encryption is disabled and
+ * throw against a good file (measured against nodered/node-red:5.0.2). An unreadable store is also
+ * a refusal; a wrong key throws rather than returning an empty set, so the two are distinguishable.
  */
 async function assertBrokerCredentials(flow) {
   const brokerIds = flow
@@ -336,22 +239,13 @@ async function assertBrokerCredentials(flow) {
 
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 
-// =================================================================================================
 // Telling Node-RED to pick it up
-// =================================================================================================
 
 /**
- * Reload the flow file through Node-RED's admin API.
- *
- * `Node-RED-Deployment-Type: reload` is the one that re-reads flows.json FROM DISK and leaves the
- * credential store alone. A `full` deploy would take the flow from this request body instead, which
- * would make this file a second way to get a flow onto an appliance -- exactly the inbound path the
- * puller exists to remove. The body is deliberately empty for that reason.
- *
- * AUTHENTICATED AS THE SYNC AGENT, not as admin. bootstrap.mjs writes that account into settings.js
- * and its password into /data/gitops/nodered.json; the human's password is printed once and stored
- * nowhere. The token grants nothing beyond the volume mount this process already has -- it is
- * needed because reloading is an API call, not because writing needs permission.
+ * Reload the flow file through Node-RED's admin API. `Node-RED-Deployment-Type: reload` re-reads
+ * flows.json from disk and leaves the credential store alone; a `full` deploy would take the flow
+ * from the request body, a second way to get a flow onto an appliance, so the body is empty.
+ * Authenticated as the sync agent, whose password bootstrap.mjs wrote to /data/gitops/nodered.json.
  */
 async function reloadNodeRed() {
   if (!existsSync(SYNC_CREDENTIAL)) {
@@ -400,17 +294,12 @@ async function reloadNodeRed() {
   }
 }
 
-// =================================================================================================
 // One pass
-// =================================================================================================
 
 /**
- * Write the flow and reload, having checked everything that can be checked first.
- *
- * WRITTEN THROUGH A TEMPORARY FILE AND RENAMED. A crash or a full disk halfway through a direct
- * write leaves a truncated flows.json, and Node-RED starting against a truncated flow file is an
- * appliance that needs a person in front of it. `rename` within the same directory is atomic, so the
- * file is either the old flow or the new one.
+ * Write the flow and reload, having checked everything first. Written through a temporary file and
+ * renamed, so a crash or a full disk leaves either the old flow or the new one, never a truncated
+ * file.
  */
 function deployFlow(text) {
   const temporary = join(DATA_DIR, `.flows.json.${randomUUID()}`);
@@ -483,9 +372,8 @@ async function syncOnce() {
 
   await assertBrokerCredentials(flow);
 
-  // ALREADY RUNNING IT. A revision can advance without the flow changing -- a README edit, a merge
-  // commit, a revert that restores what is deployed. Reloading Node-RED for those would drop every
-  // MQTT connection on the appliance to achieve nothing.
+  // Already running it: a revision can advance without the flow changing, and reloading Node-RED
+  // for that would drop every MQTT connection to achieve nothing.
   const running = existsSync(FLOWS) ? readFileSync(FLOWS, 'utf8') : '';
   if (sha256(running) === sha256(text)) {
     log(`${revision.slice(0, 12)} matches what is already running; recorded without a reload.`);
@@ -507,19 +395,13 @@ async function syncOnce() {
   );
 }
 
-// =================================================================================================
 // The loop
-// =================================================================================================
 
 /**
- * A FAILED TICK IS NEVER FATAL. The forge being unreachable, Node-RED still starting, a plant link
- * that drops at night: every one of these is ordinary, and an appliance that exits on the first of
- * them stops converging forever while its container reports "restarting" to nobody. So each pass is
- * caught, named and retried on the next tick.
- *
- * The one thing that must not be swallowed is a REFUSAL -- a rewritten history, a mismatched broker
- * id. Those are logged at every occurrence rather than once, because they mean a person has to
- * decide something and the log is the only place that will say so.
+ * A failed tick is never fatal: an unreachable forge, a Node-RED still starting or a dropped plant
+ * link is ordinary, so each pass is caught, named and retried on the next tick. A refusal (a
+ * rewritten history, a mismatched broker id) is logged at every occurrence, because a person has to
+ * decide something.
  */
 async function tick() {
   try {

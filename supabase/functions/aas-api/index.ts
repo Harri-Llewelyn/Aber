@@ -1,51 +1,14 @@
 /**
- * aas-api: the IDTA 02001/02002 REST surface over live database state.
- *
- * WHAT THIS IS FOR. `aas-export` hands somebody a file. That is the right shape for a handover and
- * the wrong shape for an ERP, a PLM or an MES that wants one submodel now and the same submodel
- * again in ten minutes: they would have to fetch, unpack and diff a whole Environment to read a
- * serial number. This serves the same object graph over the routes those systems already speak.
- *
- * ---------------------------------------------------------------------------------------------
- * NO SERVICE-ROLE KEY, AND THAT IS THE DESIGN RATHER THAN AN OMISSION.
- *
- * It authenticates the caller and then queries AS THEM, so RLS decides what they see. Identical
- * reasoning to `fplus-directory`, whose registry entry states it: a live read API over the whole
- * asset space holding the service key would turn every authenticated user's lookup into a
- * privileged one. `aas-export` holds that key and this deliberately does not -- which is also why
- * these are two functions rather than two routes on one. main/index.ts spawns one worker per
- * function with only the environment that function declares, so the separation is enforced by the
- * runtime rather than by care.
- *
- * The mapping is shared with the exporter (`../_shared/aas/shell.ts`) precisely so the two cannot
- * describe the same machine differently.
- *
- * ---------------------------------------------------------------------------------------------
- * HOW AN IDENTIFIER RESOLVES BACK TO A ROW, which is the piece with no equivalent in the exporter.
- *
- * The exporter only ever goes one way: device -> identifiers. A REST API is asked the reverse --
- * "give me the submodel with THIS id" -- and there is no table mapping identifiers to devices,
- * because identifiers are DERIVED (`shell.ts`: `${BASE_IRI}${sparkplug_id}/submodel/...`). So they
- * are parsed rather than looked up: strip the configured base, take the first segment as the
- * `sparkplug_id`, and resolve that against `devices`. Deriving both ways keeps the single source
- * of truth; a mapping table would be a second one that could disagree.
- *
- * A CONSEQUENCE WORTH STATING: changing AAS_BASE_IRI changes every identifier this deployment
- * has ever published, and previously-issued ids stop resolving here. That is already true of the
- * exported files; this endpoint simply makes it observable.
- *
- * ---------------------------------------------------------------------------------------------
- * WHAT IS DELIBERATELY NOT SERVED.
- *
- *   * WRITES. Every route is a GET. The AAS specification defines POST/PUT/DELETE for a
- *     repository, and implementing them would make this an authoring interface for asset data
- *     whose authoring interface is the dashboard, with its own role model and its own audit trail
- *     in `digital_thread`. A write here would bypass both. The self-description advertises the
- *     read-only service profiles (SSP-002) so a conformant client knows before it tries.
- *   * TELEMETRY VALUES, still. `LinkedSegment` points at the historian exactly as it does in the
- *     export -- see the rule in shell.ts. A live API makes inlining more tempting, not less, and
- *     an unbounded submodel is no better for being fetched over HTTP.
- *   * `.aasx`. That is a packaging format for a handover, and `aas-export` is where it lives.
+ * aas-api: the IDTA 02001/02002 REST surface over live database state, for an ERP, PLM or MES that
+ * wants one submodel now and again in ten minutes rather than a whole file. No service-role key: it
+ * authenticates the caller and queries as them, so RLS decides what they see; `aas-export` holds
+ * that key, which is why these are two functions with separate environments. The mapping is shared
+ * with the exporter (`../_shared/aas/shell.ts`). Identifiers are derived
+ * (`${BASE_IRI}${sparkplug_id}/submodel/...`), so an identifier is parsed back to a `sparkplug_id`
+ * rather than looked up; changing AAS_BASE_IRI changes every identifier this deployment has
+ * published. Not served: writes (the dashboard is the authoring interface, with its own audit
+ * trail), inlined telemetry values (`LinkedSegment` points at the historian), and `.aasx`
+ * (aas-export).
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -66,10 +29,8 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 
 /**
- * The specification's error shape, which is not a bare `{error: "..."}`.
- *
- * A conformant client parses `messages[]`, so answering in this stack's usual shape would make
- * every failure unreadable to exactly the tools this endpoint exists for.
+ * The specification's error shape: a conformant client parses `messages[]`, not a bare `{error:
+ * "..."}`.
  */
 const problem = (status: number, text: string, code = String(status)) =>
   json({
@@ -81,19 +42,12 @@ const problem = (status: number, text: string, code = String(status)) =>
     }],
   }, status);
 
-// ------------------------------------------------------------------------------------------------
 // Identifiers
-// ------------------------------------------------------------------------------------------------
 
 /**
- * base64url, as IDTA 02002 requires for every Identifier that appears in a path.
- *
- * NOT plain base64: `+` and `/` are not path-safe, and `/` in particular would silently split one
- * identifier across two path segments. Padding is stripped on encode and restored on decode --
- * some clients send it, most do not, and both must work.
- *
- * Encoded through TextEncoder rather than `btoa(str)` directly: `btoa` throws on any code point
- * above U+00FF, and an IRI carrying a non-ASCII character is legal.
+ * base64url, as IDTA 02002 requires for every Identifier in a path: `/` in plain base64 would split
+ * one identifier across two segments. Padding is stripped on encode and accepted on decode. Encoded
+ * through TextEncoder because `btoa` throws above U+00FF and an IRI may carry non-ASCII.
  */
 function b64urlEncode(value: string): string {
   const bytes = new TextEncoder().encode(value);
@@ -119,11 +73,8 @@ function b64urlDecode(value: string): string | null {
 const SPARKPLUG_RE = /^dev[0-9a-f]{21}$/;
 
 /**
- * The `sparkplug_id` an AAS identifier belongs to, or null when it is not one of ours.
- *
- * Accepts both the shell form (`<base><id>/shell`) and the submodel form
- * (`<base><id>/submodel/<suffix>`), because both resolve to the same device and the caller of this
- * function always knows which it asked for.
+ * The `sparkplug_id` an AAS identifier belongs to, or null when it is not one of ours. Accepts the
+ * shell form (`<base><id>/shell`) and the submodel form (`<base><id>/submodel/<suffix>`).
  */
 function assetOf(identifier: string): string | null {
   if (!identifier.startsWith(BASE_IRI)) return null;
@@ -132,16 +83,9 @@ function assetOf(identifier: string): string | null {
   return SPARKPLUG_RE.test(first) ? first : null;
 }
 
-// ------------------------------------------------------------------------------------------------
-// Pagination
-//
-// The specification's cursor is OPAQUE to the client, which is what makes the shape below
-// conformant even though it does not page one element at a time: a cursor here names the next
-// DEVICE, and a page is every item belonging to the devices it covers. Paging per submodel would
-// mean either materialising every shell to count them or storing a cursor that encodes a position
-// inside a document rebuilt on each request -- and the second is only stable while nothing changes,
-// which is the one thing a live API cannot assume.
-// ------------------------------------------------------------------------------------------------
+// Pagination. The specification's cursor is opaque to the client: a cursor here names the next
+// device, and a page is every item belonging to the devices it covers, which stays stable while the
+// data changes.
 
 const DEFAULT_LIMIT = 20;
 /** Each device on a page costs seven queries and one shell construction. That is the reason. */
@@ -165,13 +109,8 @@ function paged(result: unknown[], cursor: string | null) {
   };
 }
 
-// ------------------------------------------------------------------------------------------------
-// ValueOnly serialisation ($value)
-//
-// IDTA 02002's ValueOnly form, which is the one an ERP actually wants: it strips the metamodel
-// down to the values, so reading a serial number is `body.SerialNumber` rather than a walk through
-// `submodelElements[]` looking for a matching idShort.
-// ------------------------------------------------------------------------------------------------
+// ValueOnly serialisation ($value): IDTA 02002's form that strips the metamodel down to the values,
+// so reading a serial number is `body.SerialNumber`.
 
 // deno-lint-ignore no-explicit-any
 function valueOnly(element: any): unknown {
@@ -200,11 +139,9 @@ function submodelValueOnly(submodel: any): Record<string, unknown> {
 }
 
 /**
- * Walk an `idShortPath` -- `Metrics.Systems_TEMPERATURE`, in the specification's dotted form.
- *
- * Only collections are traversable, which is all this mapping produces; a path that runs into a
- * Property mid-way is a 404 rather than a 500, because asking for a child of a leaf is a client
- * mistake and not a server fault.
+ * Walk an `idShortPath` in the specification's dotted form (`Metrics.Systems_TEMPERATURE`). Only
+ * collections are traversable; a path that runs into a Property mid-way is a 404, a client mistake
+ * rather than a server fault.
  */
 // deno-lint-ignore no-explicit-any
 function elementAt(submodel: any, idShortPath: string): any | null {
@@ -222,9 +159,7 @@ function elementAt(submodel: any, idShortPath: string): any | null {
   return found;
 }
 
-// ------------------------------------------------------------------------------------------------
 // Routing
-// ------------------------------------------------------------------------------------------------
 
 /** Strip whichever prefix the gateway left on, exactly as fplus-directory does. */
 function routePath(url: URL): string {
@@ -254,11 +189,8 @@ async function shellFor(client: Client, sparkplugId: string): Promise<BuiltShell
 }
 
 /**
- * One page of devices, keyset-paginated by id.
- *
- * ORDERED BY `id` AND NOT BY `created_at`, because the cursor has to be stable under insertion: two
- * devices registered in the same second would otherwise be able to swap places between pages, and a
- * client walking the cursor would miss one and see the other twice.
+ * One page of devices, keyset-paginated by `id` rather than `created_at`, so the cursor is stable
+ * under insertion.
  */
 async function devicePage(client: Client, limit: number, cursor: string | null) {
   let query = client
@@ -288,12 +220,9 @@ export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = routePath(url);
 
-  // -------------------------------------------------------------------------------------------
-  // GET /description -- the service's own profile declaration.
-  // -------------------------------------------------------------------------------------------
-  // Unauthenticated by specification: a client is expected to read it to find out what it is
-  // talking to BEFORE it holds a credential, which is the same argument that keeps
-  // fplus-directory's /ping open. It reports profiles and nothing about the fleet.
+  // GET /description, the service's own profile declaration. Unauthenticated by specification, so a
+  // client can find out what it is talking to before it holds a credential; it reports profiles and
+  // nothing about the fleet.
   if (path === "/description") {
     return json({
       profiles: [
@@ -311,9 +240,7 @@ export default async function handler(req: Request): Promise<Response> {
     return problem(405, "This is a read-only AAS repository; only GET is served.", "405");
   }
 
-  // -------------------------------------------------------------------------------------------
-  // Everything below is authenticated. FAIL CLOSED.
-  // -------------------------------------------------------------------------------------------
+  // Everything below is authenticated. Fail closed.
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
     return problem(401, "Missing Authorization header", "401");
@@ -342,9 +269,7 @@ export default async function handler(req: Request): Promise<Response> {
     const wantsValue = path.endsWith("/$value");
     const bare = wantsValue ? path.slice(0, -"/$value".length) : path;
 
-    // -----------------------------------------------------------------------------------------
-    // GET /shells -- every shell this deployment publishes.
-    // -----------------------------------------------------------------------------------------
+    // GET /shells: every shell this deployment publishes.
     if (bare === "/shells") {
       const { page, nextCursor } = await devicePage(supabase, limit, cursor);
       const shells = [];
@@ -355,9 +280,7 @@ export default async function handler(req: Request): Promise<Response> {
       return json(paged(shells, nextCursor));
     }
 
-    // -----------------------------------------------------------------------------------------
-    // GET /submodels -- every submodel, across every shell.
-    // -----------------------------------------------------------------------------------------
+    // GET /submodels: every submodel, across every shell.
     if (bare === "/submodels") {
       const { page, nextCursor } = await devicePage(supabase, limit, cursor);
       const submodels = [];
@@ -371,9 +294,7 @@ export default async function handler(req: Request): Promise<Response> {
       ));
     }
 
-    // -----------------------------------------------------------------------------------------
     // /shells/{aasIdentifier}...
-    // -----------------------------------------------------------------------------------------
     if (bare.startsWith("/shells/")) {
       const rest = bare.slice("/shells/".length);
       const [encodedId, ...tail] = rest.split("/");
@@ -407,9 +328,9 @@ export default async function handler(req: Request): Promise<Response> {
         return json(paged(built.shell.submodels as unknown[], null));
       }
 
-      // GET /shells/{aasId}/submodels/{submodelId}[/...] -- the same submodel routes, reached
-      // through the shell. Delegated rather than duplicated: the only difference is that the
-      // submodel must belong to THIS shell, which is checked here and then handed on.
+      // GET /shells/{aasId}/submodels/{submodelId}[/...]: the same submodel routes reached through
+      // the shell. The submodel must belong to this shell, which is checked here and then handed
+      // on.
       if (tail[0] === "submodels" && tail.length >= 2) {
         const subIdentifier = b64urlDecode(decodeURIComponent(tail[1]));
         if (!subIdentifier) {
@@ -425,9 +346,7 @@ export default async function handler(req: Request): Promise<Response> {
       return problem(404, `Not found: ${path}`, "404");
     }
 
-    // -----------------------------------------------------------------------------------------
     // /submodels/{submodelIdentifier}...
-    // -----------------------------------------------------------------------------------------
     if (bare.startsWith("/submodels/")) {
       const rest = bare.slice("/submodels/".length);
       const [encodedId, ...tail] = rest.split("/");
@@ -447,14 +366,8 @@ export default async function handler(req: Request): Promise<Response> {
       return submodelResponse(submodel, tail, wantsValue);
     }
 
-    // -----------------------------------------------------------------------------------------
-    // GET / -- what this service serves.
-    // -----------------------------------------------------------------------------------------
-    // The specification defines no route index, and this is not pretending to be one: it answers
-    // 404, because there is no resource at the root. It names the routes in the body for the same
-    // reason fplus-directory does -- somebody who has just found this URL in a config file needs
-    // to know what to ask for next, and the alternative is reading the OpenAPI document to learn
-    // that a path exists at all.
+    // GET /: the specification defines no route index, so this answers 404 and names the routes in
+    // the body, so somebody who found this URL in a config file knows what to ask for next.
     if (bare === "/") {
       return json({
         messages: [{
@@ -487,9 +400,8 @@ export default async function handler(req: Request): Promise<Response> {
 }
 
 /**
- * The submodel routes below `/submodels/{id}`, shared by both ways of reaching them.
- *
- * `tail` is whatever followed the identifier: nothing, `submodel-elements`, or
+ * The submodel routes below `/submodels/{id}`, shared by both ways of reaching them. `tail` is
+ * whatever followed the identifier: nothing, `submodel-elements`, or
  * `submodel-elements/{idShortPath}`.
  */
 function submodelResponse(
@@ -515,9 +427,8 @@ function submodelResponse(
     ));
   }
 
-  // The remainder is an idShortPath. Rejoined with "/" first because a client may send either the
-  // dotted form the specification defines or a slash-separated path; both are accepted, and the
-  // walk below splits on "." after normalising.
+  // The remainder is an idShortPath. Rejoined with "." so a client may send the dotted form or a
+  // slash-separated path.
   const idShortPath = tail.slice(1).map(decodeURIComponent).join(".");
   const element = elementAt(submodel, idShortPath);
   if (!element) {

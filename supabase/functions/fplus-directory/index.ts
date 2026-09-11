@@ -2,40 +2,20 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 /**
- * Factory+ Directory adapter.
+ * Factory+ Directory adapter: the read half of the Factory+ Directory component's REST contract,
+ * projected from the tables this platform already has. It is not the AMRC Directory service: it
+ * does not consume Sparkplug births, has no change-notify metrics, and registers with no
+ * Configuration Store.
  *
- * Serves the read half of the Factory+ Directory component's REST contract by PROJECTING the
- * tables this platform already has. Nothing upstream of this file knows the Directory exists:
- * no column, trigger or ingestion path changed to support it, exactly as `aas-export` is an
- * adapter rather than a storage format.
+ * Identity mapping: Instance_UUID is devices.id / gateways.id; the Sparkplug address is
+ * (sparkplug_group, sparkplug_id); Schema_UUID is schemas.id and Service_UUID is
+ * directory_services.id, both locally minted (see the note on /v1/schema).
  *
- * WHAT IT IS NOT. This is not the AMRC Directory service. It answers the questions an upstream
- * Factory+ client asks -- which devices exist, what is at this Sparkplug address, which schemas
- * are in use and which devices implement one, which services are advertised -- and nothing else.
- * It does not consume Sparkplug births to build its own registry, it has no change-notify
- * metrics, and it does not register itself with a Configuration Store, because there is no
- * ConfigDB here to register with.
- *
- * IDENTITY MAPPING, which is the whole substance of the adapter:
- *
- *   Factory+            here                      why
- *   ------------------  ------------------------  ------------------------------------------
- *   Instance_UUID       devices.id / gateways.id  already RFC4122; no second namespace needed
- *   Sparkplug address   (sparkplug_group,         archived migration 0008 made the group part of the
- *                        sparkplug_id)            address, which is what /v1/address needs
- *   Schema_UUID         schemas.id                LOCALLY minted -- see the note on /v1/schema
- *   Service_UUID        directory_services.id     likewise local
- *
- * AUTH. `/ping` is unauthenticated because the Factory+ component specification requires it to
- * be reachable for discovery. EVERY `/v1/` path requires a valid bearer token and fails closed:
- * Kong does not gate this route (it is exempt from key-auth so that a Factory+ client with no
- * Supabase apikey can reach it at all), so this file is the only thing standing in front of the
- * data. That inversion is why the token check happens before any routing decision.
- *
- * It reads as the CALLER, not as the service role. A Directory is a live read over the whole
- * address space, so running it with the service key would hand every authenticated user a view
- * their RLS policies do not grant them. There is deliberately no SUPABASE_SERVICE_ROLE_KEY in
- * this function's registry entry in main/index.ts.
+ * `/ping` is unauthenticated because the specification requires it for discovery. Every `/v1/` path
+ * requires a valid bearer token and fails closed: the gateway exempts this route from key-auth so a
+ * Factory+ client with no Supabase apikey can reach it, so this file is the only thing in front of
+ * the data, and the token check runs before any routing decision. It reads as the caller, not the
+ * service role; there is no SUPABASE_SERVICE_ROLE_KEY in its registry entry.
  */
 
 const SERVICE_NAME = "fplus-directory";
@@ -51,13 +31,10 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * The request path with the routing prefixes removed.
- *
- * Two prefixes have to come off, and both are real rather than defensive. Kong routes `/v1/…`
- * with `strip_path: false` onto a service URL that already ends in `/fplus-directory`, so the
- * runtime sees `/fplus-directory/v1/device` -- which is also how it learns which worker to
- * spawn (main/index.ts reads the first segment). Invoked through `/functions/v1/fplus-directory`
- * instead, the same handler sees a path with nothing after the function name.
+ * The request path with the routing prefixes removed. The gateway routes `/v1/...` with
+ * `strip_path: false` onto a service URL ending in `/fplus-directory`, so the runtime sees
+ * `/fplus-directory/v1/device`; invoked through `/functions/v1/fplus-directory` the same handler
+ * sees nothing after the function name.
  */
 function routePath(url: URL): string {
   let path = url.pathname;
@@ -80,12 +57,8 @@ interface DirectoryEntry {
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
- * The qualification every schema identifier leaves this service wearing.
- *
- * ONE constant, read by both schema routes. It is the sentence that stops a local `schemas.id`
- * being mistaken for a registered Factory+ Schema_UUID, so the two routes must not be able to
- * word it differently -- a client that strips it off is making a choice, one that never carried
- * it is being misled.
+ * The qualification every schema identifier leaves this service wearing. One constant read by both
+ * schema routes, so a local `schemas.id` is never mistaken for a registered Factory+ Schema_UUID.
  */
 const LOCAL_SCHEMA_NOTE = "Locally minted schema identifiers, not registered Factory+ Schema_UUIDs.";
 
@@ -97,12 +70,8 @@ export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = routePath(url);
 
-  // ---------------------------------------------------------------------------------------
-  // GET /ping -- unauthenticated, by specification.
-  // ---------------------------------------------------------------------------------------
-  // Factory+ requires every component to serve this so a client can discover what it is
-  // talking to before holding a credential for it. It reports the service's identity and
-  // version and NOTHING about the fleet -- no counts, no names -- so being open costs nothing.
+  // GET /ping, unauthenticated by specification. Reports the service's identity and version and
+  // nothing about the fleet.
   if (path === "/ping") {
     return json({
       service: SERVICE_NAME,
@@ -118,12 +87,8 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "Method not allowed" }, 405);
   }
 
-  // ---------------------------------------------------------------------------------------
-  // Everything below is authenticated. FAIL CLOSED.
-  // ---------------------------------------------------------------------------------------
-  // Kong exempts this route from key-auth, so an unauthenticated request reaches this worker.
-  // The check is therefore before routing, not inside each branch -- a handler added later is
-  // authenticated by construction rather than by its author remembering.
+  // Everything below is authenticated. Fail closed. The check is before routing, not inside each
+  // branch, so a handler added later is authenticated by construction.
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
     return json({ error: "Missing Authorization header" }, 401);
@@ -145,10 +110,8 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    // -------------------------------------------------------------------------------------
-    // GET /v1/device            -> every known device UUID
-    // GET /v1/device/{uuid}     -> one device's address, status and schemas
-    // -------------------------------------------------------------------------------------
+    // GET /v1/device: every known device UUID. GET /v1/device/{uuid}: one device's address, status
+    // and schemas.
     if (path === "/v1/device" || path.startsWith("/v1/device/")) {
       const requested = path === "/v1/device" ? null : decodeURIComponent(path.slice("/v1/device/".length));
 
@@ -181,11 +144,8 @@ export default async function handler(req: Request): Promise<Response> {
       return json(entries.map((e) => e.uuid));
     }
 
-    // -------------------------------------------------------------------------------------
-    // GET /v1/address/{group}/{node}[/{device}]
-    // -------------------------------------------------------------------------------------
-    // The endpoint archived migration 0008 exists for. Before `gateways.sparkplug_group`, a node id
-    // alone was the whole address and two groups collided into one row.
+    // GET /v1/address/{group}/{node}[/{device}]. The group is part of the address, so two groups
+    // cannot collide into one row.
     if (path.startsWith("/v1/address/")) {
       const parts = path.slice("/v1/address/".length).split("/").map(decodeURIComponent);
       if (parts.length < 2 || !parts[0] || !parts[1]) {
@@ -225,24 +185,16 @@ export default async function handler(req: Request): Promise<Response> {
         address: { group_id: gateway.sparkplug_group, node_id: gateway.sparkplug_id },
         online: gateway.status === "ONLINE",
         last_change: gateway.last_heartbeat,
-        // The edge node itself declares no schema: an NBIRTH carries the node's own metrics,
-        // not a device model, so there is nothing here to name a schema with.
-        // for why claiming Factory+'s component schema would be a false assertion.
+        // The edge node itself declares no schema: an NBIRTH carries the node's own metrics, not a
+        // device model.
         schemas: [],
         devices: entries,
       });
     }
 
-    // -------------------------------------------------------------------------------------
-    // GET /v1/schema            -> Schema UUIDs in use
-    // GET /v1/schema/{uuid}     -> which devices implement one
-    // -------------------------------------------------------------------------------------
-    // LOCALLY MINTED, and BOTH responses say so, from the same constant. Factory+ Schema_UUIDs
-    // are registered against the AMRC schema repository; these are this deployment's own
-    // `schemas.id` values. Handing them back unqualified would assert an interoperability that
-    // does not exist -- the same rule the semantic-id namespace follows. The qualification is a
-    // shared constant rather than two string literals precisely because it is load bearing: a
-    // second copy is a second thing to forget when a route is added.
+    // GET /v1/schema: Schema UUIDs in use. GET /v1/schema/{uuid}: which devices implement one.
+    // Locally minted, and both responses say so from the same constant; handing them back
+    // unqualified would assert an interoperability that does not exist.
     if (path === "/v1/schema" || path.startsWith("/v1/schema/")) {
       const requested = path === "/v1/schema" ? null : decodeURIComponent(path.slice("/v1/schema/".length));
 
@@ -273,19 +225,12 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    // -------------------------------------------------------------------------------------
-    // GET /v1/service -- advertised services
-    // -------------------------------------------------------------------------------------
+    // GET /v1/service: advertised services.
     if (path === "/v1/service") {
-      // `status` IS NOW AN OBSERVATION, AND CAN BE "UNKNOWN". Until archived migration 0054 nothing wrote
-      // this column, so it was the literal 'ACTIVE' on every row -- this endpoint has been serving
-      // that to any Factory+ consumer since it was written.
-      //
-      // It is now ACTIVE / DOWN / UNKNOWN, written every minute from Prometheus's `up` series.
-      // UNKNOWN means nothing observes that service, which is true of nine of the fifteen: their
-      // endpoint_url values are browser addresses, so no probe from inside the stack could answer
-      // honestly. Passed through rather than flattened to ACTIVE, because a consumer deciding
-      // whether to route to a service should be able to tell "up" from "nobody is looking".
+      // `status` is an observation and can be UNKNOWN: ACTIVE / DOWN / UNKNOWN, written every
+      // minute from Prometheus's `up` series. UNKNOWN means nothing observes that service, and is
+      // passed through rather than flattened to ACTIVE so a consumer can tell "up" from "nobody is
+      // looking".
       const { data, error } = await supabase
         .from("directory_services")
         .select("id,service_name,service_type,endpoint_url,status");
@@ -324,28 +269,11 @@ export default async function handler(req: Request): Promise<Response> {
 }
 
 /**
- * GET /v1/schema/{uuid} -- the reverse of the lookup every other route performs.
- *
- * Every other endpoint here starts from an asset and reports its schemas. This starts from a
- * schema and reports its assets, which is the one question a client integrating against a MODEL
- * rather than against a machine actually asks: it holds a Schema_UUID and wants the addresses
- * publishing to it.
- *
- * THE STATUS FILTER IS DELIBERATELY ABSENT, unlike the collection above. `/v1/schema` lists what
- * is in use and filters to `active`; this resolves an identifier a client already holds, and the
- * most useful case it answers is the one a filter would hide -- an ARCHIVED schema with devices
- * still attached to it, which is a migration that has not finished. Answering 404 there would
- * report "no such schema" about a schema whose members are the answer. The status is returned
- * instead, so a caller can tell the two apart for itself.
- *
- * DEVICES AS FULL ENTRIES, not the UUID list `/v1/device` returns, following
- * `/v1/address/{group}/{node}`: both routes answer "what is behind this thing", and a client
- * asking either one is about to want the addresses. The bare device collection is a different
- * shape because it is the whole fleet.
- *
- * THROUGH THE VIEW for the same reason attachSchemas reads it -- `device_submodels` alone would
- * silently omit every device provisioned through the legacy 1:1 `devices.schema_id`, and those
- * are exactly the devices an archived schema still holds.
+ * GET /v1/schema/{uuid}: the reverse of every other lookup, from a schema to its assets. No status
+ * filter, unlike the collection: the most useful case is an archived schema with devices still
+ * attached, a migration that has not finished, so the status is returned instead. Devices as full
+ * entries, as `/v1/address` returns them. Through the `device_schemas` view, which includes devices
+ * provisioned through the legacy 1:1 `devices.schema_id`.
  */
 async function schemaMembers(
   supabase: ReturnType<typeof createClient>,
@@ -380,9 +308,8 @@ async function schemaMembers(
       .in("id", deviceIds)
       .eq("is_archived", false);
     if (deviceError) return json({ error: "Schema lookup failed", details: deviceError.message }, 500);
-    // attachSchemas re-reads the view to give each device its FULL set, which is not the set of
-    // one this query filtered on: a device implementing three submodels reports three here, the
-    // same as it does through /v1/device.
+    // attachSchemas re-reads the view to give each device its full set, not the set of one this
+    // query filtered on.
     entries = await attachSchemas(supabase, (devices ?? []).map(deviceEntry));
   }
 
@@ -400,15 +327,9 @@ async function schemaMembers(
 }
 
 /**
- * Fill in each entry's `schemas` from the `device_schemas` view.
- *
- * ONE query for the whole set, not one per device: the collection endpoint returns the entire
- * fleet, and a per-entry lookup would be a round-trip per device on every call.
- *
- * The VIEW, not `device_submodels` -- it is the union of the join rows and the legacy 1:1
- * `devices.schema_id`, so a device provisioned either way reports the same set the exporter and
- * the frontend see. Reading the join table alone would silently report no schema for a device
- * that has one.
+ * Fill in each entry's `schemas` from the `device_schemas` view. One query for the whole set, since
+ * the collection endpoint returns the entire fleet. The view, not `device_submodels`, so a device
+ * provisioned through the legacy 1:1 column reports the same set the exporter and the frontend see.
  */
 async function attachSchemas(
   supabase: ReturnType<typeof createClient>,
@@ -421,9 +342,8 @@ async function attachSchemas(
     .select("device_id,schema_id")
     .in("device_id", entries.map((e) => e.uuid));
 
-  // Non-fatal, deliberately: a device's address and status are still worth returning if the
-  // schema join fails. Reporting NO schemas is honest here -- the alternative is a 500 that
-  // hides the rest of the answer.
+  // Non-fatal: a device's address and status are still worth returning if the schema join fails,
+  // and reporting no schemas is honest.
   if (error) {
     console.error(`device_schemas lookup failed: ${error.message}`);
     return entries;
@@ -457,8 +377,7 @@ function deviceEntry(row: Record<string, unknown>): DirectoryEntry {
       device_id: (row.sparkplug_id as string) ?? "",
     },
     online: row.status === "ONLINE",
-    // A quarantined device IS in the directory, deliberately: it exists on the wire and a
-    // client that meets its traffic needs to be able to look it up. The flag says why its
+    // A quarantined device is in the directory: it exists on the wire, and the flag says why its
     // telemetry is not being stored.
     quarantined: Boolean(row.is_quarantined),
     schemas: [],

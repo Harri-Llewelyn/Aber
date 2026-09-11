@@ -2,63 +2,25 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 /**
- * Places a forge login in the team its Postgres role maps to -- and takes it out of the one it
- * does not -- on the way through the forge's door.
+ * Places a forge login in the team its Postgres role maps to, and takes it out of the one it does
+ * not, on the way through the forge's door. This is the `ext_authz` step of the `forge` listener in
+ * supabase/envoy.yaml: every non-static request reaches here with the caller's verified access
+ * token, and this resolves their role from `user_roles` (the only source) and places them through
+ * the machine account. Revocation is immediate: a token whose role has been removed is refused on
+ * its next request.
  *
- * =================================================================================================
- * WHY THIS EXISTS, AND WHY IT IS CALLED FROM THE GATEWAY RATHER THAN FROM A PAGE
+ * The first request finds no user, since Gitea creates it while serving that request; the page then
+ * fetches `/repo/search` and `/user/events`, which come through here with the user present, so
+ * placement happens before the repository list is answered.
  *
- * The forge's login is the `forge` listener in supabase/envoy.yaml (0094): Envoy runs the OAuth
- * flow, verifies the token, admits Administrator and Shopfloor_Manager, and hands the identity to
- * Gitea as reverse-proxy headers. Gitea then auto-registers the user -- and stops. An
- * auto-registered user owns nothing, every gateway repository is private to the `gateways`
- * organisation, and nothing native to Gitea adds a person to an organisation. So the first login
- * was a forge with no repositories in it.
+ * Answers: 200, the caller holds an admitted role and is in its team (or is not yet registered);
+ * 302, the token verified but GoTrue no longer has its session, so the browser is sent to the
+ * door's sign-out path; 403, the caller's role does not open the forge, with the login removed from
+ * both teams first; 5xx, this could not do its job, and the listener's `failure_mode_allow` lets
+ * the request through on the role the token carries, losing only placement.
  *
- * This is the `ext_authz` step of that listener. Every non-static request through the door reaches
- * here first with the caller's verified access token; this resolves their role from `user_roles`
- * -- the only source, for the reason nodered-userinfo gives -- and ensures they are in exactly the
- * team that role warrants, through the machine account that owns the organisation. This was
- * chosen over a reconciler on a timer because it is one request per login, the role decision
- * is made by the same code that makes it for Node-RED and Grafana, and REVOCATION IS IMMEDIATE:
- * a token whose role has since been removed from `user_roles` is refused here on its next request,
- * where the listener's own RBAC would have honoured it until the token expired.
- *
- * =================================================================================================
- * THE FIRST REQUEST FINDS NO USER, AND THAT IS FINE
- *
- * Gitea creates the user while serving the first request, which is after this has answered it. So
- * on that request the lookup answers 404 and this returns 200 having placed nobody. The page Gitea
- * then renders fetches `/repo/search` and `/user/events` before it is finished drawing, each of
- * which comes through here again with the user now present -- so the placement happens before the
- * repository list is answered, and the first page a person sees is complete. Measured, not hoped.
- *
- * =================================================================================================
- * WHAT A FAILURE MEANS, AND THE THREE ANSWERS THIS GIVES
- *
- *   200  the caller holds an admitted role and is in its team (or is not yet registered).
- *   302  the token verified but GoTrue no longer has its session -- a dashboard sign-out, a
- *        global sign-out, a timebox. Redirects to the door's sign-out path, which clears the
- *        cookies and starts a fresh login; a 401 would leave the browser stuck on a cookie the
- *        door still honours.
- *   403  the caller's role does not open the forge. The listener's RBAC already refused the two
- *        roles that never had one; this catches the role that was REMOVED since the token was
- *        signed -- and takes the login out of both teams first, so a revoked administrator's SSH
- *        key stops working on the same request rather than at the next sweep.
- *   5xx  this could not do its job -- the forge is unreachable, the role lookup failed. The
- *        listener runs with `failure_mode_allow`, so a 5xx lets the request THROUGH: the RBAC
- *        filter has already admitted the role in the token, and a forge outage should not take
- *        the forge's web UI down with it. What is lost is placement, and the log says so.
- *
- * Denying on 5xx would be the tidier rule and the wrong one: it makes every forge page depend on
- * the edge runtime and on Postgres, for a decision the token already carries.
- *
- * =================================================================================================
- * THE MACHINE ACCOUNT IS THE ONLY GITEA CREDENTIAL HERE, and its authority is bounded by what it
- * owns. It can place a member in a team of its own organisation; it cannot make anyone a site
- * administrator, and it cannot read a repository outside the organisation. A caller cannot make
- * this function act on anyone but themselves: the identity is the verified token's `sub`, never a
- * parameter.
+ * The machine account is the only Gitea credential here, and the identity acted on is always the
+ * verified token's `sub`, never a parameter.
  */
 
 import { resolveUserRole } from "../_shared/roles.ts";
@@ -74,11 +36,9 @@ import {
 } from "../_shared/forge.ts";
 
 /**
- * How long a placement is believed before it is re-done. Long enough that a page's dozen
- * requests cost one round of calls; short enough that a role change lands within minutes for a
- * person who keeps the forge open. Revocation is NOT bounded by this: the role lookup below runs
- * on every request, and a removed role is refused at once -- only the Gitea-side placement is
- * cached.
+ * How long a placement is believed before it is re-done: long enough that a page's dozen requests
+ * cost one round of calls, short enough that a role change lands within minutes. Revocation is not
+ * bounded by this; the role lookup runs on every request.
  */
 const PLACEMENT_TTL_MS = 5 * 60 * 1000;
 
@@ -158,15 +118,11 @@ export default async function handler(req: Request): Promise<Response> {
   });
   const { data: { user }, error: userError } = await asCaller.auth.getUser(token);
   if (userError || !user) {
-    // A DEAD SESSION IS SENT BACK THROUGH THE DOOR, NOT REFUSED. The listener's oauth2 filter and
-    // jwt_authn both accepted this token -- its signature is good and it has not expired -- and
-    // only GoTrue knows the session behind it is gone: a dashboard sign-out, a global sign-out, a
-    // session timebox. A 401 here would be forwarded to the browser as a JSON body and nothing
-    // would restart the login, because the door still sees a cookie it minted; the person is stuck
-    // until it expires, up to an hour. So the answer is a redirect to the door's own sign-out
-    // path, which clears every cookie and lands on `/`, where the absence of a cookie starts a
-    // fresh login. Envoy forwards a denied response's status and its `location` header. This is
-    // the one place in the stack a door notices a session died, and Studio's cannot do it.
+    // A dead session is sent back through the door, not refused: the listener accepted this token,
+    // and only GoTrue knows the session behind it is gone. A 401 would leave the browser stuck on a
+    // cookie the door still honours, so the answer is a redirect to the door's own sign-out path,
+    // which clears every cookie and starts a fresh login. Envoy forwards a denied response's status
+    // and its `location` header.
     console.log(`forge-membership: ${userError?.message ?? "no user"}; sending the browser back through the door`);
     return new Response(
       JSON.stringify({ error: "Session ended", details: userError?.message, next: "/oauth2/signout" }),

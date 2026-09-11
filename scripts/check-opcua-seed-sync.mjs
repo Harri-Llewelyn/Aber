@@ -1,19 +1,10 @@
 /**
- * Verify the generated OPC UA companion-specification blocks in 0002_seed_data.sql are intact.
- *
- * Same discipline as scripts/check-mtconnect-seed-sync.mjs: the digest is recomputed from the file
- * that actually executes, rather than by diffing two committed artefacts that could agree with each
- * other while neither is the thing db-init runs.
- *
- * This file needs no network, so it is the check to reach for locally and the one that still says
- * something useful when raw.githubusercontent.com is unreachable. CI runs the generator first and
- * then this, which is strictly stronger -- that pairing also catches an upstream release moving
- * under the pin, which a digest alone cannot see.
- *
- * There are TWO blocks here, not one. The vocabulary rows and the metric_groups rows are generated
- * together but land in different parts of the seed, and a check that only covered the vocabulary
- * would let the group registrations be edited freely -- which matters more than it sounds, because
- * enforce_metric_group_spelling() makes the first spelling of a group permanent.
+ * Verify the generated OPC UA companion-specification blocks in 0002_seed_data.sql are intact. Same
+ * discipline as scripts/check-mtconnect-seed-sync.mjs: the digest is recomputed from the file that
+ * executes, with no network needed. CI runs the generator first and then this, which also catches
+ * an upstream release moving under the pin. Two blocks: the vocabulary rows and the metric_groups
+ * rows land in different parts of the seed, and enforce_metric_group_spelling() makes the first
+ * spelling of a group permanent.
  *
  * Usage: node scripts/check-opcua-seed-sync.mjs
  */
@@ -39,11 +30,9 @@ const BLOCKS = [
 ];
 
 /**
- * The namespaces the generator builds semantic ids from, mirrored here so the check can assert the
- * form independently rather than trusting the digest to imply it. Unlike MTConnect and ISO 22400,
- * these are the REAL external namespaces: OPC publishes resolvable concept identifiers, so minting
- * under acs-cymru.local would be the wrong call here -- the local namespace exists for concepts
- * nobody else names, not as a default.
+ * The namespaces the generator builds semantic ids from, mirrored so the check can assert the form
+ * independently. These are the real external namespaces: OPC publishes resolvable concept
+ * identifiers.
  */
 const NAMESPACES = {
   'OPC 40501 Machine Tools': 'http://opcfoundation.org/UA/MachineTool/',
@@ -59,9 +48,7 @@ const fail = (message, ...detail) => {
   process.exit(1);
 };
 
-// Normalised before anything else: git checks the seed out as CRLF on Windows, so a digest taken
-// over the raw bytes fails on every Windows clone while passing in CI. See the same comment in
-// check-mtconnect-seed-sync.mjs -- a guard that cries wolf locally is worse than no guard.
+// Normalised first: git checks the seed out as CRLF on Windows. See check-mtconnect-seed-sync.mjs.
 const seed = readFileSync(SEED, 'utf8').replace(/\r\n/g, '\n');
 
 const bodies = {};
@@ -93,10 +80,7 @@ for (const block of BLOCKS) {
   bodies[block.label] = { body, declaredRows: Number(declaredRows), digest: actualDigest };
 }
 
-/**
- * Structural assertions. A digest proves the block is unchanged, never that it was right -- these
- * would catch a generator bug that produced a self-consistent but wrong block.
- */
+/** Structural assertions: a digest proves the block is unchanged, never that it was right. */
 const vocab = bodies.opcua_vocabulary;
 const statements = [...vocab.body.matchAll(
   /^INSERT INTO public\.opcua_vocabulary VALUES \('((?:[^']|'')*)', '((?:[^']|'')*)', '((?:[^']|'')*)', '((?:[^']|'')*)', '([^']+)', (?:'([^']+)'|NULL), '([^']+)'\)$/gm

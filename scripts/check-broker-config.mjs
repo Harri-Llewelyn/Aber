@@ -1,43 +1,15 @@
 #!/usr/bin/env node
 /**
- * Assert the broker's own configuration STARTS on the version both targets pin.
+ * Assert the broker's own configuration starts on the version both targets pin, and serves safely.
+ * Mosquitto's own parser is the only authority on what it accepts (2.0.x rejects a duplicate
+ * `password_file`, 2.1.x accepts it, and nothing short of a stack boot would notice), so the config
+ * is started on the pinned tag. A config that starts is not a config that is safe:
+ * `allow_anonymous`/`password_file` are declared once in the global section, so this also connects
+ * with no credentials and requires a refusal, and asserts mosquitto.acl confines each principal by
+ * delivery. The TLS listener is checked when a certificate can be produced. Requires Docker, and
+ * skips with a clear message without it.
  *
- * WHY THIS EXISTS. mosquitto.conf declared `password_file` twice -- once under each listener -- which
- * reads as careful, per-listener configuration and is a FATAL ERROR on mosquitto 2.0.x:
- *
- *   Error: Duplicate password_file value in configuration.
- *   Error found at /mosquitto/config/mosquitto.conf:16.
- *
- * exit 3, before a single socket is opened. Mosquitto 2.1.x accepts it. So the file was valid for as
- * long as both targets ran `eclipse-mosquitto:latest`, and became fatal the moment they were pinned
- * back to 2.0.20 -- taking the broker down on BOTH targets, and with it the ingestion daemon,
- * Node-RED and every gateway.
- *
- * Nothing caught it. `docker compose config` validates compose YAML, not broker config. `helm lint`
- * and `helm template` render the ConfigMap without reading it. The frontend and Python suites never
- * touch it. Only a full stack boot would have failed -- which is the slowest and least specific
- * signal available, and in CI it would have surfaced as a dozen unrelated-looking health timeouts.
- *
- * WHAT IT CHECKS, and the two properties are different:
- *
- *   1. THE CONFIG PARSES AND THE BROKER SERVES, on the exact pinned tag. Not a grep -- mosquitto's
- *      own parser is the only authority on what mosquitto accepts, and the duplicate-key rule is
- *      exactly the kind of thing no reimplementation would have.
- *   2. AUTHENTICATION IS ENFORCED ON EVERY LISTENER. A config that starts is not a config that is
- *      safe: `allow_anonymous`/`password_file` are declared ONCE in the global section, and if
- *      someone moves them under a listener the file may still start while a listener comes up
- *      anonymous. So this connects with no credentials and requires a refusal.
- *
- * The TLS listener is checked too when a certificate can be produced, because appending it is the
- * one way the base policy is modified at deploy time.
- *
- * Requires Docker. Skips with a clear message when Docker is unavailable, so it can sit in a
- * pipeline stage that does not guarantee a daemon -- a check that fails for want of Docker teaches
- * everyone to ignore it.
- *
- * Usage:
- *   node scripts/check-broker-config.mjs
- *   node scripts/check-broker-config.mjs --verbose
+ * Usage: node scripts/check-broker-config.mjs [--verbose]
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -92,8 +64,7 @@ mkdirSync(cfg, { recursive: true });
 
 /**
  * Compose the config exactly as the deployment does: the base policy, plus the TLS stanza appended
- * when asked. Assembling it here the same way the chart's initContainer does is the point -- a check
- * that tested a hand-written config would not be testing the shipped one.
+ * when asked, the same way the chart's initContainer does.
  */
 function assemble({ withTls }) {
   let conf = readFileSync(join(REPO, 'mosquitto', 'mosquitto.conf'), 'utf8');
@@ -105,20 +76,15 @@ function assemble({ withTls }) {
 }
 
 /**
- * Start the broker on the composed config and return its log plus whether it reached "running".
- *
- * The password file is built INSIDE the container with mosquitto_passwd, then chowned to 1883 and
- * chmod 0600 -- exactly what the chart's initContainer does. Without the chown the broker (which
- * drops to uid 1883) cannot read it and fails with "Unable to open pwfile", which looks like a
- * config error and is not one.
+ * Start the broker on the composed config and return its log plus whether it reached "running". The
+ * password file is built inside the container with mosquitto_passwd, then chowned to 1883 and chmod
+ * 0600, as the chart's initContainer does; without the chown the broker fails with "Unable to open
+ * pwfile".
  */
 /**
- * The principals mosquitto.acl actually names, provisioned into every test broker.
- *
- * `gwy999…` is not a real gateway and does not need to be: it exists so "a gateway cannot publish
- * under ANOTHER edge node" is testable. Without a second edge node that assertion cannot be made
- * at all, and it is the one that matters most -- it is the forgery `verify_gateway_binding()`
- * cannot detect, because a message published under a correctly bound device satisfies it.
+ * The principals mosquitto.acl names, provisioned into every test broker. `gwy999…` is not a real
+ * gateway: it exists so "a gateway cannot publish under another edge node" is testable, the forgery
+ * `verify_gateway_binding()` cannot detect.
  */
 const GATEWAY_A = 'gwy100000000000400080000';
 const GATEWAY_B = 'gwy999999999999999999999';
@@ -143,9 +109,8 @@ function startBroker({ withTls, certsDir, ports = [] }) {
     '-c',
     'cp /cfgsrc/* /mosquitto/config/ && ' +
       'mosquitto_passwd -b -c /mosquitto/config/password_file probe probe-secret && ' +
-      // The real principals mosquitto.acl names, so section 4 can assert the confinement each one
-      // is supposed to have. TWO gateways, because "cannot address another edge node" needs
-      // another edge node to exist before it can be tested at all.
+      // The real principals mosquitto.acl names, so section 4 can assert each one's confinement.
+      // Two gateways, because "cannot address another edge node" needs another edge node.
       Object.entries(ACCOUNTS)
         .map(([u, p]) => `mosquitto_passwd -b /mosquitto/config/password_file ${u} ${p} && `)
         .join('') +
@@ -178,9 +143,7 @@ function cleanup() {
 }
 
 try {
-  // -----------------------------------------------------------------------------------------------
   // 1. The base policy starts on the pinned version.
-  // -----------------------------------------------------------------------------------------------
   {
     const r = startBroker({ withTls: false, ports: ['21883:1883'] });
     started.push(r.name);
@@ -194,11 +157,8 @@ try {
       log(r.log.trim().split('\n').slice(-1)[0]);
     }
 
-    // -------------------------------------------------------------------------------------------
-    // 2. Anonymous access is refused. A config that STARTS is not a config that is SAFE: the
-    //    security options are global precisely so no listener can come up anonymous, and this is
-    //    what would notice if they were moved back under a listener.
-    // -------------------------------------------------------------------------------------------
+    // 2. Anonymous access is refused. The security options are global so no listener can come up
+    // anonymous, and this is what notices if they are moved back under a listener.
     if (r.running) {
       const anon = docker([
         'run', '--rm', '--network', `container:${r.name}`, IMAGE,
@@ -215,11 +175,9 @@ try {
         );
       }
 
-      // A topic `probe` is ALLOWED to publish under mosquitto.acl's per-gateway pattern. This
-      // assertion is about authentication, not authorisation -- but at QoS 0 a denied publish
-      // still exits 0 (the broker drops it silently and tells the client nothing), so a topic the
-      // ACL refuses would have made this check pass while proving nothing. Authorisation is
-      // asserted properly in section 4, by whether a message is DELIVERED.
+      // A topic `probe` is allowed to publish under the ACL's per-gateway pattern: this assertion
+      // is about authentication, and at QoS 0 a denied publish still exits 0. Authorisation is
+      // asserted in section 4, by delivery.
       const authed = docker([
         'run', '--rm', '--network', `container:${r.name}`, IMAGE,
         'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883', '-u', 'probe', '-P', 'probe-secret',
@@ -234,27 +192,17 @@ try {
       }
     }
 
-    // -------------------------------------------------------------------------------------------
-    // 4. mosquitto.acl CONFINES EACH PRINCIPAL. Asserted by DELIVERY, not by exit status.
-    //
-    // A denied publish at QoS 0 exits 0: the broker drops the message and says nothing, by design.
-    // So every assertion here works the only way that is meaningful -- publish as one principal,
-    // subscribe as one permitted to read the whole tree, and ask whether the message ARRIVED.
-    //
-    // This is the check that would notice the shared `readwrite spBv1.0/#` account coming back,
-    // in any form: a new principal, a widened rule, or an ACL file that failed to load at all
-    // (mosquitto WARNS and continues on a missing acl_file rather than refusing to start, which is
-    // exactly the failure a config-parse check cannot see).
-    // -------------------------------------------------------------------------------------------
+    // 4. mosquitto.acl confines each principal, asserted by delivery, not exit status: a denied
+    // publish at QoS 0 exits 0 and the broker says nothing. Publish as one principal, subscribe as
+    // one permitted to read the whole tree, and ask whether the message arrived. This is what would
+    // notice a shared `readwrite spBv1.0/#` account coming back in any form, including an ACL file
+    // that failed to load (mosquitto warns and continues).
     if (r.running) {
       /**
-       * Publish as one client, read as another, and report whether the payload ARRIVED.
-       *
-       * MATCHES THE PAYLOAD, not "did the subscriber print anything". `mosquitto_sub -W` writes
-       * `Timed out` to stderr when the window closes empty, and the capture is 2>&1 -- so a
-       * truthiness test on the file treats a DROPPED message as a delivered one and every negative
-       * assertion here passes vacuously. That is exactly what this function got wrong first time,
-       * and it would have made the whole section report success while asserting nothing.
+       * Publish as one client, read as another, and report whether the payload arrived. Matches the
+       * payload, not whether the subscriber printed anything: `mosquitto_sub -W` writes `Timed out`
+       * to stderr when the window closes empty, so a truthiness test would treat a dropped message
+       * as delivered.
        */
       const MARKER = 'FP-ACL-PROBE';
       const delivers = (pubUser, topic, subUser = 'factoryplus_ingestion', subTopic = 'spBv1.0/#') => {
@@ -310,11 +258,10 @@ try {
         (delivers('factoryplus_monitor', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
-      // A gateway's own NCMD must reach it through the WILDCARD subscription both the simulator
-      // flow and validate.py use. 2.0.20 grants `spBv1.0/+/NCMD/+` (QoS 0, not 128) even for a
-      // client confined by `pattern` and filters per message at delivery instead -- so those
-      // subscriptions did NOT need narrowing. If a future version starts refusing the SUBACK
-      // instead, rebirth recovery breaks silently and this is what says so.
+      // A gateway's own NCMD must reach it through the wildcard subscription the simulator flow and
+      // validate.py use. 2.0.20 grants `spBv1.0/+/NCMD/+` even for a client confined by `pattern`
+      // and filters per message at delivery; if a future version refuses the SUBACK instead,
+      // rebirth recovery breaks silently.
       expect(
         'a gateway receives its own NCMD through a wildcard subscription',
         (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`,
@@ -328,16 +275,10 @@ try {
         false
       );
 
-      // -----------------------------------------------------------------------------------
-      // The Directory topic (ingestion/directory_publish.py)
-      // -----------------------------------------------------------------------------------
-      // ONE DOCUMENT HOLDING THE WHOLE ADDRESS SPACE, published outside `spBv1.0/`. Over HTTP the
-      // Directory reads as the CALLER and is bounded by that caller's RLS policies; a topic has no
-      // caller, so the ACL is the entire access control and these two assertions are what it says.
-      //
-      // The negative one is the load-bearing half. A gateway is confined to its own edge node so it
-      // cannot enumerate the site, and reading is SILENT -- if this rule were ever widened, nothing
-      // downstream would report it and no log would carry it. This is the only place that looks.
+      // The Directory topic (ingestion/directory_publish.py): one document holding the whole
+      // address space, published outside `spBv1.0/`. A topic has no caller, so the ACL is the
+      // entire access control. The negative assertion is the load-bearing half: a gateway must not
+      // be able to enumerate the site, and reading is silent.
       expect(
         'the ingestion principal MAY publish the Directory (it is the only writer)',
         (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
@@ -368,13 +309,8 @@ try {
     }
   }
 
-  // -----------------------------------------------------------------------------------------------
-  // 3. The base policy plus the appended TLS stanza starts, and serves TLS.
-  //
-  // This is the composition the chart actually deploys, and the one that would break if a security
-  // option were ever added to mosquitto-tls.conf -- `password_file` there is the same fatal
-  // duplicate that started all this.
-  // -----------------------------------------------------------------------------------------------
+  // 3. The base policy plus the appended TLS stanza starts, and serves TLS. This is the composition
+  // the chart deploys, and the one a security option added to mosquitto-tls.conf would break.
   {
     const certs = join(work, 'certs');
     mkdirSync(certs, { recursive: true });
@@ -389,30 +325,12 @@ try {
     if (gen.status === 0 && existsSync(join(certs, 'tls.crt'))) {
       writeFileSync(join(certs, 'ca.crt'), readFileSync(join(certs, 'tls.crt')));
 
-      // THE KEY MUST BE READABLE BY UID 1883, AND OPENSSL 3 DOES NOT MAKE IT SO.
-      //
-      // `openssl req -keyout` writes the private key 0600 owned by whoever ran it (OpenSSL 1.x used
-      // 0644; 3.x tightened it). These files are bind-mounted into the broker container, mosquitto
-      // drops to uid 1883, and a bind mount carries the HOST's ownership -- so the broker cannot
-      // read its own key and exits 1 with three lines of raw OpenSSL text naming neither the file
-      // nor the cause:
-      //
-      //     Error: Unable to load server key file "/mosquitto/certs/tls.key". Check keyfile.
-      //     OpenSSL Error[0]: error:8000000D:system library::Permission denied
-      //
-      // which reads as a malformed key, not as a permission on the host side.
-      //
-      // THIS CANNOT BE CAUGHT ON DOCKER DESKTOP. Windows and macOS bind mounts go through a
-      // virtualised filesystem that presents every file as world-readable and ignores host uid
-      // entirely, so this check passes locally on any machine and fails on every Linux CI runner --
-      // the most expensive shape of environment difference, because the local result is not merely
-      // unrepresentative, it is the opposite.
-      //
-      // Widening to 0644 is safe HERE and nowhere else: this is a throwaway self-signed key, valid
-      // one day, minted in a temp directory that is deleted in `finally`, for a broker that is
-      // killed at the end of this function. The chart does not do this -- there the key arrives as a
-      // projected Secret whose mode Kubernetes sets, which is why nothing in the deployment path has
-      // the same problem.
+      // The key must be readable by uid 1883, and OpenSSL 3 writes it 0600 owned by whoever ran it.
+      // A bind mount carries the host's ownership, so the broker exits with "Unable to load server
+      // key file", which reads as a malformed key. This cannot be caught on Docker Desktop, whose
+      // bind mounts present every file as world-readable. Widening to 0644 is safe here only: a
+      // throwaway key in a temp directory for a broker killed at the end of this function; the
+      // chart's key arrives as a projected Secret.
       chmodSync(join(certs, 'tls.key'), 0o644);
       chmodSync(join(certs, 'tls.crt'), 0o644);
       chmodSync(join(certs, 'ca.crt'), 0o644);
@@ -446,25 +364,12 @@ try {
     }
   }
 
-  // -----------------------------------------------------------------------------------------------
-  // 5. THE SHIPPED CERTIFICATE GENERATOR PRODUCES A CHAIN THE BROKER SERVES AND A CLIENT VERIFIES.
-  //
-  // Section 3 proves the TLS stanza is syntactically compatible with the base policy, using a
-  // throwaway self-signed certificate. That is a different claim from the one that matters for
-  // physical gateways: `scripts/mosquitto-tls-init.mjs` issues a proper selfSigned -> CA -> leaf
-  // chain, and a gateway verifies the broker AGAINST THE ROOT rather than against the leaf. A
-  // self-signed leaf is its own CA and would pass section 3 while proving nothing about the real
-  // arrangement.
-  //
-  // Three properties, and the third is the one most likely to regress silently:
-  //   a. the leaf the generator issues is served on 8883 and verifies against the issued root
-  //   b. TLS does not weaken authentication -- an anonymous client is refused on 8883 exactly as on
-  //      1883, which is what the GLOBAL security options in mosquitto.conf are for
-  //   c. RE-RUNNING THE GENERATOR DOES NOT MINT A NEW ROOT. That is the property the entire fleet
-  //      depends on: the root is distributed by hand to every appliance's trust store, so a second
-  //      run that reissued it would take every physical gateway offline while the stack stayed green.
-  //      It is asserted by fingerprint, because "the file still exists" is not the same claim.
-  // -----------------------------------------------------------------------------------------------
+  // 5. The shipped certificate generator produces a chain the broker serves and a client verifies.
+  // Section 3 uses a self-signed leaf, which is its own CA; `scripts/mosquitto-tls-init.mjs` issues
+  // a selfSigned -> CA -> leaf chain and a gateway verifies against the root. Three properties: the
+  // issued leaf is served on 8883 and verifies against the issued root; an anonymous client is
+  // refused on 8883 as on 1883; and re-running the generator does not mint a new root, asserted by
+  // fingerprint, since the root is distributed by hand to every appliance.
   {
     const TLS_INIT_IMAGE = 'acs-cymru-mosquitto-tls-init:check';
     const build = docker(['build', '-q', '-t', TLS_INIT_IMAGE, join(REPO, 'mosquitto', 'tls-init')]);
@@ -518,12 +423,9 @@ try {
           ok.push('re-running mosquitto-tls-init reuses the existing root (fingerprint unchanged)');
         }
 
-        // (a) + (b): the broker serves the issued leaf, and TLS does not relax authentication.
-        //
-        // The generator chowns the key to uid 1883 itself -- unlike section 3, which has to widen
-        // the mode by hand -- so this also exercises the ownership logic the real deployment
-        // depends on. A broker that will not start here is the "Unable to load server key file"
-        // failure, not a config error.
+        // (a) + (b): the broker serves the issued leaf, and TLS does not relax authentication. The
+        // generator chowns the key to uid 1883 itself, so this also exercises the ownership logic
+        // the real deployment depends on.
         const r = startBroker({ withTls: true, certsDir: certs, ports: ['28884:8883'] });
         started.push(r.name);
 

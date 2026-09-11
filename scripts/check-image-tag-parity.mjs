@@ -1,30 +1,14 @@
 #!/usr/bin/env node
 /**
- * Assert that docker-compose.yml and the Helm chart pin the SAME tag for every shared image.
+ * Assert that docker-compose.yml and the Helm chart pin the same tag for every shared image.
+ * Several pins hold a coupling between components (realtime and storage-api migrate shared schemas
+ * on boot, studio is coupled to postgres-meta, node-red's settings.js depends on release internals,
+ * postgres ships the extension set), and two targets on different tags break those couplings
+ * asymmetrically, days later, on whichever target is bumped second.
  *
- * WHY THIS MATTERS MORE THAN IT LOOKS. Several pins in this stack carry a paragraph of reasoning,
- * and every one of them is about a COUPLING between components:
- *
- *   supabase/realtime      migrates the shared `_realtime` schema on boot
- *   supabase/storage-api   migrates the shared `storage` schema on boot
- *   supabase/studio        is Zod-coupled to a specific postgres-meta version
- *   nodered/node-red       settings.js depends on three contracts internal to the release
- *   supabase/postgres      ships the extension set and role scaffolding every service assumes
- *
- * Two targets on different tags therefore break precisely the couplings those pins exist to hold --
- * and worse, they break them ASYMMETRICALLY. A schema migrated by a newer storage-api on Kubernetes
- * is then read by an older one on Compose against the same shape of database; the failure appears on
- * whichever target is bumped second, days later, and looks like that target's fault.
- *
- * Bumping an image is fine. Bumping it in one place is not.
- *
- * Usage:
- *   node scripts/check-image-tag-parity.mjs            # report and exit non-zero on a mismatch
- *   node scripts/check-image-tag-parity.mjs --verbose  # also list images present in only one target
- *
- * No YAML dependency on purpose: this must run in CI before any `npm install`, and the two shapes it
- * has to read are narrow and stable. Compose uses `image: repo:tag`; the chart uses a
- * `repository:`/`tag:` pair under an `image:` key.
+ * Usage: node scripts/check-image-tag-parity.mjs [--verbose]. No YAML dependency: this runs in CI
+ * before any `npm install`. Compose uses `image: repo:tag`; the chart uses a `repository:`/`tag:`
+ * pair under an `image:` key.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -37,44 +21,33 @@ const VALUES = join(REPO_ROOT, 'deploy', 'helm', 'acs-cymru', 'values.yaml');
 const verbose = process.argv.includes('--verbose');
 
 /**
- * The registry namespace the six built images are published under, by .github/workflows/release.yml.
- *
- * Lowercase because OCI reference names are case-sensitive and must be lowercase -- the GitHub
- * account is `Harri-Llewelyn`, and a reference carrying those capitals pushes without complaint and
- * then cannot be pulled by anything.
+ * The registry namespace the built images are published under, by .github/workflows/release.yml.
+ * Lowercase because OCI reference names are case-sensitive and must be lowercase.
  */
 const IMAGE_NAMESPACE = 'ghcr.io/harri-llewelyn/acs-cymru';
 
 /**
- * Images built from this repository rather than pulled. They have no tag in docker-compose at all
- * (Compose uses `build:`), so there is nothing to compare against it and their absence is not drift.
- *
- * They are PUBLISHED, so their tag is not compared against Compose but is nonetheless the thing
- * most worth checking here -- see the release-surface section at the bottom of this file. In
- * values.yaml their tag is deliberately EMPTY, resolved to Chart.AppVersion by the
- * `acs-cymru.image` helper.
+ * Images built from this repository rather than pulled. They have no tag in docker-compose (Compose
+ * uses `build:`), so their absence there is not drift; their published tag is checked in the
+ * release-surface section below. In values.yaml their tag is deliberately empty, resolved to
+ * Chart.AppVersion by the `acs-cymru.image` helper.
  */
 const BUILT_IMAGES = [
   'edge-runtime', 'ingestion', 'node-red', 'frontend', 'test-runner', 'i3x-service',
-  // Built FROM eclipse-mosquitto rather than from a language base, so it carries the broker's own
-  // mosquitto_passwd -- the `$7$` hash has to be readable by the mosquitto that will verify it.
-  // That makes its base subject to the same pin as the broker's, which the eclipse-mosquitto row
-  // above already enforces across both targets.
+  // Built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd, which makes its
+  // base subject to the same pin as the broker's.
   'gateway-credential',
-  // supabase/postgres with supabase/migrations/*.sql copied in. It exists ONLY to carry that
-  // directory: the chain cannot reach a cluster through the chart, because a ConfigMap and Helm's
-  // release Secret are both capped at 1 MiB and the release holds those bytes twice.
-  //
-  // So this image is a schema artefact, not just a runtime. Its tag is the schema version, and
-  // pinning an older one is a database rollback rather than a runtime downgrade -- which is the
-  // reason it is listed here rather than pinned in values.yaml like a third-party image.
+  // supabase/postgres with supabase/migrations/*.sql copied in, because the chain cannot reach a
+  // cluster through the chart (a ConfigMap and Helm's release Secret are capped at 1 MiB). Its tag
+  // is the schema version, and pinning an older one is a database rollback, which is why it is
+  // listed here rather than pinned in values.yaml.
   'db-init',
 ];
 const LOCALLY_BUILT = new Set(BUILT_IMAGES.map((n) => `${IMAGE_NAMESPACE}/${n}`));
 
 /**
- * Images one target legitimately uses and the other does not. Each needs a REASON, so that adding a
- * name here is a decision rather than a way to silence the check.
+ * Images one target legitimately uses and the other does not. Each needs a reason, so adding a name
+ * here is a decision rather than a way to silence the check.
  */
 const TARGET_SPECIFIC = new Map([
   [
@@ -150,10 +123,8 @@ function composeImages() {
 }
 
 /**
- * repo -> tag, from the chart's values.
- *
- * Matched as a `repository:`/`tag:` pair rather than by tracking indentation: every image block in
- * values.yaml has that shape, and pairing on proximity is robust to the nesting depth changing.
+ * repo -> tag, from the chart's values. Matched as a `repository:`/`tag:` pair on proximity, which
+ * is robust to the nesting depth changing.
  */
 function chartImages() {
   const out = new Map();
@@ -164,10 +135,9 @@ function chartImages() {
     // The tag is within the next few lines; comments between them are normal in this file.
     for (let j = i + 1; j < Math.min(i + 12, lines.length); j += 1) {
       if (/^\s*repository:/.test(lines[j])) break;
-      // An EMPTY tag (`tag: ""`) must be captured as '' rather than skipped. It is how the five
-      // built images say "resolve me to Chart.AppVersion", and a pattern requiring at least one
-      // character silently drops those entries -- which would let a built image disappear from
-      // this comparison entirely, the one class of drift this file exists to catch.
+      // An empty tag (`tag: ""`) must be captured as '' rather than skipped: it is how the built
+      // images say "resolve me to Chart.AppVersion", and dropping those entries would remove them
+      // from the comparison.
       const tagMatch = lines[j].match(/^\s*tag:\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))\s*(?:#.*)?$/);
       if (tagMatch) {
         out.set(repoMatch[1], tagMatch[1] ?? tagMatch[2] ?? tagMatch[3] ?? '');
@@ -179,17 +149,10 @@ function chartImages() {
 }
 
 /**
- * A locally-built image whose BASE is pinned by Compose too.
- *
- * `supabase/functions/Dockerfile` builds the Kubernetes edge-runtime image `FROM
- * supabase/edge-runtime:<tag>`, and docker-compose runs that same base image directly (it
- * bind-mounts the functions instead of baking them). So the tag appears in two places and the
- * repository-level parity check above cannot see it: the chart pins `acs-cymru/edge-runtime`, which
- * is our own tag.
- *
- * Bump one and the two targets run DIFFERENT RUNTIMES against identical function code -- which is
- * exactly the asymmetric drift this script exists to prevent, hiding in the one place a
- * repository-name comparison structurally cannot look.
+ * A locally built image whose base is pinned by Compose too. `supabase/functions/Dockerfile` builds
+ * `FROM supabase/edge-runtime:<tag>` and docker-compose runs that base directly, so the tag appears
+ * in two places the repository-level comparison cannot see; bumped in one, the two targets run
+ * different runtimes against identical function code.
  */
 const BASE_IMAGE_COUPLINGS = [
   {
@@ -200,11 +163,9 @@ const BASE_IMAGE_COUPLINGS = [
   {
     dockerfile: join('supabase', 'db-init', 'Dockerfile'),
     base: 'supabase/postgres',
-    // The same shape as the row above, one layer deeper: Compose applies the migrations with the
-    // psql inside supabase/postgres, and this image bakes them into a copy of it. Drift means the
-    // two targets parse identical SQL with different psql clients -- and a client older than the
-    // server does not refuse, it mis-handles syntax, which surfaces as a schema fault somewhere
-    // downstream rather than as a version error here.
+    // The same shape one layer deeper: Compose applies the migrations with the psql inside
+    // supabase/postgres, and this image bakes them into a copy of it. Drift means identical SQL
+    // parsed by different psql clients.
     why: 'Compose runs this image directly (supabase-db, supabase-db-init); the chart bakes the migrations into an image built FROM it.',
   },
 ];
@@ -233,12 +194,8 @@ const onlyChart = [];
 
 for (const [repo, chartTag] of chart) {
   if (LOCALLY_BUILT.has(repo)) continue;
-  // TARGET_SPECIFIC applies in BOTH directions. It was originally consulted only in the
-  // compose-side loop below, which was an asymmetry rather than a decision: every entry in it names
-  // an image that legitimately exists on one target and not the other, and which target that is
-  // varies -- `alpine` is Compose-only, `bitnamilegacy/kubectl` and the mosquitto exporter are
-  // Kubernetes-only. Checking it on one side meant a Kubernetes-only image could not be declared at
-  // all, only worked around.
+  // TARGET_SPECIFIC applies in both directions: which target an entry's image belongs to varies
+  // (`alpine` is Compose-only, the kubectl and mosquitto exporter images Kubernetes-only).
   if (TARGET_SPECIFIC.has(repo)) continue;
   if (!compose.has(repo)) {
     onlyChart.push(`${repo}:${chartTag}`);
@@ -328,9 +285,8 @@ if (mismatches.length) {
 }
 
 /**
- * An image the chart pins and Compose does not know about is drift in the other direction: a service
- * added to Kubernetes and never added to Compose. Reported, because the whole premise is that both
- * targets stay working.
+ * An image the chart pins and Compose does not know about is drift in the other direction: a
+ * service added to Kubernetes and never added to Compose.
  */
 if (onlyChart.length) {
   failed = true;
@@ -342,35 +298,14 @@ if (onlyChart.length) {
   );
 }
 
-/* =================================================================================================
- * THE RELEASE SURFACE.
- *
- * Everything above compares the two DEPLOYMENT targets. This compares the four places that have to
- * agree about the images this repository BUILDS AND PUBLISHES, which is a different coupling and a
- * newer one:
- *
- *   values.yaml            what the chart tells a cluster to pull
- *   release.yml            what actually gets pushed to GHCR
- *   ci.yml                 what k8s-validation builds locally and imports into k3d
- *   test-harness/Dockerfile       which ingestion image the conformance runner extends
- *
- * These fail QUIETLY and in different places, which is why they are worth a check rather than a
- * convention:
- *
- *   - values.yaml naming an image release.yml does not push is the worst of them. `helm install`
- *     SUCCEEDS, the databases and broker come up healthy, and the affected workloads sit in
- *     ImagePullBackOff -- there is no failed release to look at, only a partly-running stack.
- *   - ci.yml building a different reference than the chart asks for does not fail either: the pod
- *     falls through to PULLING the published image, so the job silently stops testing the working
- *     tree and starts testing whatever was last released.
- *   - test-harness/Dockerfile's ARG default drifting means a bare `docker build` extends a different
- *     ingestion image than the chart deploys, and the conformance suite reports on a stack it is
- *     not running beside.
- *
- * The matrix in release.yml is templated (`${{ matrix.name }}`), so what is read here is that
- * workflow's own literal `for img in ...` verification lists -- which is the right thing to read
- * anyway: those lists are what the release asserts the packaged chart references.
- * ============================================================================================= */
+/* The release surface. The four places that must agree about the images this repository builds and
+   publishes: values.yaml (what the chart tells a cluster to pull), release.yml (what gets pushed to
+   GHCR), ci.yml (what k8s-validation builds and imports into k3d), and test-harness/Dockerfile
+   (which ingestion image the conformance runner extends). Each disagreement fails quietly: a chart
+   naming an unpushed image installs into ImagePullBackOff, a CI build of the wrong reference falls
+   through to pulling the last release, and a drifted ARG default extends a different ingestion
+   image. release.yml's matrix is templated, so what is read is its literal `for img in ...`
+   verification lists. */
 const RELEASE_WF = join(REPO_ROOT, '.github', 'workflows', 'release.yml');
 const CI_WF = join(REPO_ROOT, '.github', 'workflows', 'ci.yml');
 const CHART_YAML = join(REPO_ROOT, 'deploy', 'helm', 'acs-cymru', 'Chart.yaml');
@@ -415,18 +350,10 @@ if (!nsMatch) {
     `release.yml pushes to ${nsMatch[1]} but the chart and this script expect ${IMAGE_NAMESPACE}.`
   );
 }
-// What release.yml actually BUILDS, as opposed to what its verification lists claim. Two shapes,
-// because the images are built two ways for a reason: the independent ones ride a matrix, while
-// ingestion and test-runner share a runner (test-runner is FROM ingestion, and a base built in a
-// different job -- or on a Buildx container driver -- is not resolvable, which fails as a registry
-// 403 rather than as a build-order problem).
-//
-// Checked separately from the `for img in` lists below because those lists are what the release
-// ASSERTS it published; this is what it did. An image dropped from the build but left in the list
-// fails the release loudly at the verification step, which is fine. An image dropped from the list
-// but left in the build publishes something nothing checks -- and the reverse, an image in neither,
-// leaves the chart naming a tag that does not exist. That is the ImagePullBackOff-with-no-failed-
-// release case, so it is worth its own assertion.
+// What release.yml builds, as opposed to what its verification lists claim: the independent images
+// ride a matrix, while ingestion and test-runner share a runner. An image dropped from the list but
+// left in the build publishes something nothing checks, and one in neither leaves the chart naming
+// a tag that does not exist.
 const matrixBuilt = [...releaseSrc.matchAll(/^\s+- name:\s*([a-z0-9-]+)\s*\n\s+dockerfile:/gm)].map(
   (m) => m[1]
 );
@@ -486,10 +413,8 @@ if (ciBuilt.join('|') !== expected.join('|')) {
 }
 
 // Every image reference in those steps must interpolate IMG_NS. Checked separately from the `-t`
-// list above because it is a different SHAPE and the first version of this file got it wrong: the
-// test-runner's `--build-arg INGESTION_IMAGE=...` was left reading $NS, which in that job expands
-// to the Kubernetes namespace -- so the build would have gone looking for `acs-cymru/ingestion`,
-// found nothing, and failed with a pull error naming an image nobody had ever configured.
+// list because the test-runner's `--build-arg INGESTION_IMAGE=...` is a different shape, and once
+// read $NS, the Kubernetes namespace.
 for (const stray of ciSrc.matchAll(/(INGESTION_IMAGE=|[-]t\s+")\$NS\//g)) {
   releaseIssues.push(
     `ci.yml has an image reference using $NS rather than $IMG_NS: "${stray[0]}".\n` +

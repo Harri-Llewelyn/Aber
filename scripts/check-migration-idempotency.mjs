@@ -1,77 +1,18 @@
 #!/usr/bin/env node
 /**
  * Replays the migration chain a second time against the same database and asserts nothing moved.
+ * There is no migrations ledger: `supabase-db-init` replays every file on every boot, so a second
+ * run must match no rows. A live stack is not quiet, so the checks are things only a migration can
+ * move. Strict: the schema itself, as a filtered `pg_dump --schema-only` digest; and
+ * `digital_thread` rows with `actor_source = 'migration'`, which only a migration writes. Reported:
+ * operator-facing row counts, where a fall across a replay is the signature of a destructive
+ * one-shot re-running. The dump is filtered because modern pg_dump wraps its output in a `\restrict
+ * <nonce>` pair that differs every run. The digest includes function bodies verbatim, so it is
+ * sensitive to line endings: replaying from a CRLF tree and then an LF checkout genuinely changes
+ * what is stored.
  *
- * =================================================================================================
- * WHY THIS EXISTS
- * =================================================================================================
- *
- * This repository has no migrations ledger. `supabase-db-init` replays EVERY file in
- * `supabase/migrations/*.sql` on EVERY boot, in filename order, so idempotency is not a nicety --
- * it is the property the whole schema model rests on. The house rule is "a second run must match no
- * rows".
- *
- * Until this script, that rule was enforced by review and by self-checks authors remembered to
- * write. CI booted the stack ONCE. Nothing replayed the chain twice against the same database and
- * compared, which is precisely the test that would have caught the failures the repository records
- * having found the hard way:
- *
- *   * 0040's "provision, then restart" landmine -- a one-shot purge that would run again;
- *   * the 0033 time-window false positive;
- *   * and, most recently, 0037 and 0038's self-checks appending nine audit rows per boot to a table
- *     that is append-only to every application role and cannot be pruned. By the time it was found,
- *     `migration` was the LARGEST actor_source in `digital_thread` -- 517 rows against 135 from real
- *     users -- with 496 of them pointing at probe gateways long since deleted.
- *
- * Every one of those is a one-line assertion once something actually runs the chain twice.
- *
- * =================================================================================================
- * WHAT IS ASSERTED, AND WHAT IS ONLY REPORTED
- * =================================================================================================
- *
- * A live stack is not quiet. The ingestion daemon writes telemetry and audit rows throughout, the
- * simulator publishes continuously, and the watchdog moves device statuses. A blunt "nothing changed
- * at all" assertion would fail on a healthy system and get disabled within a week.
- *
- * So the checks are chosen to be things ONLY A MIGRATION CAN MOVE:
- *
- *   STRICT   the schema itself -- a filtered `pg_dump --schema-only` digest. Nothing but DDL moves
- *            it, and DDL between two replays of the same chain is drift by definition.
- *
- *   STRICT   `digital_thread` rows with `actor_source = 'migration'`. The daemon writes 'ingestion',
- *            users write 'user', edge functions write 'service'. Only a migration writes this lane,
- *            so any increase across a replay is a migration writing to the audit trail on every
- *            boot -- the F4 class, exactly.
- *
- *   REPORTED operator-facing row counts. A RISE is ordinary -- a device can be discovered mid-run --
- *            but a FALL across a replay is the signature of a destructive one-shot re-running, which
- *            is what `one_shot_migrations` exists to prevent and what makes 0040 dangerous if its
- *            claim row is ever deleted. Reported as a failure when it falls, ignored when it rises.
- *
- * =================================================================================================
- * THE DUMP NEEDS FILTERING, AND FINDING THAT OUT WAS THE FIRST THING THIS SCRIPT DID
- * =================================================================================================
- *
- * Two consecutive `pg_dump --schema-only` runs with NOTHING between them produce different bytes:
- * modern pg_dump wraps its output in `\restrict <nonce>` / `\unrestrict <nonce>` with a fresh random
- * token each time. Digesting the dump raw would have made this guard fail on every run -- a flaky
- * check, which is worse than no check, because it teaches people to ignore it.
- *
- * THE DIGEST INCLUDES FUNCTION BODIES VERBATIM, WHITESPACE AND ALL, and that is deliberate: an
- * edited function body is exactly the drift this is looking for. One consequence is worth knowing
- * before it surprises somebody -- it is sensitive to LINE ENDINGS, because Postgres stores the
- * source text as given. Replaying the same migration from a CRLF working tree and then from an LF
- * checkout genuinely changes what is stored, and this reports it. That is correct, if startling;
- * it is not a reason to normalise the dump, since doing so would blind the check to real edits.
- *
- * Usage:
- *   node scripts/check-migration-idempotency.mjs
- *
- * Environment:
- *   DB_CONTAINER      compose service running Postgres        (default: supabase-db)
- *   DB_INIT_SERVICE   compose service that replays the chain  (default: supabase-db-init)
- *   DB_USER_NAME      role to inspect as                      (default: postgres)
- *   DB_NAME           database                                (default: postgres)
+ * Usage: node scripts/check-migration-idempotency.mjs. Environment: DB_CONTAINER (default
+ * supabase-db), DB_INIT_SERVICE (supabase-db-init), DB_USER_NAME (postgres), DB_NAME (postgres).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -104,13 +45,7 @@ function psql(sql) {
   return r.stdout.trim();
 }
 
-/**
- * The schema, as a digest.
- *
- * FILTERED, see the header: pg_dump emits a random `\restrict` nonce on every run, so the raw bytes
- * never match themselves. Dropping those two lines is the whole difference between a guard and a
- * flake.
- */
+/** The schema, as a digest. Filtered: pg_dump emits a random `\restrict` nonce on every run. */
 function schemaDigest() {
   const r = compose(['exec', '-T', DB_CONTAINER, 'pg_dump', '-U', DB_USER_NAME, '-d', DB_NAME,
                      '--schema-only', '--schema=public']);
@@ -127,9 +62,8 @@ function schemaDigest() {
 const AUDIT_SQL =
   "SELECT count(*) FROM public.digital_thread WHERE actor_source = 'migration'";
 
-// Operator-facing tables whose rows a replay must never DELETE. `one_shot_migrations` is here
-// because it is the thing that decides whether the destructive ones run at all -- losing its claim
-// row is the failure, not a symptom of one.
+// Operator-facing tables whose rows a replay must never delete. `one_shot_migrations` decides
+// whether the destructive ones run at all, so losing its claim row is the failure.
 const ROW_TABLES = ['devices', 'gateways', 'cells', 'links', 'schemas', 'one_shot_migrations'];
 
 function rowCounts() {
@@ -178,25 +112,11 @@ note(`before: schema ${before.schema.digest.slice(0, 12)}, ` +
 console.log(`\nReplaying ${DB_INIT_SERVICE}...\n`);
 const replay = compose(['up', '--force-recreate', DB_INIT_SERVICE], { stdio: 'inherit' });
 
-// -------------------------------------------------------------------------------------------------
-// THE CONTAINER'S EXIT CODE, NOT `up`'s -- AND THIS CHECK REPORTED GREEN THROUGH A BROKEN CHAIN
-//
-// `docker compose up <one-shot service>` exits 0 when it successfully STARTED the containers. The
-// service itself exiting 1 is not a failure of `up`, so `replay.status` was 0 while db-init was
-// aborting on `0088` and every migration after it -- `0089` through `0093` -- was not running at
-// all. Everything downstream then agreed: the schema digest was unchanged (a chain that dies
-// changes nothing), no audit rows were written, no data was lost, and this printed
-//
-//     The migration chain replays cleanly: same schema, no new audit rows, no data lost.
-//
-// which is the one sentence a reader takes as proof of the opposite. A guard that cannot fail is
-// worse than no guard, because it is also an excuse not to look.
-//
-// `--abort-on-container-exit --exit-code-from` is the documented way to propagate it and is NOT
-// usable here: it stops every container in the `up` set, and that set includes db-init's
-// dependencies -- the live database this check is pointed at. Reading the exit code back off the
-// container afterwards costs one `docker inspect` and takes nothing down.
-// -------------------------------------------------------------------------------------------------
+// The container's exit code, not `up`'s: `docker compose up <one-shot service>` exits 0 when it
+// started the containers, so an aborting db-init reported green while the chain after the failing
+// file never ran, and a chain that dies changes nothing. `--abort-on-container-exit
+// --exit-code-from` would stop the live database this check is pointed at, so the exit code is read
+// back with `docker inspect`.
 const containerId = (compose(['ps', '-aq', DB_INIT_SERVICE]).stdout || '').trim().split(/[\r\n]+/)[0];
 const inspected = containerId
   ? spawnSync('docker', ['inspect', '-f', '{{.State.ExitCode}}', containerId], { encoding: 'utf8' })
@@ -225,14 +145,9 @@ if (before.schema.digest !== after.schema.digest) {
   fail('the public schema changed across a replay of the same migration chain.');
   note('Only DDL moves this, and DDL between two runs of the same files is drift by definition.');
 
-  // THE DIFF, NOT JUST THE VERDICT. This check used to say the schema had changed and then hand
-  // the reader a pg_dump command -- which reproduces the AFTER state and not the BEFORE one, so
-  // there was nothing to compare it against. The two dumps exist right here; printing what moved
-  // is the difference between a guard somebody can act on and one they have to re-derive.
-  //
-  // Bounded, because a genuinely divergent chain can move hundreds of lines and the useful signal
-  // is in the first few. GRANT and REVOKE lines are the ones this has actually caught, and they
-  // are also the ones a reader is least likely to guess at.
+  // The diff, not just the verdict: both dumps exist here, so what moved is printed. Bounded,
+  // because the useful signal is in the first few lines; GRANT and REVOKE lines are what this has
+  // caught.
   const beforeLines = before.schema.body.split('\n');
   const afterLines = after.schema.body.split('\n');
   const beforeSet = new Set(beforeLines);
@@ -267,9 +182,8 @@ if (delta > 0) {
   pass("a replay wrote no 'migration' rows to digital_thread");
 }
 
-// -- 3. Operator data ------------------------------------------------------------------------------
-// A RISE is ordinary on a live stack -- a device can be discovered between the two fingerprints.
-// A FALL is the signature of a destructive one-shot running a second time.
+// 3. Operator data. A rise is ordinary on a live stack; a fall is the signature of a destructive
+// one-shot running a second time.
 const lost = [];
 for (const t of ROW_TABLES) {
   const b = before.rows.get(t);
