@@ -105,6 +105,19 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "backup"             "to" "timescaledb"        "port" 5432 "why" "pg_dump")
   (dict "from" "backup-service"     "to" "supabase-db"        "port" 5432 "why" "pg_dump, and the job queue it claims from")
   (dict "from" "backup-service"     "to" "timescaledb"        "port" 5432 "why" "pg_dump")
+
+  (dict "from" "alloy"              "to" "prometheus"         "port" 9090 "why" "remote-write of every scraped series")
+  (dict "from" "alloy"              "to" "loki"               "port" 3100 "why" "the log push")
+  (dict "from" "grafana"            "to" "prometheus"         "port" 9090 "why" "the metrics datasource")
+  (dict "from" "grafana"            "to" "loki"               "port" 3100 "why" "the logs datasource")
+  (dict "from" "alloy"              "to" "ingestion"          "port" (int .Values.ingestion.metrics.port) "why" "scrape")
+  (dict "from" "alloy"              "to" $gw                  "port" (int .Values.supabaseEnvoy.metrics.port) "why" "scrape: the admin listener's /stats/prometheus")
+  (dict "from" "alloy"              "to" "supabase-rest"      "port" 3001 "why" "scrape: the admin listener")
+  (dict "from" "alloy"              "to" "grafana"            "port" 3000 "why" "scrape")
+  (dict "from" "alloy"              "to" "mosquitto"          "port" (int .Values.mosquitto.metrics.port) "why" "scrape: the exporter sidecar")
+  (dict "from" "alloy"              "to" "prometheus"         "port" 9090 "why" "scrape")
+  (dict "from" "alloy"              "to" "loki"               "port" 3100 "why" "scrape")
+  (dict "from" "alloy"              "to" "alloy"              "port" 12345 "why" "scrape: one DaemonSet pod reads another's on a multi-node cluster")
 -}}
 {{- /* Filter to edges whose BOTH ends are actually deployed, so a partial install does not carry
      rules naming absent components -- harmless, but it makes the rendered policy misleading. */ -}}
@@ -137,6 +150,9 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
       "e2e-aas-export" .Values.e2e.enabled
       "backup" (and .Values.backup.enabled (not .Values.backupService.enabled))
       "backup-service" (and .Values.backup.enabled .Values.backupService.enabled)
+      "prometheus" .Values.observability.enabled
+      "loki" .Values.observability.enabled
+      "alloy" .Values.observability.enabled
 -}}
 {{- $live := list -}}
 {{- range $edges -}}
@@ -403,14 +419,18 @@ spec:
         - protocol: TCP
           port: 22
 {{- end }}
-{{- if and .Values.e2e.enabled .Values.networkPolicy.apiServerCidr }}
+{{- $apiClients := list -}}
+{{- if .Values.e2e.enabled }}{{- $apiClients = append $apiClients "e2e-aas-export" -}}{{- end -}}
+{{- if .Values.observability.enabled }}{{- $apiClients = append $apiClients "alloy" -}}{{- end -}}
+{{- if and $apiClients .Values.networkPolicy.apiServerCidr }}
 ---
 {{/*
-The Kubernetes API server, for the one initContainer that talks to it.
+The Kubernetes API server, for the pods that talk to it.
 
-`e2e-aas-export`'s wait-for-validate step reads a Job's status with kubectl. Under default-deny that
-call is dropped and the initContainer sits waiting for a Job it cannot see, then times out blaming
-the Job -- which had in fact already completed.
+`alloy` discovers pods and tails their logs through it: under default-deny it collects nothing,
+and the dashboards' log panel is simply empty. `e2e-aas-export`'s wait-for-validate step reads a
+Job's status with kubectl; dropped, the initContainer waits for a Job it cannot see, then times
+out blaming the Job -- which had in fact already completed.
 
 THE ADDRESS IS ENVIRONMENT-SPECIFIC. `kubernetes.default.svc` resolves to a ClusterIP in the service
 CIDR, and NetworkPolicy has no selector for "the API server", so this is an ipBlock. Default
@@ -421,11 +441,19 @@ kind: NetworkPolicy
 metadata:
   name: {{ printf "%s-egress-apiserver" $fullname }}
   labels:
-    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" "e2e-aas-export") | nindent 4 }}
+    {{- include "acs-cymru.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels:
-      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" "e2e-aas-export") | nindent 6 }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          {{- range $apiClients }}
+          - {{ . }}
+          {{- end }}
+      - key: app.kubernetes.io/instance
+        operator: In
+        values: [{{ .Release.Name }}]
   policyTypes:
     - Egress
   egress:

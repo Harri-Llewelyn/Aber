@@ -338,13 +338,27 @@ application role**, so dropping the volume is the only way back to an empty audi
 Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short version:
 
 ```bash
-# Five images are built from this repository and are on no registry.
-docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:0.1.0 .   # context: repo root
-docker build -f ingestion/Dockerfile          -t acs-cymru/ingestion:0.1.0 .      # context: repo root
-docker build -f node-red/Dockerfile           -t acs-cymru/node-red:0.1.0 node-red
-docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-                                              -t acs-cymru/frontend:0.1.0 frontend
-docker build -f test-harness/Dockerfile       -t acs-cymru/test-runner:0.1.0 .    # conformance suites
+# Nine images are built from this repository. They are published to GHCR at the chart's
+# appVersion, and the chart pulls them under exactly these names: a local build that is
+# tagged any other way is ignored. deploy/k8s/README.md says what each one is for.
+NS=ghcr.io/harri-llewelyn/acs-cymru
+V=0.1.0                                       # appVersion in deploy/helm/acs-cymru/Chart.yaml
+docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
+docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
+docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
+docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true -t $NS/frontend:$V frontend
+docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
+docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
+docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
+docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
+docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V -t $NS/test-runner:$V .
+
+# A local cluster: k3d is k3s in Docker, with the Traefik, ServiceLB and local-path that
+# production has. Port 80 is the Ingress; 1883 is the broker for gateways on the LAN.
+k3d cluster create acs-cymru --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
+  --k3s-arg "--disable=metrics-server@server:0" --wait
+k3d image import $(for i in edge-runtime ingestion node-red frontend i3x-service \
+  gateway-credential backup-service db-init test-runner; do echo $NS/$i:$V; done) -c acs-cymru
 
 node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
 

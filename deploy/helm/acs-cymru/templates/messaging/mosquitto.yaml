@@ -345,6 +345,10 @@ spec:
         # connections" -- with the ConfigMap showing the listener plainly declared.
         checksum/policy: {{ printf "%s%s%s" $conf $roles (ternary $tlsConf "" $tls.enabled) | sha256sum }}
         checksum/scripts: {{ printf "%s%s%s%s%s" $init $service $libCredentials $libDynsec $libControl | sha256sum }}
+        {{- if .Values.mosquitto.metrics.enabled }}
+        # The exporter sidecar; the broker itself has no HTTP surface.
+        {{- include "acs-cymru.scrapeAnnotations" (dict "port" .Values.mosquitto.metrics.port "path" "/metrics") | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:

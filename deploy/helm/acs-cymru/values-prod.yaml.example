@@ -257,16 +257,16 @@ networkPolicy:
   # backups, a corporate proxy.
   extraEgress: {}
   # ---------------------------------------------------------------------------------------
-  # The INGRESS half -- and this rule is ACTIVE, not commented out, because the alternative is
-  # the failure it exists to prevent.
+  # The INGRESS half. With the chart's own stack (observability.enabled, the default) every
+  # scrape is a generated edge and this rule is unnecessary; it is ACTIVE here for a cluster
+  # Prometheus, because the alternative is the failure it exists to prevent.
   #
-  # The generated rules only cover flows BETWEEN COMPONENTS OF THIS CHART. Prometheus is not one
-  # of them, so under default-deny every scrape is dropped: the operator's targets all go DOWN,
-  # the dashboards empty, and the stack itself reports perfectly healthy throughout. It reads as
-  # a monitoring fault, and the cause is three layers away.
+  # The generated rules only cover flows BETWEEN COMPONENTS OF THIS CHART. An external
+  # Prometheus is not one of them, so under default-deny every scrape is dropped: its targets
+  # all go DOWN, the dashboards empty, and the stack itself reports perfectly healthy
+  # throughout. It reads as a monitoring fault, and the cause is three layers away.
   #
-  # THE THREE PORTS ARE THE THREE REAL METRICS ENDPOINTS -- see templates/obs/servicemonitors.yaml
-  # for why there is no fourth:
+  # THE PORTS ARE THE METRICS ENDPOINTS the ServiceMonitors name (templates/obs/servicemonitors.yaml):
   #   3000  grafana, natively
   #   9901  supabase-envoy's admin listener (requires supabaseEnvoy.metrics.enabled). Envoy serves
   #         /ready AND /stats/prometheus from this one port; Kong split them across two, which is

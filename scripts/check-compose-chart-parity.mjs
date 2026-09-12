@@ -45,8 +45,8 @@ const SHAPED_DIFFERENTLY = {
   'mosquitto-init': 'an initContainer on the mosquitto pod, so the plugin\'s document is written onto the same volume that pod mounts',
   'gitea-init': 'an initContainer on the gitea pod, so the administrator is created against the same volume that pod mounts -- the same arrangement as mosquitto-init',
   'node-red-init': 'an initContainer on the node-red pod -- see sync-helm-chart-files.mjs, which mirrors node-red-init.mjs for exactly that use',
-  'prometheus': 'Kubernetes uses the Prometheus Operator: the chart ships ServiceMonitors and expects a cluster Prometheus rather than running its own',
-  'node-exporter': 'node metrics are the cluster operator\'s concern on Kubernetes, and a DaemonSet here would collide with whatever is already scraping nodes'
+  'node-exporter': 'prometheus.exporter.unix inside the alloy DaemonSet: the same collectors, run in-process by the collector',
+  'docker-socket-proxy': 'a read-only ClusterRole on the alloy ServiceAccount: pod discovery and log tailing go through the API server, which supplies what the proxy narrowed the Docker API to'
 };
 
 /** Chart components with no Compose service. */
@@ -62,10 +62,7 @@ const CHART_ONLY = {
  * Genuinely absent, with the reason and where it is tracked. Not silent: these print on every run.
  */
 const KNOWN_GAPS = {
-  'cold-archiver': 'cold telemetry archival ships on Compose only. The chart applies cold_archive.sql so the manifest exists and db-init succeeds, but no workload exports or drops -- the catalogue is permanently empty on Kubernetes. See supabase/README.md "Cold telemetry archival"',
-  'loki': 'the log store ships on Compose only, by the same decision that gives the chart no Prometheus: Compose owns its whole observability stack, a cluster is assumed to have one already, and a second store would duplicate every line and give an operator two places to configure retention. The chart provisions the DATASOURCE either way, pointed at `grafana.lokiUrl`. See the divergence table in deploy/k8s/README.md',
-  'alloy': 'the log collector, absent for the same reason as loki. On Kubernetes the equivalent is a DaemonSet reading /var/log/pods, which the cluster log stack already runs -- and which needs no socket proxy, because the kubelet supplies the pod and container labels this has to ask Docker for',
-  'docker-socket-proxy': 'exists only to narrow the Docker API for alloy, so it is absent wherever alloy is. It has no Kubernetes analogue at all: there is no Docker socket to front, and pod metadata comes from the kubelet rather than from a container runtime API'
+  'cold-archiver': 'cold telemetry archival ships on Compose only. The chart applies cold_archive.sql so the manifest exists and db-init succeeds, but no workload exports or drops -- the catalogue is permanently empty on Kubernetes. See supabase/README.md "Cold telemetry archival"'
 };
 
 // The Compose side. Parsed by shape rather than with a YAML dependency, matching

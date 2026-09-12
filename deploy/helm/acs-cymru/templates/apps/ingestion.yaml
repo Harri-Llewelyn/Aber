@@ -55,6 +55,10 @@ spec:
     metadata:
       labels:
         {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      {{- if .Values.ingestion.metrics.enabled }}
+      annotations:
+        {{- include "acs-cymru.scrapeAnnotations" (dict "port" .Values.ingestion.metrics.port "path" "/metrics") | nindent 8 }}
+      {{- end }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
