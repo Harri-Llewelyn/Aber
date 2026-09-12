@@ -564,9 +564,19 @@ const apiMethods = {
     if (!res.ok) {
       // The function reports failures as JSON even on this path, so the real reason survives -- a
       // 403 for an Operator, a 400 for a host-run gateway, a 503 for an unconfigured deployment.
+      // The status and the details ride on the error: a 503 names the variable to set, and the
+      // modal shows that instead of a retry that cannot succeed.
       let message = `Bundle generation failed (${res.status})`;
-      try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
-      throw new Error(message);
+      let details = null;
+      try {
+        const body = await res.json();
+        message = body?.error || message;
+        details = body?.details || null;
+      } catch { /* non-JSON body */ }
+      const error = new Error(message);
+      error.status = res.status;
+      error.details = details;
+      throw error;
     }
 
     return {
@@ -576,6 +586,25 @@ const apiMethods = {
       bundleVersion: res.headers.get('X-ACS-Bundle-Version'),
       sparkplugId: res.headers.get('X-ACS-Sparkplug-Id')
     };
+  },
+
+  /**
+   * Whether this deployment can enrol an appliance: `{ ready, addresses }`, where each address is
+   * `{ variable, value, problem }`. gateway-bundle's GET; it mints nothing and any signed-in user
+   * may ask. The Gateways page asks before offering a remote gateway, so the answer arrives
+   * before a row exists rather than as a refusal after.
+   */
+  enrolmentReadiness: async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-bundle`, {
+      method: 'GET',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`
+      }
+    });
+    if (!res.ok) throw new Error(`Could not read enrolment readiness (${res.status})`);
+    return res.json();
   },
 
   /**

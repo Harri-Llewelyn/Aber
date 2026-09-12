@@ -86,6 +86,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // The host-run counterpart to bundleForGw. Separate state: the two are authorised differently,
   // destroy different things, and only one puts a password on screen.
   const [credentialForGw, setCredentialForGw] = useState(null)
+  // Whether this deployment can enrol an appliance, from gateway-bundle's GET. null until
+  // answered, and null when the probe failed: an unknown never blocks, since the function's own
+  // refusal still stands behind it.
+  const [enrolment, setEnrolment] = useState(null)
   const [filterMode, setFilterMode] = useState('all')
 
   const getInitialSearch = () => {
@@ -245,6 +249,27 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   /* One form, two endings (utils/proposeFromForm.js). Derived rather than stored, so it cannot
      disagree with the permission. */
   const proposeMode = !canManage && canPropose
+
+  // Asked by whoever could create a remote gateway, on mount and again each time the form opens,
+  // so a deployment fixed and restarted is noticed without a reload.
+  useEffect(() => {
+    if (!canManage) return undefined
+    let cancelled = false
+    Promise.resolve()
+      .then(() => api.enrolmentReadiness())
+      .then(r => { if (!cancelled && r && typeof r.ready === 'boolean') setEnrolment(r) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [canManage, showForm])
+  const enrolmentBlocked = enrolment !== null && !enrolment.ready
+  const enrolmentProblems = enrolmentBlocked
+    ? (enrolment.addresses || []).filter(a => a.problem).map(a => `${a.variable} is ${a.problem}`)
+    : []
+  // Save is withheld for a gateway that would need a bundle this deployment cannot issue: a new
+  // Remote one, or an existing gateway being moved to Remote. Renaming a remote gateway is not
+  // that, and a proposal changes nothing until an approver acts.
+  const remoteWithheld = !proposeMode && enrolmentBlocked && formType === GATEWAY_TYPES.REMOTE
+    && (!editing || editing.deployment !== 'remote')
   const [editingProposal, setEditingProposal] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
   const withheldFields = nonProposableFields('gateway')
@@ -345,6 +370,21 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             <strong>{offlineGateways.length} gateway{offlineGateways.length === 1 ? '' : 's'} offline:</strong>{' '}
             {offlineGateways.slice(0, 5).map(g => g.gateway_name).join(', ')}{offlineGateways.length > 5 ? ', …' : ''}.
             Every device underneath is silent with it. Check the appliance, its network, and its broker credential.
+          </span>
+        </div>
+      )}
+
+      {/* Said here, before a remote gateway is created, because the refusal otherwise arrives from
+          the bundle modal after the row exists. Only for those who could create one. */}
+      {enrolmentBlocked && canManage && (
+        <div role="status" style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px var(--inset)', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <IconShieldAlert size={18} style={{ flexShrink: 0 }} />
+          <span>
+            <strong>Remote gateways cannot be enrolled on this deployment:</strong>{' '}
+            {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
+            the deployment rather than here: on Compose, <span className="mono">npm run setup</span> asks
+            for the host on a fresh .env, or set both and restart (docs/physical-gateways.md, section 7).
+            Host-run and simulated gateways are unaffected.
           </span>
         </div>
       )}
@@ -630,8 +670,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 about what the readings are. */}
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
               {gatewayTypeDescription(formType)}
-              {!editing && formType === GATEWAY_TYPES.REMOTE
-                && ' On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
+              {remoteWithheld
+                ? <> <strong style={{ color: 'var(--warning-text)' }}>This deployment cannot issue a bundle yet:</strong> {enrolmentProblems.join('; ')}. Save is withheld for a Remote gateway until it can; Host and Simulated are unaffected.</>
+                : !editing && formType === GATEWAY_TYPES.REMOTE
+                  && ' On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
             </div>
             {/* One exclusive choice of scope, then the cell or the area it calls for. The
                 scopes are exclusive by CHECK (`gateways_site_wide_has_no_cell` and the area-wide
@@ -692,8 +734,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
                 // Area-Wide with no area named would be refused by the database; held here.
-                disabled={locationIncomplete(form)}
-                title={locationIncomplete(form)
+                disabled={locationIncomplete(form) || remoteWithheld}
+                title={remoteWithheld
+                  ? 'Remote gateways cannot be enrolled on this deployment yet'
+                  : locationIncomplete(form)
                   ? 'Choose which area the gateway serves'
                   : proposeMode
                     ? 'Ask for these changes — an approver applies them, or says why not'
@@ -919,6 +963,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Bundle' : 'Download Setup Bundle',
             icon: <IconDownload size={13} />,
             primary: true,
+            // Withheld, not hidden, while the deployment cannot issue one: the notice above the
+            // table says why, and the action returns when it can.
+            disabled: enrolmentBlocked,
             onClick: () => setBundleForGw({
               gateway_id: selected.gateway_id,
               gateway_name: selected.gateway_name,
@@ -926,9 +973,11 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               status: selected.status,
               confirmFirst: true
             }),
-            title: selected.status === 'AWAITING_BIRTH'
-              ? 'This appliance enrolled but has not published. Re-issuing invalidates its current credential.'
-              : 'Generate the bootstrap bundle for this gateway and download it'
+            title: enrolmentBlocked
+              ? 'Remote gateways cannot be enrolled on this deployment yet'
+              : selected.status === 'AWAITING_BIRTH'
+                ? 'This appliance enrolled but has not published. Re-issuing invalidates its current credential.'
+                : 'Generate the bootstrap bundle for this gateway and download it'
           },
           /* The host-run counterpart, mirrored: `deployment === 'host'` and no
              `isGatewayPending()`, because a host-run gateway has no enrolment lifecycle. Not on an

@@ -11,12 +11,20 @@
  * stays a zero-install script.
  *
  * `.env.example` keeps its demo values: `--demo` is the supported way for CI to ask for them.
+ *
+ * One question is asked, on a terminal only: the hostname or IP a physical gateway reaches this
+ * machine on. It writes MQTT_PUBLIC_HOST and SUPABASE_PUBLIC_URL together (lib/public-host.mjs).
+ * `--public-host=<name>` answers it from a script; without a terminal it is left blank, and blank
+ * means remote gateways cannot be enrolled, which is printed rather than discovered later.
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
+import readline from 'readline/promises';
 import { fileURLToPath } from 'url';
+import { parsePublicHost, publicAddressLines } from './lib/public-host.mjs';
 // SHARED WITH scripts/rotate-service-keys.mjs, which signs the same two keys again on a live
 // stack (issue #101). Still no new dependencies -- lib/service-jwt.mjs is node:crypto and nothing
 // else, so this remains a zero-install script.
@@ -199,8 +207,45 @@ const generated = {
  */
 const deliberatelyEmpty = ['NODERED_ADMIN_TOKEN'];
 
+/**
+ * The public host: from `--public-host=`, else asked on a terminal, else blank. Refused values
+ * (a URL, a port, an in-stack name) are explained and asked again; blank is accepted first time.
+ */
+async function resolvePublicHost() {
+  const flag = process.argv.find((a) => a.startsWith('--public-host='));
+  if (flag) {
+    const parsed = parsePublicHost(flag.slice('--public-host='.length));
+    if (parsed.error) {
+      console.error(`❌ --public-host: ${parsed.error}`);
+      process.exit(1);
+    }
+    return parsed.host;
+  }
+  if (!process.stdin.isTTY) return '';
+
+  console.log('');
+  console.log('🌐 A physical gateway reaches this machine by a name or IP that resolves on the plant');
+  console.log(`   network. This machine calls itself '${os.hostname()}' -- a hint, not an answer: localhost`);
+  console.log('   and 127.0.0.1 are refused because an appliance cannot dial them. Leave it blank if no');
+  console.log('   appliance will enrol against this stack; everything else works without it.');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    for (;;) {
+      const answer = await rl.question('   Hostname or IP appliances reach this machine on [blank = none]: ');
+      const parsed = parsePublicHost(answer);
+      if (!parsed.error) return parsed.host;
+      console.log(`   ${parsed.error}`);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+const publicHost = await resolvePublicHost();
+const addresses = publicAddressLines(publicHost, contents);
+
 const missing = [];
-for (const [key, value] of Object.entries(generated)) {
+for (const [key, value] of Object.entries({ ...generated, ...addresses })) {
   // Anchored to the start of a line so a mention inside a comment is never rewritten.
   const pattern = new RegExp(`^${key}=.*$`, 'm');
   if (!pattern.test(contents)) {
@@ -242,6 +287,18 @@ console.log(`   SUPABASE_PLAYBACK_KEY   jti ${playbackKey.jti}`);
 console.log(`   Both valid ${SERVICE_KEY_DEFAULT_DAYS} days, until ${ingestionKey.expiresAt.toISOString().slice(0, 10)}.`);
 console.log('   `npm run keys:check` reports the remaining days; `npm run keys:rotate` re-signs both');
 console.log('   in place. Rotation reuses SUPABASE_JWT_SECRET, so nothing else has to be re-issued.');
+console.log('');
+// The consequence of the one question, said now: the person who runs setup is often not the one
+// who creates a remote gateway later, and the Gateways page repeats this until the pair is set.
+if (publicHost) {
+  console.log(`🌐 Physical gateways will dial ${publicHost}: MQTT_PUBLIC_HOST and SUPABASE_PUBLIC_URL`);
+  console.log('   are set from it, and the broker certificate carries that name from its first boot.');
+} else {
+  console.log('🌐 No public host was given, so REMOTE GATEWAYS CANNOT BE ENROLLED against this stack.');
+  console.log('   Host-run and simulated gateways work fully. To enrol an appliance later, set');
+  console.log('   MQTT_PUBLIC_HOST and SUPABASE_PUBLIC_URL in .env and restart (docs/physical-gateways.md,');
+  console.log('   section 7). The Gateways page says the same until they are set.');
+}
 console.log('');
 console.log('⚠️  Demo LOGINS are separate and unchanged: admin@acs-cymru.local / acscymru123');
 console.log('   and the other three accounts are seeded by supabase/seed.sql, not by .env.');

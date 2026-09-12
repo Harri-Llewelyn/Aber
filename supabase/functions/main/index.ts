@@ -87,9 +87,11 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // gateway and mints the enrolment token as the caller, through a SECURITY DEFINER function that
   // checks has_role() itself. The template files arrive through the environment because an edge
   // worker cannot read the image's filesystem; SUPABASE_PUBLIC_URL is the address the appliance
-  // will dial.
+  // will dial. MQTT_PUBLIC_HOST is enroll-gateway's, forwarded here too so the readiness probe
+  // (GET) can report both addresses.
   "gateway-bundle": [
     "SUPABASE_PUBLIC_URL",
+    "MQTT_PUBLIC_HOST",
     "GW_BUNDLE_COMPOSE",
     "GW_BUNDLE_DOCKERFILE",
     "GW_BUNDLE_BOOTSTRAP",

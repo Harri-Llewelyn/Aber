@@ -5,6 +5,7 @@ import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { brokerPublicHost, platformPublicUrl } from "../_shared/publicAddresses.ts";
 
 /**
  * Package the physical gateway bootstrap bundle as a ZIP, with a freshly minted enrolment token.
@@ -63,11 +64,31 @@ function slug(name: string): string {
     .slice(0, 48) || "gateway";
 }
 
+/**
+ * The readiness answer. `ready` is true only when both addresses would be accepted by the two
+ * functions that check them; `addresses` names each one and the problem, so the dashboard can
+ * say which variable to set rather than that something is wrong.
+ */
+async function readiness(authHeader: string): Promise<Response> {
+  const supabaseUser = createClient(Deno.env.get("SUPABASE_URL") ?? "", gatewayKey(), {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data: { user }, error } = await supabaseUser.auth.getUser(authHeader.replace("Bearer ", ""));
+  if (error || !user) {
+    return json(401, { error: "Invalid user token", details: error?.message });
+  }
+  const addresses = [platformPublicUrl(), brokerPublicHost()];
+  return json(200, {
+    ready: addresses.every((a) => !a.problem),
+    addresses,
+  });
+}
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
-  if (req.method !== "POST") {
+  if (req.method !== "POST" && req.method !== "GET") {
     return json(405, { error: "Method not allowed" });
   }
 
@@ -75,6 +96,13 @@ export default async function handler(req: Request): Promise<Response> {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return json(401, { error: "Missing Authorization header" });
+    }
+
+    // GET is the readiness probe: can this deployment enrol an appliance? Both addresses are
+    // reported, nothing is minted and no gateway is read, so any signed-in user may ask. The
+    // dashboard asks before offering a remote gateway, which is where the answer is useful.
+    if (req.method === "GET") {
+      return readiness(authHeader);
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -119,17 +147,17 @@ export default async function handler(req: Request): Promise<Response> {
     // and cannot be derived from SUPABASE_URL, which resolves for nothing on a shopfloor; a bundle
     // carrying it would fail at the first fetch. Checked ahead of the RPC so a deployment fault
     // does not cost a token.
-    const publicUrl = (Deno.env.get("SUPABASE_PUBLIC_URL") || "").replace(/\/+$/, "");
-    if (!publicUrl || /supabase-kong|127\.0\.0\.1|localhost|::1/.test(publicUrl)) {
-      console.error(`SUPABASE_PUBLIC_URL is '${publicUrl}', which no appliance can reach`);
+    const platform = platformPublicUrl();
+    if (platform.problem) {
+      console.error(`SUPABASE_PUBLIC_URL is '${platform.value}', which no appliance can reach`);
       return json(503, {
         error: "Bundle generation is not configured on this deployment",
         details:
-          `SUPABASE_PUBLIC_URL is ${publicUrl ? `'${publicUrl}'` : "unset"} -- an address that ` +
-          "resolves only inside the stack. Set it to the URL physical gateways reach the platform " +
-          "on. No enrolment token was minted.",
+          `SUPABASE_PUBLIC_URL is ${platform.problem} -- set it to the URL physical gateways ` +
+          "reach the platform on, in .env on Compose. No enrolment token was minted.",
       });
     }
+    const publicUrl = platform.value;
 
     // Read the gateway BEFORE minting anything, so a bad id or a host-run gateway costs no token.
     const { data: gateway, error: gatewayError } = await supabaseUser

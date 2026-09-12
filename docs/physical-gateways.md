@@ -40,6 +40,10 @@ that file would have no revocation story at all.
 
 ### In the dashboard
 
+0. **The deployment must know its own address first.** The page asks `gateway-bundle` whether an
+   appliance could enrol and, if not, says so above the table and in the form, naming the variable
+   (§7). Save is withheld for a Remote gateway until it can; Host and Simulated are unaffected. On
+   Compose, `npm run setup` asks for the host when it writes a fresh `.env`.
 1. **Gateways → New Gateway.** Name it after the machine or the cell it serves.
 2. **Leave “Mark as Virtual Gateway” unchecked.** The form says which way it is going before you
    save: *“Runs on its own hardware. On save you will be given a bundle to copy to that machine.”*
@@ -215,7 +219,19 @@ perfectly and then connects to nothing — the hardest version of this failure t
 | Variable | What breaks if it is in-stack |
 | :--- | :--- |
 | `SUPABASE_PUBLIC_URL` | `gateway-bundle` answers `503` and mints no token. `supabase-kong`, `localhost` and loopback addresses are all refused. |
-| `MQTT_PUBLIC_HOST` | `enroll-gateway` answers `503` **without consuming the token**. `mosquitto`, `localhost` and `127.0.0.1` are refused. |
+| `MQTT_PUBLIC_HOST` | `enroll-gateway` answers `503` **without consuming the token**. `mosquitto`, `supabase-kong`, `localhost` and loopback addresses are refused. |
+
+Both name the same machine, so on Compose they are set from one answer: `npm run setup` asks for
+the hostname or IP appliances reach this machine on and writes the pair (`--public-host=<name>`
+answers it from a script; blank is accepted, and means remote gateways cannot be enrolled).
+`scripts/check-env-drift.mjs` reports a working `.env` that leaves either unset or in-stack. The
+chart derives both from `global.publicBaseDomain`.
+
+**The dashboard asks before it offers.** `GET /functions/v1/gateway-bundle` reports both addresses,
+judged by the same predicates the two refusals use (`_shared/publicAddresses.ts`), and the Gateways
+page shows the answer above the table, withholds Save for a Remote gateway and withholds the
+drawer's bundle action until the deployment can issue one. A `503` reached some other way is shown
+with the variable it names and no retry, since retrying a deployment fault cannot succeed.
 
 `MQTT_PUBLIC_HOST` is also folded into the broker certificate's SAN. Change it and the leaf is
 reissued on the next boot of `mosquitto-tls-init` — **the root is untouched, so no appliance has to be
@@ -475,6 +491,11 @@ last line, and a required status check in the forge is the next one (docs/roadma
 ---
 
 ## 12. Troubleshooting
+
+**The Gateways page says remote gateways cannot be enrolled on this deployment.**
+One of the two addresses in §7 is unset or in-stack; the notice names which. Set it where the
+deployment is configured (`.env` on Compose, `global.publicBaseDomain` on the chart) and restart
+the functions service. The notice clears on the next visit to the page.
 
 **`docker compose logs bootstrap` says the token was refused (`401`).**
 Unknown, expired or already redeemed. Re-issue from the dashboard.

@@ -414,6 +414,24 @@ describe('GatewayBundleModal — failure on open', () => {
     expect(screen.queryByText(/On the appliance/i)).toBeNull()
   })
 
+  it('offers no retry when the deployment cannot issue a bundle, and says what to set', async () => {
+    // A 503 is the deployment, not the request: retrying cannot succeed, and the function already
+    // names the variable. The gateway row exists, which the dialog says rather than leaves implied.
+    const refusal = new Error('Bundle generation is not configured on this deployment')
+    refusal.status = 503
+    refusal.details = 'SUPABASE_PUBLIC_URL is unset -- set it to the URL physical gateways reach the platform on, in .env on Compose. No enrolment token was minted.'
+    api.downloadGatewayBundle.mockRejectedValue(refusal)
+    renderModal()
+
+    await waitFor(() => expect(screen.getByText(/not configured on this deployment/)).toBeTruthy())
+    expect(screen.getByText(/SUPABASE_PUBLIC_URL is unset/)).toBeTruthy()
+    expect(screen.getByText(/keeps its place in the list/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Try again/i })).toBeNull()
+    // Close is the only footer action; the header's X is a separate control.
+    expect(document.querySelector('.modal-actions').textContent.trim()).toBe('Close')
+    expect(clicked).toHaveLength(0)
+  })
+
   it('recovers when the retry succeeds', async () => {
     api.downloadGatewayBundle
       .mockRejectedValueOnce(new Error('Enrolment is temporarily unavailable'))

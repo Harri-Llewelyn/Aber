@@ -72,8 +72,9 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
       showToast?.(`Bundle downloaded for '${gateway.gateway_name}'`, 'success')
     } catch (err) {
       // The step is not advanced on failure: nothing was minted, so the previous bundle is still
-      // live.
-      setError(err.message)
+      // live. A 503 is the deployment, not the request: the address an appliance would dial is
+      // unset or in-stack, and the function says which, so that is shown and no retry is offered.
+      setError({ message: err.message, details: err.details || null, deployment: err.status === 503 })
       showToast?.(err.message, 'error')
     } finally {
       setBusy(false)
@@ -172,7 +173,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
 
             {error && (
               <div className="form-group" style={{ color: 'var(--danger)', fontSize: '12px' }}>
-                <IconShieldAlert size={12} /> {error}
+                <IconShieldAlert size={12} /> {error.message}
               </div>
             )}
 
@@ -209,14 +210,24 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
             {error && !bundle && (
               <>
                 <div className="form-group" style={{ color: 'var(--danger)', fontSize: '13px' }}>
-                  <IconShieldAlert size={13} /> {error}
+                  <IconShieldAlert size={13} /> {error.message}
                 </div>
+                {error.deployment && (
+                  <div className="form-group" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {error.details || 'The address an appliance would dial is not set on this deployment.'}
+                    {' '}The gateway exists and keeps its place in the list; issue its bundle from the
+                    drawer once the deployment is configured. Host-run and simulated gateways are
+                    unaffected.
+                  </div>
+                )}
                 <div className="modal-actions">
                   <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
-                  <ActionButton pending={busy} pendingLabel="Retrying…" onClick={generate}
-                                title="Try generating the bundle again">
-                    <IconRefreshCw size={14} /> Try again
-                  </ActionButton>
+                  {!error.deployment && (
+                    <ActionButton pending={busy} pendingLabel="Retrying…" onClick={generate}
+                                  title="Try generating the bundle again">
+                      <IconRefreshCw size={14} /> Try again
+                    </ActionButton>
+                  )}
                 </div>
               </>
             )}

@@ -108,7 +108,7 @@ runbook; anything not in that table is drift. Design rationale is in
 ## Quick start — Docker Compose
 
 ```bash
-npm run setup                   # writes .env with 24 freshly generated credentials
+npm run setup                   # writes .env with freshly generated credentials; asks one question
 docker compose up --build -d    # launches the whole stack
 ```
 
