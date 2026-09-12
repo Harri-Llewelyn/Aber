@@ -125,12 +125,16 @@ const generated = {
   // Mandatory from realtime v2.102.3 (`System.fetch_env!`). Signs the bearer token its /metrics
   // endpoint requires. Its own secret rather than SUPABASE_JWT_SECRET.
   REALTIME_METRICS_JWT_SECRET: hex(32),
-  // One MQTT password per principal, independently generated: mosquitto.acl confines each account
-  // to a different subtree. The usernames are not generated: most are `sparkplug_id`s.
+  // One MQTT password per principal, independently generated: the broker's roles confine each
+  // account to a different subtree. The usernames are not generated: most are `sparkplug_id`s.
   MQTT_INGESTION_PASSWORD: hex(24),
   MQTT_I3X_PASSWORD: hex(24),
   MQTT_VALIDATOR_PASSWORD: hex(24),
   MQTT_MONITOR_PASSWORD: hex(24),
+  // The account the credential service administers the broker's Dynamic Security plugin as. Its
+  // role reaches $CONTROL/dynamic-security/# and nothing else; mosquitto-init refuses to start
+  // without it, and the service exits without it.
+  MQTT_DYNSEC_ADMIN_PASSWORD: hex(24),
   // No gateway passwords are minted here: nothing is seeded into the flow, and a gateway's account
   // is minted against a row that already exists, from the dashboard or by the enrolment bundle,
   // which is the only order in which its generated sparkplug_id can be known.
@@ -166,11 +170,11 @@ const generated = {
   // nobody chose is a secret nobody can leak, so it is generated with the rest.
   GITEA_WEBHOOK_SECRET: hex(32),
   // The bearer token supabase-functions presents to the gateway-credential service. Its own value:
-  // that service can mint a Mosquitto account for any edge node, which is the ability to publish
+  // that service can issue a Mosquitto account for any edge node, which is the ability to publish
   // as that gateway. The service refuses to start if this is shorter than 32 characters.
   MQTT_CREDENTIAL_SERVICE_TOKEN: hex(32),
   // The secret the `gateways` trigger presents to revoke-gateway-credential on archive or delete.
-  // Separate from the token above: that authorises minting for any edge node, this only rotating
+  // Separate from the token above: that authorises issuing for any edge node, this only disabling
   // a decommissioned gateway's account. Generated because an unset value makes revocation inert.
   GATEWAY_REVOKE_SECRET: hex(32),
   // The secret pg_cron presents to forge-sweep every fifteen minutes (0099). Its own value: it

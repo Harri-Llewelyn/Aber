@@ -90,7 +90,7 @@ spec:
 
               NO MQTT_USER OR MQTT_PASSWORD EITHER, and that is not an omission. This worker has no
               broker account of its own: it authenticates AS THE TARGET GATEWAY, username equal to
-              that gateway's sparkplug_id, which is what lets `pattern readwrite spBv1.0/+/+/%u/#`
+              that gateway's sparkplug_id, which is what lets `spBv1.0/+/+/<sparkplug_id>/#`
               confine it with no ACL change at all. The passwords are below, one per gateway.
             */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_PLAYBACK_CREDENTIALS" "secretName" $secretName "key" "MQTT_PLAYBACK_CREDENTIALS") | nindent 12 }}

@@ -55,7 +55,7 @@
     "type": "comment",
     "z": "acs-tab",
     "name": "READ ME — this appliance publishes as __SPARKPLUG_ID__ and nothing else",
-    "info": "The broker pins the topic's edge-node segment to this gateway's own username\n(`pattern readwrite spBv1.0/+/+/%u/#` in mosquitto.acl). Publishing under a different edge node\nis not an error you will see -- the broker drops the message and tells the client nothing.\n\nThe credential is in `flows_cred.json`, encrypted. It is not recoverable from this appliance and\nnot re-issuable except by generating a new bundle in the dashboard.",
+    "info": "The broker pins the topic's edge-node segment to this gateway's own username\n(a role generated for it at the broker). Publishing under a different edge node\nis not an error you will see -- the broker drops the message and tells the client nothing.\n\nThe credential is in `flows_cred.json`, encrypted. It is not recoverable from this appliance and\nnot re-issuable except by generating a new bundle in the dashboard.",
     "x": 320,
     "y": 60,
     "wires": []

@@ -22,7 +22,7 @@ describe('credentialState', () => {
     const state = credentialState(virtual(), null)
     expect(state).toBe(CREDENTIAL_STATES.UNRECORDED)
     expect(credentialStateLabel(state)).toBe('No platform record')
-    expect(credentialStateExplanation(state, virtual())).toMatch(/does not mean the broker holds none/i)
+    expect(credentialStateExplanation(state, virtual())).toMatch(/Broker column says whether an account exists/i)
   })
 
   /**

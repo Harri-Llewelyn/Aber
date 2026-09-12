@@ -45,7 +45,7 @@ load bearing:
      topic is an exposure decision that belongs to a deployment, not to a default -- the same
      answer `ingress.routes.studio` gives for publishing the Studio console.
 
-  2. THE BROKER ACL IS THE ONLY ACCESS CONTROL, and `mosquitto.acl` grants read on this subtree to
+  2. THE BROKER ACL IS THE ONLY ACCESS CONTROL, and the broker's roles grant read on this subtree to
      the two principals that already hold `spBv1.0/#` -- ingestion and i3X -- and to no gateway.
      A gateway is confined to its own edge node's subtree precisely so it cannot enumerate the
      site; handing it the Directory would undo that in one line. A deployment that wants a headless
@@ -104,7 +104,7 @@ DIRECTORY_MQTT_ENABLED = os.getenv("DIRECTORY_MQTT_ENABLED", "").strip().lower()
     "1", "true", "yes", "on",
 )
 
-# NOT UNDER `spBv1.0/`. That tree belongs to Sparkplug and `mosquitto.acl` confines every gateway
+# NOT UNDER `spBv1.0/`. That tree belongs to Sparkplug and the broker's roles confine every gateway
 # inside it by pattern; a Directory document is not a Sparkplug message and must not arrive looking
 # like one. A separate root also means the broker's default-deny covers this subtree until a rule
 # is written for it, rather than the per-gateway pattern accidentally granting something.
@@ -269,7 +269,7 @@ def publish_once(client, supabase, prefix=None):
 
     QoS 0 AND RETAIN TRUE. QoS 0 because the next pass is the retry -- a Directory document is a
     snapshot of current state, so a lost one is superseded rather than missing, and the whole stack
-    publishes at QoS 0 already (see mosquitto.acl, which records why a denied publish is silent
+    publishes at QoS 0 already (see mosquitto/README.md, which records why a denied publish is silent
     here). Retain because a subscriber connecting between passes must not have to wait for one.
     """
     prefix = prefix or DIRECTORY_MQTT_TOPIC_PREFIX

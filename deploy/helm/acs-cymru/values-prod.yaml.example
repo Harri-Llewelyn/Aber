@@ -112,10 +112,11 @@ secrets:
 
   pgMetaCryptoKey: ""
 
-  # Five MQTT principals, each confined by mosquitto.acl. GENERATE FIVE DIFFERENT PASSWORDS --
-  # the confinement is what limits the blast radius of one leaked credential, and reusing a
-  # single value throws that away. The usernames are fixed: the two gateway ones must equal the
-  # sparkplug_id generated from their pinned UUIDs, and the render fails if they do not.
+  # The MQTT platform principals, each confined by a role in mosquitto/dynsec-roles.json. GENERATE
+  # A DIFFERENT PASSWORD FOR EACH -- the confinement is what limits the blast radius of one leaked
+  # credential, and reusing a single value throws that away. The usernames are fixed: the
+  # validator's must equal the sparkplug_id generated from its pinned UUID, and the render fails
+  # if it does not.
   #
   # mqttValidatorPassword is only needed with e2e.enabled -- leave it empty in production and no
   # account is created for it.
@@ -123,12 +124,15 @@ secrets:
   mqttIngestionPassword: ""
   mqttI3xUser: factoryplus_i3x
   mqttI3xPassword: ""
-  mqttSimulatorUser: gwy100000000000400080000
-  mqttSimulatorPassword: ""
   mqttValidatorUser: gwy110000000000400080000
   mqttValidatorPassword: ""
   mqttMonitorUser: factoryplus_monitor
   mqttMonitorPassword: ""
+  # openssl rand -hex 24. The account the credential service administers the broker's Dynamic
+  # Security plugin as. REQUIRED: the broker's initContainer writes it on every start and exits
+  # without it.
+  mqttDynsecAdminUser: dynsec-admin
+  mqttDynsecAdminPassword: ""
 
   # The four simulated cell gateways of the shipped `Simulated Shopfloor` flow. A production site
   # that has retired the simulator leaves these empty and gets no accounts -- but then it must also
@@ -144,9 +148,9 @@ secrets:
   # characters, because the service refuses to start and it is a sidecar in the BROKER's pod, so
   # its refusal would take mosquitto out of Ready and stall everything waiting on it.
   #
-  # ITS OWN VALUE, never shared. That service can mint a Mosquitto account for any edge node, and
-  # mosquitto.acl turns an account into the ability to publish telemetry as that gateway -- so a
-  # token reused elsewhere means one leak grants forgery across the site.
+  # ITS OWN VALUE, never shared. That service can issue a Mosquitto account for any edge node, and
+  # the gateway's role turns an account into the ability to publish telemetry as that gateway -- so
+  # a token reused elsewhere means one leak grants forgery across the site.
   mqttCredentialServiceToken: ""
 
   # The forge administrator (roadmap 7-9), and the only account Gitea is meant to have. Empty

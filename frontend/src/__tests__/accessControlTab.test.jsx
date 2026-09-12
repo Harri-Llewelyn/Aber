@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
@@ -8,6 +8,7 @@ import { api } from '../api'
 vi.mock('../api', () => ({
   api: {
     listGatewayCredentials: vi.fn(),
+    listBrokerInventory: vi.fn(),
     listServicePrincipals: vi.fn(),
     listServiceTokens: vi.fn(),
     listRevokedServiceTokens: vi.fn(),
@@ -66,6 +67,8 @@ const MCP_PRINCIPAL = {
 beforeEach(() => {
   vi.clearAllMocks()
   // Defaulted so every credential-inventory test renders the whole page. Individual tests override.
+  // An empty-but-read inventory: the Broker column resolves to "No account" rather than "Not read".
+  api.listBrokerInventory.mockResolvedValue({ clients: [], roles: [], read_at: '2026-09-12T00:00:00Z', target: 'compose' })
   api.listServicePrincipals.mockResolvedValue([MCP_PRINCIPAL])
   api.listServiceTokens.mockResolvedValue(new Map())
   // Empty by default, which is both the common case and the reading a caller who cannot see the
@@ -73,6 +76,13 @@ beforeEach(() => {
   api.listRevokedServiceTokens.mockResolvedValue(new Set())
   api.listRevokedServicePrincipals.mockResolvedValue(new Map())
 })
+
+/** The page opens on Gateways; the service identities are the other section. */
+async function renderServices() {
+  const result = render(<AccessControlTab showToast={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('tab', { name: /Services/ }))
+  return result
+}
 
 describe('AccessControlTab', () => {
   /**
@@ -86,18 +96,88 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
     // The meaning lives on the badge's tooltip now rather than in three lines beside it.
-    expect(screen.getAllByTitle(/does not mean the broker holds none/i).length).toBe(1)
+    expect(screen.getAllByTitle(/Broker column says whether an account exists/i).length).toBe(1)
     expect(screen.queryByText(/^No credential$/i)).toBeNull()
   })
 
-  /** And the page says so before any row is read, not after somebody acts on one. */
-  it('states its own limit in the preamble', async () => {
+  /** The preamble names the two columns, so a reader knows the recorded state and the live one are
+   *  different things before reading a row. */
+  it('states the two sources in the preamble', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => {
-      expect(screen.getByText(/not an inventory of the broker/i)).toBeTruthy()
+      expect(screen.getByText(/what the platform issued and recorded/i)).toBeTruthy()
     })
+    expect(screen.getByText(/read live from its\s+Dynamic Security plugin/i)).toBeTruthy()
+  })
+
+  /** When the broker cannot be read the Broker column reads Not read, and the page says why once. */
+  it('reports the broker as Not read when the inventory read fails', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockRejectedValue(new Error('the broker credential service is unreachable'))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('The broker was not read.')).toBeTruthy())
+    expect(screen.getAllByText('Not read').length).toBeGreaterThan(0)
+  })
+
+  /** The two states are shown side by side: recorded, and live. */
+  it('shows a script-provisioned gateway as No platform record and its live broker state', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false }],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
+    // The broker holds it and it is enabled: Active, from the live read.
+    expect(screen.getByText('Active')).toBeTruthy()
+  })
+
+  /** A revoked gateway reads Disabled at the broker. */
+  it('shows a disabled broker account as Disabled', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: provisioned.sparkplug_id, roles: ['gateway'], disabled: true }],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy())
+  })
+
+  /** An account the broker holds that no gateway row claims gets its own section — the state the
+   *  old page could never show. */
+  it('lists a broker account with no gateway row as an orphan', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false },
+        { username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false },
+        { username: 'factoryplus_ingestion', roles: ['ingestion'], disabled: false },
+      ],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/Accounts with no gateway/i)).toBeTruthy())
+    // The gateway-shaped stray is listed; the platform principal is not an orphan.
+    expect(screen.getByRole('button', { name: /gwy999999999999999999999/ })).toBeTruthy()
+  })
+
+  /** No orphan section on a healthy stack whose broker holds only known gateways. */
+  it('shows no orphan section when every broker account is a known gateway', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false }],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
+    expect(screen.queryByText(/Accounts with no gateway/i)).toBeNull()
   })
 
   it('offers a mint for a virtual gateway and a bundle for a physical one', async () => {
@@ -105,7 +185,7 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/Generate/)).toBeTruthy())
-    expect(screen.getByText(/Bundle/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Bundle/ })).toBeTruthy()
     expect(screen.getAllByText('Issued', { selector: '.badge' }).length).toBe(1)
   })
 
@@ -125,8 +205,8 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getAllByText('No platform record', { selector: '.badge' }).length).toBe(4))
     // FOUR BADGES, FOUR TOOLTIPS, AND NOT ONE LINE OF REPEATED BODY TEXT. The second assertion is
     // the one that matters: it fails the moment the sentence is put back into the column.
-    expect(screen.getAllByTitle(/does not mean the broker holds none/i).length).toBe(4)
-    expect(screen.queryByText(/does not mean the broker holds none/i)).toBeNull()
+    expect(screen.getAllByTitle(/Broker column says whether an account exists/i).length).toBe(4)
+    expect(screen.queryByText(/Broker column says whether an account exists/i)).toBeNull()
   })
 
   /** Archived gateways are hidden by default and offer no action when shown — 0041 refuses them. */
@@ -134,13 +214,49 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([{ ...provisioned, is_archived: true }])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText(/No gateways registered/i)).toBeTruthy())
-    // The Devices page's "Needs attention" shape: a toggle button carrying its own count, not a
-    // checkbox -- which was the only control of its kind in the app and read as a form field.
-    screen.getByRole('button', { name: /Archived \(1\)/i }).click()
+    // Archived is a filter value, not a toggle. The empty message says the list is filtered, not
+    // that nothing is registered.
+    await waitFor(() => expect(screen.getByText(/No gateway matches this filter/i)).toBeTruthy())
+    const filter = screen.getByLabelText('Filter gateways by credential state')
+    expect(within(filter).getByText('Archived (1)')).toBeTruthy()
+    expect(within(filter).getByText('Current (0)')).toBeTruthy()
+    fireEvent.change(filter, { target: { value: 'archived' } })
 
     await waitFor(() => expect(screen.getByText(/Restore to issue/i)).toBeTruthy())
     expect(screen.queryByText(/Generate/)).toBeNull()
+  })
+
+  /** The filter's values are the Credential column's states, with a count on each. */
+  it('filters gateways by credential state', async () => {
+    api.listGatewayCredentials.mockResolvedValue([
+      provisioned,
+      { ...enrolled, id: '2b000000-0000-4000-8000-000000000001', name: 'Cell 5 Press Line', sparkplug_id: 'gwy2b0000000000400080000', enrolled_at: null, status: 'PENDING_ENROLLMENT' },
+    ])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Sim_Gateway_Cell1_Machining')).toBeTruthy())
+    expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
+    const filter = screen.getByLabelText('Filter gateways by credential state')
+    expect(within(filter).getByText('Current (2)')).toBeTruthy()
+    expect(within(filter).getByText('Bundle outstanding (1)')).toBeTruthy()
+    expect(within(filter).getByText('No platform record (1)')).toBeTruthy()
+
+    fireEvent.change(filter, { target: { value: 'awaiting-enrolment' } })
+    await waitFor(() => expect(screen.queryByText('Sim_Gateway_Cell1_Machining')).toBeNull())
+    expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
+    // No summary pills under the table: the filter carries the counts.
+    expect(screen.queryByText(/no record$/)).toBeNull()
+  })
+
+  it('heads the two action columns Actions', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy())
+    expect(screen.queryByRole('columnheader', { name: 'Issue' })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy())
+    expect(screen.queryByRole('columnheader', { name: 'Mint' })).toBeNull()
   })
 
   /**
@@ -152,8 +268,74 @@ describe('AccessControlTab', () => {
     api.listServicePrincipals.mockRejectedValue(new Error('insufficient privileges to list service principals'))
     render(<AccessControlTab showToast={vi.fn()} />)
 
+    await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
+    // The refusal is reported where the list would have been, on the Services section.
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
     await waitFor(() => expect(screen.getByText(/insufficient privileges/i)).toBeTruthy())
-    expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0)
+  })
+
+  it('opens on Gateways and keeps the service identities under Services', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Broker credentials')).toBeTruthy())
+    expect(screen.queryByText('Database principals')).toBeNull()
+    expect(screen.queryByText('Broker roles')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    await waitFor(() => expect(screen.getByText('Database principals')).toBeTruthy())
+    expect(screen.getByText('Broker roles')).toBeTruthy()
+    expect(screen.queryByText('Broker credentials')).toBeNull()
+  })
+
+  /** A declared fixture is named rather than listed as a stray; anything undeclared is the stray. */
+  it('names a declared fixture among the accounts with no gateway', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: 'gwy110000000000400080000', roles: ['gateway', 'gateway-gwy110000000000400080000'], disabled: false },
+        { username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false },
+      ],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    // The stray is the orphan; the declared fixture is not listed among them.
+    await waitFor(() => expect(screen.getByText(/Accounts with no gateway/i)).toBeTruthy())
+    expect(screen.getByRole('button', { name: /gwy999999999999999999999/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /gwy110000000000400080000/ })).toBeNull()
+
+    // It is a platform account, listed with the others under Services.
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    await waitFor(() => expect(screen.getByText('Broker accounts')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /gwy110000000000400080000/ })).toBeTruthy()
+    expect(screen.getByText(/Validator test gateway/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /gwy999999999999999999999/ })).toBeNull()
+  })
+
+  /** The broker's own accounts are listed live, each with the purpose of the role it holds. */
+  it('lists the platform accounts with the purpose of their role', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false },
+        { username: 'factoryplus_monitor', roles: ['monitor'], disabled: false },
+        { username: 'dynsec-admin', roles: ['admin'], disabled: false },
+        { username: 'factoryplus_ingestion', roles: ['ingestion'], disabled: true },
+      ],
+      roles: [],
+    })
+    await renderServices()
+
+    await waitFor(() => expect(screen.getByText('Broker accounts')).toBeTruthy())
+    // Policy order, not alphabetical: ingestion, monitor, admin.
+    const names = screen.getAllByRole('button', { name: /Copy MQTT username/ }).map(b => b.textContent)
+    expect(names).toEqual(['factoryplus_ingestion', 'factoryplus_monitor', 'dynsec-admin'])
+    // Scoped to the row: the same purpose is printed beside the role in the table beneath.
+    const monitorRow = screen.getByRole('button', { name: /factoryplus_monitor/ }).closest('tr')
+    expect(within(monitorRow).getByText(/The broker health probes and the metrics exporter/)).toBeTruthy()
+    expect(screen.getByText('Disabled')).toBeTruthy()
+    expect(screen.queryByText(/Accounts with no gateway/i)).toBeNull()
   })
 
   /** An unrecognised machine identity is more interesting than a recognised one, so it is listed. */
@@ -162,7 +344,7 @@ describe('AccessControlTab', () => {
     api.listServicePrincipals.mockResolvedValue([
       { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
     // Both origins, which is the assertion rather than the exact sentence: an unknown principal may
@@ -185,7 +367,7 @@ describe('AccessControlTab', () => {
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000003', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     expect(screen.getByText('Service_Playback')).toBeTruthy()
@@ -204,7 +386,7 @@ describe('AccessControlTab', () => {
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000003', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
 
@@ -224,7 +406,7 @@ describe('AccessControlTab', () => {
     api.listServicePrincipals.mockResolvedValue([
       { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
     expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy()
@@ -232,7 +414,7 @@ describe('AccessControlTab', () => {
 
   it('opens the token dialog for the principal whose button was pressed', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
     screen.getByRole('button', { name: /Issue Token/i }).click()
@@ -255,7 +437,7 @@ describe('AccessControlTab', () => {
         { jti: 'b', issued_at: '2026-09-02T00:00:00Z', expires_at: '2099-02-01T00:00:00Z' }
       ]
     ]]))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
     screen.getByRole('button', { name: /2 active tokens/i }).click()
@@ -277,7 +459,7 @@ describe('AccessControlTab', () => {
       ]
     ]]))
     api.listRevokedServiceTokens.mockResolvedValue(new Set(['a']))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('1 active token')).toBeTruthy())
     expect(screen.queryByText('2 active tokens')).toBeNull()
@@ -286,7 +468,7 @@ describe('AccessControlTab', () => {
   /** Nothing to list means nothing to open -- a button onto an empty dialog is worse than a badge. */
   it('leaves the badge inert when no mint is recorded', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
     expect(screen.queryByRole('button', { name: /No token on record/i })).toBeNull()
@@ -298,7 +480,7 @@ describe('AccessControlTab', () => {
    */
   it('offers Withdraw beside Issue Token for a live identity', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy())
     expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy()
@@ -315,7 +497,7 @@ describe('AccessControlTab', () => {
       MCP_PRINCIPAL.principal_id,
       { principal_id: MCP_PRINCIPAL.principal_id, revoked_at: '2026-09-03T12:00:00Z', reason: 'leaked' }
     ]]))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('REVOKED')).toBeTruthy())
     expect(screen.queryByRole('button', { name: /Issue Token/i })).toBeNull()
@@ -325,7 +507,7 @@ describe('AccessControlTab', () => {
 
   it('opens the dialog in the direction the identity needs', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy())
     screen.getByRole('button', { name: /^Withdraw$/i }).click()
@@ -333,16 +515,64 @@ describe('AccessControlTab', () => {
       .toBe('withdraw:MCP read-only client'))
   })
 
-  it('shows the broker principals and marks which one can publish', async () => {
+  it('shows the broker roles and marks which ones can publish', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
-    await waitFor(() => expect(screen.getByText('factoryplus_ingestion')).toBeTruthy())
-    expect(screen.getByText('factoryplus_i3x')).toBeTruthy()
-    expect(screen.getByText('factoryplus_monitor')).toBeTruthy()
-    // Exactly one of the three writes, and it is the daemon.
-    expect(screen.getAllByText('CAN PUBLISH').length).toBe(1)
-    expect(screen.getAllByText('READ ONLY').length).toBe(2)
+    // Role names, not usernames: the page renders the policy's roles.
+    await waitFor(() => expect(screen.getByText('ingestion', { selector: 'td' })).toBeTruthy())
+    expect(screen.getByText('i3x', { selector: 'td' })).toBeTruthy()
+    expect(screen.getByText('monitor', { selector: 'td' })).toBeTruthy()
+    expect(screen.getByText('admin', { selector: 'td' })).toBeTruthy()
+    expect(screen.getByText('gateway', { selector: 'td' })).toBeTruthy()
+    // With no live inventory the writes flag is the declared fallback: ingestion and admin publish.
+    expect(screen.getAllByText('CAN PUBLISH').length).toBe(2)
+    expect(screen.getAllByText('READ ONLY').length).toBe(3)
+  })
+
+  /**
+   * With a live inventory the rules come from the broker, verb and topic, not from a literal. The
+   * table carries a count; the rules themselves open in the drawer, since one role is nine lines.
+   */
+  it('counts a role’s live rules in the table and opens them in the drawer', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: 'factoryplus_monitor', roles: ['monitor'], disabled: false },
+      ],
+      roles: [
+        { rolename: 'monitor', acls: [{ acltype: 'subscribePattern', topic: '$SYS/#', allow: true }] },
+        {
+          rolename: 'ingestion',
+          acls: [
+            { acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: true },
+            { acltype: 'publishClientReceive', topic: 'spBv1.0/#', allow: true },
+            { acltype: 'publishClientSend', topic: 'spBv1.0/+/NCMD/+', allow: true },
+          ],
+        },
+      ],
+    })
+    await renderServices()
+
+    const monitor = await screen.findByRole('button', { name: '1 rule' })
+    expect(screen.getByRole('button', { name: '3 rules' })).toBeTruthy()
+    // Not in the table.
+    expect(screen.queryByText('$SYS/#')).toBeNull()
+
+    fireEvent.click(monitor)
+    const panel = await screen.findByRole('complementary', { name: 'monitor role' })
+    expect(within(panel).getByText('$SYS/#')).toBeTruthy()
+    expect(within(panel).getByText('subscribe')).toBeTruthy()
+    expect(within(panel).getByText('1 account')).toBeTruthy()
+  })
+
+  it('reports a role as Not read when the broker was not', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockRejectedValue(new Error('credential service unreachable'))
+    await renderServices()
+
+    await waitFor(() => expect(screen.getAllByText('Not read').length).toBe(5))
+    expect(screen.queryByRole('button', { name: /rules?$/ })).toBeNull()
   })
 
   /**
@@ -356,9 +586,10 @@ describe('AccessControlTab', () => {
     // CopyableId renders a button, which is what makes it keyboard-reachable and announced as an
     // action -- a clickable span would be neither.
     await waitFor(() => expect(screen.getByRole('button', { name: /gwy120000000000400080000/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
     // Exact, because the mint command in the next column also contains this id. CopyableId's
     // accessible name is `Copy <label> <value>`, so naming the label makes this exact.
-    expect(screen.getByRole('button', { name: 'Copy principal id b0000000-0000-4000-8000-000000000001' })).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Copy principal id b0000000-0000-4000-8000-000000000001' })).toBeTruthy())
   })
 
   /**
@@ -368,7 +599,7 @@ describe('AccessControlTab', () => {
    */
   it('offers the mint command rather than a mint button', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(
       screen.getByRole('button', {
@@ -392,7 +623,7 @@ describe('AccessControlTab', () => {
         { expires_at: inDays(-3), jti: 'expired-and-not-counted' }
       ]]
     ]))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
     // The earliest expiry is the one reported: the next date on which something stops working. Read
@@ -402,7 +633,7 @@ describe('AccessControlTab', () => {
 
   it('says a principal has no token on record rather than implying it has none at all', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
     // An empty cell is a fact about the record, not the credential, stated on the badge's tooltip.
@@ -417,7 +648,7 @@ describe('AccessControlTab', () => {
    */
   it('states the credentials it cannot see, so an empty list is not read as none', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
     // On the row, not in a footer: the badge itself says an empty cell is a statement about the
@@ -432,7 +663,7 @@ describe('AccessControlTab', () => {
     // The footer was removed deliberately: a page this dense should not state the same thing twice,
     // and the row is where it belongs. Pinned so it does not creep back alongside the tooltip.
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
     expect(screen.queryByText(/Why a row can show no token/i)).toBeNull()
@@ -451,7 +682,7 @@ describe('AccessControlTab', () => {
       ['b0000000-0000-4000-8000-000000000002',
         [{ jti: 'abc', expires_at: new Date(Date.now() + 60 * 86400000).toISOString() }]]
     ]))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     expect(screen.getByText(/1 active token/i)).toBeTruthy()
@@ -468,7 +699,7 @@ describe('AccessControlTab', () => {
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000001', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     const rowOf = (name) => screen.getByText(name).closest('tr')
@@ -489,7 +720,7 @@ describe('AccessControlTab', () => {
    */
   it('renders the copy control as a ghost button, not as an understated identifier', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
 
@@ -505,7 +736,7 @@ describe('AccessControlTab', () => {
   it('still lists identities when the token history cannot be read', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockRejectedValue(new Error('permission denied for table digital_thread'))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
     expect(screen.getByText('No token on record')).toBeTruthy()

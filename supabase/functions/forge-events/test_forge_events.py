@@ -234,10 +234,12 @@ class TestTheForgeItself(ForgeEventsBase):
     @classmethod
     def tearDownClass(cls):
         cls.delete_repo()
+        # The broker account outlives the row; deleted through the service container's admin
+        # credential, as test_enroll_gateway.py does.
         subprocess.run(
-            ["docker", "exec", "acs-cymru_mosquitto", "sh", "-c",
-             f"grep -v '^{cls.sparkplug_id}:' /mosquitto/config/password_file > /tmp/pf.$$ "
-             f"&& cat /tmp/pf.$$ > /mosquitto/config/password_file && rm -f /tmp/pf.$$"],
+            ["docker", "exec", "acs-cymru_gateway_credential", "sh", "-c",
+             'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
+             f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec deleteClient {cls.sparkplug_id}'],
             capture_output=True, text=True,
         )
         super().tearDownClass()

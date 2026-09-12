@@ -750,6 +750,31 @@ const apiMethods = {
   },
 
   /**
+   * What the broker holds, read live: every account with its roles and whether it is disabled,
+   * and every role with its rules. Administrator only, through broker-inventory. A refusal or an
+   * unreachable broker throws, so the page says the column was not read rather than drawing it
+   * empty.
+   */
+  listBrokerInventory: async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/broker-inventory`, {
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+      },
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw new Error(body?.details || body?.error || `Could not read the broker (${res.status})`);
+    }
+
+    return body;
+  },
+
+  /**
    * Mint a host-run gateway's broker credential and get it back once.
    *
    * A raw fetch so both gateway-credential paths read the same way. The password is returned once

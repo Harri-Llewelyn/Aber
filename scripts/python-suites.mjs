@@ -683,10 +683,11 @@ export const SUITES = {
     why:
       "Broker credential issuance -- needs the stack up AND the service's own bearer token, which " +
       'the e2e job now writes into `.env` before launch. The exposure tests are the ones that ' +
-      'matter most and are invisible anywhere else: this service can mint a Mosquitto account for ' +
-      'ANY edge node, and mosquitto.acl turns an account into the ability to publish telemetry as ' +
-      'that gateway -- so "it is not published on the host" is a security boundary, not a ' +
-      'deployment detail, and nothing else checks it.',
+      'matter most and are invisible anywhere else: this service can issue a Mosquitto account for ' +
+      'ANY edge node, and the gateway\'s role turns an account into the ability to publish ' +
+      'telemetry as that gateway -- so "it is not published on the host" is a security boundary, ' +
+      'not a deployment detail, and nothing else checks it. Revocation and the inventory are ' +
+      'asserted here too, against the running plugin.',
   },
   'timescaledb/test_historian_role_grants.py': {
     lanes: ['stack'],

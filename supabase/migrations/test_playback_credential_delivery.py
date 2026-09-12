@@ -6,7 +6,7 @@ the playback worker by writing it into a file that worker reads. The security of
 predicate: only gateways the database calls playback targets may have their passwords delivered.
 
 Get it wrong in the permissive direction and a real machine's broker password is written into a file
-the replay worker reads -- and `mosquitto.acl` confines an account to `spBv1.0/+/+/%u/#`, so that is
+the replay worker reads -- and the broker's roles confine an account to `spBv1.0/+/+/<sparkplug_id>/#`, so that is
 the ability to publish telemetry as that machine. Nothing fails, nothing logs, and the file looks
 exactly the same as a correct one.
 
@@ -109,7 +109,7 @@ class PlaybackCredentialDelivery(unittest.TestCase):
     def test_a_real_gateway_is_not(self):
         """
         THE ONE THAT MATTERS. A true here writes a real machine's broker password into a file the
-        replay worker reads, and mosquitto.acl then lets that worker publish as the machine.
+        replay worker reads, and the broker's roles then lets that worker publish as the machine.
         """
         gid = self._gateway(simulated=False)
         self.assertIsNotNone(self._authorize(gid))

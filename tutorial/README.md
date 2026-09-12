@@ -20,7 +20,7 @@ somebody else's plant in it. What that floor knew is in this file instead.
 | The dashboard | `http://localhost:3000` |
 | The Node-RED editor | `http://localhost:1880` |
 | Grafana | `http://localhost:3002` |
-| Broker config and topic ACL | [`../mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf), [`../mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) |
+| Broker config and roles | [`../mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf), [`../mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`../mosquitto/README.md`](../mosquitto/README.md) |
 | Node-RED provisioning | [`../scripts/node-red-init.mjs`](../scripts/node-red-init.mjs) |
 | Credential tool, physical gateways | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
 
@@ -63,7 +63,7 @@ behaviour, and it is quiet by design — so if nothing shows up later, check thi
 ### 4. Mint its broker credential
 
 Still on the gateway's row: **Generate broker credential**. The password is **revealed once** and
-cannot be read back afterwards, because `mosquitto_passwd` stores only a hash.
+cannot be read back afterwards, because the broker stores only a hash.
 
 This is the step that used to require a shell on the host. It goes through the same one-verb
 credential service the enrolment bundle uses, authorised by role rather than by a single-use token,
@@ -354,17 +354,20 @@ a real gateway carries no `Asset_ID` either, which is why the topic has to be au
 
 ## Broker Topic Authorisation
 
-[`../mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) confines each client to its own edge-node subtree:
+The broker's Dynamic Security plugin confines each gateway to its own edge-node subtree through a
+role generated for it when its credential is issued ([`../mosquitto/README.md`](../mosquitto/README.md)):
 
 ```
-pattern readwrite spBv1.0/+/+/%u/#
+gateway-<sparkplug_id>:  publish and receive  spBv1.0/+/+/<sparkplug_id>/#
+gateway (shared):        subscribe            spBv1.0/#       receive spBv1.0/STATE/#
 ```
 
-`%u` is the connecting username, so a gateway provisioned with **username == its `sparkplug_id`**
-can publish only beneath its own segment and to no other. Verified: a publish to another gateway's
-subtree is dropped by the broker.
+So a gateway provisioned with **username == its `sparkplug_id`** can publish only beneath its own
+segment and to no other. Verified by delivery in `scripts/check-broker-config.mjs`: a publish to
+another gateway's subtree is dropped by the broker.
 
-Issue a credential with:
+The dashboard and the enrolment bundle are the ordinary ways to issue a credential. The break-glass
+one, for a stack whose credential service is down or whose Administrator cannot sign in:
 
 ```bash
 node scripts/mosquitto-provision-gateway.mjs gwy120000000000400080000
@@ -373,25 +376,16 @@ node scripts/mosquitto-provision-gateway.mjs gwy120000000000400080000
 node scripts/mosquitto-provision-gateway.mjs --target=k8s gwy120000000000400080000
 ```
 
-The password is printed **once** — `mosquitto_passwd` stores only a hash.
+The password is printed **once** — the broker stores only a hash.
 
-**One script, two backends**, so the ACL reasoning above lives in one place. On Compose it writes into
-the broker's volume with `docker exec` and reloads with `SIGHUP`. On Kubernetes the
-`mosquitto-passwords` **Secret is the source of truth**: the script hashes the entry *inside the broker
-pod* (so the hash format matches what the broker will read — hashing locally only works if you happen
-to have a compatible `mosquitto_passwd`), patches the Secret, and **then forces the reload rather than
-waiting for it**.
+**One script, two backends**, so the role reasoning above lives in one place. Both send the same
+plugin commands the credential service sends, through `docker exec` or `kubectl exec` into the
+broker, and the broker applies them to itself at once: nothing is reloaded, nothing is signalled,
+and the account works before the command returns. Re-issuing an existing gateway **replaces** its
+password and re-enables the account; it never adds a second one.
 
-> **The forcing is the point.** A kubelet refreshes a projected Secret volume on its own sync period —
-> 60–90 seconds — and the broker reads its password file once at start. Without forcing, a freshly
-> provisioned gateway is refused for over a minute with nothing distinguishing "not synced yet" from
-> "wrong password", which is long enough that anyone commissioning a gateway retypes the credential and
-> concludes the tooling is broken. The script execs in and `SIGHUP`s, which is immediate and
-> **non-disruptive** — Mosquitto re-reads the file and keeps every connected gateway. If exec is
-> unavailable it falls back to a rollout restart, **which drops every connected gateway**, and says so.
-
-Re-provisioning an existing gateway **replaces** its line rather than appending: Mosquitto reads the
-first match, so a duplicate would silently pin the old password.
+A gateway issued this way reads *No platform record* beside *Active* on the Access Control page,
+which is the honest pair: the broker holds it, and the platform did not issue it.
 
 ### There is no shared broker account
 
@@ -401,18 +395,20 @@ could publish `DBIRTH` or `DDATA` for *any* machine on the site, and `verify_gat
 cannot catch that: a forged message published under a **correctly bound** device satisfies the
 binding check by construction.
 
-Five principals replace it, each confined by `mosquitto.acl`:
+Confined principals replace it, each holding a role from
+[`../mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json):
 
 | Principal | May do |
 | :--- | :--- |
-| `factoryplus_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth) |
-| `factoryplus_i3x` | read `spBv1.0/#`. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
-| any `gwy…` account | one per gateway, each confined to its own edge node by the ordinary `%u` pattern. Minted against a row that already exists — from the dashboard for a virtual gateway, by the enrolment bundle for an appliance |
+| `factoryplus_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), the Directory and the Unified Namespace |
+| `factoryplus_i3x` | read `spBv1.0/#` and the Directory. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
+| any `gwy…` account | one per gateway, each confined to its own edge node by a role generated for it. Issued against a row that already exists — from the dashboard for a virtual gateway, by the enrolment bundle for an appliance |
 | `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
 | `factoryplus_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
+| `dynsec-admin` | the credential service's account: the plugin's control topic and nothing else |
 
-**The two gateway usernames are `sparkplug_id`s and cannot be friendly names.** The ACL pins the
-topic's edge-node segment to `%u`, and that segment must equal the gateway row's *generated*
+**The gateway usernames are `sparkplug_id`s and cannot be friendly names.** The gateway's role
+confines it to its own edge-node segment, and that segment must equal the gateway row's *generated*
 `sparkplug_id` or ingestion rejects the message. Both rows therefore have **pinned UUIDs**, which is
 the only reason a credential can be issued before the row exists — that is what let the validator,
 which creates its gateway at runtime, move off the wildcard account at all. Only its *gateway* is

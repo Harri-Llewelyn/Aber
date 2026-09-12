@@ -41,7 +41,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - forge-membership - forge-signout - forge-events - forge-sweep - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential - gateway-credential<br/>mint-service-token"]
+        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - forge-membership - forge-signout - forge-events - forge-sweep - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential - gateway-credential - broker-inventory<br/>mint-service-token"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -160,9 +160,9 @@ trust store, so re-minting it takes the whole fleet offline at once with no othe
 `0036` adds `public.gateway_health`, the **third** narrow view the Grafana reader may select,
 after `0027`'s and `0029`'s: it backs the gateway dashboard and the certificate alert while
 leaving the asset inventory `0029` deliberately withheld exactly where it is — and `0038` makes
-**archiving or deleting a gateway revoke its broker credential**, by rotating the account to a
-password nobody records: the credential service is add-only by design, so a delete verb there
-would turn "can mint one confined account" into "can stop the whole fleet publishing" — and `0037`
+**archiving or deleting a gateway revoke its broker credential**, by disabling the account at the
+broker, which drops its live session: nothing in the credential service can delete an account, so
+a delete verb that could stop the whole fleet publishing is not one it carries — and `0037`
 makes **archiving a gateway withdraw its outstanding enrolment bundle**, and enrolment refuse
 an archived gateway at all: a bundle downloaded and never instantiated was still redeemable
 after the gateway was archived, which issued a real broker credential and resurrected the row
@@ -453,7 +453,7 @@ unrecognised role produces `403`.
 
 | Layer | Control |
 | :--- | :--- |
-| **Broker** | `allow_anonymous false`; [`mosquitto.acl`](mosquitto/mosquitto.acl) confines each gateway to `spBv1.0/+/+/<own-id>/#` |
+| **Broker** | `allow_anonymous false`; the Dynamic Security plugin's roles ([`mosquitto/dynsec-roles.json`](mosquitto/dynsec-roles.json), [`mosquitto/README.md`](mosquitto/README.md)) confine each gateway to `spBv1.0/+/+/<own-id>/#`, and revocation drops a live session |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise, once `INGEST_WRITER_PASSWORD` and `INGEST_DB_USER` are set: `ingest_writer` may INSERT and cannot UPDATE, DELETE or TRUNCATE. Unset, the daemon keeps the admin credential and the guarantee is the Python's again — see [Historian roles](#historian-roles) |
 | **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
@@ -644,7 +644,7 @@ that bypasses PostgREST is ever added.
 There is no CRL and no OCSP for the root `mosquitto-tls-init` mints on Compose or
 `deploy/k8s/internal-ca.yaml` issues on Kubernetes. A compromised root private key has no remedy
 short of re-minting the root and re-walking the fleet. Broker *credentials* are revocable and
-immediate (archiving a gateway rotates its account); the trust anchor is the one thing that is not.
+immediate (archiving a gateway disables its account and drops its session); the trust anchor is the one thing that is not.
 
 **Accepted because** the key never leaves its Secret or volume, is never mounted into an application
 pod, and never reaches an appliance, which receives `ca.crt` alone; for a fleet of this size a CRL

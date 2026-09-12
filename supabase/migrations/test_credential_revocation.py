@@ -13,10 +13,9 @@ credential went on publishing. `revoke_credential_on_decommission()` gated on
 every gateway a provisioned stack has, so the revocation path was dead code in practice.
 
 BOTH DIRECTIONS ARE ASSERTED, and the second is the one that keeps 0040's guarantee alive.
-Revocation is a rotation through an ADD-ONLY credential service, so asking it to rotate an account
-that does not exist CREATES one, with a password nobody records. `0040` gated on `is_virtual`
-precisely to prevent that, and the fix must not undo it: a gateway with no recorded credential must
-still be passed over.
+Revocation asks the credential service to disable the account at the broker. `0040` gated on
+`is_virtual` so that a gateway with no recorded credential is passed over rather than producing a
+request for an account that was never issued, and the fix must not undo it.
 
 WHY THE REQUESTS NEVER LEAVE. `net.http_post()` queues into `net.http_request_queue` inside the
 caller's transaction, so a test that rolls back un-queues its own requests -- nothing is sent, and

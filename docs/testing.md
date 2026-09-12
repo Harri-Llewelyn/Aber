@@ -155,14 +155,16 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 # leaves it empty, which used to make all thirteen checks skip while the run still exited 0).
 #
 # The exposure tests are the ones that matter and are invisible anywhere else: this service can
-# mint a Mosquitto account for ANY edge node, and mosquitto.acl turns an account into the ability
-# to publish telemetry as that gateway. "Not published on the host" is a security boundary.
+# issue a Mosquitto account for ANY edge node, and the gateway's role turns an account into the
+# ability to publish telemetry as that gateway. "Not published on the host" is a security boundary.
+# Revocation (a disabled account is refused and listed as disabled) and the inventory (no hash
+# material) are asserted here too, against the running plugin.
 MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 
-# Two pieces of the broker-credential machinery whose failure is silent, in isolation and with no
-# stack: the merge that must never lose an account, and the filter deciding which accounts the
-# orphan sweep may rotate — which is what keeps it from revoking `factoryplus_ingestion` and
-# stopping the stack ingesting.
+# The broker-credential machinery whose failure is silent, in isolation and with no stack: the
+# boot reconcile that must never lose a client, the control-API protocol, and the filter deciding
+# which accounts the orphan sweep may disable — which is what keeps it from revoking
+# `factoryplus_ingestion` and stopping the stack ingesting.
 npm run test:lib
 
 # Configuration drift — no services needed, and the ONE check here that reads your own .env.
@@ -233,8 +235,8 @@ python supabase/migrations/test_digital_thread_guard.py
 python supabase/migrations/test_digital_thread_paging.py
 # The delivery gate on broker-credential issuance (0078). NOT the happy path: the test that earns
 # its place is that a REAL gateway is not a delivery target, because a true there writes a real
-# machine's broker password into a file the replay worker reads -- and mosquitto.acl would then let
-# it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
+# machine's broker password into a file the replay worker reads -- and its broker role would then
+# let it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
 # dead code rather than the thing deciding deliveries.
 python supabase/migrations/test_playback_credential_delivery.py
 # The monthly partitioning of digital_thread (0079). THE INTERESTING TESTS ARE THE BORING ONES:
@@ -270,7 +272,7 @@ python supabase/migrations/test_gateway_enrollment.py
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.
 python supabase/migrations/test_credential_recorder.py
 # Revocation reaching a host-run gateway (0063), and still passing over one that holds nothing.
-# Rolls back for a second reason: net.http_post queues inside the transaction, so the rotation
+# Rolls back for a second reason: net.http_post queues inside the transaction, so the revocation
 # requests these tests provoke are un-queued rather than sent.
 python supabase/migrations/test_credential_revocation.py
 # Service-token revocation (0074): the denylist, and the PostgREST db-pre-request hook that reads

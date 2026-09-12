@@ -246,8 +246,8 @@ year never has to travel, and the one that has to travel changes once a decade.
 
 ### What already happens without you
 
-The leaf renews on its own. cert-manager re-issues at `renewBefore`, the reload sidecar sends the
-broker a `SIGHUP`, and Mosquitto re-reads the certificate **in place without dropping a connected
+The leaf renews on its own. cert-manager re-issues at `renewBefore`, the certificate-reload sidecar
+sends the broker a `SIGHUP`, and Mosquitto re-reads the certificate **in place without dropping a connected
 gateway**. No appliance notices, nothing is redistributed, and there is nothing to do. On Compose the
 equivalent is `node scripts/mosquitto-tls-init.mjs --force-leaf`, which reissues the leaf and leaves
 the root alone.
@@ -356,13 +356,14 @@ Broker **credentials** are a different matter and are revocable immediately — 
 ### An appliance that is lost, stolen or scrapped
 
 The broker password is on the appliance in plaintext, in `/data/gateway.env`. That is unavoidable —
-something has to connect — and the blast radius is deliberately small: `mosquitto.acl` pins the
-topic's edge-node segment to the connecting username, so a stolen appliance can publish as **itself**
-and as nothing else. It cannot forge another gateway's telemetry and it cannot read the fleet's.
+something has to connect — and the blast radius is deliberately small: the gateway's broker role
+confines it to its own edge node, so a stolen appliance can publish as **itself** and as nothing
+else. It cannot forge another gateway's telemetry and it cannot read the fleet's.
 
-**Archiving the gateway is the revocation.** It rotates the broker account to a password nobody
-records, and the appliance stops connecting. Do it the moment hardware goes missing rather than as
-part of a later tidy-up.
+**Archiving the gateway is the revocation.** It disables the broker account: the appliance's live
+session is dropped at once and its next connection is refused. Do it the moment hardware goes
+missing rather than as part of a later tidy-up; the Access Control page shows the account as
+*Disabled* once it has landed.
 
 What archiving does **not** do is retrieve the CA copy on that appliance — but that certificate is
 public by nature and worth nothing to whoever has the box.

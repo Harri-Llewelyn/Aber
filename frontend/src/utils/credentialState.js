@@ -1,14 +1,15 @@
 /**
- * What the platform knows about a gateway's broker credential.
+ * What the platform recorded about a gateway's broker credential, and what the broker says.
  *
- * The platform cannot see the broker's password file: `gateway-credential-service` is add-only and
- * cannot list. State is derived from what the database recorded: `enrolled_at` (an appliance
- * redeemed a bundle), `credential_revoked_at` (archive or delete rotated it), or a
- * CREDENTIAL_ISSUED row (minted for a host-run gateway through the UI).
+ * Two columns, two sources. The platform's record is what the database wrote: `enrolled_at` (an
+ * appliance redeemed a bundle), `credential_revoked_at` (archive or delete disabled it), or a
+ * CREDENTIAL_ISSUED row (minted for a host-run gateway through the UI). The broker's state is read
+ * live from its Dynamic Security plugin (api.listBrokerInventory): whether an account exists and
+ * whether it is disabled.
  *
- * Credentials exist that none of those record: an account minted on the host by script works while
- * the platform holds no record. That case gets its own state, `unrecorded`, rather than being
- * reported as No credential, which would be a claim about the broker.
+ * The two can disagree, and the page shows both rather than merging them: an account issued on the
+ * host by script is `unrecorded` here and Active at the broker, which is exactly the fact an
+ * operator wants to see.
  */
 
 /**
@@ -76,8 +77,8 @@ export function credentialStateTone(state) {
 export function credentialStateExplanation(state, gateway) {
   switch (state) {
     case CREDENTIAL_STATES.REVOKED:
-      return 'Rotated to a password nobody holds when this gateway was archived or deleted. '
-        + 'It cannot connect until a new credential is issued.';
+      return 'Disabled at the broker when this gateway was archived or deleted: its session was '
+        + 'dropped and its next connection is refused. Issuing a new credential re-enables it.';
     case CREDENTIAL_STATES.ISSUED:
       return gateway?.deployment === 'host'
         ? 'Minted through the dashboard and shown once. The password is not recoverable.'
@@ -87,10 +88,69 @@ export function credentialStateExplanation(state, gateway) {
       return 'A bundle has been issued and not yet redeemed. The credential is minted on the '
         + 'appliance at first boot, not here.';
     default:
-      return 'The platform has not issued a credential for this gateway. That does not mean the '
-        + 'broker holds none — an account minted on the host with '
-        + '`scripts/mosquitto-provision-gateway.mjs` is issued outside the dashboard and leaves '
-        + 'no record here.';
+      return 'The platform has not issued a credential for this gateway. The Broker column says '
+        + 'whether an account exists anyway — one issued on the host with '
+        + '`scripts/mosquitto-provision-gateway.mjs` works and leaves no record here.';
+  }
+}
+
+/**
+ * What the broker says about the account, from the live inventory. `unknown` is the inventory not
+ * having been read, which is a fact about this page load and not about the account.
+ */
+export const BROKER_STATES = {
+  ACTIVE: 'active',
+  DISABLED: 'disabled',
+  ABSENT: 'absent',
+  UNKNOWN: 'unknown',
+};
+
+/**
+ * @param {object|undefined} client  the inventory's entry for this username, if any
+ * @param {boolean} inventoryRead    whether the inventory was read at all
+ */
+export function brokerState(client, inventoryRead) {
+  if (!inventoryRead) return BROKER_STATES.UNKNOWN;
+  if (!client) return BROKER_STATES.ABSENT;
+  return client.disabled ? BROKER_STATES.DISABLED : BROKER_STATES.ACTIVE;
+}
+
+const BROKER_LABELS = {
+  [BROKER_STATES.ACTIVE]: 'Active',
+  [BROKER_STATES.DISABLED]: 'Disabled',
+  [BROKER_STATES.ABSENT]: 'No account',
+  [BROKER_STATES.UNKNOWN]: 'Not read',
+};
+
+const BROKER_TONES = {
+  [BROKER_STATES.ACTIVE]: 'ok',
+  [BROKER_STATES.DISABLED]: 'critical',
+  [BROKER_STATES.ABSENT]: 'neutral',
+  [BROKER_STATES.UNKNOWN]: 'unknown',
+};
+
+export function brokerStateLabel(state) {
+  return BROKER_LABELS[state] || BROKER_LABELS[BROKER_STATES.UNKNOWN];
+}
+
+export function brokerStateTone(state) {
+  return BROKER_TONES[state] || BROKER_TONES[BROKER_STATES.UNKNOWN];
+}
+
+export function brokerStateExplanation(state) {
+  switch (state) {
+    case BROKER_STATES.ACTIVE:
+      return 'The broker holds an enabled account by this name. Whoever has its password can '
+        + 'connect and publish under this edge node.';
+    case BROKER_STATES.DISABLED:
+      return 'The broker holds this account and refuses it. Any session it had was dropped when '
+        + 'it was disabled. Issuing a new credential re-enables it.';
+    case BROKER_STATES.ABSENT:
+      return 'The broker holds no account by this name. Nothing can connect as this gateway '
+        + 'until one is issued.';
+    default:
+      return 'The broker was not read on this page load, so nothing here is known about the '
+        + 'account. Refresh, or read the error above.';
   }
 }
 

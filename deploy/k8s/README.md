@@ -357,8 +357,8 @@ kubectl -n acs-cymru get svc mosquitto-external \
 
 #### Renewal needs no restart
 
-cert-manager renews at `renewBefore` and rewrites the Secret; the reload sidecar notices the
-certificate changing and sends `SIGHUP`. **Mosquitto re-reads certificates on SIGHUP** — verified
+cert-manager renews at `renewBefore` and rewrites the Secret; the `certificate-reload` sidecar
+notices the certificate changing and sends `SIGHUP`. **Mosquitto re-reads certificates on SIGHUP** — verified
 against `eclipse-mosquitto:2.0.20` by swapping the files on a running broker and watching the served
 certificate change — so no gateway is disconnected. Without that sidecar the broker would keep
 serving the old certificate until it expired, weeks after a renewal cert-manager reported as
@@ -508,11 +508,11 @@ docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
 # exists to work around, and one more independent image is cheaper than one more constraint.
 docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 
-# Broker credential-issuing sidecar — context is gateway-credential/, and the image is built FROM
-# eclipse-mosquitto so it carries the broker's own mosquitto_passwd. That is not incidental: the
-# `$7$` hash has to be readable by the mosquitto that will verify it, and a reimplementation
-# produces a password file that looks correct and refuses every login with nothing logged at either
-# end. The service's own code is NOT baked in — the chart mounts it from a ConfigMap.
+# Broker credential service and the broker's boot reconcile — context is gateway-credential/, and
+# the image is built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd and
+# mosquitto_rr. That is not incidental: the `$7$` hash has to be readable by the mosquitto that
+# will verify it, and a reimplementation produces a hash that looks correct and refuses every login
+# with nothing logged at either end. The code is NOT baked in — the chart mounts it from a ConfigMap.
 docker build -f gateway-credential/Dockerfile   -t $NS/acs-cymru-gateway-credential:$V gateway-credential
 
 # The backup service -- supabase/postgres for its pg_dump, plus node, sqlite3 and GNU tar. The
@@ -609,17 +609,20 @@ helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version 0.2.0
 
 ### Provisioning a gateway's MQTT credential
 
-Every gateway needs its own account: `mosquitto.acl` confines each client to `spBv1.0/+/+/%u/#`,
-and that only constrains anything if the username **is** the gateway's `sparkplug_id`. A gateway
-sharing the platform account is confined by nothing at the broker.
+Every gateway needs its own account: the broker generates a role for it that confines it to
+`spBv1.0/+/+/<sparkplug_id>/#`, and that only constrains anything if the username **is** the
+gateway's `sparkplug_id`. The dashboard and the enrolment bundle are the ordinary paths; this is the
+break-glass one:
 
 ```bash
 node scripts/mosquitto-provision-gateway.mjs --target=k8s gwy0123456789abcdef01234
 ```
 
-It writes the hash into the `mosquitto-passwords` Secret (the source of truth) **and then applies it
-to the running broker immediately** — see *Credential changes are forced, not awaited* below. The
-password is printed once and is not recoverable.
+It sends the same Dynamic Security commands the credential service sends, through `kubectl exec`
+into the broker pod, and the plugin applies them to the running broker and rewrites its own document
+on the data PVC. Nothing is written to a Secret and nothing is signalled. The password is printed
+once and is not recoverable. The plugin's admin credential comes from `MQTT_DYNSEC_ADMIN_USER` /
+`MQTT_DYNSEC_ADMIN_PASSWORD` in the environment or `.env`.
 
 ---
 
@@ -1147,70 +1150,61 @@ NodePort — Klipper cannot share one node port between two service ports.
 
 ### The broker config is version-specific, and 2.1 accepts what 2.0 rejects
 
-`mosquitto.conf` declares `allow_anonymous`, `password_file` and `acl_file` **once, in the global
-section above the first `listener` line**. Do not move them under a listener, however tidy it looks.
-
-**`password_file` declared twice is fatal on mosquitto 2.0.x** — `Error: Duplicate password_file
-value in configuration`, exit 3, before a socket is opened — and **accepted on 2.1.x**. So a config
-that works against `eclipse-mosquitto:latest` takes the broker down on both targets the moment the
-image is pinned back to the version they actually run. That happened: the pin from `latest` to
-`2.0.20` broke the broker, and the only symptom was a stack of unrelated-looking health timeouts
-minutes into the E2E job.
+`mosquitto.conf` declares `allow_anonymous` and the Dynamic Security `plugin` lines **once, in the
+global section above the first `listener` line**. Do not move them under a listener, however tidy
+it looks: a `plugin` line under a listener is refused outright without `per_listener_settings`, and
+a duplicated security option is fatal on 2.0.x and accepted on 2.1.x. That second trap has bitten:
+when the config still declared `password_file`, it was declared twice, and the pin from `latest` to
+`2.0.20` broke the broker on both targets with a stack of unrelated-looking health timeouts as the
+only symptom.
 
 Declaring them once is also what *guarantees* all three listeners are authorised identically —
 nothing above the first `listener` can be listener-specific, so no listener can come up anonymous.
 
-`scripts/check-broker-config.mjs` runs the real config on the pinned tag and asserts both properties
-(it starts; an unauthenticated client is refused). It is in CI and takes about ten seconds:
+`scripts/check-broker-config.mjs` runs the real config on the pinned tag, runs the real boot
+reconcile in the credential service's image, and asserts the policy by delivery, the control API
+end to end (issue, re-issue, a disable that drops a live session, re-enable) and the refusal of an
+unauthenticated client. It is in CI:
 
 ```bash
 node scripts/check-broker-config.mjs --verbose
 ```
 
-### Credential changes are forced, not awaited (M1)
+### Credential changes are applied by the plugin
 
-A kubelet refreshes a projected Secret volume on **its own sync period — 60–90 seconds**, not on
-write. The broker also reads its password file once at start. So a freshly provisioned gateway would
-be refused for over a minute, with nothing distinguishing "not synced yet" from "wrong password" —
-long enough that anyone commissioning a gateway retypes the credential and concludes the tooling is
-broken.
+The credential service sends the Dynamic Security plugin's commands to the broker over MQTT, on
+loopback, as an account whose role reaches `$CONTROL/dynamic-security/#` and nothing else. The
+plugin applies each command to the running broker as it answers it and rewrites its own document.
+There is no projected Secret to wait for, no `SIGHUP`, and no PID namespace to share: a freshly
+issued gateway connects at once, and a revoked one is disconnected at once. `shareProcessNamespace`
+is set only with `tls.enabled`, for the `certificate-reload` sidecar.
 
-Two mechanisms, doing different jobs:
+### The plugin's document is the broker's one volume, and an upgrade never touches it
 
-- **`--target=k8s` forces the reload.** After patching the Secret it execs into the broker pod,
-  merges the entry into the live password file and sends `SIGHUP` — immediate, and **non-disruptive**:
-  Mosquitto re-reads the password and ACL files in place and keeps every connected gateway. If exec
-  is unavailable it falls back to `kubectl rollout restart deployment/mosquitto`, **which drops every
-  connected gateway**, and says so.
-- **The `credential-reload` sidecar converges.** It compares the projected Secret against the file in
-  use (by content — a projected volume's mtime moves on every sync whether or not the data changed)
-  and SIGHUPs on a real difference. It is what makes a Secret changed by **any other route** — a
-  `helm upgrade`, a restore, another operator's `kubectl`, an External Secrets refresh —
-  reach the running broker at all.
+The document — every issued gateway account, as hashes — lives on the `mosquitto-data` PVC
+(`mosquitto.persistence`), with `resource-policy: keep` so an uninstall does not disconnect the
+fleet. It is the only copy: deleting the claim means re-issuing every gateway. The `assemble-config`
+initContainer runs `scripts/mosquitto-dynsec-init.mjs` on every start, which replaces the roles
+from the ConfigMap, re-hashes the platform principals and the plugin's admin from `secrets.mqtt*`
+(so rotating one in values reaches the broker on the next restart), keeps every gateway client
+exactly as stored, and refuses to write a document that would lose one.
 
-The Secret is always written **first**. Forcing the reload accelerates a change already committed; a
-pod rescheduled between the two steps must come back with the credential.
-
-### The gateway credential Secret is never overwritten by an upgrade
-
-`mosquitto-passwords` is created empty on first install and preserved thereafter (`resource-policy:
-keep` plus a `lookup` that carries the current contents through a re-render). Without the lookup,
-every `helm upgrade` would reset it and the whole fleet would fall off the broker at once with the
-upgrade as the only clue.
-
-The five **platform** principals are not in that Secret. They come from the `secrets.mqtt*` values
-and are re-applied on every pod start, so rotating one in values reaches the broker on the next
-restart.
+`mosquitto-passwords` is still a Secret, for two things only: the playback delivery file (`0078`),
+and a `password_file` left by a release from before the plugin, which the initContainer imports
+once — every appliance's password intact — and leaves in place. It is created empty on first
+install and preserved thereafter (`resource-policy: keep` plus a `lookup` through a re-render).
 
 > **There is no shared broker account.** `acs-cymru`, which held `readwrite spBv1.0/#` and was
 > used by ingestion, i3X, Node-RED and the validator alike, has been deleted — it could forge
 > `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for
-> a correctly bound device. `mosquitto.acl` now confines `factoryplus_ingestion` (read plus NCMD
-> only), `factoryplus_i3x` (read only), `factoryplus_monitor` (`$SYS` only) and two per-gateway
-> accounts. **The gateway usernames must be `sparkplug_id`s** — the chart fails the render
-> otherwise, because a friendly name authenticates perfectly and then has every publish silently
-> dropped by the broker. `secrets.mqttMonitorPassword` is required: the broker's own probes
-> authenticate as it, so an empty one leaves mosquitto permanently NotReady.
+> a correctly bound device. The roles in `mosquitto/dynsec-roles.json` now confine
+> `factoryplus_ingestion` (read plus NCMD only), `factoryplus_i3x` (read only), `factoryplus_monitor`
+> (`$SYS` only), the plugin's admin (`$CONTROL` only) and every gateway (its own edge node, through
+> a role generated for it). **The gateway usernames must be `sparkplug_id`s** — the chart fails the
+> render otherwise, because a friendly name authenticates perfectly and then has every publish
+> silently dropped by the broker. `secrets.mqttMonitorPassword` and `secrets.mqttDynsecAdminPassword`
+> are required: the broker's own probes authenticate as the first, and the initContainer refuses to
+> start without the second.
 
 ### Changing a hostname re-registers the OAuth clients — but only through Helm
 
@@ -1324,10 +1318,10 @@ anyone retiring one deletes it, in the same commit as the change.
 | Network alias `realtime-dev.supabase-realtime` | Service *named* `realtime-dev` | Kubernetes has no per-Service alias; naming it for the tenant is cleaner |
 | `deno_cache` volume | `emptyDir` | Compose-only hot-reload convenience |
 | `node-red-init` runs `chown -R 1000:1000 /data` | `podSecurityContext.fsGroup: 1000` | Kubernetes does it natively on mount |
-| `mosquitto-init` writes the password file once | initContainer assembles it, sidecar reloads it | Gateway credentials become reviewable Secret state instead of something typed into a container |
+| `mosquitto-init` writes the plugin's document onto a named volume | An initContainer runs the same reconcile onto a PVC | The document is the broker's own state, rewritten by the plugin on every change; it needs a volume the broker keeps, and there is no other copy |
 | `gitea-init` one-shot creates the forge's administrator and machine account | An initContainer on the gitea pod, running the same `gitea-init.sh` | Same arrangement as `mosquitto-init`: provisioning against the volume the server mounts |
 | Gitea sits on a `forge` Docker network that only the gateway and the edge runtime join | NetworkPolicy edges from the gateway and `supabase-functions` to `gitea:3000`, **only when `networkPolicy.enabled`** | Gitea signs in whoever `X-WEBAUTH-USER` names, from any peer, so reachability of port 3000 is the forge's access control. With the policy off (the default) every pod in the namespace can reach it; see the security note under *Hardening* |
-| Gateway provisioning via `docker exec` | `--target=k8s`: patch the Secret, then force the reload | Same script, two backends, so the ACL reasoning stays in one place |
+| Gateway provisioning via `docker exec` | `--target=k8s`: the same plugin commands through `kubectl exec` | Same script, two backends, so the role reasoning stays in one place |
 | Ingestion has no healthcheck | Liveness probe on the heartbeat file's age | A wedged paho loop is invisible on Compose; Kubernetes can restart it |
 | `loki` + `alloy` + `docker-socket-proxy` run the log store | No log workload; the Grafana **datasource** is provisioned either way, pointed at `grafana.lokiUrl` | Same reasoning as Prometheus, which this chart also does not deploy: Compose owns its whole observability stack, a cluster is assumed to run one already, and a second store plus a second collector would duplicate every line and give an operator two places to configure retention. **Not a judgement that logs matter less here** — `kubectl logs` dies at reschedule, so the Kubernetes case is the stronger one |
 | `alloy` reaches the Docker API through a read-only socket proxy | A DaemonSet reads `/var/log/pods` | There is no Docker socket to front, and the kubelet supplies the pod and container labels the proxy exists to obtain on Compose |

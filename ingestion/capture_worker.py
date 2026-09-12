@@ -7,7 +7,7 @@ WHY THIS LIVES IN THE INGESTION DAEMON
 
 `capture.py record` opens its own MQTT subscription from a terminal. A browser cannot: mosquitto
 listens on 1883 TCP with no WebSocket listener, and the recording principal's password is a
-server-side secret that a bundle would publish -- which is the exact thing `mosquitto.acl` was
+server-side secret that a bundle would publish -- which is the exact thing the broker's per-gateway role was
 rewritten to prevent. So a capture started from the Capture page has to be performed by something
 already inside the stack, and the daemon is the obvious candidate for a reason beyond convenience.
 

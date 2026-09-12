@@ -12,7 +12,7 @@ things stop that being sufficient on its own:
     all, and says so only in a db-init log line nobody re-reads.
 
 In both cases this is the only thing standing between a retired gateway and a row that quietly
-returns to ONLINE on the dashboard. Same two-tier arrangement mosquitto.acl describes for the ACL
+returns to ONLINE on the dashboard. Same two-tier arrangement mosquitto/README.md describes for the ACL
 and `verify_gateway_binding()`.
 
 THE DISTINCT LOG LINE IS PART OF THE BEHAVIOUR, not decoration. Filtering archived rows inside the

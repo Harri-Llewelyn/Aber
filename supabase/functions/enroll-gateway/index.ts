@@ -306,12 +306,12 @@ export default async function handler(req: Request): Promise<Response> {
     sparkplug_group: identity.sparkplug_group,
     mqtt_host: mqttHost,
     mqtt_tls_port: mqttTlsPort,
-    // The username is the sparkplug_id and cannot be anything else: mosquitto.acl pins the topic's
-    // edge-node segment to `%u`, and verify_gateway_binding() compares the same segment against the
-    // gateway row.
+    // The username is the sparkplug_id and cannot be anything else: the gateway's broker role
+    // confines it to spBv1.0/+/+/<username>/#, and verify_gateway_binding() compares the same
+    // segment against the gateway row.
     mqtt_username: identity.sparkplug_id,
-    // RETURNED EXACTLY ONCE. mosquitto_passwd stores only a hash, so this response is the only copy
-    // that will ever exist -- there is no endpoint that could re-read it.
+    // RETURNED EXACTLY ONCE. The broker stores only a hash, so this response is the only copy that
+    // will ever exist -- there is no endpoint that could re-read it.
     mqtt_password: credential.password,
     ca_cert: credential.ca_cert,
     // Whether the running broker has already been reloaded. False means the credential is durable

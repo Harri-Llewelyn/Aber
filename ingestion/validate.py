@@ -87,7 +87,7 @@ MALFORMED_DEVICE_ID = "dev" + "f" * 20
 VAL_GROUP = "ACS-Cymru"
 
 # The validator's gateway UUID is pinned so it can hold an ordinary per-gateway MQTT credential:
-# mosquitto.acl confines a client to `spBv1.0/+/+/%u/#`, so the username must equal the gateway
+# The broker's roles confine a client to `spBv1.0/+/+/<sparkplug_id>/#`, so the username must equal the gateway
 # row's generated `sparkplug_id`, which is a pure function of this constant
 # (11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000). Only the gateway is pinned;
 # devices sit in the fifth topic segment, which the ACL's trailing `#` covers. The first 21 hex
@@ -653,7 +653,7 @@ def run_simulation():
     # node and must speak what the fleet speaks. paho 1.6.1's v1 callback API is unchanged.
     client = mqtt.Client(protocol=mqtt.MQTTv5)
     # Connects as its own gateway, exactly as a physical edge node does: username ==
-    # VAL_GW_SPARKPLUG_ID, confined by mosquitto.acl to its own subtree, so a mismatch shows as
+    # VAL_GW_SPARKPLUG_ID, confined by its own broker role to its own subtree, so a mismatch shows as
     # every publish silently dropped. Read from MQTT_VALIDATOR_*, the names docker-compose hands
     # mosquitto-init. Not `MQTT_USER`/`MQTT_PASSWORD`, the ingestion daemon's credential, which may
     # only read and publish NCMD; sourcing them would connect as the daemon and have every publish

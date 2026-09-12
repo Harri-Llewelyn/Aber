@@ -572,7 +572,7 @@ which a fresh CI run never reaches.
 `sparkplug_id` and no database access by design, and the edge function could compute something
 similar from the gateway row — which would be a *second* definition of "is this a playback target".
 Two definitions eventually disagree, and the disagreement is a real machine's broker password
-written into a file the replay worker reads, from where `mosquitto.acl` would let it publish as that
+written into a file the replay worker reads, from where its broker role would let it publish as that
 machine.
 
 **Letting the worker mint its own was rejected**, though it needs no delivery mechanism at all. The
@@ -747,7 +747,7 @@ first role-assignment surface is where `authz:manage` starts meaning something, 
 into a schema where the two roles already differ rather than one where they do not.
 
 **It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
-deploys flows. The repair is to make that person an `Administrator`. Multi-factor authentication ([`docs/roadmap.md`](../docs/roadmap.md)) and the audit-domain work both depended on this split — the MFA reset is gated on
+deploys flows. The repair is to make that person an `Administrator`. Multi-factor authentication ([#184](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/184)) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
 
@@ -1652,17 +1652,21 @@ default: a row naming only `deployment` arrives with both set, and the one the c
 
 ### Revocation reads that record, which is why it never worked (`0063`)
 
-`0038` rotates a decommissioned gateway's broker credential to a password nobody records. **It never
-fired for a virtual gateway, which is every gateway a provisioned stack has**, because it gated on
-`gateway_holds_a_credential()`. Demonstrated end to end: create a virtual gateway, give it a broker
-account, publish, `DELETE` the row, and it went on publishing — with nothing queued in
-`net.http_request_queue`, so the revocation was never attempted rather than failing.
+`0038` revokes a decommissioned gateway's broker credential (since `0102`, by disabling the account
+at the broker, which drops its live session; before that, by rotating it to a password nobody
+recorded). **It never fired for a virtual gateway, which is every gateway a provisioned stack has**,
+because it gated on `gateway_holds_a_credential()`. Demonstrated end to end: create a virtual
+gateway, give it a broker account, publish, `DELETE` the row, and it went on publishing — with
+nothing queued in `net.http_request_queue`, so the revocation was never attempted rather than
+failing.
 
 **The exclusion was deliberate and its purpose was right.** `0040`'s header says so: *"The guard is
 there so revocation cannot CREATE an account by rotating one that never existed, and by that
-definition a simulator gateway holds nothing."* Revocation goes through an **add-only** credential
-service, so asking it to rotate an account that does not exist provisions one. What was wrong is the
-second half — a simulator gateway holds exactly what was minted for it on the host.
+definition a simulator gateway holds nothing."* At the time revocation went through an add-only
+credential service, so asking it to rotate an account that did not exist provisioned one; a
+disable of an unknown account now creates nothing, and the guard still spares the broker a request
+for an account that was never issued. What was wrong is the second half — a simulator gateway holds
+exactly what was minted for it on the host.
 
 So `0063` swaps both the trigger and the pg_cron sweep onto `gateway_has_broker_credential()`, which
 admits a virtual gateway **only when a `CREDENTIAL_ISSUED` row exists**. That closes the leak and
@@ -1677,10 +1681,11 @@ leak for one junk account per gateway ever deleted.
   a gateway in this state is re-recorded by minting it a fresh credential through the dashboard,
   which is an act with a person behind it and needs no claim on anyone's behalf.
 - **Accounts whose gateway row is gone** cannot fire a trigger at all.
-  `scripts/revoke-orphaned-broker-accounts.mjs` reads the password file, subtracts every gateway row
-  (archived included — those belong to the trigger and the sweep), and rotates what is left through
-  `revoke_gateway_credential()`. Dry run by default. It considers only `gwy` + 21 hex characters, so
-  it can never select `factoryplus_ingestion` and stop the stack ingesting.
+  `scripts/revoke-orphaned-broker-accounts.mjs` reads the broker's client list, subtracts every
+  gateway row (archived included — those belong to the trigger and the sweep), and disables what is
+  left through `revoke_gateway_credential()`. Dry run by default. It considers only enabled
+  `gwy` + 21 hex character accounts, so it can never select `factoryplus_ingestion` and stop the
+  stack ingesting. The Access Control page lists the same accounts under *Accounts with no gateway*.
 
 ### What the inventory still cannot see
 
@@ -1763,6 +1768,27 @@ overlap. Rotating a ten-year one left ten years.
 The page lists every gateway with what the platform knows about its broker credential, lists the
 machine identities on both planes, lets an Administrator create one, mints tokens for the identities
 that read one, and shows what stands against each.
+
+**It also reads the broker (`0102`).** Since the broker's accounts moved to its Dynamic Security
+plugin ([`mosquitto/README.md`](../mosquitto/README.md)), the page holds two columns for each
+gateway: **Credential**, what the platform issued and recorded, and **Broker**, what the broker
+holds at the moment of the read — *Active*, *Disabled* or *No account* — through the
+`broker-inventory` function, which forwards the credential service's `listClients` and `listRoles`
+to an Administrator with every hash stripped. The pair is the point: a gateway issued on the host
+reads *No platform record* beside *Active*, and one revoked since reads *Issued* beside *Disabled*.
+Accounts shaped like a gateway id that no row claims and nothing declares are listed under
+*Accounts with no gateway*, which is what `scripts/revoke-orphaned-broker-accounts.mjs` disables.
+The page is two sections: *Gateways* holds those two lists, *Services* the database principals,
+the broker's own accounts and the broker roles. *Broker accounts* is every non-gateway account the
+broker holds, live, with the purpose of the role each holds; the validator's test gateway
+(`gwy11…`, created at boot from `MQTT_VALIDATOR_*` rather than issued against a row, and only when
+that pair is set) is declared in `serviceIdentities.js` and listed there rather than as a stray.
+The roles table counts each role's live rules and opens them in the context drawer, annotated with
+a purpose declared in `serviceIdentities.js`; `check-docs-drift.mjs` holds that list and
+`mosquitto/dynsec-roles.json` together. Revocation is
+now `disableClient`: the live session is dropped at once, the account stays listed as disabled, and
+a re-issue re-enables it. When the broker cannot be read the column says *Not read* and the page
+says why once, rather than drawing an empty column that reads as no accounts.
 
 `tokenStatus()` counts **every** unexpired mint rather than reading the latest, because a re-mint
 adds a live credential rather than replacing one — reporting the newer of two would state half the
@@ -3175,7 +3201,7 @@ cannot use a capability should not hold it.
 ### The path is confined by the database, not by the uploader
 
 Every object must live under `<sparkplug_id>/`, and that folder must name a gateway that exists.
-Same idea as `mosquitto.acl`'s `pattern readwrite spBv1.0/+/+/%u/#` one layer up: **the client does
+Same idea as the broker's per-gateway role (`spBv1.0/+/+/<sparkplug_id>/#`) one layer up: **the client does
 not get to assert where its data belongs.** A convention the frontend happens to follow is not a
 control — Storage's REST API is reachable with any authenticated session.
 

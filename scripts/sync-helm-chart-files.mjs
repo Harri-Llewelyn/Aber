@@ -129,18 +129,18 @@ const MIRRORS = [
   {
     source: 'mosquitto',
     dest: 'mosquitto',
-    // mosquitto.conf declares `acl_file`, `allow_anonymous` and `password_file` ONCE in its global
-    // section, which is what guarantees the TCP, WebSocket and TLS listeners are authorised
-    // identically -- and, on 2.0.x, is the difference between a broker that starts and one that
-    // exits 3 on "Duplicate password_file value". The three files are one policy and must travel
-    // together.
+    // mosquitto.conf declares `allow_anonymous` and the Dynamic Security `plugin` ONCE in its
+    // global section, which is what guarantees the TCP, WebSocket and TLS listeners authenticate
+    // and authorise identically. dynsec-roles.json is the policy the plugin enforces, written into
+    // its document by the boot reconcile on both targets. The three files are one policy and must
+    // travel together.
     //
     // mosquitto-tls.conf is the 8883 listener, APPENDED to mosquitto.conf only where certificates
     // exist. It is mirrored unconditionally because the chart decides whether to append it at
     // render time; a missing file would fail the render instead of turning the listener off.
     match: (name) =>
-      name === 'mosquitto.conf' || name === 'mosquitto.acl' || name === 'mosquitto-tls.conf',
-    why: 'Broker config, topic ACL and the optional MQTTS listener; repository-managed policy, mounted read-only on both targets',
+      name === 'mosquitto.conf' || name === 'dynsec-roles.json' || name === 'mosquitto-tls.conf',
+    why: 'Broker config, the plugin\'s roles and the optional MQTTS listener; repository-managed policy, mounted read-only on both targets',
   },
   {
     source: 'scripts',
@@ -161,12 +161,14 @@ const MIRRORS = [
   {
     source: 'scripts',
     dest: 'gateway-credential',
-    // The service ONLY. Compose bind-mounts these two from scripts/; the chart projects them
-    // through a ConfigMap, with the library restored to `lib/` by the volume's `items` -- see
-    // templates/messaging/gateway-credential.yaml. The image supplies the runtime (node, and
-    // mosquitto_passwd), the chart supplies the code, so a script change needs no image rebuild.
-    match: (name) => name === 'gateway-credential-service.mjs',
-    why: 'The credential-issuing sidecar in the broker pod; mints one gateway account per call',
+    // The two scripts that run on the credential service's image: the boot reconcile (the
+    // broker's initContainer) and the service (a sidecar). Compose bind-mounts them from scripts/;
+    // the chart projects them through a ConfigMap, with the libraries restored to `lib/` by the
+    // volume's `items` -- see templates/messaging/mosquitto.yaml. The image supplies the runtime
+    // (node, mosquitto_passwd, mosquitto_rr), the chart supplies the code, so a script change
+    // needs no image rebuild.
+    match: (name) => name === 'gateway-credential-service.mjs' || name === 'mosquitto-dynsec-init.mjs',
+    why: 'The broker\'s boot reconcile and the credential service; both run on the gateway-credential image in the broker pod',
   },
   {
     source: 'scripts',
@@ -184,11 +186,12 @@ const MIRRORS = [
     // theorised: the first attempt shared `gateway-credential` and the sync reported
     // "updated ... / removed ...' for the same path in a single pass.)
     //
-    // The two files are reunited at MOUNT time instead: the ConfigMap carries both and the volume's
-    // `items` restores this one to `lib/`. See templates/messaging/gateway-credential.yaml.
+    // The files are reunited at MOUNT time instead: the ConfigMap carries them all and the
+    // volume's `items` restores these to `lib/`. See templates/messaging/mosquitto.yaml.
     dest: 'gateway-credential-lib',
-    match: (name) => name === 'mosquitto-credentials.mjs',
-    why: 'The shared merge -- the truncation guard both the CLI and the service depend on',
+    match: (name) =>
+      name === 'mosquitto-credentials.mjs' || name === 'mosquitto-dynsec.mjs' || name === 'mosquitto-control.mjs',
+    why: 'The credential, policy and control-API libraries the reconcile and the service share',
   },
   {
     source: 'grafana',

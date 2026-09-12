@@ -195,11 +195,11 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                   {copied === 'user' ? <IconCheck size={13} /> : <IconCopy size={13} />}
                 </button>
               </div>
-              {/* Said explicitly because it looks like a coincidence and is a constraint:
-                  mosquitto.acl pins the topic's edge-node segment to the connecting username. */}
+              {/* Said explicitly because it looks like a coincidence and is a constraint: the
+                  gateway's broker role confines it to its own edge-node segment. */}
               <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>
-                This is the gateway’s Sparkplug ID, and it cannot be anything else — the broker’s ACL
-                matches the topic against the connecting username.
+                This is the gateway’s Sparkplug ID, and it cannot be anything else — the broker
+                confines the account to the edge node named by its username.
               </div>
             </div>
 

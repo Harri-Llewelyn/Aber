@@ -5,7 +5,7 @@ WHAT THIS PROTECTS, IN ORDER OF HOW BADLY IT FAILS. Every failure in this file i
 production -- there is no exception, no log line and no error count, only an empty historian --
 which is why they are asserted here rather than left to a live run to reveal.
 
-  1. THE IDENTITY REWRITE. mosquitto.acl confines a client to `spBv1.0/+/+/%u/#`, and a publish
+  1. THE IDENTITY REWRITE. The broker's roles confine a client to `spBv1.0/+/+/<sparkplug_id>/#`, and a publish
      outside that is dropped by the broker with no PUBACK at QoS 0. A playback that failed to
      rewrite the edge-node segment would connect, publish every message, report success, and move
      nothing. validate.py has already had this exact run.

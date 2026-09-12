@@ -12,7 +12,7 @@ the broker could publish under any device's id. Three consequences, in ascending
      which silently stops its real telemetry being stored. A denial of service against a
      production asset, triggered by one message.
 
-`mosquitto.acl` closes the same hole at the broker tier. Both are needed: the broker cannot know
+The broker's roles close the same hole at the broker tier. Both are needed: the broker cannot know
 which device belongs to which gateway (that lives in Supabase), and the daemon cannot stop a
 forged message being delivered to other subscribers.
 

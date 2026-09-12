@@ -178,6 +178,13 @@ const BASE_IMAGE_COUPLINGS = [
     // image; a drift here is a dumping client older than the database it dumps.
     why: 'Compose runs this image directly (supabase-db); the backup service is built FROM it for its pg_dump.',
   },
+  {
+    dockerfile: join('gateway-credential', 'Dockerfile'),
+    base: 'eclipse-mosquitto',
+    // The hash mosquitto_passwd writes is verified by the broker, and mosquitto_rr speaks to the
+    // broker's plugin; both come from this image so they cannot disagree with the broker.
+    why: 'Compose runs this image directly (mosquitto); the credential service and the boot reconcile are built FROM it for its mosquitto_passwd and mosquitto_rr.',
+  },
 ];
 
 /** repo -> tag, from the FROM lines of a Dockerfile. ARG-parameterised bases are skipped. */
