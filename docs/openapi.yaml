@@ -2076,6 +2076,37 @@ paths:
         '403': { description: 'Forbidden: insufficient privileges.' }
 
   /functions/v1/gateway-bundle:
+    get:
+      tags: [Edge Functions]
+      summary: Whether this deployment can enrol an appliance
+      description: |
+        The readiness probe. Reports the two addresses an appliance dials, `SUPABASE_PUBLIC_URL`
+        and `MQTT_PUBLIC_HOST`, judged exactly as the `POST` below and `enroll-gateway` judge them,
+        so the dashboard can say before a remote gateway is created that its bundle could not be
+        issued. Nothing is minted and no gateway is read; any signed-in user may ask.
+      responses:
+        '200':
+          description: The answer.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ready:
+                    type: boolean
+                    description: True only when both addresses would be accepted.
+                  addresses:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        variable: { type: string, example: SUPABASE_PUBLIC_URL }
+                        value: { type: string, description: The configured value, empty when unset. }
+                        problem:
+                          type: string
+                          nullable: true
+                          description: Why an appliance could not use it, or null.
+        '401': { description: Missing or invalid Authorization header. }
     post:
       tags: [Edge Functions]
       summary: Download a physical gateway's bootstrap bundle (ZIP)

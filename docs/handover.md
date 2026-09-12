@@ -26,6 +26,7 @@ npm run setup                           # regenerate .env for the recipient
 ```
 
 The recipient runs `npm run setup` themselves — that is what makes the credentials theirs rather
-than a copy of yours. `.env.example` carries working development secrets so the stack still starts
+than a copy of yours. It asks for the hostname physical gateways reach their machine on; blank is
+accepted and means remote gateways cannot be enrolled until it is set. `.env.example` carries working development secrets so the stack still starts
 without it, which is a convenience and **not** a supported state for anything another person can
 reach.

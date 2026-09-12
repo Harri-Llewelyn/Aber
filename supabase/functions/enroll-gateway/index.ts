@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { brokerPublicHost } from "../_shared/publicAddresses.ts";
 import {
   forgeConfig,
   forgeKnownHosts,
@@ -85,14 +86,15 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 
-  if (mqttHost === "mosquitto" || mqttHost === "localhost" || mqttHost === "127.0.0.1") {
+  const broker = brokerPublicHost();
+  if (broker.problem) {
     console.error(`MQTT_PUBLIC_HOST is '${mqttHost}', which no appliance can resolve`);
     return json(503, {
       error: "Enrolment is not configured on this deployment",
       details:
-        `MQTT_PUBLIC_HOST is '${mqttHost}' -- an address that resolves only inside the stack. ` +
-        "Set it to the hostname or IP physical gateways dial, then re-issue the certificate " +
-        "(mosquitto-tls-init folds it into the broker certificate's SAN). No token was consumed.",
+        `MQTT_PUBLIC_HOST is ${broker.problem} -- set it to the hostname or IP physical gateways ` +
+        "dial, then re-issue the certificate (mosquitto-tls-init folds it into the broker " +
+        "certificate's SAN). No token was consumed.",
     });
   }
 

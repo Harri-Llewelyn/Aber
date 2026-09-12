@@ -151,6 +151,51 @@ class BundleBase(unittest.TestCase):
             rest(f"/gateways?id=eq.{gid}", method="DELETE")
 
 
+def probe(bearer=None):
+    """The readiness GET, as the dashboard sends it. Returns (status, body)."""
+    headers = {"apikey": ANON_KEY}
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    req = urllib.request.Request(f"{SUPABASE_URL}/functions/v1/gateway-bundle", method="GET", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            return response.status, json.loads(response.read().decode())
+    except urllib.error.HTTPError as err:
+        raw = err.read().decode()
+        return err.code, (json.loads(raw) if raw.strip() else None)
+
+
+class TestReadiness(BundleBase):
+    """
+    The GET the Gateways page asks before it offers a remote gateway. CI sets both addresses, so
+    the answer here is ready; the shape is what the dashboard reads, and a refusal mints nothing.
+    """
+
+    def test_any_signed_in_user_may_ask(self):
+        for role in ACCOUNTS:
+            with self.subTest(role=role):
+                status, body = probe(self.tokens[role])
+                self.assertEqual(status, 200, body)
+                self.assertIs(body["ready"], True, body)
+                self.assertEqual(
+                    sorted(a["variable"] for a in body["addresses"]),
+                    ["MQTT_PUBLIC_HOST", "SUPABASE_PUBLIC_URL"],
+                )
+                for address in body["addresses"]:
+                    self.assertIsNone(address["problem"], address)
+                    self.assertTrue(address["value"], address)
+
+    def test_probe_needs_a_signed_in_user(self):
+        status, _ = probe()
+        self.assertIn(status, (400, 401))
+
+    def test_probe_mints_nothing(self):
+        rest(f"/gateway_enrollment_tokens?gateway_id=eq.{PHYSICAL_GW}", method="DELETE")
+        probe(self.tokens["Administrator"])
+        _, rows = rest(f"/gateway_enrollment_tokens?gateway_id=eq.{PHYSICAL_GW}&select=id")
+        self.assertEqual(rows, [], "the readiness probe minted an enrolment token")
+
+
 class TestPermissions(BundleBase):
     def test_privileged_roles_may_download(self):
         for role in ("Administrator", "Shopfloor_Manager"):

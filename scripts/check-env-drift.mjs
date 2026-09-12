@@ -12,6 +12,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { publicAddressProblems } from './lib/public-host.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(REPO, p), 'utf8');
@@ -24,6 +25,13 @@ const note = (msg) => console.log(`  --    ${msg}`);
 /** Variable names assigned in a dotenv-style file. Comments and blanks ignored. */
 const declaredIn = (text) =>
   new Set([...text.matchAll(/^([A-Z_][A-Z0-9_]*)=/gm)].map((m) => m[1]));
+
+/** The same assignments with their values, unquoted. Enough for a hostname or a URL. */
+const valuesIn = (text) =>
+  Object.fromEntries(
+    [...text.matchAll(/^([A-Z_][A-Z0-9_]*)=(.*)$/gm)]
+      .map((m) => [m[1], m[2].trim().replace(/^(["'])(.*)\1$/, '$2')])
+  );
 
 // `$$` is Compose's escape for a literal `$`: `$${VAR}` reaches the container shell untouched and
 // is not a Compose variable, so those references are removed before the scan.
@@ -101,6 +109,20 @@ if (!existsSync(join(REPO, '.env'))) {
         `${dead.join(', ')}\n` +
         '        Retired from the template and doing nothing. Safe to delete from .env.'
     );
+  }
+
+  // C. The two addresses an appliance dials, judged as the two functions judge them. Advisory: a
+  // stack with no appliances is complete without them, and the Gateways page says the same.
+  const problems = publicAddressProblems(valuesIn(read('.env')));
+  if (problems.length) {
+    note(
+      `remote gateways cannot be enrolled against this .env: ${problems.join('; ')}\n` +
+        '        Host-run and simulated gateways are unaffected. `npm run setup` asks for the host\n' +
+        '        on a fresh .env; on this one, set MQTT_PUBLIC_HOST and SUPABASE_PUBLIC_URL and\n' +
+        '        restart (docs/physical-gateways.md, section 7).'
+    );
+  } else {
+    pass('MQTT_PUBLIC_HOST and SUPABASE_PUBLIC_URL name an address off the stack');
   }
 }
 
