@@ -15,7 +15,6 @@ cancel test stops the service container for a few seconds. Skips without the key
 """
 import json
 import os
-import subprocess
 import sys
 import time
 import unittest
@@ -23,26 +22,24 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "supabase", "functions", "enroll-gateway"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
 from test_enroll_gateway import ADMIN_PASSWORD, ANON_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, rest, sign_in  # noqa: E402
+import stack_exec  # noqa: E402  -- docker exec on Compose, kubectl exec on Kubernetes (ACS_STACK)
 
-SERVICE_CONTAINER = os.getenv("BACKUP_CONTAINER", "acs-cymru_backup_service")
-DB_CONTAINER = os.getenv("DB_CONTAINER", "acs-cymru_supabase_db")
 OPERATOR_EMAIL = os.getenv("ACS_OPERATOR_EMAIL", "operator@acs-cymru.local")
 NOTE = "test_backup_service.py"
 # A backup of a developer stack takes well under a minute; a poll of fifteen seconds precedes it.
 BACKUP_TIMEOUT_SECONDS = int(os.getenv("BACKUP_TIMEOUT_SECONDS", "300"))
 
 
-def docker(*args, check=True):
-    result = subprocess.run(["docker", *args], capture_output=True, text=True)
-    if check and result.returncode != 0:
-        raise RuntimeError(f"docker {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout
+def service(*args, check=True):
+    """Run a command inside the backup service, where the files it wrote live."""
+    return stack_exec.run("backup-service", *args, check=check).stdout
 
 
 def psql(sql):
     """One statement as postgres, the way the migrations run."""
-    return docker("exec", DB_CONTAINER, "psql", "-U", "postgres", "-d", "postgres", "-At", "-c", sql).strip()
+    return stack_exec.output("supabase-db", "psql", "-U", "postgres", "-d", "postgres", "-At", "-c", sql).strip()
 
 
 def rpc(name, body, bearer):
@@ -57,17 +54,14 @@ def query(path, bearer):
     return rest(path, key=ANON_KEY, bearer=bearer)[1]
 
 
-def container_running(name):
-    return docker("inspect", "-f", "{{.State.Running}}", name, check=False).strip() == "true"
-
 
 @unittest.skipIf(not SERVICE_ROLE_KEY or not ANON_KEY, "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY must be set")
 class BackupServiceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.admin = sign_in()
-        if not container_running(SERVICE_CONTAINER):
-            raise unittest.SkipTest(f"{SERVICE_CONTAINER} is not running")
+        if not stack_exec.running("backup-service"):
+            raise unittest.SkipTest(f"{stack_exec.describe('backup-service')} is not running")
         # A clean slate: a job left over from an earlier run would make the single-flight refusal
         # fire on the wrong test.
         psql("UPDATE public.backup_jobs SET status = 'CANCELLED', finished_at = now() WHERE status = 'PENDING'")
@@ -75,12 +69,12 @@ class BackupServiceTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        if not container_running(SERVICE_CONTAINER):
-            docker("start", SERVICE_CONTAINER)
+        if not stack_exec.running("backup-service"):
+            stack_exec.start("backup-service")
         # The backups this file took: files first, then the row, the way the service prunes.
         for line in psql(f"SELECT id || ' ' || location FROM public.backups WHERE note = '{NOTE}'").splitlines():
             backup_id, location = line.split(" ", 1)
-            docker("exec", SERVICE_CONTAINER, "rm", "-rf", location, check=False)
+            service("rm", "-rf", location, check=False)
             psql(f"UPDATE public.backups SET pinned = false WHERE id = '{backup_id}'")
             psql(f"SELECT public.backup_forget('{backup_id}', 'test_backup_service.py cleanup')")
 
@@ -146,18 +140,18 @@ class BackupServiceTests(unittest.TestCase):
         self.assertEqual(backup["size_bytes"], sum(c["size_bytes"] for c in backup["components"]))
 
         # The files are where the row says, as big as it says, with the digest it says.
-        listing = docker("exec", SERVICE_CONTAINER, "ls", "-1", backup["location"]).split()
+        listing = service("ls", "-1", backup["location"]).split()
         self.assertIn(f"manifest-{backup['stamp']}.txt", listing)
         self.assertIn("manifest.json", listing)
         for component in backup["components"]:
             self.assertIn(component["file"], listing)
-            digest = docker("exec", SERVICE_CONTAINER, "sha256sum", f"{backup['location']}/{component['file']}").split()[0]
+            digest = service("sha256sum", f"{backup['location']}/{component['file']}").split()[0]
             self.assertEqual(digest, component["sha256"], component["file"])
-            size = int(docker("exec", SERVICE_CONTAINER, "stat", "-c", "%s", f"{backup['location']}/{component['file']}"))
+            size = int(service("stat", "-c", "%s", f"{backup['location']}/{component['file']}"))
             self.assertEqual(size, component["size_bytes"], component["file"])
 
         # The text manifest names the dumps the way restore-databases.sh looks them up.
-        manifest = docker("exec", SERVICE_CONTAINER, "cat", f"{backup['location']}/manifest-{backup['stamp']}.txt")
+        manifest = service("cat", f"{backup['location']}/manifest-{backup['stamp']}.txt")
         self.assertIn(f"stamp={backup['stamp']}", manifest)
         self.assertIn("format=", manifest)
         self.assertIn("supabase_db=supabase-db-", manifest)
@@ -167,7 +161,7 @@ class BackupServiceTests(unittest.TestCase):
         # The forge archive carries a database copy that passes its own integrity check.
         forge = next(c for c in backup["components"] if c["name"] == "forge")
         self.assertIn(forge.get("sqlite"), ("sqlite-online-backup", "raw-copy-with-checkpoint"))
-        members = docker("exec", SERVICE_CONTAINER, "tar", "-tzf", f"{backup['location']}/{forge['file']}")
+        members = service("tar", "-tzf", f"{backup['location']}/{forge['file']}")
         self.assertIn("gitea/gitea.db", members)
         self.assertIn("./ssh/", members, "the host keys appliances pin are in the archive")
 
@@ -178,7 +172,7 @@ class BackupServiceTests(unittest.TestCase):
         ), "service true")
 
     def test_04_a_queued_request_refuses_a_twin_and_can_be_cancelled(self):
-        docker("stop", SERVICE_CONTAINER)
+        stack_exec.stop("backup-service")
         try:
             status, job_id = rpc("request_backup", {"p_note": NOTE}, self.admin)
             self.assertEqual(status, 200, job_id)
@@ -196,7 +190,7 @@ class BackupServiceTests(unittest.TestCase):
                 f"AND entity_id = '{job_id}' AND action = 'BACKUP_CANCELLED' AND actor_source = 'user'"
             ), "1")
         finally:
-            docker("start", SERVICE_CONTAINER)
+            stack_exec.start("backup-service")
 
     def test_05_a_pinned_backup_is_released_once(self):
         rows = query(f"/backups?note=eq.{NOTE}&pinned=eq.true&select=id&order=taken_at.desc&limit=1", self.admin)

@@ -49,6 +49,39 @@ cluster. Point the context at loopback instead, with the port `docker ps` shows 
 kubectl config set-cluster k3d-acs-cymru --server=https://127.0.0.1:<port>
 ```
 
+### The development loop
+
+`scripts/dev-cluster.mjs` is the cluster above and the install below as one command each, with the
+stack lane added: the same steps CI's k8s-validation job runs, repeatable on a laptop.
+
+```bash
+npm run dev:up        # cluster if absent, cert-manager and the internal CA, the nine images built
+                      # and imported, helm upgrade --install with values-dev.yaml, every hook and
+                      # rollout waited for, the daemon subscribed, helm test
+npm run dev:test      # validate.py and the stack lane from the host, through port-forwards
+npm run dev:forward   # the port-forwards alone, held until Ctrl+C
+npm run dev:reset     # uninstall, drop every claim, reinstall: a blank stack, same images
+npm run dev:down      # delete the cluster
+```
+
+`up` installs on the dev values' loopback domain, so every host resolves on this machine whatever
+the resolver does, and gives the two functions that address an appliance this machine's LAN address
+instead: the broker's TLS listener, which `up` turns on, carries it in its certificate, and the
+bundle's API address is `api.<LAN address>.nip.io`, which resolves only where the resolver answers
+nip.io names carrying private addresses (many home routers refuse to, as DNS-rebind protection).
+`--domain=<LAN address>.nip.io` moves every host onto the LAN where it does. `up` also enables the
+backup service, taking storage and the forge as a Compose backup does, and generates the forge
+sweep secret once; the stack lane exercises all of it. `--no-tls` leaves the listener off,
+`--no-build` reuses the images already in the node, `--only=ingestion` rebuilds a subset, `--e2e`
+adds the in-cluster conformance Jobs.
+
+The port-forwards carry the host port numbers Compose published (`5433` for the historian,
+`54322` and `54321` for Supabase, `1880`, `3002`, `9090`, `3100` and the rest), so every host-side
+tool keeps its defaults. `test` builds the suites' environment from `.env.example` for the
+non-secret settings and from the release's own Secret for every credential, and sets
+`ACS_STACK=k8s`, which tells the suites that reach into a container (`test-harness/stack_exec.py`)
+to use `kubectl exec` against the workload rather than `docker exec` against a container name.
+
 ## Install
 
 Two paths, and they are for genuinely different situations. **From the registry** if you want to

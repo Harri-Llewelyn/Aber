@@ -338,6 +338,8 @@ application role**, so dropping the volume is the only way back to an empty audi
 Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short version:
 
 ```bash
+# Everything below in one command, plus the waits and helm test: npm run dev:up
+#   (deploy/k8s/README.md, "The development loop"). Step by step:
 # Nine images are built from this repository. They are published to GHCR at the chart's
 # appVersion, and the chart pulls them under exactly these names: a local build that is
 # tagged any other way is ignored. deploy/k8s/README.md says what each one is for.

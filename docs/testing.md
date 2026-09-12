@@ -14,7 +14,7 @@ cd frontend && npm test
 npm run test:py          # lane: unit  — needs nothing at all
 npm run test:py:db       # lane: db    — needs a migrated Postgres (see `npm run test:db` below,
                          #               which starts a throwaway one and runs this same lane)
-npm run test:py:stack    # lane: stack — needs the composed stack up
+npm run test:py:stack    # lane: stack — needs a running stack (Compose; on k3d, npm run dev:test)
 
 # The individual commands below still work and are the reference for WHAT each suite covers. They
 # are not the list CI runs from; there is no such list any more.

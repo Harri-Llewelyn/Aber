@@ -22,36 +22,26 @@ regresses:
   * THE INVENTORY CARRIES NO HASH. `listClients` returns each client's salt and iterations; the
     service drops them, because the Access Control page shows what it returns.
 
-Requires the stack up (`docker compose up -d`) and MQTT_CREDENTIAL_SERVICE_TOKEN from .env:
+Requires the stack up (Compose, or a cluster with ACS_STACK=k8s) and MQTT_CREDENTIAL_SERVICE_TOKEN:
 
     MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 """
 import json
 import os
-import subprocess
+import sys
 import unittest
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
+import stack_exec  # noqa: E402  -- docker exec on Compose, kubectl exec on Kubernetes (ACS_STACK)
+
 TOKEN = os.getenv("MQTT_CREDENTIAL_SERVICE_TOKEN", "")
-SERVICE_CONTAINER = os.getenv("CREDENTIAL_CONTAINER", "acs-cymru_gateway_credential")
-BROKER_CONTAINER = os.getenv("MOSQUITTO_CONTAINER", "acs-cymru_mosquitto")
 
 # Not a real gateway. It needs no database row: this service issues BROKER accounts and knows
 # nothing about the gateways table -- binding a device to a gateway is verify_gateway_binding()'s
 # job, one layer up. The id only has to satisfy GATEWAY_ID_PATTERN.
 TEST_GW = "gwy2f0000000000400080000"
-
-
-def docker(container, *args, check=True):
-    """Run a command in a container and return stdout."""
-    result = subprocess.run(
-        ["docker", "exec", container, *args],
-        capture_output=True, text=True,
-    )
-    if check and result.returncode != 0:
-        raise RuntimeError(f"{' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout
 
 
 def delete_client(username):
@@ -60,11 +50,10 @@ def delete_client(username):
     service never deletes, so this is the one place a delete is spoken; the per-gateway role is
     left where it is, because deleting a role a client holds took the broker down when measured.
     """
-    subprocess.run(
-        ["docker", "exec", SERVICE_CONTAINER, "sh", "-c",
-         'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
-         f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec deleteClient {username}'],
-        capture_output=True, text=True,
+    stack_exec.run(
+        "credential", "sh", "-c",
+        'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
+        f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec deleteClient {username}',
     )
 
 
@@ -97,18 +86,15 @@ def call(body=None, token=TOKEN, path="/credentials", raw_body=None, method="POS
     has to be made from within. A host-side client has nowhere to connect, which is itself asserted
     by test_host_cannot_reach_it_directly.
     """
-    env = [
-        "-e", f"REQ_BODY={raw_body if raw_body is not None else json.dumps(body)}",
-        "-e", f"REQ_PATH={path}",
-        "-e", f"REQ_METHOD={method}",
-    ]
+    env = {
+        "REQ_BODY": raw_body if raw_body is not None else json.dumps(body),
+        "REQ_PATH": path,
+        "REQ_METHOD": method,
+    }
     if token is not None:
-        env += ["-e", f"REQ_TOKEN={token}"]
+        env["REQ_TOKEN"] = token
 
-    result = subprocess.run(
-        ["docker", "exec", *env, SERVICE_CONTAINER, "node", "-e", _CLIENT],
-        capture_output=True, text=True,
-    )
+    result = stack_exec.run("credential", "node", "-e", _CLIENT, env=env)
     if result.returncode != 0:
         raise RuntimeError(f"client failed: {result.stderr.strip()}")
 
@@ -142,12 +128,11 @@ def client_entry(username):
 
 def publish_as(username, password):
     """Publish under the account's own edge node over MQTTS; the exit status is the broker's answer."""
-    return subprocess.run(
-        ["docker", "exec", BROKER_CONTAINER, "mosquitto_pub",
-         "--cafile", "/mosquitto/certs/ca.crt", "-h", "localhost", "-p", "8883",
-         "-u", username, "-P", password,
-         "-t", f"spBv1.0/ACS-Cymru/DBIRTH/{username}/probe", "-m", "x"],
-        capture_output=True, text=True,
+    return stack_exec.run(
+        "broker", "mosquitto_pub",
+        "--cafile", "/mosquitto/certs/ca.crt", "-h", stack_exec.broker_host(), "-p", "8883",
+        "-u", username, "-P", password,
+        "-t", f"spBv1.0/ACS-Cymru/DBIRTH/{username}/probe", "-m", "x",
     )
 
 
@@ -155,13 +140,10 @@ def publish_as(username, password):
 class CredentialServiceBase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        probe = subprocess.run(
-            ["docker", "exec", SERVICE_CONTAINER, "wget", "-qO-", "http://127.0.0.1:9010/healthz"],
-            capture_output=True, text=True,
-        )
+        probe = stack_exec.run("credential", "wget", "-qO-", "http://127.0.0.1:9010/healthz")
         if probe.returncode != 0:
             raise unittest.SkipTest(
-                f"{SERVICE_CONTAINER} is not answering /healthz -- is the stack up?"
+                f"{stack_exec.describe('credential')} is not answering /healthz -- is the stack up?"
             )
 
     def tearDown(self):
@@ -171,7 +153,7 @@ class CredentialServiceBase(unittest.TestCase):
 
 class TestAuthentication(CredentialServiceBase):
     def test_healthz_is_open_and_says_nothing(self):
-        body = docker(SERVICE_CONTAINER, "wget", "-qO-", "http://127.0.0.1:9010/healthz")
+        body = stack_exec.output("credential", "wget", "-qO-", "http://127.0.0.1:9010/healthz")
         payload = json.loads(body)
         self.assertEqual(payload["status"], "ok")
         # Liveness and the configured target ONLY. A health endpoint that leaked the account list
@@ -341,10 +323,7 @@ class TestExposure(CredentialServiceBase):
         issuance on the host interface, and issuance is -- through the gateway's role -- the ability
         to publish Sparkplug telemetry as any gateway on the site.
         """
-        ports = subprocess.run(
-            ["docker", "port", SERVICE_CONTAINER],
-            capture_output=True, text=True,
-        ).stdout.strip()
+        ports = stack_exec.published_ports("credential")
         self.assertEqual(ports, "", f"the credential service is published on the host: {ports}")
 
     def test_host_cannot_reach_it_directly(self):

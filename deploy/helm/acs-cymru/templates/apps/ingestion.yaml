@@ -87,19 +87,6 @@ spec:
           image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
           imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
           env:
-            {{- /*
-              JSON LOGS, matching docker-compose.yml so the targets do not diverge -- see roadmap
-              13. The daemon's `reason`, `device` and `edge_node` become top-level keys rather
-              than an appended `[reason=...]`, which is what makes a log query filter on them.
-
-              SET ON BOTH TARGETS EVEN THOUGH THIS CHART DEPLOYS NO LOKI. A cluster's own log
-              stack parses JSON better than prose too, and leaving this unset here to mirror the
-              absent store would be a silent behavioural difference in the daemon itself -- which
-              is exactly what the divergence table exists to prevent. The store is the divergence;
-              the log FORMAT is not.
-            */}}
-            - name: LOG_FORMAT
-              value: "json"
             {{- include "acs-cymru.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
           command:
             - /bin/sh
@@ -194,6 +181,11 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 12 }}
             - name: PYTHONUNBUFFERED
               value: "1"
+            # JSON log lines, as on Compose: `reason`, `device` and `edge_node` are top-level keys,
+            # which is what a Loki `| json` query filters on. This sat on the init container's env
+            # until the first live log-pipeline run against the chart found the daemon logging prose.
+            - name: LOG_FORMAT
+              value: "json"
             # Enables the heartbeat the liveness probe reads. UNSET IS A NO-OP, which is why the
             # Compose path is unaffected by any of this.
             - name: INGESTION_HEALTH_FILE

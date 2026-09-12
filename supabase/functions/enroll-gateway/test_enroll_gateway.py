@@ -27,16 +27,33 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import urllib.error
 import urllib.request
 import uuid
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "test-harness"))
+import stack_exec  # noqa: E402  -- docker exec on Compose, kubectl exec on Kubernetes (ACS_STACK)
+
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-CREDENTIAL_CONTAINER = os.getenv("CREDENTIAL_CONTAINER", "acs-cymru_gateway_credential")
+
+
+def delete_broker_account(username):
+    """
+    Remove a broker account an enrolment created, through the credential service's own admin
+    credential: the one place a delete is spoken, since the service itself never deletes. The
+    forge suites share this, because their enrolments leave the same account behind.
+    """
+    stack_exec.run(
+        "credential", "sh", "-c",
+        'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
+        f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec deleteClient {username}',
+    )
+
 
 # A physical gateway created and torn down by this suite. Pinned so a crashed run leaves a row the
 # next setUpClass reclaims rather than accumulating gateways. Distinct from the migration suite's
@@ -126,7 +143,11 @@ def enroll(token, agent_version=None, key=None, ssh_public_key=None):
             return response.status, json.loads(response.read().decode())
     except urllib.error.HTTPError as err:
         raw = err.read().decode()
-        return err.code, (json.loads(raw) if raw.strip() else None)
+        # A gateway timeout arrives as text, not JSON; kept whole so the assertion can show it.
+        try:
+            return err.code, (json.loads(raw) if raw.strip() else None)
+        except json.JSONDecodeError:
+            return err.code, {"raw": raw}
 
 
 @unittest.skipIf(not SERVICE_ROLE_KEY or not ANON_KEY,
@@ -169,12 +190,7 @@ class EnrollGatewayBase(unittest.TestCase):
         # The broker account outlives the row (the plugin knows nothing about gateways), so it is
         # removed explicitly or it accumulates across runs. Deleted through the service container's
         # own admin credential, the one place a delete is spoken; the service itself never does.
-        subprocess.run(
-            ["docker", "exec", "acs-cymru_gateway_credential", "sh", "-c",
-             'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
-             f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec deleteClient {cls.sparkplug_id}'],
-            capture_output=True, text=True,
-        )
+        delete_broker_account(cls.sparkplug_id)
 
     def issue_token(self, ttl_minutes=30):
         """Mint a token exactly as the dashboard does: anon key, Administrator's access token."""
@@ -247,13 +263,12 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         token = self.issue_token()
         _, payload = enroll(token)
 
-        publish = subprocess.run(
-            ["docker", "exec", "acs-cymru_mosquitto", "mosquitto_pub",
-             "--cafile", "/mosquitto/certs/ca.crt", "-h", "localhost", "-p", "8883",
-             "-u", payload["mqtt_username"], "-P", payload["mqtt_password"],
-             "-t", f"spBv1.0/{payload['sparkplug_group']}/DBIRTH/{payload['sparkplug_id']}/probe",
-             "-m", "x"],
-            capture_output=True, text=True,
+        publish = stack_exec.run(
+            "broker", "mosquitto_pub",
+            "--cafile", "/mosquitto/certs/ca.crt", "-h", stack_exec.broker_host(), "-p", "8883",
+            "-u", payload["mqtt_username"], "-P", payload["mqtt_password"],
+            "-t", f"spBv1.0/{payload['sparkplug_group']}/DBIRTH/{payload['sparkplug_id']}/probe",
+            "-m", "x",
         )
         self.assertEqual(publish.returncode, 0,
                          f"the enrolled credential was refused: {publish.stderr.strip()}")
@@ -263,18 +278,15 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         token = self.issue_token()
         _, payload = enroll(token)
 
-        verify = subprocess.run(
-            ["docker", "exec", "-i", CREDENTIAL_CONTAINER, "sh", "-c",
-             "cat > /tmp/ca.pem && openssl verify -CAfile /tmp/ca.pem /mosquitto/certs/tls.crt"],
-            input=payload["ca_cert"], capture_output=True, text=True,
+        verify = stack_exec.run(
+            "credential", "sh", "-c",
+            "cat > /tmp/ca.pem && openssl verify -CAfile /tmp/ca.pem /mosquitto/certs/tls.crt",
+            input=payload["ca_cert"],
         )
         # openssl is not in this image; fall back to comparing against the CA on disk, which is the
         # same assertion by a weaker route.
         if verify.returncode != 0 and "not found" in (verify.stderr or ""):
-            on_disk = subprocess.run(
-                ["docker", "exec", CREDENTIAL_CONTAINER, "cat", "/mosquitto/certs/ca.crt"],
-                capture_output=True, text=True,
-            ).stdout
+            on_disk = stack_exec.run("credential", "cat", "/mosquitto/certs/ca.crt").stdout
             self.assertEqual(payload["ca_cert"].strip(), on_disk.strip())
         else:
             self.assertEqual(verify.returncode, 0, verify.stderr)
@@ -362,22 +374,14 @@ class TestCredentialServiceFailure(EnrollGatewayBase):
 
     def tearDown(self):
         if self.stopped:
-            subprocess.run(["docker", "start", CREDENTIAL_CONTAINER],
-                           capture_output=True, text=True)
+            stack_exec.start("credential")
             # Wait for it to answer again so the next test is not racing the restart.
-            for _ in range(30):
-                probe = subprocess.run(
-                    ["docker", "exec", CREDENTIAL_CONTAINER, "wget", "-qO-",
-                     "http://127.0.0.1:9010/healthz"],
-                    capture_output=True, text=True,
-                )
-                if probe.returncode == 0:
-                    break
+            stack_exec.wait_until("credential", "wget", "-qO-", "http://127.0.0.1:9010/healthz")
 
     def test_returns_503_and_releases_the_claim(self):
         token = self.issue_token()
 
-        subprocess.run(["docker", "stop", CREDENTIAL_CONTAINER], capture_output=True, text=True)
+        stack_exec.stop("credential")
         self.stopped = True
 
         status, payload = enroll(token)
@@ -389,15 +393,8 @@ class TestCredentialServiceFailure(EnrollGatewayBase):
 
         # THE CLAIM WAS RELEASED -- asserted by the token working once the service is back, which is
         # the behaviour that matters rather than the row's internal state.
-        subprocess.run(["docker", "start", CREDENTIAL_CONTAINER], capture_output=True, text=True)
-        for _ in range(30):
-            probe = subprocess.run(
-                ["docker", "exec", CREDENTIAL_CONTAINER, "wget", "-qO-",
-                 "http://127.0.0.1:9010/healthz"],
-                capture_output=True, text=True,
-            )
-            if probe.returncode == 0:
-                break
+        stack_exec.start("credential")
+        stack_exec.wait_until("credential", "wget", "-qO-", "http://127.0.0.1:9010/healthz")
         self.stopped = False
 
         retried, retry_payload = enroll(token)
@@ -761,7 +758,10 @@ class TestForgeProvisioning(EnrollGatewayBase):
         )
 
         ssh_url = repository["ssh_url"]
-        match = re.match(r"^ssh://(?:[^@/]+@)?([^/:]+)(?::(\d+))?", ssh_url)
+        # `ssh://git@host:2222/owner/repo.git` where the forge publishes SSH on a non-default port
+        # (Compose), `git@host:owner/repo.git` where it is on 22 (the chart's LoadBalancer).
+        match = (re.match(r"^ssh://(?:[^@/]+@)?([^/:]+)(?::(\d+))?", ssh_url)
+                 or re.match(r"^(?:[^@/:]+@)?([^/:]+):(\d*)", ssh_url))
         self.assertIsNotNone(match, f"unexpected clone URL shape: {ssh_url}")
         expected = (
             f"[{match.group(1)}]:{match.group(2)}"

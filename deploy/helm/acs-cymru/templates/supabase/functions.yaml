@@ -120,7 +120,7 @@ spec:
               =========================================================================================
             */}}
             - name: SUPABASE_PUBLIC_URL
-              value: {{ include "acs-cymru.supabaseUrl" . | quote }}
+              value: {{ .Values.supabaseFunctions.gatewayEnrolment.supabasePublicUrl | default (include "acs-cymru.supabaseUrl" .) | quote }}
             {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
                    already derives for the external broker route, which is the address the
                    certificate's SAN carries -- see mosquitto.tls in values.yaml. */}}

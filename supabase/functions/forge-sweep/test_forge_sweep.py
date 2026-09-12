@@ -30,7 +30,9 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "enroll-gateway"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "forge-membership"))
-from test_enroll_gateway import ANON_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, enroll, rest, sign_in  # noqa: E402
+from test_enroll_gateway import (  # noqa: E402
+    ANON_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
+)
 from test_forge_membership import (  # noqa: E402
     FORGE_URL, MACHINE_PASSWORD, MACHINE_USER, ORGANISATION, PERSONAS, members_of, request, through_the_door,
 )
@@ -191,14 +193,8 @@ class TestRepositories(ForgeSweepBase):
     @classmethod
     def tearDownClass(cls):
         cls.delete_repositories()
-        # The broker account outlives the row; deleted through the service container's admin
-        # credential, as test_enroll_gateway.py does.
-        subprocess.run(
-            ["docker", "exec", "acs-cymru_gateway_credential", "sh", "-c",
-             'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
-             f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec deleteClient {cls.sparkplug_id}'],
-            capture_output=True, text=True,
-        )
+        # The broker account outlives the row; deleted through the service's admin credential.
+        delete_broker_account(cls.sparkplug_id)
         rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
 
     @classmethod

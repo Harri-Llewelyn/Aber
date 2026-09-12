@@ -440,6 +440,9 @@ supabaseFunctions:
     # Empty = the `mqtt.<publicBaseDomain>` host the chart derives.
     mqttPublicHost: ""
     mqttPublicTlsPort: 8883
+    # The API an appliance dials, embedded in its bundle. Empty = the browser-facing Supabase
+    # URL; set it where that is a loopback domain, which gateway-bundle refuses to embed.
+    supabasePublicUrl: ""
 
   # AAS export. Declared on this service because an edge worker sees only the variables
   # main/index.ts forwards. Outbound references must name addresses the recipient of a shell

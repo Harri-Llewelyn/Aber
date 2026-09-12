@@ -66,21 +66,31 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- if or $includeStorage $includeForge }}
+      {{/*
+        The storage and forge volumes are ReadWriteOnce, so this pod has to sit on their node. ONE
+        term naming every component it follows: two required terms, one per component, leave the
+        pod Pending on k3s v1.35 ("didn't match pod affinity rules") even on a single node where
+        both run, measured 2026-09-12. A node-bound volume (local-path) pins the pod as well; this
+        is what carries the intent where the storage class does not.
+      */}}
       affinity:
         podAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
-            {{- if $includeStorage }}
             - topologyKey: kubernetes.io/hostname
               labelSelector:
                 matchLabels:
-                  {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" "supabase-storage") | nindent 18 }}
-            {{- end }}
-            {{- if $includeForge }}
-            - topologyKey: kubernetes.io/hostname
-              labelSelector:
-                matchLabels:
-                  {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" "gitea") | nindent 18 }}
-            {{- end }}
+                  app.kubernetes.io/name: {{ include "acs-cymru.name" . }}
+                  app.kubernetes.io/instance: {{ .Release.Name }}
+                matchExpressions:
+                  - key: app.kubernetes.io/component
+                    operator: In
+                    values:
+                      {{- if $includeStorage }}
+                      - supabase-storage
+                      {{- end }}
+                      {{- if $includeForge }}
+                      - gitea
+                      {{- end }}
       {{- end }}
       containers:
         - name: backup-service

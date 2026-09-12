@@ -33,13 +33,14 @@ import time
 import shlex
 import shutil
 import secrets
-import subprocess
 import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingestion"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import stack_exec  # noqa: E402  -- the probe container, on Compose or on Kubernetes (ACS_STACK)
 
 LOKI = os.getenv("LOKI_TEST_URL", "http://127.0.0.1:3100")
 PROM = os.getenv("PROMETHEUS_TEST_URL", "http://127.0.0.1:9090")
@@ -437,13 +438,12 @@ class MultilineTestCase(unittest.TestCase):
         does not OPEN a block -- it is appended to the record above it. The crash therefore arrives
         glued to the last line the service logged before it died, under that line's timestamp.
         """
-        image = os.getenv("PROBE_IMAGE", "acs-cymru-ingestion")
-        if not shutil.which("docker"):
+        image = os.getenv("PROBE_IMAGE") or stack_exec.default_probe_image()
+        if stack_exec.STACK == "compose" and not shutil.which("docker"):
             skip_or_fail(self, "docker is not on PATH, so the probe container cannot be started")
-        if subprocess.run(["docker", "image", "inspect", image],
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+        if not stack_exec.probe_image_available(image):
             skip_or_fail(self, "the image " + image + " is not built, so the probe cannot run the "
-                               "daemon's own formatter: docker compose build ingestion")
+                               "daemon's own formatter: build the ingestion image first")
 
         token = "multiline-probe-" + secrets.token_hex(6)
 
@@ -466,18 +466,12 @@ class MultilineTestCase(unittest.TestCase):
         ])
         script = "sleep 25; python -c " + shlex.quote(inner) + "; sleep 10"
 
-        subprocess.run(["docker", "rm", "-f", name],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        started = subprocess.run(
-            ["docker", "run", "-d", "--name", name,
-             "--label", "com.docker.compose.project=acs-cymru",
-             # THE LABEL IS THE WHOLE TRICK. discovery.relabel maps it to `service`, which is what
-             # the stage.match selector reads. Narrow that selector in alloy/config.alloy and this
-             # container stops matching -- which is a thing worth having noticed.
-             "--label", "com.docker.compose.service=ingestion",
-             "-e", "LOG_FORMAT=json", "-e", "PYTHONUNBUFFERED=1",
-             "--entrypoint", "sh", image, "-c", script],
-            capture_output=True, text=True)
+        # THE LABEL IS THE WHOLE TRICK. The probe is labelled as the ingestion service (the Compose
+        # service label, or the chart's component label), which discovery.relabel maps to `service`
+        # and the stage.match selector reads. Narrow that selector and this container stops
+        # matching -- which is a thing worth having noticed.
+        started = stack_exec.run_probe(name, image, script, component="ingestion",
+                                       env={"LOG_FORMAT": "json", "PYTHONUNBUFFERED": "1"})
         self.assertEqual(started.returncode, 0,
                          "could not start the probe container: " + started.stderr.strip())
 
@@ -495,9 +489,9 @@ class MultilineTestCase(unittest.TestCase):
             self.assertTrue(
                 entries,
                 "nothing carrying " + token + " reached the store in time. The probe container "
-                "ran, so this is collection rather than the daemon: check that discovery.docker "
-                "still resolves targets through the socket proxy, which is what failed wholesale "
-                "on the first live run.",
+                "ran, so this is collection rather than the daemon: check the collector's "
+                "discovery (discovery.docker through the socket proxy on Compose, which is what "
+                "failed wholesale on the first live run; discovery.kubernetes on the chart).",
             )
 
             rejoined = [e for e in entries
@@ -520,8 +514,7 @@ class MultilineTestCase(unittest.TestCase):
                 "entries seen: " + repr(entries),
             )
         finally:
-            subprocess.run(["docker", "rm", "-f", name],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stack_exec.remove_probe(name)
 
 
 if __name__ == "__main__":
