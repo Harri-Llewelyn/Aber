@@ -194,6 +194,12 @@ const MIRRORS = [
     why: 'The credential, policy and control-API libraries the reconcile and the service share',
   },
   {
+    source: 'loki',
+    dest: 'loki',
+    match: (name) => name === 'loki.yaml',
+    why: 'The log store: retention and the ingest ceilings, one file for both targets',
+  },
+  {
     source: 'grafana',
     dest: 'grafana',
     // The OAuth block only. Everything else Grafana needs comes from GF_* env vars, which is where

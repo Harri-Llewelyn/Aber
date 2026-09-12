@@ -440,6 +440,9 @@ supabaseFunctions:
     # Empty = the `mqtt.<publicBaseDomain>` host the chart derives.
     mqttPublicHost: ""
     mqttPublicTlsPort: 8883
+    # The API an appliance dials, embedded in its bundle. Empty = the browser-facing Supabase
+    # URL; set it where that is a loopback domain, which gateway-bundle refuses to embed.
+    supabasePublicUrl: ""
 
   # AAS export. Declared on this service because an edge worker sees only the variables
   # main/index.ts forwards. Outbound references must name addresses the recipient of a shell
@@ -805,20 +808,17 @@ frontend:
 # ---------------------------------------------------------------------------------------------
 grafana:
   enabled: true
-  # Where the cluster's Prometheus lives, substituted into the shared datasource template. This
-  # chart deploys no Prometheus: it ships ServiceMonitors and lets the Operator collect. The
-  # default is kube-prometheus-stack's service; with no Prometheus the datasource fails its
-  # health check and the alert rules report DatasourceError, which is the honest failure.
-  prometheusUrl: http://prometheus-operated.monitoring.svc:9090
-  # Where the cluster's Loki lives, the same arrangement. This chart deploys no Loki either: a
-  # cluster is assumed to have one, and a second store plus collector would duplicate every line.
+  # The Prometheus and Loki the datasources point at. Empty resolves to the chart's own
+  # (observability.enabled); with that off, both must be set or the render fails, because a
+  # datasource pointed at nothing reports DatasourceError on every rule while the stack looks fine.
   #
-  # LABEL CONTRACT: every log query this repository ships selects on `{service="<name>"}`, which
-  # is what Compose's collector applies. A stock Kubernetes log stack sets `namespace`/`pod`/
-  # `container` and no `service`, so the datasource connects and every query returns nothing. A
-  # cluster feeding this datasource must relabel `service` to the workload name -- one rule in
-  # whatever collector it runs.
-  lokiUrl: http://loki-gateway.monitoring.svc:80
+  # LABEL CONTRACT for an external Loki: every log query this repository ships selects on
+  # `{service="<name>"}`. The chart's own collector sets it from app.kubernetes.io/component; a
+  # stock cluster log stack sets namespace/pod/container and no `service`, so the datasource
+  # connects and every query returns nothing. Relabel `service` to the workload name in that
+  # collector.
+  prometheusUrl: ""
+  lokiUrl: ""
   image:
     repository: grafana/grafana
     # Pinned to the same tag Compose uses (check-image-tag-parity.mjs). grafana.ini depends on
@@ -963,8 +963,73 @@ e2e:
 # Hardening
 # ---------------------------------------------------------------------------------------------
 
+# =================================================================================================
+# The chart's own observability stack: Prometheus (metrics store), Loki (log store) and Alloy
+# (the one collector). Alloy runs as a DaemonSet and does three jobs: it scrapes every pod in the
+# release annotated `prometheus.io/scrape: "true"` and remote-writes the series to Prometheus; it
+# tails every container in the release through the API server and ships the lines to Loki
+# labelled `service` (the component) and `container`; and it serves the node's own metrics
+# (prometheus.exporter.unix, the node_exporter collectors) from /proc, /sys and / on the host.
+#
+# On by default: a single k3s node has no monitoring stack of its own, and a chart whose
+# dashboards are empty until one is installed does not demonstrate anything. Off for a cluster
+# that already runs Prometheus and Loki: set grafana.prometheusUrl and grafana.lokiUrl, and use
+# telemetry.serviceMonitor for the Operator, or the same pod annotations for a Prometheus that
+# reads them.
+#
+# Stores are ClusterIP only and unauthenticated (Prometheus's remote-write receiver included);
+# Grafana is the only intended reader, behind its own login. Retention: Prometheus 30d/8GB,
+# Loki 30d (loki.yaml, mirrored from the repository's), both by design the same window.
+# =================================================================================================
+observability:
+  enabled: true
+  prometheus:
+    image:
+      repository: prom/prometheus
+      tag: "v3.14.0"
+      pullPolicy: IfNotPresent
+    retentionTime: 30d
+    retentionSize: 8GB
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
+    resources:
+      requests: { cpu: 50m, memory: 256Mi }
+      limits: { memory: 1Gi }
+  loki:
+    image:
+      repository: grafana/loki
+      tag: "3.5.7"
+      pullPolicy: IfNotPresent
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
+    resources:
+      requests: { cpu: 50m, memory: 256Mi }
+      limits: { memory: 1Gi }
+  alloy:
+    image:
+      repository: grafana/alloy
+      tag: "v1.11.2"
+      pullPolicy: IfNotPresent
+    # Node metrics from the host's /proc, /sys and /, mounted read-only. Disk is the one that
+    # matters: the databases, the metrics store and the log store share the node's volume, and
+    # the Host Disk Filling rule reads node_filesystem_avail_bytes. Off leaves the DaemonSet with
+    # no hostPath mounts at all.
+    hostMetrics: true
+    # 15s matches the interval every dashboard and rule assumes for rate() windows.
+    scrapeInterval: 15s
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { memory: 512Mi }
+
 # ---------------------------------------------------------------------------------------------
-# Self-monitoring (Prometheus Operator). Requires the ServiceMonitor CRD, hence off by default:
+# ServiceMonitors for a cluster that runs the Prometheus Operator instead of the chart's own
+# stack (observability.enabled=false). Requires the ServiceMonitor CRD, hence off by default:
 # with it absent `helm install` fails outright. Targets and reasoning:
 #   deploy/k8s/README.md -> "Self-monitoring"
 # ---------------------------------------------------------------------------------------------
@@ -1018,14 +1083,16 @@ networkPolicy:
   # Where appliances clone from. Defence in depth behind a per-gateway read-only deploy key.
   giteaSshAllowedCidrs:
     - 0.0.0.0/0
-  # For the e2e-aas-export initContainer, which reads a Job's status with kubectl. Empty removes
-  # the rule (and that Job then cannot run under policy).
+  # For Alloy (pod discovery and log tailing go through the API server) and the e2e-aas-export
+  # initContainer (reads a Job's status with kubectl). Empty removes the rule: Alloy then
+  # collects nothing and that Job cannot run under policy.
   apiServerCidr: 0.0.0.0/0
   apiServerPorts: [443, 6443]
   # Raw NetworkPolicy spec for flows the chart cannot express (SMTP relay, S3 endpoint, proxy).
   extraEgress: {}
   # The ingress half of the same escape hatch, for anything reaching in from outside the chart
-  # (a cluster Prometheus; kubelet probes if your CNI does not exempt them).
+  # (a cluster Prometheus when observability.enabled is off; kubelet probes if your CNI does not
+  # exempt them).
   # (deploy/k8s/README.md -> "NetworkPolicies (M4)")
   #  extraIngress:
   #    podSelector:

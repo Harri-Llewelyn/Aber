@@ -135,6 +135,10 @@ spec:
         # It does NOT cover the API keys, which live in the Secret the chart may not own. Rotating
         # one needs `kubectl rollout restart deployment/supabase-envoy`.
         checksum/envoy-template: {{ $envoy | sha256sum }}
+        {{- if .Values.supabaseEnvoy.metrics.enabled }}
+        # The admin listener serves the scrape at /stats/prometheus, not /metrics.
+        {{- include "acs-cymru.scrapeAnnotations" (dict "port" .Values.supabaseEnvoy.metrics.port "path" "/stats/prometheus") | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:

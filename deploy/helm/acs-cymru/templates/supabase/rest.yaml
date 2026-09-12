@@ -41,6 +41,9 @@ spec:
     metadata:
       labels:
         {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # The admin listener (PGRST_ADMIN_SERVER_PORT below) is the only place PostgREST serves /metrics.
+        {{- include "acs-cymru.scrapeAnnotations" (dict "port" 3001 "path" "/metrics") | nindent 8 }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:

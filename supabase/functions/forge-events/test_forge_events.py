@@ -31,7 +31,9 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "enroll-gateway"))
-from test_enroll_gateway import ANON_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, enroll, rest, sign_in  # noqa: E402
+from test_enroll_gateway import (  # noqa: E402
+    ANON_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
+)
 
 WEBHOOK_SECRET = os.getenv("GITEA_WEBHOOK_SECRET", "")
 FORGE_URL = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
@@ -234,14 +236,8 @@ class TestTheForgeItself(ForgeEventsBase):
     @classmethod
     def tearDownClass(cls):
         cls.delete_repo()
-        # The broker account outlives the row; deleted through the service container's admin
-        # credential, as test_enroll_gateway.py does.
-        subprocess.run(
-            ["docker", "exec", "acs-cymru_gateway_credential", "sh", "-c",
-             'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
-             f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec deleteClient {cls.sparkplug_id}'],
-            capture_output=True, text=True,
-        )
+        # The broker account outlives the row; deleted through the service's admin credential.
+        delete_broker_account(cls.sparkplug_id)
         super().tearDownClass()
 
     @classmethod

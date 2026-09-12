@@ -151,6 +151,8 @@ spec:
         # Grafana reloads provisioning on a schedule but reads grafana.ini once at start, so a
         # change to the OAuth block needs a restart.
         checksum/config: {{ printf "%s%s" $ini $dsTemplate | sha256sum }}
+        # Grafana serves /metrics on its normal port, unauthenticated.
+        {{- include "acs-cymru.scrapeAnnotations" (dict "port" 3000 "path" "/metrics") | nindent 8 }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -190,24 +192,13 @@ spec:
                 exit 1
               fi
               {{- /*
-                __PROMETHEUS_URL__ points at the CLUSTER'S OWN Prometheus, not at one this chart
-                ships. Compose runs its own and substitutes its service name; here the value comes
-                from `grafana.prometheusUrl`, defaulting to kube-prometheus-stack's conventional
-                service. The chart deliberately does not deploy a Prometheus -- a second one would
-                duplicate every series the Operator already collects through the ServiceMonitors
-                in obs/servicemonitors.yaml.
-              */}}
-              {{- /*
-                __LOKI_URL__ is the same arrangement, one store along. The chart deploys no Loki
-                either -- Compose runs its own log store because it
-                already runs its own Prometheus and owns its whole observability stack, while a
-                cluster is assumed to have one and a second collector would duplicate every line.
-                A cluster with no Loki gets a datasource whose health check fails, which is the
-                honest failure rather than a Logs panel that renders empty.
+                __PROMETHEUS_URL__ and __LOKI_URL__ resolve to the chart's own stores
+                (observability.enabled) unless grafana.prometheusUrl / grafana.lokiUrl name a
+                cluster's; the helpers fail the render when neither applies.
               */}}
               sed -e "s|__BI_READER_PASSWORD__|$BI_READER_PASSWORD|g" \
-                  -e "s|__PROMETHEUS_URL__|{{ .Values.grafana.prometheusUrl }}|g" \
-                  -e "s|__LOKI_URL__|{{ .Values.grafana.lokiUrl }}|g" \
+                  -e "s|__PROMETHEUS_URL__|{{ include "acs-cymru.prometheusUrl" . }}|g" \
+                  -e "s|__LOKI_URL__|{{ include "acs-cymru.lokiUrl" . }}|g" \
                   /config/datasources.template.yml > /datasources/datasources.yml
               # Comment lines excluded: the template's own header documents the placeholder
               # convention BY NAME, so a whole-file scan flags the documentation of the rule as a

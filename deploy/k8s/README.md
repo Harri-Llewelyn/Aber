@@ -26,6 +26,7 @@ operational half.
 k3d cluster create acs-cymru \
   --agents 0 \
   --port "80:80@loadbalancer" \
+  --port "1883:1883@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" \
   --wait
 ```
@@ -36,6 +37,51 @@ exercised through its real path rather than by port-forwarding straight to a Ser
 Teardown is `k3d cluster delete acs-cymru` — it takes the PVCs with it, which is exactly what you
 want for a throwaway cluster and never what you want on k3s.
 
+`--port 1883:1883@loadbalancer` does the same for the `mosquitto-external` LoadBalancer, so a gateway
+on the LAN, or a simulator on the host, reaches the broker at the host address.
+
+On Windows, k3d may write the API endpoint into the kubeconfig as `host.docker.internal:<port>`,
+which some adapters resolve to an unreachable address; `kubectl` then times out against a healthy
+cluster. Point the context at loopback instead, with the port `docker ps` shows for the
+`k3d-acs-cymru-serverlb` container:
+
+```bash
+kubectl config set-cluster k3d-acs-cymru --server=https://127.0.0.1:<port>
+```
+
+### The development loop
+
+`scripts/dev-cluster.mjs` is the cluster above and the install below as one command each, with the
+stack lane added: the same steps CI's k8s-validation job runs, repeatable on a laptop.
+
+```bash
+npm run dev:up        # cluster if absent, cert-manager and the internal CA, the nine images built
+                      # and imported, helm upgrade --install with values-dev.yaml, every hook and
+                      # rollout waited for, the daemon subscribed, helm test
+npm run dev:test      # validate.py and the stack lane from the host, through port-forwards
+npm run dev:forward   # the port-forwards alone, held until Ctrl+C
+npm run dev:reset     # uninstall, drop every claim, reinstall: a blank stack, same images
+npm run dev:down      # delete the cluster
+```
+
+`up` installs on the dev values' loopback domain, so every host resolves on this machine whatever
+the resolver does, and gives the two functions that address an appliance this machine's LAN address
+instead: the broker's TLS listener, which `up` turns on, carries it in its certificate, and the
+bundle's API address is `api.<LAN address>.nip.io`, which resolves only where the resolver answers
+nip.io names carrying private addresses (many home routers refuse to, as DNS-rebind protection).
+`--domain=<LAN address>.nip.io` moves every host onto the LAN where it does. `up` also enables the
+backup service, taking storage and the forge as a Compose backup does, and generates the forge
+sweep secret once; the stack lane exercises all of it. `--no-tls` leaves the listener off,
+`--no-build` reuses the images already in the node, `--only=ingestion` rebuilds a subset, `--e2e`
+adds the in-cluster conformance Jobs.
+
+The port-forwards carry the host port numbers Compose published (`5433` for the historian,
+`54322` and `54321` for Supabase, `1880`, `3002`, `9090`, `3100` and the rest), so every host-side
+tool keeps its defaults. `test` builds the suites' environment from `.env.example` for the
+non-secret settings and from the release's own Secret for every credential, and sets
+`ACS_STACK=k8s`, which tells the suites that reach into a container (`test-harness/stack_exec.py`)
+to use `kubectl exec` against the workload rather than `docker exec` against a container name.
+
 ## Install
 
 Two paths, and they are for genuinely different situations. **From the registry** if you want to
@@ -43,7 +89,7 @@ run this stack; **from a checkout** if you are changing it.
 
 ### A. From the published chart (no checkout, no image builds)
 
-The chart and the six images this repository builds are published to GHCR as OCI artefacts. Helm
+The chart and the nine images this repository builds are published to GHCR as OCI artefacts. Helm
 speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 
 ```bash
@@ -89,7 +135,7 @@ it needs. Either write a `my-values.yaml` from
 the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
 demo credentials out of `.env.example`.
 
-The six built images resolve automatically to the chart's `appVersion`, which the release stamps
+The nine built images resolve automatically to the chart's `appVersion`, which the release stamps
 equal to the chart version. Chart 0.1.0 can only pull images 0.1.0; there is nothing to line up by
 hand and no `latest` tag to drift onto.
 
@@ -117,7 +163,7 @@ done
 
 No `--wait` here either, for the reason given above — it is exactly what CI does.
 
-This still **pulls** the six built images from GHCR at the `appVersion` in `Chart.yaml` — a
+This still **pulls** the nine built images from GHCR at the `appVersion` in `Chart.yaml` — a
 checkout does not imply a local build. To run your own, build them under the reference the chart
 asks for and make them available to the cluster (`k3d image import`, or a push to your own
 registry). `pullPolicy` is `IfNotPresent`, so a locally-present image of that exact name and tag
@@ -140,7 +186,7 @@ ingestion:
 ```
 
 Do this for a hotfix, a bisect or an air-gapped mirror. Do not do it as a way to run one component
-a release ahead of the rest: the six are built and tested together, and the failures from mixing
+a release ahead of the rest: the nine are built and tested together, and the failures from mixing
 them are the asymmetric kind that surface days later on whichever component was *not* changed.
 
 ## Verify
@@ -469,7 +515,7 @@ kubectl -n acs-cymru get pvc          # delete deliberately, never as cleanup ha
 
 ### Images you must build
 
-Six images are built from this repository rather than pulled from a vendor. **They are published**
+Nine images are built from this repository rather than pulled from a vendor. **They are published**
 to `ghcr.io/harri-llewelyn/acs-cymru/`, so an ordinary install needs none of this — the chart pulls
 them at its own `appVersion`.
 
@@ -513,7 +559,7 @@ docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 # mosquitto_rr. That is not incidental: the `$7$` hash has to be readable by the mosquitto that
 # will verify it, and a reimplementation produces a hash that looks correct and refuses every login
 # with nothing logged at either end. The code is NOT baked in — the chart mounts it from a ConfigMap.
-docker build -f gateway-credential/Dockerfile   -t $NS/acs-cymru-gateway-credential:$V gateway-credential
+docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
 
 # The backup service -- supabase/postgres for its pg_dump, plus node, sqlite3 and GNU tar. The
 # code itself is projected from a ConfigMap (scripts/backup-service.mjs), so this is runtime only.
@@ -537,7 +583,7 @@ docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
 docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V \
                                                 -t $NS/test-runner:$V .
 
-for i in edge-runtime ingestion node-red frontend test-runner i3x-service; do
+for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service db-init test-runner; do
   k3d image import $NS/$i:$V -c <cluster>   # or push to your registry
 done
 ```
@@ -546,14 +592,14 @@ done
 
 ## Publishing a release
 
-[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the six images and
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the nine images and
 then the chart, to GHCR over OCI, on a `v*` tag.
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-That tag is the only place the version is written. It stamps the five image tags, the chart
+That tag is the only place the version is written. It stamps the nine image tags, the chart
 `version` and the chart `appVersion` in one run — **nothing is bumped in a commit first**, which is
 the usual way a chart ends up published under a version naming a different build. `Chart.yaml`'s
 committed values are for the untagged path only (a checkout, `helm lint`, `helm template`).
@@ -562,14 +608,14 @@ committed values are for the untagged path only (a checkout, `helm lint`, `helm 
 builds, the chart packages, every check runs, and nothing is pushed.
 
 **Images publish before the chart, and the chart job `needs` them.** A chart published ahead of its
-images does not fail — `helm install` succeeds, the databases and broker come up healthy, and six
+images does not fail — `helm install` succeeds, the databases and broker come up healthy, and nine
 workloads sit in `ImagePullBackOff` with no failed release to point at.
 
 ### One-time: make the packages public
 
 **GHCR creates every new package private, whatever the repository's visibility**, and
 `GITHUB_TOKEN` cannot change it — package visibility is an account-level setting, not a repository
-one. So the first release publishes six packages that nobody else can pull, and the symptom on a
+one. So the first release publishes nine packages that nobody else can pull, and the symptom on a
 consumer's machine is an authentication error on a repository that is public.
 
 After the first successful release, once per package:
@@ -994,48 +1040,53 @@ the rarer this procedure is, the more likely it is to be performed carefully.
 
 ### Self-monitoring
 
-Requires the **Prometheus Operator CRDs** first; `ServiceMonitor` is not a core type, so with them
-absent `helm install` fails with `no matches for kind "ServiceMonitor"`.
+**The chart runs its own stack by default** (`observability.enabled`): Prometheus, Loki and an
+Alloy DaemonSet, ClusterIP only, read by Grafana behind its own login. Alloy scrapes every pod in
+the release annotated `prometheus.io/scrape` and remote-writes the series to Prometheus, tails every
+container through the API server and ships the lines to Loki labelled `service` (the component)
+and `container`, and serves the node's metrics from `/proc`, `/sys` and `/` mounted read-only.
+Retention is thirty days in both stores. Nothing to enable; nothing to install first.
+
+**The scrape targets are the annotated pods**, and the annotation is the contract:
+
+| Pod | Port | Path | Needs |
+| :--- | :--- | :--- | :--- |
+| `ingestion` | 9108 | `/metrics` | `ingestion.metrics.enabled` (default on) |
+| `supabase-envoy` | 9901 | `/stats/prometheus` | `supabaseEnvoy.metrics.enabled` (default on) |
+| `supabase-rest` | 3001 | `/metrics` | nothing — the admin listener is always bound |
+| `grafana` | 3000 | `/metrics` | nothing |
+| `mosquitto` | 9234 | `/metrics` | `mosquitto.metrics.enabled` (the exporter sidecar) |
+| `prometheus`, `loki`, `alloy` | 9090, 3100, 12345 | `/metrics` | nothing |
+
+- **Under `networkPolicy.enabled` the edges are generated**, Alloy to each target above and to the
+  two stores, Grafana to the stores, and Alloy to the API server on `networkPolicy.apiServerCidr`.
+  An empty `apiServerCidr` leaves Alloy unable to discover anything: the DaemonSet is healthy, the
+  dashboards are empty, and nothing logs a policy decision.
+- **Mosquitto's metrics are prefixed `broker_`, not `mosquitto_`.** Alerts and dashboards written
+  against the latter match nothing and render as empty panels rather than as errors.
+- **Grafana is inside the thing being monitored.** A `supabase-db` failure takes the Factory+
+  dashboards down with it, and the alert webhook with them. Send alerts off-cluster, or use the
+  external arrangement below.
+
+**A cluster that already runs Prometheus and Loki** sets `observability.enabled=false` and points
+the datasources at its own: `grafana.prometheusUrl` and `grafana.lokiUrl`, both required then, since
+the render refuses an empty one. Its Prometheus either reads the same pod annotations or, with the
+Operator, adopts the chart's ServiceMonitors:
 
 ```bash
-helm upgrade ... \
-  --set telemetry.serviceMonitor.enabled=true \
-  --set 'telemetry.serviceMonitor.labels.release=kube-prometheus-stack' \
-  --set supabaseKong.metrics.enabled=true \
-  --set mosquitto.metrics.enabled=true
+helm upgrade ...   --set observability.enabled=false   --set grafana.prometheusUrl=http://prometheus-operated.monitoring.svc:9090   --set grafana.lokiUrl=http://loki-gateway.monitoring.svc:80   --set telemetry.serviceMonitor.enabled=true   --set 'telemetry.serviceMonitor.labels.release=kube-prometheus-stack'   --set mosquitto.metrics.enabled=true
 ```
 
-**`telemetry.serviceMonitor.labels` is the setting that decides whether any of this works.** The
-operator only adopts ServiceMonitors matching its own `serviceMonitorSelector` — `release: <its
-release>` by default. Without a matching label the objects are created successfully, appear in
-`kubectl get servicemonitors`, and are **silently ignored**: no target, no error, nothing logged.
+`telemetry.serviceMonitor.labels` decides whether that works: the operator only adopts
+ServiceMonitors matching its own `serviceMonitorSelector`, and without a matching label they are
+created and silently ignored. Under `networkPolicy.enabled` the external Prometheus also needs
+`networkPolicy.extraIngress` to reach the ports above; `values-prod.yaml.example` carries the rule.
+Its Loki must label streams `service` with the workload name, or every shipped log query returns
+nothing against a datasource that reports healthy.
 
 ```bash
 kubectl get prometheus -A -o jsonpath='{.items[*].spec.serviceMonitorSelector}'
 ```
-
-**There are exactly three targets, and each was verified against its pinned image:**
-
-| Target | Port | Needs | Verified |
-| :--- | :--- | :--- | :--- |
-| `grafana` | 3000 `/metrics` | nothing — native, unauthenticated | 1250 series |
-| `supabase-kong` | 8100 `/metrics` | `supabaseKong.metrics.enabled` | 57 `kong_*` series |
-| `mosquitto` | 9234 `/metrics` | `mosquitto.metrics.enabled` (exporter sidecar) | 48 `broker_*` series |
-
-- **Kong is the most valuable of the three by a distance.** Every REST, Auth, Storage, Realtime and
-  edge-function request passes through it, and **none of those components exposes metrics of its
-  own** — PostgREST 12.2.0 has no metrics endpoint at all, its admin server serving only `/ready`
-  and `/live`. So there is deliberately no `supabase-rest` ServiceMonitor: it would be fiction, and
-  the traffic is already measured from the gateway side, labelled per service.
-- **Mosquitto's metrics are prefixed `broker_`, not `mosquitto_`.** Alerts and dashboards written
-  against the latter match nothing and render as empty panels rather than as errors.
-- **Under `networkPolicy.enabled` every scrape is dropped** unless `networkPolicy.extraIngress`
-  admits it — the generated edges only describe flows between components of this chart, and
-  Prometheus is not one of them. `values-prod.yaml.example` carries a working rule for ports 3000,
-  8100 and 9234; change the namespace to wherever your Prometheus runs.
-- **Grafana is inside the thing being monitored.** Scrape into a Prometheus in its own namespace and
-  send alerts off-cluster: a `supabase-db` failure takes the Factory+ dashboards down with it, so a
-  monitoring stack that lives here reports nothing at the one moment it is needed.
 
 ### Still outstanding
 
@@ -1323,9 +1374,9 @@ anyone retiring one deletes it, in the same commit as the change.
 | Gitea sits on a `forge` Docker network that only the gateway and the edge runtime join | NetworkPolicy edges from the gateway and `supabase-functions` to `gitea:3000`, **only when `networkPolicy.enabled`** | Gitea signs in whoever `X-WEBAUTH-USER` names, from any peer, so reachability of port 3000 is the forge's access control. With the policy off (the default) every pod in the namespace can reach it; see the security note under *Hardening* |
 | Gateway provisioning via `docker exec` | `--target=k8s`: the same plugin commands through `kubectl exec` | Same script, two backends, so the role reasoning stays in one place |
 | Ingestion has no healthcheck | Liveness probe on the heartbeat file's age | A wedged paho loop is invisible on Compose; Kubernetes can restart it |
-| `loki` + `alloy` + `docker-socket-proxy` run the log store | No log workload; the Grafana **datasource** is provisioned either way, pointed at `grafana.lokiUrl` | Same reasoning as Prometheus, which this chart also does not deploy: Compose owns its whole observability stack, a cluster is assumed to run one already, and a second store plus a second collector would duplicate every line and give an operator two places to configure retention. **Not a judgement that logs matter less here** — `kubectl logs` dies at reschedule, so the Kubernetes case is the stronger one |
-| `alloy` reaches the Docker API through a read-only socket proxy | A DaemonSet reads `/var/log/pods` | There is no Docker socket to front, and the kubelet supplies the pod and container labels the proxy exists to obtain on Compose |
-| Streams are labelled `service` + `container` | Whatever the cluster's collector applies | **A CONTRACT, NOT A DETAIL.** Every log query shipped here selects on `{service="<name>"}` — the provisioned drop panel's drill-down included. A stock Kubernetes log stack sets `namespace`/`pod`/`container` and no `service`, so the datasource connects, the health check passes, and every query returns nothing. A cluster feeding `grafana.lokiUrl` must relabel `service` to the workload name |
+| `alloy` reaches the Docker API through a read-only socket proxy | A read-only ClusterRole on its ServiceAccount; pods and their logs come through the API server | There is no Docker socket to front, and the kubelet supplies the pod and container names the proxy exists to obtain on Compose. Streams carry the same two labels, `service` and `container`, from `app.kubernetes.io/component` |
+| Prometheus scrapes a static target list in `prometheus/prometheus.yml` | Alloy scrapes every pod annotated `prometheus.io/scrape` and remote-writes; Prometheus scrapes only itself | Pods have no fixed address. The annotation is the convention any cluster Prometheus reads too, and one collector for logs, metrics and host means one place to look for a missing target |
+| `node-exporter` is its own container | `prometheus.exporter.unix` inside the Alloy DaemonSet | The same collectors in the collector's own process; one fewer image. Same series names, so the Host Disk Filling rule reads either |
 | Gateway CORS origins default to `localhost:3000` / `:8088` | Derived from `publicBaseDomain` by `acs-cymru.corsOrigins` | Compose serves the dashboard on a published port; the chart serves it on `app.<domain>` and calls the API on `api.<domain>`, which is cross-origin. Same `__CORS_ORIGINS__` placeholder, different substituter — substituted into `envoy.yaml` on Compose and into whichever gateway the chart deploys |
 
 **Image tags must match between the two targets, and CI enforces it.**

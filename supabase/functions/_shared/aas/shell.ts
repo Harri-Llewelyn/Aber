@@ -64,8 +64,10 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 export function isLoopbackBase(base: string): boolean {
   try {
     const host = new URL(base).hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "::1" ||
-      host === "[::1]" || host === "0.0.0.0" || host.endsWith(".localhost");
+    // Substrings, not equality: `api.127.0.0.1.nip.io` is a hostname whose every resolution is
+    // loopback, and it is what the chart's dev domain produces.
+    return host.includes("localhost") || host.includes("127.0.0.1") || host === "::1" ||
+      host === "[::1]" || host === "0.0.0.0";
   } catch {
     // An unparseable base is a different misconfiguration and is not this function's to report.
     return false;

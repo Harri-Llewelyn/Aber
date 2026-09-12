@@ -101,7 +101,7 @@ if (audit.orphans.length) {
   for (const f of audit.orphans) console.error(c.red(`  ${f}`))
   console.error(
     '\nA suite with no lane runs nowhere. Give it one -- unit (needs nothing), db (needs the\n' +
-    'migrated Postgres), stack (needs the composed stack) -- or `manual` with a reason saying\n' +
+    'migrated Postgres), stack (needs a running stack) -- or `manual` with a reason saying\n' +
     'why it is deliberately not automated.\n'
   )
 }

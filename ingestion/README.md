@@ -1268,12 +1268,13 @@ platform alerting work: the other three platform rules — Gateway Stale, Enrolm
 Queue Depth — read *state* out of Supabase through `public.platform_health`, and this one reads a
 **counter**, which is why it could not exist until this endpoint did.
 
-**On Kubernetes they are provisioned but not necessarily evaluable.** The chart renders a
-`ServiceMonitor` when `telemetry.serviceMonitor.enabled` is set, and that needs the Prometheus
-Operator CRDs the chart deliberately does not install — so a cluster that brings no Prometheus of
-its own gets these rules against a datasource whose health check fails. That is stated at the URL
-placeholder in `grafana/provisioning/datasources/datasources.template.yml`, which is also why the
-datasource URL is substituted per deployment target rather than committed.
+**On Kubernetes they evaluate out of the box.** The ingestion pod carries the `prometheus.io`
+scrape annotations, the chart’s Alloy DaemonSet scrapes this endpoint and remote-writes to the
+chart’s Prometheus, and the datasource points there. A cluster that runs its own Prometheus
+(`observability.enabled=false`) gets a `ServiceMonitor` instead, which needs the Prometheus
+Operator CRDs, and must set `grafana.prometheusUrl` — the render refuses an empty one. The URL
+placeholder in `grafana/provisioning/datasources/datasources.template.yml` is substituted per
+deployment target for that reason.
 
 ### `acs_ingestion_write_seconds` — the one distribution
 

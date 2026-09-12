@@ -1028,8 +1028,8 @@ groups:
         title: Log Collector Down
         condition: C
         for: 5m
-        # OK, not Alerting: the chart deploys no log workload, so on Kubernetes this series does not
-        # exist and NoData is the correct state (see the divergence table in deploy/k8s/README.md).
+        # OK, not Alerting: a cluster running its own log stack (observability.enabled=false) has no
+        # series here, and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1086,8 +1086,8 @@ groups:
         title: Log Collection Stalled
         condition: C
         for: 15m
-        # OK, not Alerting: the chart deploys no log workload, so on Kubernetes this series does not
-        # exist and NoData is the correct state.
+        # OK, not Alerting: a cluster running its own log stack (observability.enabled=false) has no
+        # series here, and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1145,8 +1145,8 @@ groups:
         title: Log Store Refusing Lines
         condition: C
         for: 10m
-        # OK, not Alerting: the chart deploys no log workload, so on Kubernetes this series does not
-        # exist and NoData is the correct state.
+        # OK, not Alerting: a cluster running its own log stack (observability.enabled=false) has no
+        # series here, and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1206,8 +1206,8 @@ groups:
         title: Log Collector Cannot Decode
         condition: C
         for: 10m
-        # OK, not Alerting: the chart deploys no log workload, so on Kubernetes this series does not
-        # exist and NoData is the correct state.
+        # OK, not Alerting: a cluster running its own log stack (observability.enabled=false) has no
+        # series here, and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1253,6 +1253,81 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+  # ===============================================================================================
+  # THE HOST. The databases, the metrics store and the log store share one volume, and a full
+  # disk stops all of them at once: Postgres refuses writes, Prometheus refuses samples, Loki
+  # refuses lines. `node_filesystem_*` comes from the node_exporter collectors, whichever
+  # process runs them (node-exporter on Compose, Alloy's prometheus.exporter.unix on Kubernetes).
+  # ===============================================================================================
+  - orgId: 1
+    name: Host
+    folder: ACS-Cymru - Platform Infrastructure
+    interval: 1m
+    rules:
+
+      # -------------------------------------------------------------------------------------------
+      # Free space on the root filesystem, as a fraction, per host. 15% for 15 minutes: Postgres
+      # checkpoints and Loki compaction need headroom, and a store that has run out reports it as
+      # a write error somewhere else. `mountpoint="/"` is where every data directory here lives;
+      # a deployment that mounts data elsewhere edits this selector.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-host-disk-filling
+        title: Host Disk Filling
+        condition: C
+        for: 15m
+        # OK, not Alerting: a deployment without host metrics (observability.alloy.hostMetrics
+        # off, or an external Prometheus that does not scrape nodes) has no series here.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            The root filesystem on {{ $labels.instance }} has {{ humanizePercentage $values.B }}
+            free. Both databases, the metrics store and the log store write to it, and each of
+            them stops when it is full. Prune backups, shorten retention, or grow the volume.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                min by (instance) (
+                  node_filesystem_avail_bytes{mountpoint="/"}
+                  / node_filesystem_size_bytes{mountpoint="/"}
+                )
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [0.15]
               datasource:
                 type: __expr__
                 uid: __expr__

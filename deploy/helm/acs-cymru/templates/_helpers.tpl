@@ -121,6 +121,48 @@ a bisect, a locally-built image) without forking the chart.
 {{- printf "%s:%s" .image.repository $tag -}}
 {{- end -}}
 
+{{/*
+The Prometheus and Loki the Grafana datasources point at.
+
+Empty in values resolves to the chart's own stores when observability.enabled; with it off, an
+empty value fails the render, because a datasource pointed at nothing gives every alert rule
+DatasourceError against a stack that is otherwise healthy. The Service names are the Compose
+names, as every other Service here.
+*/}}
+{{- define "acs-cymru.prometheusUrl" -}}
+{{- if .Values.grafana.prometheusUrl -}}
+{{- .Values.grafana.prometheusUrl -}}
+{{- else if .Values.observability.enabled -}}
+http://prometheus:9090
+{{- else -}}
+{{- fail "\n\nacs-cymru: grafana.prometheusUrl is empty and observability.enabled is false.\n\nEither enable the chart's own stack or set grafana.prometheusUrl to the cluster's Prometheus.\n" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "acs-cymru.lokiUrl" -}}
+{{- if .Values.grafana.lokiUrl -}}
+{{- .Values.grafana.lokiUrl -}}
+{{- else if .Values.observability.enabled -}}
+http://loki:3100
+{{- else -}}
+{{- fail "\n\nacs-cymru: grafana.lokiUrl is empty and observability.enabled is false.\n\nEither enable the chart's own stack or set grafana.lokiUrl to the cluster's Loki.\n" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Pod annotations that make a workload a scrape target. Alloy (templates/obs/alloy.yaml) keeps
+every pod in the release carrying `prometheus.io/scrape: "true"`, reads the port and path from
+the other two, and labels the series `service` with the pod's component. The convention is the
+one most Prometheus configurations already read, so a cluster's own Prometheus can use it too.
+
+  {{ include "acs-cymru.scrapeAnnotations" (dict "port" 9108 "path" "/metrics") | nindent 8 }}
+*/}}
+{{- define "acs-cymru.scrapeAnnotations" -}}
+prometheus.io/scrape: "true"
+prometheus.io/port: {{ .port | quote }}
+prometheus.io/path: {{ .path | default "/metrics" | quote }}
+{{- end -}}
+
 {{/* ---------------------------------------------------------------------------------------- */}}
 {{/* 2. Validation                                                                              */}}
 {{/*                                                                                            */}}
@@ -400,6 +442,10 @@ gitea: SQLite plus a repository directory on one ReadWriteOnce PVC -- and the re
   store corrupt it rather than merely contending for it
 supabase-db: a single Postgres instance with no replication; HA needs an operator
 timescaledb: likewise
+prometheus: one TSDB on a ReadWriteOnce PVC; a second instance would also be a second remote-write
+  target, and the DaemonSet writes to one Service
+loki: single-binary mode with filesystem storage on a ReadWriteOnce PVC -- the ingester, the index
+  and the chunks are all local files
 {{- end -}}
 
 {{/*

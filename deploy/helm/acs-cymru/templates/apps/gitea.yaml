@@ -311,7 +311,6 @@ spec:
             - name: init-script
               mountPath: /seed
               readOnly: true
-          volumeMounts:
             - name: data
               mountPath: /data
           resources:
