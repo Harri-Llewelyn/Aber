@@ -62,19 +62,19 @@ export const GATEWAY_ROLES = {
 }
 
 /**
- * Gateway-shaped broker accounts that are not gateways, keyed by username. A validator's fixture
- * holds an ordinary gateway account at a pinned id, created by the boot reconcile from
- * MQTT_VALIDATOR_* rather than issued against a row, so between runs the broker holds it and
- * no gateway claims it. Declared so the Access Control page can say what it is instead of listing
- * it as a stray; a username not here is a genuine orphan.
+ * Gateway-shaped broker accounts that are platform accounts, keyed by username. The validator's
+ * fixture holds an ordinary gateway account at a pinned id, created by the boot reconcile from
+ * MQTT_VALIDATOR_* rather than issued against a row, so between runs the broker holds it and no
+ * gateway claims it. Declared so the Access Control page lists it with the other platform accounts
+ * rather than as a stray; a gateway-shaped username not here and not a gateway's is an orphan.
  */
 export const FIXTURE_ACCOUNTS = {
   gwy110000000000400080000: {
-    name: 'Validator fixture',
-    purpose: 'ingestion/validate.py\'s gateway (UUID 11000000-0000-4000-8000-000000000001). The '
-      + 'validator seeds the row at the start of a run and deletes it at the end; the broker '
-      + 'account outlives it because mosquitto-init creates it from MQTT_VALIDATOR_* at boot. A '
-      + 'production stack leaves those unset and has no such account.',
+    name: 'Validator test gateway',
+    purpose: 'ingestion/validate.py publishes as this gateway (UUID 11000000-0000-4000-8000-000000000001). '
+      + 'The validator seeds the row at the start of a run and deletes it at the end; the account '
+      + 'is created at boot from MQTT_VALIDATOR_* so the run can connect. Leave that pair unset '
+      + 'on a stack that never runs the validator and no account is created.',
   },
 }
 

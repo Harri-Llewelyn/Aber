@@ -185,7 +185,7 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/Generate/)).toBeTruthy())
-    expect(screen.getByText(/Bundle/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Bundle/ })).toBeTruthy()
     expect(screen.getAllByText('Issued', { selector: '.badge' }).length).toBe(1)
   })
 
@@ -214,13 +214,49 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([{ ...provisioned, is_archived: true }])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText(/No gateways registered/i)).toBeTruthy())
-    // The Devices page's "Needs attention" shape: a toggle button carrying its own count, not a
-    // checkbox -- which was the only control of its kind in the app and read as a form field.
-    screen.getByRole('button', { name: /Archived \(1\)/i }).click()
+    // Archived is a filter value, not a toggle. The empty message says the list is filtered, not
+    // that nothing is registered.
+    await waitFor(() => expect(screen.getByText(/No gateway matches this filter/i)).toBeTruthy())
+    const filter = screen.getByLabelText('Filter gateways by credential state')
+    expect(within(filter).getByText('Archived (1)')).toBeTruthy()
+    expect(within(filter).getByText('Current (0)')).toBeTruthy()
+    fireEvent.change(filter, { target: { value: 'archived' } })
 
     await waitFor(() => expect(screen.getByText(/Restore to issue/i)).toBeTruthy())
     expect(screen.queryByText(/Generate/)).toBeNull()
+  })
+
+  /** The filter's values are the Credential column's states, with a count on each. */
+  it('filters gateways by credential state', async () => {
+    api.listGatewayCredentials.mockResolvedValue([
+      provisioned,
+      { ...enrolled, id: '2b000000-0000-4000-8000-000000000001', name: 'Cell 5 Press Line', sparkplug_id: 'gwy2b0000000000400080000', enrolled_at: null, status: 'PENDING_ENROLLMENT' },
+    ])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Sim_Gateway_Cell1_Machining')).toBeTruthy())
+    expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
+    const filter = screen.getByLabelText('Filter gateways by credential state')
+    expect(within(filter).getByText('Current (2)')).toBeTruthy()
+    expect(within(filter).getByText('Bundle outstanding (1)')).toBeTruthy()
+    expect(within(filter).getByText('No platform record (1)')).toBeTruthy()
+
+    fireEvent.change(filter, { target: { value: 'awaiting-enrolment' } })
+    await waitFor(() => expect(screen.queryByText('Sim_Gateway_Cell1_Machining')).toBeNull())
+    expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
+    // No summary pills under the table: the filter carries the counts.
+    expect(screen.queryByText(/no record$/)).toBeNull()
+  })
+
+  it('heads the two action columns Actions', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy())
+    expect(screen.queryByRole('columnheader', { name: 'Issue' })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy())
+    expect(screen.queryByRole('columnheader', { name: 'Mint' })).toBeNull()
   })
 
   /**
@@ -264,9 +300,42 @@ describe('AccessControlTab', () => {
     })
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Validator fixture')).toBeTruthy())
-    expect(screen.getByText('Validator fixture').getAttribute('title')).toMatch(/validate\.py/)
-    expect(screen.getByText('Not declared anywhere')).toBeTruthy()
+    // The stray is the orphan; the declared fixture is not listed among them.
+    await waitFor(() => expect(screen.getByText(/Accounts with no gateway/i)).toBeTruthy())
+    expect(screen.getByRole('button', { name: /gwy999999999999999999999/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /gwy110000000000400080000/ })).toBeNull()
+
+    // It is a platform account, listed with the others under Services.
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    await waitFor(() => expect(screen.getByText('Broker accounts')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /gwy110000000000400080000/ })).toBeTruthy()
+    expect(screen.getByText(/Validator test gateway/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /gwy999999999999999999999/ })).toBeNull()
+  })
+
+  /** The broker's own accounts are listed live, each with the purpose of the role it holds. */
+  it('lists the platform accounts with the purpose of their role', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false },
+        { username: 'factoryplus_monitor', roles: ['monitor'], disabled: false },
+        { username: 'dynsec-admin', roles: ['admin'], disabled: false },
+        { username: 'factoryplus_ingestion', roles: ['ingestion'], disabled: true },
+      ],
+      roles: [],
+    })
+    await renderServices()
+
+    await waitFor(() => expect(screen.getByText('Broker accounts')).toBeTruthy())
+    // Policy order, not alphabetical: ingestion, monitor, admin.
+    const names = screen.getAllByRole('button', { name: /Copy MQTT username/ }).map(b => b.textContent)
+    expect(names).toEqual(['factoryplus_ingestion', 'factoryplus_monitor', 'dynsec-admin'])
+    // Scoped to the row: the same purpose is printed beside the role in the table beneath.
+    const monitorRow = screen.getByRole('button', { name: /factoryplus_monitor/ }).closest('tr')
+    expect(within(monitorRow).getByText(/The broker health probes and the metrics exporter/)).toBeTruthy()
+    expect(screen.getByText('Disabled')).toBeTruthy()
+    expect(screen.queryByText(/Accounts with no gateway/i)).toBeNull()
   })
 
   /** An unrecognised machine identity is more interesting than a recognised one, so it is listed. */

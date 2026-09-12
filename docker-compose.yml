@@ -1025,8 +1025,9 @@ services:
       # The account the credential service administers the plugin as. Required.
       MQTT_DYNSEC_ADMIN_USER: ${MQTT_DYNSEC_ADMIN_USER:-dynsec-admin}
       MQTT_DYNSEC_ADMIN_PASSWORD: ${MQTT_DYNSEC_ADMIN_PASSWORD}
-      # Every principal is required on Compose: the stack ships the validator.
-      DYNSEC_REQUIRED_PRINCIPALS: "INGESTION I3X VALIDATOR MONITOR"
+      # The validator is optional, as on the chart: leave MQTT_VALIDATOR_PASSWORD unset and no
+      # account is created. MONITOR is always required by the init.
+      DYNSEC_REQUIRED_PRINCIPALS: "INGESTION I3X"
       LEGACY_PASSWORD_FILE: /mosquitto/config/password_file
       # No gateway accounts are seeded here: a gateway's credential is minted once its row exists
       # (dashboard, or the enrolment bundle).
