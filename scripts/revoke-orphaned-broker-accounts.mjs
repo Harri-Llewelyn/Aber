@@ -1,55 +1,43 @@
 #!/usr/bin/env node
 /**
- * Rotate broker accounts whose gateway no longer exists.
+ * Disable broker accounts whose gateway no longer exists.
  *
- * ---------------------------------------------------------------------------------------------
- * WHY THIS CANNOT BE A MIGRATION, WHICH IS THE WHOLE REASON IT IS A SCRIPT.
+ * Archiving or deleting a gateway revokes its broker account through a trigger on `gateways`
+ * (0038, 0063). An account whose row was deleted BEFORE that path worked has no row to fire a
+ * trigger from, and the database has no way to learn the account exists. The broker knows: this
+ * reads its client list and compares it with the `gateways` table.
  *
- * `0063` fixed revocation for gateways the platform still knows about: archiving or deleting one
- * now rotates its broker credential, because the gate finally asks a question a virtual gateway can
- * answer. Nothing in SQL can reach the accounts left behind BEFORE that, and not for want of
- * trying -- the row that would have fired the trigger is gone, and the database has no way to learn
- * that an account exists at the broker. Only the password file knows, and only the host can read
- * it.
+ * IT DISABLES; IT DOES NOT DELETE. Same as the trigger: `disableClient` drops a live session and
+ * refuses the next CONNECT, and the account stays listed as disabled on the Access Control page,
+ * which is the record of what happened. Deleting a client is a decision an operator takes by hand
+ * with `mosquitto_ctrl`.
  *
- * Measured on the stack this was written against: 17 accounts, 5 live gateways, 3 platform
- * services -- and nine `gwy…` accounts belonging to gateways deleted long ago. `0040`'s header
- * predicted four of them and called them harmless:
- *
- *     "So four accounts remain in the password file with no row behind them. They are harmless --
- *      mosquitto.acl confines each to spBv1.0/+/+/%u/# … and SQL could not remove them anyway."
- *
- * The confinement claim is true and is why this is housekeeping rather than an incident. What has
- * changed is that "SQL could not remove them anyway" was the end of the sentence, and this is the
- * rest of it.
- *
- * ---------------------------------------------------------------------------------------------
- * IT ROTATES; IT DOES NOT DELETE. Same design as `0038`, for the same reason: the credential
- * service is add-only by construction, and a delete verb would turn "can mint a confined account"
- * into "can stop the entire fleet publishing". So each stray account is re-provisioned with a
- * password the service generates and nobody records, and the response is discarded.
- *
- * THROUGH THE DATABASE, NOT STRAIGHT AT THE SERVICE. `revoke_gateway_credential()` is granted to
+ * THROUGH THE DATABASE, NOT STRAIGHT AT THE BROKER. `revoke_gateway_credential()` is granted to
  * `service_role`, pulls the revoke secret out of the vault, and posts through the edge function --
- * the one path the Kubernetes NetworkPolicy admits to the credential sidecar. Calling the service
- * directly from a host script would mean holding that secret here and opening a second edge into
- * credential issuance, which is exactly what that function exists to avoid.
+ * the one path the Kubernetes NetworkPolicy admits to the credential service. Calling the plugin
+ * directly from here would need the admin credential on the host and would be a second way to
+ * change the broker's accounts.
  *
- * ---------------------------------------------------------------------------------------------
- * DRY RUN BY DEFAULT. It lists what it would rotate and changes nothing until `--yes`. A password
- * rotation is irreversible -- the replacement is never recorded anywhere -- so an operator who has
- * mis-identified an account (a gateway mid-provision, a stack pointed at the wrong broker) gets to
- * find out before rather than after.
+ * DRY RUN BY DEFAULT. It lists what it would disable and changes nothing until `--yes`.
  *
  * Usage:
  *   node scripts/revoke-orphaned-broker-accounts.mjs                 # list, change nothing
- *   node scripts/revoke-orphaned-broker-accounts.mjs --yes           # rotate them
- *   node scripts/revoke-orphaned-broker-accounts.mjs --target=k8s    # read the Secret, not the file
+ *   node scripts/revoke-orphaned-broker-accounts.mjs --yes           # disable them
+ *   node scripts/revoke-orphaned-broker-accounts.mjs --target=k8s    # the broker pod, not the container
  *
- * Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
+ * Requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and MQTT_DYNSEC_ADMIN_USER /
+ * MQTT_DYNSEC_ADMIN_PASSWORD (read from .env when unset).
  */
 import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
+import { GATEWAY_ID_PATTERN } from './lib/mosquitto-credentials.mjs';
+import { assertOk, summariseInventory } from './lib/mosquitto-dynsec.mjs';
+import { controlSender } from './lib/mosquitto-control.mjs';
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const apply = args.includes('--yes');
 const target = (args.find((a) => a.startsWith('--target=')) || '--target=compose').split('=')[1];
@@ -58,12 +46,9 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || 'http://localhost:54321').repl
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 /**
- * CHECKED IN main(), NOT AT MODULE SCOPE, and that is not a style preference.
- *
- * `parseAccounts()` and `strays()` are the safety-critical halves of this script -- they decide
- * which accounts get rotated irreversibly -- and they are pure, so they can be tested without a
- * stack. A module that calls `process.exit(1)` while being imported cannot be tested at all, which
- * is how the filter that protects `factoryplus_ingestion` would end up covered by nothing.
+ * CHECKED IN main(), NOT AT MODULE SCOPE. `parseAccounts()` and `strays()` decide which accounts
+ * get disabled and are pure, so they are tested without a stack; a module that exits while being
+ * imported cannot be tested at all.
  */
 function requireServiceKey() {
   if (SERVICE_KEY) return;
@@ -91,42 +76,59 @@ async function rest(pathname, init = {}) {
   return body ? JSON.parse(body) : null;
 }
 
-/**
- * The broker's account list, read the way `mosquitto-provision-gateway.mjs` writes it.
- *
- * DELIBERATELY THE SAME TWO MECHANISMS and no third: on Compose the password file inside the
- * container, on Kubernetes the Secret the sidecar mounts. A script that invented its own way to
- * find the accounts would be a second definition of "what accounts exist" to keep in step.
- */
-function brokerAccounts() {
-  if (target === 'k8s') {
-    const encoded = execFileSync('kubectl', [
-      '-n', process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru',
-      'get', 'secret', process.env.MOSQUITTO_SECRET || 'mosquitto-passwords',
-      '-o', 'jsonpath={.data.password_file}',
-    ], { encoding: 'utf8' });
-    return parseAccounts(Buffer.from(encoded, 'base64').toString('utf8'));
+function adminCredential() {
+  const env = { ...process.env };
+  const dotenv = join(REPO, '.env');
+  if (!env.MQTT_DYNSEC_ADMIN_PASSWORD && existsSync(dotenv)) {
+    for (const line of readFileSync(dotenv, 'utf8').split('\n')) {
+      const m = /^\s*(MQTT_DYNSEC_ADMIN_(?:USER|PASSWORD))\s*=\s*(.*?)\s*$/.exec(line);
+      if (m && !env[m[1]]) env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+    }
   }
-  return parseAccounts(execFileSync('docker', [
-    'exec', process.env.MOSQUITTO_CONTAINER || 'acs-cymru_mosquitto',
-    'cat', '/mosquitto/config/password_file',
-  ], { encoding: 'utf8' }));
+  if (!env.MQTT_DYNSEC_ADMIN_PASSWORD) {
+    console.error('MQTT_DYNSEC_ADMIN_PASSWORD is not set and .env does not carry it.');
+    process.exit(1);
+  }
+  return { username: env.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin', password: env.MQTT_DYNSEC_ADMIN_PASSWORD };
 }
 
 /**
- * GATEWAY ACCOUNTS ONLY, and the filter is the safety property of this whole script.
- *
- * `factoryplus_ingestion`, `factoryplus_i3x` and `factoryplus_monitor` are platform services with
- * no `gateways` row and no prospect of one, so a sweep keyed on "has no gateway row" would rotate
- * the ingestion daemon's own credential and stop the stack ingesting anything -- from the script
- * whose subject is tidying up. Only `gwy` + 21 hex characters is considered, which is the shape
- * `gateways.sparkplug_id` generates and the same pattern `revoke_gateway_credential()` validates.
+ * The broker's client list, read from the plugin the same way the service reads it. Inside the
+ * broker container on Compose, inside the broker pod on Kubernetes.
  */
-export function parseAccounts(passwordFile) {
-  return passwordFile
-    .split('\n')
-    .map((line) => line.split(':')[0].trim())
-    .filter((name) => /^gwy[0-9a-f]{21}$/.test(name));
+function brokerClients() {
+  const prefix = target === 'k8s'
+    ? (() => {
+      const pod = execFileSync('kubectl', [
+        '-n', process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru', 'get', 'pods',
+        '-l', 'app.kubernetes.io/component=mosquitto', '--field-selector=status.phase=Running',
+        '-o', 'jsonpath={.items[*].metadata.name}',
+      ], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean)[0];
+      if (!pod) throw new Error('no Running mosquitto pod');
+      return ['kubectl', '-n', process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru', 'exec', pod, '-c', 'mosquitto', '--'];
+    })()
+    : ['docker', 'exec', process.env.MOSQUITTO_CONTAINER || 'acs-cymru_mosquitto'];
+  const admin = adminCredential();
+  const send = controlSender({ host: '127.0.0.1', port: 1883, username: admin.username, password: admin.password }, prefix);
+  const clients = assertOk(send({ command: 'listClients', verbose: true }));
+  return summariseInventory(clients, null).clients;
+}
+
+/**
+ * GATEWAY ACCOUNTS THAT ARE STILL ENABLED, and the filter is the safety property of this script.
+ *
+ * `factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor` and the plugin's admin are
+ * platform accounts with no `gateways` row and no prospect of one, so a sweep keyed on "has no
+ * gateway row" would disable the ingestion daemon's own credential and stop the stack ingesting
+ * anything. Only `gwy` plus 21 hex characters is considered, which is the shape
+ * `gateways.sparkplug_id` generates and the same pattern `revoke_gateway_credential()` validates.
+ * An account already disabled is done with, and is not listed again on every run.
+ */
+export function parseAccounts(clients) {
+  return (clients || [])
+    .filter((c) => c && typeof c.username === 'string' && GATEWAY_ID_PATTERN.test(c.username))
+    .filter((c) => c.disabled !== true)
+    .map((c) => c.username);
 }
 
 /** Accounts at the broker that no gateway row claims. Pure, so the decision is testable. */
@@ -137,15 +139,15 @@ export function strays(accounts, liveSparkplugIds) {
 
 async function main() {
   requireServiceKey();
-  const accounts = brokerAccounts();
-  // EVERY gateway row, archived included. An archived gateway still has a row, so `0063`'s trigger
-  // and the pg_cron sweep own its credential -- rotating it from here would be a second mechanism
+  const accounts = parseAccounts(brokerClients());
+  // EVERY gateway row, archived included. An archived gateway still has a row, so the trigger and
+  // the pg_cron sweep own its credential -- disabling it from here would be a second mechanism
   // acting on the same account, and the two would race over `credential_revoked_at`.
   const gateways = await rest('/gateways?select=sparkplug_id');
   const orphans = strays(accounts, gateways.map((g) => g.sparkplug_id));
 
   console.log(
-    `${accounts.length} gateway account(s) at the broker, ${gateways.length} gateway row(s), ` +
+    `${accounts.length} enabled gateway account(s) at the broker, ${gateways.length} gateway row(s), ` +
     `${orphans.length} orphaned.`
   );
 
@@ -159,10 +161,9 @@ async function main() {
 
   if (!apply) {
     console.log(
-      '\nDRY RUN. Nothing was changed. Re-run with --yes to rotate each of these to a password\n' +
-      'the credential service generates and nobody records, which is how this platform revokes.\n' +
-      'The accounts remain in the password file as inert hashes -- see 0038 for why revocation is\n' +
-      'a rotation and not a deletion.'
+      '\nDRY RUN. Nothing was changed. Re-run with --yes to disable each of these at the broker.\n' +
+      'A disabled account drops its live session, refuses the next CONNECT, and stays listed as\n' +
+      'disabled on the Access Control page.'
     );
     return;
   }
@@ -185,10 +186,8 @@ async function main() {
   }
 
   console.log(
-    `\n${asked} rotation(s) queued. ASKED, NOT DONE: net.http_post is asynchronous, so this is a\n` +
-    'request rather than a receipt. Confirm with the broker itself --\n' +
-    '  docker compose logs mosquitto | grep -i reload\n' +
-    'or by attempting a connection with a password you hold.'
+    `\n${asked} revocation(s) queued. ASKED, NOT DONE: net.http_post is asynchronous, so this is a\n` +
+    'request rather than a receipt. Confirm on the Access Control page, which reads the broker.'
   );
 
   if (refused.length > 0) {
@@ -201,7 +200,7 @@ async function main() {
 }
 
 // Importable for its pure halves without running the sweep -- see requireServiceKey(). The test
-// suite imports this file; a bare `main()` here would run a rotation from `node --test`.
+// suite imports this file; a bare `main()` here would run a revocation from `node --test`.
 if (process.argv[1]?.endsWith('revoke-orphaned-broker-accounts.mjs')) {
   main().catch((err) => {
     console.error(`\n${err.message}`);

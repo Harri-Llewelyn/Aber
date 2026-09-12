@@ -2,61 +2,63 @@
  * The non-human identities that can reach this stack, on both planes.
  *
  * The database plane is `auth.users` rows that cannot sign in, enumerated at runtime by
- * `list_machine_principals()`. The broker plane is `mosquitto.acl`, a file: Mosquitto has no API
- * that lists its principals and `gateway-credential-service` is add-only by design, so the list
- * is declared here and `scripts/check-docs-drift.mjs` asserts the two agree. Nothing holds an
- * identity on both planes.
+ * `list_machine_principals()`. The broker plane is read live from the broker's Dynamic Security
+ * plugin (api.listBrokerInventory): the accounts, their roles and each role's rules come from the
+ * broker at the moment of the read. What the broker cannot say is what a role is FOR, so that is
+ * declared here, keyed by role name, and `scripts/check-docs-drift.mjs` asserts the set matches
+ * the roles `mosquitto/dynsec-roles.json` declares. Nothing holds an identity on both planes.
  */
 
 /**
- * Named principals in `mosquitto.acl`, in the order they appear there. `topics` mirrors the
- * ACL's own lines rather than paraphrasing them.
+ * The platform roles in `mosquitto/dynsec-roles.json`, with the purpose the page shows beside the
+ * live rules. `writes` is the fallback for a page rendered without an inventory; with one, it is
+ * read off the role's rules.
  */
 export const BROKER_PRINCIPALS = [
   {
-    username: 'factoryplus_ingestion',
-    purpose: 'The ingestion daemon. Reads every Sparkplug topic and is the only principal that may '
-      + 'publish a command.',
-    topics: [
-      'read  spBv1.0/#',
-      'write spBv1.0/+/NCMD/+',
-      'write ACS-Cymru/Directory/#',
-      'read  ACS-Cymru/Directory/#',
-      'write uns/#',
-      'read  uns/#',
-    ],
-    // The one principal here that can write, and every write is narrow: NCMD is how a rebirth is
-    // requested, `ACS-Cymru/Directory/#` is the Directory's MQTT half (off unless
-    // DIRECTORY_MQTT_ENABLED) and `uns/#` is the Unified Namespace (off unless UNS_MQTT_ENABLED).
-    // Neither tree is readable by any gateway: the Directory would enumerate the site, and the
-    // UNS would hand one credential every machine's readings.
+    role: 'ingestion',
+    purpose: 'The ingestion daemon. Reads every Sparkplug topic, is the only principal that may '
+      + 'publish a command, and is the only writer of the Directory and the Unified Namespace.',
+    // Every write is narrow: NCMD is how a rebirth is requested, `ACS-Cymru/Directory/#` is the
+    // Directory's MQTT half (off unless DIRECTORY_MQTT_ENABLED) and `uns/#` is the Unified
+    // Namespace (off unless UNS_MQTT_ENABLED). Neither tree is readable by any gateway: the
+    // Directory would enumerate the site, and the UNS would hand one credential every machine's
+    // readings.
     writes: true,
   },
   {
-    username: 'factoryplus_i3x',
+    role: 'i3x',
     purpose: 'The i3X server. Reads the whole namespace to assemble its address space and publishes '
       + 'nothing.',
-    topics: ['read spBv1.0/#', 'read ACS-Cymru/Directory/#'],
     writes: false,
   },
   {
-    username: 'factoryplus_monitor',
-    purpose: 'The broker metrics exporter. Reads Mosquitto’s own $SYS statistics and never sees '
-      + 'telemetry at all.',
-    topics: ['read $SYS/#'],
+    role: 'monitor',
+    purpose: 'The broker health probes and the metrics exporter. Reads Mosquitto’s own $SYS '
+      + 'statistics and never sees telemetry at all.',
     writes: false,
+  },
+  {
+    role: 'admin',
+    purpose: 'The credential service. Speaks to the broker’s Dynamic Security plugin to issue, '
+      + 'disable and list accounts, and reaches no telemetry topic.',
+    writes: true,
   },
 ]
 
 /**
- * The rule every gateway authenticates under. Not a principal, so it is separate rather than a
- * fourth row. `%u` is the connecting username, which is what lets a gateway be created at
- * runtime with no ACL edit.
+ * The two roles every gateway account holds. Not a principal, so it is separate rather than a
+ * fifth row: the shared role is one account-independent grant, and the per-gateway role is
+ * generated from the username when the credential is issued, which is what lets a gateway be
+ * created at runtime with no policy edit.
  */
-export const GATEWAY_ACL_PATTERN = {
-  pattern: 'readwrite spBv1.0/+/+/%u/#',
-  purpose: 'Every gateway, confined to the edge node named by its own username. No ACL edit is '
-    + 'needed to add one — only an account.',
+export const GATEWAY_ROLES = {
+  shared: 'gateway',
+  perGateway: 'gateway-<sparkplug_id>',
+  perGatewayTopic: 'spBv1.0/+/+/<sparkplug_id>/#',
+  purpose: 'Every gateway. The shared role lets it subscribe across spBv1.0/ and receive the '
+    + 'primary host’s STATE topics; its own role confines what it publishes and receives to the '
+    + 'edge node named by its username. Both are created when the credential is issued.',
 }
 
 /**

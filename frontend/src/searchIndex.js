@@ -67,7 +67,7 @@ export const CARDS = [
   { id: 'broker-credentials',   label: 'Broker credentials',   tab: 'access-control', keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
   { id: 'service-identities',   label: 'Service identities',   tab: 'access-control', keywords: ['machine accounts', 'non-human'] },
   { id: 'database-principals',  label: 'Database principals',  tab: 'access-control', keywords: ['auth users', 'cannot sign in', 'service role'] },
-  { id: 'broker-principals',    label: 'Broker principals',    tab: 'access-control', keywords: ['acl', 'mosquitto users', 'topic access'] },
+  { id: 'broker-roles',         label: 'Broker roles',         tab: 'access-control', keywords: ['dynamic security', 'mosquitto roles', 'topic access', 'orphaned accounts'] },
   { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] },
   { id: 'runtime-configuration', label: 'Runtime configuration', tab: 'settings',     keywords: ['system settings', 'retention', 'thresholds'] }
 ]

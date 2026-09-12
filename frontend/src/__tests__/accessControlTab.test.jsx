@@ -8,6 +8,7 @@ import { api } from '../api'
 vi.mock('../api', () => ({
   api: {
     listGatewayCredentials: vi.fn(),
+    listBrokerInventory: vi.fn(),
     listServicePrincipals: vi.fn(),
     listServiceTokens: vi.fn(),
     listRevokedServiceTokens: vi.fn(),
@@ -66,6 +67,8 @@ const MCP_PRINCIPAL = {
 beforeEach(() => {
   vi.clearAllMocks()
   // Defaulted so every credential-inventory test renders the whole page. Individual tests override.
+  // An empty-but-read inventory: the Broker column resolves to "No account" rather than "Not read".
+  api.listBrokerInventory.mockResolvedValue({ clients: [], roles: [], read_at: '2026-09-12T00:00:00Z', target: 'compose' })
   api.listServicePrincipals.mockResolvedValue([MCP_PRINCIPAL])
   api.listServiceTokens.mockResolvedValue(new Map())
   // Empty by default, which is both the common case and the reading a caller who cannot see the
@@ -86,18 +89,88 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
     // The meaning lives on the badge's tooltip now rather than in three lines beside it.
-    expect(screen.getAllByTitle(/does not mean the broker holds none/i).length).toBe(1)
+    expect(screen.getAllByTitle(/Broker column says whether an account exists/i).length).toBe(1)
     expect(screen.queryByText(/^No credential$/i)).toBeNull()
   })
 
-  /** And the page says so before any row is read, not after somebody acts on one. */
-  it('states its own limit in the preamble', async () => {
+  /** The preamble names the two columns, so a reader knows the recorded state and the live one are
+   *  different things before reading a row. */
+  it('states the two sources in the preamble', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => {
-      expect(screen.getByText(/not an inventory of the broker/i)).toBeTruthy()
+      expect(screen.getByText(/what the platform issued and recorded/i)).toBeTruthy()
     })
+    expect(screen.getByText(/read live from its\s+Dynamic Security plugin/i)).toBeTruthy()
+  })
+
+  /** When the broker cannot be read the Broker column reads Not read, and the page says why once. */
+  it('reports the broker as Not read when the inventory read fails', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockRejectedValue(new Error('the broker credential service is unreachable'))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('The broker was not read.')).toBeTruthy())
+    expect(screen.getAllByText('Not read').length).toBeGreaterThan(0)
+  })
+
+  /** The two states are shown side by side: recorded, and live. */
+  it('shows a script-provisioned gateway as No platform record and its live broker state', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false }],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
+    // The broker holds it and it is enabled: Active, from the live read.
+    expect(screen.getByText('Active')).toBeTruthy()
+  })
+
+  /** A revoked gateway reads Disabled at the broker. */
+  it('shows a disabled broker account as Disabled', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: provisioned.sparkplug_id, roles: ['gateway'], disabled: true }],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy())
+  })
+
+  /** An account the broker holds that no gateway row claims gets its own section — the state the
+   *  old page could never show. */
+  it('lists a broker account with no gateway row as an orphan', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false },
+        { username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false },
+        { username: 'factoryplus_ingestion', roles: ['ingestion'], disabled: false },
+      ],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/Accounts with no gateway/i)).toBeTruthy())
+    // The gateway-shaped stray is listed; the platform principal is not an orphan.
+    expect(screen.getByRole('button', { name: /gwy999999999999999999999/ })).toBeTruthy()
+  })
+
+  /** No orphan section on a healthy stack whose broker holds only known gateways. */
+  it('shows no orphan section when every broker account is a known gateway', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false }],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
+    expect(screen.queryByText(/Accounts with no gateway/i)).toBeNull()
   })
 
   it('offers a mint for a virtual gateway and a bundle for a physical one', async () => {
@@ -125,8 +198,8 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getAllByText('No platform record', { selector: '.badge' }).length).toBe(4))
     // FOUR BADGES, FOUR TOOLTIPS, AND NOT ONE LINE OF REPEATED BODY TEXT. The second assertion is
     // the one that matters: it fails the moment the sentence is put back into the column.
-    expect(screen.getAllByTitle(/does not mean the broker holds none/i).length).toBe(4)
-    expect(screen.queryByText(/does not mean the broker holds none/i)).toBeNull()
+    expect(screen.getAllByTitle(/Broker column says whether an account exists/i).length).toBe(4)
+    expect(screen.queryByText(/Broker column says whether an account exists/i)).toBeNull()
   })
 
   /** Archived gateways are hidden by default and offer no action when shown — 0041 refuses them. */
@@ -333,16 +406,33 @@ describe('AccessControlTab', () => {
       .toBe('withdraw:MCP read-only client'))
   })
 
-  it('shows the broker principals and marks which one can publish', async () => {
+  it('shows the broker roles and marks which ones can publish', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('factoryplus_ingestion')).toBeTruthy())
-    expect(screen.getByText('factoryplus_i3x')).toBeTruthy()
-    expect(screen.getByText('factoryplus_monitor')).toBeTruthy()
-    // Exactly one of the three writes, and it is the daemon.
-    expect(screen.getAllByText('CAN PUBLISH').length).toBe(1)
-    expect(screen.getAllByText('READ ONLY').length).toBe(2)
+    // Role names, not usernames: the page renders the policy's roles.
+    await waitFor(() => expect(screen.getByText('ingestion', { selector: 'td' })).toBeTruthy())
+    expect(screen.getByText('i3x', { selector: 'td' })).toBeTruthy()
+    expect(screen.getByText('monitor', { selector: 'td' })).toBeTruthy()
+    expect(screen.getByText('admin', { selector: 'td' })).toBeTruthy()
+    expect(screen.getByText('gateway', { selector: 'td' })).toBeTruthy()
+    // With no live inventory the writes flag is the declared fallback: ingestion and admin publish.
+    expect(screen.getAllByText('CAN PUBLISH').length).toBe(2)
+    expect(screen.getAllByText('READ ONLY').length).toBe(3)
+  })
+
+  /** With a live inventory the rules come from the broker, verb and topic, not from a literal. */
+  it('renders a role’s rules live from the broker inventory', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [],
+      roles: [
+        { rolename: 'monitor', acls: [{ acltype: 'subscribePattern', topic: '$SYS/#', allow: true }] },
+      ],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/subscribe \$SYS\/#/)).toBeTruthy())
   })
 
   /**

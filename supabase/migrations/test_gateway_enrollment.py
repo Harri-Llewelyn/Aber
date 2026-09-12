@@ -7,7 +7,7 @@ direction if it regresses:
   * a token table readable by `authenticated` never errors -- it just exposes the claim material
     for every physical gateway to every signed-in user, including Operator and Auditor;
   * a non-atomic claim never errors -- two appliances redeem one token, both receive a credential
-    for the same edge node, and because mosquitto.acl pins the topic to the username they then
+    for the same edge node, and because the broker's roles pin the topic to the username they then
     fight over one identity with no message anywhere saying so;
   * a token that outlives its expiry never errors -- the bundle in somebody's downloads folder just
     keeps working;
@@ -338,7 +338,7 @@ class TestRedeeming(GatewayEnrollmentBase):
         self.assertIsNotNone(row, "a live token was refused")
         gateway_id, sparkplug_id, sparkplug_group, name = row
         self.assertEqual(str(gateway_id), PHYSICAL_GW)
-        # The username mosquitto.acl pins the topic's edge-node segment to. An appliance given
+        # The username the broker's roles pin the topic's edge-node segment to. An appliance given
         # anything else authenticates and then has every message dropped by the broker.
         self.assertRegex(sparkplug_id, r"^gwy[0-9a-f]{21}$")
         # The other half of the address resolve_gateway() looks up first. Omitting it leaves the
@@ -438,7 +438,7 @@ class TestRedeeming(GatewayEnrollmentBase):
 
         This is the reason redemption is a function and not three statements in TypeScript. A
         read-then-write in the edge function would let both appliances observe an unconsumed token
-        and both receive a credential for the same edge node -- and because mosquitto.acl pins the
+        and both receive a credential for the same edge node -- and because the broker's roles pin the
         topic to the username, they would then silently contend for one identity.
 
         The second connection BLOCKS on the first's row lock until it commits, then re-evaluates
@@ -548,8 +548,8 @@ class TestGatewayBackupPolicies(GatewayEnrollmentBase):
 
     def test_path_is_confined_to_an_existing_gateway(self):
         """
-        The client does not get to assert where its data belongs -- the same idea as mosquitto.acl's
-        `%u`, one layer up. Storage's REST API is reachable with any authenticated session, so a
+        The client does not get to assert where its data belongs -- the same idea as the broker's
+        per-gateway role, one layer up. Storage's REST API is reachable with any authenticated session, so a
         convention the frontend happens to follow would be no control at all.
         """
         for path in (

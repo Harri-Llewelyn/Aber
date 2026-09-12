@@ -6,15 +6,15 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
- * Mint a broker credential for a virtual gateway and reveal it exactly once. The third caller of
- * one verb: `gateway-credential-service` can add a Mosquitto account and nothing else, and nothing
- * is added to it here. The mirror image of enroll-gateway, which has no user and is authorised by a
- * token; this has a session and is authorised by role, and folding the two would mean one function
- * accepting two unrelated proofs of authority. A virtual gateway needs this because its
- * `sparkplug_id` is generated from its row, so the account can only be minted after the row, and
- * there is no appliance to carry a bundle to.
+ * Mint a broker credential for a virtual gateway and reveal it exactly once. The second caller of
+ * the credential service's issue verb, beside enroll-gateway, and nothing is added to that verb
+ * here. The mirror image of enroll-gateway, which has no user and is authorised by a token; this
+ * has a session and is authorised by role, and folding the two would mean one function accepting
+ * two unrelated proofs of authority. A virtual gateway needs this because its `sparkplug_id` is
+ * generated from its row, so the account can only be minted after the row, and there is no
+ * appliance to carry a bundle to.
  *
- * The authority is more than gateway-bundle's, which holds no secret: the broker's password file is
+ * The authority is more than gateway-bundle's, which holds no secret: the broker's accounts are
  * not reachable from SQL, so minting requires MQTT_CREDENTIAL_SERVICE_TOKEN. There is still no
  * service-role key, so this cannot read or write a table outside the caller's RLS context. The
  * decision is the database's: `authorize_virtual_gateway_credential()` is SECURITY DEFINER and
@@ -98,8 +98,8 @@ serve(async (req) => {
   const userRole = await resolveUserRole(supabase, user.id);
   if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
     // Operator and Auditor land here, and nothing has been minted: the check is ahead of the RPC
-    // and the credential service, so a refused request cannot leave an unaccounted account in the
-    // broker's password file.
+    // and the credential service, so a refused request cannot leave an unaccounted account at the
+    // broker.
     return json(403, {
       error: "Forbidden: Insufficient privileges",
       details:
@@ -212,8 +212,9 @@ serve(async (req) => {
   return json(200, {
     gateway_name: identity.gateway_name,
     sparkplug_id: identity.sparkplug_id,
-    // The username is the sparkplug_id and cannot be anything else: mosquitto.acl pins the topic's
-    // edge-node segment to it. Returned under its own name so the dashboard can label the field.
+    // The username is the sparkplug_id and cannot be anything else: the gateway's broker role
+    // confines it to that edge-node segment. Returned under its own name so the dashboard can label
+    // the field.
     mqtt_username: identity.sparkplug_id,
     password: credential.password,
     applied_to_running_broker: credential.applied_to_running_broker ?? false,

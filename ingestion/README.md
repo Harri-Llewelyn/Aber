@@ -28,7 +28,7 @@ allowed to be heard at all.
 Sparkplug B device
       │  DBIRTH / DDATA / DDEATH  on  spBv1.0/<group>/<type>/<edge_node>/<device>
       ▼
-  Mosquitto ──── mosquitto.acl confines each gateway to spBv1.0/+/+/<own-id>/#
+  Mosquitto ──── a role per gateway confines it to spBv1.0/+/+/<own-id>/#
       │
       ▼  subscribe spBv1.0/#
   ingestion.py
@@ -107,7 +107,7 @@ under any device's id. Three consequences, in ascending severity:
    which silently stops its real telemetry being stored. **A denial of service against a production
    asset, triggered by one message.**
 
-[`mosquitto.acl`](../mosquitto/mosquitto.acl) closes the same hole at the broker tier. **Both are needed**:
+The broker's roles ([`../mosquitto/README.md`](../mosquitto/README.md)) close the same hole at the broker tier. **Both are needed**:
 the broker cannot know which device belongs to which gateway (that lives in Supabase), and the
 daemon cannot stop a forged message being delivered to other subscribers.
 
@@ -255,9 +255,10 @@ python capture.py play morning-shift.json --as-gateway gwy… --map dev<recorded
 
 This is the constraint the whole design turns on, and it is not a limitation to be worked around.
 
-`mosquitto.acl` confines every client to `spBv1.0/+/+/%u/#` — the topic's edge-node segment must
-equal the connecting username — and its header states the rule behind that: **"THERE IS NO
-WILDCARD-WRITE PRINCIPAL"**. That replaced a shared account which could forge DBIRTH and DDATA for
+The broker confines every gateway to `spBv1.0/+/+/<its username>/#` through a role generated for
+it — the topic's edge-node segment must equal the connecting username — and the policy's rule
+behind that (`mosquitto/README.md`) is that **no principal holds wildcard write**. That replaced a
+shared account which could forge DBIRTH and DDATA for
 every machine on site, a forgery `verify_gateway_binding()` cannot detect *"since a forged message
 under a CORRECTLY BOUND device passes that check by construction"*.
 
@@ -282,7 +283,7 @@ than the traffic it came from.
 
 **Getting the gateway wrong fails silently, so it is refused up front.** A publish outside the ACL
 is dropped by the broker with no PUBACK at QoS 0 — under MQTT 3.1.1 and 5 alike — so, as
-`mosquitto.acl` puts it, *"the publisher learns nothing from the broker by construction"*.
+`mosquitto/README.md` puts it, *"the publisher learns nothing from the broker by construction"*.
 `validate.py` has already had the run where every publish went nowhere. `play` therefore refuses to
 start unless `MQTT_PLAYBACK_USER` is the gateway named by `--as-gateway`.
 
@@ -518,11 +519,11 @@ is. One says what the worker may do in the database, the other what the broker w
 | :--- | :--- |
 | the job gate | `playback_jobs` refuses a target that is not `is_simulated`, in the database rather than the UI |
 | credential possession | the worker holds credentials only for gateways issued as playback targets, so it cannot authenticate as a real one |
-| the broker ACL | `pattern readwrite spBv1.0/+/+/%u/#` confines each credential to its own edge node, so even a compromised worker reaches one gateway |
+| the broker role | `spBv1.0/+/+/<sparkplug_id>/#` confines each credential to its own edge node, so even a compromised worker reaches one gateway |
 
-**The ACL cannot say "simulated gateways", and does not need to.** `mosquitto.acl` is a static file
-with `%u` substitution and MQTT wildcards; `is_simulated` is a database predicate, and no ACL rule
-can consult Postgres. Per-gateway confinement delivers the guarantee anyway — a worker connected as
+**The broker cannot say "simulated gateways", and does not need to.** A role is a list of topic
+patterns; `is_simulated` is a database predicate, and no role can consult Postgres. Per-gateway
+confinement delivers the guarantee anyway — a worker connected as
 `gwyAAA…` cannot publish under `gwyBBB…`, and the broker drops the attempt at the network protocol
 layer before any subscriber sees it. A topic-shaped rule such as `spBv1.0/+/+/simulated_#` is not a
 narrower version of that: `#` is a wildcard only as a whole filter or immediately after a `/`, so
@@ -609,7 +610,7 @@ the read finds nothing, so the worker correctly reports "no credentials issued".
 On Kubernetes the delivery is a **second key in the broker's existing credential Secret**, not a
 second Secret: `gateway-credential`'s Role grants `patch` on exactly one Secret by name, and a new
 one would widen the authority of the component that mints broker credentials. The playback pod
-mounts that one key via `items:`, so it never receives `password_file`.
+mounts that one key via `items:`, so it never receives anything else the Secret holds.
 
 ### The Playback gateway, and its shadow devices
 
@@ -716,8 +717,8 @@ Renaming the bucket means changing `supabase/storage-policies.sql` too. A bucket
 invisible to every browser-facing role and a policy naming a bucket that does not exist is dead text
 — neither errors.
 
-`record` defaults to the ingestion principal because recording is a read: `mosquitto.acl` grants it
-`read spBv1.0/#` and no asset write at all, so a mistyped subcommand cannot publish. `play` has no
+`record` defaults to the ingestion principal because recording is a read: its role grants it read
+of `spBv1.0/#` and no asset write at all, so a mistyped subcommand cannot publish. `play` has no
 default and no fallback, because there is no gateway this tool should pick on an operator's behalf.
 
 **`MQTT_PLAYBACK_CREDENTIALS` is empty by default and the worker starts anyway.** A stack that has
@@ -880,9 +881,9 @@ On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
   next one too, and retrying per message is exactly the flood the limit exists to prevent.
 - The daemon ignores `NCMD`/`DCMD` on its own wildcard subscription, so its own request coming
   straight back is not read as edge-node traffic.
-- `mosquitto.acl` permits **exactly this and nothing more**: the `factoryplus_ingestion` principal
-  holds `read spBv1.0/#` plus `write spBv1.0/+/NCMD/+`, so the daemon can ask for a rebirth and
-  cannot publish DBIRTH or DDATA at all. Each gateway's own `spBv1.0/+/+/%u/#` covers receiving it.
+- The ingestion role permits **exactly this and nothing more**: it holds read of `spBv1.0/#` plus
+  publish of `spBv1.0/+/NCMD/+`, so the daemon can ask for a rebirth and cannot publish DBIRTH or
+  DDATA at all. Each gateway's own role (`spBv1.0/+/+/<sparkplug_id>/#`) covers receiving it.
   That split is the point: this credential cannot forge telemetry for a device that is correctly
   bound to its gateway — the one forgery `verify_gateway_binding()` cannot detect, because such a
   message satisfies it by construction.
@@ -914,16 +915,17 @@ subscriber. Publishing the Directory therefore moves the access decision out of 
 into the broker, and turning it on is an exposure decision that belongs to a deployment, not a
 default.
 
-**The broker ACL is the whole of that access control**, and it is deliberately narrow:
+**The broker's roles are the whole of that access control**, and they are deliberately narrow
+(`mosquitto/dynsec-roles.json`):
 
 ```
-user factoryplus_ingestion     topic write ACS-Cymru/Directory/#   topic read ACS-Cymru/Directory/#
-user factoryplus_i3x                                               topic read ACS-Cymru/Directory/#
+ingestion   publish, subscribe, receive   ACS-Cymru/Directory/#
+i3x         subscribe, receive            ACS-Cymru/Directory/#
 ```
 
-**No gateway may read it.** A gateway is otherwise confined to `spBv1.0/+/+/%u/#` — its own edge
-node and nothing else — so it cannot enumerate the site today, and a read is silent. Granting it
-here would undo that confinement through the back door.
+**No gateway may read it.** A gateway is otherwise confined to `spBv1.0/+/+/<its id>/#` — its own
+edge node and nothing else — so it cannot enumerate the site today, and a read is silent. Granting
+it here would undo that confinement through the back door.
 `scripts/check-broker-config.mjs` asserts both halves: that ingestion may publish
 `ACS-Cymru/Directory/v1/device`, and that a gateway may not read it.
 
@@ -1005,10 +1007,10 @@ Retained, QoS 0: a subscriber sees the last value on connect, and the next readi
 
 **It is off by default**, for the Directory publisher's reason. A topic has no caller, so the broker
 ACL is the whole of the access control, and `uns/#` is every machine's readings in the clear.
-`mosquitto.acl` grants the daemon write and read on `uns/#` and **no gateway a read of it**: one
-gateway credential reading the tree would read the whole plant, which the per-node confinement
-exists to prevent. A BI or SCADA consumer gets its own account and its own `topic read uns/#` rule,
-added deliberately. `scripts/check-broker-config.mjs` asserts all three halves by delivery.
+The ingestion role grants the daemon publish and read on `uns/#` and **no gateway a read of it**:
+one gateway credential reading the tree would read the whole plant, which the per-node confinement
+exists to prevent. A BI or SCADA consumer gets its own account and a role reading `uns/#`, added
+deliberately in `mosquitto/dynsec-roles.json`. `scripts/check-broker-config.mjs` asserts all three halves by delivery.
 
 **The cost is on the single-writer path**, one publish per metric per message on the same thread
 as the historian write, and it is measured the same way: `acs_ingestion_uns_publish_seconds` sits
@@ -1068,7 +1070,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | Compose-internal name |
-| `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto.acl` |
+| `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
 | `DB_HOST` / `DB_PORT` | `timescaledb` / `5432` | Port defaults to `5433` when `DB_HOST` is unset, i.e. running from the host |
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
@@ -1461,4 +1463,4 @@ still runs, because its assertions are worth reporting either way.
 
 - [`../supabase/README.md`](../supabase/README.md) — schema, RLS, triggers, edge functions
 - [`../tutorial/README.md`](../tutorial/README.md) — building a gateway, a device and the flow that publishes as it
-- [`../mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) — per-gateway topic confinement
+- [`../mosquitto/README.md`](../mosquitto/README.md) — the broker's roles and per-gateway topic confinement

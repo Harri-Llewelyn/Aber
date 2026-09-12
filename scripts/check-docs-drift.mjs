@@ -1095,90 +1095,63 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 11c. The Access Control page's broker list agrees with mosquitto.acl.
+// 11c. The Access Control page describes every role mosquitto/dynsec-roles.json declares.
 //
-// The list is a literal in the frontend because there is nowhere to read it from: the ACL is a
-// file mounted into the broker, Mosquitto lists no principals, and gateway-credential-service is
-// add-only by design. The topic rules are compared too, not just the usernames.
+// The page reads the broker live (broker-inventory) for its accounts and each role's rules; what a
+// role is FOR is declared in frontend/src/utils/serviceIdentities.js. A role in the policy with no
+// purpose on the page is broker access nobody can explain; a purpose for a role the policy does
+// not declare is a description of nothing. The policy's default is checked here too: the plugin's
+// own `init` writes `publishClientReceive: true`, and that one grant lets every client read topics
+// its role never mentions.
 // -------------------------------------------------------------------------------------------------
 {
-  const acl = read('mosquitto/mosquitto.acl');
+  const policy = JSON.parse(read('mosquitto/dynsec-roles.json'));
   const ui = read('frontend/src/utils/serviceIdentities.js');
 
-  // A `user <name>` line owns every `topic` line until the next `user` or the end of the file.
-  const aclPrincipals = new Map();
-  for (const [, name, body] of acl.matchAll(/^user[ \t]+(\S+)[ \t]*$([\s\S]*?)(?=^user[ \t]|$(?![\s\S]))/gm)) {
-    aclPrincipals.set(
-      name,
-      [...body.matchAll(/^topic[ \t]+(\S+)[ \t]+(\S+)[ \t]*$/gm)].map((m) => `${m[1]} ${m[2]}`)
-    );
-  }
+  const policyRoles = new Set((policy.roles || []).map((r) => r.rolename));
+  const uiRoles = new Set([...ui.matchAll(/^\s*role:\s*'([^']+)'/gm)].map((m) => m[1]));
+  // The shared gateway role is declared separately on the page, as it is held separately.
+  const shared = ui.match(/shared:\s*'([^']+)'/)?.[1];
+  if (shared) uiRoles.add(shared);
 
-  // WHITESPACE IS NORMALISED ON BOTH SIDES. The ACL aligns its columns with extra spaces
-  // (`topic read  spBv1.0/#`), and a check that treated that as a difference would fail on
-  // formatting while missing a real divergence in the noise.
-  const norm = (t) => t.replace(/\s+/g, ' ').trim();
-
-  const uiPrincipals = new Map(
-    [...ui.matchAll(/username:\s*'([^']+)',[\s\S]*?topics:\s*\[([^\]]*)\]/g)].map(([, name, topics]) => [
-      name,
-      [...topics.matchAll(/'([^']+)'/g)].map((m) => norm(m[1])),
-    ])
-  );
-
-  if (aclPrincipals.size === 0 || uiPrincipals.size === 0) {
+  if (policyRoles.size === 0 || uiRoles.size === 0) {
     fail(
-      'could not read the broker principals out of ' +
-        (aclPrincipals.size === 0 ? 'mosquitto.acl' : 'frontend/src/utils/serviceIdentities.js') +
-        ` (found ${aclPrincipals.size} in the ACL, ${uiPrincipals.size} on the page).\n` +
+      'could not read the broker roles out of ' +
+        (policyRoles.size === 0 ? 'mosquitto/dynsec-roles.json' : 'frontend/src/utils/serviceIdentities.js') +
+        ` (found ${policyRoles.size} in the policy, ${uiRoles.size} on the page).\n` +
         '      One of them changed shape, so the Access Control page is no longer being checked\n' +
-        '      against the ACL at all.'
+        '      against the policy at all.'
     );
   } else {
     const problems = [];
-
-    for (const [name, topics] of aclPrincipals) {
-      if (!uiPrincipals.has(name)) {
-        problems.push(`${name} is in mosquitto.acl but not on the Access Control page`);
-        continue;
-      }
-      const shown = uiPrincipals.get(name);
-      const missing = topics.map(norm).filter((t) => !shown.includes(t));
-      if (missing.length) {
-        problems.push(`${name} is granted '${missing.join("', '")}' by the ACL and the page does not show it`);
-      }
+    for (const r of policyRoles) {
+      if (!uiRoles.has(r)) problems.push(`${r} is declared in dynsec-roles.json and has no purpose on the Access Control page`);
     }
-
-    for (const name of uiPrincipals.keys()) {
-      if (!aclPrincipals.has(name)) {
-        problems.push(`${name} is on the Access Control page but not in mosquitto.acl`);
-      }
+    for (const r of uiRoles) {
+      if (!policyRoles.has(r)) problems.push(`${r} is described on the Access Control page and dynsec-roles.json does not declare it`);
     }
-
-    // The gateway rule is a PATTERN and not a principal -- there is no account by that name, which
-    // is precisely why adding a gateway needs a broker account and no ACL edit. Checked separately
-    // for the same reason the page renders it separately.
-    const aclPattern = acl.match(/^pattern[ \t]+(.+)$/m);
-    const uiPattern = ui.match(/pattern:\s*'([^']+)'/);
-    if (!aclPattern || !uiPattern) {
-      problems.push('the gateway ACL pattern could not be read from one of the two files');
-    } else if (norm(aclPattern[1]) !== norm(uiPattern[1])) {
-      problems.push(
-        `the gateway ACL pattern differs: the broker enforces '${norm(aclPattern[1])}' and the ` +
-          `page shows '${norm(uiPattern[1])}'`
-      );
+    const d = policy.defaultACLAccess || {};
+    if (d.publishClientSend !== false || d.publishClientReceive !== false || d.subscribe !== false) {
+      problems.push('defaultACLAccess must deny publishClientSend, publishClientReceive and subscribe');
+    }
+    for (const role of policy.roles || []) {
+      for (const acl of role.acls || []) {
+        // `%u` is not substituted by the plugin on 2.0.x (measured; mosquitto/README.md). A rule
+        // written with it grants nothing and fails nothing.
+        if (String(acl.topic).includes('%')) problems.push(`role ${role.rolename} uses '${acl.topic}': the plugin substitutes nothing in a topic`);
+      }
     }
 
     if (problems.length) {
       fail(
-        `the Access Control page and mosquitto.acl disagree: ${problems.join('; ')}.\n` +
-          '      A principal in the ACL and not on the page is broker access nobody can see; one on\n' +
-          '      the page and not in the ACL is an authorisation the broker is not enforcing.'
+        `the Access Control page and dynsec-roles.json disagree: ${problems.join('; ')}.\n` +
+          '      A role in the policy and not on the page is broker access nobody can explain; one\n' +
+          '      on the page and not in the policy is a description of nothing.'
       );
     } else {
       pass(
-        `the Access Control page lists all ${aclPrincipals.size} broker principals with the rules ` +
-          'mosquitto.acl grants them'
+        `the Access Control page describes all ${policyRoles.size} broker roles dynsec-roles.json ` +
+          'declares, and the policy denies by default'
       );
     }
   }
@@ -1458,8 +1431,8 @@ function edgeFunctionNames() {
 // Deliberately not listed, because renaming it is not cosmetic:
 //   * deploy/k8s/internal-ca.yaml `commonName: Factory+ Internal CA`: changing a cert-manager
 //     commonName re-mints the CA, which takes the whole fleet offline (docs/incidents.md).
-//   * `factoryplus_ingestion` / `factoryplus_i3x` / `factoryplus_monitor`: MQTT usernames in
-//     mosquitto.acl and a password file the broker cannot read back.
+//   * `factoryplus_ingestion` / `factoryplus_i3x` / `factoryplus_monitor`: MQTT usernames in the
+//     broker's Dynamic Security document, which holds only hashes.
 // -------------------------------------------------------------------------------------------------
 {
   /** file -> why this file's prose is product identity rather than a framework reference. */

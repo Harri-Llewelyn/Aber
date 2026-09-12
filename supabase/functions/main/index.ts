@@ -34,9 +34,13 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
 
   // Mints a virtual gateway's broker credential and reveals it once, authorised by role through a
   // SECURITY DEFINER RPC that checks has_role() itself. No service-role key: it holds the
-  // credential service's bearer token, whose whole authority is adding one confined account to a
-  // password file.
+  // credential service's bearer token, whose authority is one confined account at the broker.
   "gateway-credential": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
+
+  // Reads the broker's accounts and roles for the Access Control page, Administrator only. The
+  // same bearer token, because the credential service is the one thing that speaks to the broker's
+  // plugin; the read returns names, roles and state and no hash material.
+  "broker-inventory": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
 
   // Signs a long-lived JWT for a service principal and reveals it once. JWT_SECRET is the widest
   // secret in this map: it signs anything, including a `service_role` token that storage, realtime,
@@ -69,7 +73,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_WEBHOOK_SECRET",
   ],
 
-  // Rotates a decommissioned gateway's broker account to a password nobody records, which is how
+  // Disables a decommissioned gateway's broker account, dropping its live session, which is how
   // this platform revokes. Called by the database through the gateway with pg_net, because the
   // NetworkPolicy admits only `supabase-functions` to the credential service. GATEWAY_REVOKE_SECRET
   // must be listed here or the worker answers 503 to every revocation.

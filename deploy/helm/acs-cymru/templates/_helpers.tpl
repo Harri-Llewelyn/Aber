@@ -184,19 +184,26 @@ in CrashLoopBackOff reporting a database it cannot authenticate against.
 THE CREDENTIAL SERVICE'S TOKEN, for the same reason one line up and with a worse blast radius.
 
 It exits 2 on anything shorter than 32 characters rather than running open -- correctly, because it
-can mint a Mosquitto account for any edge node and mosquitto.acl turns an account into the ability
-to publish Sparkplug telemetry AS that gateway. There is no safe default to fall back to.
+can issue a Mosquitto account for any edge node and the gateway's role turns an account into the
+ability to publish Sparkplug telemetry AS that gateway. There is no safe default to fall back to.
 
-But it is a SIDECAR IN THE BROKER'S POD (it needs a shared PID namespace to signal mosquitto), so
-its refusal is not contained the way Grafana's would be: the pod never reaches Ready, and every
-workload that waits on the broker -- ingestion, i3x-service, both e2e Jobs -- times out against a
-broker that is running perfectly well. The rollout error then names i3x-service, which is neither
-the cause nor anywhere near it.
+But it is a SIDECAR IN THE BROKER'S POD, so its refusal is not contained the way Grafana's would
+be: the pod never reaches Ready, and every workload that waits on the broker -- ingestion,
+i3x-service, both e2e Jobs -- times out against a broker that is running perfectly well. The
+rollout error then names i3x-service, which is neither the cause nor anywhere near it.
 
 32, not "not empty", because the length is the check the service actually applies.
 */}}
 {{- if and .Values.gatewayCredential.enabled (lt (len (.Values.secrets.mqttCredentialServiceToken | default "")) 32) -}}
 {{- $missing = append $missing "secrets.mqttCredentialServiceToken (MQTT_CREDENTIAL_SERVICE_TOKEN, 32+ characters, required when gatewayCredential.enabled)" -}}
+{{- end -}}
+{{/*
+THE PLUGIN'S ADMIN. The broker's initContainer writes this account into the Dynamic Security
+document on every start and exits 1 without a password, so the pod never starts and the symptom is
+the same rollout timeout as above. The credential service authenticates as it; nothing else does.
+*/}}
+{{- if and .Values.mosquitto.enabled (not .Values.secrets.mqttDynsecAdminPassword) -}}
+{{- $missing = append $missing "secrets.mqttDynsecAdminPassword (MQTT_DYNSEC_ADMIN_PASSWORD, required -- the account the credential service administers the broker's Dynamic Security plugin as)" -}}
 {{- end -}}
 {{/*
 CONDITIONAL, LIKE THE TOKEN ABOVE, because playback is off by default and a cluster that never
@@ -525,12 +532,13 @@ told about the hostnames it also lacks.
 The two GATEWAY MQTT usernames must be well-formed sparkplug_ids, and the monitoring account must
 have a password.
 
-WHY THE RENDER AND NOT THE POD. `mosquitto.acl` pins the topic's edge-node segment to the
-connecting username (`pattern readwrite spBv1.0/+/+/%u/#`), and `verify_gateway_binding()` requires
-that same segment to be the gateway row's GENERATED `sparkplug_id`. So a friendly username here
-does not fail: the client authenticates perfectly, and then the broker silently drops every
-message it publishes. Nothing logs a reason at either end -- the symptom is an edge node that
-connects and produces no telemetry, which reads as a broken simulator or a broken ingestion daemon.
+WHY THE RENDER AND NOT THE POD. A gateway account's role confines it to
+`spBv1.0/+/+/<username>/#` (mosquitto/dynsec-roles.json, and the per-gateway role the reconcile
+generates), and `verify_gateway_binding()` requires that same segment to be the gateway row's
+GENERATED `sparkplug_id`. So a friendly username here does not fail: the client authenticates
+perfectly, and then the broker silently drops every message it publishes. Nothing logs a reason at
+either end -- the symptom is an edge node that connects and produces no telemetry, which reads as a
+broken simulator or a broken ingestion daemon.
 
 The monitoring password is checked because the broker's own probes authenticate as that account:
 an empty one leaves the pod permanently NotReady and takes down every workload that waits on it,
@@ -543,7 +551,7 @@ Skipped when `existingSecret` is set -- the values are then not the chart's to s
 {{- range $field := list "mqttValidatorUser" -}}
 {{- $v := get $.Values.secrets $field -}}
 {{- if not (regexMatch "^gwy[0-9a-f]{21}$" $v) -}}
-{{- fail (printf "\n\nacs-cymru: secrets.%s is %q, which is not a gateway sparkplug_id.\n\nIt must be 'gwy' followed by exactly 21 lowercase hex characters. mosquitto.acl confines each\nclient to `spBv1.0/+/+/%%u/#`, and ingestion's verify_gateway_binding() requires that same topic\nsegment to be the gateway row's GENERATED sparkplug_id -- so any other value AUTHENTICATES FINE\nand then has every published message silently dropped by the broker, with nothing logged at\neither end.\n\nThe id is derived from the row's pinned UUID: 'gwy' + the first 21 hex characters of it.\n  10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (Virtual_Gateway_NodeRED)\n  11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)\n" $field $v) -}}
+{{- fail (printf "\n\nacs-cymru: secrets.%s is %q, which is not a gateway sparkplug_id.\n\nIt must be 'gwy' followed by exactly 21 lowercase hex characters. The broker confines a gateway\naccount to `spBv1.0/+/+/<username>/#`, and ingestion's verify_gateway_binding() requires that same\ntopic segment to be the gateway row's GENERATED sparkplug_id -- so any other value AUTHENTICATES\nFINE and then has every published message silently dropped by the broker, with nothing logged at\neither end.\n\nThe id is derived from the row's pinned UUID: 'gwy' + the first 21 hex characters of it.\n  10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (Virtual_Gateway_NodeRED)\n  11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)\n" $field $v) -}}
 {{- end -}}
 {{- end -}}
 {{- if not .Values.secrets.mqttMonitorPassword -}}
@@ -994,19 +1002,14 @@ finished.
 {{- end -}}
 
 {{/*
-The MQTT principals the chart itself provisions, as env, for the two containers that write them:
-the broker's assemble-config initContainer and the credential-reload sidecar.
+The MQTT principals the chart itself provisions, as env, for the broker's assemble-config
+initContainer, which writes them into the Dynamic Security document on every start. The set must
+match PLATFORM_PRINCIPALS in scripts/lib/mosquitto-dynsec.mjs, which is what reads these names.
 
-ONE DEFINITION, because the two must agree exactly. They write the same password file, and a
-principal present in one and absent from the other produces a broker that authenticates a client
-until the next reload and then stops -- an intermittent CONNACK 5 that looks like a flapping
-network rather than a template that disagrees with itself.
-
-FIVE PLATFORM PRINCIPALS AND FOUR SIMULATED CELL GATEWAYS. The gateways are here for a different
-reason from the rest: node-red-init fails closed when a broker node in the shipped flow declares an
-`acsCredentialsEnv` pair it cannot find, so an install without them does not degrade to a quiet
-simulator -- the init container exits 1 and Node-RED never starts. They are ordinary accounts to
-the broker, and the empty-password skip below is what keeps them optional.
+An EMPTY password skips that account rather than writing an empty one. `mqttValidatorPassword` is
+the case that matters: the validator is a fixture, so a production install leaves it unset and
+should simply not have the account. Gateway accounts are not here at all: they are issued against a
+row that already exists, through the credential service.
 
 Consumers (ingestion, i3x, node-red, the validator Job) each take only THEIR OWN pair, so this is
 deliberately not used there: the point of the split is that no workload holds another's credential.
@@ -1021,41 +1024,6 @@ INGESTION I3X VALIDATOR MONITOR
 {{ include "acs-cymru.secretEnv" (dict "name" (printf "MQTT_%s_USER" $p) "secretName" $secretName "key" (printf "MQTT_%s_USER" $p)) }}
 {{ include "acs-cymru.secretEnv" (dict "name" (printf "MQTT_%s_PASSWORD" $p) "secretName" $secretName "key" (printf "MQTT_%s_PASSWORD" $p)) }}
 {{- end }}
-{{- end -}}
-
-{{/*
-The shell fragment that upserts those accounts into an ALREADY-ASSEMBLED password file.
-
-`mosquitto_passwd -b` upserts, so this is idempotent and re-applying it on every start is what
-makes a rotated password in values reach the broker on the next restart.
-
-NEVER `-c` HERE. That flag CREATES the file, discarding every per-gateway credential provisioned
-since the last upgrade -- the whole fleet drops off the broker at once with `helm upgrade` as the
-only clue. It is the single most destructive character available in this script.
-
-An EMPTY password skips that account rather than writing an empty one. `mqttValidatorPassword` is
-the case that matters: the validator is a fixture, so a production install leaves it unset and
-should simply not have the account, not fail to boot over a credential it never wanted. Gateway
-accounts are not here at all: they are minted against a row that already exists, so they arrive
-through the gateway-credential service rather than through values.
-*/}}
-{{- define "acs-cymru.mqttPrincipalUpserts" -}}
-for p in {{ include "acs-cymru.mqttPrincipals" . }}; do
-  eval user="\$MQTT_${p}_USER"
-  eval pass="\$MQTT_${p}_PASSWORD"
-  if [ -n "$pass" ]; then
-    mosquitto_passwd -b /mosquitto/config/password_file "$user" "$pass"
-  else
-    echo "MQTT_${p}_PASSWORD is empty -- not creating an account for '${user}'."
-  fi
-done
-# The monitoring account is the one that cannot be skipped: the broker's own probes subscribe to
-# $SYS as it, so without it the pod never becomes ready and every workload that waits on mosquitto
-# fails to start -- an outage whose message names neither MQTT nor this file.
-if [ -z "$MQTT_MONITOR_PASSWORD" ]; then
-  echo 'MQTT_MONITOR_PASSWORD must be set: the readiness, liveness and startup probes authenticate as this account, so an empty one leaves the broker permanently NotReady.' >&2
-  exit 1
-fi
 {{- end -}}
 
 {{/*

@@ -86,7 +86,7 @@ CREATE POLICY "asset_3d_models_delete_privileged" ON storage.objects
 -- See ./README.md -> "Storage buckets and why they differ".
 --
 -- The path is confined by the database: every object must live under `<sparkplug_id>/` naming a
--- gateway that exists (`storage.foldername(name)[1]` is the leading folder), as mosquitto.acl
+-- gateway that exists (`storage.foldername(name)[1]` is the leading folder), as mosquitto/README.md
 -- confines a client to its own edge node. SELECT is not path-confined, so a reader can find the
 -- backups of a gateway that has since been deleted.
 --

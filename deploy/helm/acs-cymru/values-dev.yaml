@@ -60,23 +60,19 @@ secrets:
 
   pgMetaCryptoKey: acs-cymru-pg-meta-crypto-key
 
-  # Five principals; see values.yaml for why the two gateway usernames are sparkplug_ids and not
-  # free text. One shared password here only because this file is the CI fixture.
+  # The platform principals; see values.yaml for why the validator's username is a sparkplug_id
+  # and not free text. One shared password here only because this file is the CI fixture.
   mqttIngestionUser: factoryplus_ingestion
   mqttIngestionPassword: acscymru123
   mqttI3xUser: factoryplus_i3x
   mqttI3xPassword: acscymru123
-  mqttSimulatorUser: gwy100000000000400080000
-  # EMPTY, matching .env.example. This is the RETIRED single-device simulator's account: 0020
-  # deletes its gateway row, so anything published under it is refused by
-  # verify_gateway_binding() anyway. acs-cymru.mqttPrincipalUpserts skips an empty password,
-  # so no account is created and the stack carries no live credential for an edge node that
-  # has no asset record. Set it only for a Node-RED PVC that predates the flow consolidation.
-  mqttSimulatorPassword: ""
   mqttValidatorUser: gwy110000000000400080000
   mqttValidatorPassword: acscymru123
   mqttMonitorUser: factoryplus_monitor
   mqttMonitorPassword: acscymru123
+  # The plugin's admin. Required: the broker's initContainer exits without it.
+  mqttDynsecAdminUser: dynsec-admin
+  mqttDynsecAdminPassword: acscymru123dynsecadmin
   # The four simulated cell gateways. Set here because node-red-init fails closed on a broker node
   # whose declared `acsCredentialsEnv` pair is missing -- without these the init container exits 1
   # and Node-RED never starts, which on k3d reads as a stuck rollout rather than as a credential.
@@ -88,8 +84,8 @@ secrets:
   # The bearer token supabase-functions presents to the gateway-credential sidecar.
   #
   # NOT OPTIONAL, AND NOT A DEFAULT THE SERVICE CAN INVENT. It exits 2 on anything shorter than 32
-  # characters rather than running open -- that service can mint a broker account for any edge node,
-  # and mosquitto.acl makes an account the ability to publish telemetry as that gateway. Unset, the
+  # characters rather than running open -- that service can issue a broker account for any edge
+  # node, and the gateway's role makes an account the ability to publish telemetry as that gateway. Unset, the
   # sidecar CrashLoopBackOffs, which takes the whole mosquitto POD out of Ready and stalls every
   # workload that waits on the broker. The symptom is i3x-service and ingestion timing out, naming
   # neither this value nor the container that refused to start.

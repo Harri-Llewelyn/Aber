@@ -30,8 +30,8 @@ const RUNTIME_DIR =
   process.env.NODE_RED_RUNTIME_DIR || '/usr/src/node-red/node_modules';
 
 const credentialSecret = process.env.NODERED_CREDENTIAL_SECRET;
-// A gateway credential, not a shared platform account: mosquitto.acl confines each client to
-// `spBv1.0/+/+/%u/#`, so the username must be the gateway's `sparkplug_id`. This pair is the
+// A gateway credential, not a shared platform account: the broker's roles confine each client to
+// `spBv1.0/+/+/<sparkplug_id>/#`, so the username must be the gateway's `sparkplug_id`. This pair is the
 // legacy fallback for a `mqtt-broker-config` node (see brokerCredentialFor()); current flows
 // name their own pair per broker node through `acsCredentialsEnv`.
 const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
@@ -181,7 +181,7 @@ if (mqttTlsEnabled && !fs.existsSync(mqttTlsCaFile)) {
 if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
   const flow = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
 
-  // Every broker node, not just the first: mosquitto.acl pins the topic's edge-node segment to the
+  // Every broker node, not just the first: the broker's roles pin the topic's edge-node segment to the
   // username, so a multi-cell floor has one broker node per gateway.
   const brokers = flow.filter((n) => n.type === 'mqtt-broker');
 
@@ -674,7 +674,7 @@ function storedBrokerCredential(nodeId = BROKER_NODE_ID) {
 /**
  * Which credential each broker node in the flow should carry.
  *
- * One connection per gateway, because mosquitto.acl pins the edge-node segment to the username.
+ * One connection per gateway, because the broker's roles pin the edge-node segment to the username.
  * The env prefix is declared on the node in `acsCredentialsEnv`, not derived from its id: a
  * convention is invisible when it breaks, and the only symptom is "Connection failed to broker".
  * The credential tooling emits exactly these variable names. The legacy node keeps reading

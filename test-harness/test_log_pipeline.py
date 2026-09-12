@@ -212,7 +212,7 @@ class DropPairTestCase(unittest.TestCase):
 
         # BOTH, NOT JUST THE PASSWORD, AND THE USERNAME IS THE ONE THAT FAILS QUIETLY.
         #
-        # mosquitto.acl grants each gateway `spBv1.0/+/+/%u/#` -- the edge-node segment of the
+        # The broker's roles grant each gateway `spBv1.0/+/+/<sparkplug_id>/#` -- the edge-node segment of the
         # topic must equal the username. Checking only the password let an unset username through
         # as `""`, publishing to `.../DDATA/validator/<dev>` on a connection authenticated as
         # nobody. The broker accepts the CONNECT and silently discards the PUBLISH: an ACL refusal
@@ -246,8 +246,8 @@ class DropPairTestCase(unittest.TestCase):
 
         now_ms = int(time.time() * 1000)
         payload = make_sparkplug_payload(cls.device, {"Systems/TEMPERATURE": 99.9}, now_ms)
-        # THE EDGE-NODE SEGMENT IS THE USERNAME, because mosquitto.acl matches them against each
-        # other (`spBv1.0/+/+/%u/#`). It is `user` rather than a re-read with a fallback: the
+        # THE EDGE-NODE SEGMENT IS THE USERNAME, because the broker's roles match them against each
+        # other (`spBv1.0/+/+/<sparkplug_id>/#`). It is `user` rather than a re-read with a fallback: the
         # fallback was how a mismatch became possible in the first place.
         client.publish(f"spBv1.0/{GROUP}/DDATA/{user}/{cls.device}", payload)
         time.sleep(3)

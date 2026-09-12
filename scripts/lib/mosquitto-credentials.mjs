@@ -1,33 +1,8 @@
 /**
- * The one implementation of "add a gateway account to a Mosquitto password file".
- *
- * WHY THIS FILE EXISTS. Two things now issue broker credentials -- the operator CLI
- * (scripts/mosquitto-provision-gateway.mjs) and the enrolment service
- * (scripts/gateway-credential-service.mjs) -- and they run in different places against different
- * transports: `docker exec` and `kubectl` for the first, a mounted volume and the Kubernetes API
- * for the second. What they must NOT differ on is the merge: which lines survive, which line is
- * replaced, and what the file looks like afterwards.
- *
- * That is the part where this repository has already been burned. `mosquitto_passwd -b -c` CREATES
- * the file and discards everything in it, and a one-shot that re-ran with `-c` deleted every
- * gateway credential issued since boot -- invisibly, because Mosquitto keeps authenticated accounts
- * in memory and only notices at the next reload. See the mosquitto-init header in
- * docker-compose.yml for the full account of that failure.
- *
- * So the merge lives here, once, as a PURE FUNCTION over strings with no I/O, and both callers use
- * it. It is the only part of credential issuance that is unit-tested, because it is the only part
- * whose failure is silent.
- *
- * ---------------------------------------------------------------------------------------------
- * THE INVARIANT, STATED AS CODE RATHER THAN AS A COMMENT.
- *
- * `mergeCredential()` THROWS if its output would hold fewer accounts than its input, other than the
- * single account being replaced. A comment saying "never truncate" is advice; this is a check that
- * fires before anything is written. Every path that produces a password file goes through it.
- *
- * `-c` IS NEVER PASSED TO A FILE THAT MATTERS. Both callers hash into a scratch file that holds
- * exactly one account -- where `-c` is correct and required -- and then merge that one line in
- * here. The real password file is only ever written whole, from a value this function returned.
+ * What every issuer of a broker credential shares: the gateway id shape, the password alphabet, the
+ * password generator, the hashing argv, and the playback delivery store. Pure functions over
+ * strings with no I/O, used by the boot reconcile, the credential service, the operator CLI and
+ * the tests. The policy itself is in mosquitto-dynsec.mjs.
  */
 import { randomBytes } from 'node:crypto';
 
@@ -35,15 +10,15 @@ import { randomBytes } from 'node:crypto';
  * 'gwy' plus 21 lowercase hex characters.
  *
  * Mirrors the GENERATED column in 0001_baseline_schema.sql
- * ('gwy' || substr(encode(uuid_send(id),'hex'),1,21)) and, more importantly, mirrors what
- * mosquitto.acl's `pattern readwrite spBv1.0/+/+/%u/#` compares against. A username that is not a
- * real edge-node id produces an account confined to a subtree nothing will ever publish to -- which
- * authenticates perfectly and then drops every message, at 3am.
+ * ('gwy' || substr(encode(uuid_send(id),'hex'),1,21)) and, more importantly, what the broker
+ * confines the account to: `spBv1.0/+/+/<username>/#`. A username that is not a real edge-node id
+ * produces an account confined to a subtree nothing will ever publish to -- which authenticates
+ * perfectly and then drops every message, at 3am.
  */
 export const GATEWAY_ID_PATTERN = /^gwy[0-9a-f]{21}$/;
 
-/** Where both deployment targets keep the file. mosquitto.conf names this path for both. */
-export const PASSWORD_FILE = '/mosquitto/config/password_file';
+/** A username mosquitto_passwd and the plugin both accept, for the platform principals. */
+export const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 
 /**
  * Where a playback target's password is delivered (0078).
@@ -135,39 +110,26 @@ export function generatePassword() {
   return randomBytes(24).toString('base64url');
 }
 
-/**
- * The usernames a password file declares, in order.
- *
- * Blank lines are ignored. A line with no colon is NOT ignored -- it is returned as-is so
- * mergeCredential's count check sees it, because a corrupted file is a thing to preserve and refuse
- * to write over, not a thing to quietly tidy up.
- */
-export function accountsIn(text) {
-  return String(text || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const colon = line.indexOf(':');
-      return colon === -1 ? line : line.slice(0, colon);
-    });
+export function assertUsername(value) {
+  if (typeof value !== 'string' || !USERNAME_PATTERN.test(value)) {
+    throw new CredentialError(`'${value}' is not a usable MQTT username`, 'invalid_username');
+  }
+  return value;
 }
 
 /**
- * Validate one line of mosquitto_passwd output before it is allowed near the real file.
+ * Validate one line of mosquitto_passwd output before its hash is transplanted into a client.
  *
  * mosquitto_passwd writes `<username>:$7$<iterations>$<salt>$<hash>`. Checking the shape here is
- * what stops an error message, an empty string or a multi-line dump being merged in as though it
- * were an account -- each of which would produce a file the broker rejects wholesale, taking every
- * OTHER gateway down with it.
+ * what stops an error message, an empty string or a multi-line dump being taken for an account.
  */
-export function assertEntry(entry, sparkplugId) {
+export function assertEntry(entry, username) {
   const line = String(entry || '').trim();
 
-  if (!line.startsWith(`${sparkplugId}:`)) {
+  if (!line.startsWith(`${username}:`)) {
     throw new CredentialError(
-      `mosquitto_passwd produced a line for a different account (expected '${sparkplugId}:...'), `
-      + `refusing to merge it: ${line.slice(0, 120)}`,
+      `mosquitto_passwd produced a line for a different account (expected '${username}:...'): `
+      + `${line.slice(0, 120)}`,
       'hash_mismatch',
     );
   }
@@ -187,95 +149,13 @@ export function assertEntry(entry, sparkplugId) {
 }
 
 /**
- * Merge one account into a password file's contents.
- *
- * REPLACES rather than appends when the account already exists. Mosquitto reads the FIRST match, so
- * appending a second line for the same username silently pins the OLD password -- the rotation
- * reports success and changes nothing.
- *
- * Returns the complete new contents; the caller writes them. Nothing here touches a filesystem or a
- * cluster, which is what makes the invariant below testable without either.
- *
- * @param {string} existing  current file contents ('' when there is no file yet)
- * @param {string} entry     one validated mosquitto_passwd line
- * @returns {{contents: string, replaced: boolean, accounts: string[]}}
- */
-export function mergeCredential(existing, entry) {
-  const line = String(entry).trim();
-  const sparkplugId = line.slice(0, line.indexOf(':'));
-  if (!sparkplugId) {
-    throw new CredentialError('entry has no username', 'hash_mismatch');
-  }
-
-  const before = accountsIn(existing);
-  const kept = String(existing || '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .filter((l) => !l.startsWith(`${sparkplugId}:`));
-
-  const replaced = kept.length !== before.length;
-  const contents = `${[...kept, line].join('\n')}\n`;
-  const after = accountsIn(contents);
-
-  // ---------------------------------------------------------------------------------------------
-  // THE NO-TRUNCATION CHECK. Every account present before must still be present after, and the only
-  // permitted change to the SET of accounts is the addition of this one.
-  //
-  // It is deliberately a comparison of sets rather than of counts: a count check passes if one
-  // account is dropped while another is duplicated, which is precisely what an appending bug looks
-  // like. `expected` is what the caller asked for; anything else is a bug in the lines above, and
-  // writing the result would be worse than failing here.
-  // ---------------------------------------------------------------------------------------------
-  const expected = new Set([...before, sparkplugId]);
-  const actual = new Set(after);
-  const lost = [...expected].filter((u) => !actual.has(u));
-  const gained = [...actual].filter((u) => !expected.has(u));
-
-  if (lost.length || gained.length) {
-    throw new CredentialError(
-      'refusing to write a password file that would '
-      + `${lost.length ? `LOSE account(s) ${lost.join(', ')}` : ''}`
-      + `${lost.length && gained.length ? ' and ' : ''}`
-      + `${gained.length ? `invent account(s) ${gained.join(', ')}` : ''}. `
-      + 'This is the truncation guard in scripts/lib/mosquitto-credentials.mjs; it fires before '
-      + 'anything is written, because a password file that loses accounts fails silently until the '
-      + 'broker next reloads.',
-      'merge_would_lose_accounts',
-    );
-  }
-
-  // Duplicate usernames in the INPUT survive as duplicates in `kept` only if they belong to other
-  // accounts, which is a pre-existing corruption this function is not entitled to fix silently. It
-  // is reported instead, because the broker resolves a duplicate to whichever line comes first.
-  if (after.length !== actual.size) {
-    throw new CredentialError(
-      'the existing password file contains duplicate usernames; refusing to rewrite it. '
-      + 'Mosquitto resolves a duplicate to the FIRST match, so which credential is live depends on '
-      + 'line order. Repair the file by hand.',
-      'duplicate_accounts',
-    );
-  }
-
-  return { contents, replaced, accounts: after };
-}
-
-/**
  * The shell fragment that hashes ONE account into a scratch file and prints it.
  *
- * Shared so the CLI's `kubectl exec` path and the service's local path cannot drift on the one
- * detail that matters: `-c` is applied to `$tmp`, a file created by mktemp for this purpose and
- * holding exactly one account. It is never applied to the real password file.
- *
- * NO INTERPOLATION AT ALL -- the id and the password arrive as POSITIONAL PARAMETERS, `$1` and
- * `$2`, supplied by hashArgv() below. They used to be interpolated into this string inside single
- * quotes, which was safe only because assertGatewayId() and assertSafePassword() reject every
- * character that could close one. That reasoning held, and it made the allow-lists the sole thing
- * between an argument and a shell: correct today, and one loosened regex away from not being.
- * Positional parameters are not parsed as script text at all, so the allow-lists become
- * defence in depth rather than the defence.
- *
- * Constant, and therefore argument-free: there is nothing left in it that varies per account.
+ * `-c` is applied to `$tmp`, a file created by mktemp for this purpose and holding exactly one
+ * account; the line is read back and the file removed. The username and the password arrive as
+ * POSITIONAL PARAMETERS, `$1` and `$2`, supplied by hashArgv() below, so nothing parses them as
+ * script text and the allow-lists are defence in depth rather than the defence. Constant, and
+ * therefore argument-free.
  */
 export function hashScript() {
   return [
@@ -288,31 +168,45 @@ export function hashScript() {
 }
 
 /**
- * The full `/bin/sh` argument vector for hashing one account.
+ * The full `/bin/sh` argument vector for hashing one gateway account.
  *
  * `['-c', script, '--', id, password]`: `sh -c` assigns the first operand after the script to
  * `$0`, so the `--` is consumed there and the two real values land on `$1` and `$2`. Without it
- * the id would become `$0` and the script would hash a password against nothing.
- *
- * Both backends build their command from this one function, which is what keeps the CLI's
- * `kubectl exec` path and the service's local `execFileSync` path from drifting on the calling
- * convention now that there is one to get wrong. Validation stays here -- an invalid argument
- * should never reach a process at all, positional or not.
+ * the id would become `$0` and the script would hash a password against nothing. Validation stays
+ * here: an invalid argument should never reach a process at all, positional or not.
  */
 export function hashArgv(sparkplugId, password) {
   assertGatewayId(sparkplugId);
   assertSafePassword(password);
-  return ['-c', hashScript(), '--', sparkplugId, password];
+  return hashArgvForUsername(sparkplugId, password);
+}
+
+/**
+ * The same vector for any username the broker accepts: the platform principals and the admin,
+ * whose passwords are the operator's own values from the environment. They reach mosquitto_passwd
+ * as a positional parameter and never a command line, so the rule is only that the value is text.
+ */
+export function hashArgvForUsername(username, password) {
+  assertUsername(username);
+  assertPrincipalPassword(password);
+  return ['-c', hashScript(), '--', username, password];
+}
+
+/** A platform principal's password: non-empty printable text, at most 128 characters. */
+export function assertPrincipalPassword(password) {
+  if (typeof password !== 'string' || !/^[^\x00-\x1f\x7f]{1,128}$/.test(password)) {
+    throw new CredentialError('password must be 1-128 characters with no control characters', 'invalid_password');
+  }
+  return password;
 }
 
 /**
  * base64url only, 16-128 characters.
  *
- * NOT a strength rule -- generatePassword() decides strength. This is an INJECTION boundary: these
- * values are interpolated into the shell fragment above, so the alphabet is restricted to
- * characters that cannot terminate a single-quoted string. A caller supplying its own password
- * (the enrolment service does not, but the CLI accepts one) is held to the same alphabet rather
- * than trusted.
+ * NOT a strength rule -- generatePassword() decides strength. This is an INJECTION boundary kept
+ * from when these values were interpolated into a shell string; they are positional now, and the
+ * alphabet is kept because a hand-typed password still reaches a command line in the operator CLI.
+ * A caller supplying its own password is held to it rather than trusted.
  */
 const PASSWORD_SAFE = /^[A-Za-z0-9_-]{16,128}$/;
 

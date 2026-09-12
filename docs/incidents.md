@@ -17,7 +17,10 @@ Each entry names the file the fix lives in, so the pointer works in both directi
 
 ## Truncating the broker password file
 
-**Where the fix lives:** `docker-compose.yml`, the `mosquitto-init` service.
+**Where the fix lives:** `scripts/mosquitto-dynsec-init.mjs`, the boot reconcile, which refuses to
+write a document that would lose a client (`merge_would_lose_accounts`). The password file itself
+is retired: the broker's accounts live in its Dynamic Security plugin's document
+(`mosquitto/README.md`), which no command can truncate.
 **Symptom:** four provisioned gateways silently stopped authenticating, hours after the change that
 caused it.
 
@@ -38,9 +41,12 @@ restart, by which point nothing connects the two events.
 `scripts/stack-reset.mjs` hit exactly this: it provisioned four gateway credentials and then deleted
 three of them one step later, in a script whose entire purpose is to leave a working stack behind.
 
-**The fix:** `-c` is conditional on the file not existing. The five platform principals are still
-rewritten on every run, because `.env` is authoritative for them; anything else in the file is left
-alone, because this service is not the source of truth for issued gateway credentials.
+**The fix, then:** `-c` was made conditional on the file not existing. **The fix, now:** the
+reconcile that replaced the password file re-hashes the platform principals from `.env` on every
+run, keeps every other client exactly as stored, and refuses to write at all if the result would
+hold fewer clients than the document it read. The assertion the incident needed --
+every account present before is present after -- is in `gateway-credential/test_gateway_credential.py`
+and `scripts/check-broker-config.mjs`.
 
 **The general lesson**, which recurs across this stack: *a destructive default guarded by "this
 only runs once" is guarded by an assumption, not by a mechanism.*

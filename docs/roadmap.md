@@ -6,17 +6,23 @@ it leaves this file and its substance moves into the documentation of the compon
 **Known issues** stay in [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues);
 **accepted risks** live under [Accepted risks](../README.md#accepted-risks).
 
+**It lists only what 1.0 must or should have.** A thing that is not built and that 1.0 does
+not need is a feature request, not an entry here: open one with
+[the template](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/new?template=feature_request.yml)
+and it competes with every other request rather than sitting in the release's critical path.
+An entry that turns out to be a could-have leaves the same way an entry that ships does — it
+moves out, and the table below says where it went.
+
 **The numbers are reading order, not identifiers.** Nothing in the code cites an entry by number
 (`CONTRIBUTING.md` says why), so retiring an entry and renumbering the rest costs one grep of
 `§[0-9]` in this file.
 
-**Ordering.** 1–5 are the platform's own: the one item somebody else sets the deadline for, then
-the identity and operations chain, ending with the rehearsal that turns the backup into a
-capability. 6–8 are the edge chain, in dependency order: 6 makes a gateway's flow reviewable, 7
-makes the appliance a managed artefact and shares 6's puller, 8 removes what 6 replaced. 9 runs
-under every other item. 10 is a rename and sits second to last because nothing depends on it. 11
-is last by rule: it folds the migration chain, so every entry that changes the schema must have
-landed before it.
+**Ordering.** 1 and 2 are the platform's own: the one item somebody else sets the deadline for,
+then the rehearsal that turns the backup into a capability. 3–5 are the edge chain, in dependency
+order: 3 makes a gateway's flow reviewable, 4 makes the appliance a managed artefact and shares
+3's puller, 5 removes what 3 replaced. 6 runs under every other item. 7 is a rename and sits
+second to last because nothing depends on it. 8 is last by rule: it folds the migration chain, so
+every entry that changes the schema must have landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -30,13 +36,16 @@ landed before it.
 | Contextual help | [`frontend/README.md`](../frontend/README.md#contextual-help) |
 | The Directory's MQTT half | [`ingestion/README.md`](../ingestion/README.md#the-directory-on-mqtt) |
 | The log store, structured logging and the drop drill-down | [`ingestion/README.md`](../ingestion/README.md#log-fields), `loki/loki.yaml`, `alloy/config.alloy` |
-| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 7 |
+| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 4 |
+| The broker's Dynamic Security plugin (`0102`) | [`mosquitto/README.md`](../mosquitto/README.md) for the policy, the measured facts and the boot reconcile; [`supabase/README.md`](../supabase/README.md#the-access-control-page-states-what-is-outstanding) for the live Broker column, the orphaned-accounts list and a revocation that disconnects |
 | Kong → Envoy, and the new API key translation | [`docs/gateway-migration.md`](gateway-migration.md) |
 | The demonstration floor and simulator | Removed; [`tutorial/README.md`](../tutorial/README.md) builds one machine by hand |
 | Horizontal ingestion scaling | Answered, not built: [The single-writer ceiling](../ingestion/README.md#the-single-writer-ceiling). The write path since moved to [the historian writer](../ingestion/README.md#the-historian-writer), one thread and one transaction per batch |
 | Ingress → Gateway API for CORS | Answered, not built: it would state origin policy a second way on one of two targets |
 | A backup an operator can take without a shell (`0101`) | [`supabase/README.md`](../supabase/README.md#backups-from-the-dashboard-0101): the Backups page, the backup service, the forge in every backup, and the retention and no-download decisions; restore stays [the runbook](../supabase/README.md#backup-and-recovery) |
 | The ISA-95 Unified Namespace bridge (`0097`) | [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) for the bridge; [`supabase/README.md`](../supabase/README.md#the-plant-gains-areas-and-a-third-scope-0097) for the areas, the site setting and the `area_wide` scope |
+| Microsoft Entra ID sign-in | Not built, and not needed for 1.0: a could-have, reopened as [#183](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/183). Every decision the entry had taken is in the request |
+| Multi-factor authentication | Not built, and not needed for 1.0: a could-have, reopened as [#184](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/184). The `0069` role split it waited on has shipped; the rest is in the request |
 
 ---
 
@@ -64,107 +73,7 @@ own.
 
 ---
 
-## 2 · Microsoft Entra ID sign-in
-
-**Builds on:** `custom_access_token_hook()` and `handle_new_user()` in `0001` · `has_role()` ·
-`GOTRUE_DISABLE_SIGNUP` · `acs-cymru.validateSecrets` in `_helpers.tpl` · the role split (`0069`),
-which is built and was the prerequisite
-
-Sign in with a Microsoft work account, with the organisation's Entra groups deciding which role the
-account lands in, and documentation an IT administrator can follow without reading this repository.
-Entra only: it expresses groups and app roles; GitHub org membership is not in the OIDC token and
-Google Workspace groups need a separate API, so those could only map by email domain.
-
-**The tenant boundary fails open and must be refused, not ignored.** GoTrue's Azure provider falls
-back to `common` (every Microsoft account, personal ones included) when the authority is unset.
-`organizations` and `consumers` are equally wrong. So: one variable, `ENTRA_TENANT_ID`, a GUID;
-refuse to enable the provider when it is empty or names any of those three; enforce it in the
-chart (`acs-cymru.validateEntra`) and in `scripts/setup.mjs`; and, because `.env` is editable after
-setup, check the `tid` claim on the provisioning path against a value held in `system_settings`.
-
-**Closed signup collides with first-time federated logins.** Confirm that
-`GOTRUE_DISABLE_SIGNUP=true` refuses them (expected). If it does, deny the signup route at the
-gateway and leave the OAuth callback open rather than flipping the variable, which reopens
-`POST /auth/v1/signup` to every caller.
-
-**The IdP authenticates; `user_roles` still authorises.** Never read a role out of user metadata:
-`raw_user_meta_data` is writable by the user through `updateUser`. A group claim is a provisioning
-input, consulted at sign-in by an `sso_role_mappings(provider, claim_key, claim_value, role_id)`
-table that writes `user_roles`; `has_role()`, every policy and the Access Control tab are unchanged.
-Whether Entra group claims survive into `identity_data` on `gotrue:v2.189.0` is unverified; spike it
-before designing the table.
-
-**Worth deciding early.** Whether the login screen offers both paths (seeded password accounts as
-break-glass) or one. What happens when a user leaves the group: nothing revokes on its own, and
-re-evaluating on every login still leaves a session valid until `GOTRUE_JWT_EXP`.
-
----
-
-## 3 · Multi-factor authentication
-
-**Builds on:** GoTrue's factor API · the `aal` and `amr` claims · `has_role()` ·
-[`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx) · the role split
-(`0069`), so a `Shopfloor_Manager` can no longer dissolve an MFA boundary
-
-TOTP second factors, required of the roles that can change the platform and optional for everyone
-else. Any TOTP authenticator works.
-
-**`aal2` is not a switch.** GoTrue mints an `aal1` token for a user with a factor enrolled, and a
-challenge screen in the browser is not enforcement. Enforcement is `(auth.jwt()->>'aal') = 'aal2'`
-in the policies, beside `has_role()`, and deciding which policy sites are privilege-changing enough
-to demand it is a judgement per policy.
-
-**Never prompt a federated user twice.** `amr` says how the session was obtained: federated users
-inherit assurance from the IdP; password users enrol a factor here. Password users do not go away
-when 2 ships (seeded personas, break-glass, air-gapped installs).
-
-**There are no recovery codes.** The administrative path is the design: a **Reset MFA** control in
-the Access Control tab, gated on `authz:manage`, calling `auth.admin.mfa.deleteFactor()` and written
-to the digital thread. The residual case (one Administrator, locked out) is the service-role key
-from `.env` and a documented one-liner; recommend two Administrators.
-
-**Must not touch:** machine identities. A policy that demands `aal2` on a table a service principal
-writes is an outage.
-
-**Worth deciding early.** Whether enrolment can be deferred (the strong position makes the first
-login on a fresh stack an enrolment screen). Home-grown recovery codes are buildable and not worth
-it: a code can only drop MFA and force re-enrolment.
-
----
-
-## 4 · The broker's Dynamic Security plugin
-
-**Builds on:** [`mosquitto.acl`](../mosquitto/mosquitto.acl) ·
-[`gateway-credential-service.mjs`](../scripts/gateway-credential-service.mjs) ·
-`revoke_gateway_credentials()` (`0038`, `0063`) · `BROKER_PRINCIPALS` in
-[`serviceIdentities.js`](../frontend/src/utils/serviceIdentities.js) ·
-[`check-broker-config.mjs`](../scripts/check-broker-config.mjs) · `mosquitto_dynamic_security.so`,
-which ships in `eclipse-mosquitto:2.0.22`
-
-Move broker authentication and authorisation from `password_file` + `acl_file` onto the Dynamic
-Security plugin, managed over `$CONTROL/dynamic-security/v1`.
-
-**Two things the files cannot do.** Revocation does not disconnect: Mosquitto checks credentials at
-CONNECT only, so an archived gateway that is already connected keeps publishing until it reconnects;
-dynsec's `disableClient` kicks the live session. And there is no list: the Access Control page holds
-a literal because the ACL is never parsed by anything with an HTTP surface; `listClients` would
-make it a live read.
-
-**What it costs.** It inverts the credential service's minimal authority (add one line becomes
-create, delete, list and rewrite over every principal). `mosquitto.acl` is the most heavily verified
-artefact in the repository, and a dynsec policy subtly wider than it fails silently at QoS 0.
-`dynamic-security.json` is mutable state on both targets, and boot must reconcile rather than
-rewrite; on Kubernetes it needs a PVC the broker does not have.
-
-**Worth deciding early.** Whether dynsec can coexist with `password_file` for one listener (assume
-not). Whether dynsec ACLs substitute `%u`, measured in `check-broker-config.mjs` before anything
-else. Whether `listClients` is exposed to the dashboard at all (a LIST verb was refused once for the
-inventory it hands a token holder). Whether revocation alone justifies the move: rewriting the
-account to an unguessable password and bouncing that one session may be cheaper.
-
----
-
-## 5 · A restore is rehearsed from a backup the service took
+## 2 · A restore is rehearsed from a backup the service took
 
 **Builds on:** [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) ·
 [`scripts/restore-databases.sh`](../scripts/restore-databases.sh) ·
@@ -197,19 +106,20 @@ README's own line applies: an untested backup is a belief, not a capability.
 weekly, not the service's; and a rehearsal that restores the data layer alone is reported as
 that, as the workflow's header already insists.
 
-**Worth deciding early.** Whether the broker's CA and password file (`mosquitto_certs`,
-`mosquitto_data`) join the tier 1 backup. Neither is in it today; losing the root is a
-fleet-wide re-enrolment, and on Compose only a tier 2 snapshot saves them. Whether the platform's
+**Worth deciding early.** Whether the broker's CA and the Dynamic Security plugin's document
+(`mosquitto_certs`, `mosquitto_dynsec`; the `mosquitto-data` PVC on Kubernetes) join the tier 1
+backup. Neither is in it today; losing the root is a fleet-wide re-enrolment, losing the document
+is every gateway re-issued, and on Compose only a tier 2 snapshot saves them. Whether the platform's
 own Node-RED data joins for the same reason. Whether the rehearsal should also prove the
 retention prune removes exactly the directory the row named and nothing beside it.
 
 ---
 
-## 6 · GitOps edge sync
+## 3 · GitOps edge sync
 
 **Builds on:** the forge (`gitea`, `gitea-init.sh`), one private repository per enrolled gateway
 in the `gateways` organisation ([`_shared/forge.ts`](../supabase/functions/_shared/forge.ts)) ·
-the per-gateway read-only deploy key and the host key delivered at enrolment
+the per-gateway deploy key and the host key delivered at enrolment
 ([`enroll-gateway`](../supabase/functions/enroll-gateway/index.ts)) · the puller
 [`flow-sync.mjs`](../gateway-bundle-template/flow-sync.mjs) · the forge's door and
 [`forge-membership`](../supabase/functions/forge-membership/index.ts) (`0094`) · the push webhook and
@@ -218,7 +128,7 @@ heartbeat · issue [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
 
 **What is built** is documented in [`docs/physical-gateways.md`](physical-gateways.md) and
 [The forge's door](../supabase/README.md#the-forges-door-and-the-room-behind-it-0094): an
-appliance clones its own repository over SSH with a read-only key, verifies the forge against the
+appliance clones its own repository over SSH with a deploy key, verifies the forge against the
 host key it received at enrolment, deploys `flows.json` and reloads Node-RED when the tracked branch
 advances; it refuses a rewritten history, an unverifiable forge, and a commit whose `mqtt-broker`
 node id is not a key in `flows_cred.json`. Administrators and managers sign in to the forge with
@@ -238,70 +148,122 @@ from the heartbeat as `ingestion`; the puller never touches the database, so no 
 
 **What remains.**
 
-- **A required status check refusing `flows_cred.json` by shape.** The endpoint that used to refuse
-  it is gone, and a file uploaded through the forge's own UI meets no check until the puller
-  refuses it on the appliance, which is late. It needs a Gitea Actions runner, which 7 argues on;
-  until then the puller's refusal is the only check.
+- **The appliance reports on a branch of its own.** `main` is what was approved; a second
+  branch, `appliance`, is what is running, written only by the appliance and read by people in
+  the forge rather than by a shell on the box. The pusher commits an allowlist and never widens
+  it: `flows.json`, the deployed record (the platform tag it converged to, the commit of its own
+  repository, the digest of any custom container), and the playbook it ran when that differs from
+  `main`. `flows_cred.json` is on no list. The branch is append-only: a second protection rule
+  on `appliance` admits deploy keys and blocks force-push, so the branch is tamper-evident and is
+  the record that survives a decommission. The heartbeat's flow hash stays the dashboard's source
+  of truth, because it arrives over the broker credential; the branch is the human-readable copy,
+  and the forge's compare view between the two branches is the drift diff the drawer links to.
+  The webhook, which ignores every ref but the tracked one today, records the head of `appliance`
+  on the gateway row beside the head of `main`.
+- **The deploy key becomes read-write, on the gateway's own repository only.** `read_only: true`
+  in `forge.ts` flips, and the header that argues for it is rewritten: a writable key on a
+  repository whose `main` admits no deploy key lets an appliance *report* and never *deploy*.
+  Branch protection on `main` keeps `enable_push: false` with deploy keys not whitelisted, on
+  every repository, and the sweep asserts it.
+- **A required status check refusing `flows_cred.json` by shape.** A file uploaded through the
+  forge's own UI meets no check until the puller refuses it on the appliance, which is late. It
+  needs a Gitea Actions runner, which 4 argues on; until then the puller's refusal is the only
+  check.
 - **A failed webhook delivery does not alert.** It is visible on the hook's page in the forge and
   nowhere else. A repository from before `0095` gets its hook back from the sweep but not its
   incident template, which the machine account cannot commit to a protected `main`; an
   administrator adds it by pull request. Small, and not urgent.
 
-**Constraints.** Deploy only what is committed; a revert is a new commit and never a force-push
-(branch protection in the forge, and `flow-sync.mjs` refuses a non-descendant head); `flows_cred.json`
-never leaves the appliance in a backup, a commit or a diff; the enrolment token stays single-use and
-`bootstrap.mjs` enrols once; `Operator` and `Auditor` hold no forge login and no shopfloor person is
-a Gitea user. If 2 lands, federating the forge to Entra directly is an alternative to the Envoy door
-and the choice re-opens on the evidence of both.
+**Constraints.** Deploy only what is committed to `main`; a revert is a new commit and never a
+force-push (branch protection in the forge, and `flow-sync.mjs` refuses a non-descendant head);
+`flows_cred.json` never leaves the appliance in a backup, a commit or a diff; the enrolment token
+stays single-use and the appliance enrols once; an appliance can push to a branch and can never
+merge, approve, open a pull request or reach another gateway's repository; `Operator` and
+`Auditor` hold no forge login and no shopfloor person is a Gitea user. If
+[Microsoft Entra ID sign-in](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/183) is ever
+built, federating the forge to Entra directly is an alternative to the Envoy door and the choice
+re-opens on the evidence of both.
+
+**Worth measuring first.** Whether a writable deploy key can push to the repository's wiki. If it
+can, the wiki stops being the place a plant keeps notes only people wrote, and the answer is a
+separate rule or a separate home for the notes.
 
 ---
 
-## 7 · The appliance itself, and the code somebody wants to run on it
+## 4 · The appliance itself, and the code somebody wants to run on it
 
 **Builds on:** [`gateway-bundle`](../supabase/functions/gateway-bundle/index.ts) ·
 [`gateway-bundle-template/`](../gateway-bundle-template) · `bootstrap.mjs`'s once-only guard ·
 [`docs/physical-gateways.md`](physical-gateways.md) · the `apikey` gate and its four exemptions ·
 [`check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) ·
-[`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) · the clock offset gauge and its
-alert · 6, whose forge and puller this reuses · arrives from a request to run custom data-gathering
-software on gateways, for legacy machinery
+[`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) and
+[`mosquitto-tls-init.mjs`](../scripts/mosquitto-tls-init.mjs) · the clock offset gauge and its
+alert · 3, whose forge, puller and appliance branch this reuses · the three revocation handles
+(`disableClient` in the credential service, `withdraw_gateway_enrollment_tokens()`, and the deploy
+key) · arrives from a request to run custom data-gathering software on gateways, for legacy
+machinery
 
-Three subjects that are one appliance: commissioning as a pasted command, the operating system as
-a managed artefact, and a lane for bespoke adapters. They should not be started as one piece of
-work.
+Four subjects that are one appliance: commissioning as a pasted command, the operating system as
+a managed artefact, the forge as the appliance sees it, and a lane for bespoke adapters. They
+should not be started as one piece of work. Ubuntu and Ubuntu Server are the operating system,
+amd64 and arm64 alike; another OS is a feature request.
 
 ### The one-liner
 
-`curl -fsSL -H "X-Enrolment-Token: <token>" https://api.<domain>/... | bash`, with the dashboard
-minting (role-gated) and the appliance fetching (token-gated), which is `enroll-gateway`'s model
-rather than `gateway-bundle`'s. The token travels in a header, never the query string. Fetching
-validates the token; only enrolling consumes it. The installer is static and tagged in the forge;
-the per-gateway secrets (`NODERED_CREDENTIAL_SECRET`) come from a token-gated fetch and are never
+A Manager or Administrator creates the gateway in the dashboard and is shown a command to paste
+on the appliance: `curl -fsSL -H "X-Enrolment-Token: <token>" https://api.<domain>/... | bash`,
+with the dashboard minting (role-gated) and the appliance fetching (token-gated), which is
+`enroll-gateway`'s model rather than `gateway-bundle`'s. The token travels in a header, never the
+query string. Fetching validates the token; only enrolling consumes it. The installer is static,
+tagged in the forge, and **served by the platform**, because a fresh appliance has no key and the
+forge refuses anonymous reads; the edge function reads the tagged file with the machine account.
+The per-gateway secrets (`NODERED_CREDENTIAL_SECRET`) come from a token-gated fetch and are never
 cacheable. The script wraps its body in a function invoked on the last line so a truncated download
 runs nothing.
 
+**Install first, enrol last.** Packages, Docker and Ansible take minutes and can fail; every step
+before enrolment is idempotent and retryable with the same command, and the token is spent only by
+the enrolment that also writes the credential. The script refuses to run twice on an enrolled
+appliance, as `bootstrap.mjs` does.
+
+### The CA
+
 **The CA is the gating question.** A fresh appliance does not trust the internal root, and a
-one-liner that ends in `curl -k` is worse than the ZIP. Decided direction: **the pin rides in the
-token and the script checks it** (RFC 7030 §4.1.1). The dashboard mints an SPKI fingerprint of the
-live root beside the token; stage 0 fetches the PEM as inert bytes over plain HTTP from a static
-ingress path, hashes it, refuses on mismatch, and everything after is verified TLS. Pin the public
-key, not the certificate (`renewBefore: 8760h` re-issues the root a year early; `rotationPolicy:
-Never` keeps the key). The appliance must also check the CA it enrols with against the pin, because
-the broker root and the ingress root are allowed to differ. A cloud-init seed that plants the root
-is the zero-circularity answer for a plant that images its own appliances. Since the `apikey` gate
-is on `/functions/v1/`, serving the PEM from the ingress costs no fifth exemption.
+one-liner that ends in `curl -k` is worse than the ZIP. Decided: **the pin rides in the command
+and the script checks it** (RFC 7030 §4.1.1). The dashboard mints an SPKI fingerprint of the live
+root beside the token, over the authenticated browser session, which is the trusted channel; stage
+0 fetches the PEM as inert bytes over plain HTTP from a static ingress path, hashes it, refuses on
+mismatch, installs it, and everything after is verified TLS. **Stage 0 carries no secret**: the
+token rides only over TLS the pin has already verified. Pin the public key, not the certificate
+(`renewBefore: 8760h` re-issues the root a year early; `rotationPolicy: Never` keeps the key).
+The appliance must also check the CA it enrols with against the pin, because the broker root and
+the ingress root are allowed to differ. A cloud-init seed that plants the root is the
+zero-circularity answer for a plant that images its own appliances. Since the `apikey` gate is on
+`/functions/v1/`, serving the PEM from the ingress costs no fifth exemption.
+
+**Compose has no HTTPS root of its own.** `mosquitto-tls-init.mjs` owns the broker CA; nothing
+owns a root for the gateway listener, so on Compose there is nothing to pin the installer fetch
+against. Either the command carries two pins or Compose gains a root for the listener. Decide
+before the one-liner is built, not after.
 
 ### The operating system
 
-Ubuntu Server as a requirement, which closes the Windows-gateway seam the bundle's compose file
-still describes. `unattended-upgrades` without automatic reboot. **`ansible-pull`**, not Ansible:
-outbound only, no inventory, self-healing on a timer, idempotent by construction. Two playbooks and
-the split is the security boundary: a **platform** playbook (Node-RED, `node_exporter`, the CA, the
-upgrade configuration, the time source) in one repository the whole fleet reads, tagged, with
-appliances tracking a tag rather than `main` so one merge cannot converge every appliance on the
-next timer; and a **custom** playbook in the gateway's own repository beside its flow. When it
-lands, scheduling and platform convergence become Ansible's; everything below `flow-sync.mjs`'s
-`deployFlow()` stays Node-RED knowledge, which is why `--once` exists.
+`unattended-upgrades` without automatic reboot. **`ansible-pull`**, not Ansible: outbound only,
+no inventory, self-healing on a timer, idempotent by construction. Two playbooks and the split is
+the security boundary: a **platform** playbook (Node-RED, `node_exporter`, the CA bundle, the
+upgrade configuration, the time source, the pusher) in one repository the whole fleet reads, in
+its own `platform` organisation so the `gateways` organisation's rules (both teams may create
+repositories; the sweep protects whatever it finds) do not apply to it; and an optional **custom**
+playbook in the gateway's own repository beside its flow. Every gateway runs the platform
+playbook; "custom" is a gateway whose repository also carries a playbook, not a choice between two.
+When it lands, scheduling and platform convergence become Ansible's; everything below
+`flow-sync.mjs`'s `deployFlow()` stays Node-RED knowledge, which is why `--once` exists.
+
+**The fleet tracks a tag, and the pointer is per gateway.** "Latest tag" gives no staged rollout,
+so the tag an appliance converges to is a small file in its own repository (`platform.yml`),
+changed by pull request through the lane 3 already has. A fleet bump is one pull request per
+gateway or a scripted batch; a canary is one gateway. Nothing tracks `main` of the platform
+repository.
 
 **The time source belongs here.** Nothing in the repository sets an appliance's clock. TLS tolerates
 the skew the telemetry path does not: a gateway three minutes fast verifies every certificate and
@@ -313,37 +275,87 @@ the platform is itself a time source for the air-gapped case; whether an RTC mod
 requirement for single-board appliances; and whether `TELEMETRY_MAX_FUTURE_SECONDS` is right. Do not
 correct device timestamps at ingest.
 
+### The forge, as the appliance sees it
+
+**Deploy keys, not gateway users.** One SSH key per appliance, generated on it as now, registered
+twice: read-write on its own repository, read-only on the platform repository. `main` on both
+admits no deploy key; `appliance` on the gateway repository admits them and blocks force-push (3).
+That is the whole policy: pull and push its own repository, pull the platform's, reach nothing
+else. A Gitea user per gateway would express the same policy through teams, at the cost of a third
+kind of principal the membership sweep would have to exempt, and a user can open issues and create
+repositories in the organisation, which a deploy key cannot. **The sweep reconciles keys** the way
+it reconciles webhooks and membership: an active gateway holds exactly those two links, an
+archived one holds none.
+
+**Worth measuring first.** Whether Gitea accepts one public key as a deploy key on two
+repositories with a different mode on each. If not, the platform repository takes a read-only
+key of its own per appliance, generated beside the first.
+
 ### Custom code
 
-Admissible on one condition: **a container built from a commit, pulled by the appliance, never a
-payload handed to it.** The motivating case is legacy machinery (serial, Modbus, OPC-DA) that no
-Node-RED node reaches; the adapter is worth nothing to anybody else and has no business in this
-repository, and it runs unattended for years, which is the argument for the forge being mandatory.
+Admissible on one condition: **a container built from a commit, never a payload handed to the
+appliance.** The motivating case is legacy machinery (serial, Modbus, OPC-DA) that no Node-RED
+node reaches; the adapter is worth nothing to anybody else and has no business in this repository,
+and it runs unattended for years, which is the argument for the forge being mandatory.
 
-That means a build plane: Gitea Actions and its package registry, both off today. A runner
-executes arbitrary code and should not share a host with the database. The registry is a fourth
-credential plane unless Gitea's registry accepts the deploy key as the pull credential — measure
-that before designing enrolment around it. Pin by digest; sign the image; build multi-arch or
-declare an architecture per gateway, because a fleet is arm64 and amd64 in the same plant and an
-image for the wrong one fails at `docker run` in front of whoever is commissioning it.
+**Built on the appliance, from the tagged checkout of the gateway's own repository.** The bundle
+already builds its image on the appliance, so this costs no new mechanism, no registry, and no
+fourth credential plane: the deploy key is the only thing the appliance holds and the registry
+could not have accepted it. Pin the base image by digest; an image for the wrong architecture
+fails at `docker run` in front of whoever is commissioning it, so the platform playbook declares
+the architecture it found. A Gitea Actions runner is still wanted, for CI on the platform
+repository and the status check in 3; a runner executes arbitrary code and should not share a host
+with the database. It does not build gateway images.
 
 **The adapter holds no credential.** It publishes locally (HTTP or a local topic) and Node-RED
-republishes on the one Sparkplug connection the appliance holds, so `%u` confinement still means what
-it says and schema conformance and quarantine still apply. A workload that needs its own identity
-is a second gateway and should enrol as one. Not Portainer; not a k3s agent on gateways.
+republishes on the one Sparkplug connection the appliance holds, so per-gateway confinement still
+means what it says and schema conformance and quarantine still apply. A workload that needs its own
+identity is a second gateway and should enrol as one. Not Portainer; not a k3s agent on gateways.
 
-**Worth deciding early.** One repository per gateway or per plant for custom code (engineers think
-in projects). Whether the platform builds images or only pulls them. What the heartbeat reports
-about a failing custom container, which is the failure this lane is most likely to produce and
-least likely to notice. Reporting the `notAfter` of the root the platform is currently issuing from,
-beside the per-gateway `Cert_Expires_At` the fleet already reports, so a rotation in progress is
-visible; read it from the credential service's `ca.crt`, never from the Kubernetes API. Whether the
-HTTPS side should refuse to run unencrypted the way the physical-gateway enrolment leg already
-does.
+**Cloning is seeding.** A new gateway's repository is seeded from a template: an example custom
+repository the platform ships, or another gateway's repository. No column records the choice; the
+repository is the record.
+
+### Revocation and rotation
+
+**A gateway holds three things and loses all three on archive:** the broker client
+(`disableClient`, which drops the live session), the deploy key links (the sweep, above), and any
+unredeemed enrolment token (`withdraw_gateway_enrollment_tokens()`). Only the second is unbuilt.
+
+**There is no HTTPS credential to revoke, and none is to be added.** After enrolment an appliance
+makes no HTTPS call; the publishable key is public by construction. Every design that hands a
+gateway an HTTPS credential, a registry token included, is a fourth revocation to build.
+
+**Gateways hold no client certificate.** Identity is the dynsec password and the SSH key, and the
+server is verified against a pinned root and a pinned host key. Client certificates would add a
+per-gateway leaf lifecycle and a `crlfile` the broker reloads badly, for nothing dynsec does not
+already give: identity, confinement, and a revocation that disconnects.
+
+**The root rotates through the platform playbook.** The playbook ships a CA bundle holding the
+old and new roots for an overlap window, delivered over SSH whose host key does not depend on the
+X.509 chain. Rotation becomes a tagged release, not a visit to every cabinet. The heartbeat already
+reports the expiry each appliance holds; reporting the `notAfter` of the root the platform is
+currently issuing from, beside it, makes a rotation in progress visible. Read it from the
+credential service's `ca.crt`, never from the Kubernetes API.
+
+**No VPN for 1.0.** Every link is outbound-only, verified, and confined per gateway; the exposed
+surface is three ports, and a firewall allowlisting the plant's subnets is the control. A VPN adds
+a key plane per gateway (a fourth thing to issue at enrolment and revoke on archive) and a
+concentrator, does not remove TLS inside it, and makes inbound access to gateways easy, which the
+design exists to avoid. The case for it is gateways at remote sites over the public internet; if
+that arrives, WireGuard with keys issued at enrolment is the shape.
+
+**Worth deciding early.** Whether `unattended-upgrades` holds Docker's packages, which a
+convergence run does not expect to change under it. What the heartbeat reports about a failing
+custom container, which is the failure this lane is most likely to produce and least likely to
+notice. Whether the HTTPS side should refuse to run unencrypted the way the physical-gateway
+enrolment leg already does. Whether a rebuilt appliance (a dead SD card) re-enrols with a new
+token against the same repository, which the deploy-key reconcile makes routine, and what its
+`appliance` branch shows for the gap.
 
 ---
 
-## 8 · Retiring the flow-backup bucket
+## 5 · Retiring the flow-backup bucket
 
 **Builds on:** the `gateway-backups` bucket in [`storage-init.mjs`](../scripts/storage-init.mjs) ·
 [`storage-policies.sql`](../supabase/storage-policies.sql) · `GATEWAY_BACKUP_BUCKET` in
@@ -360,14 +372,16 @@ bucket's contents fall under the same answer: kept in a backup, not in a second 
 The repository pointer is derived (`gateway-<sparkplug_id>` in the organisation named in
 `constants.js`), not stored; a column is earned only if a gateway ever needs re-pointing. A tracked
 branch other than `main` is the one part that genuinely does not fit and is a small separate
-decision. **Archiving a gateway should archive its repository and its wiki** (Gitea archives both
-together), and deleting one is the retention question again: the wiki is the one place a plant's
+decision. **Archiving a gateway archives its repository and its wiki** (Gitea archives both
+together) and removes its deploy key links (4); the `appliance` branch is the last thing the
+gateway reported and survives the archive, which is a better record than the heartbeat table,
+which stops. Deleting one is the retention question again: the wiki is the one place a plant's
 notes about a gateway live, so a delete is a decision and never a cascade. The forge is in every
 backup now, so a deleted repository is recoverable from one for as long as the backup is kept.
 
 ---
 
-## 9 · The transport between services
+## 6 · The transport between services
 
 **Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
 [`internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
@@ -377,7 +391,7 @@ backup now, so a deleted repository is recoverable from one for as long as the b
 [`check-compose-chart-parity.mjs`](../scripts/check-compose-chart-parity.mjs)
 
 **Built:** default-deny NetworkPolicy from one edge list (opt-in), an internal CA outside the
-chart, TLS on the Ingress and the broker's 8883 listener, `%u` confinement, the `apikey` gate, the
+chart, TLS on the Ingress and the broker's 8883 listener, per-gateway broker roles, the `apikey` gate, the
 database ports and the metrics endpoints on loopback, and no skip-verification setting anywhere.
 
 **The gap is what is on the wire.** NetworkPolicy answers *who*; every internal hop is plaintext:
@@ -401,10 +415,11 @@ as an accepted risk now; the statement of what each target enforces belongs in
 chart's subdomains, not a second proxy. The blocker is a wildcard DNS record this project does not
 own; design the `nip.io` escape hatch in from the start. MQTT and git-over-SSH do not ride it.
 
-**Client certificates on the gateway link** (`CN = <sparkplug_id>`, so `%u` still matches) are the
-intended direction and wait for 4, because `crlfile` revocation needs a reload.
+**Client certificates on the gateway link** are not planned: 4 decides that a gateway holds no
+certificate, because the dynsec password and the pinned root already give identity, confinement and
+a revocation that disconnects, and `crlfile` revocation needs a reload.
 
-**Must not touch:** `%u` confinement, the origin policy's single home in `envoy.yaml`, the root's
+**Must not touch:** per-gateway broker confinement, the origin policy's single home in `envoy.yaml`, the root's
 residence outside the chart, and the absence of a skip-verification switch. A service mesh is the
 complete answer and does nothing for Compose.
 
@@ -414,7 +429,7 @@ in separate changes.
 
 ---
 
-## 10 · Cells become work centers
+## 7 · Cells become work centers
 
 **Builds on:** `public.cells` and everything that names it · `public.areas` (`0097`) ·
 [The Unified Namespace](../ingestion/README.md#the-unified-namespace) ·
@@ -439,7 +454,7 @@ wire.
 
 **Must not touch:** the `uns/` topic shape, which already uses the cell's name and not the table's.
 
-## 11 · The migration chain folds back into the baseline, and the codebase is audited
+## 8 · The migration chain folds back into the baseline, and the codebase is audited
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)

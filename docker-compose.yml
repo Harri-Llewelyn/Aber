@@ -1002,15 +1002,17 @@ services:
     command: ["node", "/scripts/mosquitto-tls-init.mjs"]
     restart: "no"
 
-  # Assembles mosquitto.conf (appending the TLS stanza when certificates exist) and writes the
-  # platform principals into the password file on EVERY run; issued gateway credentials in the
-  # same file are left alone. `mosquitto_passwd -c` CREATES the file, discarding every gateway
-  # credential, so it is used only when the file does not exist -- and a one-shot is re-run
-  # whenever a dependent is brought up (docs/incidents.md, "Truncating the broker password file").
+  # Assembles mosquitto.conf (appending the TLS stanza when certificates exist), then writes the
+  # Dynamic Security plugin's document with scripts/mosquitto-dynsec-init.mjs: the roles from
+  # mosquitto/dynsec-roles.json, the platform principals and the plugin's admin from the
+  # environment, and every gateway account already in the document kept as it is. A stack that
+  # still has a password file from before the plugin has it imported on the first run and renamed
+  # `.imported`. mosquitto/README.md states the reconcile rules. Runs on the credential service's
+  # image, which carries the broker's own mosquitto_passwd beside node.
   mosquitto-init:
     container_name: acs-cymru_mosquitto_init
-    image: eclipse-mosquitto:2.0.22
-    user: "0"
+    build:
+      context: ./gateway-credential
     environment:
       MQTT_INGESTION_USER: ${MQTT_INGESTION_USER:-factoryplus_ingestion}
       MQTT_INGESTION_PASSWORD: ${MQTT_INGESTION_PASSWORD}
@@ -1020,13 +1022,23 @@ services:
       MQTT_VALIDATOR_PASSWORD: ${MQTT_VALIDATOR_PASSWORD}
       MQTT_MONITOR_USER: ${MQTT_MONITOR_USER:-factoryplus_monitor}
       MQTT_MONITOR_PASSWORD: ${MQTT_MONITOR_PASSWORD}
+      # The account the credential service administers the plugin as. Required.
+      MQTT_DYNSEC_ADMIN_USER: ${MQTT_DYNSEC_ADMIN_USER:-dynsec-admin}
+      MQTT_DYNSEC_ADMIN_PASSWORD: ${MQTT_DYNSEC_ADMIN_PASSWORD}
+      # Every principal is required on Compose: the stack ships the validator.
+      DYNSEC_REQUIRED_PRINCIPALS: "INGESTION I3X VALIDATOR MONITOR"
+      LEGACY_PASSWORD_FILE: /mosquitto/config/password_file
       # No gateway accounts are seeded here: a gateway's credential is minted once its row exists
       # (dashboard, or the enrolment bundle).
     volumes:
       - mosquitto_data:/mosquitto/config
-      # mosquitto.acl is deliberately NOT assembled: it stays a read-only bind mount on the broker.
+      - mosquitto_dynsec:/mosquitto/data
       - ./mosquitto/mosquitto.conf:/policy/mosquitto.conf:ro
       - ./mosquitto/mosquitto-tls.conf:/policy/mosquitto-tls.conf:ro
+      - ./mosquitto/dynsec-roles.json:/policy/dynsec-roles.json:ro
+      - ./scripts/mosquitto-dynsec-init.mjs:/scripts/mosquitto-dynsec-init.mjs:ro
+      - ./scripts/lib/mosquitto-credentials.mjs:/scripts/lib/mosquitto-credentials.mjs:ro
+      - ./scripts/lib/mosquitto-dynsec.mjs:/scripts/lib/mosquitto-dynsec.mjs:ro
       - mosquitto_certs:/certs:ro
     entrypoint: >
       /bin/sh -e -c "
@@ -1039,20 +1051,7 @@ services:
       else
         echo 'NO BROKER CERTIFICATES FOUND -- 8883 will not be offered, and physical gateways cannot enrol. Check the mosquitto-tls-init service.' >&2;
       fi;
-      if [ -z \"$$MQTT_INGESTION_PASSWORD\" ] || [ -z \"$$MQTT_I3X_PASSWORD\" ] || [ -z \"$$MQTT_VALIDATOR_PASSWORD\" ] || [ -z \"$$MQTT_MONITOR_PASSWORD\" ]; then
-        echo 'One or more MQTT_*_PASSWORD values are empty. The broker runs allow_anonymous false, so an empty credential fails as CONNACK 5 with no useful log line at either end. Run: node scripts/setup.mjs' >&2;
-        exit 1;
-      fi;
-      if [ ! -f /mosquitto/config/password_file ]; then
-        mosquitto_passwd -b -c /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
-      else
-        mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
-      fi;
-      mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_I3X_USER\" \"$$MQTT_I3X_PASSWORD\";
-      mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_VALIDATOR_USER\" \"$$MQTT_VALIDATOR_PASSWORD\";
-      mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_MONITOR_USER\" \"$$MQTT_MONITOR_PASSWORD\";
-      chmod 644 /mosquitto/config/password_file;
-      echo \"Mosquitto password file initialized with $$(grep -c : /mosquitto/config/password_file) account(s)\";
+      exec node /scripts/mosquitto-dynsec-init.mjs;
       "
     depends_on:
       # The TLS stanza is appended only if the certificates already exist.
@@ -1067,7 +1066,7 @@ services:
       - "1883:1883"
       - "9001:9001"
       # MQTTS for clients off the Docker network (physical gateways). 1883 stays open for the
-      # in-network services and virtual gateways. One password file and one ACL serve both.
+      # in-network services and virtual gateways. One plugin document serves both.
       - "8883:8883"
     environment:
       # The healthcheck's credential only: reads $SYS/# and can publish nothing.
@@ -1076,8 +1075,9 @@ services:
     volumes:
       # mosquitto.conf arrives assembled by mosquitto-init through this volume.
       - mosquitto_data:/mosquitto/config
-      # Topic authorisation: repository-managed, read-only, never rewritten at runtime.
-      - ./mosquitto/mosquitto.acl:/mosquitto/config/mosquitto.acl:ro
+      # The plugin's document, written by mosquitto-init before the broker starts and rewritten by
+      # the plugin itself on every change the credential service makes.
+      - mosquitto_dynsec:/mosquitto/data
       # The leaf and CA the broker presents. ca.key is root-owned 0600 and unreadable to the broker uid.
       - mosquitto_certs:/mosquitto/certs:ro
     healthcheck:
@@ -1094,25 +1094,27 @@ services:
   # ---------------------------------------------------------------------------
   # Broker credential-issuing service
   # ---------------------------------------------------------------------------
-  # The narrow authority enroll-gateway calls to mint a gateway's Mosquitto account: one verb, no
-  # database, no read-back. Not published: minting is the ability to publish telemetry as any
-  # gateway on the site, and reachability from the compose network is the primary control.
-  # `pid: "service:mosquitto"` lets it SIGHUP the broker, which re-reads the password file only
-  # on that signal (the chart's equivalent is `shareProcessNamespace: true`).
+  # The narrow authority the edge functions call: issue a gateway's Mosquitto account, disable one,
+  # list what the broker holds. No database. Not published: issuing is the ability to publish
+  # telemetry as any gateway on the site, and reachability from the compose network is the primary
+  # control. It speaks to the broker's Dynamic Security plugin over MQTT as the plugin's admin, so
+  # a change is applied to the running broker by the broker itself; nothing is signalled and no
+  # file is shared.
   gateway-credential:
     container_name: acs-cymru_gateway_credential
     build:
       context: ./gateway-credential
     restart: always
-    pid: "service:mosquitto"
     environment:
       CREDENTIAL_TARGET: compose
       # Required; the service refuses to start without it. Shared only with supabase-functions.
       MQTT_CREDENTIAL_SERVICE_TOKEN: ${MQTT_CREDENTIAL_SERVICE_TOKEN}
       MQTT_CREDENTIAL_SERVICE_PORT: "9010"
+      MQTT_HOST: mosquitto
+      # The plugin's admin: its role reaches $CONTROL/dynamic-security/# and nothing else.
+      MQTT_DYNSEC_ADMIN_USER: ${MQTT_DYNSEC_ADMIN_USER:-dynsec-admin}
+      MQTT_DYNSEC_ADMIN_PASSWORD: ${MQTT_DYNSEC_ADMIN_PASSWORD}
     volumes:
-      # Writable: the one service that may add an account.
-      - mosquitto_data:/mosquitto/config
       # Read-only, for ca.crt, which it returns at enrolment.
       - mosquitto_certs:/mosquitto/certs:ro
       # Write end of the playback credential delivery path (0078); the playback worker mounts
@@ -1120,6 +1122,8 @@ services:
       - playback_credentials:/var/lib/acs-cymru/playback
       - ./scripts/gateway-credential-service.mjs:/scripts/gateway-credential-service.mjs:ro
       - ./scripts/lib/mosquitto-credentials.mjs:/scripts/lib/mosquitto-credentials.mjs:ro
+      - ./scripts/lib/mosquitto-dynsec.mjs:/scripts/lib/mosquitto-dynsec.mjs:ro
+      - ./scripts/lib/mosquitto-control.mjs:/scripts/lib/mosquitto-control.mjs:ro
     command: ["node", "/scripts/gateway-credential-service.mjs"]
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:9010/healthz || exit 1"]
@@ -1763,7 +1767,13 @@ volumes:
   # Rendered provisioning carrying credentials; volumes so nothing is written back into the repository.
   grafana_provisioning_alerting:
   grafana_provisioning_datasources:
+  # The assembled mosquitto.conf, and a pre-plugin stack's password file until mosquitto-init
+  # imports it.
   mosquitto_data:
+  # The Dynamic Security plugin's document: every gateway account the credential service has
+  # issued, as hashes. Durable because it is the only copy; `docker volume rm` on it disconnects
+  # the whole fleet, and each gateway must then be re-issued.
+  mosquitto_dynsec:
   # Broker passwords for playback targets, written by gateway-credential and read by playback.
   # A volume because it holds credential material, and durable because it is the only copy.
   playback_credentials:

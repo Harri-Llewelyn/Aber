@@ -1,24 +1,26 @@
 """
-Contract tests for the broker credential-issuing service.
+Contract tests for the broker credential service.
 
 WHAT THIS PROTECTS. The service's whole justification is that it holds LESS authority than the
-alternatives -- it can add one line to one file and do nothing else. Two properties make that true,
-and both fail silently if they regress:
+alternatives: three verbs that name a gateway, spoken to the broker's Dynamic Security plugin as an
+account that reaches nothing else. Four properties make that true, and each fails silently if it
+regresses:
 
-  * AUTHENTICATION. An unauthenticated issuer lets anything that can reach the port mint a Mosquitto
-    account for any edge node, and mosquitto.acl's `%u` confinement turns an account into the
-    ability to publish Sparkplug telemetry AS that gateway. Nothing errors; the forged telemetry is
-    simply indistinguishable from the real thing.
+  * AUTHENTICATION. An unauthenticated issuer lets anything that can reach the port issue a
+    Mosquitto account for any edge node, and the gateway's role turns an account into the ability
+    to publish Sparkplug telemetry AS that gateway. Nothing errors; the forged telemetry is simply
+    indistinguishable from the real thing.
 
-  * NO TRUNCATION. `mosquitto_passwd -b -c` creates the file and discards its contents. A run that
-    lost every other gateway's credential does not fail -- Mosquitto keeps authenticated accounts in
-    memory, so the fleet keeps working until the next reload, whereupon the broker comes up having
-    never heard of any of them. This repository has already hit that once; see the mosquitto-init
-    header in docker-compose.yml.
+  * NOTHING LOST. The plugin keeps every account it holds across an issue, a re-issue and a
+    revocation. This repository once truncated the broker's password file on a re-provision
+    (docs/incidents.md); the plugin's document cannot be truncated by a command, and this asserts
+    that every account present beforehand is still present afterwards.
 
-The suite issues real credentials against the running service and asserts BOTH -- including that
-every account present beforehand is still present afterwards, which is the assertion the incident
-would have needed.
+  * REVOCATION REFUSES THE NEXT CONNECT and leaves the account listed as disabled. A live session
+    being dropped is asserted where a broker can be started for it, scripts/check-broker-config.mjs.
+
+  * THE INVENTORY CARRIES NO HASH. `listClients` returns each client's salt and iterations; the
+    service drops them, because the Access Control page shows what it returns.
 
 Requires the stack up (`docker compose up -d`) and MQTT_CREDENTIAL_SERVICE_TOKEN from .env:
 
@@ -26,7 +28,6 @@ Requires the stack up (`docker compose up -d`) and MQTT_CREDENTIAL_SERVICE_TOKEN
 """
 import json
 import os
-import re
 import subprocess
 import unittest
 import urllib.error
@@ -35,7 +36,6 @@ import urllib.request
 TOKEN = os.getenv("MQTT_CREDENTIAL_SERVICE_TOKEN", "")
 SERVICE_CONTAINER = os.getenv("CREDENTIAL_CONTAINER", "acs-cymru_gateway_credential")
 BROKER_CONTAINER = os.getenv("MOSQUITTO_CONTAINER", "acs-cymru_mosquitto")
-PASSWORD_FILE = "/mosquitto/config/password_file"
 
 # Not a real gateway. It needs no database row: this service issues BROKER accounts and knows
 # nothing about the gateways table -- binding a device to a gateway is verify_gateway_binding()'s
@@ -54,17 +54,18 @@ def docker(container, *args, check=True):
     return result.stdout
 
 
-def password_file():
-    return docker(BROKER_CONTAINER, "cat", PASSWORD_FILE)
-
-
-def accounts():
-    """Usernames currently in the broker's password file."""
-    return [
-        line.split(":", 1)[0]
-        for line in password_file().splitlines()
-        if line.strip()
-    ]
+def delete_client(username):
+    """
+    Remove an account from the plugin, through the service container's own admin credential. The
+    service never deletes, so this is the one place a delete is spoken; the per-gateway role is
+    left where it is, because deleting a role a client holds took the broker down when measured.
+    """
+    subprocess.run(
+        ["docker", "exec", SERVICE_CONTAINER, "sh", "-c",
+         'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
+         f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec deleteClient {username}'],
+        capture_output=True, text=True,
+    )
 
 
 # The request is made by node INSIDE the service container, not by busybox wget.
@@ -77,19 +78,20 @@ def accounts():
 # Arguments arrive through the environment rather than being interpolated into the script, so a
 # test payload containing quotes cannot change what the script does.
 _CLIENT = """
-const body = process.env.REQ_BODY;
+const method = process.env.REQ_METHOD || 'POST';
+const body = method === 'GET' ? undefined : process.env.REQ_BODY;
 const token = process.env.REQ_TOKEN;
 const headers = { 'Content-Type': 'application/json' };
 if (token) headers.Authorization = 'Bearer ' + token;
-fetch('http://127.0.0.1:9010' + process.env.REQ_PATH, { method: 'POST', headers, body })
+fetch('http://127.0.0.1:9010' + process.env.REQ_PATH, { method, headers, body })
   .then(async (r) => { console.log(r.status); console.log(await r.text()); })
   .catch((e) => { console.log('000'); console.log(JSON.stringify({ error: String(e) })); });
 """
 
 
-def call(body, token=TOKEN, path="/credentials", raw_body=None):
+def call(body=None, token=TOKEN, path="/credentials", raw_body=None, method="POST"):
     """
-    POST to the service FROM INSIDE the container network.
+    Call the service FROM INSIDE the container network.
 
     It publishes no host port -- that is the primary control, not an inconvenience -- so the request
     has to be made from within. A host-side client has nowhere to connect, which is itself asserted
@@ -98,6 +100,7 @@ def call(body, token=TOKEN, path="/credentials", raw_body=None):
     env = [
         "-e", f"REQ_BODY={raw_body if raw_body is not None else json.dumps(body)}",
         "-e", f"REQ_PATH={path}",
+        "-e", f"REQ_METHOD={method}",
     ]
     if token is not None:
         env += ["-e", f"REQ_TOKEN={token}"]
@@ -120,6 +123,34 @@ def call(body, token=TOKEN, path="/credentials", raw_body=None):
     return status, payload
 
 
+def inventory():
+    """The broker's own list, as the Access Control page reads it."""
+    status, payload = call(path="/clients", method="GET")
+    if status != 200:
+        raise RuntimeError(f"GET /clients answered {status}: {payload}")
+    return payload
+
+
+def accounts():
+    """Usernames the broker holds right now."""
+    return [c["username"] for c in inventory()["clients"]]
+
+
+def client_entry(username):
+    return next((c for c in inventory()["clients"] if c["username"] == username), None)
+
+
+def publish_as(username, password):
+    """Publish under the account's own edge node over MQTTS; the exit status is the broker's answer."""
+    return subprocess.run(
+        ["docker", "exec", BROKER_CONTAINER, "mosquitto_pub",
+         "--cafile", "/mosquitto/certs/ca.crt", "-h", "localhost", "-p", "8883",
+         "-u", username, "-P", password,
+         "-t", f"spBv1.0/ACS-Cymru/DBIRTH/{username}/probe", "-m", "x"],
+        capture_output=True, text=True,
+    )
+
+
 @unittest.skipIf(not TOKEN, "MQTT_CREDENTIAL_SERVICE_TOKEN is not set")
 class CredentialServiceBase(unittest.TestCase):
     @classmethod
@@ -135,12 +166,7 @@ class CredentialServiceBase(unittest.TestCase):
 
     def tearDown(self):
         """Remove the test account, leaving the broker exactly as it was found."""
-        subprocess.run(
-            ["docker", "exec", BROKER_CONTAINER, "sh", "-c",
-             f"grep -v '^{TEST_GW}:' {PASSWORD_FILE} > /tmp/pf.$$ "
-             f"&& cat /tmp/pf.$$ > {PASSWORD_FILE} && rm -f /tmp/pf.$$"],
-            capture_output=True, text=True,
-        )
+        delete_client(TEST_GW)
 
 
 class TestAuthentication(CredentialServiceBase):
@@ -149,14 +175,13 @@ class TestAuthentication(CredentialServiceBase):
         payload = json.loads(body)
         self.assertEqual(payload["status"], "ok")
         # Liveness and the configured target ONLY. A health endpoint that leaked the account list
-        # or the password file's state would be an unauthenticated read of exactly what the
-        # authenticated endpoint exists to protect.
+        # would be an unauthenticated read of exactly what the authenticated endpoint protects.
         self.assertEqual(set(payload), {"status", "target"})
 
     def test_missing_token_is_refused(self):
         status, _ = call({"sparkplug_id": TEST_GW}, token=None)
         self.assertEqual(status, 401)
-        self.assertNotIn(TEST_GW, accounts(), "an unauthenticated request minted an account")
+        self.assertNotIn(TEST_GW, accounts(), "an unauthenticated request issued an account")
 
     def test_wrong_token_is_refused(self):
         status, _ = call({"sparkplug_id": TEST_GW}, token="0" * 32)
@@ -170,13 +195,20 @@ class TestAuthentication(CredentialServiceBase):
                 status, _ = call({"sparkplug_id": TEST_GW}, token=bogus)
                 self.assertEqual(status, 401)
 
+    def test_the_inventory_needs_the_token_too(self):
+        # The list is the map of the site's telemetry authority, and it is behind the same bearer.
+        status, _ = call(path="/clients", method="GET", token=None)
+        self.assertEqual(status, 401)
+
     def test_unknown_paths_and_verbs(self):
         status, _ = call({}, path="/anything")
         self.assertEqual(status, 404)
+        status, _ = call({}, path="/clients")
+        self.assertEqual(status, 405)
 
 
 class TestValidation(CredentialServiceBase):
-    def test_rejects_ids_the_acl_could_not_confine(self):
+    def test_rejects_ids_the_broker_could_not_confine(self):
         # A username that is not a real edge-node id produces an account confined to a subtree
         # nothing publishes to: it authenticates and every message is then dropped.
         for bad in ("val_gateway_01", "GWY120000000000400080000", "gwy123", "", None):
@@ -185,11 +217,9 @@ class TestValidation(CredentialServiceBase):
                 self.assertEqual(status, 400)
                 self.assertEqual(payload.get("code"), "invalid_sparkplug_id")
 
-    def test_rejects_a_password_containing_shell_metacharacters(self):
-        # Defence in depth, not the boundary itself any more: hashArgv() passes the password to
-        # `sh` as a positional parameter, so nothing parses it as script text. The alphabet is
-        # still enforced -- an invalid argument should not reach a process at all, and the
-        # reload path does still build a command string.
+    def test_rejects_a_password_outside_the_alphabet(self):
+        # The alphabet is an injection boundary kept because the operator CLI still puts a
+        # hand-typed password on a command line; an invalid value should not reach a process.
         status, payload = call({"sparkplug_id": TEST_GW, "password": "a'; id; '"})
         self.assertEqual(status, 400)
         self.assertEqual(payload.get("code"), "invalid_password")
@@ -210,7 +240,8 @@ class TestIssuance(CredentialServiceBase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["sparkplug_id"], TEST_GW)
         self.assertFalse(payload["replaced"])
-        self.assertTrue(payload["applied_to_running_broker"], "the broker was not SIGHUPed")
+        self.assertTrue(payload["applied_to_running_broker"])
+        self.assertEqual(payload["apply_method"], "dynsec")
 
         after = accounts()
         # THE ASSERTION THE INCIDENT WOULD HAVE NEEDED.
@@ -218,23 +249,20 @@ class TestIssuance(CredentialServiceBase):
             self.assertIn(account, after, f"issuing a credential LOST the account {account}")
         self.assertEqual(set(after), set(before) | {TEST_GW})
 
-        # And it is a real credential, not merely a line in a file. Published over MQTTS on 8883,
-        # under its OWN edge node, which is the only subtree mosquitto.acl permits it.
-        publish = subprocess.run(
-            ["docker", "exec", BROKER_CONTAINER, "mosquitto_pub",
-             "--cafile", "/mosquitto/certs/ca.crt", "-h", "localhost", "-p", "8883",
-             "-u", TEST_GW, "-P", payload["password"],
-             "-t", f"spBv1.0/ACS-Cymru/DBIRTH/{TEST_GW}/probe", "-m", "x"],
-            capture_output=True, text=True,
-        )
+        # Both roles, so the account is confined to its own edge node and can subscribe.
+        entry = client_entry(TEST_GW)
+        self.assertEqual(set(entry["roles"]), {"gateway", f"gateway-{TEST_GW}"})
+        self.assertFalse(entry["disabled"])
+
+        # And it is a real credential. Published over MQTTS on 8883 under its OWN edge node, which
+        # is the only subtree its role permits it.
+        publish = publish_as(TEST_GW, payload["password"])
         self.assertEqual(
             publish.returncode, 0,
             f"the issued credential was refused by the broker: {publish.stderr.strip()}",
         )
 
     def test_reissuing_replaces_rather_than_appends(self):
-        # Mosquitto reads the FIRST match, so an appended second line for the same username would
-        # silently pin the OLD password: the rotation reports success and changes nothing.
         _, first = call({"sparkplug_id": TEST_GW})
         before = accounts()
 
@@ -244,22 +272,13 @@ class TestIssuance(CredentialServiceBase):
         self.assertNotEqual(first["password"], second["password"])
 
         after = accounts()
-        self.assertEqual(len(after), len(before), "re-issuing appended a second account")
+        self.assertEqual(len(after), len(before), "re-issuing added a second account")
         self.assertEqual(after.count(TEST_GW), 1)
 
-        def publish(password):
-            return subprocess.run(
-                ["docker", "exec", BROKER_CONTAINER, "mosquitto_pub",
-                 "--cafile", "/mosquitto/certs/ca.crt", "-h", "localhost", "-p", "8883",
-                 "-u", TEST_GW, "-P", password,
-                 "-t", f"spBv1.0/ACS-Cymru/DBIRTH/{TEST_GW}/probe", "-m", "x"],
-                capture_output=True, text=True,
-            ).returncode
-
-        self.assertEqual(publish(second["password"]), 0, "the new password does not work")
+        self.assertEqual(publish_as(TEST_GW, second["password"]).returncode, 0, "the new password does not work")
         self.assertNotEqual(
-            publish(first["password"]), 0,
-            "the SUPERSEDED password still authenticates -- the entry was appended, not replaced",
+            publish_as(TEST_GW, first["password"]).returncode, 0,
+            "the SUPERSEDED password still authenticates",
         )
 
     def test_the_password_is_generated_when_not_supplied(self):
@@ -268,12 +287,59 @@ class TestIssuance(CredentialServiceBase):
         self.assertRegex(payload["password"], r"^[A-Za-z0-9_-]{16,128}$")
 
 
+class TestRevocation(CredentialServiceBase):
+    def test_revoking_disables_and_reissuing_reenables(self):
+        _, issued = call({"sparkplug_id": TEST_GW})
+        self.assertEqual(publish_as(TEST_GW, issued["password"]).returncode, 0)
+        before = accounts()
+
+        status, payload = call({"sparkplug_id": TEST_GW}, path="/revocations")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["revoked"])
+        self.assertTrue(payload["existed"])
+
+        # Refused at CONNECT, still listed, listed as disabled -- and nothing else lost.
+        self.assertNotEqual(publish_as(TEST_GW, issued["password"]).returncode, 0,
+                            "a revoked account still authenticates")
+        self.assertEqual(set(accounts()), set(before))
+        self.assertTrue(client_entry(TEST_GW)["disabled"])
+
+        # A re-issue is the way back: replaced, enabled, and the new password works.
+        status, again = call({"sparkplug_id": TEST_GW})
+        self.assertEqual(status, 200)
+        self.assertTrue(again["replaced"])
+        self.assertFalse(client_entry(TEST_GW)["disabled"])
+        self.assertEqual(publish_as(TEST_GW, again["password"]).returncode, 0)
+
+    def test_revoking_an_unknown_account_creates_nothing(self):
+        before = accounts()
+        status, payload = call({"sparkplug_id": TEST_GW}, path="/revocations")
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["revoked"])
+        self.assertFalse(payload["existed"])
+        self.assertEqual(accounts(), before)
+
+
+class TestInventory(CredentialServiceBase):
+    def test_the_inventory_carries_roles_and_state_and_no_hash(self):
+        call({"sparkplug_id": TEST_GW})
+        payload = inventory()
+        text = json.dumps(payload)
+        for leaked in ("salt", "iterations", '"password"'):
+            self.assertNotIn(leaked, text, f"the inventory leaked {leaked}")
+        self.assertEqual(set(payload), {"clients", "roles", "read_at", "target"})
+        # The platform principals and the policy's roles are there, with their rules.
+        self.assertIn("factoryplus_ingestion", [c["username"] for c in payload["clients"]])
+        gateway_role = next(r for r in payload["roles"] if r["rolename"] == "gateway")
+        self.assertTrue(any(a["topic"] == "spBv1.0/#" for a in gateway_role["acls"]))
+
+
 class TestExposure(CredentialServiceBase):
     def test_service_is_not_published_on_the_host(self):
         """
         THE PRIMARY CONTROL, ahead of the bearer token. Publishing 9010 would put credential
-        minting on the host interface, and minting is -- through mosquitto.acl's `%u` confinement --
-        the ability to publish Sparkplug telemetry as any gateway on the site.
+        issuance on the host interface, and issuance is -- through the gateway's role -- the ability
+        to publish Sparkplug telemetry as any gateway on the site.
         """
         ports = subprocess.run(
             ["docker", "port", SERVICE_CONTAINER],

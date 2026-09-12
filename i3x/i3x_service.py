@@ -94,8 +94,8 @@ SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
 
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-# A READ-ONLY broker principal, matching what this service refuses to do in code: mosquitto.acl
-# grants `factoryplus_i3x` only `read spBv1.0/#`. Deliberately not the ingestion account, which
+# A READ-ONLY broker principal, matching what this service refuses to do in code: the i3x role
+# grants `factoryplus_i3x` only reads of `spBv1.0/#` and the Directory. Deliberately not the ingestion account, which
 # can publish NCMD -- a server whose durable control is that it cannot be talked into writing
 # should not hold a credential that could.
 MQTT_USER = os.getenv("MQTT_USER", "factoryplus_i3x")

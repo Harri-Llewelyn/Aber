@@ -14,8 +14,8 @@ test at a chosen multiple of real time against a fleet whose measured rate is 0.
 THE ONE THING THAT DECIDES THE WHOLE DESIGN: A CAPTURE CANNOT BE PLAYED BACK AS ITSELF.
 =================================================================================================
 
-mosquitto.acl confines every gateway to `spBv1.0/+/+/%u/#` -- the fourth topic segment must equal
-the connecting username. Its header states the rule this rests on: "THERE IS NO WILDCARD-WRITE
+The broker's roles confine every gateway to `spBv1.0/+/+/<sparkplug_id>/#` -- the fourth topic segment must equal
+the connecting username. mosquitto/README.md states the rule this rests on: "THERE IS NO WILDCARD-WRITE
 PRINCIPAL", and that was not an oversight to work around. It replaced a shared account that could
 forge DBIRTH and DDATA for every machine on site, which `verify_gateway_binding()` could not
 detect, "since a forged message under a CORRECTLY BOUND device passes that check by construction".
@@ -26,7 +26,7 @@ and would need write access to every edge node that ever appears in any capture.
 the identity in every topic onto assets that gateway owns. Playback is a gateway like any other.
 
 AND THE FAILURE MODE FOR GETTING THIS WRONG IS SILENCE, which is why it is refused up front rather
-than discovered. mosquitto.acl records that a refused publish is dropped with no PUBACK at QoS 0,
+than discovered. mosquitto/README.md records that a refused publish is dropped with no PUBACK at QoS 0,
 under MQTT 3.1.1 and 5 alike, so "the publisher learns nothing from the broker by construction".
 validate.py has already been bitten by exactly this: a mismatch there "shows up as every publish
 being silently dropped", producing "a full run in which every publish went nowhere". `play`
@@ -97,7 +97,7 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_TLS_ENABLED = os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
 MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 
-# The recorder is a CONSUMER, so it defaults to a principal mosquitto.acl already grants
+# The recorder is a CONSUMER, so it defaults to a principal the broker's roles already grant
 # `read spBv1.0/#` and no asset write at all. Recording needs nothing more, and pointing it at a
 # gateway credential would hand a mistyped subcommand the ability to publish.
 #
@@ -111,7 +111,7 @@ RECORD_PASSWORD = (os.getenv("MQTT_CAPTURE_PASSWORD") or os.getenv("MQTT_INGESTI
                    or os.getenv("MQTT_PASSWORD") or "")
 
 # Playback authenticates as the gateway it publishes as -- username == sparkplug_id, which is what
-# makes the `%u` pattern in mosquitto.acl constrain anything at all. No fallback and no default:
+# makes the per-gateway role at the broker constrain anything at all. No fallback and no default:
 # there is no gateway this tool should pick on an operator's behalf.
 PLAY_USER = os.getenv("MQTT_PLAYBACK_USER", "")
 PLAY_PASSWORD = os.getenv("MQTT_PLAYBACK_PASSWORD", "")
@@ -706,7 +706,7 @@ def cmd_play(args):
             print("  ... %d more" % (len(plan) - args.head))
         return 0
 
-    # THE REFUSAL THAT SAVES A SILENT RUN. mosquitto.acl pins the edge-node segment to the
+    # THE REFUSAL THAT SAVES A SILENT RUN. The broker's roles pin the edge-node segment to the
     # connecting username, and a mismatch is dropped with nothing logged at either end.
     if PLAY_USER != args.as_gateway:
         raise CaptureError(
@@ -734,7 +734,7 @@ def cmd_play(args):
             remaining = due - time.time()
             if remaining > 0:
                 time.sleep(remaining)
-            # QoS 0, matching every other Sparkplug publisher on this stack. mosquitto.acl
+            # QoS 0, matching every other Sparkplug publisher on this stack. mosquitto/README.md
             # records why raising it is not an option: Sparkplug B requires QoS 0 for these
             # message types and delegates loss detection to `seq` and the rebirth request.
             client.publish(topic, payload_bytes, qos=0)
@@ -782,7 +782,7 @@ def build_parser():
         help="publish a capture back",
         description="Publishes as ONE gateway, rewriting every captured identity onto assets "
                     "that gateway owns. A capture cannot be played back under the identity it "
-                    "was recorded from: mosquitto.acl confines a client to its own edge-node "
+                    "was recorded from: the broker's roles confine a client to its own edge-node "
                     "segment, and a publish outside it is dropped silently at QoS 0.",
     )
     play.add_argument("capture", help="capture file to play")

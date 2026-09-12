@@ -1,23 +1,35 @@
 #!/usr/bin/env node
 /**
- * Assert the broker's own configuration starts on the version both targets pin, and serves safely.
- * Mosquitto's own parser is the only authority on what it accepts (2.0.x rejects a duplicate
- * `password_file`, 2.1.x accepts it, and nothing short of a stack boot would notice), so the config
- * is started on the pinned tag. A config that starts is not a config that is safe:
- * `allow_anonymous`/`password_file` are declared once in the global section, so this also connects
- * with no credentials and requires a refusal, and asserts mosquitto.acl confines each principal by
- * delivery. The TLS listener is checked when a certificate can be produced. Requires Docker, and
- * skips with a clear message without it.
+ * Assert the broker's configuration starts on the pinned image and enforces the policy.
+ *
+ * Mosquitto's own parser is the only authority on what it accepts, so mosquitto.conf is started on
+ * the tag docker-compose.yml pins. A config that starts is not a config that is safe, so the check
+ * then connects with no credentials and requires a refusal, and asserts BY DELIVERY that each role
+ * in mosquitto/dynsec-roles.json confines its principal: a denied publish at QoS 0 exits 0 and the
+ * broker says nothing, so exit status proves nothing.
+ *
+ * The document the broker boots on is written by the real boot reconcile
+ * (scripts/mosquitto-dynsec-init.mjs) in the credential service's image, from the repository's
+ * roles, the environment and a seeded legacy password file, so the import, the hash transplant and
+ * a second idempotent run are exercised. The plugin's control API is then driven through
+ * mosquitto_rr the way the credential service drives it: issue, re-issue, disable a live session,
+ * re-enable. The TLS listener is checked when a certificate can be produced.
+ *
+ * Requires Docker, and skips with a clear message without it.
  *
  * Usage: node scripts/check-broker-config.mjs [--verbose]
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync, chmodSync,
+  readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync, existsSync, chmodSync,
+  statSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+
+import { assertOk, isRefusal, issueWithControl, summariseInventory } from './lib/mosquitto-dynsec.mjs';
+import { controlSender } from './lib/mosquitto-control.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const verbose = process.argv.includes('--verbose');
@@ -39,6 +51,8 @@ function pinnedTag() {
 /** Both targets must pin the same tag; the chart's is checked by check-image-tag-parity.mjs. */
 const TAG = pinnedTag();
 const IMAGE = `eclipse-mosquitto:${TAG}`;
+/** The credential service's image, built from the repository so the check runs the real reconcile. */
+const CREDENTIAL_IMAGE = 'acs-cymru-gateway-credential:check';
 
 function docker(args, opts = {}) {
   return spawnSync('docker', args, { encoding: 'utf8', ...opts });
@@ -60,7 +74,77 @@ if (docker(['image', 'inspect', IMAGE]).status !== 0) {
 
 const work = mkdtempSync(join(tmpdir(), 'fp-broker-'));
 const cfg = join(work, 'cfg');
-mkdirSync(cfg, { recursive: true });
+const dynsecDir = join(work, 'dynsec');
+const legacyDir = join(work, 'legacy');
+const brokenDir = join(work, 'broken');
+for (const d of [cfg, dynsecDir, legacyDir, brokenDir]) mkdirSync(d, { recursive: true });
+
+/**
+ * The principals of the test broker. GATEWAY_A is the platform's validator gateway and arrives
+ * from the environment; GATEWAY_B and `probe` arrive through the legacy password file the reconcile
+ * imports; GATEWAY_C is issued over the control API. GATEWAY_B is not a real gateway: it exists so
+ * "a gateway cannot publish under another edge node" is testable, the forgery
+ * `verify_gateway_binding()` cannot detect. `probe` matches no role and must reach nothing.
+ */
+const GATEWAY_A = 'gwy100000000000400080000';
+const GATEWAY_B = 'gwy999999999999999999999';
+const GATEWAY_C = 'gwy2a71a14de1b04971bfbb5';
+const ADMIN = 'dynsec-admin';
+const ACCOUNTS = {
+  [ADMIN]: 'admin-secret-for-the-check-0001',
+  factoryplus_ingestion: 'ingestion-secret-0001',
+  factoryplus_i3x: 'i3x-secret-000000001',
+  factoryplus_monitor: 'monitor-secret-000001',
+  [GATEWAY_A]: 'gateway-a-secret-0001',
+  [GATEWAY_B]: 'gateway-b-secret-0001',
+  probe: 'probe-secret-00000001',
+};
+const IMPORTED = [GATEWAY_B, 'probe'];
+const EXPECTED_CLIENTS = Object.keys(ACCOUNTS).sort();
+
+const INIT_ENV = {
+  DYNSEC_FILE: '/out/dynamic-security.json',
+  DYNSEC_POLICY_FILE: '/policy/dynsec-roles.json',
+  LEGACY_PASSWORD_FILE: '/legacy/password_file',
+  DYNSEC_REQUIRED_PRINCIPALS: 'INGESTION I3X VALIDATOR MONITOR',
+  MQTT_DYNSEC_ADMIN_USER: ADMIN,
+  MQTT_DYNSEC_ADMIN_PASSWORD: ACCOUNTS[ADMIN],
+  MQTT_INGESTION_USER: 'factoryplus_ingestion',
+  MQTT_INGESTION_PASSWORD: ACCOUNTS.factoryplus_ingestion,
+  MQTT_I3X_USER: 'factoryplus_i3x',
+  MQTT_I3X_PASSWORD: ACCOUNTS.factoryplus_i3x,
+  MQTT_MONITOR_USER: 'factoryplus_monitor',
+  MQTT_MONITOR_PASSWORD: ACCOUNTS.factoryplus_monitor,
+  MQTT_VALIDATOR_USER: GATEWAY_A,
+  MQTT_VALIDATOR_PASSWORD: ACCOUNTS[GATEWAY_A],
+};
+
+/**
+ * Run the real reconcile in the credential service's image, as both targets do before the broker
+ * starts. `outDir` is where the document lands; `preamble` runs first in the same shell.
+ */
+function runInit({ outDir = dynsecDir, preamble = '' } = {}) {
+  const args = ['run', '--rm'];
+  for (const [k, v] of Object.entries(INIT_ENV)) args.push('-e', `${k}=${v}`);
+  args.push(
+    '-v', `${outDir}:/out`,
+    '-v', `${legacyDir}:/legacy`,
+    '-v', `${join(REPO, 'scripts')}:/scripts:ro`,
+    '-v', `${join(REPO, 'mosquitto', 'dynsec-roles.json')}:/policy/dynsec-roles.json:ro`,
+    CREDENTIAL_IMAGE, 'sh', '-c', `${preamble}exec node /scripts/mosquitto-dynsec-init.mjs`,
+  );
+  return docker(args);
+}
+
+/**
+ * The written document, read through a container. On a Linux host the reconcile has chowned it to
+ * uid 1883 at 0600, which is exactly right for the broker and unreadable for whoever runs this.
+ */
+function readDocument(dir = dynsecDir) {
+  const r = docker(['run', '--rm', '-v', `${dir}:/out:ro`, IMAGE, 'cat', '/out/dynamic-security.json']);
+  if (r.status !== 0) throw new Error(`could not read the written document: ${(r.stderr || '').trim()}`);
+  return JSON.parse(r.stdout);
+}
 
 /**
  * Compose the config exactly as the deployment does: the base policy, plus the TLS stanza appended
@@ -72,50 +156,30 @@ function assemble({ withTls }) {
     conf += '\n' + readFileSync(join(REPO, 'mosquitto', 'mosquitto-tls.conf'), 'utf8');
   }
   writeFileSync(join(cfg, 'mosquitto.conf'), conf);
-  writeFileSync(join(cfg, 'mosquitto.acl'), readFileSync(join(REPO, 'mosquitto', 'mosquitto.acl'), 'utf8'));
 }
 
 /**
- * Start the broker on the composed config and return its log plus whether it reached "running". The
- * password file is built inside the container with mosquitto_passwd, then chowned to 1883 and chmod
- * 0600, as the chart's initContainer does; without the chown the broker fails with "Unable to open
- * pwfile".
+ * Start the broker on the composed config and the reconciled document, and return its log plus
+ * whether it reached "running". The document is COPIED into the container rather than mounted:
+ * the plugin rewrites it on every change, and each broker here must start from the same one. It
+ * is chowned to 1883 at 0600 as both targets do; the plugin warns on anything wider.
  */
-/**
- * The principals mosquitto.acl names, provisioned into every test broker. `gwy999…` is not a real
- * gateway: it exists so "a gateway cannot publish under another edge node" is testable, the forgery
- * `verify_gateway_binding()` cannot detect.
- */
-const GATEWAY_A = 'gwy100000000000400080000';
-const GATEWAY_B = 'gwy999999999999999999999';
-const ACCOUNTS = {
-  factoryplus_ingestion: 'ing-secret',
-  factoryplus_i3x: 'i3x-secret',
-  factoryplus_monitor: 'mon-secret',
-  [GATEWAY_A]: 'gw-a-secret',
-  [GATEWAY_B]: 'gw-b-secret',
-};
-
 function startBroker({ withTls, certsDir, ports = [] }) {
   assemble({ withTls });
   const name = `fp-broker-check-${Date.now()}`;
   const args = ['run', '-d', '--name', name];
   for (const p of ports) args.push('-p', p);
-  args.push('-v', `${cfg}:/cfgsrc:ro`);
+  args.push('-v', `${cfg}:/cfgsrc:ro`, '-v', `${dynsecDir}:/dynsrc:ro`);
   if (certsDir) args.push('-v', `${certsDir}:/mosquitto/certs:ro`);
   args.push(
     IMAGE,
     'sh',
     '-c',
-    'cp /cfgsrc/* /mosquitto/config/ && ' +
-      'mosquitto_passwd -b -c /mosquitto/config/password_file probe probe-secret && ' +
-      // The real principals mosquitto.acl names, so section 4 can assert each one's confinement.
-      // Two gateways, because "cannot address another edge node" needs another edge node.
-      Object.entries(ACCOUNTS)
-        .map(([u, p]) => `mosquitto_passwd -b /mosquitto/config/password_file ${u} ${p} && `)
-        .join('') +
-      'chown 1883:1883 /mosquitto/config/password_file && ' +
-      'chmod 0600 /mosquitto/config/password_file && ' +
+    'cp /cfgsrc/mosquitto.conf /mosquitto/config/mosquitto.conf && ' +
+      'mkdir -p /mosquitto/data && ' +
+      'cp /dynsrc/dynamic-security.json /mosquitto/data/dynamic-security.json && ' +
+      'chown 1883:1883 /mosquitto/data /mosquitto/data/dynamic-security.json && ' +
+      'chmod 0600 /mosquitto/data/dynamic-security.json && ' +
       'exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf'
   );
   const run = docker(args);
@@ -135,6 +199,9 @@ function startBroker({ withTls, certsDir, ports = [] }) {
 const started = [];
 function cleanup() {
   for (const n of started) if (n) docker(['rm', '-f', n]);
+  // The reconcile and the certificate generator chown what they write to uid 1883, so on a Linux
+  // host the temp directory is emptied from a container before the host removes it.
+  docker(['run', '--rm', '-v', `${work}:/w`, IMAGE, 'sh', '-c', 'rm -rf /w/*']);
   try {
     rmSync(work, { recursive: true, force: true });
   } catch {
@@ -142,19 +209,95 @@ function cleanup() {
   }
 }
 
+const startFailure = (r) => (r.log.match(/^.*Error.*$/gim) || []).slice(0, 3).join('\n         ') || r.log.slice(0, 300);
+const refusedConnect = (result) => /not authorised|Connection Refused/i.test(result.stderr + result.stdout);
+
 try {
+  // 0. The boot reconcile writes the document the broker will start on. This is the real script in
+  // the real image, so the import of a legacy password file, the transplant of mosquitto_passwd's
+  // hash and the file's ownership are what the deployment will do, not a model of it.
+  {
+    const build = docker(['build', '-q', '-t', CREDENTIAL_IMAGE, join(REPO, 'gateway-credential')]);
+    if (build.status !== 0) {
+      throw new Error(`could not build gateway-credential/Dockerfile: ${(build.stderr || '').trim().slice(0, 300)}`);
+    }
+
+    const seed = IMPORTED.map((u, i) =>
+      `mosquitto_passwd -b ${i === 0 ? '-c ' : ''}/legacy/password_file ${u} ${ACCOUNTS[u]} && `).join('');
+    const first = runInit({ preamble: seed });
+    if (first.status !== 0) {
+      throw new Error(`scripts/mosquitto-dynsec-init.mjs failed on first boot:\n         ${(first.stderr || first.stdout || '').trim().slice(0, 600)}`);
+    }
+    log((first.stdout.trim().split('\n').slice(-1)[0] || '').trim());
+
+    const doc = readDocument();
+    const names = doc.clients.map((c) => c.username).sort();
+    if (JSON.stringify(names) === JSON.stringify(EXPECTED_CLIENTS)) {
+      ok.push('the reconcile writes the admin, every platform principal and every imported account');
+    } else {
+      problems.push(`the reconciled document holds ${names.join(', ')}; expected ${EXPECTED_CLIENTS.join(', ')}`);
+    }
+    const rolesOf = (u) => (doc.clients.find((c) => c.username === u)?.roles || []).map((r) => r.rolename).sort();
+    if (JSON.stringify(rolesOf(GATEWAY_B)) === JSON.stringify(['gateway', `gateway-${GATEWAY_B}`].sort())) {
+      ok.push('an imported gateway account holds the shared role and its own');
+    } else {
+      problems.push(`imported gateway ${GATEWAY_B} holds roles ${rolesOf(GATEWAY_B).join(', ') || '(none)'}`);
+    }
+    if (rolesOf('probe').length === 0) {
+      ok.push('an imported account matching no principal holds no role');
+    } else {
+      problems.push(`imported account 'probe' was given roles ${rolesOf('probe').join(', ')}`);
+    }
+    if (doc.clients.every((c) => typeof c.salt === 'string' && Number.isInteger(c.iterations))) {
+      ok.push('every stored client is a PBKDF2 hash with its salt and iterations, never a password');
+    } else {
+      problems.push('a stored client lacks salt or iterations, so its password field is not a mosquitto_passwd hash');
+    }
+    if (doc.defaultACLAccess?.publishClientReceive === false && doc.defaultACLAccess?.subscribe === false) {
+      ok.push('the document denies by default (defaultACLAccess receive and subscribe are false)');
+    } else {
+      problems.push('defaultACLAccess must deny receive and subscribe; mosquitto_ctrl init writes receive: true and that is rejected here');
+    }
+    if (existsSync(join(legacyDir, 'password_file.imported')) && !existsSync(join(legacyDir, 'password_file'))) {
+      ok.push('the legacy password file is renamed .imported once its accounts are in the document');
+    } else {
+      problems.push('the legacy password file was not renamed to password_file.imported after import');
+    }
+
+    // The second boot: the document exists, so nothing is imported and nothing is lost.
+    const second = runInit();
+    const again = second.status === 0 ? readDocument() : null;
+    if (again && JSON.stringify(again.clients.map((c) => c.username).sort()) === JSON.stringify(EXPECTED_CLIENTS)) {
+      ok.push('a second boot reconciles the existing document without losing or duplicating a client');
+    } else {
+      problems.push(`a second boot ${second.status === 0 ? 'changed the client set' : `failed: ${(second.stderr || '').trim().slice(0, 300)}`}`);
+    }
+
+    // A document that exists and cannot be parsed is the fleet's credentials in an unknown state;
+    // the reconcile must refuse rather than write a fresh one over it.
+    writeFileSync(join(brokenDir, 'dynamic-security.json'), '{ this is not json');
+    const broken = runInit({ outDir: brokenDir });
+    if (broken.status !== 0 && /cannot be parsed/.test(broken.stderr + broken.stdout)) {
+      ok.push('the reconcile refuses to overwrite a document it cannot parse');
+    } else {
+      problems.push('the reconcile OVERWROTE an unparseable document; it must refuse and name the file');
+    }
+  }
+
   // 1. The base policy starts on the pinned version.
   {
     const r = startBroker({ withTls: false, ports: ['21883:1883'] });
     started.push(r.name);
     if (!r.running) {
-      const err = (r.log.match(/^.*Error.*$/gim) || []).slice(0, 3).join('\n         ');
-      problems.push(
-        `mosquitto.conf does NOT start on ${IMAGE}:\n         ${err || r.log.slice(0, 300)}`
-      );
+      problems.push(`mosquitto.conf does NOT start on ${IMAGE}:\n         ${startFailure(r)}`);
     } else {
       ok.push(`mosquitto.conf starts and serves on ${IMAGE}`);
       log(r.log.trim().split('\n').slice(-1)[0]);
+      if (/world readable/i.test(r.log)) {
+        problems.push('the plugin warned that its document is world readable; it must be written 0600 owned by uid 1883');
+      } else {
+        ok.push('the plugin loads its document without a permissions warning');
+      }
     }
 
     // 2. Anonymous access is refused. The security options are global so no listener can come up
@@ -164,27 +307,25 @@ try {
         'run', '--rm', '--network', `container:${r.name}`, IMAGE,
         'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883', '-t', 'probe/anon', '-m', 'x'
       ]);
-      const refused = /not authorised|Connection Refused/i.test(anon.stderr + anon.stdout);
-      if (refused) {
+      if (refusedConnect(anon)) {
         ok.push('1883 refuses an unauthenticated client (allow_anonymous is in force)');
       } else {
         problems.push(
-          'AN UNAUTHENTICATED CLIENT WAS ACCEPTED ON 1883. `allow_anonymous false` and ' +
-            '`password_file` must be declared in mosquitto.conf\'s GLOBAL section (above the first ' +
+          'AN UNAUTHENTICATED CLIENT WAS ACCEPTED ON 1883. `allow_anonymous false` and the ' +
+            '`plugin` lines must be declared in mosquitto.conf\'s GLOBAL section (above the first ' +
             '`listener` line) so they apply to every listener.'
         );
       }
 
-      // A topic `probe` is allowed to publish under the ACL's per-gateway pattern: this assertion
-      // is about authentication, and at QoS 0 a denied publish still exits 0. Authorisation is
-      // asserted in section 4, by delivery.
+      // Authentication only: `probe` holds no role, and at QoS 0 a denied publish still exits 0.
+      // Authorisation is asserted in section 4, by delivery.
       const authed = docker([
         'run', '--rm', '--network', `container:${r.name}`, IMAGE,
-        'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883', '-u', 'probe', '-P', 'probe-secret',
+        'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883', '-u', 'probe', '-P', ACCOUNTS.probe,
         '-t', 'spBv1.0/ACS-Cymru/DDATA/probe/dev1', '-m', 'x'
       ]);
       if (authed.status === 0) {
-        ok.push('1883 accepts a client with valid credentials');
+        ok.push('1883 accepts a client whose hash was transplanted from a password file');
       } else {
         problems.push(
           `a client WITH valid credentials was refused on 1883: ${(authed.stderr || '').trim()}`
@@ -192,11 +333,9 @@ try {
       }
     }
 
-    // 4. mosquitto.acl confines each principal, asserted by delivery, not exit status: a denied
-    // publish at QoS 0 exits 0 and the broker says nothing. Publish as one principal, subscribe as
-    // one permitted to read the whole tree, and ask whether the message arrived. This is what would
-    // notice a shared `readwrite spBv1.0/#` account coming back in any form, including an ACL file
-    // that failed to load (mosquitto warns and continues).
+    // 4. The roles confine each principal, asserted by delivery, not exit status. Publish as one
+    // principal, subscribe as one permitted to read the whole tree, and ask whether the message
+    // arrived. This is what would notice a shared `spBv1.0/#` grant coming back in any form.
     if (r.running) {
       /**
        * Publish as one client, read as another, and report whether the payload arrived. Matches the
@@ -234,6 +373,21 @@ try {
         false
       );
       expect(
+        'an imported gateway account is confined exactly as an issued one',
+        (delivers(GATEWAY_B, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_B}/dev1`)),
+        true
+      );
+      expect(
+        'an imported account with no role authenticates and reaches nothing (publish)',
+        (delivers('probe', 'spBv1.0/ACS-Cymru/DDATA/probe/dev1')),
+        false
+      );
+      expect(
+        'an imported account with no role authenticates and reaches nothing (subscribe)',
+        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`, 'probe', 'spBv1.0/#')),
+        false
+      );
+      expect(
         'the ingestion principal may NOT publish DDATA',
         (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
         false
@@ -258,10 +412,15 @@ try {
         (delivers('factoryplus_monitor', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
+      expect(
+        'the plugin\'s admin reads NOTHING under spBv1.0 (it speaks to the plugin and nothing else)',
+        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`, ADMIN, 'spBv1.0/#')),
+        false
+      );
       // A gateway's own NCMD must reach it through the wildcard subscription the simulator flow and
-      // validate.py use. 2.0.20 grants `spBv1.0/+/NCMD/+` even for a client confined by `pattern`
-      // and filters per message at delivery; if a future version refuses the SUBACK instead,
-      // rebirth recovery breaks silently.
+      // validate.py use. The shared `gateway` role grants the subscription across spBv1.0/ and the
+      // per-gateway role decides delivery per message; if a future version refuses the SUBACK
+      // instead, rebirth recovery breaks silently.
       expect(
         'a gateway receives its own NCMD through a wildcard subscription',
         (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`,
@@ -276,7 +435,7 @@ try {
       );
 
       // The Directory topic (ingestion/directory_publish.py): one document holding the whole
-      // address space, published outside `spBv1.0/`. A topic has no caller, so the ACL is the
+      // address space, published outside `spBv1.0/`. A topic has no caller, so the role is the
       // entire access control. The negative assertion is the load-bearing half: a gateway must not
       // be able to enumerate the site, and reading is silent.
       expect(
@@ -324,9 +483,153 @@ try {
         problems.push('the monitoring principal CANNOT read $SYS -- every readiness probe will fail and no workload waiting on the broker will start');
       }
       if ((sysRead(GATEWAY_A).stdout || '').includes('mosquitto version')) {
-        problems.push('a gateway credential can read $SYS; `topic read $SYS/#` must be scoped to the monitoring user');
+        problems.push('a gateway credential can read $SYS; the `$SYS/#` grant belongs to the monitor role alone');
       } else {
         ok.push('a gateway credential cannot read $SYS');
+      }
+      if ((sysRead(ADMIN).stdout || '').includes('mosquitto version')) {
+        problems.push('the plugin\'s admin can read $SYS; its role must grant $CONTROL/dynamic-security/# and nothing else');
+      } else {
+        ok.push('the plugin\'s admin cannot read $SYS');
+      }
+
+      // 6. The control API, driven as the credential service drives it: mosquitto_rr, one command
+      // per request. Run inside the broker container the way the operator CLI and the orphan
+      // sweep run it.
+      const send = controlSender(
+        { host: '127.0.0.1', port: 1883, username: ADMIN, password: ACCOUNTS[ADMIN] },
+        ['docker', 'exec', r.name],
+      );
+      const inventory = () => summariseInventory(
+        assertOk(send({ command: 'listClients', verbose: true })),
+        assertOk(send({ command: 'listRoles', verbose: true })),
+      );
+
+      let listed;
+      try {
+        listed = inventory();
+      } catch (err) {
+        problems.push(`the control API did not answer the admin: ${err.message}`);
+      }
+      if (listed) {
+        const usernames = listed.clients.map((c) => c.username).sort();
+        if (JSON.stringify(usernames) === JSON.stringify(EXPECTED_CLIENTS)) {
+          ok.push('listClients returns the reconciled accounts (the Access Control page reads this)');
+        } else {
+          problems.push(`listClients returned ${usernames.join(', ')}`);
+        }
+        const text = JSON.stringify(listed);
+        if (!/salt|iterations/.test(text) && !text.includes(ACCOUNTS[ADMIN])) {
+          ok.push('the inventory summary carries roles and state and no hash material');
+        } else {
+          problems.push('summariseInventory leaked salt, iterations or a password into the summary');
+        }
+        if (listed.roles.some((role) => role.rolename === 'gateway' && role.acls.length > 0)) {
+          ok.push('listRoles returns each role with its ACLs');
+        } else {
+          problems.push('listRoles verbose did not return the gateway role with ACLs');
+        }
+      }
+
+      // Issue, as the service does; then re-issue with a new password, as a rotation does.
+      const passwordC1 = 'gateway-c-secret-0001';
+      const passwordC2 = 'gateway-c-secret-0002';
+      const pubAsC = (password) => docker(['exec', r.name, 'mosquitto_pub', '-u', GATEWAY_C, '-P', password,
+        '-t', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_C}/dev1`, '-m', 'x']);
+      let issued;
+      try {
+        issued = issueWithControl(send, GATEWAY_C, passwordC1);
+      } catch (err) {
+        problems.push(`issuing ${GATEWAY_C} over the control API failed: ${err.message}`);
+      }
+      if (issued) {
+        if (issued.replaced === false) ok.push('issuing a new gateway creates its role and client');
+        else problems.push('issuing a gateway that did not exist reported replaced: true');
+        ACCOUNTS[GATEWAY_C] = passwordC1;
+        expect(
+          'an issued gateway may publish under its own edge node, with no reload',
+          (delivers(GATEWAY_C, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_C}/dev1`)),
+          true
+        );
+        expect(
+          'an issued gateway may NOT publish under another edge node',
+          (delivers(GATEWAY_C, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
+          false
+        );
+
+        let reissued;
+        try {
+          reissued = issueWithControl(send, GATEWAY_C, passwordC2);
+        } catch (err) {
+          problems.push(`re-issuing ${GATEWAY_C} failed: ${err.message}`);
+        }
+        if (reissued) {
+          if (reissued.replaced === true) ok.push('re-issuing an existing gateway reports replaced: true');
+          else problems.push('re-issuing an existing gateway reported replaced: false');
+          if (refusedConnect(pubAsC(passwordC1))) {
+            ok.push('after a re-issue the previous password is refused');
+          } else {
+            problems.push('after a re-issue the PREVIOUS password still authenticates');
+          }
+          if (pubAsC(passwordC2).status === 0) {
+            ok.push('after a re-issue the new password authenticates');
+          } else {
+            problems.push('after a re-issue the new password is refused');
+          }
+          ACCOUNTS[GATEWAY_C] = passwordC2;
+        }
+
+        // Revocation is disableClient, and its whole point is that a LIVE session is dropped. A
+        // subscriber is left connected with a 20-second window; if it is still there 5 seconds
+        // after the disable, the revocation did not reach the session.
+        const kicked = '/tmp/kicked.txt';
+        docker(['exec', '-d', r.name, 'sh', '-c',
+          `mosquitto_sub -u ${GATEWAY_C} -P ${ACCOUNTS[GATEWAY_C]} -t 'spBv1.0/+/NCMD/+' -W 20 > ${kicked} 2>&1; echo EXIT:$? >> ${kicked}`]);
+        docker(['exec', r.name, 'sleep', '2']);
+        let disabled;
+        try {
+          assertOk(send({ command: 'disableClient', username: GATEWAY_C }));
+          disabled = true;
+        } catch (err) {
+          problems.push(`disableClient ${GATEWAY_C} failed: ${err.message}`);
+        }
+        if (disabled) {
+          docker(['exec', r.name, 'sleep', '3']);
+          if ((docker(['exec', r.name, 'cat', kicked]).stdout || '').includes('EXIT:')) {
+            ok.push('disableClient drops the live session (the subscriber exited)');
+          } else {
+            problems.push('disableClient did NOT drop the live session; a revoked gateway would stay connected');
+          }
+          if (refusedConnect(pubAsC(ACCOUNTS[GATEWAY_C]))) {
+            ok.push('a disabled client is refused on its next CONNECT');
+          } else {
+            problems.push('a DISABLED client was accepted on CONNECT');
+          }
+          const state = inventory().clients.find((c) => c.username === GATEWAY_C);
+          if (state?.disabled === true) {
+            ok.push('listClients reports the disabled account as disabled (what the page shows)');
+          } else {
+            problems.push('listClients did not report the disabled account as disabled');
+          }
+          try {
+            assertOk(send({ command: 'enableClient', username: GATEWAY_C }));
+            if (pubAsC(ACCOUNTS[GATEWAY_C]).status === 0) {
+              ok.push('enableClient re-admits the account (what a re-issue after revocation does)');
+            } else {
+              problems.push('enableClient did not re-admit the account');
+            }
+          } catch (err) {
+            problems.push(`enableClient ${GATEWAY_C} failed: ${err.message}`);
+          }
+        }
+      }
+
+      // The refusal the service turns into `existed: false`.
+      const unknown = send({ command: 'disableClient', username: 'gwy000000000000000000000' });
+      if (isRefusal(unknown, 'not found')) {
+        ok.push('disabling an account that does not exist is refused with "not found"');
+      } else {
+        problems.push(`disabling an unknown account answered ${JSON.stringify(unknown).slice(0, 120)}`);
       }
     }
   }
@@ -359,10 +662,8 @@ try {
       const r = startBroker({ withTls: true, certsDir: certs, ports: ['28883:8883'] });
       started.push(r.name);
       if (!r.running) {
-        const err = (r.log.match(/^.*Error.*$/gim) || []).slice(0, 3).join('\n         ');
         problems.push(
-          'mosquitto.conf + mosquitto-tls.conf does NOT start:\n         ' +
-            (err || r.log.slice(0, 300)) +
+          'mosquitto.conf + mosquitto-tls.conf does NOT start:\n         ' + startFailure(r) +
             '\n         A "Duplicate ... value" error here means a security option was added to ' +
             'mosquitto-tls.conf; they belong in mosquitto.conf\'s global section only.'
         );
@@ -372,7 +673,8 @@ try {
           'run', '--rm', '--network', `container:${r.name}`,
           '-v', `${certs}:/c:ro`, IMAGE,
           'mosquitto_pub', '--cafile', '/c/ca.crt', '-h', 'localhost', '-p', '8883',
-          '-u', 'probe', '-P', 'probe-secret', '-t', 'probe/tls', '-m', 'x'
+          '-u', GATEWAY_A, '-P', ACCOUNTS[GATEWAY_A],
+          '-t', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/tls`, '-m', 'x'
         ]);
         if (tls.status === 0) {
           ok.push('8883 completes a verified TLS handshake and accepts an authenticated publish');
@@ -452,17 +754,16 @@ try {
         started.push(r.name);
 
         if (!r.running) {
-          const err = (r.log.match(/^.*Error.*$/gim) || []).slice(0, 3).join('\n         ');
           problems.push(
-            'the broker does NOT start on certificates issued by mosquitto-tls-init:\n         '
-            + (err || r.log.slice(0, 300))
+            'the broker does NOT start on certificates issued by mosquitto-tls-init:\n         ' + startFailure(r)
           );
         } else {
           const verified = docker([
             'run', '--rm', '--network', `container:${r.name}`,
             '-v', `${certs}:/c:ro`, IMAGE,
             'mosquitto_pub', '--cafile', '/c/ca.crt', '-h', 'localhost', '-p', '8883',
-            '-u', 'probe', '-P', 'probe-secret', '-t', 'probe/tls', '-m', 'x',
+            '-u', GATEWAY_A, '-P', ACCOUNTS[GATEWAY_A],
+            '-t', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/tls`, '-m', 'x',
           ]);
           if (verified.status === 0) {
             ok.push('8883 serves the issued leaf and a client verifies it against the issued root');
@@ -478,19 +779,49 @@ try {
             'mosquitto_pub', '--cafile', '/c/ca.crt', '-h', 'localhost', '-p', '8883',
             '-t', 'probe/anon-tls', '-m', 'x',
           ]);
-          if (/not authorised|Connection Refused/i.test(anonTls.stderr + anonTls.stdout)) {
+          if (refusedConnect(anonTls)) {
             ok.push('8883 refuses an unauthenticated client (TLS does not relax authentication)');
           } else {
             problems.push(
               'AN UNAUTHENTICATED CLIENT WAS ACCEPTED ON 8883. The security options must stay in '
-              + 'mosquitto.conf\'s GLOBAL section so the TLS listener inherits them; a copy under '
-              + 'the 8883 stanza is also a fatal duplicate on 2.0.x.'
+              + 'mosquitto.conf\'s GLOBAL section so the TLS listener inherits them; a `plugin` line '
+              + 'under a listener is refused outright on 2.0.x.'
             );
           }
         }
       }
     }
   }
+
+  // 7. Nothing in the repository deletes a role. Measured on 2.0.22: deleteRole on a role a client
+  // holds took the broker down (mosquitto/README.md). The reconcile regenerates orphaned gateway
+  // roles instead, and every caller of the control API must keep to that.
+  {
+    const forbidden = new RegExp('command[\'"]?\\s*:\\s*[\'"]delete' + 'Role');
+    const roots = ['scripts', 'supabase/functions', 'deploy', 'gateway-credential', 'ingestion', 'frontend/src'];
+    const offenders = [];
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== 'node_modules' && entry.name !== 'dist') walk(p);
+        } else if (/\.(mjs|js|jsx|ts|tsx|py|sh|ya?ml|tpl)$/.test(entry.name) && forbidden.test(readFileSync(p, 'utf8'))) {
+          offenders.push(p.slice(REPO.length + 1));
+        }
+      }
+    };
+    for (const root of roots) {
+      const dir = join(REPO, root);
+      if (existsSync(dir) && statSync(dir).isDirectory()) walk(dir);
+    }
+    if (offenders.length === 0) {
+      ok.push('no repository script issues deleteRole to the plugin');
+    } else {
+      problems.push(`deleteRole is issued by ${offenders.join(', ')}; a role a client holds cannot be deleted safely on 2.0.x`);
+    }
+  }
+} catch (err) {
+  problems.push(err.message);
 } finally {
   cleanup();
 }
@@ -501,10 +832,11 @@ if (problems.length) {
   for (const p of problems) console.error(`  ${p}`);
   console.error(
     `\nThis is checked against ${IMAGE} -- the tag docker-compose.yml pins -- because mosquitto's\n` +
-      'accepted syntax CHANGES BETWEEN MINOR VERSIONS. A duplicate `password_file` is fatal on\n' +
-      '2.0.x and accepted on 2.1.x, so a config that works on `latest` can take the broker down on\n' +
-      'both targets the moment the image is pinned.\n'
+      'accepted syntax and the plugin\'s behaviour CHANGE BETWEEN MINOR VERSIONS. A config that works\n' +
+      'on `latest` can take the broker down on both targets the moment the image is pinned, and the\n' +
+      'plugin\'s treatment of `%u`, of a deleted role and of a disabled session is measured, not\n' +
+      'assumed (mosquitto/README.md).\n'
   );
   process.exit(1);
 }
-console.log(`\nBroker configuration starts and authenticates correctly on ${IMAGE}.`);
+console.log(`\nBroker configuration starts, authenticates and confines every principal on ${IMAGE}.`);

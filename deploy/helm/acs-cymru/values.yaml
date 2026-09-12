@@ -95,10 +95,11 @@ secrets:
   # postgres-meta encrypts stored connection strings with this; Studio must be given the same.
   pgMetaCryptoKey: acs-cymru-pg-meta-crypto-key
 
-  # --- MQTT: five platform principals, no wildcard account -----------------------------------
-  # mosquitto.acl confines each account. The two gateway usernames are the rows' GENERATED
-  # `sparkplug_id` ('gwy' + the first 21 hex characters of the UUID), which is why those rows
-  # have pinned UUIDs; `acs-cymru.validateMqttPrincipals` fails the render otherwise:
+  # --- MQTT: the platform principals, no wildcard account ------------------------------------
+  # The broker's roles (mosquitto/dynsec-roles.json) confine each account. The validator's
+  # username is its row's GENERATED `sparkplug_id` ('gwy' + the first 21 hex characters of the
+  # UUID), which is why that row has a pinned UUID; `acs-cymru.validateMqttPrincipals` fails the
+  # render otherwise:
   #   11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)
   # Each password is independent.
 
@@ -115,10 +116,16 @@ secrets:
   # healthcheck never passes.
   mqttMonitorUser: factoryplus_monitor
   mqttMonitorPassword: ""
-  # No gateway accounts are declared here: a gateway's credential is minted once its row exists
-  # (dashboard, or the enrolment bundle). See tutorial/README.md.
+  # The account the credential service administers the broker's Dynamic Security plugin as:
+  # $CONTROL/dynamic-security/# and nothing else. Required; the broker's initContainer writes it
+  # on every start.
+  mqttDynsecAdminUser: dynsec-admin
+  mqttDynsecAdminPassword: ""
+  # No gateway accounts are declared here: a gateway's credential is issued once its row exists
+  # (dashboard, or the enrolment bundle) and lives in the plugin's document on the broker's PVC.
+  # See tutorial/README.md.
   # The bearer token supabase-functions presents to the gateway-credential sidecar. Its own
-  # value, never shared: that service can mint a credential for any edge node. It refuses to
+  # value, never shared: that service can issue a credential for any edge node. It refuses to
   # start below 32 characters.
   mqttCredentialServiceToken: ""
 
@@ -586,21 +593,30 @@ mosquitto:
     resources:
       requests: { cpu: 10m, memory: 16Mi }
       limits: { memory: 64Mi }
-  # Per-gateway credentials live in a Secret (reviewable, backed-up state). See
-  # scripts/mosquitto-provision-gateway.mjs (operator path) and `gatewayCredential` below.
+  # The Dynamic Security plugin's document: every issued gateway account, rewritten by the
+  # broker on each change. The only copy, so the only volume the broker keeps. `resource-policy:
+  # keep` on the claim; deleting it disconnects the fleet and each gateway must be re-issued.
+  persistence:
+    size: 1Gi
+    # Empty for the cluster default.
+    storageClass: ""
+    # A claim you manage yourself, in place of the one the chart creates.
+    existingClaim: ""
+  # The Secret the credential service patches: the playback delivery file (0078), read by
+  # playback through its own projection, and a `password_file` left by a release from before
+  # the plugin, which the broker's initContainer imports once. Created empty if absent and never
+  # overwritten.
   credentials:
-    # The Secret holding the hashed `password_file`. Created empty if absent and never
-    # overwritten, or every upgrade would delete every issued credential.
     secretName: mosquitto-passwords
-    # How often the reload sidecar compares the projected Secret against the file the broker
-    # is using. The kubelet's own sync period (60-90s) precedes this, which is why the
-    # provisioning script forces the reload.
-    watchIntervalSeconds: 15
   # MQTTS on 8883. Off by default: needs cert-manager and a ClusterIssuer the chart cannot
   # create (deploy/k8s/internal-ca.yaml). 1883 stays open when this is on: a fleet is converted
   # gateway by gateway, then `external.plaintext: false`.
   tls:
     enabled: false
+    # How often the certificate-reload sidecar compares the projected certificate against the
+    # one it last saw, and SIGHUPs the broker on a change. The kubelet's own sync period
+    # (60-90s) precedes this.
+    watchIntervalSeconds: 15
     # `acs-cymru-ca` is what deploy/k8s/internal-ca.yaml creates. An ACME issuer works too.
     clusterIssuer: acs-cymru-ca
     # Set if your issuer is a namespaced Issuer rather than a ClusterIssuer.
@@ -685,14 +701,15 @@ ingestion:
   # Rate limit on NCMD rebirth requests, per edge node.
   rebirthRequestIntervalSeconds: 300
   # The Directory's MQTT half. Off by default: a topic has no caller, so publishing puts the
-  # whole address space behind mosquitto.acl alone. The prefix MUST stay inside the ACL's
-  # `topic write ACS-Cymru/Directory/#` rule, or publishes are dropped silently at QoS 0.
+  # whole address space behind the broker's roles alone. The prefix MUST stay inside the
+  # ingestion role's `ACS-Cymru/Directory/#` publish rule, or publishes are dropped silently at
+  # QoS 0.
   directoryMqttEnabled: false
   directoryMqttTopicPrefix: ACS-Cymru/Directory/v1
   directoryMqttIntervalSeconds: 60
   # The Unified Namespace bridge (ingestion/uns_publish.py). Off by default for the same reason:
-  # every decoded reading, retained under uns/..., behind mosquitto.acl alone. The root MUST stay
-  # inside the ACL's `topic write uns/#` rule. The TTL bounds how long a relocation on the
+  # every decoded reading, retained under uns/..., behind the broker's roles alone. The root MUST
+  # stay inside the ingestion role's `uns/#` publish rule. The TTL bounds how long a relocation on the
   # dashboard takes to move a device's topic.
   unsMqttEnabled: false
   unsMqttTopicRoot: uns
@@ -964,16 +981,18 @@ telemetry:
     scrapeTimeout: 10s
 
 # ===============================================================================================
-# Broker credential-issuing service: the narrow authority enroll-gateway calls to mint a
-# gateway's Mosquitto account. A sidecar in the broker's pod, because Mosquitto re-reads its
-# password file only on SIGHUP. Disabling it removes automated enrolment of new physical
-# gateways; scripts/mosquitto-provision-gateway.mjs remains the manual path.
+# Broker credential service: the narrow authority the edge functions call to issue a gateway's
+# Mosquitto account, disable one, or list what the broker holds. A sidecar in the broker's pod,
+# speaking to the Dynamic Security plugin over loopback. Disabling it removes automated
+# enrolment and revocation and the Access Control page's live inventory;
+# scripts/mosquitto-provision-gateway.mjs remains the manual path. The image is used regardless:
+# the broker's initContainer runs the boot reconcile on it.
 # ===============================================================================================
 gatewayCredential:
   enabled: true
   image:
     repository: ghcr.io/harri-llewelyn/acs-cymru/gateway-credential
-    # Built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd.
+    # Built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd and mosquitto_rr.
     tag: ""
     pullPolicy: IfNotPresent
   port: 9010

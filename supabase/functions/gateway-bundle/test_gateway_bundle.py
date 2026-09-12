@@ -5,7 +5,7 @@ THE TWO THINGS WORTH PROTECTING HERE, both of which fail quietly:
 
   * WHO MAY GENERATE A BUNDLE. A bundle contains a live claim on a gateway's identity. If an
     Operator or Auditor could download one, they could enrol an appliance that publishes telemetry
-    as that gateway -- and because mosquitto.acl confines an account to its own edge-node subtree,
+    as that gateway -- and because the broker's roles confine an account to its own edge-node subtree,
     the forged data would be indistinguishable from the real thing at every layer below.
 
   * THAT THE ARCHIVE IS ACTUALLY AN ARCHIVE. supabase-js's functions.invoke() text-decodes any
@@ -161,7 +161,7 @@ class TestPermissions(BundleBase):
     def test_operator_and_auditor_are_refused(self):
         """
         A bundle is a live claim on a gateway's identity. An Operator who could download one could
-        stand up an appliance publishing telemetry AS that gateway, and mosquitto.acl would confine
+        stand up an appliance publishing telemetry AS that gateway, and the broker's roles would confine
         it to exactly the subtree that makes the forgery credible.
         """
         for role in ("Operator", "Auditor"):

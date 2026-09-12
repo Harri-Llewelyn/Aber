@@ -5,7 +5,7 @@ Publishing a stored capture back into the stack, as a simulated gateway.
 A SEPARATE PROCESS, AND A SEPARATE PRINCIPAL, AND NOT THE INGESTION DAEMON
 =================================================================================================
 
-`mosquitto.acl` grants the ingestion principal `read spBv1.0/#` and `write spBv1.0/+/NCMD/+` --
+The broker's roles grant the ingestion principal `read spBv1.0/#` and `write spBv1.0/+/NCMD/+` --
 rebirth requests and nothing else. Teaching it to publish asset data would widen the one account the
 whole ACL is built around, and `verify_gateway_binding()` cannot tell a forged message under a
 correctly bound device from a real one.
@@ -24,7 +24,7 @@ TWO IDENTITIES, WHICH IS THE ARRANGEMENT WORTH UNDERSTANDING BEFORE READING ANYT
                and supplied as a secret the way `MQTT_VALIDATOR_USER` is.
 
 One says what this may do in the database; the other says what the broker will carry. That split is
-what lets `pattern readwrite spBv1.0/+/+/%u/#` confine a playback with NO ACL CHANGE AT ALL: a
+what lets `spBv1.0/+/+/<sparkplug_id>/#` confine a playback with NO ACL CHANGE AT ALL: a
 worker connected as `gwyAAA...` cannot publish under `gwyBBB...`, because the broker drops it at the
 network protocol layer before any subscriber sees it. Even a job carrying a wrong mapping cannot
 reach another gateway's topics.

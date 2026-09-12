@@ -8,7 +8,7 @@ Kong. So the suite asserts a different set of properties:
 
   * the token is genuinely single-use, and unknown/expired/consumed are INDISTINGUISHABLE (telling
     them apart would let an enumerator learn that a token value once existed);
-  * a race produces exactly ONE winner -- because mosquitto.acl pins the topic's edge-node segment
+  * a race produces exactly ONE winner -- because the broker's roles pin the topic's edge-node segment
     to the connecting username, two credentials for one gateway would silently contend for one
     Sparkplug identity rather than failing;
   * a failure in the credential service RELEASES the claim, so a transient broker outage costs a
@@ -166,12 +166,13 @@ class EnrollGatewayBase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
-        # The broker account outlives the row (the password file knows nothing about gateways), so
-        # it is removed explicitly or it accumulates across runs.
+        # The broker account outlives the row (the plugin knows nothing about gateways), so it is
+        # removed explicitly or it accumulates across runs. Deleted through the service container's
+        # own admin credential, the one place a delete is spoken; the service itself never does.
         subprocess.run(
-            ["docker", "exec", "acs-cymru_mosquitto", "sh", "-c",
-             f"grep -v '^{cls.sparkplug_id}:' /mosquitto/config/password_file > /tmp/pf.$$ "
-             f"&& cat /tmp/pf.$$ > /mosquitto/config/password_file && rm -f /tmp/pf.$$"],
+            ["docker", "exec", "acs-cymru_gateway_credential", "sh", "-c",
+             'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
+             f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec deleteClient {cls.sparkplug_id}'],
             capture_output=True, text=True,
         )
 
@@ -203,9 +204,9 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         self.assertEqual(status, 200, payload)
         self.assertEqual(payload["status"], "ENROLLED")
 
-        # IDENTITY. The username IS the sparkplug_id and cannot be anything else: mosquitto.acl
-        # pins the topic's edge-node segment to %u, and verify_gateway_binding() compares the same
-        # segment against the gateway row.
+        # IDENTITY. The username IS the sparkplug_id and cannot be anything else: the gateway's
+        # broker role confines it to its own edge-node segment, and verify_gateway_binding()
+        # compares the same segment against the gateway row.
         self.assertEqual(payload["sparkplug_id"], self.sparkplug_id)
         self.assertEqual(payload["mqtt_username"], self.sparkplug_id)
         # The other half of the address resolve_gateway() looks up FIRST. An appliance told only the
@@ -335,7 +336,7 @@ class TestTokenRejection(EnrollGatewayBase):
 
     def test_a_race_produces_exactly_one_winner(self):
         """
-        Two appliances, one token. Because mosquitto.acl pins the topic to the username, two winners
+        Two appliances, one token. Because the broker's roles pin the topic to the username, two winners
         would not fail -- they would silently contend for one Sparkplug identity.
         """
         from concurrent.futures import ThreadPoolExecutor

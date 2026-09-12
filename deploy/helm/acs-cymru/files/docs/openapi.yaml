@@ -1551,8 +1551,8 @@ paths:
         every broker capture. This is the same publish with a person as the reason.
 
         **This is the only command this stack sends.** Sparkplug's NCMD channel can also write
-        metric *values*, which is actuation; that is not reachable from the dashboard, `mosquitto.acl`
-        grants the daemon this one topic pattern, and `0058` carries a self-check that fails if this
+        metric *values*, which is actuation; that is not reachable from the dashboard, the daemon's
+        broker role grants it this one topic pattern, and `0058` carries a self-check that fails if this
         table ever gains a column able to carry a payload. A rebirth asks a node to restate what it
         already is — it changes nothing on the plant, and a node that ignores it is unaffected.
 
@@ -2197,16 +2197,16 @@ paths:
                   mqtt_username:
                     type: string
                     description: >-
-                      Always equal to `sparkplug_id`. `mosquitto.acl` pins the topic's edge-node
-                      segment to the connecting username, so it cannot be anything else.
+                      Always equal to `sparkplug_id`. The gateway's broker role confines it to
+                      that edge-node segment, so it cannot be anything else.
                   password:
                     type: string
                     description: base64url. Shown once; the broker keeps only a hash.
                   applied_to_running_broker:
                     type: boolean
                     description: >-
-                      Whether the live broker reloaded the account. `false` means the durable copy
-                      was written but the running process has not picked it up yet.
+                      Whether the running broker applied the account. The Dynamic Security plugin
+                      applies it as it is created, so this is `true`; kept for callers that read it.
                   audit_recorded: { type: boolean }
                   env_hint:
                     type: object
@@ -2318,22 +2318,18 @@ paths:
   /functions/v1/revoke-gateway-credential:
     post:
       tags: [Edge Functions]
-      summary: Rotate a decommissioned gateway's broker credential to an unrecorded password
+      summary: Disable a decommissioned gateway's broker account
       description: |
         **Called by the database, not by a browser or an appliance.** A trigger on `gateways`
         reaches this through the gateway with `pg_net` whenever a gateway is archived or deleted, and a
         `pg_cron` sweep retries any archive whose call did not land (migration `0038`).
 
-        **Revocation is a rotation, not a deletion.** The credential service is add-only by design
-        — it "cannot delete accounts", and a delete verb there would turn "can mint one
-        ACL-confined account" into "can stop the entire fleet publishing". So this re-provisions the
-        gateway's account with a fresh random password the service generates and **nobody records**,
-        and discards the response. The appliance's credential stops working immediately; an inert
-        hash remains in the broker's password file.
-
-        **The password is never returned.** It exists only in this worker's memory for the length of
-        one request. Returning it — even to a caller holding the shared secret — would turn a
-        revocation endpoint into an issuance one.
+        **Revocation is a disable, not a deletion.** The credential service asks the broker's
+        Dynamic Security plugin to `disableClient`: the gateway's live session is dropped at once
+        and its next CONNECT is refused. The account and its hash stay, listed as disabled on the
+        Access Control page, and a later issue re-enables it. Nothing here can delete an account
+        or a role; a delete verb would turn "can disable one gateway" into "can stop the entire
+        fleet publishing".
 
         Authorised by `GATEWAY_REVOKE_SECRET` in the `x-revoke-secret` header, **not** by the anon
         key. The gateway's API-key check in front of `/functions/v1/` proves only that the caller holds a key
@@ -2351,37 +2347,103 @@ paths:
                   pattern: '^gwy[0-9a-f]{21}$'
                   description: >-
                     The gateway's immutable edge-node id, which is also its MQTT username. Shape
-                    checked before it reaches the credential service: that service creates an
-                    account for whatever id it is handed, so a malformed one would not fail — it
-                    would succeed and add a junk account nothing removes.
+                    checked here so a malformed one is refused where the caller can read why.
       responses:
         '200':
-          description: The rotation was applied.
+          description: The request reached the broker.
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  revoked: { type: boolean }
-                  replaced:
+                  revoked:
+                    type: boolean
+                    description: Whether the account was disabled. Equal to `existed`.
+                  existed:
                     type: boolean
                     description: >-
-                      Whether an account actually existed to rotate. False means one has now been
-                      created holding an unrecorded password — inert, but not a withdrawal of
-                      anything. `0038` avoids reaching here in that case by checking `enrolled_at`.
+                      Whether the broker held an account by that name. False means nothing was
+                      changed. `0038` avoids reaching here in that case by checking whether a
+                      credential was ever recorded.
         '400': { description: Body is not JSON, or `sparkplug_id` is not a well-formed edge-node id. }
         '401':
           description: >-
             The `x-revoke-secret` header is missing or wrong. No detail about which — a response
             distinguishing the two is a hint.
         '405': { description: Method not allowed. }
-        '502': { description: The credential service refused the rotation. }
+        '502': { description: The credential service refused the revocation. }
         '503':
           description: >-
             Revocation is unconfigured on this deployment, or the credential service is unreachable.
             An unconfigured stack answers this rather than 401: it has nothing to check against, and
             401 would send whoever is debugging it looking for a wrong value rather than a missing
             one.
+
+  /functions/v1/broker-inventory:
+    get:
+      tags: [Edge Functions]
+      summary: What the broker holds, read live
+      description: |
+        Every account at the broker with its roles and whether it is disabled, and every role with
+        its rules, read from the broker's Dynamic Security plugin through the credential service at
+        the moment of the request. The Access Control page's Broker column, its list of accounts
+        with no gateway row, and its broker principals table are all this read.
+
+        **No hash material.** The plugin's `listClients` returns each client's salt and iterations;
+        the credential service drops them before answering, and this function forwards what it
+        returns.
+
+        Requires `Administrator`, narrower than issuing: the inventory names every account on the
+        broker, including the platform principals and the plugin's own admin.
+      responses:
+        '200':
+          description: The inventory.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clients:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        username: { type: string }
+                        roles:
+                          type: array
+                          items: { type: string }
+                        disabled:
+                          type: boolean
+                          description: >-
+                            A disabled account is refused at CONNECT and had any live session
+                            dropped when it was disabled. This is what revocation sets.
+                  roles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rolename: { type: string }
+                        acls:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              acltype:
+                                type: string
+                                description: >-
+                                  `publishClientSend`, `publishClientReceive`, `subscribePattern`
+                                  or `unsubscribePattern`; the plugin's own names.
+                              topic: { type: string }
+                              allow: { type: boolean }
+                  read_at: { type: string, format: date-time }
+                  target:
+                    type: string
+                    description: '`compose` or `k8s`, as the credential service is configured.'
+        '401': { description: Missing or invalid Authorization header. }
+        '403': { description: 'Forbidden: requires Administrator.' }
+        '405': { description: Method not allowed. }
+        '500': { description: The credential service is not configured on this deployment. }
+        '503': { description: The credential service is unreachable, or could not read the broker. }
 
   /functions/v1/enroll-gateway:
     post:
@@ -2398,9 +2460,9 @@ paths:
         exactly one gateway.
 
         **The claim is atomic.** Two appliances racing the same token produce exactly one winner —
-        the loser gets `401`. That matters because `mosquitto.acl` pins the topic's edge-node
-        segment to the connecting username, so two credentials for one gateway would silently
-        contend for a single Sparkplug identity.
+        the loser gets `401`. That matters because a gateway's broker role confines it to its own
+        edge-node segment, so two credentials for one gateway would silently contend for a single
+        Sparkplug identity.
 
         **A failed issuance releases the claim.** If the broker credential service is unavailable
         the response is `503` with `retryable: true` and the *same bundle* can be retried. Only when

@@ -165,7 +165,7 @@ spec:
             {{- /* Host, port and TLS from one shared helper, so this and Node-RED cannot drift. */}}
             {{- include "acs-cymru.brokerClientEnv" . | nindent 12 }}
             {{- /*
-              THE INGESTION PRINCIPAL AND NOTHING WIDER. mosquitto.acl grants it `read spBv1.0/#`
+              THE INGESTION PRINCIPAL AND NOTHING WIDER. The broker's roles grant it `read spBv1.0/#`
               plus `write spBv1.0/+/NCMD/+`, which is exactly what this daemon does -- it is a
               consumer whose only publish() is the rebirth NCMD. It CANNOT publish DBIRTH or DDATA,
               so this credential cannot forge telemetry for a device that is correctly bound to its

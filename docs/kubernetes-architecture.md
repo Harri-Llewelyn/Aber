@@ -19,7 +19,7 @@ Four decisions constrain everything that follows, so they are recorded first.
 | # | Decision | Where it shows up |
 |---|---|---|
 | 1 | **Target: local on-prem k3s.** PVCs on the built-in `local-path` StorageClass; MQTT exposed via k3s's built-in ServiceLB (Klipper) or NodePort | §3.3, §5.1, §7.2, §9-M5 |
-| 2 | **Mosquitto credentials: Option B** — `password_file` in a Secret, sidecar `SIGHUP` on change. Option C (`mosquitto-go-auth` against Supabase Postgres) stays the recorded future direction | §5.1, §9-M1 |
+| 2 | **Mosquitto credentials: the Dynamic Security plugin**, its document on a PVC, reconciled by an initContainer on every start. Option B (`password_file` in a Secret, sidecar `SIGHUP` on change) is what shipped first and is retired; Option C (`mosquitto-go-auth` against Supabase Postgres) is no longer pursued, the plugin having given revocation and inventory without a broker-auth redesign | §5.1, §9-M1 |
 | 3 | **Ingress: subdomain routing** under `global.publicBaseDomain` (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`, `mqtt.`) | §7.1, §7.3, §9-M3 |
 | 4 | **Secrets: plain Kubernetes Secrets** with `values-dev` defaults. External Secrets Operator / SOPS are supported through the `existingSecret` seam rather than templated | §3.2, §10 |
 
@@ -473,7 +473,7 @@ of a boot that half-works:
 | `supabase-db-init` | Hook Job, weight 10 | Applies migrations + seed. Must wait for `supabase-db` **and** `supabase-auth` — GoTrue installs the `auth` schema the migrations build on |
 | `supabase-storage-init` | Hook Job, weight 20 | Creates the bucket through the Storage REST API. Must wait for storage-api to have finished its own `storage`-schema migrations |
 | `supabase-kong-init` | **deleted** | Replaced by Helm templating (§2.3) |
-| `mosquitto-init` | initContainer | Writes `password_file` into the broker's own config dir — see §5.1 |
+| `mosquitto-init` | initContainer | Writes the Dynamic Security plugin's document onto the broker's PVC — see §5.1 |
 | `node-red-init` | initContainer | Writes into `/data` on Node-RED's own PVC, and must run from the *same image* as the main container (§6.1) |
 
 Hook phase: **`post-install,post-upgrade`**, not `pre-`. `pre-upgrade` would run the migrations
@@ -591,76 +591,62 @@ and adding one means editing both db-init call sites. They remain display-only m
 
 ## 5. Messaging
 
-`mosquitto` (policy ConfigMap, credential Secret, assembling initContainer, reload sidecar, plus a
-`mosquitto-external` LoadBalancer) and `ingestion`. The credential-sync half of this lives in
-`scripts/mosquitto-provision-gateway.mjs --target=k8s` — see §9-M1.
+`mosquitto` (policy ConfigMap, data PVC, reconciling initContainer, credential-service sidecar,
+certificate-reload sidecar under TLS, plus a `mosquitto-external` LoadBalancer) and `ingestion`.
 
 ### 5.1 Mosquitto — the item with real design work
 
-The broker is the one component whose Compose design does not translate mechanically, because
-`scripts/mosquitto-provision-gateway.mjs` **mutates the running broker's config at runtime**:
-`docker exec … mosquitto_passwd -b` into the shared volume, then `kill -HUP 1`. That is
-imperative, container-runtime-specific, and assumes exactly one broker.
+The broker was the one component whose Compose design did not translate mechanically, because
+the first design **mutated the running broker's config at runtime**: `docker exec …
+mosquitto_passwd -b` into a shared volume, then `kill -HUP 1`. Imperative, container-runtime-specific,
+and assuming exactly one broker.
 
-Static pieces are easy: `mosquitto.conf` and `mosquitto.acl` are repository-managed policy →
-ConfigMap, mounted read-only. Exposure is covered in §7.
+Static pieces are easy: `mosquitto.conf` and `mosquitto/dynsec-roles.json` are repository-managed
+policy → ConfigMap, mounted read-only. Exposure is covered in §7.
 
-For the credentials, three options:
+For the credentials, the options weighed, in the order they were tried:
 
 | Option | Shape | Verdict |
 |---|---|---|
-| **A** | Keep the PVC; rewrite the script to `kubectl exec` | Least work, but still imperative, still single-replica-only, and puts cluster exec rights in an operator's hands for a routine task |
-| **B** | `password_file` lives in a **Secret**; the provisioning script hashes with `mosquitto_passwd` locally and patches the Secret; a sidecar watches the projected file and sends `SIGHUP` on change | **Recommended.** Declarative, the credential set becomes reviewable/backed-up state, and it survives rescheduling |
-| **C** | Replace file auth with `mosquitto-go-auth` against Supabase Postgres | Architecturally the best fit — gateways already exist in the `gateways` table keyed by `sparkplug_id`, which is exactly the username the ACL's `%u` matches — but it is a broker-auth redesign |
+| **A** | Keep the PVC; rewrite the script to `kubectl exec` | Still imperative, still single-replica-only, and puts cluster exec rights in an operator's hands for a routine task |
+| **B** | `password_file` in a **Secret**; a provisioning script patches it; a sidecar watches the projected file and sends `SIGHUP` | **What shipped first.** Declarative and reviewable, but the kubelet's 60–90 s projection delay had to be forced around (§9-M1), the platform principals had to be re-upserted after every reload, and revocation could only rotate a password: a live session stayed connected |
+| **C** | Replace file auth with `mosquitto-go-auth` against Supabase Postgres | The best conceptual fit, and a broker-auth redesign. No longer pursued: D gives what C was wanted for |
+| **D** | **Mosquitto's own Dynamic Security plugin**, administered over `$CONTROL/dynamic-security/v1` | **What the chart implements.** The broker applies each change to itself at once and persists its own document; `disableClient` drops a live session; `listClients` gives the Access Control page a live inventory. The cost is one PVC, since the document is the broker's own mutable state and the only copy |
 
-**Option B is what the chart implements.** Concretely:
+**Option D, concretely** (`mosquitto/README.md` is the policy; the measured facts behind it are
+listed there):
 
-- Secret `mosquitto-passwords`, key `password_file`, seeded by the chart with the platform
-  `MQTT_USER` account (an initContainer runs `mosquitto_passwd -b -c` if the key is absent).
-- An initContainer copies the projected Secret to an `emptyDir` at the path
-  `mosquitto.conf` expects, with `0600` and the broker's uid — mosquitto warns on a world-readable
-  password file, and Secret projections default to 0644.
-- A tiny sidecar (`inotifywait`, or a 30s mtime poll) re-copies and `SIGHUP`s the broker process on
-  change. `shareProcessNamespace: true` on the pod so the sidecar can signal it.
-- `mosquitto-provision-gateway.mjs` grows a `--target=k8s` mode: read the Secret, append the hash,
-  patch the Secret, **then force the reload rather than waiting for it** (§9-M1). Keep the existing
-  `docker exec` mode for the Compose path — **same script, two backends**, so the ACL reasoning in
-  its header stays in one place.
+- The document lives at `/mosquitto/data/dynamic-security.json` on the `mosquitto-data` PVC
+  (`resource-policy: keep`). An `assemble-config` initContainer on the credential service's image
+  runs `scripts/mosquitto-dynsec-init.mjs` on every start: the roles from the ConfigMap replace the
+  stored ones, the platform principals and the plugin's admin are re-hashed from `secrets.mqtt*`
+  with the broker's own `mosquitto_passwd`, every gateway client is kept as stored, and a document
+  that would lose a client is refused. A `password_file` in the `mosquitto-passwords` Secret from
+  a release before the plugin is imported on the first start, hashes transplanted intact.
+- The credential service is a sidecar dialling loopback, sending one plugin command per
+  `mosquitto_rr` request as an admin whose role reaches `$CONTROL/dynamic-security/#` only. Three
+  verbs: issue, disable, list. Its Role on the API server is `get`/`patch` on one Secret, for the
+  playback delivery file alone.
+- `%u` is **not** substituted by the plugin on 2.0.x (measured), so each gateway holds a shared
+  `gateway` role plus a `gateway-<id>` role generated for it. Roles are never deleted: deleting one a
+  client holds took the broker down when measured, so the reconcile regenerates orphaned ones.
+- `shareProcessNamespace` is set only with `tls.enabled`, for the `certificate-reload` sidecar; no
+  credential path signals anything.
 
-**C** stays the recorded future direction — a broker-auth redesign, deliberately not bundled in with
-a hosting change.
+**Decisions that survive from the first design:**
 
-**Six decisions worth recording:**
-
-- **`/mosquitto/config` is one assembled `emptyDir`, not three mounts.** `mosquitto.conf` names
-  `/mosquitto/config/password_file` and `/mosquitto/config/mosquitto.acl` — paths shared with the
-  Compose target, so they cannot move without changing both. Mounting a ConfigMap over that
-  directory makes it read-only and hides the password file; per-file `subPath` mounts work but
-  **never receive ConfigMap or Secret updates**, which would defeat the reload sidecar entirely. An
-  initContainer assembling the directory avoids both.
-- **The merge uses `mosquitto_passwd -b`, never `-b -c`.** `-c` *creates* the file, discarding every
-  gateway credential just copied in from the Secret. It is the single most destructive character
-  available in that script, and it is one keystroke from correct.
-- **The credential Secret is created empty and preserved**, via `resource-policy: keep` *plus* a
-  `lookup` that carries the current contents through a re-render. `resource-policy` alone governs
-  deletion, not update — without the lookup every `helm upgrade` would reset the Secret and the
-  whole fleet would fall off the broker at once, with the upgrade as the only clue.
-- **The platform principals are not in that Secret.** They come from the `secrets.mqtt*` values and
-  are re-applied on every start, so rotating one reaches the broker on restart; the Secret holds
-  only what the provisioning script adds. The sidecar re-adds them after every reload, because
-  dropping them would disconnect the ingestion daemon, i3X and Node-RED — **and the broker's own
-  probes**, which authenticate as `factoryplus_monitor`, turning a credential rotation into a
-  NotReady pod.
+- **`/mosquitto/config` is one assembled `emptyDir`, not a ConfigMap mount.** The TLS stanza is
+  appended to `mosquitto.conf` when certificates exist, and a ConfigMap mount is read-only.
 - **There is no shared `factoryplus` account any more.** One credential with `readwrite spBv1.0/#`
   meant anything holding it could forge `DBIRTH`/`DDATA` for any machine on the site — a forgery
   `verify_gateway_binding()` cannot detect, since a message published under a correctly bound device
-  satisfies it by construction. Five confined principals replace it, two of which are ordinary
-  per-gateway credentials whose usernames MUST be `sparkplug_id`s (the chart fails the render
-  otherwise; a friendly name authenticates and is then silently dropped by the broker).
+  satisfies it by construction. Confined principals replace it; a gateway's username MUST be its
+  `sparkplug_id` (the chart fails the render otherwise; a friendly name authenticates and is then
+  silently dropped by the broker).
 - **The readiness probe is a real authenticated `mosquitto_sub`, not `tcpSocket`.** The broker runs
   `allow_anonymous false`, so a TCP probe passes while every client is being refused with CONNACK 5
-  — which is precisely the failure this stack has hit before (a stale or missing password file).
-  Subscribing to `$SYS/broker/version` proves the listener *and* the password file together, and
+  — which is precisely the failure this stack has hit before (a stale or missing credential store).
+  Subscribing to `$SYS/broker/version` proves the listener *and* the plugin's document together, and
   needs no application topic to exist.
 
 The external Service is **separate from the in-cluster one**, not a change of type on it: the
@@ -998,35 +984,17 @@ work, for a minute or so, with nothing to distinguish "not synced yet" from "wro
 engineer commissioning a gateway will retype the credential, re-run the script, and conclude the
 tooling is broken well before the file lands.
 
-**Mitigation:** `--target=k8s` does not wait. After patching the Secret it forces the reload:
+**Mitigation, as first shipped:** `--target=k8s` did not wait. After patching the Secret it
+`kubectl exec`ed into the broker pod, wrote the entry with `mosquitto_passwd -b` and sent `SIGHUP`,
+falling back to a rollout restart; a watching sidecar converged any Secret changed by another route.
 
-1. Preferred — `kubectl exec` into the broker pod, write the entry directly with
-   `mosquitto_passwd -b`, and `kill -HUP 1`. Immediate, and non-disruptive: `SIGHUP` re-reads the
-   password and ACL files without dropping connected gateways.
-2. Fallback — `kubectl rollout restart deployment/mosquitto` when exec is unavailable (a
-   restricted kubeconfig, or a pod not yet Ready). **This drops every connected gateway**, so it is
-   the fallback and the script must say which one it took.
-
-The Secret remains the source of truth either way; the direct write is an *acceleration* of a
-change already committed, never a substitute for it. That ordering matters — patch first, then
-reload — or a pod rescheduled between the two steps comes back without the credential.
-
-The watching sidecar stays regardless: it is what makes a Secret edited by any other route (a
-`helm upgrade`, a restore, another operator) reach the running broker at all.
-
-Four details make the difference between this working and appearing to:
-
-- **The hash is produced inside the broker pod**, by the broker's own `mosquitto_passwd`. Hashing on
-  the operator's laptop would work only if they happened to have a compatible mosquitto installed at
-  a compatible version, and a format mismatch fails as an authentication error rather than as a
-  tooling one.
-- **Re-provisioning replaces the gateway's line rather than appending.** Mosquitto reads the *first*
-  match, so a duplicate would silently pin the old password — the change would appear to have no
-  effect. The Secret is `kubectl patch`ed (merge) rather than recreated, so other keys survive.
-- **The sidecar compares content, not mtime.** A projected volume's timestamps move on every kubelet
-  sync whether or not the data changed, so an mtime watch would SIGHUP the broker every 60s forever.
-- The script **reports which reload path it took**, because the fallback (`rollout restart`) drops
-  every connected gateway and that is not something to discover from a graph later.
+**Resolved, not mitigated, by the move to the Dynamic Security plugin (§5.1, option D).** There is
+no projected Secret on the credential path any more: the credential service and the operator CLI
+send the plugin's commands to the broker itself, which applies each at once and persists its own
+document. The delay this item described no longer exists, and neither does the sidecar that
+converged it. What survives is the certificate half: the `certificate-reload` sidecar still
+compares the projected certificate by content (a projected volume's mtime moves on every kubelet
+sync) and `SIGHUP`s the broker on a renewal.
 
 ### M2 — `postgres_fdw` connectivity (§3.3)
 
@@ -1261,8 +1229,9 @@ Four features that came after the first working chart, each with a design note w
 - **A broker-config trap worth knowing about.** `mosquitto.conf` once declared `password_file`
   twice, which mosquitto 2.0.x rejects (`Duplicate password_file value`, exit 3) and 2.1.x accepts —
   so pinning the image from `latest` to 2.0.20 broke the broker on **both** targets at once.
-  `scripts/check-broker-config.mjs` now runs the real config on the pinned tag in CI, asserting both
-  that it starts and that an unauthenticated client is refused.
+  `scripts/check-broker-config.mjs` now runs the real config on the pinned tag in CI, asserting that
+  it starts, that an unauthenticated client is refused, and, since the move to the plugin, the whole
+  policy by delivery and the control API end to end.
 
 - **Storage durability.** The 3D model objects were in no backup while `devices.model_3d_path` was,
   so a database-only restore produced a fleet of rows referencing objects that were gone — a break
