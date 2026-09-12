@@ -62,6 +62,27 @@ export const GATEWAY_ROLES = {
 }
 
 /**
+ * Gateway-shaped broker accounts that are not gateways, keyed by username. A validator's fixture
+ * holds an ordinary gateway account at a pinned id, created by the boot reconcile from
+ * MQTT_VALIDATOR_* rather than issued against a row, so between runs the broker holds it and
+ * no gateway claims it. Declared so the Access Control page can say what it is instead of listing
+ * it as a stray; a username not here is a genuine orphan.
+ */
+export const FIXTURE_ACCOUNTS = {
+  gwy110000000000400080000: {
+    name: 'Validator fixture',
+    purpose: 'ingestion/validate.py\'s gateway (UUID 11000000-0000-4000-8000-000000000001). The '
+      + 'validator seeds the row at the start of a run and deletes it at the end; the broker '
+      + 'account outlives it because mosquitto-init creates it from MQTT_VALIDATOR_* at boot. A '
+      + 'production stack leaves those unset and has no such account.',
+  },
+}
+
+export function describeBrokerAccount(username) {
+  return FIXTURE_ACCOUNTS[username] || null
+}
+
+/**
  * What the dashboard knows about each database principal, keyed by the id a migration pinned
  * (not by role: two principals could hold the same permission for different reasons). A
  * principal with no entry here is still listed; see `describePrincipal()`.

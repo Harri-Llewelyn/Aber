@@ -680,7 +680,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                 <span className="site-hierarchy-label">Enterprise</span>
                 {enterprise
                   ? <span className="site-hierarchy-value">{enterprise}</span>
-                  : <span className="site-hierarchy-unset">Not known yet — it is the Sparkplug group of the first gateway</span>}
+                  : <span className="site-hierarchy-unset">Not known yet — it is the Sparkplug group of the first enrolled gateway. The Playback lane does not count</span>}
               </div>
               <IconChevronRight size={12} className="site-hierarchy-sep" aria-hidden="true" />
               <div className="site-hierarchy-level" title="The ISA-95 site: this campus, named on the Settings page under Site">

@@ -8,6 +8,7 @@ import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal
 import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevocationModal'
 import { IconArchive, IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
+import { ContextPanel } from '../common/ContextPanel'
 import {
   CREDENTIAL_STATES,
   brokerState,
@@ -23,6 +24,7 @@ import {
 import {
   BROKER_PRINCIPALS,
   GATEWAY_ROLES,
+  describeBrokerAccount,
   describePrincipal,
   isMintableFromPage,
   permissionReach,
@@ -48,15 +50,34 @@ const ACL_VERB = {
 const GATEWAY_USERNAME = /^gwy[0-9a-f]{21}$/
 
 /**
- * Access Control: broker credentials and service identities.
+ * The declared broker roles in policy order, each annotated with the live rules the broker reports.
+ * The gateway row stands for every gateway: the shared role plus the per-gateway role the reconcile
+ * generates, which is what actually confines one.
+ */
+const ROLE_ENTRIES = [
+  ...BROKER_PRINCIPALS.map(bp => ({ rolename: bp.role, purpose: bp.purpose, writes: bp.writes })),
+  {
+    rolename: GATEWAY_ROLES.shared,
+    purpose: GATEWAY_ROLES.purpose,
+    writes: false,
+    perGateway: `${GATEWAY_ROLES.perGateway} — ${GATEWAY_ROLES.perGatewayTopic}`,
+  },
+]
+
+/**
+ * Access Control: broker credentials and service identities, as two sections of one page.
  *
- * Two sources side by side: what the platform issued and recorded (the database), and what the
- * broker holds right now (its Dynamic Security plugin, read through broker-inventory). A credential
- * issued outside a dashboard session reads `No platform record` and `Active`, which is the honest
- * pair. Administrator only, gated on the role as Settings is; the page is narrower than the RPCs
+ * Gateways is the per-gateway list, with two sources side by side: what the platform issued and
+ * recorded (the database), and what the broker holds right now (its Dynamic Security plugin, read
+ * through broker-inventory). A credential issued outside a dashboard session reads `No platform
+ * record` and `Active`, which is the honest pair. Services is the non-human identities on both
+ * planes. Administrator only, gated on the role as Settings is; the page is narrower than the RPCs
  * behind it, which also admit Shopfloor_Manager.
  */
 export function AccessControlTab({ showToast }) {
+  const [section, setSection] = useState('gateways')
+  // The role whose rules the drawer shows, by name; null when closed.
+  const [openRole, setOpenRole] = useState(null)
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -188,6 +209,45 @@ export function AccessControlTab({ showToast }) {
   return (
     <div className="page-layout">
       <div className="page-main">
+        {/* Two sections, one page: a gateway's credential and a service's identity are different
+            questions with different actions, and interleaving their cards read as one long list.
+            Same tablist markup as the Capture page's subject switch. */}
+        <div
+          role="tablist"
+          aria-label="Access Control section"
+          style={{ display: 'flex', gap: '8px', marginBottom: 'var(--stack)' }}
+        >
+          <button
+            role="tab"
+            aria-selected={section === 'gateways'}
+            className={`btn btn-sm ${section === 'gateways' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => { setSection('gateways'); setOpenRole(null) }}
+            title="Every gateway's broker credential, and any broker account no gateway claims"
+          >
+            Gateways <span className="section-count">{rows.length}</span>
+          </button>
+          <button
+            role="tab"
+            aria-selected={section === 'services'}
+            className={`btn btn-sm ${section === 'services' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setSection('services')}
+            title="The stack's own identities: database principals and broker roles"
+          >
+            Services <span className="section-count">{principals.length + ROLE_ENTRIES.length}</span>
+          </button>
+        </div>
+
+        {section === 'gateways' && (<>
+        <div style={{ margin: '0 0 10px' }}>
+          <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <IconLock size={15} /> Gateway credentials
+          </h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '6px 0 0' }}>
+            The accounts gateways authenticate to the broker as: what the platform issued against each
+            gateway, and what the broker holds that no gateway claims.
+          </p>
+        </div>
+
         {/* One card for one list: title, description, controls and rows. The page states its own
             limit before the first row, so a reader knows what it can and cannot see before acting
             on one. */}
@@ -419,13 +479,14 @@ export function AccessControlTab({ showToast }) {
             <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
               These authenticate as a gateway but match no gateway on this platform.{' '}
               <code>scripts/revoke-orphaned-broker-accounts.mjs</code> lists and disables them; it
-              never deletes an account.
+              never deletes an account. A test fixture the repository declares is named as one.
             </p>
             <div className="table-wrap" style={{ marginTop: '12px' }}>
             <table>
               <thead>
                 <tr>
                   <th>MQTT username</th>
+                  <th title="What the repository says this account is, if it says anything">Account</th>
                   <th>Roles</th>
                   <th>Broker</th>
                 </tr>
@@ -433,6 +494,7 @@ export function AccessControlTab({ showToast }) {
               <tbody>
                 {orphanAccounts.map(c => {
                   const bs = brokerState(c, true)
+                  const fixture = describeBrokerAccount(c.username)
                   return (
                     <tr key={c.username}>
                       <td>
@@ -442,6 +504,20 @@ export function AccessControlTab({ showToast }) {
                           title={`Copy ${c.username}`}
                           onNotify={showToast}
                         />
+                      </td>
+                      {/* A declared fixture is named, with its purpose as the tooltip; anything
+                          else is what the section is for. */}
+                      <td style={{ fontSize: '12px' }}>
+                        {fixture ? (
+                          <span
+                            title={fixture.purpose}
+                            style={{ textDecoration: 'underline dotted var(--text-muted)', textUnderlineOffset: '3px', cursor: 'help' }}
+                          >
+                            {fixture.name}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)' }}>Not declared anywhere</span>
+                        )}
                       </td>
                       <td className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                         {(c.roles || []).join(', ') || '—'}
@@ -463,13 +539,15 @@ export function AccessControlTab({ showToast }) {
             </div>
           </div>
         )}
+        </>)}
 
+        {section === 'services' && (<>
         {/* Service identities: two lists rather than one, because nothing holds an identity on both
             planes. The ingestion daemon connects to the broker as `factoryplus_ingestion` and
             reaches the database with the service-role key. */}
         {/* A heading, not a card: one sentence introducing the two cards beneath, in the page's one
             title treatment. */}
-        <div style={{ margin: 'calc(var(--stack) * 1.5) 0 10px' }}>
+        <div style={{ margin: '0 0 10px' }}>
           <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <IconLock size={15} /> Service identities
           </h3>
@@ -716,7 +794,7 @@ export function AccessControlTab({ showToast }) {
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
             {inventory
-              ? 'The rules below are read live from the broker; the purpose beside each is declared in the repository.'
+              ? 'The rules are read live from the broker and open beside the table; the purpose beside each role is declared in the repository.'
               : 'The broker was not read, so the rules cannot be shown. Each role and its purpose are declared in mosquitto/dynsec-roles.json.'}
           </p>
           <div className="table-wrap" style={{ marginTop: '12px' }}>
@@ -725,42 +803,39 @@ export function AccessControlTab({ showToast }) {
               <tr>
                 <th>Role</th>
                 <th>Access</th>
-                <th>Rules</th>
+                <th title="How many rules the broker reports for the role; open one to read them">Rules</th>
                 <th>Purpose</th>
               </tr>
             </thead>
             <tbody>
-              {/* Declared roles in policy order, each annotated with the live rules the broker
-                  reports. The gateway row stands for every gateway: the shared role plus the
-                  per-gateway role the reconcile generates, which is what actually confines one. */}
-              {[
-                ...BROKER_PRINCIPALS.map(bp => ({ rolename: bp.role, purpose: bp.purpose, writes: bp.writes })),
-                {
-                  rolename: GATEWAY_ROLES.shared,
-                  purpose: GATEWAY_ROLES.purpose,
-                  writes: false,
-                  extra: `+ ${GATEWAY_ROLES.perGateway} per gateway (${GATEWAY_ROLES.perGatewayTopic})`,
-                },
-              ].map(entry => {
+              {ROLE_ENTRIES.map(entry => {
                 const live = rolesByName.get(entry.rolename)
                 const allowed = (live?.acls || []).filter(a => a.allow)
                 const writes = live ? allowed.some(a => a.acltype === 'publishClientSend') : entry.writes
                 return (
-                  <tr key={entry.rolename}>
+                  <tr key={entry.rolename} className={openRole === entry.rolename ? 'row-selected' : undefined}>
                     <td className="mono" style={{ fontSize: '12px' }}>{entry.rolename}</td>
                     <td>
                       <span className={`badge badge-${writes ? 'pending' : 'ok'}`} style={{ fontSize: '11px' }}>
                         {writes ? 'CAN PUBLISH' : 'READ ONLY'}
                       </span>
                     </td>
-                    {/* THE PLUGIN'S OWN RULES, verb and topic, when the broker was read; a dash
-                        otherwise. Not a paraphrase: someone comparing this against the policy should
-                        read the same topics on both sides. */}
-                    <td className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'pre-line' }}>
-                      {live
-                        ? (allowed.map(a => `${ACL_VERB[a.acltype] || a.acltype} ${a.topic}`).join('\n') || '—')
-                        : '—'}
-                      {entry.extra && <div style={{ marginTop: '4px', fontStyle: 'italic' }}>{entry.extra}</div>}
+                    {/* A count that opens the drawer, not the rules inline: the ingestion role alone
+                        is nine lines, and the table is for comparing roles. The drawer prints the
+                        plugin's own rules, verb and topic, for comparing against the policy. */}
+                    <td>
+                      {live ? (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setOpenRole(entry.rolename)}
+                          title={`Open the ${allowed.length === 1 ? 'rule' : 'rules'} the broker holds for ${entry.rolename}`}
+                        >
+                          {allowed.length} {allowed.length === 1 ? 'rule' : 'rules'}
+                        </button>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Not read</span>
+                      )}
                     </td>
                     <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '46ch' }}>{entry.purpose}</td>
                   </tr>
@@ -770,7 +845,75 @@ export function AccessControlTab({ showToast }) {
           </table>
           </div>
         </div>
+        </>)}
       </div>
+
+      {/* One role at a time, beside the table it came from. */}
+      {(() => {
+        const entry = ROLE_ENTRIES.find(e => e.rolename === openRole) || null
+        const live = entry ? rolesByName.get(entry.rolename) : null
+        const acls = live?.acls || []
+        const allowed = acls.filter(a => a.allow)
+        const denied = acls.filter(a => !a.allow)
+        const writes = allowed.some(a => a.acltype === 'publishClientSend')
+        const holders = entry
+          ? (inventory?.clients || []).filter(c => (c.roles || []).includes(entry.rolename)).length
+          : 0
+        return (
+          <ContextPanel
+            open={!!entry}
+            onClose={() => setOpenRole(null)}
+            subject="role"
+            onCopy={showToast}
+            title={entry?.rolename || ''}
+            subtitle={entry && (
+              <span className={`badge badge-${writes ? 'pending' : 'ok'}`} style={{ fontSize: '11px' }}>
+                {writes ? 'CAN PUBLISH' : 'READ ONLY'}
+              </span>
+            )}
+            fields={entry ? [
+              { label: 'Purpose', value: entry.purpose, full: true },
+              {
+                label: 'Held by',
+                value: `${holders} account${holders === 1 ? '' : 's'}`,
+                title: 'Broker accounts holding this role at the moment of the read',
+              },
+              ...(entry.perGateway ? [{
+                label: 'Per gateway',
+                value: entry.perGateway,
+                mono: true,
+                full: true,
+                title: 'Generated when the credential is issued; it is what confines one gateway to its own edge node',
+              }] : []),
+            ] : []}
+          >
+            {entry && (
+              <div>
+                <div className="context-panel-section-label">Rules</div>
+                {/* THE PLUGIN'S OWN RULES, verb and topic. Not a paraphrase: someone comparing
+                    this against the policy should read the same topics on both sides. */}
+                {allowed.length === 0 ? (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>The broker reports no rule for this role.</div>
+                ) : (
+                  <ul className="mono" style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '11px' }}>
+                    {allowed.map((a, i) => (
+                      <li key={i} style={{ padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                        <span style={{ color: 'var(--text-muted)', display: 'inline-block', minWidth: '9ch' }}>{ACL_VERB[a.acltype] || a.acltype}</span>
+                        {a.topic}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {denied.length > 0 && (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '8px' }}>
+                    {denied.length} explicit den{denied.length === 1 ? 'ial' : 'ials'} not listed; the policy denies by default.
+                  </div>
+                )}
+              </div>
+            )}
+          </ContextPanel>
+        )
+      })()}
 
       {credentialForGw && (
         <GatewayCredentialModal

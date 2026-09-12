@@ -1777,8 +1777,12 @@ holds at the moment of the read — *Active*, *Disabled* or *No account* — thr
 to an Administrator with every hash stripped. The pair is the point: a gateway issued on the host
 reads *No platform record* beside *Active*, and one revoked since reads *Issued* beside *Disabled*.
 Accounts shaped like a gateway id that no row claims are listed under *Accounts with no gateway*,
-which is what `scripts/revoke-orphaned-broker-accounts.mjs` disables. The broker roles table shows
-each role's rules live, annotated with a purpose declared in `serviceIdentities.js`;
+which is what `scripts/revoke-orphaned-broker-accounts.mjs` disables. The validator's fixture
+account (`gwy11…`, created at boot from `MQTT_VALIDATOR_*` rather than issued against a row) is
+declared in `serviceIdentities.js` and named there as one, so a fresh stack does not read it as a
+stray. The page is two sections: *Gateways* holds those two lists, *Services* the database
+principals and the broker roles. The roles table counts each role's live rules and opens them in
+the context drawer, annotated with a purpose declared in `serviceIdentities.js`;
 `check-docs-drift.mjs` holds that list and `mosquitto/dynsec-roles.json` together. Revocation is
 now `disableClient`: the live session is dropped at once, the account stays listed as disabled, and
 a re-issue re-enables it. When the broker cannot be read the column says *Not read* and the page

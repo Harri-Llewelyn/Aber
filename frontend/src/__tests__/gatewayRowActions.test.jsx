@@ -245,12 +245,27 @@ describe('the playback gateway is filtered out by default', () => {
     expect(screen.queryByText('Playback')).toBeNull()
   })
 
-  it('offers a toggle that counts what it is hiding', async () => {
+  it('offers a toggle that reveals the playback gateway', async () => {
     api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-    fireEvent.click(await screen.findByText(/Show playback gateway \(1\)/))
+    // No count on the toggle: a stack holds one Playback gateway.
+    const toggle = await screen.findByText(/Show playback gateway/)
+    expect(toggle.textContent.trim()).toBe('Show playback gateway')
+    fireEvent.click(toggle)
     await waitFor(() => expect(screen.getByText('Playback')).toBeInTheDocument())
+  })
+
+  it('is hidden again by Clear filters', async () => {
+    api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+
+    fireEvent.click(await screen.findByText(/Show playback gateway/))
+    await waitFor(() => expect(screen.getByText('Playback')).toBeInTheDocument())
+    // Showing it is a filter, so it counts and it clears with the rest.
+    fireEvent.click(screen.getByTitle('Clear every filter'))
+    await waitFor(() => expect(screen.queryByText('Playback')).toBeNull())
+    expect(screen.queryByTitle('Clear every filter')).toBeNull()
   })
 
   it('offers no toggle on a stack that has none', async () => {

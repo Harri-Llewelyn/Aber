@@ -123,6 +123,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     setLiveStatusFilter('')
     setKindFilter('')
     setQuarantineOnly(false)
+    setShowShadowGateways(false)
     setFilterMode('all')
     handleClearSearch()
   }
@@ -298,8 +299,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     return true
   })
 
-  // Counted across the whole fleet, not the filtered list: it is what the toggle reveals, so
-  // counting what is already shown would read zero exactly when the button matters.
+  // Counted across the whole fleet, not the filtered list: the toggle is offered when one exists,
+  // hidden or not. The count is not printed, since a stack holds one Playback gateway.
   const shadowGatewayCount = gateways.filter(g => g.is_shadow).length
 
   const activeFilterCount =
@@ -427,7 +428,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             onClick={() => setShowShadowGateways(v => !v)}
             title="The Playback gateway (archived migration 0060). It publishes recorded captures as shadow devices and is not a connector to any machine, so it is hidden by default — but it stays reachable, because minting its broker credential is the one act an operator must perform on it."
           >
-            <IconRadio size={13} /> Show playback gateway ({shadowGatewayCount})
+            <IconRadio size={13} /> Show playback gateway
           </button>
         )}
 

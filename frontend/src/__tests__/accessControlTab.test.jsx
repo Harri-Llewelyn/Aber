@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
@@ -76,6 +76,13 @@ beforeEach(() => {
   api.listRevokedServiceTokens.mockResolvedValue(new Set())
   api.listRevokedServicePrincipals.mockResolvedValue(new Map())
 })
+
+/** The page opens on Gateways; the service identities are the other section. */
+async function renderServices() {
+  const result = render(<AccessControlTab showToast={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('tab', { name: /Services/ }))
+  return result
+}
 
 describe('AccessControlTab', () => {
   /**
@@ -225,8 +232,41 @@ describe('AccessControlTab', () => {
     api.listServicePrincipals.mockRejectedValue(new Error('insufficient privileges to list service principals'))
     render(<AccessControlTab showToast={vi.fn()} />)
 
+    await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
+    // The refusal is reported where the list would have been, on the Services section.
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
     await waitFor(() => expect(screen.getByText(/insufficient privileges/i)).toBeTruthy())
-    expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0)
+  })
+
+  it('opens on Gateways and keeps the service identities under Services', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Broker credentials')).toBeTruthy())
+    expect(screen.queryByText('Database principals')).toBeNull()
+    expect(screen.queryByText('Broker roles')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    await waitFor(() => expect(screen.getByText('Database principals')).toBeTruthy())
+    expect(screen.getByText('Broker roles')).toBeTruthy()
+    expect(screen.queryByText('Broker credentials')).toBeNull()
+  })
+
+  /** A declared fixture is named rather than listed as a stray; anything undeclared is the stray. */
+  it('names a declared fixture among the accounts with no gateway', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: 'gwy110000000000400080000', roles: ['gateway', 'gateway-gwy110000000000400080000'], disabled: false },
+        { username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false },
+      ],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Validator fixture')).toBeTruthy())
+    expect(screen.getByText('Validator fixture').getAttribute('title')).toMatch(/validate\.py/)
+    expect(screen.getByText('Not declared anywhere')).toBeTruthy()
   })
 
   /** An unrecognised machine identity is more interesting than a recognised one, so it is listed. */
@@ -235,7 +275,7 @@ describe('AccessControlTab', () => {
     api.listServicePrincipals.mockResolvedValue([
       { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
     // Both origins, which is the assertion rather than the exact sentence: an unknown principal may
@@ -258,7 +298,7 @@ describe('AccessControlTab', () => {
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000003', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     expect(screen.getByText('Service_Playback')).toBeTruthy()
@@ -277,7 +317,7 @@ describe('AccessControlTab', () => {
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000003', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
 
@@ -297,7 +337,7 @@ describe('AccessControlTab', () => {
     api.listServicePrincipals.mockResolvedValue([
       { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
     expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy()
@@ -305,7 +345,7 @@ describe('AccessControlTab', () => {
 
   it('opens the token dialog for the principal whose button was pressed', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
     screen.getByRole('button', { name: /Issue Token/i }).click()
@@ -328,7 +368,7 @@ describe('AccessControlTab', () => {
         { jti: 'b', issued_at: '2026-09-02T00:00:00Z', expires_at: '2099-02-01T00:00:00Z' }
       ]
     ]]))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
     screen.getByRole('button', { name: /2 active tokens/i }).click()
@@ -350,7 +390,7 @@ describe('AccessControlTab', () => {
       ]
     ]]))
     api.listRevokedServiceTokens.mockResolvedValue(new Set(['a']))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('1 active token')).toBeTruthy())
     expect(screen.queryByText('2 active tokens')).toBeNull()
@@ -359,7 +399,7 @@ describe('AccessControlTab', () => {
   /** Nothing to list means nothing to open -- a button onto an empty dialog is worse than a badge. */
   it('leaves the badge inert when no mint is recorded', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
     expect(screen.queryByRole('button', { name: /No token on record/i })).toBeNull()
@@ -371,7 +411,7 @@ describe('AccessControlTab', () => {
    */
   it('offers Withdraw beside Issue Token for a live identity', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy())
     expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy()
@@ -388,7 +428,7 @@ describe('AccessControlTab', () => {
       MCP_PRINCIPAL.principal_id,
       { principal_id: MCP_PRINCIPAL.principal_id, revoked_at: '2026-09-03T12:00:00Z', reason: 'leaked' }
     ]]))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('REVOKED')).toBeTruthy())
     expect(screen.queryByRole('button', { name: /Issue Token/i })).toBeNull()
@@ -398,7 +438,7 @@ describe('AccessControlTab', () => {
 
   it('opens the dialog in the direction the identity needs', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy())
     screen.getByRole('button', { name: /^Withdraw$/i }).click()
@@ -408,7 +448,7 @@ describe('AccessControlTab', () => {
 
   it('shows the broker roles and marks which ones can publish', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     // Role names, not usernames: the page renders the policy's roles.
     await waitFor(() => expect(screen.getByText('ingestion', { selector: 'td' })).toBeTruthy())
@@ -421,18 +461,49 @@ describe('AccessControlTab', () => {
     expect(screen.getAllByText('READ ONLY').length).toBe(3)
   })
 
-  /** With a live inventory the rules come from the broker, verb and topic, not from a literal. */
-  it('renders a role’s rules live from the broker inventory', async () => {
+  /**
+   * With a live inventory the rules come from the broker, verb and topic, not from a literal. The
+   * table carries a count; the rules themselves open in the drawer, since one role is nine lines.
+   */
+  it('counts a role’s live rules in the table and opens them in the drawer', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listBrokerInventory.mockResolvedValue({
-      clients: [],
+      clients: [
+        { username: 'factoryplus_monitor', roles: ['monitor'], disabled: false },
+      ],
       roles: [
         { rolename: 'monitor', acls: [{ acltype: 'subscribePattern', topic: '$SYS/#', allow: true }] },
+        {
+          rolename: 'ingestion',
+          acls: [
+            { acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: true },
+            { acltype: 'publishClientReceive', topic: 'spBv1.0/#', allow: true },
+            { acltype: 'publishClientSend', topic: 'spBv1.0/+/NCMD/+', allow: true },
+          ],
+        },
       ],
     })
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
-    await waitFor(() => expect(screen.getByText(/subscribe \$SYS\/#/)).toBeTruthy())
+    const monitor = await screen.findByRole('button', { name: '1 rule' })
+    expect(screen.getByRole('button', { name: '3 rules' })).toBeTruthy()
+    // Not in the table.
+    expect(screen.queryByText('$SYS/#')).toBeNull()
+
+    fireEvent.click(monitor)
+    const panel = await screen.findByRole('complementary', { name: 'monitor role' })
+    expect(within(panel).getByText('$SYS/#')).toBeTruthy()
+    expect(within(panel).getByText('subscribe')).toBeTruthy()
+    expect(within(panel).getByText('1 account')).toBeTruthy()
+  })
+
+  it('reports a role as Not read when the broker was not', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockRejectedValue(new Error('credential service unreachable'))
+    await renderServices()
+
+    await waitFor(() => expect(screen.getAllByText('Not read').length).toBe(5))
+    expect(screen.queryByRole('button', { name: /rules?$/ })).toBeNull()
   })
 
   /**
@@ -446,9 +517,10 @@ describe('AccessControlTab', () => {
     // CopyableId renders a button, which is what makes it keyboard-reachable and announced as an
     // action -- a clickable span would be neither.
     await waitFor(() => expect(screen.getByRole('button', { name: /gwy120000000000400080000/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
     // Exact, because the mint command in the next column also contains this id. CopyableId's
     // accessible name is `Copy <label> <value>`, so naming the label makes this exact.
-    expect(screen.getByRole('button', { name: 'Copy principal id b0000000-0000-4000-8000-000000000001' })).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Copy principal id b0000000-0000-4000-8000-000000000001' })).toBeTruthy())
   })
 
   /**
@@ -458,7 +530,7 @@ describe('AccessControlTab', () => {
    */
   it('offers the mint command rather than a mint button', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(
       screen.getByRole('button', {
@@ -482,7 +554,7 @@ describe('AccessControlTab', () => {
         { expires_at: inDays(-3), jti: 'expired-and-not-counted' }
       ]]
     ]))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
     // The earliest expiry is the one reported: the next date on which something stops working. Read
@@ -492,7 +564,7 @@ describe('AccessControlTab', () => {
 
   it('says a principal has no token on record rather than implying it has none at all', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
     // An empty cell is a fact about the record, not the credential, stated on the badge's tooltip.
@@ -507,7 +579,7 @@ describe('AccessControlTab', () => {
    */
   it('states the credentials it cannot see, so an empty list is not read as none', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
     // On the row, not in a footer: the badge itself says an empty cell is a statement about the
@@ -522,7 +594,7 @@ describe('AccessControlTab', () => {
     // The footer was removed deliberately: a page this dense should not state the same thing twice,
     // and the row is where it belongs. Pinned so it does not creep back alongside the tooltip.
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
     expect(screen.queryByText(/Why a row can show no token/i)).toBeNull()
@@ -541,7 +613,7 @@ describe('AccessControlTab', () => {
       ['b0000000-0000-4000-8000-000000000002',
         [{ jti: 'abc', expires_at: new Date(Date.now() + 60 * 86400000).toISOString() }]]
     ]))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     expect(screen.getByText(/1 active token/i)).toBeTruthy()
@@ -558,7 +630,7 @@ describe('AccessControlTab', () => {
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000001', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     const rowOf = (name) => screen.getByText(name).closest('tr')
@@ -579,7 +651,7 @@ describe('AccessControlTab', () => {
    */
   it('renders the copy control as a ghost button, not as an understated identifier', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
 
@@ -595,7 +667,7 @@ describe('AccessControlTab', () => {
   it('still lists identities when the token history cannot be read', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockRejectedValue(new Error('permission denied for table digital_thread'))
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderServices()
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
     expect(screen.getByText('No token on record')).toBeTruthy()
