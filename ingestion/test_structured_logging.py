@@ -31,6 +31,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import metrics  # noqa: E402
 import logging_config  # noqa: E402
 
+# The collector's config lives in the chart template; the River is a YAML block scalar there,
+# so the regexes below read it as text.
+ALLOY_TEMPLATE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "helm", "acs-cymru",
+    "templates", "obs", "alloy.yaml")
+
 INGESTION_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ingestion.py")
 
 
@@ -262,9 +268,9 @@ class DropPairTestCase(unittest.TestCase):
 # =================================================================================================
 class MultilineFirstlineTestCase(unittest.TestCase):
     """
-    THE COUPLING NOBODY WOULD LOOK FOR. `alloy/config.alloy` rejoins Docker's one-entry-per-line
-    output into whole records by matching lines that START one -- `^(\{|\d{4}-\d{2}-\d{2}T)`,
-    which is to say a JSON object or this file's ISO 8601 timestamp.
+    THE COUPLING NOBODY WOULD LOOK FOR. The collector (the chart's obs/alloy.yaml) rejoins the
+    runtime's one-entry-per-line output into whole records by matching lines that START one --
+    `^(\{|\d{4}-\d{2}-\d{2}T)`, which is to say a JSON object or this file's ISO 8601 timestamp.
 
     That regex is a restatement, in another language and another repository directory, of what
     UTCFormatter and JSONFormatter emit. Change the timestamp format here and the collector goes
@@ -279,13 +285,9 @@ class MultilineFirstlineTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        alloy = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "alloy", "config.alloy")
-        if not os.path.exists(alloy):
-            raise unittest.SkipTest("alloy/config.alloy is not present")
-        cls.alloy = open(alloy, encoding="utf-8").read()
+        cls.alloy = open(ALLOY_TEMPLATE, encoding="utf-8").read()
         m = re.search(r'firstline\s*=\s*"((?:[^"\\]|\\.)*)"', cls.alloy)
-        assert m, "no `firstline` in alloy/config.alloy -- this check has gone stale"
+        assert m, "no `firstline` in the chart's alloy.yaml -- this check has gone stale"
         # The config is River, which escapes backslashes the same way a Python string literal
         # does, so the captured text needs one round of unescaping to become the actual pattern.
         cls.firstline = re.compile(m.group(1).encode().decode("unicode_escape"))
@@ -358,7 +360,7 @@ class DrillDownLinkTestCase(unittest.TestCase):
     The drop panel on `Stack & Ingestion Health` carries a data link into the log store. For a
     click on it to land on the right lines, all of these must hold at once:
 
-        alloy/config.alloy    labels streams with `service`
+        obs/alloy.yaml        labels streams with `service`
         ingestion.py          logs a `reason` field
         the panel             selects `{service="..."}` and filters on `reason`
 
@@ -370,14 +372,10 @@ class DrillDownLinkTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-        cls.alloy_path = os.path.join(root, "alloy", "config.alloy")
         cls.dash_path = os.path.join(
             root, "grafana", "provisioning", "dashboards", "platform",
             "stack-ingestion-health.json")
-        for path in (cls.alloy_path, cls.dash_path):
-            if not os.path.exists(path):
-                raise unittest.SkipTest(f"{path} is not present")
-        cls.alloy = open(cls.alloy_path, encoding="utf-8").read()
+        cls.alloy = open(ALLOY_TEMPLATE, encoding="utf-8").read()
         cls.dash = json.load(open(cls.dash_path, encoding="utf-8"))
 
     def link(self):
@@ -390,7 +388,7 @@ class DrillDownLinkTestCase(unittest.TestCase):
 
     def test_the_panel_selects_a_label_the_collector_actually_sets(self):
         """
-        The stream selector in the link must name a label alloy/config.alloy relabels TO. Selecting
+        The stream selector in the link must name a label the collector relabels TO. Selecting
         on one it does not set gives a valid query over zero streams.
         """
         selector = re.search(r'\{(\w+)=', self.link().replace('\\', ''))
@@ -399,7 +397,7 @@ class DrillDownLinkTestCase(unittest.TestCase):
         targets = set(re.findall(r'target_label\s*=\s*"(\w+)"', self.alloy))
         self.assertIn(
             label, targets,
-            f'the panel selects {{{label}="..."}} but alloy/config.alloy sets only {sorted(targets)}. '
+            f'the panel selects {{{label}="..."}} but the collector sets only {sorted(targets)}. '
             f"The link would open a valid query over no streams, which reads as 'no logs'.",
         )
 

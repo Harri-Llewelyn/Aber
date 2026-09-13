@@ -1036,6 +1036,12 @@ observability:
     # the Host Disk Filling rule reads node_filesystem_avail_bytes. Off leaves the DaemonSet with
     # no hostPath mounts at all.
     hostMetrics: true
+    # The node's kubelet, over its TLS port with the pod's ServiceAccount token: the kubelet's own
+    # metrics (running pods, per-PVC volume stats) and cAdvisor's (CPU, memory, network, restarts
+    # and OOM kills per container), kept to the series the Cluster dashboard and the Cluster
+    # alert group read. No kube-state-metrics: the object inventory it adds is what kubectl and
+    # Headlamp show. Under networkPolicy.enabled the edge is networkPolicy.kubeletCidr.
+    kubeletMetrics: true
     # 15s matches the interval every dashboard and rule assumes for rate() windows.
     scrapeInterval: 15s
     resources:
@@ -1103,6 +1109,9 @@ networkPolicy:
   # collects nothing and that Job cannot run under policy.
   apiServerCidr: 0.0.0.0/0
   apiServerPorts: [443, 6443]
+  # For Alloy's kubelet scrape (observability.alloy.kubeletMetrics): the nodes' addresses, port
+  # 10250. Empty removes the rule and the Cluster dashboard's workload and volume panels go blank.
+  kubeletCidr: 0.0.0.0/0
   # Raw NetworkPolicy spec for flows the chart cannot express (SMTP relay, S3 endpoint, proxy).
   extraEgress: {}
   # The ingress half of the same escape hatch, for anything reaching in from outside the chart
