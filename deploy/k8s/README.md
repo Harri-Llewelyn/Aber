@@ -712,7 +712,8 @@ kubectl -n acs-cymru get networkpolicy
 kubectl -n acs-cymru describe networkpolicy acs-cymru-egress-supabase-db
 # Prove it from inside the source pod, which distinguishes DNS from connectivity:
 kubectl -n acs-cymru exec deploy/ingestion -- getent hosts mosquitto
-kubectl -n acs-cymru exec deploy/ingestion -- timeout 5 sh -c 'echo > /dev/tcp/mosquitto/8883' && echo reachable
+# python, not `sh -c 'echo > /dev/tcp/...'`: the image's sh is dash, which has no /dev/tcp
+kubectl -n acs-cymru exec deploy/ingestion -- python -c "import socket; socket.create_connection(('mosquitto', 8883), 5)" && echo reachable
 ```
 
 **If everything goes unready the moment you enable it**, your CNI does not exempt kubelet probes from
