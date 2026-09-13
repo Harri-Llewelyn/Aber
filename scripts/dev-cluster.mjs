@@ -15,7 +15,7 @@
  *
  * Options:  --no-build          reuse the images already built (`up`)
  *           --only=a,b          build and import only these images (`up`)
- *           --no-tls            skip cert-manager and the broker's TLS listener (`up`)
+ *           --no-tls            skip cert-manager, the broker's TLS listener and the databases' TLS (`up`)
  *           --e2e               also run the in-cluster conformance Jobs (`up`, `test`)
  *           --no-validate       skip validate.py, run the lane only (`test`)
  *           --filter=<text>     only suites whose path contains the text (`test`)
@@ -36,7 +36,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import dgram from 'node:dgram'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -70,10 +70,11 @@ const IMAGES = [
 // The host ports the suites default to, forwarded to the Services that stand behind them, so every
 // host-side tool -- validate.py, the stack lane, the provisioning scripts -- keeps its defaults.
 // MQTT is not here: the k3d load balancer publishes 1883 and 8883 when the cluster was created
-// with those ports, and a forward is added below only when it was not.
+// with those ports, and a forward is added below only when it was not. The two databases are
+// relayed, a forward per connection: `openRelay` says why.
 const FORWARDS = [
-  { local: 5433, service: 'timescaledb', remote: 5432, what: 'historian' },
-  { local: 54322, service: 'supabase-db', remote: 5432, what: 'Supabase Postgres' },
+  { local: 5433, service: 'timescaledb', remote: 5432, what: 'historian', relay: true },
+  { local: 54322, service: 'supabase-db', remote: 5432, what: 'Supabase Postgres', relay: true },
   { local: 54321, service: 'supabase-kong', remote: 8000, what: 'Supabase API (the gateway)' },
   { local: 54323, service: 'supabase-kong', remote: 8001, what: 'Studio, behind the gateway login' },
   { local: 3003, service: 'supabase-kong', remote: 8002, what: 'the forge, behind the gateway' },
@@ -110,6 +111,15 @@ const option = name => {
 // ---------------------------------------------------------------------------------------------
 function run (cmd, args, opts = {}) {
   return spawnSync(cmd, args, { cwd: REPO, stdio: 'inherit', ...opts })
+}
+// `run` without blocking the event loop, for a step that runs while this process is relaying
+// the database forwards (`openRelay`); resolves like spawnSync's result.
+function runAsync (cmd, args, opts = {}) {
+  return new Promise(resolve => {
+    const child = spawn(cmd, args, { cwd: REPO, stdio: 'inherit', ...opts })
+    child.on('error', error => resolve({ status: null, error }))
+    child.on('exit', (status, signal) => resolve({ status, signal }))
+  })
 }
 function capture (cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { cwd: REPO, encoding: 'utf8', ...opts })
@@ -320,12 +330,16 @@ async function installChart ({ tls, e2e }) {
   } else {
     console.log('  no LAN address found: enrolment stays unconfigured, as the dev values leave it')
   }
-  if (tls) sets.push('--set', 'mosquitto.tls.enabled=true')
+  // The broker's listener and both databases, from the one internal CA.
+  if (tls) sets.push('--set', 'mosquitto.tls.enabled=true', '--set', 'postgresTls.enabled=true')
   if (e2e) {
     // The validate Job follows browser-facing URLs, which resolve to the pod itself under the dev
     // domain; hostAliases point them at Traefik instead.
     const ip = capture('kubectl', ['-n', 'kube-system', 'get', 'svc', 'traefik', '-o', 'jsonpath={.spec.clusterIP}']).out
     sets.push('--set', 'e2e.enabled=true', '--set', `e2e.ingressIp=${ip}`)
+    // Plain Jobs, not hooks, and a Job's pod template is immutable: a completed run left in place
+    // makes the next upgrade fail with `field is immutable` the moment their spec changes.
+    run('kubectl', ['-n', NS, 'delete', 'job', `${RELEASE}-e2e-validate`, `${RELEASE}-e2e-aas-export`, '--ignore-not-found'])
   }
   // No --wait: Helm would block on workloads whose initContainers wait for the roles the
   // post-install hooks create. The hooks themselves are waited for regardless.
@@ -375,33 +389,120 @@ function portOpen (port) {
   })
 }
 
+function freePort () {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer()
+    s.on('error', reject)
+    s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)) })
+  })
+}
+
+function spawnForward (f, local) {
+  return spawn('kubectl', ['-n', NS, 'port-forward', `svc/${f.service}`, `${local}:${f.remote}`],
+    { cwd: REPO, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+}
+
+// Resolves true once kubectl reports the listener open, false if it exited or timed out first.
+// Read from its stdout rather than probed: a probe is a connection the Service behind sees.
+function forwardReady (child, ms = 15_000) {
+  return new Promise(resolve => {
+    let out = ''
+    let settled = false
+    const settle = ok => { if (!settled) { settled = true; clearTimeout(timer); resolve(ok) } }
+    const timer = setTimeout(() => settle(false), ms)
+    child.stdout.on('data', d => { if (!settled) { out += d; if (out.includes('Forwarding from')) settle(true) } })
+    child.on('exit', () => settle(false))
+  })
+}
+
+// A libpq session over TLS ends with a Terminate message and then a TLS close_notify. The backend
+// exits on the Terminate without reading the alert, the kernel answers the unread bytes with a
+// reset, and containerd closes the whole port-forward session on that error: kubectl prints
+// "lost connection to pod" and exits, with every other connection on that forward. So once
+// postgresTls is on, a forward shared by a test run dies at its first disconnect. The database
+// ports are relayed instead: each host connection gets a forward of its own, opened ahead of
+// time, and a session that ends with a reset takes down only the forward it used. The relay
+// runs on this process's event loop, so whatever runs while it is open must not block that
+// loop: the suites run through `runAsync`, not `run`.
+async function openRelay (f) {
+  const WARM = 3
+  const ready = []
+  const waiting = []
+  const live = new Set()
+  let pending = 0
+  let closed = false
+  const prepare = async () => {
+    pending++
+    const port = await freePort()
+    const child = spawnForward(f, port)
+    live.add(child)
+    child.on('exit', () => live.delete(child))
+    const ok = await forwardReady(child)
+    pending--
+    if (!ok || closed) {
+      child.kill()
+      while (waiting.length && !pending) waiting.shift()(null)
+      return
+    }
+    const fw = { child, port }
+    if (waiting.length) waiting.shift()(fw); else ready.push(fw)
+  }
+  const fill = () => { while (!closed && ready.length + pending < WARM) prepare() }
+  const take = () => {
+    while (ready.length) { const fw = ready.shift(); if (fw.child.exitCode === null) return Promise.resolve(fw) }
+    fill()
+    return new Promise(resolve => waiting.push(resolve))
+  }
+  const handle = async client => {
+    const fw = await take()
+    fill()
+    if (!fw) { client.destroy(); return }
+    const up = net.connect({ host: '127.0.0.1', port: fw.port })
+    const end = () => { client.destroy(); up.destroy(); fw.child.kill() }
+    up.on('connect', () => { client.pipe(up); up.pipe(client) })
+    for (const s of [client, up]) { s.on('error', end); s.on('close', end) }
+    fw.child.on('exit', end)
+  }
+  const listen = host => new Promise((resolve, reject) => {
+    const server = net.createServer({ pauseOnConnect: true }, handle)
+    server.on('error', reject)
+    server.listen(f.local, host, () => resolve(server))
+  })
+  // Both loopbacks, as kubectl itself listens: libpq tries ::1 first for `localhost`, and a
+  // refused IPv6 connect costs two seconds on Windows.
+  const servers = [await listen('127.0.0.1')]
+  try { servers.push(await listen('::1')) } catch { /* no IPv6 loopback on this machine */ }
+  fill()
+  return { close: () => { closed = true; servers.forEach(s => s.close()); for (const ch of live) ch.kill() } }
+}
+
 async function openForwards ({ tls }) {
   const wanted = [...FORWARDS]
   for (const f of MQTT_FORWARDS) {
     if (f.tlsOnly && !tls) continue
     if (!lbPublishes(f.local)) wanted.push(f)
   }
-  const children = []
+  const handles = []
+  const close = () => handles.forEach(h => h.close())
   const opened = []
   for (const f of wanted) {
     if (await portOpen(f.local)) {
       console.log(`  ${c.dim(`${f.local} is already listening on this machine; not forwarded (${f.what})`)}`)
       continue
     }
-    const child = spawn('kubectl', ['-n', NS, 'port-forward', `svc/${f.service}`, `${f.local}:${f.remote}`],
-      { cwd: REPO, stdio: 'ignore', windowsHide: true })
-    children.push(child)
-    const started = Date.now()
-    while (!(await portOpen(f.local))) {
-      if (child.exitCode !== null || Date.now() - started > 15_000) {
-        children.forEach(ch => ch.kill())
+    if (f.relay) {
+      handles.push(await openRelay(f))
+    } else {
+      const child = spawnForward(f, f.local)
+      handles.push({ close: () => child.kill() })
+      if (!(await forwardReady(child))) {
+        close()
         die(`the port-forward for ${f.what} (${f.local} -> ${f.service}:${f.remote}) did not open`)
       }
-      await sleep(250)
     }
     opened.push(f)
   }
-  return { children, opened, close: () => children.forEach(ch => ch.kill()) }
+  return { opened, close }
 }
 
 function printForwards (opened) {
@@ -420,6 +521,18 @@ function clusterSecrets () {
 
 function tlsEnabled () {
   return releaseValues().mosquitto?.tls?.enabled === true
+}
+
+// With postgresTls on, both databases refuse plaintext, so a host-side client through the
+// port-forwards verifies them like an in-cluster one: libpq reads these two variables, and the
+// certificate names `localhost` (values-dev.yaml). The CA comes from the issued Secret.
+function dbTlsEnvironment () {
+  if (releaseValues().postgresTls?.enabled !== true) return {}
+  const r = kubectl('get', 'secret', 'supabase-db-tls', '-o', 'jsonpath={.data.ca\\.crt}')
+  if (!r.ok || !r.out) die('postgresTls is on but the supabase-db-tls Secret holds no ca.crt yet; is the Certificate issued?')
+  const file = path.join(os.tmpdir(), 'acs-cymru-db-ca.crt')
+  writeFileSync(file, Buffer.from(r.out, 'base64'))
+  return { PGSSLMODE: 'verify-full', PGSSLROOTCERT: file }
 }
 
 function testEnvironment () {
@@ -441,6 +554,7 @@ function testEnvironment () {
     TS_TEST_HOST: 'localhost', TS_TEST_PORT: '5433',
     SUPABASE_DB_HOST: 'localhost', SUPABASE_DB_PORT: '54322',
     SUPABASE_DB_PASSWORD: secrets.POSTGRES_PASSWORD,
+    ...dbTlsEnvironment(),
     SUPABASE_URL: 'http://127.0.0.1:54321',
     MQTT_HOST: 'localhost', MQTT_PORT: '1883',
     MQTT_TEST_HOST: '127.0.0.1', MQTT_TEST_PORT: '1883',
@@ -518,13 +632,13 @@ async function test () {
   try {
     if (!flag('no-validate')) {
       step('validate.py')
-      const r = run(python, ['ingestion/validate.py'], { env })
+      const r = await runAsync(python, ['ingestion/validate.py'], { env })
       if (r.status !== 0) { failed = true; console.error(c.red('validate.py failed')) }
     }
     step('the stack lane')
     const args = ['scripts/run-python-suites.mjs', '--lane', 'stack']
     if (option('filter')) args.push('--filter', option('filter'))
-    const r = run('node', args, { env })
+    const r = await runAsync('node', args, { env })
     if (r.status !== 0) failed = true
     if (flag('e2e')) await waitForE2e()
   } finally {
