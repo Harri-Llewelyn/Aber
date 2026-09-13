@@ -7,8 +7,8 @@ consequences were silent in opposite directions.
     acs-cymru_ingestion    started 20:08:52.370   restarts=0   policy=always
     acs-cymru_timescaledb  started 20:08:52.823   restarts=0   policy=always
 
-`depends_on` orders `docker compose up` and nothing else, so when the Docker daemon brought the
-stack back it started ingestion 453ms before the historian and the dependency graph had no say.
+Nothing orders a whole-host restart, so when the stack came back it started ingestion 453ms
+before the historian and the dependency graph had no say.
 The daemon then entered its MQTT loop having done none of the startup work that needed a database,
 and NOTHING RETRIED ANY OF IT:
 

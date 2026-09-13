@@ -1,9 +1,9 @@
 #!/bin/bash
 # =================================================================================================
-# Gitea provisioning, run before the server starts, on both deployment targets.
+# Gitea provisioning, run before the server starts.
 #
-# ONE FILE, MIRRORED, because it used to be two. Compose bind-mounts it into a one-shot service and
-# the chart projects it through a ConfigMap onto an initContainer -- the same arrangement
+# ONE FILE, MIRRORED: the chart projects it through a ConfigMap onto an initContainer -- the same
+# arrangement
 # node-red-init.mjs has, and for the same reason: this is provisioning POLICY (which accounts exist,
 # and what they may do), and policy that lives in two hand-copied shell blocks drifts. See
 # scripts/sync-helm-chart-files.mjs, which fails CI if the chart's copy falls behind this one.

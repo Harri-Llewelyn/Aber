@@ -6,8 +6,8 @@
  * before the module bundle, which guarantees it runs first.
  *
  * Every value below is blank, and blank means "not supplied". frontend/src/config.js then falls
- * through to the value Vite inlined at build time, which is how the Docker Compose path keeps
- * working exactly as it did before this file existed.
+ * through to the value Vite inlined at build time, which is what a plain `docker build` of the
+ * image serves.
  *
  * A KUBERNETES DEPLOYMENT REPLACES THIS FILE, by mounting a ConfigMap over
  * /usr/share/nginx/html/config.js. That is what lets one frontend image serve any environment.

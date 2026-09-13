@@ -5,7 +5,7 @@
  * nobody wrote, and a gateway translation that quietly widened an exemption would pass every other
  * test. Three modes: (default) template hygiene over `supabase/envoy.yaml`: every credential is
  * still an `__UPPER_SNAKE__` placeholder, the placeholder set is known to both substituters, and
- * Compose no longer reads kong.yml while the chart still does. `--runtime`: the route surface
+ * kong.yml is still mirrored for the chart's Kong revert path. `--runtime`: the route surface
  * against a live gateway, every row in EXPECTED, gated routes refused before their upstream and
  * open ones through, worded so it reads identically against Kong and Envoy. `--authenticated`:
  * extends --runtime with a credentialled pass, presenting a valid key by header and by query and an

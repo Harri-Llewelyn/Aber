@@ -54,7 +54,6 @@ body:
         - Gateway onboarding and credentials
         - Vocabularies and the metric catalogue
         - Helm chart / Kubernetes
-        - Docker Compose
         - Documentation
         - Not sure
     validations:

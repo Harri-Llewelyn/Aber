@@ -17,23 +17,19 @@
  * accounts, and can read the inventory, and cannot read a message. Nothing here deletes a client
  * or a role: deleting a role a client holds took the broker down when measured.
  *
- * ONE SHAPE ON BOTH TARGETS. The plugin persists its own document, so there is no durable copy for
+ * ONE SHAPE. The plugin persists its own document, so there is no durable copy for
  * this service to write and no broker to signal: a command answered without error is applied and
  * saved. The service speaks `mosquitto_rr` from the broker's own image, one request per command,
- * so the binary and the broker never disagree about the protocol. On Compose it dials the
- * `mosquitto` service; on Kubernetes it is a sidecar in the broker's pod and dials loopback.
+ * so the binary and the broker never disagree about the protocol. It is a sidecar in the broker's
+ * pod and dials loopback.
  *
- * The one Kubernetes-only path is the playback delivery (0078): the worker runs in another pod, so
- * the password goes into the Secret that pod mounts. The Role behind that is `get` and `patch` on
- * one Secret by name.
+ * The playback delivery (0078): the worker runs in another pod, so the password goes into the
+ * Secret that pod mounts. The Role behind that is `get` and `patch` on one Secret by name.
  */
 import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { timingSafeEqual } from 'node:crypto';
-import {
-  chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync,
-} from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 import {
   CredentialError,
@@ -42,7 +38,6 @@ import {
   generatePassword,
   mergeDelivery,
   serialiseDelivery,
-  PLAYBACK_CREDENTIAL_FILE,
 } from './lib/mosquitto-credentials.mjs';
 import { assertOk, isRefusal, issueWithControl, summariseInventory } from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
@@ -50,7 +45,6 @@ import { controlSender } from './lib/mosquitto-control.mjs';
 // -------------------------------------------------------------------------------------------------
 // Configuration
 // -------------------------------------------------------------------------------------------------
-const TARGET = process.env.CREDENTIAL_TARGET || 'compose';
 const PORT = Number.parseInt(process.env.MQTT_CREDENTIAL_SERVICE_PORT || '9010', 10);
 const TOKEN = process.env.MQTT_CREDENTIAL_SERVICE_TOKEN || '';
 
@@ -60,11 +54,6 @@ const MQTT_PORT = Number.parseInt(process.env.MQTT_PORT || '1883', 10);
 const ADMIN_USER = process.env.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin';
 const ADMIN_PASSWORD = process.env.MQTT_DYNSEC_ADMIN_PASSWORD || '';
 
-// Where a playback target's password is dropped for the worker to read. The default MUST match
-// playback_worker.py's PLAYBACK_CREDENTIAL_FILE -- the two ends of one volume, and a mismatch is
-// silent at both: this side writes successfully and that side finds no file.
-const PLAYBACK_DELIVERY_PATH =
-  process.env.PLAYBACK_CREDENTIAL_FILE || PLAYBACK_CREDENTIAL_FILE;
 
 /**
  * The broker's CA, returned alongside the credential.
@@ -83,11 +72,6 @@ const PLAYBACK_SECRET_KEY = 'playback_credentials.json';
 const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
 
 const log = (...args) => console.log('[gateway-credential]', ...args);
-
-if (TARGET !== 'compose' && TARGET !== 'k8s') {
-  console.error(`[gateway-credential] CREDENTIAL_TARGET must be 'compose' or 'k8s' (got '${TARGET}')`);
-  process.exit(2);
-}
 
 /**
  * REFUSE TO START WITHOUT A TOKEN, rather than defaulting to one or running open.
@@ -215,47 +199,30 @@ function namespace() {
  * MERGED, NOT OVERWRITTEN: a stack can have several playback targets, issued one at a time.
  */
 async function deliverToPlayback(sparkplugId, password) {
-  if (TARGET === 'k8s') {
-    // A second key in the broker's Secret, so this pod's Role needs `patch` on one Secret by name.
-    // The playback Deployment mounts this key alone via `items:`.
-    const ns = namespace();
-    const path = `/api/v1/namespaces/${ns}/secrets/${SECRET_NAME}`;
+  // A second key in the broker's Secret, so this pod's Role needs `patch` on one Secret by name.
+  // The playback Deployment mounts this key alone via `items:`.
+  const ns = namespace();
+  const path = `/api/v1/namespaces/${ns}/secrets/${SECRET_NAME}`;
 
-    let existing = '';
-    try {
-      const secret = await k8sRequest('GET', path);
-      const encoded = secret?.data?.[PLAYBACK_SECRET_KEY];
-      if (encoded) existing = Buffer.from(encoded, 'base64').toString('utf8');
-    } catch (err) {
-      if (!/-> 404:/.test(err.message)) throw err;
-      log(`Secret ${ns}/${SECRET_NAME} not found; creating its first playback delivery.`);
-    }
-
-    const held = mergeDelivery(existing, sparkplugId, password, log);
-    await k8sRequest('PATCH', path, {
-      data: {
-        [PLAYBACK_SECRET_KEY]:
-          Buffer.from(serialiseDelivery(held), 'utf8').toString('base64'),
-      },
-    });
-    log(`delivered a playback credential for ${sparkplugId} (${Object.keys(held).length} held)`);
-    return { delivered: true, held: Object.keys(held).length, via: 'secret' };
+  let existing = '';
+  try {
+    const secret = await k8sRequest('GET', path);
+    const encoded = secret?.data?.[PLAYBACK_SECRET_KEY];
+    if (encoded) existing = Buffer.from(encoded, 'base64').toString('utf8');
+  } catch (err) {
+    if (!/-> 404:/.test(err.message)) throw err;
+    log(`Secret ${ns}/${SECRET_NAME} not found; creating its first playback delivery.`);
   }
 
-  const existing = existsSync(PLAYBACK_DELIVERY_PATH)
-    ? readFileSync(PLAYBACK_DELIVERY_PATH, 'utf8')
-    : '';
   const held = mergeDelivery(existing, sparkplugId, password, log);
-
-  // Atomic and 0600: the worker re-reads this every three seconds.
-  const tmp = `${PLAYBACK_DELIVERY_PATH}.tmp`;
-  mkdirSync(dirname(PLAYBACK_DELIVERY_PATH), { recursive: true });
-  writeFileSync(tmp, serialiseDelivery(held), { mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, PLAYBACK_DELIVERY_PATH);
-
+  await k8sRequest('PATCH', path, {
+    data: {
+      [PLAYBACK_SECRET_KEY]:
+        Buffer.from(serialiseDelivery(held), 'utf8').toString('base64'),
+    },
+  });
   log(`delivered a playback credential for ${sparkplugId} (${Object.keys(held).length} held)`);
-  return { delivered: true, held: Object.keys(held).length, via: 'file' };
+  return { delivered: true, held: Object.keys(held).length, via: 'secret' };
 }
 
 async function issue(sparkplugId, password, { deliver = false } = {}) {
@@ -294,7 +261,6 @@ async function issue(sparkplugId, password, { deliver = false } = {}) {
     // so the callers that report it to an operator keep one shape.
     applied_to_running_broker: true,
     apply_method: 'dynsec',
-    target: TARGET,
   };
 }
 
@@ -311,7 +277,7 @@ function revoke(sparkplugId) {
 function inventory() {
   const clients = assertOk(control({ command: 'listClients', verbose: true }));
   const roles = assertOk(control({ command: 'listRoles', verbose: true }));
-  return { ...summariseInventory(clients, roles), read_at: new Date().toISOString(), target: TARGET };
+  return { ...summariseInventory(clients, roles), read_at: new Date().toISOString() };
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -369,9 +335,9 @@ function sendError(res, err) {
 const server = createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://localhost');
 
-  // UNAUTHENTICATED, and deliberately empty of detail: liveness and the configured target only.
+  // UNAUTHENTICATED, and deliberately empty of detail: liveness only.
   if (req.method === 'GET' && pathname === '/healthz') {
-    return send(res, 200, { status: 'ok', target: TARGET });
+    return send(res, 200, { status: 'ok' });
   }
 
   const routes = new Set(['/credentials', '/revocations', '/clients']);
@@ -396,7 +362,7 @@ const server = createServer(async (req, res) => {
     if (pathname === '/revocations') {
       const result = revoke(sparkplugId);
       log(`revoked ${sparkplugId}: ${result.existed ? 'disabled, live session dropped' : 'no such client'}`);
-      return send(res, 200, { sparkplug_id: sparkplugId, ...result, target: TARGET });
+      return send(res, 200, { sparkplug_id: sparkplugId, ...result });
     }
 
     // The password is generated HERE when the caller does not supply one, which is the normal
@@ -416,8 +382,8 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  // 0.0.0.0 is the CONTAINER's interface, not the host's: neither target publishes this port.
-  log(`listening on :${PORT} (target=${TARGET}, broker ${MQTT_HOST}:${MQTT_PORT} as ${ADMIN_USER})`);
+  // 0.0.0.0 is the CONTAINER's interface, not the host's: the port is not published.
+  log(`listening on :${PORT} (broker ${MQTT_HOST}:${MQTT_PORT} as ${ADMIN_USER})`);
 });
 
 for (const signal of ['SIGTERM', 'SIGINT']) {

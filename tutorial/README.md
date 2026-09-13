@@ -224,7 +224,7 @@ default.
 
 | Field | Value |
 | :--- | :--- |
-| Server | `mosquitto` (compose service name), or `localhost` from the host |
+| Server | `mosquitto` (the Service name, from inside the cluster), or `localhost` from the host with `npm run dev:forward` |
 | Port | `1883` (TCP) / `9001` (WebSocket) |
 | Client ID | `node-red-simulator` |
 | Protocol | MQTT v3.1.1 |

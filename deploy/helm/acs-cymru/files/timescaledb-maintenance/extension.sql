@@ -42,8 +42,8 @@ ALTER EXTENSION timescaledb UPDATE;
 --
 -- A successful `ALTER EXTENSION` that leaves the versions apart is not a state to carry on from:
 -- the database is running one release's SQL definitions against another release's library, which is
--- the exact condition this file exists to end. It is LOUD -- the maintenance step fails and, on
--- Compose, the services waiting on it do not start -- because the alternative is the failure mode
+-- the exact condition this file exists to end. It is LOUD -- the maintenance Job fails and the
+-- upgrade with it -- because the alternative is the failure mode
 -- being fixed here: true, invisible, and unbounded.
 --
 -- Two ways to arrive, and the message names the remedy for each rather than only the numbers.

@@ -80,7 +80,7 @@ python ingestion/test_capture_worker.py
 python ingestion/test_startup_healer.py
 # How the playback worker resolves the broker passwords it holds (0078), and the precedence rule
 # that matters: a DELIVERED credential beats one in the environment. The broker keeps one password
-# per username, so a value in `.env` is not an alternative to the delivered one -- it is an older
+# per username, so a value in the environment is not an alternative to the delivered one -- it is an older
 # one. If the environment won, "issue a new credential" would be the one repair that could not fix
 # a refused playback.
 python ingestion/test_playback_credentials.py
@@ -126,14 +126,14 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 
 # The forge's push webhook (0095): signature refusals, what a push to main records on the gateway
 # row, what is ignored, and one delivery sent by the forge itself for a freshly enrolled gateway.
-# GITEA_WEBHOOK_SECRET is the value in .env (the one the edge runtime holds). Skips without it.
+# GITEA_WEBHOOK_SECRET is the release Secret's value (the one the edge runtime holds). Skips without it.
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
   python supabase/functions/forge-events/test_forge_events.py
 
 # The forge sweep (0099): the secret is checked; a role changed in user_roles behind the door is
 # unseated by one sweep and seated again when it returns; a member seated by hand is left alone; a
 # deleted push webhook comes back; a repository made by hand gets main protected; and the
-# database's own sweep_forge() answers true. FORGE_SWEEP_SECRET is the value in .env. Skips without it.
+# database's own sweep_forge() answers true. FORGE_SWEEP_SECRET is the release Secret's value. Skips without it.
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
 
@@ -150,9 +150,8 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_b
 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/gateway-bundle/test_gateway_bundle.py
 
-# Broker credential issuance — needs the stack up and the service's own bearer token, which the
-# e2e job writes into .env before launch (`setup.mjs --demo` copies .env.example verbatim and
-# leaves it empty, which used to make all thirteen checks skip while the run still exited 0).
+# Broker credential issuance — needs the stack up and the service's own bearer token
+# (MQTT_CREDENTIAL_SERVICE_TOKEN, which `npm run dev:test` reads from the release Secret).
 #
 # The exposure tests are the ones that matter and are invisible anywhere else: this service can
 # issue a Mosquitto account for ANY edge node, and the gateway's role turns an account into the
@@ -284,10 +283,10 @@ python supabase/migrations/test_anon_privilege_baseline.py
 python supabase/migrations/test_gateway_deployment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
 python timescaledb/test_bi_reader_grants.py
-# The installed extension against the version the image ships, plus the two deployment paths that
-# are supposed to close that gap. The second half needs no stack.
+# The installed extension against the version the image ships, plus the maintenance Job that is
+# supposed to close that gap. The second half needs no stack.
 python timescaledb/test_extension_version.py
-# The worker pool against the workers the server may launch, and both deployment files against
+# The worker pool against the workers the server may launch, and the chart's defaults against
 # each other. Also needs no stack for its second half.
 python timescaledb/test_worker_pool.py
 # The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
@@ -341,10 +340,10 @@ cluster's `cron.database_name`, and `IF NOT EXISTS` does not save it because the
 from inside pg_cron's own install script. The chain aborts on its first file. A throwaway *cluster*
 has its own `postgres` database and its own GUC pointing at it, so the same line succeeds untouched.
 
-**This is a paved road, not a fence.** `SUPABASE_DB_PORT` still defaults to `54322`, because `.env`
-sets it, `validate.py` derives from it and both backup scripts read it — changing the default would
-be overridden by the environment in the common case and would fight four other consumers in the
-rest. `npm run test:db` makes the clean path a one-liner; running a suite bare still reaches the
+**This is a paved road, not a fence.** `SUPABASE_DB_PORT` still defaults to `54322`, because the
+dev loop forwards it there, `validate.py` derives from it and both backup scripts read it — changing
+the default would be overridden by the environment in the common case and would fight four other
+consumers in the rest. `npm run test:db` makes the clean path a one-liner; running a suite bare still reaches the
 live stack.
 
 ### The fixture is shared with CI, in one file

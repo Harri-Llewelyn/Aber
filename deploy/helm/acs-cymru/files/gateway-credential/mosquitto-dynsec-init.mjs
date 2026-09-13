@@ -2,9 +2,8 @@
 /**
  * Write the broker's Dynamic Security document before the broker starts.
  *
- * Runs on both targets in the credential service's image (node plus the broker's own
- * mosquitto_passwd): the mosquitto-init service on Compose, the assemble-config initContainer on
- * Kubernetes. It reconciles the stored document with the repository's roles and the platform
+ * Runs in the credential service's image (node plus the broker's own mosquitto_passwd) as the
+ * broker's assemble-config initContainer. It reconciles the stored document with the repository's roles and the platform
  * principals from the environment, imports a legacy password file when there is no document yet,
  * and refuses to write anything that would lose a client. mosquitto/README.md states the rules;
  * scripts/lib/mosquitto-dynsec.mjs implements them.

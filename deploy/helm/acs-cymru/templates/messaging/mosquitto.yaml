@@ -635,8 +635,6 @@ spec:
             runAsGroup: 1883
           command: ["node", "/scripts/gateway-credential-service.mjs"]
           env:
-            - name: CREDENTIAL_TARGET
-              value: k8s
             - name: MQTT_CREDENTIAL_SERVICE_PORT
               value: {{ .Values.gatewayCredential.port | quote }}
             - name: MOSQUITTO_SECRET

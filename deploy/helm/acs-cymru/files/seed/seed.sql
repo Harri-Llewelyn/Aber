@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 -- - encrypted_password is stored as bcrypt hash
 -- - raw_app_meta_data must include the 'role' key with the user's role name
 -- - is_sso_user must be false (default)
--- - aud must be 'authenticated' and must match GOTRUE_JWT_AUD in docker-compose.yml,
+-- - aud must be 'authenticated' and must match GOTRUE_JWT_AUD in the chart's auth env,
 --   otherwise GoTrue looks users up under a different audience and finds nothing.
 INSERT INTO auth.users (
   instance_id,

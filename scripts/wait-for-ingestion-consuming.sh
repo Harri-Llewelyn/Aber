@@ -69,8 +69,7 @@
 # so neither one alone is what makes it work.
 #
 # Usage:
-#   WAIT_MODE=compose sh scripts/wait-for-ingestion-consuming.sh
-#   WAIT_MODE=k8s NS=acs-cymru sh scripts/wait-for-ingestion-consuming.sh
+#   NS=acs-cymru sh scripts/wait-for-ingestion-consuming.sh
 #
 set -eu
 

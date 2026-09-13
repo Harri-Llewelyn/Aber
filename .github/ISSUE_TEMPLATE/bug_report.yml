@@ -44,8 +44,8 @@ body:
     attributes:
       label: Deployment target
       options:
-        - Docker Compose
-        - Kubernetes (Helm chart)
+        - Kubernetes (the Helm chart)
+        - A gateway appliance (the Compose bundle)
         - Both
         - Neither / not deployed
     validations:
@@ -69,7 +69,6 @@ body:
         - Node-RED / gateway simulator
         - Gateway onboarding, bundles, credentials
         - Helm chart / Kubernetes
-        - Docker Compose / .env
         - Scripts, setup, or the test suites
         - CI
         - Documentation

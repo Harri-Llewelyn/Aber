@@ -35,7 +35,7 @@ import urllib.request
 import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "test-harness"))
-import stack_exec  # noqa: E402  -- docker exec on Compose, kubectl exec on Kubernetes (ACS_STACK)
+import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
@@ -759,7 +759,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
 
         ssh_url = repository["ssh_url"]
         # `ssh://git@host:2222/owner/repo.git` where the forge publishes SSH on a non-default port
-        # (Compose), `git@host:owner/repo.git` where it is on 22 (the chart's LoadBalancer).
+        # (a non-default port), `git@host:owner/repo.git` where it is on 22 (the chart's LoadBalancer).
         match = (re.match(r"^ssh://(?:[^@/]+@)?([^/:]+)(?::(\d+))?", ssh_url)
                  or re.match(r"^(?:[^@/:]+@)?([^/:]+):(\d*)", ssh_url))
         self.assertIsNotNone(match, f"unexpected clone URL shape: {ssh_url}")

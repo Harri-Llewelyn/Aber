@@ -1,7 +1,7 @@
 -- =============================================================================================
 -- Telemetry rollups and the latest-value view.
 --
--- Applied on every boot by the `timescaledb-maintenance` service (Compose) and hook Job (Helm).
+-- Applied on every boot by the chart's maintenance hook Job.
 -- It takes three psql variables:
 --
 --     -v rollup_1m_retain='180 days' -v rollup_5m_retain='1 year' -v rollup_1h_retain='5 years'

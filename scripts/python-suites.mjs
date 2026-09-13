@@ -55,7 +55,7 @@
  *   db     Needs the migrated Supabase Postgres and no seed. Runs in `edge-function-auth-test`
  *          against its `services.postgres`, and locally against `npm run test:db`'s throwaway
  *          container -- the SAME image and the SAME bootstrap, which is why one lane covers both.
- *   stack  Needs a running stack, Compose or the k3d loop (scripts/dev-cluster.mjs test). Runs
+ *   stack  Needs a running stack (scripts/dev-cluster.mjs test). Runs
  *          in `e2e-validation`.
  *   manual Deliberately has no automated runner. Must say why.
  *
@@ -201,7 +201,7 @@ export const SUITES = {
       'behaviour IS the health signal. Every property it pins would break in the same direction ' +
       '-- toward a daemon that looks healthy while its MQTT loop is dead (writing regardless of ' +
       'connection state), or one restarted while it is fine (crashing on a write error). Neither ' +
-      'is visible on the Compose path, which declares no healthcheck at all.',
+      'is visible from outside the daemon.',
   },
   'ingestion/test_gateway_binding.py': {
     lanes: ['unit'],
@@ -741,7 +741,7 @@ export const SUITES = {
  *
  * One-directional is what failed before. A check that only asks "does every manifest entry exist"
  * certifies the half somebody remembered to write down -- it is blind to the new suite nobody
- * added, which is the entire failure in #147. The Compose service directory check in
+ * added, which is the entire failure in #147. The service directory check in
  * check-docs-drift.mjs learned this the same way and says so.
  *
  * @param {string[]} allFiles repo-relative paths, forward slashes

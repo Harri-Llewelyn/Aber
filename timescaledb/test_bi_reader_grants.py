@@ -33,7 +33,7 @@ import unittest
 
 import psycopg2
 
-# The HISTORIAN, not Supabase. 5433 is where docker-compose publishes it.
+# The HISTORIAN, not Supabase. 5433 is where `npm run dev:test` forwards it.
 DB_HOST = os.getenv("TS_TEST_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("TS_TEST_PORT", "5433")
 DB_NAME = os.getenv("DB_NAME", "postgres")

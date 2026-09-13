@@ -2,10 +2,10 @@
 --
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.
 --
--- `directory_services` held an address and no statement of who could use it. Four rows are bound
--- to 127.0.0.1 in docker-compose.yml, and two of those are `http://localhost:...`, which the
--- page's scheme-and-host test renders as a link that works only on the deployment host and
--- looks like the service being down anywhere else.
+-- `directory_services` held an address and no statement of who could use it. The seed's rows
+-- described a loopback deployment, and two of them are `http://localhost:...`, which the page's
+-- scheme-and-host test renders as a link that works only on the deployment host and looks like
+-- the service being down anywhere else.
 --
 -- `exposure` describes the port, not the URL:
 --   NETWORK   published on every interface.
@@ -17,8 +17,8 @@
 -- a login) while its `endpoint_url` is the STUDIO_PUBLIC_URL default, so the page tests the
 -- URL's host as well.
 --
--- This describes the Compose deployment the seed describes. On Kubernetes these rows' URLs are
--- wrong before this column is reached; this only makes that quieter.
+-- This describes the loopback deployment the seed describes; 0085 derives the browser-facing
+-- rows from the chart's values.
 
 ALTER TABLE public.directory_services
     ADD COLUMN IF NOT EXISTS exposure text DEFAULT 'UNKNOWN'::text NOT NULL;
@@ -38,7 +38,7 @@ COMMENT ON COLUMN public.directory_services.exposure IS
 
 -- -------------------------------------------------------------------------------------------------
 -- The fifteen seeded rows, keyed on id, not service_name: 0016 renames two of these. Every value
--- is read off the `ports:` blocks in docker-compose.yml; 127.0.0.1 is HOST, no `ports:` is
+-- is the seed's loopback deployment as it was bound: 127.0.0.1 is HOST, no published port is
 -- INTERNAL.
 -- -------------------------------------------------------------------------------------------------
 UPDATE public.directory_services SET exposure = v.exposure

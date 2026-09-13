@@ -36,7 +36,7 @@ info:
 
     > ℹ️ **Tokens outlive their sessions.** PostgREST verifies only the JWT signature, so a
     > token stays readable after its `auth.sessions` row is gone — which is what
-    > `docker compose down -v` does. Edge Functions validate the session properly and answer
+    > `npm run dev:reset` does. Edge Functions validate the session properly and answer
     > `401 Invalid user token`. Sign in again for a fresh token.
 
     ### Authorization
@@ -106,7 +106,7 @@ info:
 
 servers:
   - url: http://127.0.0.1:54321
-    description: Local Docker Compose stack (Envoy gateway)
+    description: The gateway (Envoy) through `npm run dev:forward`
 
 security:
   - bearerAuth: []
@@ -1987,8 +1987,8 @@ paths:
         out. Anything in this bucket is world-readable to whoever learns the path.
 
         Composed at read time from `AAS_MODEL_PUBLIC_BASE`. It **cannot** be derived from
-        `SUPABASE_URL`, which inside Compose is `http://supabase-kong:8000` and resolves for
-        nothing outside Docker.
+        `SUPABASE_URL`, which inside the cluster is `http://supabase-kong:8000` and resolves for
+        nothing outside it.
       security: []
       parameters:
         - { name: path, in: path, required: true, schema: { type: string } }
@@ -2467,9 +2467,6 @@ paths:
                               topic: { type: string }
                               allow: { type: boolean }
                   read_at: { type: string, format: date-time }
-                  target:
-                    type: string
-                    description: '`compose` or `k8s`, as the credential service is configured.'
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator.' }
         '405': { description: Method not allowed. }

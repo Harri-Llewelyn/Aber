@@ -231,7 +231,7 @@ export default async function handler(req: Request): Promise<Response> {
       error: "The broker has no certificate authority",
       details:
         "Physical gateways connect over MQTTS and must verify the broker against its CA. " +
-        "Check the mosquitto-tls-init service (Compose) or mosquitto.tls.enabled (Kubernetes).",
+        "Check mosquitto.tls.enabled and the cert-manager issuer it names.",
       retryable,
     });
   }

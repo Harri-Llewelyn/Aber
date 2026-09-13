@@ -17,7 +17,7 @@
  * invisible to every browser-facing role (RLS denies by default), and a policy naming a bucket that
  * was never created is dead text. Neither errors.
  *
- * IDEMPOTENT, because compose re-runs this on every `up`. It asks whether each bucket exists before
+ * IDEMPOTENT, because the storage-init hook Job runs on every upgrade. It asks whether each bucket exists before
  * deciding to create it, rather than creating it and treating the failure as success: storage-api
  * answers a duplicate create with **400** "The resource already exists", not the 409 the status
  * code alone would suggest, so a conflict and a genuinely malformed request are indistinguishable

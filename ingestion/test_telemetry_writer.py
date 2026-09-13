@@ -336,7 +336,7 @@ class TestThread(WriterTestCase):
 class TestShutdownDefaults(unittest.TestCase):
 
     def test_the_drain_fits_inside_the_shortest_grace_period(self):
-        """Compose stops a container 10s after SIGTERM; the drain must give up before that."""
+        """The shortest grace period a runtime gives is 10s; the drain must give up before that."""
         self.assertLess(ingestion.TELEMETRY_SHUTDOWN_DRAIN_SECONDS, 10)
 
     def test_the_daemon_holds_one_writer(self):

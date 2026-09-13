@@ -76,7 +76,7 @@ PROGRESS_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_PROGRESS_INTERVAL_SECONDS"
 
 # How long to wait for the broker's CONNACK before failing the job.
 #
-# GENEROUS ON PURPOSE. This is a local broker on the same compose network, where the answer arrives
+# GENEROUS ON PURPOSE. This is a broker in the same cluster, where the answer arrives
 # in milliseconds, and the cost of waiting is paid once per job rather than per message. Five
 # seconds is long enough that a loaded host does not produce a spurious failure, and short enough
 # that an operator watching a job does not read the pause as the playback having started.
@@ -98,10 +98,10 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 # Where the credential service drops passwords for simulated gateways (0078).
 #
 # THE FILE EXISTS BECAUSE THE ENVIRONMENT CANNOT BE RE-READ. A container's environment is fixed at
-# creation, so before this the only way to hand this worker a newly-issued password was
-# `docker compose up -d --force-recreate playback` -- and an operator who had just clicked "Generate
-# broker credential" had no reason to think a container recreate was the next step. The credential
-# was correct, the worker held the previous one, and the failure arrived as a broker refusal.
+# creation, so before this the only way to hand this worker a newly-issued password was a pod
+# restart -- and an operator who had just clicked "Generate broker credential" had no reason to
+# think that was the next step. The credential was correct, the worker held the previous one, and
+# the failure arrived as a broker refusal.
 #
 # WRITTEN ONLY FOR GATEWAYS THE DATABASE CALLS PLAYBACK TARGETS. The filter is applied at issue time
 # by authorize_virtual_gateway_credential() (0078), not here, because `is_simulated` is the

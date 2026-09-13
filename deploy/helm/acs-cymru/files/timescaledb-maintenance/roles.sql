@@ -1,7 +1,7 @@
 -- =============================================================================================
 -- Database roles on the historian.
 --
--- Applied on every boot by the `timescaledb-maintenance` service (Compose) and hook Job (Helm),
+-- Applied on every boot by the chart's maintenance hook Job,
 -- after aggregates.sql and storage.sql, because it grants on objects those files create. An
 -- empty `-v bi_reader_password` skips the role rather than creating one with a blank password.
 --
@@ -196,7 +196,7 @@ BEGIN
     IF to_regclass('public.storage_footprint') IS NULL THEN
       RAISE EXCEPTION
         'roles self-check: public.storage_footprint does not exist. storage.sql must run BEFORE '
-        'roles.sql -- check the ordering in docker-compose.yml and in the Helm maintenance Job.';
+        'roles.sql -- check the ordering in the Helm maintenance Job.';
     END IF;
 
     IF NOT has_table_privilege('grafana_reader', 'public.storage_footprint', 'SELECT') THEN

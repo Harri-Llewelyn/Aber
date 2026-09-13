@@ -41,7 +41,7 @@ const MIRRORS = [
     source: join('timescaledb', 'init'),
     dest: 'timescaledb-init',
     match: (name) => name.endsWith('.sql'),
-    why: 'TimescaleDB bootstrap; Compose bind-mounts the same directory at /docker-entrypoint-initdb.d',
+    why: 'TimescaleDB bootstrap, mounted at /docker-entrypoint-initdb.d',
   },
   {
     source: 'timescaledb',
@@ -52,8 +52,8 @@ const MIRRORS = [
     // fixed before the first row was written. Mounting them into the initdb ConfigMap would
     // silently restore the old behaviour.
     // An explicit allow-list rather than `endsWith('.sql')`, so a new file in timescaledb/ has to
-    // be added here deliberately -- and, more to the point, has to be wired into BOTH the Compose
-    // service and the Helm Job that run these. A file that mirrored automatically but was never
+    // be added here deliberately -- and, more to the point, has to be wired into the Helm Job
+    // that runs these. A file that mirrored automatically but was never
     // invoked would sit in the ConfigMap looking applied.
     match: (name) =>
       name === 'extension.sql' ||
@@ -96,10 +96,9 @@ const MIRRORS = [
     dest: 'kong',
     match: (name) => name === 'kong.yml',
     why:
-      'STILL MIRRORED, AND ONLY FOR KUBERNETES. Compose no longer reads it -- Envoy is the gateway '
-      + 'there -- but the chart still deploys Kong by default, because its Envoy '
-      + 'templates have never run in a cluster. Deleting this file breaks helm install outright, '
-      + 'which is how it was found. It goes when the chart stops deploying Kong',
+      'STILL MIRRORED: the gateway is Envoy, and the chart keeps Kong off-not-deleted as the revert '
+      + 'path (supabaseKong.enabled). Deleting this file breaks helm install outright, which is how '
+      + 'it was found. It goes when the chart drops Kong',
   },
   {
     source: 'supabase',
@@ -107,8 +106,8 @@ const MIRRORS = [
     match: (name) => name === 'envoy.yaml',
     why:
       'The Envoy translation of kong.yml. Mirrored for the SAME reason kong.yml is: '
-      + 'one file serves both targets, and a route added for Compose and forgotten on Kubernetes '
-      + 'is a gateway that behaves differently between environments',
+      + 'the chart mounts the mirror, and a stale copy is a gateway that behaves differently '
+      + 'from the file in the tree',
   },
   {
     source: 'scripts',
@@ -145,8 +144,7 @@ const MIRRORS = [
   {
     source: 'scripts',
     dest: 'gitea-scripts',
-    // The provisioning script BOTH targets run: Compose bind-mounts it into a one-shot service,
-    // the chart projects it onto an initContainer. It decides which accounts the forge has and
+    // The provisioning script, projected onto an initContainer. It decides which accounts the forge has and
     // what they may do -- the machine account is deliberately not an admin -- and that is policy
     // rather than plumbing, so a hand-copied second version is exactly the drift this exists for.
     match: (name) => name === 'gitea-init.sh',
@@ -162,8 +160,8 @@ const MIRRORS = [
     source: 'scripts',
     dest: 'gateway-credential',
     // The two scripts that run on the credential service's image: the boot reconcile (the
-    // broker's initContainer) and the service (a sidecar). Compose bind-mounts them from scripts/;
-    // the chart projects them through a ConfigMap, with the libraries restored to `lib/` by the
+    // broker's initContainer) and the service (a sidecar). The chart projects them from scripts/
+    // through a ConfigMap, with the libraries restored to `lib/` by the
     // volume's `items` -- see templates/messaging/mosquitto.yaml. The image supplies the runtime
     // (node, mosquitto_passwd, mosquitto_rr), the chart supplies the code, so a script change
     // needs no image rebuild.
@@ -173,8 +171,7 @@ const MIRRORS = [
   {
     source: 'scripts',
     dest: 'backup-service',
-    // The same arrangement as gateway-credential: Compose bind-mounts it, the chart projects it
-    // through a ConfigMap over an image that supplies pg_dump, node, sqlite3 and tar.
+    // The same arrangement as gateway-credential: the chart projects it through a ConfigMap over an image that supplies pg_dump, node, sqlite3 and tar.
     match: (name) => name === 'backup-service.mjs',
     why: 'The backup service; takes a queued backup_jobs row to a tier 1 backup on the backup PVC',
   },
@@ -359,8 +356,7 @@ if (checkOnly && stale > 0) {
   console.error(
     `\n${stale} chart file(s) out of sync. Run:  node scripts/sync-helm-chart-files.mjs\n` +
       `\nThe chart mounts these into the cluster, so a stale copy provisions a DIFFERENT database\n` +
-      `than Docker Compose does -- which is precisely the drift the two-target arrangement exists\n` +
-      `to prevent, and it would only surface as a schema error at first write.\n`
+      `than the files in the tree describe, and it would only surface as a schema error at first write.\n`
   );
   process.exit(1);
 }

@@ -19,10 +19,10 @@ for _stream in (sys.stdout, sys.stderr):
         except Exception:
             pass
 
-# Configuration. Defaults target a host run against Docker Compose; an in-cluster Job overrides them
-# with Service names. See ../ingestion/README.md, "End-to-end validation". The port defaults are
-# conditional on their host being set: 5433/54322 are the ports Compose publishes, and naming a host
-# means the service is addressed directly on 5432.
+# Configuration. Defaults target a host run through `npm run dev:test`'s port-forwards; the
+# in-cluster Job overrides them with Service names. See ../ingestion/README.md, "End-to-end
+# validation". The port defaults are conditional on their host being set: 5433/54322 are the
+# forwarded ports, and naming a host means the service is addressed directly on 5432.
 TIMESCALEDB_HOST = os.getenv("DB_HOST", "localhost")
 TIMESCALEDB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None else "5432")
 TIMESCALEDB_NAME = os.getenv("DB_NAME", "postgres")
