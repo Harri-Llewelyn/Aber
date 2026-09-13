@@ -4,8 +4,8 @@
 --
 -- 0002 seeds `localhost` endpoints for Node-RED, Grafana and Studio, while the deployment states
 -- its browser-facing addresses in NODERED_PUBLIC_URL, GRAFANA_PUBLIC_URL and STUDIO_PUBLIC_URL,
--- which build the OAuth `redirect_uris`, GF_SERVER_ROOT_URL and the passport callback. Both
--- db-init call sites (docker-compose.yml and templates/jobs/db-init.yaml) already pass
+-- which build the OAuth `redirect_uris`, GF_SERVER_ROOT_URL and the passport callback. The
+-- db-init Job (templates/jobs/db-init.yaml) already passes
 -- `grafana_public_url`, `studio_public_url` and `nodered_redirect_uri` to psql for 0002, so this
 -- derives the three rows from the same values: the row and the redirect_uri cannot disagree.
 -- Three rows, not fifteen, because those are the three db-init passes.
@@ -13,10 +13,7 @@
 -- These rows are therefore no longer editable: a replay stamps over a hand edit on the next
 -- boot, and the place to change an address is the variable. A row is left alone when its
 -- variable is absent: `\if :{?var}` defaults an unpassed variable to empty, and empty means
--- "this deployment said nothing". On Compose every variable arrives with a `:-` default.
---
--- This does not give Compose port-free URLs; that needs the reverse proxy (docs/roadmap.md,
--- "The transport between services").
+-- "this deployment said nothing".
 
 \if :{?grafana_public_url}
 \else
@@ -45,8 +42,8 @@ DECLARE
   v_nodered TEXT := NULLIF(current_setting('acs_cymru.dir_nodered_redirect',   true), '');
   v_moved   INT  := 0;
 
-  -- The Node-RED value arrives as the callback (docker-compose builds
-  -- `${NODERED_PUBLIC_URL}/auth/strategy/callback` for 0002's client registration), so exactly
+  -- The Node-RED value arrives as the callback (the chart builds
+  -- `<nodered URL>/auth/strategy/callback` for 0002's client registration), so exactly
   -- that fixed suffix is stripped. Not a general "strip the path": Grafana and Studio are passed
   -- origins, and a deployment may legitimately put either behind a subpath.
   v_nodered_origin TEXT := rtrim(

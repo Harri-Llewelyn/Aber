@@ -1,7 +1,7 @@
 -- =============================================================================================
 -- Storage footprint: what the historian is spending disk on, and how far back it goes.
 --
--- Applied on every boot by the `timescaledb-maintenance` service (Compose) and hook Job (Helm).
+-- Applied on every boot by the chart's maintenance hook Job.
 -- Runs after aggregates.sql (it reports on the rollups) and before roles.sql (which grants on the
 -- view); run first, the view creates successfully and fails in a dashboard panel instead.
 --

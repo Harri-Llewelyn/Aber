@@ -100,7 +100,7 @@ info:
 
 servers:
   - url: http://localhost:8090/v1
-    description: Local Docker Compose stack — note the /v1 suffix is part of the base URL
+    description: The i3X server through `npm run dev:forward` — note the /v1 suffix is part of the base URL
 
 security:
   - bearerAuth: []

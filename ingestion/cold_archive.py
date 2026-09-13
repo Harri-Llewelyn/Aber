@@ -428,7 +428,7 @@ def query_archive(conn, storage, bucket, start, end, asset=None, metric=None, li
     Answer one question from cold storage.
 
     DOWNLOADED, THEN QUERIED, AND THAT IS A LIMITATION WORTH NAMING rather than hiding. DuckDB can
-    range-read Parquet over HTTP and fetch only the row groups a query touches -- but on Compose the
+    range-read Parquet over HTTP and fetch only the row groups a query touches -- but by default the
     objects sit behind storage-api with STORAGE_BACKEND=file, not an S3 endpoint DuckDB can address,
     so this pulls each relevant object whole. The manifest pruning above is what keeps that
     reasonable: it is whole OBJECTS, not the whole archive. Pointing storage at real S3 makes this a
@@ -548,7 +548,7 @@ def audit(conn, storage, bucket):
     Check that every object the manifest claims exists is still fetchable.
 
     THE FAILURE THIS EXISTS FOR IS A RECONFIGURATION, NOT A BUG. storage-api's backend is
-    `STORAGE_BACKEND: file` on Compose and can be pointed at S3 instead -- and switching it does NOT
+    `STORAGE_BACKEND: file` by default and can be pointed at S3 instead -- and switching it does NOT
     migrate anything. The same keys are then looked for in the new backend and 404, while the
     manifest still reads `archived` and the raw rows are already gone from the hypertable. The
     catalogue goes on saying everything is fine.
@@ -739,7 +739,7 @@ def main():
     parser.add_argument("--chunk", help="restore: the chunk_name to put back")
     # THE SETTING FINALLY MEANS SOMETHING WITH THIS. `archive.enabled` armed a mechanism nothing
     # ran: an operator turned it on, opened the page and saw nothing, because the exporter is a CLI
-    # and no scheduler existed. The compose service runs this loop, so the switch is what decides
+    # and no scheduler existed. The chart's coldArchive CronJob runs it, so the switch is what decides
     # whether anything happens rather than a note about a command somebody has to remember.
     parser.add_argument("--loop", type=int, metavar="SECONDS",
                         help="archive: keep running, pausing this long between passes")

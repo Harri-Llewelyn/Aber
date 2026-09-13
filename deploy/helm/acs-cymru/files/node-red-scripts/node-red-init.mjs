@@ -692,7 +692,7 @@ function brokerCredentialFor(node) {
         fail(
           `this volume's flow carries the legacy '${BROKER_NODE_ID}' node, but MQTT_PASSWORD is not set.
   That node predates the per-cell consolidation and reads MQTT_USER / MQTT_PASSWORD
-  (MQTT_SIMULATOR_* on Compose), which are empty by default because the account they
+  which are empty by default because the account they
   name was retired by migration 0020.
 
   Either set MQTT_SIMULATOR_PASSWORD and re-provision that account, or reseed the flow

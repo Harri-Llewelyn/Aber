@@ -315,7 +315,7 @@ class SurvivedTheConversionTestCase(unittest.TestCase):
         without it is invisible on a single boot and produces DRIFT on the next one: 0077's
         `CREATE INDEX IF NOT EXISTS` skips, its unconditional `COMMENT ON INDEX` lands, and the
         schema now differs between two runs of the same chain. check-migration-idempotency.mjs
-        refuses that, correctly -- but it needs the Compose stack, so nothing here saw it.
+        refuses that, correctly -- but it needs the live stack, so nothing here saw it.
 
         Asserted as "every index and column that has a comment has a NON-EMPTY one" rather than
         against a list of names, so a comment added to this table later is covered by this test

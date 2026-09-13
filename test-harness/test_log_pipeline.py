@@ -39,7 +39,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingestion"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import stack_exec  # noqa: E402  -- the probe container, on Compose or on Kubernetes (ACS_STACK)
+import stack_exec  # noqa: E402  -- the probe pod
 
 LOKI = os.getenv("LOKI_TEST_URL", "http://127.0.0.1:3100")
 PROM = os.getenv("PROMETHEUS_TEST_URL", "http://127.0.0.1:9090")
@@ -119,7 +119,7 @@ def setUpModule():
             urllib.request.urlopen(url, timeout=5).read()
         except Exception as exc:
             message = (f"{name} is not reachable at {url} ({exc}). This suite needs the stack up: "
-                       f"docker compose up -d")
+                       f"npm run dev:up")
             if REQUIRE:
                 raise AssertionError(f"REQUIRE_LOG_PIPELINE=1, so this cannot be skipped: {message}")
             raise unittest.SkipTest(message)
@@ -189,7 +189,7 @@ class CollectionTestCase(unittest.TestCase):
             rows,
             "no ingestion line parsed as JSON with a `logger` field. Either LOG_FORMAT is not "
             "json on the running container, or the image predates logging_config.py's "
-            "JSONFormatter -- `docker compose build ingestion` is required, not just a recreate",
+            "JSONFormatter -- `npm run dev:up --only=ingestion` rebuilds and restarts it",
         )
 
 
@@ -414,8 +414,8 @@ class MultilineTestCase(unittest.TestCase):
 
         HOW THIS AVOIDS BOTH COSTS THE ROADMAP REFUSED. The entry said closing this meant either a
         fault-injection path in the daemon or restarting a service mid-suite. It needs neither.
-        Alloy discovers containers through the Docker API and derives `service` from the compose
-        LABEL, so a throwaway container carrying `com.docker.compose.service=ingestion` is
+        Alloy discovers pods through the API server and derives `service` from the component
+        LABEL, so a throwaway pod carrying the ingestion component label is
         collected by the same pipeline, matches the same `stage.match` selector and is subject to
         the same `stage.multiline`. Nothing in the daemon changes and no running service is
         touched.
@@ -487,8 +487,7 @@ class MultilineTestCase(unittest.TestCase):
                 entries,
                 "nothing carrying " + token + " reached the store in time. The probe container "
                 "ran, so this is collection rather than the daemon: check the collector's "
-                "discovery (discovery.docker through the socket proxy on Compose, which is what "
-                "failed wholesale on the first live run; discovery.kubernetes on the chart).",
+                "discovery (discovery.kubernetes, and the component label the probe carries).",
             )
 
             rejoined = [e for e in entries

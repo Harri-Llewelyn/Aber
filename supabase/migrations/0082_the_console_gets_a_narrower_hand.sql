@@ -8,8 +8,8 @@
 --
 -- This file asserts; it does not grant. `supabase_read_only_user` is created by the image and
 -- is reserved (only superusers may modify it), and db-init's `postgres` is not a superuser, so
--- the ALTER that gives it a password lives in the superuser step (`supabase-db-roles-init` on
--- Compose, `db-roles-init` on Kubernetes). It needs one because pg_hba trusts 127.0.0.1 and
+-- the ALTER that gives it a password lives in the superuser step (the `db-roles-init` Job). It
+-- needs one because pg_hba trusts 127.0.0.1 and
 -- requires scram from the container networks. The role holds `pg_read_all_data` and `pg_monitor`
 -- with BYPASSRLS and no write; an absent role is a WARNING rather than a CREATE, so a renamed
 -- image role cannot be replaced by a weaker same-named one.
@@ -38,7 +38,7 @@ BEGIN
   IF NOT v_has_password THEN
     RAISE WARNING '0082: supabase_read_only_user has no password, so Studio cannot authenticate as '
                   'it from any container network (pg_hba requires scram there). Run the roles-init '
-                  'step -- supabase-db-roles-init on Compose, db-roles-init on Kubernetes -- or '
+                  'step -- the db-roles-init Job -- or '
                   'leave POSTGRES_USER_READ_ONLY unset.';
   END IF;
 

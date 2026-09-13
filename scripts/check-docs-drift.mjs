@@ -1235,7 +1235,6 @@ function edgeFunctionNames() {
   const chart = read('deploy/helm/acs-cymru/templates/supabase/rest.yaml');
 
   const chartName = chart.match(/name:\s*PGRST_DB_PRE_REQUEST\s*\n\s*value:\s*([A-Za-z0-9_.]+)/)?.[1];
-  const composeName = chartName;
 
   if (!chartName) {
     fail(
@@ -1245,7 +1244,7 @@ function edgeFunctionNames() {
   } else {
     // Declared anywhere in the applied chain. The bare name is enough: a function that is dropped
     // and recreated still has to appear in a CREATE, and this is looking for the typo case.
-    const bare = composeName.replace(/^public\./, '');
+    const bare = chartName.replace(/^public\./, '');
     const declared = readdirSync(join(REPO, 'supabase/migrations'), { withFileTypes: true })
       .filter((e) => e.isFile() && e.name.endsWith('.sql'))
       .some((e) => new RegExp(
@@ -1254,12 +1253,12 @@ function edgeFunctionNames() {
 
     if (!declared) {
       fail(
-        `PGRST_DB_PRE_REQUEST names ${composeName}, which no migration declares. PostgREST does ` +
+        `PGRST_DB_PRE_REQUEST names ${chartName}, which no migration declares. PostgREST does ` +
           'NOT fail to boot on this -- it answers 404 (42883) to every request while /live and ' +
           '/ready both report 200, so the outage is invisible to every health check.'
       );
     } else {
-      pass(`PGRST_DB_PRE_REQUEST names ${composeName} on both targets, and a migration declares it`);
+      pass(`PGRST_DB_PRE_REQUEST names ${chartName}, and a migration declares it`);
     }
   }
 }

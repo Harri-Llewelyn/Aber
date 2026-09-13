@@ -11,8 +11,8 @@ direction if it regresses:
     fight over one identity with no message anywhere saying so;
   * a token that outlives its expiry never errors -- the bundle in somebody's downloads folder just
     keeps working;
-  * a migration that is not idempotent fails only on the SECOND boot, which on Compose is the first
-    `docker compose up` after the volume already exists.
+  * a migration that is not idempotent fails only on the SECOND boot: the first upgrade after the
+    database claim already exists.
 
 So the suite exercises the deployed SQL rather than reasoning about it: it runs as `authenticated`
 with simulated JWT claims, exactly as the RLS policies and public.has_role() see a real caller.

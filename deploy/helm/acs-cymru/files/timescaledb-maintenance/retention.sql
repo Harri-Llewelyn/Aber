@@ -1,7 +1,7 @@
 -- =============================================================================================
 -- TimescaleDB compression and retention policy reconciliation
 --
--- Applied on every boot by the `timescaledb-retention` service (Compose) and hook Job (Helm),
+-- Applied on every boot by the chart's maintenance hook Job,
 -- against a database that already holds the hypertable. It takes two psql variables:
 --
 --     -v compress_after='7 days'      -v retain_after='90 days'

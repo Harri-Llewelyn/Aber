@@ -34,9 +34,8 @@
  * Gitea writes, and falls back to a raw copy of the db, -wal and -shm files followed by a
  * checkpoint and an integrity check on the copy. The method used is in manifest.json.
  *
- * Two targets, one script: Compose bind-mounts this file and the chart projects it through a
- * ConfigMap, over an image built from the database's own (backup-service/Dockerfile), so
- * pg_dump is at least the server's version.
+ * The chart projects this file through a ConfigMap over an image built from the database's own
+ * (backup-service/Dockerfile), so pg_dump is at least the server's version.
  */
 import { spawnSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';

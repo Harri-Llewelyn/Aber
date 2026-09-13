@@ -2,9 +2,8 @@
 # Envoy gateway -- a translation of supabase/kong.yml, route for route.
 #
 # THIS IS A TEMPLATE, NOT A CONFIG. Fourteen `__UPPER_SNAKE__` placeholders are substituted at boot by
-# `supabase-envoy-init` on Compose and by an initContainer on Kubernetes -- the two share this file
-# and not the substituter, which is why `scripts/check-gateway-surface.mjs` asserts that both know
-# every one of them. A real key committed here would be a leaked key, not a config change, and the
+# the gateway's initContainer; `scripts/check-gateway-surface.mjs` asserts that the substituters
+# know every one of them. A real key committed here would be a leaked key, not a config change, and the
 # same script asserts the placeholders are still placeholders.
 #
 # Four carry the API keys (`__SUPABASE_ANON_KEY__`, `__SUPABASE_SERVICE_ROLE_KEY__`,
@@ -599,7 +598,7 @@ static_resources:
     #
     # The headers are the credential: Gitea signs in whoever X-WEBAUTH-USER names, from any
     # peer, so the control is that only this listener and the edge runtime can reach Gitea's
-    # HTTP port (the `forge` network on Compose, the NetworkPolicy edges on Kubernetes), and
+    # HTTP port (the NetworkPolicy edges), and
     # that the API ignores the header. The routes below overwrite or remove the identity headers
     # so a value a browser sent never reaches Gitea. The username is the token's `sub` (Gitea
     # refuses `@`); the email rides in its own header.
@@ -878,9 +877,9 @@ static_resources:
           - lb_endpoints:
               - endpoint:
                   address:
-                    # Target-specific: Compose dials the container, the chart names its Service
-                    # `realtime-dev`. Distinct from __REALTIME_UPSTREAM_HOST__, which is the Host
-                    # header and must keep the `realtime-dev` leading label on both targets.
+                    # The chart names the Service `realtime-dev`. Distinct from
+                    # __REALTIME_UPSTREAM_HOST__, which is the Host header and must keep the
+                    # `realtime-dev` leading label.
                     socket_address: { address: __REALTIME_UPSTREAM_ADDRESS__, port_value: 4000 }
 
     - name: storage-v1

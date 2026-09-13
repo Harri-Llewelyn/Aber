@@ -11,8 +11,8 @@ successful interception. There is no error, no log line and no metric; telemetry
   * silently ignoring a missing CA file would fall back to the system trust store, which cannot
     verify an internal CA, turning a legible configuration error into a handshake failure that
     names neither the setting nor the path.
-  * applying TLS when it was never asked for would break the Compose path, where the broker has no
-    TLS listener at all.
+  * applying TLS when it was never asked for would break a stack whose broker has no TLS
+    listener (mosquitto.tls.enabled off).
 
 None of those are visible in a passing end-to-end run against a stack whose broker happens to be
 plaintext, which is why they are asserted here on the ARGUMENTS PASSED rather than on a live
@@ -88,7 +88,7 @@ class MqttTlsTests(unittest.TestCase):
     # -- off by default ---------------------------------------------------------------------------
 
     def test_no_op_when_disabled(self):
-        """The Compose path must be untouched: its broker has no TLS listener to connect to."""
+        """Disabled means untouched: a broker with no TLS listener must still be reachable."""
         ingestion.MQTT_TLS_ENABLED = False
         ingestion.MQTT_TLS_CA_FILE = self.ca_path  # set but irrelevant while disabled
         client = RecordingClient()

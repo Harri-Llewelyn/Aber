@@ -37,11 +37,11 @@ underneath to fall back on.
 
 ## Goal and posture
 
-Kubernetes becomes the **primary** way the platform is built and served. Docker Compose stays,
-unchanged in purpose, as the one-command path for local development, debugging and CI's existing
-e2e job. This is an *addition of a deployment target*, not a rewrite — the container images, the
-init scripts and the SQL migrations are shared substrate, and only the **wiring** is expressed
-twice.
+Kubernetes became the **primary** way the platform is built and served, with Docker Compose kept
+for a time as the one-command path for local development and CI's e2e job; that second target has
+since been removed (`npm run dev:up` on k3d is the one-command path now). It was an *addition of
+a deployment target*, not a rewrite — the container images, the init scripts and the SQL migrations
+were shared substrate, and only the **wiring** was expressed twice.
 
 The wiring is the whole job. `docker-compose.yml` is 36 KB of which very little is service
 definition; the rest is ordering (`depends_on` / `condition:`), secret fan-out (the
@@ -928,20 +928,15 @@ Both targets must stay green.
 Running the suites in-cluster is *simpler* than the Compose job, which has to override `DB_HOST`,
 `MQTT_HOST` and `SUPABASE_URL` back to published ports. Keep that observation in the job's comments.
 
-### 8.2 Keeping the two targets in step
+### 8.2 Keeping the two targets in step (retired)
 
-There is no way to fully automate "these two topologies describe the same system", and pretending
-otherwise produces a check that passes while the stacks diverge. Instead:
+While two targets existed there was no way to fully automate "these two topologies describe the
+same system"; instead both ran the same e2e suite (`validate.py` is topology-agnostic), the
+runbook carried a divergence table, and image tags were compared by a script (§8.3). With one
+target the divergence table, the parity script and `check-compose-chart-parity.mjs` are gone; the
+chart's `sync-helm-chart-files.mjs` mirror check is what remains of the arrangement.
 
-- **Both run the same e2e suite.** `validate.py` is the real conformance check and it is topology-
-  agnostic. If both jobs pass, the wiring agrees where it matters.
-- **`deploy/k8s/README.md` carries an explicit divergence table** — what exists on one target and
-  not the other, and why: `supabase-kong-init` (deleted, Helm templates), Grafana's `sed` entrypoint
-  (deleted, Secret), the frontend's baked env (Compose only), `deno_cache` (Compose only), the
-  mosquitto provisioning backend (two modes of one script).
-- **Image tag parity** — see §8.3.
-
-### 8.3 Image tag parity — `scripts/check-image-tag-parity.mjs`
+### 8.3 Image tag parity — `scripts/check-image-tag-parity.mjs` (retired with the second target)
 
 Every image is deliberately pinned, several with a paragraph explaining why, and every one of those
 paragraphs is about a **coupling**: `supabase/realtime` and `supabase/storage-api` migrate shared

@@ -8,8 +8,7 @@ while it is fine:
 
   * writing when DISCONNECTED would make a wedged broker connection look alive, which is the exact
     failure the probe exists to catch;
-  * writing when the feature is OFF would put litter on the Compose path, which declares no
-    healthcheck and reads no file;
+  * writing when the feature is OFF would put litter where nothing reads a file;
   * crashing on a write error would turn a full disk into a crash-looping daemon that was otherwise
     ingesting fine.
 
@@ -112,7 +111,7 @@ class HeartbeatTests(unittest.TestCase):
         return False
 
     def test_no_op_when_unconfigured(self):
-        """Unset means OFF -- the Compose default. No thread is started and nothing is written."""
+        """Unset means OFF. No thread is started and nothing is written."""
         ingestion.INGESTION_HEALTH_FILE = ""
         started = self.start(FakeClient(connected=True))
         self.assertEqual(started, [], "a heartbeat thread was started with no file configured")

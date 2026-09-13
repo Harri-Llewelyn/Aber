@@ -671,7 +671,7 @@ It sends the same Dynamic Security commands the credential service sends, throug
 into the broker pod, and the plugin applies them to the running broker and rewrites its own document
 on the data PVC. Nothing is written to a Secret and nothing is signalled. The password is printed
 once and is not recoverable. The plugin's admin credential comes from `MQTT_DYNSEC_ADMIN_USER` /
-`MQTT_DYNSEC_ADMIN_PASSWORD` in the environment or `.env`.
+`MQTT_DYNSEC_ADMIN_PASSWORD` in the environment, else from the release Secret.
 
 ---
 

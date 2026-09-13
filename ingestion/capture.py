@@ -101,10 +101,8 @@ MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 # `read spBv1.0/#` and no asset write at all. Recording needs nothing more, and pointing it at a
 # gateway credential would hand a mistyped subcommand the ability to publish.
 #
-# FALLS BACK TO THE INGESTION PRINCIPAL'S OWN VARIABLES, because that is how .env names it. The
-# daemon reads MQTT_USER/MQTT_PASSWORD and docker-compose maps MQTT_INGESTION_* onto those inside
-# the container -- so a host-run tool that read MQTT_PASSWORD would find nothing in a shell that
-# had sourced .env, which is the only way anybody runs this.
+# FALLS BACK TO THE INGESTION PRINCIPAL'S OWN VARIABLES: the daemon reads MQTT_USER/MQTT_PASSWORD
+# inside its container, while a host-run tool is handed the MQTT_INGESTION_* names.
 RECORD_USER = os.getenv("MQTT_CAPTURE_USER") or os.getenv("MQTT_INGESTION_USER") \
     or "factoryplus_ingestion"
 RECORD_PASSWORD = (os.getenv("MQTT_CAPTURE_PASSWORD") or os.getenv("MQTT_INGESTION_PASSWORD")

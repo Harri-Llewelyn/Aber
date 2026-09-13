@@ -24,7 +24,7 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "supabase", "functions", "enroll-gateway"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
 from test_enroll_gateway import ADMIN_PASSWORD, ANON_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, rest, sign_in  # noqa: E402
-import stack_exec  # noqa: E402  -- docker exec on Compose, kubectl exec on Kubernetes (ACS_STACK)
+import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
 
 OPERATOR_EMAIL = os.getenv("ACS_OPERATOR_EMAIL", "operator@acs-cymru.local")
 NOTE = "test_backup_service.py"

@@ -310,9 +310,8 @@ jobs:
         run: node scripts/check-broker-config.mjs --verbose
 
       # Naming any plugin in Kong's `plugins` property replaces its bundled set, so a plugin kong.yml
-      # references but the list omits makes Kong refuse to boot. Kubernetes only: Compose runs Envoy
-      # and declares no KONG_PLUGINS. The step retires with the chart's Kong, which is retained off as
-      # the revert path.
+      # references but the list omits makes Kong refuse to boot. The step retires with the chart's
+      # Kong, which is retained off as the revert path.
       - name: Verify The Chart's Kong Plugin List Covers Everything kong.yml References
         run: |
           python3 - <<'PY'
@@ -1025,7 +1024,7 @@ jobs:
           PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 \
             -U supabase_admin -d postgres -f test-harness/auth-bootstrap.sql
 
-      # Single-dollar "$f": doubling is Compose escaping, and in a shell "$$" is the PID.
+      # Single-dollar "$f": in a shell "$$" is the PID.
       # seed.sql is not applied: the tests seed their own fixtures, and the base image's auth.users
       # lacks columns the seed writes.
       - name: Apply Supabase Database Migrations

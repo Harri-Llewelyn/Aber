@@ -7,7 +7,7 @@ contact_links:
     about: Privately, as a draft advisory — never as a public issue. See SECURITY.md for scope.
   - name: Getting the stack running
     url: https://github.com/Harri-Llewelyn/ACS-Cymru#readme
-    about: Prerequisites, npm run setup, and bringing it up on Compose or Kubernetes.
+    about: Prerequisites, npm run setup, and bringing it up on k3d or k3s.
   - name: Which test suite covers what
     url: https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/docs/testing.md
     about: Every suite, what each one needs, and the pairs that must move together.

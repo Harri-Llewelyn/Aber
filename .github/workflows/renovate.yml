@@ -36,8 +36,7 @@
 # has not started at all -- every scheduled run completes in three to five seconds with zero steps,
 # which is what an exhausted Actions allowance looks like. The last successful run was 2026-08-23,
 # and the dependency dashboard (issue #53) has been frozen at that date ever since: it still lists
-# `postgrest v12.2.0` and `kong 3.9.3`, one long since bumped and the other deleted from
-# docker-compose entirely.
+# `postgrest v12.2.0` and `kong 3.9.3`, one long since bumped and the other since retired.
 #
 # So this file's own warning came true by a route it could not check: "the repository looks as
 # though drift is being watched when it is not". A workflow cannot detect that it was never
@@ -53,10 +52,9 @@
 # registry, and opened no pull requests because that is this workflow's job.
 #
 # THE ONE THING IT DID THAT RENOVATE DOES NOT is fail when a PINNED TAG NO LONGER EXISTS, which is
-# a real problem rather than news about upstream shipping. That is not lost: the Compose e2e job
-# pulls every service image on every run -- `supabase-storage Pulling`, `supabase-envoy Pulling`,
-# and so on down the file -- so a vanished tag fails the build at the pull, earlier and louder than
-# a script somebody has to remember to run.
+# a real problem rather than news about upstream shipping. That is not lost: the k8s-validation
+# job pulls every image the chart pins on every run, so a vanished tag fails the build at the
+# pull, earlier and louder than a script somebody has to remember to run.
 #
 # The outage is left recorded above rather than deleted with the script. A scheduled workflow that
 # silently never starts is a failure mode this file's own warning did not cover, and the next

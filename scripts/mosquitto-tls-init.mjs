@@ -234,7 +234,7 @@ function issueCa() {
   openssl([
     'req', '-x509', '-newkey', 'rsa:4096', '-sha256', '-days', String(CA_DAYS), '-nodes',
     '-keyout', CA_KEY, '-out', CA_CRT,
-    '-subj', `/O=${ORG}/OU=${ORG_UNIT}/CN=${dn('Factory+ Internal CA (Compose)')}`,
+    '-subj', `/O=${ORG}/OU=${ORG_UNIT}/CN=${dn('Factory+ Internal CA (fixture)')}`,
     // pathlen:0 -- this root signs LEAVES and may not delegate. A CA that can mint intermediates is
     // a broader authority than anything here needs, and narrowing it costs nothing.
     '-addext', 'basicConstraints=critical,CA:TRUE,pathlen:0',

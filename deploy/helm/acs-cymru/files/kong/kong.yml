@@ -1,8 +1,8 @@
 # =============================================================================================
 # Kong declarative configuration -- retained as the chart's revert path only.
 #
-# Both targets run Envoy (supabase/envoy.yaml). Compose does not read this file; the chart reads
-# it only when `supabaseKong.enabled=true` and `supabaseEnvoy.enabled=false`, in which case Helm
+# The gateway is Envoy (supabase/envoy.yaml). The chart reads this file
+# only when `supabaseKong.enabled=true` and `supabaseEnvoy.enabled=false`, in which case Helm
 # renders the `__UPPER_SNAKE__` placeholders into a Secret. The keys are not committed here.
 #
 # Six routes are exempt from `key-auth`, across four exemptions:
@@ -63,7 +63,7 @@ services:
 
   # WebSocket change feed. The upstream path is /socket/, and the leading hostname label must be
   # `realtime-dev`: Realtime reads the tenant id from it. On Kubernetes the Service is named
-  # `realtime-dev`, which is why Realtime is the one Service whose name differs from Compose's.
+  # `realtime-dev`, which is why Realtime is the one Service not named after its component.
   - name: realtime-v1
     url: __REALTIME_UPSTREAM_URL__
     routes:

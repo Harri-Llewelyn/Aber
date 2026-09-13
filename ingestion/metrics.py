@@ -25,10 +25,9 @@ where it now sits.
 IT NEEDS NO CREDENTIAL, so anything here is exposed to whatever can reach the port. Every addition
 is a decision, not a detail.
 
-The port is now bound to `127.0.0.1:9108:9108` rather than every interface, which narrows WHO can
-reach it and changes nothing about what this file may put behind it. Prometheus scrapes
-`ingestion:9108` over the compose network and never used the host mapping; the rules below were
-written for an unauthenticated endpoint and still are.
+The endpoint is cluster-internal (the `ingestion-metrics` Service, scraped by Alloy) with no
+Ingress route, which narrows WHO can reach it and changes nothing about what this file may put
+behind it; the rules below were written for an unauthenticated endpoint and still are.
 
 IT USED TO SERVE COUNTERS AND NOTHING ELSE. It now also serves SEVEN GAUGES DESCRIBING THE
 APPLIANCES THEMSELVES -- uptime, load, available memory, free disk, and when each last reported,

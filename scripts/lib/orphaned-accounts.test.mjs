@@ -79,8 +79,8 @@ test('nothing at the broker means nothing to do', () => {
 });
 
 test('no gateways at all makes every gateway account a stray', () => {
-  // A stack whose rows were wiped without the broker being touched -- `docker compose down -v` on
-  // the database volume alone, which is a real thing to do by accident.
+  // A stack whose rows were wiped without the broker being touched -- the database claim deleted
+  // alone, which is a real thing to do by accident.
   const accounts = ['gwy120000000000400080000', 'gwy2a71a14de1b04971bfbb5'];
   assert.deepEqual(strays(accounts, []), accounts);
 });

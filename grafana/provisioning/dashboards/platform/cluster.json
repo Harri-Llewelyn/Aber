@@ -1093,7 +1093,7 @@
       "id": 19,
       "type": "bargauge",
       "title": "Volume Used",
-      "description": "Bytes on each PersistentVolumeClaim, as the kubelet measures them. Which store is growing.",
+      "description": "Bytes on each PersistentVolumeClaim, as the kubelet measures them. Claims reporting the same figure share one filesystem and are shown as one row: on local-path (k3s's default) that is every claim, and the row is the node disk.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1113,7 +1113,8 @@
           },
           "expr": "max by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=\"$namespace\"})",
           "legendFormat": "{{persistentvolumeclaim}}",
-          "instant": true
+          "instant": true,
+          "format": "table"
         }
       ],
       "fieldConfig": {
@@ -1145,12 +1146,29 @@
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
-          "values": false
+          "fields": "/^Value/",
+          "values": true
         },
         "sizing": "auto"
       },
       "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value": {
+                "operation": "groupby",
+                "aggregations": []
+              },
+              "persistentvolumeclaim": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "uniqueValues"
+                ]
+              }
+            }
+          }
+        },
         {
           "id": "sortBy",
           "options": {
@@ -1168,7 +1186,7 @@
       "id": 20,
       "type": "bargauge",
       "title": "Volume Fill",
-      "description": "Used against capacity per claim. On local-path (k3s's default) every claim reports the node disk as its capacity, so this tracks Root Disk Used; on a provisioner that sizes volumes it is the per-claim figure the Volume Filling rule reads.",
+      "description": "Used against capacity per claim, claims sharing one filesystem shown as one row. On local-path (k3s's default) that is every claim and this tracks Root Disk Used; on a provisioner that sizes volumes it is the per-claim figure the Volume Filling rule reads.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1188,7 +1206,8 @@
           },
           "expr": "max by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=\"$namespace\"} / kubelet_volume_stats_capacity_bytes{namespace=\"$namespace\"})",
           "legendFormat": "{{persistentvolumeclaim}}",
-          "instant": true
+          "instant": true,
+          "format": "table"
         }
       ],
       "fieldConfig": {
@@ -1229,12 +1248,29 @@
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
-          "values": false
+          "fields": "/^Value/",
+          "values": true
         },
         "sizing": "auto"
       },
       "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value": {
+                "operation": "groupby",
+                "aggregations": []
+              },
+              "persistentvolumeclaim": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "uniqueValues"
+                ]
+              }
+            }
+          }
+        },
         {
           "id": "sortBy",
           "options": {

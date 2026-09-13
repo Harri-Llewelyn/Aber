@@ -93,7 +93,7 @@ REVOKE ALL ON SCHEMA _realtime FROM PUBLIC;
 -- table is never routable; only the public view is exposed.
 CREATE SCHEMA IF NOT EXISTS timescale;
 
--- Recreated on every run so the connection settings stay in step with docker-compose.yml and
+-- Recreated on every run so the connection settings stay in step with the chart's values and
 -- timescaledb/init/001_schema.sql. The CASCADE drops the whole telemetry read surface until the
 -- rollup views are rebuilt later in the chain; a file aborting in between leaves PostgREST
 -- answering `telemetry` with a missing-relation error until the next successful replay.

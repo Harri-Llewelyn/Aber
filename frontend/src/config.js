@@ -3,10 +3,10 @@
  *
  * Vite inlines `import.meta.env` at build, so a bundle built for one environment carries that
  * environment's Supabase URL wherever it is deployed. `public/config.js` is a plain script that
- * sets `window.__ACS_CYMRU_CONFIG__` and is loaded before the module bundle; on Kubernetes it is
- * replaced by a ConfigMap mount, and on Compose it stays the shipped no-op so the build-time
- * values win. Keys are the `VITE_*` names, so a ConfigMap is generated from the same variable
- * names the Dockerfile and `.env` use.
+ * sets `window.__ACS_CYMRU_CONFIG__` and is loaded before the module bundle; the chart replaces
+ * it with a ConfigMap mount, and a plain image build ships the no-op so the build-time values
+ * win. Keys are the `VITE_*` names, so the ConfigMap is generated from the same variable names
+ * the Dockerfile uses.
  */
 
 /** The global a deployment-supplied `config.js` assigns. */
@@ -34,7 +34,7 @@ export const RUNTIME_SETTING_NAMES = [
   // The forge's door: a link from the gateway drawer, and a sign-out beacon like Studio's.
   'VITE_GITEA_URL',
   // The bucket names, settings for the same reason the URLs are: scripts/storage-init.mjs,
-  // docker-compose, values.yaml and storage-policies.sql all read them from the environment, and a
+  // values.yaml and storage-policies.sql both read them from the environment, and a
   // literal here was the one consumer a rename left behind. The browser no longer reads the
   // `gateway-backups` bucket; retiring it is one change (docs/roadmap.md, "Retiring the
   // flow-backup bucket").

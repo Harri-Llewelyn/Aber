@@ -1,8 +1,7 @@
 -- =============================================================================================
 -- Storage access control for the platform's buckets.
 --
--- Applied on every boot by the `supabase-storage-policies` service (Compose) and the Job of the
--- same name (Helm). Idempotent: every policy is dropped before it is created, and the grants are
+-- Applied on every boot by the chart's storage-policies Job. Idempotent: every policy is dropped before it is created, and the grants are
 -- repeatable.
 --
 -- ORDERING: after `supabase-storage` is healthy (storage-api creates `storage.objects` by its
@@ -31,7 +30,7 @@ BEGIN
     RAISE EXCEPTION
       'storage.objects does not exist. It is created by storage-api''s own migrations when the '
       'supabase-storage service boots, so this script must run AFTER that service is healthy -- '
-      'see the depends_on in docker-compose.yml and the hook-weight on the Helm Job. The database '
+      'see the hook-weight on the Helm Job. The database '
       'image no longer ships a stub storage schema (it did up to supabase/postgres 15.x).';
   END IF;
 END $$;

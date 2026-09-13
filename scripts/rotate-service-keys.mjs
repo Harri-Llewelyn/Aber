@@ -267,6 +267,6 @@ if (unrecorded.length) {
 // these restart they are still presenting the previous token -- which still works, and is exactly
 // what makes it easy to believe the rotation is finished when it is not.
 console.log('⚠️  NOT LIVE YET. Both workers read their key at boot, so restart them:');
-console.log(`   docker compose up -d --force-recreate ${KEYS.map(k => k.restart).join(' ')}`);
+console.log(`   kubectl -n ${NAMESPACE} rollout restart ${KEYS.map(k => 'deploy/' + k.restart).join(' ')}`);
 console.log('   The previous keys keep working until they expire — rotation shortens exposure,');
 console.log('   it cannot withdraw a token that is already out there.');

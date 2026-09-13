@@ -2782,15 +2782,13 @@ advertising `localhost`. The frontend already got this right — `constants.js` 
 for every Grafana link the dashboard renders — which made the Directory row the odd one out beside
 links that followed the deployment.
 
-**Nothing was added to db-init.** Both call sites — the migration loop in `docker-compose.yml` and
-`templates/jobs/db-init.yaml` — already pass `grafana_public_url`, `studio_public_url` and
-`nodered_redirect_uri` to psql once per file, because `0002` needs them for the OAuth clients. `0085`
-reads the same three values, which is the point: a row and a `redirect_uri` computed from one input
-cannot disagree.
+**Nothing was added to db-init.** `templates/jobs/db-init.yaml` already passes `grafana_public_url`,
+`studio_public_url` and `nodered_redirect_uri` to psql once per file, because `0002` needs them for
+the OAuth clients. `0085` reads the same three values, which is the point: a row and a
+`redirect_uri` computed from one input cannot disagree.
 
 **Three rows, not fifteen**, and the limit is what db-init passes rather than a judgement about which
-rows deserve it. Swagger, Mosquitto and the four Supabase gateway rows have no `-v` entry at either
-call site.
+rows deserve it. Swagger, Mosquitto and the four Supabase gateway rows have no `-v` entry.
 
 **These three are now derived, so hand edits no longer stick.** `directory_services` carries UPDATE
 RLS for Administrator and Shopfloor_Manager, and a replay stamps over an edit to these rows on the
@@ -2802,10 +2800,7 @@ place to change one of these addresses is the variable, where the login flow fol
 not "this deployment wants the fallback", and stamping a fallback over an operator's edit on the
 strength of a variable nobody set would be the worst of both behaviours.
 
-On Kubernetes this is what surfaces the chart's port-free hostnames on the page. On Compose it shows
-whatever the operator configured, which is still a port — **port-free URLs there need the reverse
-proxy** ([`docs/roadmap.md`](../docs/roadmap.md), *The transport between services*), sequenced after this so a proxy cannot serve `nodered.<domain>` while this
-table advertises `localhost:1880`.
+This is what surfaces the chart's port-free hostnames on the page.
 
 ---
 
@@ -2845,8 +2840,8 @@ and binds everyone: history that can be re-opened is not history.
 
 ## Runtime configuration (`system_settings`)
 
-Values an `Administrator` changes from the dashboard instead of editing a host `.env` and
-restarting a container. On a plant the person who needs a retention window changed is rarely the
+Values an `Administrator` changes from the dashboard instead of editing a values file and
+rolling a pod. On a plant the person who needs a retention window changed is rarely the
 person with a shell on the machine.
 
 **The key set is closed, and that is the decision the rest follows from.** RLS grants `UPDATE` and
@@ -2912,22 +2907,23 @@ BACKUP_STAMP=<stamp> scripts/restore-databases.sh
 ```
 
 Writes three timestamped artefacts plus a manifest into `./backups/` (gitignored — a dump holds
-`auth.users`, hashed OAuth client secrets and the whole `digital_thread`). Defaults target Docker
-Compose; `BACKUP_MODE=direct` with `SUPABASE_DB_HOST`/`TIMESCALE_HOST` reaches any PostgreSQL.
+`auth.users`, hashed OAuth client secrets and the whole `digital_thread`). It runs a local `pg_dump`
+against whatever `SUPABASE_DB_HOST`/`TIMESCALE_HOST` name; the defaults are the dev loop's
+port-forwards (`npm run dev:forward`), and the passwords come from `POSTGRES_PASSWORD` /
+`DB_PASSWORD` in the environment.
 
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
-| `BACKUP_MODE` | `docker` | `direct` to use a local `pg_dump` against host/port |
 | `BACKUP_FORMAT` | `plain` | `.sql.gz`. Use `custom` for `.dump` — selective `pg_restore`, and what the chart's CronJob writes |
 | `BACKUP_DIR` | `./backups` | |
 | `BACKUP_RETENTION_DAYS` | `14` | `0` disables pruning |
 | `INCLUDE_STORAGE` | `true` | The `asset-3d-models` objects |
 
-Without a stack, `docker compose exec` directly:
+Without a port-forward, `kubectl exec` directly:
 
 ```bash
-docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db \
-  pg_dump -Fp -Z6 -U postgres -d postgres > supabase-db.sql.gz
+kubectl -n acs-cymru exec statefulset/supabase-db -- \
+  pg_dump -Fp -Z6 -U supabase_admin -d postgres > supabase-db.sql.gz
 ```
 
 Four things about these dumps are not obvious and each has bitten someone:
@@ -3002,14 +2998,14 @@ but that is a side effect rather than a promise and no retention story should be
 
 The tier 1 backup above needed a shell. `0101` gives it a caller: the **Backups** page (Administrator
 only) queues a `backup_jobs` row through `request_backup()`, and the **backup service**
-(`scripts/backup-service.mjs`, the `backup-service` container on Compose and a Deployment behind
-`backupService.enabled` on Kubernetes) claims it, takes the backup and records a `backups` row.
+(`scripts/backup-service.mjs`, a Deployment behind `backupService.enabled`) claims it, takes the
+backup and records a `backups` row.
 The shape is the Capture page's: the job is the act, the row is the artefact, and the page reads
 both and writes neither.
 
 **What the service takes.** Both databases as their superusers (`supabase_admin`, for the reason
 above), the storage objects, and the forge, into one directory per backup on its own volume
-(`backup_data` on Compose, the backup PVC on Kubernetes), named by the UTC stamp:
+(the backup PVC), named by the UTC stamp:
 
 ```
 /backups/20260911T143000Z/
@@ -3071,20 +3067,31 @@ where an act on the whole database belongs.
 in a directory on the volume, and there is a forge archive.
 
 ```bash
-# Compose. Copy the directory out of the volume, then restore as above.
-docker cp acs-cymru_backup_service:/backups/<stamp> ./backups/<stamp>
+# Copy the directory off the backup PVC, then restore as above (.dump files by default,
+# backupService.format, so the restore is pg_restore as the cluster runbook shows).
+POD=$(kubectl -n acs-cymru get pod -l app.kubernetes.io/component=backup-service -o jsonpath='{.items[0].metadata.name}')
+kubectl -n acs-cymru cp "$POD:/backups/<stamp>" ./backups/<stamp>
 BACKUP_DIR=./backups/<stamp> BACKUP_STAMP=<stamp> scripts/restore-databases.sh
 
-# The forge: stop Gitea, replace the volume's contents, start it. Restoring the archive restores
-# the host keys, so appliances keep cloning.
-docker compose stop gitea
-docker run --rm -v acs-cymru_gitea_data:/data -v "$PWD/backups/<stamp>:/b:ro" alpine \
-  sh -c 'rm -rf /data/* && tar -xzf /b/forge-<stamp>.tar.gz -C /data'
-docker compose start gitea
+# The forge: scale Gitea to zero, replace the volume's contents through a helper pod that holds
+# the same claim, scale it back. Restoring the archive restores the host keys, so appliances
+# keep cloning.
+kubectl -n acs-cymru scale deploy/gitea --replicas=0
+kubectl -n acs-cymru apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: { name: forge-restore }
+spec:
+  restartPolicy: Never
+  containers: [{ name: sh, image: alpine, command: [sleep, "3600"], volumeMounts: [{ name: data, mountPath: /data }] }]
+  volumes: [{ name: data, persistentVolumeClaim: { claimName: acs-cymru-gitea } }]
+EOF
+kubectl -n acs-cymru wait --for=condition=Ready pod/forge-restore
+kubectl -n acs-cymru cp ./backups/<stamp>/forge-<stamp>.tar.gz forge-restore:/tmp/forge.tar.gz
+kubectl -n acs-cymru exec forge-restore -- sh -c 'rm -rf /data/* && tar -xzf /tmp/forge.tar.gz -C /data'
+kubectl -n acs-cymru delete pod forge-restore
+kubectl -n acs-cymru scale deploy/gitea --replicas=1
 ```
-
-On Kubernetes the same files are under `/backups/<stamp>` on the backup PVC, with `.dump` files by
-default (`backupService.format`), restored with `pg_restore` as the cluster runbook shows.
 
 **Not yet rehearsed.** The service's backups have been taken and their digests checked; no restore
 has yet run from one, and the weekly CI rehearsal still restores the CronJob's files. That is the
@@ -3093,9 +3100,9 @@ at the end of this section applies to these backups as much as to any.
 
 ### Tier 2: infrastructure snapshots
 
-For the Kubernetes target — CSI `VolumeSnapshot`, Velero, and the storage-PVC gap — see
-[`../deploy/k8s/README.md`](../deploy/k8s/README.md#backups). For an on-prem edge appliance running
-Compose on a VM, the recommended pattern is **Proxmox VE + Proxmox Backup Server**:
+For the cluster — CSI `VolumeSnapshot`, Velero, and the storage-PVC gap — see
+[`../deploy/k8s/README.md`](../deploy/k8s/README.md#backups). For a single-node k3s on a VM, the
+recommended pattern is **Proxmox VE + Proxmox Backup Server**:
 
 > **`qemu-guest-agent` must be running in the guest, and this is the whole invariant.** Proxmox
 > issues `fs-freeze` through the agent before it snapshots, which flushes and quiesces the

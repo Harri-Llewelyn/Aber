@@ -2512,7 +2512,7 @@ SELECT set_config('acs_cymru.nodered_admin_token', '', false);
 -- literal here would be rewritten back on every boot. Grafana needs both `client_uri` (the
 -- origin) and `redirect_uris` (origin + /login/generic_oauth), so the origin is passed and the
 -- callback derived. It is the address the browser reaches Grafana on. GF_SERVER_ROOT_URL is
--- built from the same GRAFANA_PUBLIC_URL in docker-compose.yml.
+-- built from the same value by the chart.
 \if :{?grafana_public_url}
 \else
 \set grafana_public_url ''
@@ -7555,13 +7555,12 @@ SELECT set_config('acs_cymru.nodered_redirect_uri',        :'nodered_redirect_ur
 -- Change this and settings.js has to change with it.
 DO $$
 DECLARE
-  -- Pinned, not generated. settings.js carries this as NODERED_OAUTH_CLIENT_ID (defaulted in
-  -- docker-compose.yml), and a fresh UUID on every stack rebuild would silently break the
+  -- Pinned, not generated. settings.js carries this as NODERED_OAUTH_CLIENT_ID, and a fresh UUID on every stack rebuild would silently break the
   -- integration. Same reasoning as the Grafana client id and the pinned virtual gateway.
   -- Deliberately the next value after Grafana's ...0001.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000002';
   v_secret    TEXT := current_setting('acs_cymru.nodered_oauth_client_secret', true);
-  -- Derived from NODERED_PUBLIC_URL by docker-compose, so this row and the callbackURL settings.js
+  -- Derived from NODERED_PUBLIC_URL by the chart, so this row and the callbackURL settings.js
   -- hands passport-oauth2 come from one value; they must agree exactly or /oauth/authorize
   -- answers "invalid redirect_uri". /auth/strategy/callback is Node-RED's own fixed route.
   v_redirect  TEXT := COALESCE(

@@ -73,7 +73,7 @@ SUPABASE_INGESTION_KEY = os.getenv("SUPABASE_INGESTION_KEY", "")
 # can move one consumer at a time.
 SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
 
-# Liveness heartbeat, opt-in. Compose sets no healthcheck; the chart sets the file and probes its
+# Liveness heartbeat, opt-in: the chart sets the file and probes its
 # age. Written on a timer gated on client.is_connected(), not per message, so a quiet shopfloor
 # does not read as a dead daemon.
 INGESTION_HEALTH_FILE = os.getenv("INGESTION_HEALTH_FILE", "")
@@ -119,8 +119,7 @@ TELEMETRY_QUEUE_MAX_MESSAGES = int(os.getenv("TELEMETRY_QUEUE_MAX_MESSAGES", "10
 TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS = float(os.getenv("TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS", "5"))
 # Messages per transaction, at most.
 TELEMETRY_BATCH_MAX_MESSAGES = int(os.getenv("TELEMETRY_BATCH_MAX_MESSAGES", "500"))
-# How long a SIGTERM waits for the queue to drain. Inside the grace period both targets give a
-# container (10s on Compose, 30s on Kubernetes).
+# How long a SIGTERM waits for the queue to drain. Inside the pod's termination grace period.
 TELEMETRY_SHUTDOWN_DRAIN_SECONDS = float(os.getenv("TELEMETRY_SHUTDOWN_DRAIN_SECONDS", "8"))
 
 # Seconds between directory refresh passes (see refresh_directory_caches). 0 disables the thread
@@ -2897,7 +2896,7 @@ def configure_mqtt_tls(client):
 def start_health_heartbeat(client):
     """
     Touch INGESTION_HEALTH_FILE every INGESTION_HEALTH_INTERVAL seconds while the MQTT connection
-    is up. No-op when the variable is unset (the Compose default).
+    is up. No-op when the variable is unset.
 
     A daemon thread, forgiving of write errors: a full filesystem should stop the heartbeat, not
     the daemon.
@@ -3062,8 +3061,8 @@ def start_startup_healer(supabase=None, check_privileges=False, reconcile_captur
     """
     Retry, off the message path, the startup work a dependency that was not up yet prevented.
 
-    `depends_on` orders `docker compose up` and nothing else; Docker restarts `restart: always`
-    containers in its own order. Two startup steps depend on a database being up, with different
+    A node coming back brings pods up in the kubelet's order, not the dependency graph's. Two
+    startup steps depend on a database being up, with different
     dependencies: the historian connection (which `acs_ingestion_db_connected` reads) and
     capture_worker.reconcile() (Supabase). Each is retried until it succeeds.
 

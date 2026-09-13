@@ -41,7 +41,7 @@ set -euo pipefail
 NS="${NS:-acs-cymru}"
 FIXTURES="${FIXTURES:-$(cd "$(dirname "$0")/../test-harness/restore-rehearsal" && pwd)}"
 
-# Local ports for the tunnels. Deliberately not 54322/5433: those are what docker-compose publishes,
+# Local ports for the tunnels. Deliberately not 54322/5433: those are the dev loop's forwards,
 # and a rehearsal that silently reached a developer's live stack instead of the cluster is the one
 # mistake here that would be genuinely expensive.
 SB_PORT="${SB_PORT:-54399}"
@@ -171,7 +171,7 @@ cmd_backup() {
   # THE STORAGE OBJECTS COME OUT FIRST, and by hand. backup-databases.sh in direct mode refuses to
   # archive storage without STORAGE_HOST_PATH -- correctly, since the objects live on a volume it
   # has no way to reach over a database connection. Copying them to the runner first is what gives
-  # it that path, and keeps the artefact identical in shape to the one Compose produces.
+  # it that path, and keeps the artefact identical in shape to the one backup-databases.sh produces.
   local pod host_copy
   pod="$(storage_pod)"
   host_copy="$dir/.storage-objects"
@@ -181,7 +181,7 @@ cmd_backup() {
   # on whether the directory itself or its contents land at the destination, which decides whether
   # the objects come back at /var/lib/storage/... or at /var/lib/storage/storage/... -- a nesting
   # mistake that restores "successfully" and leaves every model URL dead. `tar -C <dir> .` says
-  # which one it means, and it is the same shape backup-databases.sh uses for Compose.
+  # which one it means, and it is the same shape backup-databases.sh uses.
   kubectl -n "$NS" exec "$pod" -- tar -czf - -C /var/lib/storage . | tar -xzf - -C "$host_copy"
 
   BACKUP_MODE=direct \
