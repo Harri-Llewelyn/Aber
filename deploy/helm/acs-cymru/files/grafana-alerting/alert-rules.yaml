@@ -1199,8 +1199,8 @@ groups:
   # ===============================================================================================
   # THE HOST. The databases, the metrics store and the log store share one volume, and a full
   # disk stops all of them at once: Postgres refuses writes, Prometheus refuses samples, Loki
-  # refuses lines. `node_filesystem_*` comes from the node_exporter collectors, whichever
-  # process runs them (node-exporter on Compose, Alloy's prometheus.exporter.unix on Kubernetes).
+  # refuses lines. `node_filesystem_*` comes from the node_exporter collectors, which Alloy's
+  # prometheus.exporter.unix runs.
   # ===============================================================================================
   - orgId: 1
     name: Host
@@ -1267,6 +1267,318 @@ groups:
                 - evaluator:
                     type: lt
                     params: [0.15]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+
+  # ===============================================================================================
+  # THE CLUSTER. What the kubelet and cAdvisor report about the node and the pods on it, scraped
+  # by Alloy (observability.alloy.kubeletMetrics). Every rule here is per node, per container or
+  # per claim, and reads Prometheus. noDataState is OK throughout: a deployment that scrapes no
+  # kubelet has no series here and that is not a condition.
+  # ===============================================================================================
+  - orgId: 1
+    name: Cluster
+    folder: ACS-Cymru - Platform Infrastructure
+    interval: 1m
+    rules:
+
+      # -------------------------------------------------------------------------------------------
+      # Working set against the container's memory limit. Past 100% the kernel kills the process
+      # and the kubelet restarts the container: an OOMKilled restart, with the daemon's queue and
+      # the broker's session gone with it. Ten minutes at 90%: a checkpoint or a compaction peaks
+      # and falls back; a leak does not.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-cluster-container-memory
+        title: Container Near Memory Limit
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }} is at
+            {{ humanizePercentage $values.B }} of its memory limit. Past it the kernel kills the
+            process and the kubelet restarts the container. Raise the limit in the chart's
+            resources for that workload, or find the growth.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                max by (namespace, pod, container) (
+                  container_memory_working_set_bytes{container!=""}
+                  / on (namespace, pod, container)
+                  (container_spec_memory_limit_bytes{container!=""} > 0)
+                )
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.9]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # Starts of one container in an hour, counted as changes of its start time (the cgroup and
+      # runtime ids are dropped at collection, so a restart is a new value on one series). A
+      # rollout is one; a crash loop is many, with the kubelet's back-off spacing them out.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-cluster-container-restarting
+        title: Container Restarting
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }} has
+            started {{ $values.B }} times in the last hour. The previous instance's last lines:
+            kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c {{ $labels.container }} --previous
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                sum by (namespace, pod, container) (
+                  changes(container_start_time_seconds{container!=""}[1h])
+                )
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # Used against capacity per PersistentVolumeClaim, as the kubelet measures the mounted
+      # filesystem. On local-path every claim reports the node disk as its capacity and this
+      # tracks Host Disk Filling; on a provisioner that sizes volumes it is the per-claim figure,
+      # and a full claim stops one store while the node still has room.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-cluster-volume-filling
+        title: Volume Filling
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            Claim {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is
+            {{ humanizePercentage $values.B }} full. The store on it stops when it is; grow the
+            claim (the storage class must allow expansion), shorten that store's retention, or
+            prune what it holds.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                max by (namespace, persistentvolumeclaim) (
+                  kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes
+                )
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.85]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # MemAvailable against MemTotal per node. Below the kubelet's eviction threshold it evicts
+      # pods by priority, and everything here has the same priority; below the kernel's it OOM
+      # kills. Ten minutes under 10%: page cache is reclaimed first and that alone dips it.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-cluster-node-memory
+        title: Node Memory Pressure
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            Node {{ $labels.instance }} has {{ humanizePercentage $values.B }} of its memory
+            available. The kubelet evicts pods below its threshold and the kernel kills below
+            its own. Lower the memory requests and limits of the stores, or give the node memory.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                min by (instance) (
+                  node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes
+                )
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [0.1]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # Non-idle share of the node's cores, fifteen minutes above 90%. Nothing fails at full
+      # CPU; everything slows, and the first thing to slow is the ingestion writer, whose own
+      # rule fires next. This one says why.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-cluster-node-cpu
+        title: Node CPU Saturated
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            Node {{ $labels.instance }} has been {{ humanizePercentage $values.B }} busy for
+            fifteen minutes. The Cluster dashboard's CPU by Pod panel says which workload;
+            the historian's continuous aggregates and Loki's compaction are the usual ones.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.9]
               datasource:
                 type: __expr__
                 uid: __expr__

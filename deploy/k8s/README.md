@@ -1059,6 +1059,18 @@ Retention is thirty days in both stores. Nothing to enable; nothing to install f
 | `mosquitto` | 9234 | `/metrics` | `mosquitto.metrics.enabled` (the exporter sidecar) |
 | `prometheus`, `loki`, `alloy` | 9090, 3100, 12345 | `/metrics` | nothing |
 
+**The node's kubelet is scraped as well** (`observability.alloy.kubeletMetrics`, default on): its
+own metrics and cAdvisor's, over its TLS port with the DaemonSet's ServiceAccount token, cut down
+to the series the **Cluster** dashboard and the Cluster alert group read: CPU, working set, network,
+start times and OOM kills per container, running pods, and used and capacity bytes per
+PersistentVolumeClaim. The five rules are Container Near Memory Limit, Container Restarting, Volume
+Filling, Node Memory Pressure and Node CPU Saturated. **There is no kube-state-metrics** and no
+object inventory in Grafana: what is Pending, why a Job failed and what an event said are questions
+for `kubectl` or Headlamp, not for a second metrics service. Two measured limits: on local-path
+every claim reports the node disk as its capacity, so Volume Fill tracks Root Disk Used; and on k3d
+the root filesystem is an overlay the exporter excludes, so Root Disk Used is blank there. Under
+`networkPolicy.enabled` the edge is `networkPolicy.kubeletCidr` on port 10250.
+
 - **Under `networkPolicy.enabled` the edges are generated**, Alloy to each target above and to the
   two stores, Grafana to the stores, and Alloy to the API server on `networkPolicy.apiServerCidr`.
   An empty `apiServerCidr` leaves Alloy unable to discover anything: the DaemonSet is healthy, the

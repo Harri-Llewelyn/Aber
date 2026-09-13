@@ -356,10 +356,10 @@ class MultilineTestCase(unittest.TestCase):
 
     def test_a_python_traceback_arrives_as_one_entry(self):
         """
-        Docker emits one log entry PER LINE, so an eight-line traceback becomes eight unrelated
-        records -- each one useless, and the one naming the exception separated from the one
-        naming the code. `alloy/config.alloy` rejoins them on a line that starts with neither a
-        timestamp nor a `{`.
+        The runtime emits one log entry PER LINE, so an eight-line traceback becomes eight
+        unrelated records -- each one useless, and the one naming the exception separated from
+        the one naming the code. The collector (the chart's obs/alloy.yaml) rejoins them on a line
+        that starts with neither a timestamp nor a `{`.
 
         ASSERTED AGAINST WHATEVER TRACEBACKS THE STACK HAS, rather than by provoking one. Making
         a daemon throw on demand means either shipping a fault injection path or restarting a

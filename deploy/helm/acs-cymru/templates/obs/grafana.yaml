@@ -7,6 +7,12 @@
 {{- if or (not $ini) (not $dsTemplate) }}
 {{- fail "\n\nacs-cymru: files/grafana/grafana.ini and/or files/grafana-datasources/datasources.template.yml are missing.\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nWithout grafana.ini there is no [auth.generic_oauth] block, so Grafana comes up with SSO simply\nabsent -- local admin login still works, which is why this fails the render instead of being left\nto be noticed later.\n" }}
 {{- end }}
+{{- /* The alerting directory is rendered once, at pod start, by the initContainer below; the
+       pod must roll for a changed rule, policy or contact point to be read. */ -}}
+{{- $alerting := "" -}}
+{{- range $path, $bytes := .Files.Glob "files/grafana-alerting/*.yaml" }}
+{{- $alerting = printf "%s%s" $alerting ($.Files.Get $path) }}
+{{- end }}
 {{- $supabasePublic := include "acs-cymru.supabaseUrl" . -}}
 {{- $grafanaPublic := include "acs-cymru.grafanaUrl" . -}}
 ---
@@ -148,9 +154,10 @@ spec:
       labels:
         {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
       annotations:
-        # Grafana reloads provisioning on a schedule but reads grafana.ini once at start, so a
-        # change to the OAuth block needs a restart.
-        checksum/config: {{ printf "%s%s" $ini $dsTemplate | sha256sum }}
+        # Grafana reads grafana.ini once at start, and the alerting directory is rendered once
+        # at start, so a change to either rolls the pod. Dashboards are mounted from their
+        # ConfigMap and re-read on the provider's schedule, so they are not in this sum.
+        checksum/config: {{ printf "%s%s%s" $ini $dsTemplate $alerting | sha256sum }}
         # Grafana serves /metrics on its normal port, unauthenticated.
         {{- include "acs-cymru.scrapeAnnotations" (dict "port" 3000 "path" "/metrics") | nindent 8 }}
     spec:
