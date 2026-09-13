@@ -35,9 +35,7 @@ export const RUNTIME_SETTING_NAMES = [
   'VITE_GITEA_URL',
   // The bucket names, settings for the same reason the URLs are: scripts/storage-init.mjs,
   // values.yaml and storage-policies.sql both read them from the environment, and a
-  // literal here was the one consumer a rename left behind. The browser no longer reads the
-  // `gateway-backups` bucket; retiring it is one change (docs/roadmap.md, "Retiring the
-  // flow-backup bucket").
+  // literal here was the one consumer a rename left behind.
   'VITE_MODEL_3D_BUCKET',
   'VITE_CAPTURE_BUCKET',
 ];

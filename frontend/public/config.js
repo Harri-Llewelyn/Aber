@@ -39,8 +39,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   VITE_GITEA_URL: '',
   // Storage buckets, as named by scripts/storage-init.mjs (STORAGE_BUCKET and CAPTURE_BUCKET).
   // Blank falls through to the defaults in src/api.js, which are the same two names -- so a
-  // deployment only sets these if it renamed a bucket. `gateway-backups` is no longer among them:
-  // the browser stopped reading that bucket when flow backups became flow proposals.
+  // deployment only sets these if it renamed a bucket.
   VITE_MODEL_3D_BUCKET: '',
   VITE_CAPTURE_BUCKET: '',
 };

@@ -494,10 +494,6 @@ supabaseStorage:
   modelFileSizeLimit: 52428800
   # Bucket names must match supabase/storage-policies.sql: a bucket with no policies is
   # invisible to every browser role, and a policy naming an absent bucket is dead text.
-  # The private flow-backup bucket, keyed <sparkplug_id>/. Nothing in the browser writes to it
-  # any more; retiring it is docs/roadmap.md ("Retiring the flow-backup bucket").
-  gatewayBackupBucket: gateway-backups
-  gatewayBackupFileSizeLimit: 5242880
   # Broker captures, private, keyed <sparkplug_id>/ of the subject recorded.
   captureBucket: broker-captures
   # Must exceed the 50 MiB cap `capture_jobs` puts on a recording.

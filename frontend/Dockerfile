@@ -79,9 +79,6 @@ ARG VITE_GITEA_URL
 # is the ordinary case: src/api.js defaults to the same names those default to. They are build args
 # at all so a deployment that RENAMED a bucket can move the dashboard with everything else, rather
 # than leaving it reading the old name and 404ing on upload.
-#
-# VITE_GATEWAY_BACKUP_BUCKET was here and is gone with the flow-backup panel -- the browser no
-# longer reaches for `gateway-backups`, and roadmap 9 retires the bucket itself.
 ARG VITE_MODEL_3D_BUCKET
 # The version shown in the account menu (issue #57). UNLIKE EVERY OTHER ARG HERE, this one has no
 # runtime-config twin: a version is a property of this artefact, not of the environment it is

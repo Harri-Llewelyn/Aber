@@ -76,41 +76,13 @@ const MODEL_MIME_TYPES = [
 ];
 
 /**
- * A Node-RED flow export is JSON and nothing else.
- *
- * `text/plain` and `application/octet-stream` are here for the same reason they are in the list
- * above and NOT because anything else is allowed: a browser handing back a `.json` file picked from
- * disk reports its type inconsistently across platforms, and a File object built from a fetch of
- * Node-RED's admin API can arrive with an empty type. The uploader validates that the payload
- * PARSES as a Node-RED flow array before it is sent; this list is the coarse outer bound.
- */
-const FLOW_BACKUP_MIME_TYPES = [
-  'application/json',
-  'text/json',
-  'text/plain',
-  'application/octet-stream',
-];
-
-/**
- * 5 MiB for a flow backup.
- *
- * Deliberately NOT STORAGE_FILE_SIZE_LIMIT, which is sized for 3D geometry (50 MiB by default). A
- * `flows.json` that large is not a flow, and the limit is the cheapest place to say so -- an
- * appliance uploading its whole /data directory by mistake should fail at the bucket rather than
- * quietly fill the volume.
- */
-const FLOW_BACKUP_SIZE_LIMIT = Number.parseInt(
-  process.env.GATEWAY_BACKUP_FILE_SIZE_LIMIT || '5242880',
-  10,
-);
-
-/**
  * A broker capture is JSON and nothing else.
  *
- * Same list as the flow backups above, and for the same reason: a browser handing back a `.json`
- * picked from disk reports its type inconsistently across platforms. The uploader checks that the
- * payload IS a capture -- that it carries `acs_capture_version` and a `messages` array -- before it
- * is sent, so this list is the coarse outer bound rather than the check.
+ * `text/plain` and `application/octet-stream` are here for the same reason they are in the list
+ * above and NOT because anything else is allowed: a browser handing back a `.json` picked from
+ * disk reports its type inconsistently across platforms. The uploader checks that the payload IS
+ * a capture -- that it carries `acs_capture_version` and a `messages` array -- before it is sent,
+ * so this list is the coarse outer bound rather than the check.
  */
 const CAPTURE_MIME_TYPES = [
   'application/json',
@@ -126,9 +98,6 @@ const CAPTURE_MIME_TYPES = [
  * is a few hundred bytes of JSON, so an hour of a real shift is single-digit megabytes and a full
  * working day fits. What this refuses is a capture taken at the ingestion ceiling -- 240 msg/s --
  * running for far longer than anybody needs, which would otherwise quietly fill the volume.
- *
- * Deliberately not FLOW_BACKUP_SIZE_LIMIT: 5 MiB is right for a flow and would refuse an
- * ordinary morning's capture.
  *
  * ---------------------------------------------------------------------------------------------
  * RAISED FROM 25 MiB BY 0055, AND THE TWO NUMBERS HAVE TO BE READ TOGETHER.
@@ -199,25 +168,14 @@ const BUCKETS = [
     why: '3D models referenced by exported AAS shells',
   },
   {
-    id: process.env.GATEWAY_BACKUP_BUCKET || 'gateway-backups',
-    // PRIVATE, AND THIS IS THE SETTING THE WHOLE BUCKET TURNS ON. A flows.json describes the
-    // plant's edge topology, its broker addresses, its device ids and its processing logic.
-    // `public: true` here would put all of that at a guessable, unauthenticated URL -- and because
-    // storage-api serves public objects without consulting storage.objects RLS at all, the careful
-    // role split in supabase/storage-policies.sql would simply stop applying to reads. The
-    // reconcile step below re-asserts this on every boot, so a bucket flipped public by hand in
-    // Studio is corrected rather than left.
-    public: false,
-    file_size_limit: FLOW_BACKUP_SIZE_LIMIT,
-    allowed_mime_types: FLOW_BACKUP_MIME_TYPES,
-    why: 'Node-RED flow backups from gateway appliances, under <sparkplug_id>/',
-  },
-  {
     id: process.env.CAPTURE_BUCKET || 'broker-captures',
-    // PRIVATE, FOR THE SAME REASON THE ONE ABOVE IS, and the reason is stronger here rather than
-    // weaker. A capture is a recording of the plant's Sparkplug traffic: every edge node and device
-    // id that spoke during the window, every metric name they publish, and the values. A flows.json
-    // describes what the edge is configured to do; a capture shows what it actually did.
+    // PRIVATE, AND THIS IS THE SETTING THE WHOLE BUCKET TURNS ON. A capture is a recording of the
+    // plant's Sparkplug traffic: every edge node and device id that spoke during the window, every
+    // metric name they publish, and the values. `public: true` here would put all of that at a
+    // guessable, unauthenticated URL -- and because storage-api serves public objects without
+    // consulting storage.objects RLS at all, the role split in supabase/storage-policies.sql would
+    // simply stop applying to reads. The reconcile step below re-asserts this on every boot, so a
+    // bucket flipped public by hand in Studio is corrected rather than left.
     //
     // Note that a capture filed under one gateway's prefix can name OTHER gateways -- it records
     // whatever was on the wire. That is not a leak across the prefix rule: the roles that can read
@@ -231,8 +189,8 @@ const BUCKETS = [
   {
     id: process.env.TELEMETRY_ARCHIVE_BUCKET || 'telemetry-archive',
     // PRIVATE, AND THE ONE BUCKET WHERE PUBLIC WOULD BE UNRECOVERABLE RATHER THAN MERELY WRONG.
-    // The others hold copies: a flow backup and a capture both describe something that still
-    // exists. An object here is the ONLY remaining copy of a month of plant telemetry -- the raw
+    // The others hold copies: a capture describes traffic the plant produced and can produce
+    // again. An object here is the ONLY remaining copy of a month of plant telemetry -- the raw
     // chunk was dropped precisely because this was verified (timescaledb/cold_archive.sql). So a
     // guessable unauthenticated URL would expose the plant's entire operating history, and a
     // deletion here is not a lost backup, it is lost history.
@@ -306,7 +264,7 @@ async function ensureBucket(spec) {
 
   // Runs on the create path too. A bucket created by an older revision of this script -- or by
   // hand in Studio -- is brought up to the current settings rather than left as it was found.
-  // For gateway-backups this is what re-asserts `public: false` on every boot.
+  // For the private buckets this is what re-asserts `public: false` on every boot.
   const update = await fetch(`${STORAGE_URL}/bucket/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers,

@@ -77,22 +77,14 @@ spec:
                      storage-init's parseInt reads as 5 -- creating the bucket with a five-byte
                      limit. See the note in supabase/storage.yaml. */}}
               value: {{ .Values.supabaseStorage.modelFileSizeLimit | int64 | quote }}
-            - name: GATEWAY_BACKUP_BUCKET
-              value: {{ .Values.supabaseStorage.gatewayBackupBucket | quote }}
             - name: CAPTURE_BUCKET
               value: {{ .Values.supabaseStorage.captureBucket | quote }}
             - name: CAPTURE_FILE_SIZE_LIMIT
-              {{- /* int64 first, like both of its neighbours and for the same reason: `quote`
-                     alone renders 104857600 as "1.048576e+08", which parseInt reads as 1. The
-                     capture bucket arrived after the other two and did not get the treatment, so
-                     a 100 MiB bucket would have been created with a one-byte limit and every
-                     upload refused. Caught by "Verify No Rendered Value Uses Scientific
-                     Notation", which is the guard the other two comments were written for. */}}
+              {{- /* int64 first, like the model limit above and for the same reason: `quote`
+                     alone renders 104857600 as "1.048576e+08", which parseInt reads as 1, and a
+                     100 MiB bucket would be created with a one-byte limit and every upload
+                     refused. Caught by "Verify No Rendered Value Uses Scientific Notation". */}}
               value: {{ .Values.supabaseStorage.captureFileSizeLimit | int64 | quote }}
-            - name: GATEWAY_BACKUP_FILE_SIZE_LIMIT
-              {{- /* int64 first, for the same reason as the limit above -- `quote` alone renders
-                     5242880 as "5.24288e+06", which parseInt reads as 5. */}}
-              value: {{ .Values.supabaseStorage.gatewayBackupFileSizeLimit | int64 | quote }}
           command: ["node", "/app/storage-init.mjs"]
           volumeMounts:
             - name: script
