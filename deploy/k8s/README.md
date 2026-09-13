@@ -416,13 +416,14 @@ successful.
 
 #### In-cluster clients
 
-`mosquitto.tls.internalClients=true` moves the ingestion daemon and Node-RED onto 8883 as well. Off
-by default: they reach the broker over the pod network, which never leaves the cluster, so this is
-defence in depth rather than the exposure TLS was added for. The CA is projected into both pods
-**`ca.crt` only** — `mosquitto-tls` is a `kubernetes.io/tls` Secret and also holds the broker's
-private key, which neither client has any business holding.
+`mosquitto.tls.internalClients` moves every in-cluster client onto 8883 as well: the ingestion
+daemon, i3X, Node-RED, playback and the e2e validator. On by default once TLS is on, so the pod
+network carries no broker credential in clear either. One helper sets the host, port and CA path for
+all five, and one NetworkPolicy variable moves their edges, so none can be left behind on 1883. The
+CA is projected into each pod **`ca.crt` only** — `mosquitto-tls` is a `kubernetes.io/tls` Secret
+and also holds the broker's private key, which no client has any business holding.
 
-Both clients **fail closed**: if the CA is missing or unreadable they refuse to start rather than
+Every client **fails closed**: if the CA is missing or unreadable it refuses to start rather than
 fall back to plaintext or to unverified TLS.
 
 ---

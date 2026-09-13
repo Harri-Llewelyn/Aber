@@ -612,8 +612,10 @@ mosquitto:
   credentials:
     secretName: mosquitto-passwords
   # MQTTS on 8883. Off by default: needs cert-manager and a ClusterIssuer the chart cannot
-  # create (deploy/k8s/internal-ca.yaml). 1883 stays open when this is on: a fleet is converted
-  # gateway by gateway, then `external.plaintext: false`.
+  # create (deploy/k8s/internal-ca.yaml). With it on, every in-cluster client moves to 8883
+  # (`internalClients`) and 1883 stays published externally until the fleet has moved
+  # (`external.plaintext`); once both say so, 1883 binds to loopback and only the broker's own
+  # sidecars reach it.
   tls:
     enabled: false
     # How often the certificate-reload sidecar compares the projected certificate against the
@@ -638,9 +640,10 @@ mosquitto:
     #  - 10.20.0.50
     extraDnsSans: []
     #  - mqtt.plant.example.com
-    # Put the in-cluster clients (ingestion, i3X, Node-RED) on 8883 too. One switch for all
-    # three; all fail closed if the CA is unreadable.
-    internalClients: false
+    # The in-cluster clients (ingestion, i3X, Node-RED, playback, the e2e validator) on 8883 too.
+    # One switch for all of them, and the supported posture; each fails closed if the CA is
+    # unreadable. False keeps them on 1883 over the pod network.
+    internalClients: true
   # External exposure for shopfloor gateways. MQTT is raw TCP and cannot ride an HTTP Ingress.
   external:
     enabled: true

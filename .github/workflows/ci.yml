@@ -671,8 +671,8 @@ jobs:
           print("NetworkPolicies are symmetric and cover every load-bearing flow.")
           PY
 
-      # The same property with broker TLS on: `mosquitto.tls.internalClients` moves ingestion and
-      # Node-RED to 8883 and must move their edges too. A second render because the port is a
+      # The same property with broker TLS on: `mosquitto.tls.internalClients` moves every in-cluster
+      # client to 8883 and must move their edges too. A second render because the port is a
       # render-time choice.
       - name: Verify NetworkPolicies Follow The Broker Onto TLS
         run: |
@@ -708,7 +708,7 @@ jobs:
               errors.append(f"egress allowed but ingress missing: {flow[0]} -> {flow[1]}:{flow[2]}")
           for flow in sorted(ingress - egress):
               errors.append(f"ingress allowed but egress missing: {flow[0]} -> {flow[1]}:{flow[2]}")
-          for src in ('ingestion', 'node-red'):
+          for src in ('ingestion', 'node-red', 'i3x-service', 'e2e-validate'):
               if (src, 'mosquitto', 8883) not in egress:
                   errors.append(f"::error::{src} -> mosquitto:8883 missing with internalClients on")
               if (src, 'mosquitto', 1883) in egress:

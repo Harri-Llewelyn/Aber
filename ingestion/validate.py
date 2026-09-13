@@ -1,4 +1,5 @@
 import os
+import ssl
 import sys
 import time
 import json
@@ -42,6 +43,11 @@ SUPABASE_DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
+# The same transport contract as ingestion.py, i3x_service.py and node-red-init.mjs: the chart's
+# `mosquitto.tls.internalClients` sets all three names at once, and a CA file that is named but
+# absent refuses to start rather than verify against the system store.
+MQTT_TLS_ENABLED = os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -669,6 +675,20 @@ def run_simulation():
             "  Source the stack's .env before running, or generate one with: node scripts/setup.mjs"
         )
     client.username_pw_set(mqtt_user, mqtt_pass)
+
+    if MQTT_TLS_ENABLED:
+        if MQTT_TLS_CA_FILE and not os.path.isfile(MQTT_TLS_CA_FILE):
+            raise SystemExit(
+                f"MQTT_TLS_ENABLED is set and MQTT_TLS_CA_FILE={MQTT_TLS_CA_FILE} does not exist.\n"
+                "  The system trust store cannot verify the internal CA, so the handshake would\n"
+                "  fail with an error naming neither this setting nor the file."
+            )
+        client.tls_set(
+            ca_certs=MQTT_TLS_CA_FILE or None,
+            cert_reqs=ssl.CERT_REQUIRED,
+            tls_version=ssl.PROTOCOL_TLS_CLIENT,
+        )
+        client.tls_insecure_set(False)
 
     # Capture the daemon's own NCMD rebirth requests. Check 9 asserts one is issued for an unknown
     # alias and the second is suppressed, so the subscription has to be live before either.
@@ -1738,7 +1758,7 @@ if __name__ == "__main__":
     # it at its own pod. Supabase's own database is listed too, since only the cleanup path touches
     # it.
     print("Validation targets:")
-    print(f"  MQTT broker  : {MQTT_HOST}:{MQTT_PORT}")
+    print(f"  MQTT broker  : {MQTT_HOST}:{MQTT_PORT}{' (TLS)' if MQTT_TLS_ENABLED else ''}")
     print(f"  TimescaleDB  : {TIMESCALEDB_HOST}:{TIMESCALEDB_PORT}/{TIMESCALEDB_NAME}")
     print(f"  Supabase DB  : {SUPABASE_DB_HOST}:{SUPABASE_DB_PORT}/{SUPABASE_DB_NAME}")
     print(f"  Supabase API : {SUPABASE_URL}")

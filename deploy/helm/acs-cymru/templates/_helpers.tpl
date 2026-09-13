@@ -663,12 +663,14 @@ The URL is judged, not global.scheme: a publicUrls.* override carries its own sc
 {{- end -}}
 
 {{/*
-Broker client transport, shared by the ingestion daemon and Node-RED.
+Broker client transport, shared by the ingestion daemon, i3X, Node-RED, playback and the e2e
+validator.
 
-DEFINED ONCE because the two must agree. They read the SAME environment variable names --
-ingestion.py's `configure_mqtt_tls()` and node-red-init.mjs's transport reconciliation were written
-against one contract deliberately -- so a port set for one and not the other is a class of mistake
-worth making unrepresentable. Same reasoning as the NetworkPolicy edge list.
+DEFINED ONCE because they must agree. They read the SAME environment variable names --
+ingestion.py's `configure_mqtt_tls()`, i3x_service.py, playback_worker.py, validate.py and
+node-red-init.mjs's transport reconciliation were written against one contract deliberately -- so a
+port set for one and not another is a class of mistake worth making unrepresentable. Same reasoning
+as the NetworkPolicy edge list.
 */}}
 {{- define "acs-cymru.brokerClientEnv" -}}
 {{- $tls := .Values.mosquitto.tls -}}

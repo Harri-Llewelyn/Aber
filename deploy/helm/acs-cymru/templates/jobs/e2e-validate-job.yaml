@@ -210,10 +210,9 @@ spec:
             - name: SUPABASE_DB_PORT
               value: {{ include "acs-cymru.supabaseDb.port" . | quote }}
             {{- include "acs-cymru.secretEnv" (dict "name" "POSTGRES_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
-            - name: MQTT_HOST
-              value: mosquitto
-            - name: MQTT_PORT
-              value: "1883"
+            {{- /* The broker port and transport follow `mosquitto.tls.internalClients` with every
+                   other in-cluster client; the CA projection below is the same one. */}}
+            {{- include "acs-cymru.brokerClientEnv" . | nindent 12 }}
             {{- /*
               The validator connects AS AN ORDINARY GATEWAY, confined by its own broker role to its
               own edge-node subtree exactly as a physical one is. The username is the `sparkplug_id`
@@ -281,4 +280,12 @@ spec:
               value: "1"
           resources:
             {{- toYaml .Values.e2e.resources | nindent 12 }}
+          {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
+          volumeMounts:
+            {{- include "acs-cymru.brokerClientCaMount" . | nindent 12 }}
+          {{- end }}
+      {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
+      volumes:
+        {{- include "acs-cymru.brokerClientCaVolume" . | nindent 8 }}
+      {{- end }}
 {{- end }}
