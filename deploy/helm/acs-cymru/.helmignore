@@ -44,3 +44,8 @@ __pycache__/
 # is the only place the four optional hardening features are turned on together with the reasoning
 # for each, and `helm show values` renders values.yaml alone. Someone who pulled the chart from a
 # registry has no repository to read them from, which is precisely when they are worth the ~21 KB.
+
+# The example and dev values are passed by path (-f) and never read from inside the chart, so they
+# do not belong in the archive Helm stores with every release; that archive has a 1 MB ceiling.
+values-dev.yaml
+values-prod.yaml.example
