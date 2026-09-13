@@ -20,10 +20,10 @@ moves out, and the table below says where it went.
 **Ordering.** 1 and 2 are the platform's own: the one item somebody else sets the deadline for,
 then the rehearsal that turns the backup into a capability. 3–5 are the edge chain, in dependency
 order: 3 makes a gateway's flow reviewable, 4 makes the appliance a managed artefact and shares
-3's puller, 5 removes what 3 replaced. 6 runs under every other item. 7 reviews playback before
-the chain is folded, because a finding there may change the schema. 8 audits the documentation,
-code and comments once the code has stopped moving. 9 is last by rule: it folds the migration
-chain, so every entry that changes the schema must have landed before it.
+3's puller, 5 removes what 3 replaced. 6 reviews playback before the chain is folded, because a
+finding there may change the schema. 7 audits the documentation, code and comments once the code
+has stopped moving. 8 is last by rule: it folds the migration chain, so every entry that changes
+the schema must have landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -48,6 +48,7 @@ chain, so every entry that changes the schema must have landed before it.
 | Microsoft Entra ID sign-in | Not built, and not needed for 1.0: a could-have, reopened as [#183](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/183). Every decision the entry had taken is in the request |
 | Multi-factor authentication | Not built, and not needed for 1.0: a could-have, reopened as [#184](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/184). The `0069` role split it waited on has shipped; the rest is in the request |
 | Cells become work centers | Answered, not built: a cell is itself one of ISA-95's work center types, so the standard's name is given where the hierarchy is named rather than replacing the word. [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) records the decision; each page's help Summary names its ISA-95 level |
+| The transport between services | Built for the broker and both databases: [`deploy/k8s/README.md`](../deploy/k8s/README.md#mqtts-on-8883) (in-cluster clients on 8883 by default, 1883 withdrawing to loopback) and [`deploy/k8s/README.md`](../deploy/k8s/README.md#tls-to-the-databases) (`postgresTls`: `verify-full` everywhere, `hostssl`-only pg_hba, Realtime's tenant link as the one named exception). HTTP between the gateway and its upstreams stays plaintext: none of them terminates TLS itself, so that hop is a TLS sidecar per pod, which is a service mesh, and a service mesh is the complete answer. Answered, not built. Gateways hold no client certificate: the dynsec password and the pinned root already give identity, confinement and a revocation that disconnects |
 
 ---
 
@@ -374,53 +375,7 @@ backup now, so a deleted repository is recoverable from one for as long as the b
 
 ---
 
-## 6 · The transport between services
-
-**Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
-[`internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
-[`mosquitto-tls.conf`](../mosquitto/mosquitto-tls.conf) · `mosquitto.tls.internalClients` and
-`MQTT_TLS_ENABLED` · the DSN helper in `_helpers.tpl` ·
-[`datasources.template.yml`](../grafana/provisioning/datasources/datasources.template.yml)
-
-**Built:** default-deny NetworkPolicy from one edge list (opt-in), an internal CA outside the
-chart, TLS on the Ingress and the broker's 8883 listener, every in-cluster broker client on 8883 by
-default with plaintext 1883 withdrawing to loopback once the fleet has moved, per-gateway broker
-roles, the `apikey` gate, the database ports and the metrics endpoints on loopback, and no
-skip-verification setting anywhere.
-
-**The gap is what is on the wire.** NetworkPolicy answers *who*; the Postgres hops are plaintext,
-and neither database offers TLS at all: `sslmode=disable` on GoTrue's DSN, the PostgREST DSN the
-chart builds and both Grafana datasources, and every other client with no setting. Those links
-carry scoped credentials and every row.
-
-**Decided.** `verify-full`, not `require`: `require` verifies nothing, which is the
-skip-verification setting this entry forbids by another name. Every client stack in the chart can
-reach it (libpq, pgx, node-postgres, the Grafana datasource, `postgres_fdw`); a client that cannot
-is a named exception, not the fleet's ceiling. Enforced server-side too, `hostssl` only, so a
-client that forgets the setting is refused rather than silently plaintext. cert-manager is a
-prerequisite of the supported posture, as it already is for the broker; `tls.enabled=false` per
-subsystem is a no-TLS mode, never an unverified one. HTTP between the gateway and its upstreams
-stays plaintext for 1.0: none of them terminates TLS itself, so that hop is a TLS sidecar per pod,
-which is a service mesh, and a service mesh is the complete answer. It leaves as answered, not built.
-
-**The work.** One Certificate per database on the broker's pattern, SANs on the Service names and
-the reload sidecar; `ssl=on` and `hostssl`; then every client, including the `postgres_fdw` server
-options in the baseline migration and the dev loop's port-forward, whose `localhost` needs the
-`extraDnsSans` knob the broker has.
-
-**Client certificates on the gateway link** are not planned: 4 decides that a gateway holds no
-certificate, because the dynsec password and the pinned root already give identity, confinement and
-a revocation that disconnects, and `crlfile` revocation needs a reload.
-
-**Must not touch:** per-gateway broker confinement, the origin policy's single home in `envoy.yaml`, the root's
-residence outside the chart, and the absence of a skip-verification switch.
-
-**Done means:** every non-loopback Postgres backend shows TLS in `pg_stat_ssl`, both databases
-refuse plaintext at `pg_hba`, a `helm test` pins both, and the HTTP hops have a retired-table row.
-
----
-
-## 7 · The playback feature is reviewed end to end
+## 6 · The playback feature is reviewed end to end
 
 **Builds on:** [`playback_worker.py`](../ingestion/playback_worker.py) · [`capture.py`](../ingestion/capture.py) ·
 [`capture_worker.py`](../ingestion/capture_worker.py) · [`playback.yaml`](../deploy/helm/acs-cymru/templates/apps/playback.yaml) ·
@@ -461,7 +416,7 @@ a component entry; and the feature's README sections describe what is built.
 
 ---
 
-## 8 · The documentation, code and comments are audited against the codebase
+## 7 · The documentation, code and comments are audited against the codebase
 
 **Builds on:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) (the comment rule, and where argument and
 history go) · `scripts/check-docs-drift.mjs` · `scripts/check-mirror-drift.mjs` ·
@@ -476,9 +431,11 @@ lists; and the retired-entries table above, where an entry's substance lands whe
 replaced: Compose is gone, and "Compose", "both targets" and "the divergence table" survive across
 the tree outside the incident log. Comments that argue history where the rule wants the constraint:
 the Python suites, the rest of `ingestion.py`, the i3X server, the capture, playback and cold-archive
-modules, the broker and setup scripts, and the Helm templates. Rules and tests guarding what
-nothing renders, which the Site Map work found in the stylesheet. And claims the checker could
-verify but does not, which is how the other kinds return.
+modules, the broker and setup scripts, and the Helm templates, whose comment blocks ship in
+every release's Secret and have brought it within two percent of Helm's 1 MiB ceiling (a CI step
+estimates it; revision 19 on the dev cluster was refused on 2026-09-13). Rules and tests guarding
+what nothing renders, which the Site Map work found in the stylesheet. And claims the checker
+could verify but does not, which is how the other kinds return.
 
 **Decided.** One sweep per surface, not one pass over everything, and a surface is done when its
 non-comment lines are unchanged (AST minus docstrings for Python, data equality for YAML, stripped
@@ -498,7 +455,7 @@ method so the next one starts from it.
 
 ---
 
-## 9 · The migration chain folds back into the baseline
+## 8 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)
