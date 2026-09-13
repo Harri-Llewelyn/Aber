@@ -15,7 +15,7 @@ import {
   SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE,
   SOURCE_SIMULATED, groupDevicesByCell
 } from '../../utils/cellResolution'
-import { groundFloor, sortFloors, isPlaced, formatPlace, floorAspect } from '../../utils/floorPlans'
+import { groundFloor, sortFloors, isPlaced, formatPlace } from '../../utils/floorPlans'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { areaIconComponent } from '../../utils/areaIcon'
 import {
@@ -818,7 +818,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                     <div
                       className="site-map-stage"
                       ref={stageRef}
-                      style={{ '--map-fit-height': fitHeight ? `${fitHeight}px` : '72vh', '--map-zoom': zoom, '--plan-aspect': floorAspect(viewedFloor) }}
+                      style={{ '--map-fit-height': fitHeight ? `${fitHeight}px` : '72vh', '--map-zoom': zoom }}
                     >
                       <div className="site-map-stage-inner" style={{ width: `${zoom * 100}%` }}>
                         <FloorPlan floor={viewedFloor} title={`${viewedFloor.name} of ${viewedArea.area_name}`}>

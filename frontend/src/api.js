@@ -3,7 +3,7 @@ import { withActivityTracking } from './lib/apiActivity';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
-import { sortFloors, isSvgFile, svgAspectFromText, floorPlanPath, FLOOR_PLAN_MAX_BYTES } from './utils/floorPlans';
+import { sortFloors, isSvgFile, readSvgPlan, decodeSvgBytes, floorPlanPath, FLOOR_PLAN_MAX_BYTES } from './utils/floorPlans';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 import { DIGITAL_THREAD_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
@@ -2535,11 +2535,8 @@ const apiMethods = {
     if (file.size > FLOOR_PLAN_MAX_BYTES) {
       throw new Error(`"${file.name}" is larger than the ${Math.round(FLOOR_PLAN_MAX_BYTES / 1048576)} MiB limit for a floor plan.`);
     }
-    const text = await file.text();
-    const aspect = svgAspectFromText(text);
-    if (!aspect) {
-      throw new Error('The SVG states no size: give it a viewBox (or width and height) so places on it stay put.');
-    }
+    const { aspect, problem } = readSvgPlan(decodeSvgBytes(await file.arrayBuffer()));
+    if (problem) throw new Error(problem);
 
     const floorId = floor.floor_id ?? floor.id;
     const path = floorPlanPath({ area_id: floor.area_id, floor_id: floorId });

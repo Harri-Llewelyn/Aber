@@ -1935,8 +1935,12 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* The stage is as tall as the room below it, measured by the page, so the map fits without the
    page scrolling; past zoom 1 the plan outgrows it and scrolls inside. The plan is as wide as the
-   stage or as wide as its height allows at the floor's aspect, whichever is less, and centred. */
+   stage or as wide as its height allows at the floor's aspect, whichever is less, and centred.
+   Neither side is drawn shorter than --plan-min-side: a corridor or a tower section would
+   otherwise be a strip narrower than a pin, so it grows and scrolls instead. `--plan-aspect` is
+   set by FloorPlan on the plan itself. */
 .site-map-stage {
+  --plan-min-side: 240px;
   overflow: auto;
   max-height: calc(var(--map-fit-height, 72vh) * var(--map-zoom, 1));
   overscroll-behavior: contain;
@@ -1945,7 +1949,22 @@ tbody tr:hover { background: var(--bg-glass); }
 .site-map-stage-inner { min-width: 100%; }
 
 .site-map-stage .floor-plan {
-  width: min(100%, calc(var(--map-fit-height, 72vh) * var(--map-zoom, 1) * var(--plan-aspect, 1.3333)));
+  width: max(
+    min(100%, calc(var(--map-fit-height, 72vh) * var(--map-zoom, 1) * var(--plan-aspect, 1.3333))),
+    var(--plan-min-side),
+    calc(var(--plan-min-side) * var(--plan-aspect, 1.3333))
+  );
+  margin: 0 auto;
+}
+
+/* A thumbnail is at most --thumb-max-height tall: a tall plan is a narrow column in its card
+   rather than a card the height of the page. */
+.area-thumb {
+  --thumb-max-height: 260px;
+}
+
+.area-thumb .floor-plan {
+  width: min(100%, calc(var(--thumb-max-height) * var(--plan-aspect, 1.3333)));
   margin: 0 auto;
 }
 
