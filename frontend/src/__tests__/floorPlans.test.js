@@ -12,6 +12,8 @@ import {
   formatPlace,
   isSvgFile,
   svgAspectFromText,
+  readSvgPlan,
+  decodeSvgBytes,
   floorPlanPath,
   nextLevel
 } from '../utils/floorPlans';
@@ -114,15 +116,50 @@ describe('plan files', () => {
     expect(isSvgFile(null)).toBe(false);
   });
 
+  const NS = 'xmlns="http://www.w3.org/2000/svg"';
+
   it('reads the aspect from the viewBox first, then width and height, else refuses', () => {
     // Rounded to four places: the column is numeric(8,4).
-    expect(svgAspectFromText('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><rect/></svg>')).toBe(1.3333);
-    expect(svgAspectFromText('<?xml version="1.0"?><svg viewBox="0,0,300,600" width="10" height="10"/>')).toBe(0.5);
-    expect(svgAspectFromText('<svg width="1200px" height="400px"></svg>')).toBe(3);
+    expect(svgAspectFromText(`<svg ${NS} viewBox="0 0 800 600"><rect/></svg>`)).toBe(1.3333);
+    expect(svgAspectFromText(`<?xml version="1.0"?><svg ${NS} viewBox="0,0,300,600" width="10" height="10"/>`)).toBe(0.5);
+    expect(svgAspectFromText(`<svg ${NS} width="1200px" height="400px"></svg>`)).toBe(3);
+    expect(svgAspectFromText(`<svg ${NS} viewBox="0 0 1.2e3 9e2"/>`)).toBe(1.3333);
+    expect(svgAspectFromText(`<svg ${NS} viewBox="0,0,\n  800,\n  600"/>`)).toBe(1.3333);
     // Percent lengths say nothing about shape, and a plan with no stated size renders 300x150.
-    expect(svgAspectFromText('<svg width="100%" height="100%"></svg>')).toBeNull();
-    expect(svgAspectFromText('<svg></svg>')).toBeNull();
+    expect(readSvgPlan(`<svg ${NS} width="100%" height="100%"></svg>`).problem).toMatch(/states no size/);
+    expect(readSvgPlan(`<svg ${NS} style="width:800px;height:600px"></svg>`).problem).toMatch(/states no size/);
+    expect(svgAspectFromText(`<svg ${NS}></svg>`)).toBeNull();
     expect(svgAspectFromText('not svg at all')).toBeNull();
+    expect(svgAspectFromText('')).toBeNull();
+  });
+
+  it('reads the file the way a browser does, so what passes the check is what draws', () => {
+    // No namespace: well-formed XML that an <img> draws as nothing.
+    expect(readSvgPlan('<svg viewBox="0 0 800 600"><rect/></svg>').problem).toMatch(/not an SVG/);
+    // XML is case-sensitive: "viewbox" is ignored, and the size comes from width and height.
+    expect(readSvgPlan(`<svg ${NS} viewbox="0 0 800 600" width="1000" height="1000"/>`)).toEqual({ aspect: 1 });
+    // The root is the root, not the first "<svg" in the bytes.
+    expect(readSvgPlan(`<?xml version="1.0"?><!-- template: <svg viewBox="0 0 10 10"> --><svg ${NS} viewBox="0 0 800 600"/>`)).toEqual({ aspect: 1.3333 });
+    // Units are honoured: 1200mm by 80cm is 3:2, not 15:1.
+    expect(readSvgPlan(`<svg ${NS} width="1200mm" height="80cm"/>`)).toEqual({ aspect: 1.5 });
+    expect(readSvgPlan(`<svg ${NS} width="8.5in" height="792pt"/>`)).toEqual({ aspect: 0.7727 });
+    // A prefixed root is still an SVG root.
+    expect(readSvgPlan(`<svg:svg xmlns:svg="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><svg:rect/></svg:svg>`)).toEqual({ aspect: 1.3333 });
+    // Not well-formed: a browser shows a broken image.
+    expect(readSvgPlan(`<svg ${NS} viewBox="0 0 800 600"><rect><text>Goods & services</text></svg>`).problem).toMatch(/not well-formed/);
+  });
+
+  it('refuses proportions the column cannot hold, saying so', () => {
+    expect(readSvgPlan(`<svg ${NS} viewBox="0 0 20000 1"/>`).problem).toMatch(/proportions/);
+    expect(readSvgPlan(`<svg ${NS} viewBox="0 0 1 30000"/>`).problem).toMatch(/proportions/);
+    expect(readSvgPlan(`<svg ${NS} viewBox="0 0 9999 1"/>`)).toEqual({ aspect: 9999 });
+  });
+
+  it('decodes a plan by its byte-order mark', () => {
+    const svg = `<?xml version="1.0" encoding="UTF-16"?><svg ${NS} viewBox="0 0 800 600"/>`;
+    const utf16 = new Uint8Array([0xff, 0xfe, ...Array.from(svg).flatMap(ch => [ch.charCodeAt(0) & 0xff, ch.charCodeAt(0) >> 8])]);
+    expect(readSvgPlan(decodeSvgBytes(utf16.buffer))).toEqual({ aspect: 1.3333 });
+    expect(readSvgPlan(decodeSvgBytes(new TextEncoder().encode(`<svg ${NS} viewBox="0 0 300 600"/>`).buffer))).toEqual({ aspect: 0.5 });
   });
 
   it('files a plan under its area and floor, with a fresh name per upload', () => {

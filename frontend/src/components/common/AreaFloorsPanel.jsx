@@ -134,7 +134,7 @@ export function AreaFloorsPanel({ area, floors, cells, canManage, showToast, onC
           Floors
           <HelpTip
             label="About floors"
-            text="Every area has a ground floor (level 0); add floors above it and basements below. Each floor can carry an SVG plan, which the Site Map draws with the floor's cells pinned on it; without one it shows a plain outline. A floor holding cells cannot be deleted."
+            text="Every area has a ground floor (level 0); add floors above it and basements below. Each floor can carry an SVG plan, which the Site Map draws with the floor's cells pinned on it; without one it shows a plain outline. The SVG needs a viewBox (or a width and height) so places on it stay put, and a file a browser cannot draw is refused. A floor holding cells cannot be deleted."
             size={12}
           />
         </span>

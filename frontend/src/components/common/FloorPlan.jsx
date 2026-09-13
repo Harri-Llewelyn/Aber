@@ -30,6 +30,10 @@ export function FloorPlan({ floor, onPlaceClick, children, className = '', title
   const aspect = floorAspect(floor)
   const { url, error } = useFloorPlanUrl(floor)
   const hasPlan = !!floor?.plan_path
+  // The blob URL the browser refused to draw, if any: a file it cannot render fires error, not load.
+  const [undrawable, setUndrawable] = useState(null)
+  const broken = !!url && undrawable === url
+  const unavailable = error ? 'The plan could not be loaded' : broken ? 'The browser cannot draw this plan; replace it from the area\'s floors' : null
 
   const handleClick = (e) => {
     if (!onPlaceClick) return
@@ -42,16 +46,16 @@ export function FloorPlan({ floor, onPlaceClick, children, className = '', title
   return (
     <div
       className={`floor-plan${onPlaceClick ? ' floor-plan-interactive' : ''}${compact ? ' floor-plan-compact' : ''}${className ? ' ' + className : ''}`}
-      style={{ aspectRatio: String(aspect) }}
+      style={{ aspectRatio: String(aspect), '--plan-aspect': aspect }}
       onClick={handleClick}
       title={title}
       role={onPlaceClick ? 'button' : undefined}
-      data-plan={hasPlan ? 'uploaded' : 'outline'}
+      data-plan={hasPlan ? (unavailable ? 'unavailable' : 'uploaded') : 'outline'}
     >
-      {hasPlan && url ? (
-        <img className="floor-plan-image" src={url} alt="" draggable={false} />
+      {hasPlan && url && !broken ? (
+        <img className="floor-plan-image" src={url} alt="" draggable={false} onError={() => setUndrawable(url)} />
       ) : (
-        <DefaultOutline aspect={aspect} compact={compact} unavailable={hasPlan && !!error} />
+        <DefaultOutline aspect={aspect} compact={compact} unavailable={hasPlan ? unavailable : null} />
       )}
       {children}
     </div>
@@ -74,7 +78,7 @@ function DefaultOutline({ aspect, compact, unavailable }) {
       </svg>
       {!compact && (
         <span className="floor-plan-caption">
-          {unavailable ? 'The plan could not be loaded' : 'No plan uploaded — the default outline'}
+          {unavailable || 'No plan uploaded — the default outline'}
         </span>
       )}
     </>

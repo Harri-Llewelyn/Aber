@@ -290,7 +290,8 @@ describe('OverviewTab draws the areas on the Site Map', () => {
     expect(follows(side, stage)).toBe(true)
     // jsdom lays nothing out: every rect is at 0, so the room is the whole 768px window.
     expect(stage.style.getPropertyValue('--map-fit-height')).toBe('768px')
-    expect(stage.style.getPropertyValue('--plan-aspect')).toBe(String(4 / 3))
+    // The plan carries its own aspect for the stage's width rule.
+    expect(stage.querySelector('.floor-plan').style.getPropertyValue('--plan-aspect')).toBe(String(4 / 3))
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
     expect(stage.style.getPropertyValue('--map-zoom')).toBe('1.25')
   })

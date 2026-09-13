@@ -111,39 +111,74 @@ export function isSvgFile(file) {
   return /\.svg$/i.test(file.name || '') || file.type === 'image/svg+xml'
 }
 
+/** The bounds of `area_floors.plan_aspect`, numeric(8,4); a plan outside them is refused before the upload. */
+export const PLAN_ASPECT_MIN = 0.0001
+export const PLAN_ASPECT_MAX = 9999.9999
+
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+/** Absolute CSS units to px, as a browser sizes an SVG viewport. Relative units and percentages say nothing about shape. */
+const PX_PER_UNIT = { '': 1, px: 1, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6, pt: 96 / 72, pc: 16 }
+
+/** The text of an uploaded plan, decoded by its byte-order mark: an SVG saved as UTF-16 is still an SVG. */
+export function decodeSvgBytes(buffer) {
+  const bytes = new Uint8Array(buffer)
+  let encoding = 'utf-8'
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) encoding = 'utf-16le'
+  else if (bytes[0] === 0xfe && bytes[1] === 0xff) encoding = 'utf-16be'
+  return new TextDecoder(encoding).decode(buffer)
+}
+
 /**
- * Width over height from an SVG document's viewBox, or from its width and height attributes,
- * or null when the drawing states neither. Without one the browser renders 300x150 and every
- * place on the plan would move with the window, so such a file is refused at upload.
+ * What a browser will make of an SVG plan: `{ aspect }`, width over height, or `{ problem }`
+ * saying why the file is refused. The document is parsed as the browser parses it, so the check
+ * fails where the plan would: XML that is not well-formed is a broken image, a root outside the
+ * SVG namespace draws nothing, `viewBox` is case-sensitive, and the fallback to width and height
+ * honours their units. Without any stated size the browser renders 300x150 and every place on the
+ * plan would move with the window. The aspect is rounded to the column's four places.
  */
-export function svgAspectFromText(text) {
-  if (typeof text !== 'string') return null
-  const open = /<svg\b[^>]*>/i.exec(text)
-  if (!open) return null
-  const attrs = open[0]
-  const attr = (name) => {
-    const m = new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i').exec(attrs)
-    return m ? m[1].trim() : null
+export function readSvgPlan(text) {
+  if (typeof text !== 'string' || !text.trim()) return { problem: 'The file is empty.' }
+  const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
+  const root = doc.documentElement
+  if (!root || doc.getElementsByTagName('parsererror').length) {
+    return { problem: 'The file is not well-formed XML, so a browser cannot draw it.' }
   }
-  const viewBox = attr('viewBox')
+  if (root.namespaceURI !== SVG_NS || root.localName !== 'svg') {
+    return { problem: 'The root element is not an SVG (is xmlns="http://www.w3.org/2000/svg" on it?), so a browser draws nothing.' }
+  }
+  let aspect = null
+  const viewBox = root.getAttribute('viewBox')
   if (viewBox) {
-    const parts = viewBox.split(/[\s,]+/).map(Number)
-    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) return round(parts[2] / parts[3])
+    const parts = viewBox.trim().split(/[\s,]+/).map(Number)
+    if (parts.length === 4 && parts.every(Number.isFinite) && parts[2] > 0 && parts[3] > 0) aspect = parts[2] / parts[3]
   }
-  const width = parseLength(attr('width'))
-  const height = parseLength(attr('height'))
-  if (width > 0 && height > 0) return round(width / height)
-  return null
+  if (aspect === null) {
+    const width = parseLength(root.getAttribute('width'))
+    const height = parseLength(root.getAttribute('height'))
+    if (width > 0 && height > 0) aspect = width / height
+  }
+  if (aspect === null) {
+    return { problem: 'The SVG states no size: give it a viewBox (or width and height) so places on it stay put.' }
+  }
+  const rounded = Number(aspect.toFixed(4))
+  if (rounded < PLAN_ASPECT_MIN || rounded > PLAN_ASPECT_MAX) {
+    return { problem: `The plan's proportions (${Number(aspect.toPrecision(3))} wide for every 1 tall) are beyond what a floor can hold (${PLAN_ASPECT_MIN} to ${PLAN_ASPECT_MAX}).` }
+  }
+  return { aspect: rounded }
 }
 
+/** Width over height of an SVG plan, or null when it would be refused. */
+export function svgAspectFromText(text) {
+  return readSvgPlan(text).aspect ?? null
+}
+
+/** A length attribute in px, or null for a relative unit, a percentage, or no length at all. */
 function parseLength(value) {
-  if (!value || /%$/.test(value)) return null
-  const n = Number.parseFloat(value)
-  return Number.isFinite(n) ? n : null
-}
-
-function round(n) {
-  return Number(n.toFixed(4))
+  const m = /^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*([a-z%]*)\s*$/i.exec(value || '')
+  if (!m) return null
+  const perUnit = PX_PER_UNIT[m[2].toLowerCase()]
+  return perUnit === undefined ? null : Number(m[1]) * perUnit
 }
 
 /** Where a floor's plan is stored: one folder per floor, so the policy can name the floor. */
