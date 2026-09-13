@@ -71,11 +71,11 @@ spec:
         {{/*
           WAITS FOR THE MIGRATIONS, NOT FOR THE GATEWAY. This is a plain Job, so Kubernetes creates
           it at `helm install` time -- alongside every Deployment and MINUTES BEFORE the
-          post-install hooks that bootstrap the database. It previously waited only on Kong, and
+          post-install hooks that bootstrap the database. It previously waited only on the gateway, and
           that failed in CI in the most misleading way available:
 
-            * Kong answers as soon as it is up, long before PostgREST has a schema behind it;
-            * the probe was `curl -s -o /dev/null`, with NO `-f`, so the 502 Kong returns while its
+            * the gateway answers as soon as it is up, long before PostgREST has a schema behind it;
+            * the probe was `curl -s -o /dev/null`, with NO `-f`, so the 502 the gateway returns while its
               upstream is broken counted as SUCCESS.
 
           So the Job started ~3 minutes early, found `supabase-db` still refusing connections, and
@@ -115,20 +115,17 @@ spec:
              "describe" "db-init to finish the whole migration chain (public.schema_bootstrap.completed_at) — it is a post-install hook and runs AFTER this Job is created")
            | nindent 8 }}
         {{/*
-          Kong second, and with `-f` this time. validate.py reaches Supabase THROUGH the gateway, so
-          the database being ready is necessary but not sufficient. `-f` matters: without it any
-          response at all -- including the 502 Kong returns while its upstream is down -- satisfies
-          the probe, which is exactly how this check came to pass while proving nothing.
+          The gateway second, and with `-f` this time. validate.py reaches Supabase THROUGH the
+          gateway, so the database being ready is necessary but not sufficient. `-f` matters:
+          without it any response at all -- including the 502 the gateway returns while its
+          upstream is down -- satisfies the probe, which is exactly how this check came to pass
+          while proving nothing.
 
-          BOTH HEADERS ARE REQUIRED, AND THEY DO DIFFERENT JOBS. `apikey` is what Kong's key-auth
-          plugin checks; it is treated as an opaque registered string and does not reach PostgREST
-          as an identity. `Authorization: Bearer` is what PostgREST reads to switch database role.
-          With the apikey alone the request passes the gateway and then runs as `anon`, which holds
-          no SELECT on `devices` -- so it answers 401 forever and this probe times out after 600s
-          against a stack that is completely healthy. Measured against a running stack:
-          apikey only -> 401, apikey + bearer -> 200, neither -> 401.
+          The secret key alone: the gateway matches it as an opaque string and hands PostgREST the
+          service-role bearer, which holds SELECT on `devices`. Measured: no key -> 401, the
+          publishable key alone -> 401 (anon holds no SELECT there), the secret key -> 200.
         */}}
-        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" (printf "curl -sf -o /dev/null -H \"apikey: $SERVICE_ROLE_KEY\" -H \"Authorization: Bearer $SERVICE_ROLE_KEY\" '%s/rest/v1/devices?limit=1'" (include "acs-cymru.supabase.internalUrl" .)) "describe" "supabase-kong routing to PostgREST with a live schema" "env" (include "acs-cymru.secretEnv" (dict "name" "SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY"))) | nindent 8 }}
+        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" (printf "curl -sf -o /dev/null -H \"apikey: $SUPABASE_SECRET_KEY\" '%s/rest/v1/devices?limit=1'" (include "acs-cymru.supabase.internalUrl" .)) "describe" "the gateway routing to PostgREST with a live schema" "env" (include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SECRET_KEY" "secretName" $secretName "key" "SUPABASE_SECRET_KEY"))) | nindent 8 }}
         {{/*
           NODE-RED AND i3X TOO, because validate.py asserts against them directly -- checks 7/7b
           drive a real editor sign-in and 12-12f exercise the i3X address space.
@@ -233,11 +230,13 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_VALIDATOR_PASSWORD" "secretName" $secretName "key" "MQTT_VALIDATOR_PASSWORD") | nindent 12 }}
             - name: SUPABASE_URL
               value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
-            # WITHOUT THIS the script seeds nothing and fails about 12 of 20 checks in a way that
-            # reads like a schema fault ("no quarantined device reported", "no telemetry records"),
-            # with the real cause one line up in its own banner: "Service role key: MISSING".
+            # WITHOUT THE SECRET KEY the script seeds nothing and fails about 12 of 20 checks in a
+            # way that reads like a schema fault ("no quarantined device reported", "no telemetry
+            # records"), with the real cause one line up in its own banner: "Secret key: MISSING".
+            # The service-role JWT is read by one check only, which proves the gateway refuses it.
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SECRET_KEY" "secretName" $secretName "key" "SUPABASE_SECRET_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
-            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             # Check 7 probes all three Node-RED auth surfaces -- the editor, the /flows admin API and
             # the webhook receiver -- and it has to be an end-to-end check: the fix is a runtime
             # property of the assembled stack, and a settings.js securing only /flows would leave the

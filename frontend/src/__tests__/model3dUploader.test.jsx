@@ -25,7 +25,7 @@ vi.mock('../api', async () => {
 vi.mock('../lib/supabaseClient', () => ({
   supabase: { storage: { from: () => ({}) } },
   SUPABASE_URL: 'http://localhost:54321',
-  SUPABASE_ANON_KEY: 'anon'
+  SUPABASE_GATEWAY_KEY: 'anon'
 }))
 
 const DEVICE_ID = '20000000-0000-4000-8000-000000000002'

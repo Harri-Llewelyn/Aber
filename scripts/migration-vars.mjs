@@ -7,7 +7,7 @@
  * db-init passes these through `psql -v` on every run (supabase/db-init/Dockerfile's migration loop).
  * `0002` reads them with `\if :{?name}`, falls back to empty, and then WARNS RATHER THAN FAILING:
  *
- *     0038: GATEWAY_REVOKE_SECRET or SUPABASE_ANON_KEY is unset; credential revocation is INERT
+ *     0038: GATEWAY_REVOKE_SECRET or SUPABASE_PUBLISHABLE_KEY is unset; credential revocation is INERT
  *           on this stack. Archiving will not revoke, and the sweep will do nothing.
  *
  * A NOTICE, so the chain applies cleanly, every schema check passes, and the database is subtly

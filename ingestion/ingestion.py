@@ -62,16 +62,11 @@ MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 
-# Two keys with different jobs (see Machine Identities in supabase/README.md): the anon or
-# publishable key is the `apikey` the gateway's filter admits; the ingestion token is the bearer
-# that names Service_Ingestor, whose writes all go through SECURITY DEFINER gates.
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+# Two keys with different jobs (see Machine Identities in supabase/README.md): the publishable
+# key is the `apikey` the gateway's filter admits; the ingestion token is the bearer that names
+# Service_Ingestor, whose writes all go through SECURITY DEFINER gates.
+SUPABASE_GATEWAY_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SUPABASE_INGESTION_KEY = os.getenv("SUPABASE_INGESTION_KEY", "")
-
-# The gateway accepts both key formats; the publishable key is preferred when present so installs
-# can move one consumer at a time.
-SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
 
 # Liveness heartbeat, opt-in: the chart sets the file and probes its
 # age. Written on a timer gated on client.is_connected(), not per message, so a quiet shopfloor
@@ -163,7 +158,7 @@ try:
         supabase_client = create_client(SUPABASE_URL, SUPABASE_GATEWAY_KEY)
         try:
             # `.auth()`, not a session header: supabase-py re-derives Authorization from the client's
-            # token on every request, so a header set by hand is silently replaced by the anon key.
+            # token on every request, so a header set by hand is silently replaced by the gateway key.
             # The apikey stays the gateway key; the bearer is what resolves auth.uid() to Service_Ingestor.
             supabase_client.postgrest.auth(SUPABASE_INGESTION_KEY)
             supabase_client.postgrest.session.headers["X-ACS-Cymru-Actor"] = "ingestion"
@@ -176,8 +171,7 @@ try:
         logger.info("Supabase client initialized successfully.")
     else:
         logger.warning(
-            "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY/SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY "
-            "missing. Supabase "
+            "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY or SUPABASE_INGESTION_KEY missing. Supabase "
             "integration disabled. SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY -- "
             "see Machine Identities in supabase/README.md; the chart sets it from secrets.ingestionKey."
         )
@@ -3174,7 +3168,7 @@ def main():
     if supabase_client is None:
         logger.critical(
             "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL, "
-            "SUPABASE_PUBLISHABLE_KEY/SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY missing or invalid. "
+            "SUPABASE_PUBLISHABLE_KEY or SUPABASE_INGESTION_KEY missing or invalid. "
             "SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY here (see Machine Identities in supabase/README.md); a "
             "values file predating that change has no such key -- npm run setup mints it "
             "(secrets.ingestionKey). "

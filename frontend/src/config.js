@@ -18,10 +18,7 @@ const RUNTIME_CONFIG_GLOBAL = '__ACS_CYMRU_CONFIG__';
  */
 export const RUNTIME_SETTING_NAMES = [
   'VITE_SUPABASE_URL',
-  'VITE_SUPABASE_ANON_KEY',
-  // The replacement for the key above, and OPTIONAL where that one is required. Supabase
-  // deprecates the anon JWT by the end of 2026; the gateway accepts both formats at once, so a
-  // deployment that has not minted the new pair leaves this empty and keeps working.
+  // The key the browser presents at the gateway; public by construction.
   'VITE_SUPABASE_PUBLISHABLE_KEY',
   'VITE_ENABLE_REALTIME',
   'VITE_GITHUB_REPO_URL',
@@ -47,7 +44,6 @@ export const RUNTIME_SETTING_NAMES = [
  */
 const BUILD_TIME_SETTINGS = {
   VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
-  VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY,
   VITE_SUPABASE_PUBLISHABLE_KEY: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
   VITE_ENABLE_REALTIME: import.meta.env.VITE_ENABLE_REALTIME,
   VITE_GITHUB_REPO_URL: import.meta.env.VITE_GITHUB_REPO_URL,
@@ -98,8 +94,9 @@ export const readFlag = (name, fallback = false) => {
 };
 
 /**
- * The Supabase origin and anon key. These throw when unresolvable rather than defaulting: the
- * dashboard cannot function without them and should say so once. The message names both sources.
+ * The Supabase origin and publishable key. These throw when unresolvable rather than defaulting:
+ * the dashboard cannot function without them and should say so once. The message names both
+ * sources.
  */
 function required(name) {
   const value = readSetting(name);
@@ -113,14 +110,9 @@ function required(name) {
 }
 
 export const SUPABASE_URL = required('VITE_SUPABASE_URL');
-export const SUPABASE_ANON_KEY = required('VITE_SUPABASE_ANON_KEY');
-
 /**
- * The key the browser presents: the publishable format where this deployment has one, the legacy
- * anon key where it does not. Not `required()`: both formats are accepted by the gateway at once
- * so consumers move one at a time. `supabase-js` sends this as the bearer as well as the apikey
- * when there is no session, which is safe for an opaque key because the gateway synthesises the
- * JWT the upstreams need (docs/gateway-migration.md).
+ * The key the browser presents. `supabase-js` sends it as the bearer as well as the apikey when
+ * there is no session, which is safe for an opaque key because the gateway synthesises the JWT
+ * the upstreams need (docs/gateway.md).
  */
-export const SUPABASE_GATEWAY_KEY =
-  readSetting('VITE_SUPABASE_PUBLISHABLE_KEY') || SUPABASE_ANON_KEY;
+export const SUPABASE_GATEWAY_KEY = required('VITE_SUPABASE_PUBLISHABLE_KEY');

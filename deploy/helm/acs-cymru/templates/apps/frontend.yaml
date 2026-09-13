@@ -13,9 +13,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // The gateway as the BROWSER reaches it -- never http://supabase-kong:8000, which resolves
   // inside the cluster and for nothing outside it.
   VITE_SUPABASE_URL: %q,
-  VITE_SUPABASE_ANON_KEY: %q,
-  // The format replacing the key above. src/config.js prefers it and falls back to the anon key,
-  // so an install that has not minted the pair renders this empty and behaves as it always did.
+  // The key the browser presents at the gateway; public by construction.
   VITE_SUPABASE_PUBLISHABLE_KEY: %q,
   VITE_ENABLE_REALTIME: %q,
   VITE_GITHUB_REPO_URL: %q,
@@ -55,8 +53,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
 };
 `
   (include "acs-cymru.supabaseUrl" .)
-  .Values.secrets.anonKey
-  (.Values.secrets.publishableKey | default "")
+  .Values.secrets.publishableKey
   (.Values.frontend.enableRealtime | toString)
   .Values.frontend.githubRepoUrl
   (include "acs-cymru.grafanaUrl" .)
@@ -124,7 +121,7 @@ metadata:
 spec:
   # THE ONE COMPONENT HERE THAT SCALES FREELY: NGINX serving static files, no state, no upstream
   # connection pool, nothing per-instance. Default 2 for availability during a rollout; the first
-  # HPA candidate alongside Kong and PostgREST.
+  # HPA candidate alongside the gateway and PostgREST.
   replicas: {{ .Values.frontend.replicas }}
   strategy:
     type: RollingUpdate

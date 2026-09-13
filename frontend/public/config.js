@@ -18,10 +18,9 @@
  * the two drift.
  */
 window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
-  // Supabase API gateway (Kong) as the BROWSER reaches it -- never the in-cluster address.
+  // The gateway as the BROWSER reaches it -- never the in-cluster address.
   VITE_SUPABASE_URL: '',
   // Public by design: this key is the `anon` role and is readable in any built bundle.
-  VITE_SUPABASE_ANON_KEY: '',
   VITE_SUPABASE_PUBLISHABLE_KEY: '',
   // "true" | "false". Gates every supabase.channel() subscription.
   VITE_ENABLE_REALTIME: '',

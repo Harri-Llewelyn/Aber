@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
  * The forge says when `main` moved, and the gateway row remembers. Gitea delivers a push event to
@@ -155,7 +155,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   const flowSha256 = await flowHashAt(repository, sha);
 
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+  const admin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const { data, error } = await admin
     .from("gateways")
     .update({

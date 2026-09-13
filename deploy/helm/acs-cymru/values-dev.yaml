@@ -27,6 +27,9 @@ secrets:
   jwtSecret: super-secret-jwt-token-with-at-least-32-characters
   anonKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
   serviceRoleKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJleHAiOjIwMDAwMDAwMDB9.GWSHLKn253lfP0FAYobjuXvQkQGcYhKVJ6Y0IJOo-lA
+  # The keys callers present; demo values, as the two JWTs above are.
+  publishableKey: sb_publishable_acscymru_dev_0000000000000000
+  secretKey: sb_secret_acscymru_dev_00000000000000000000
   postgresPassword: postgres
   timescalePassword: postgres
 

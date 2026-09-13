@@ -2,20 +2,19 @@
 /**
  * Assert the API gateway's routing and authentication surface against a declared inventory.
  * `validate.py` asserts the 401s that should happen; nothing can assert the absence of a route
- * nobody wrote, and a gateway translation that quietly widened an exemption would pass every other
+ * nobody wrote, and a gateway change that quietly widened an exemption would pass every other
  * test. Three modes: (default) template hygiene over `supabase/envoy.yaml`: every credential is
- * still an `__UPPER_SNAKE__` placeholder, the placeholder set is known to both substituters, and
- * kong.yml is still mirrored for the chart's Kong revert path. `--runtime`: the route surface
- * against a live gateway, every row in EXPECTED, gated routes refused before their upstream and
- * open ones through, worded so it reads identically against Kong and Envoy. `--authenticated`:
- * extends --runtime with a credentialled pass, presenting a valid key by header and by query and an
- * unregistered key, and asserting that on a route which hides credentials the header and query
- * forms are indistinguishable upstream. Both modes share EXPECTED so two inventories cannot drift.
+ * still an `__UPPER_SNAKE__` placeholder and the placeholder set is known to the substituter.
+ * `--runtime`: the route surface against a live gateway, every row in EXPECTED, gated routes
+ * refused before their upstream and open ones through. `--authenticated`: extends --runtime with
+ * a credentialled pass, presenting a valid key by header and by query and an unregistered key,
+ * and asserting that on a route which hides credentials the header and query forms are
+ * indistinguishable upstream. Both modes share EXPECTED so two inventories cannot drift.
  *
  * Usage: node scripts/check-gateway-surface.mjs [--verbose] | --runtime [baseUrl] | --runtime
- * --authenticated [baseUrl] (needs SUPABASE_ANON_KEY). The base URL is the first non-flag argument,
- * or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the runtime modes
- * use `node:http`; see probeOnce.
+ * --authenticated [baseUrl] (needs SUPABASE_PUBLISHABLE_KEY). The base URL is the first non-flag
+ * argument, or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the
+ * runtime modes use `node:http`; see probeOnce.
  */
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
@@ -100,26 +99,6 @@ const EXPECTED = [
     auth: 'key-auth',
     probe: '/functions/v1/aas-api/description', marker: '"profiles"' ,
     authMarker: 'profiles', hides: true},
-];
-
-/** Consumers the gateway registers. Values must stay placeholders -- see assertion 5. */
-const EXPECTED_CONSUMERS = ['anon', 'service_role'];
-
-/** Global plugins, and the config keys that are load bearing rather than incidental. */
-const EXPECTED_GLOBAL_PLUGINS = ['prometheus', 'cors'];
-
-/**
- * On Kong 3.x these three default to false. Losing them removes `kong_http_status`,
- * `kong_latency_*` and `kong_bandwidth` while /metrics keeps answering 200.
- */
-const PROMETHEUS_FLAGS = ['status_code_metrics', 'latency_metrics', 'bandwidth_metrics'];
-
-/** Substituted by BOTH targets. Assertion 7 requires all three lists to agree. */
-const EXPECTED_PLACEHOLDERS = [
-  '__CORS_ORIGINS__',
-  '__REALTIME_UPSTREAM_URL__',
-  '__SUPABASE_ANON_KEY__',
-  '__SUPABASE_SERVICE_ROLE_KEY__',
 ];
 
 // Runtime mode: `node scripts/check-gateway-surface.mjs --runtime [baseUrl]`. What survives a
@@ -266,9 +245,8 @@ if (RUNTIME) {
   );
 
   // Authenticated mode: `--runtime --authenticated`. The unauthenticated pass presents no
-  // credential, so it is blind to everything the gateway does with one: an Envoy translation once
-  // passed it while forwarding a query-string apikey to PostgREST, which parsed it as a column
-  // filter. This pass presents a valid key by header (the gate opens), by query (key_in_query,
+  // credential, so it is blind to everything the gateway does with one: the filter once passed
+  // it while forwarding a query-string apikey to PostgREST, which parsed it as a column filter. This pass presents a valid key by header (the gate opens), by query (key_in_query,
   // which Realtime needs since a browser sets no header on a handshake), and an invalid key
   // (refused 401), and asserts that on a route which hides credentials the header and query forms
   // produce the same status. Its limit: this detects forwarding only where the upstream is
@@ -276,11 +254,11 @@ if (RUNTIME) {
   // be observed from outside.
 
   if (AUTHENTICATED) {
-    const anonKey = process.env.SUPABASE_ANON_KEY || '';
+    const anonKey = process.env.SUPABASE_PUBLISHABLE_KEY || '';
     if (!anonKey) {
       console.error(
-        '\n--authenticated needs SUPABASE_ANON_KEY to present a valid credential.\n'
-        + 'Export it: kubectl -n acs-cymru get secret acs-cymru-secrets -o jsonpath={.data.SUPABASE_ANON_KEY} | base64 -d\n'
+        '\n--authenticated needs SUPABASE_PUBLISHABLE_KEY to present a valid credential.\n'
+        + 'Export it: kubectl -n acs-cymru get secret acs-cymru-secrets -o jsonpath={.data.SUPABASE_PUBLISHABLE_KEY} | base64 -d\n'
         + 'Refusing rather than skipping: a pass that\n'
         + 'silently checked nothing is the failure this whole mode exists to prevent.\n'
       );
@@ -345,8 +323,8 @@ if (RUNTIME) {
       if (!viaQuery.body.includes(row.authMarker)) {
         authProblems.push(
           `${label}: a VALID key in the QUERY STRING did not reach the upstream `
-          + `(HTTP ${viaQuery.status}). Kong accepts the key either way (key_in_query), and `
-          + `Realtime depends on it -- a browser cannot set a header on a WebSocket handshake.`
+          + `(HTTP ${viaQuery.status}). The gateway accepts the key either way, and Realtime `
+          + `depends on it -- a browser cannot set a header on a WebSocket handshake.`
         );
       }
 
@@ -388,7 +366,7 @@ if (RUNTIME) {
     const checked = EXPECTED.filter((r) => r.auth === 'key-auth' && r.authMarker).length;
     console.log(
       `\nCredential handling at ${base} matches the reviewed surface: ${checked} gated route(s) `
-      + 'accept a valid key by header and by query, hide it where Kong hides it, and refuse an '
+      + 'accept a valid key by header and by query, hide it where the route hides it, and refuse an '
       + 'unregistered one.'
     );
   }
@@ -398,19 +376,16 @@ if (RUNTIME) {
 
 // Template hygiene, the default mode. Two assertions about the template rather than the gateway: no
 // literal credential is committed (every key must be an `__UPPER_SNAKE__` placeholder, and in
-// envoy.yaml the key is inlined into a Lua string), and both substituters know every placeholder
+// envoy.yaml the key is inlined into a Lua string), and the substituter knows every placeholder
 // (the chart's initContainer scans for leftovers at boot, so a placeholder it was not taught is a
 // boot failure). The route surface is asserted by `--runtime`.
 
 const ENVOY_TEMPLATE = 'supabase/envoy.yaml';
 const CHART_ENVOY = 'deploy/helm/acs-cymru/templates/supabase/envoy.yaml';
 
-/** Substituted by the chart's initContainer. The lists below must agree. */
+/** Substituted by the chart's initContainer. */
 const TEMPLATE_PLACEHOLDERS = [
   '__CORS_ORIGINS__',
-  // Not a credential: a bare `true`/`false` substituted into the Lua filter, deciding whether the
-  // legacy anon and service-role JWTs are still accepted. Both substituters validate the value.
-  '__LEGACY_KEYS_ACCEPTED__',
   '__REALTIME_UPSTREAM_ADDRESS__',
   '__REALTIME_UPSTREAM_HOST__',
   '__SUPABASE_ANON_KEY__',
@@ -446,7 +421,7 @@ const template = read(ENVOY_TEMPLATE);
   if (undeclared.length) {
     fail(
       `${ENVOY_TEMPLATE} uses placeholder(s) this script does not know: ${undeclared.join(', ')}. `
-      + 'Add them to TEMPLATE_PLACEHOLDERS and to BOTH substituters.'
+      + 'Add them to TEMPLATE_PLACEHOLDERS and to the substituter.'
     );
   }
   if (unused.length) {
@@ -506,30 +481,6 @@ const template = read(ENVOY_TEMPLATE);
   }
 }
 
-// ---- 4. Kong is off, and its template still has its file. --------------------------------------
-{
-  // supabase/kong.yml is mirrored into the chart and read by templates/supabase/kong.yaml. Kong is
-  // off by default and this did not relax with it: `supabaseKong.enabled=true` is the documented
-  // revert, and it is a broken `helm install` the moment this file goes. It can go when the
-  // template does.
-  let present = true;
-  try {
-    read('supabase/kong.yml');
-  } catch {
-    present = false;
-  }
-  if (!present) {
-    fail(
-      'supabase/kong.yml is missing, but templates/supabase/kong.yaml still reads a mirror of it. '
-      + 'Kong is off by default and Envoy is the gateway, so nothing fails until somebody '
-      + 'takes the documented revert -- and then `helm install` fails on the absent file. Restore '
-      + 'it, or delete the Kong template in the same change -- see docs/gateway-migration.md.'
-    );
-  } else {
-    pass("supabase/kong.yml is retained for the chart Kong template, which is the revert path");
-  }
-}
-
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nThe gateway template has drifted:\n');
@@ -537,6 +488,6 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(
-  `\n${ENVOY_TEMPLATE} is consistent with both substituters. The ROUTE surface is not checkable `
+  `\n${ENVOY_TEMPLATE} is consistent with its substituter. The ROUTE surface is not checkable `
   + 'from a file: run --runtime --authenticated against a live gateway for that.'
 );

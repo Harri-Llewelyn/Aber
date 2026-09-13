@@ -239,10 +239,9 @@ export default async function handler(req: Request): Promise<Response> {
 
     // The .env is generated, not templated: it is the only file that differs per gateway and the
     // only one carrying the token. Written as a real .env so `docker compose up` works with no
-    // editing. Every name here is read by bootstrap.mjs: ACS_SUPABASE_URL, ACS_SUPABASE_ANON_KEY,
-    // ACS_ENROLLMENT_TOKEN, ACS_AGENT_VERSION, ACS_GATEWAY_NAME and NODERED_CREDENTIAL_SECRET. The
-    // publishable key is added beside the anon key rather than substituted, so bundles already
-    // downloaded and bundles from a legacy-only install both boot.
+    // editing. Every name here is read by bootstrap.mjs: ACS_SUPABASE_URL,
+    // ACS_SUPABASE_PUBLISHABLE_KEY, ACS_ENROLLMENT_TOKEN, ACS_AGENT_VERSION, ACS_GATEWAY_NAME and
+    // NODERED_CREDENTIAL_SECRET.
     files[`${folder}/.env`] = strToU8(`# =============================================================================
 # ACS-Cymru physical gateway -- ${gateway.name}
 #
@@ -257,12 +256,7 @@ export default async function handler(req: Request): Promise<Response> {
 ACS_SUPABASE_URL=${publicUrl}
 
 # Public by construction -- the same key every browser running the dashboard holds. It gets the
-# enrolment request past the gateway's key-auth; the token below is what actually authorises it.
-#
-# TWO FORMATS, AND THE APPLIANCE PREFERS THE SECOND. Supabase deprecates the anon JWT by the end
-# of 2026; the platform's gateway accepts both at once, so this bundle carries whichever this
-# install has. An empty publishable key here means the platform has not minted one yet.
-ACS_SUPABASE_ANON_KEY=${Deno.env.get("SUPABASE_ANON_KEY") ?? ""}
+# enrolment request past the gateway's key check; the token below is what actually authorises it.
 ACS_SUPABASE_PUBLISHABLE_KEY=${Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? ""}
 
 # SINGLE USE. Redeemed by bootstrap.mjs on first boot and spent thereafter, whether or not that boot

@@ -15,7 +15,7 @@ names itself in the resulting error:
      is why this waits on db-init rather than merely on the database.
   3. The tenant is `realtime-dev`, and SEED_SELF_HOST IGNORES TENANT_NAME. Probing
      /api/tenants/realtime/health returns 404 against a perfectly healthy server.
-  4. Kong must address it as `realtime-dev...`, which here is the Service NAME -- see
+  4. The gateway must address it as `realtime-dev...`, which here is the Service NAME -- see
      realtime-service.yaml.
 
 Two more that are equally load-bearing:
@@ -122,7 +122,7 @@ spec:
               value: {{ include "acs-cymru.dbCaPath" . }}
             {{- end }}
             {{- include "acs-cymru.secretEnv" (dict "name" "DB_ENC_KEY" "secretName" $secretName "key" "REALTIME_DB_ENC_KEY") | nindent 12 }}
-            # Must be the same secret Kong, PostgREST and GoTrue verify with, or every subscriber
+            # Must be the same secret the gateway, PostgREST and GoTrue verify with, or every subscriber
             # is rejected at the socket handshake.
             {{- include "acs-cymru.secretEnv" (dict "name" "API_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SECRET_KEY_BASE" "secretName" $secretName "key" "REALTIME_SECRET_KEY_BASE") | nindent 12 }}

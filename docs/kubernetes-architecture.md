@@ -175,10 +175,9 @@ image so the Deployment needs no command override.
 
 ### 2.3 Gateway config: template, don't `sed`
 
-> **Envoy is the gateway on both targets** since the gateway migration
-> ([`docs/gateway-migration.md`](gateway-migration.md)), and `supabase-envoy-init` plays the
-> role described here. The Kong reasoning below is kept because the argument is the gateway-agnostic
-> one, and because `supabaseKong.enabled=true` is still the documented revert.
+> **Envoy is the gateway** ([`docs/gateway.md`](gateway.md)) and Kong is gone from the chart;
+> `supabase-envoy`'s initContainer plays the role described here. The Kong reasoning below is
+> kept because the argument is the gateway-agnostic one.
 
 `supabase-kong-init` exists because Compose has no templating. It originally existed because Kong
 2.8 could not read environment variables from declarative config either; **on 3.x it can**
@@ -401,7 +400,7 @@ label `realtime-dev`, which is the tenant `SEED_SELF_HOST` creates — but they 
 and the difference matters if either is changed. Kong took the upstream `Host` from the service
 hostname, with the default `preserve_host: false`, so the Service name alone did the work. Envoy
 preserves the downstream `Host` unless told otherwise, so `supabase/envoy.yaml` carries an explicit
-`host_rewrite_literal` for that route ([`docs/gateway-migration.md`](gateway-migration.md) records it
+`host_rewrite_literal` for that route ([`docs/gateway.md`](gateway.md) records it
 as one of the four translation traps).
 The Service name is still load-bearing on both — `acs-cymru.validateRealtimeServiceName` refuses an
 install that renames it — and it is still the Kubernetes-native equivalent of the Compose alias.

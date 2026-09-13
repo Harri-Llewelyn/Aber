@@ -33,15 +33,14 @@ COPY . .
 # `process.env` during `npm run build` exactly as it did when each line had an `ENV` twin. The
 # twins were pure duplication, and each one also raised its own `SecretsUsedInArgOrEnv` warning.
 #
-# WHY THE REMAINING `ARG VITE_SUPABASE_ANON_KEY` WARNING IS SKIPPED RATHER THAN FIXED.
+# WHY THE REMAINING `ARG VITE_SUPABASE_PUBLISHABLE_KEY` WARNING IS SKIPPED RATHER THAN FIXED.
 #
 # BuildKit's rule matches the NAME, not the value: anything ending `_KEY`, `_TOKEN` or `_SECRET`
-# trips it. The Supabase anon key is not a secret. It is a JWT carrying `role: anon`, signed so
-# PostgREST can identify the caller, and it is useful only in combination with the RLS policies
-# that gate every table -- its whole purpose is to be handed to every browser that loads the app.
-# Treating it as a build secret would mean it could not be inlined into the bundle, which is the
-# one thing it exists to do. The name cannot be changed either: Vite inlines by exact
-# `VITE_`-prefixed name.
+# trips it. The publishable key is not a secret. The gateway translates it to the `anon` role,
+# which is useful only in combination with the RLS policies that gate every table -- its whole
+# purpose is to be handed to every browser that loads the app. Treating it as a build secret would
+# mean it could not be inlined into the bundle, which is the one thing it exists to do. The name
+# cannot be changed either: Vite inlines by exact `VITE_`-prefixed name.
 #
 # Verified, so the skip rests on facts rather than on the argument above:
 #   - `docker inspect` on the FINAL image shows no `VITE_*` variable in `Config.Env`, on either
@@ -54,9 +53,8 @@ COPY . .
 #     same exposure as serving the app at all.
 ARG VITE_RUNTIME_CONFIG=false
 ARG VITE_SUPABASE_URL
-ARG VITE_SUPABASE_ANON_KEY
-# The format that replaces the key above. Public by construction in exactly the same way --
-# it is readable in any built bundle, which is why it is a build ARG rather than a secret.
+# Public by construction: readable in any built bundle, which is why it is a build ARG rather
+# than a secret.
 ARG VITE_SUPABASE_PUBLISHABLE_KEY
 # Gates every supabase.channel() subscription.
 ARG VITE_ENABLE_REALTIME

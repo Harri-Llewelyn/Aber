@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
  * Gitea's own "Sign out" link, made to mean something. Under reverse-proxy authentication Gitea's
@@ -39,7 +39,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   // Global, deliberately: every session this person holds, the dashboard's included. A local
   // sign-out would end the door's session alone, and the dashboard's would sign them back in.
-  const admin = createClient(supabaseUrl, serviceKey);
+  const admin = serviceRoleClient(supabaseUrl, serviceKey);
   const { error } = await admin.auth.admin.signOut(token, "global");
   if (error) {
     // Already dead is the ordinary failure here (a sign-out elsewhere first), and it is not a

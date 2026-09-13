@@ -77,8 +77,10 @@ spec:
             # one for both is the classic way this breaks: a browser cannot resolve `supabase-kong`.
             - name: SUPABASE_PUBLIC_URL
               value: {{ include "acs-cymru.supabaseUrl" . | quote }}
-            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
-            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SERVICE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            # Studio's calls go THROUGH the gateway, so these are the keys the gateway accepts,
+            # under the names the image reads.
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SERVICE_KEY" "secretName" $secretName "key" "SUPABASE_SECRET_KEY") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "AUTH_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
             - name: DEFAULT_ORGANIZATION_NAME
               value: {{ .Values.supabaseStudio.organizationName | quote }}

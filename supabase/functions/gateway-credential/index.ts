@@ -47,7 +47,7 @@ serve(async (req) => {
 
   const missing = [
     !supabaseUrl && "SUPABASE_URL",
-    !anonKey && "SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY",
+    !anonKey && "SUPABASE_PUBLISHABLE_KEY",
     !credentialUrl && "MQTT_CREDENTIAL_SERVICE_URL",
     !credentialToken && "MQTT_CREDENTIAL_SERVICE_TOKEN",
   ].filter(Boolean);

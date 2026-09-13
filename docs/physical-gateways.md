@@ -105,7 +105,7 @@ Everything except `.env` and `GATEWAY.txt` is mirrored verbatim from
 | Key | Purpose |
 | :--- | :--- |
 | `ACS_SUPABASE_URL` | the platform, as reachable **from the appliance** |
-| `ACS_SUPABASE_ANON_KEY` | gets the request past Kong's `key-auth`; public by construction |
+| `ACS_SUPABASE_PUBLISHABLE_KEY` | gets the request past the gateway's key check; public by construction |
 | `ACS_ENROLLMENT_TOKEN` | the single-use claim |
 | `NODERED_CREDENTIAL_SECRET` | encrypts `flows_cred.json` on the appliance; **generated per bundle** |
 | `ACS_AGENT_VERSION` | recorded on the gateway so the fleet's vintage is visible |

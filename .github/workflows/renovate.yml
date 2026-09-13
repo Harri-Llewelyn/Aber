@@ -36,7 +36,7 @@
 # has not started at all -- every scheduled run completes in three to five seconds with zero steps,
 # which is what an exhausted Actions allowance looks like. The last successful run was 2026-08-23,
 # and the dependency dashboard (issue #53) has been frozen at that date ever since: it still lists
-# `postgrest v12.2.0` and `kong 3.9.3`, one long since bumped and the other since retired.
+# `postgrest v12.2.0`, long since bumped.
 #
 # So this file's own warning came true by a route it could not check: "the repository looks as
 # though drift is being watched when it is not". A workflow cannot detect that it was never

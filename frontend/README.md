@@ -241,8 +241,9 @@ Five things about it are load-bearing, and each has a comment in the file saying
   a redeployed dashboard at the previous environment's Supabase URL.
 
 `__tests__/runtimeConfig.test.js` pins all of it, including that the placeholder's key set matches
-`RUNTIME_SETTING_NAMES`. The anon key moving from the bundle to a ConfigMap is **not** a security
-change: it is the `anon` role, public by construction, and already readable in any built bundle.
+`RUNTIME_SETTING_NAMES`. The publishable key moving from the bundle to a ConfigMap is **not** a
+security change: it stands for the `anon` role, is public by construction, and is already readable
+in any built bundle.
 
 ---
 

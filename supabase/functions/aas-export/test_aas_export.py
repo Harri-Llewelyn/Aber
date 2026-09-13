@@ -46,7 +46,7 @@ MODEL_BUCKET = os.getenv("STORAGE_MODEL_BUCKET", "asset-3d-models")
 ID_SHORT_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
-ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
 DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
 # The machining cell's first CNC on the `Simulated Shopfloor` flow, seeded by 0002 and given its
@@ -148,7 +148,7 @@ def sign_in() -> str | None:
         status, data, _ = post_json(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
             {"email": DEMO_EMAIL, "password": DEMO_PASSWORD},
-            {"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}"},
         )
         return data.get("access_token") if status == 200 else None
     except Exception:
@@ -160,7 +160,7 @@ def find_device_id(token: str) -> str | None:
         f"{SUPABASE_URL}/rest/v1/devices?select=id,name&name=eq."
         + urllib.request.quote(TARGET_DEVICE)
     )
-    req.add_header("apikey", ANON_KEY)
+    req.add_header("apikey", PUBLISHABLE_KEY)
     req.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(req, timeout=20) as res:
@@ -180,7 +180,7 @@ def provision(token):
     if not PROVISION_FIXTURE:
         return find_device_id(token)
     try:
-        device = aas_fixture.ensure(SUPABASE_URL, token, ANON_KEY)
+        device = aas_fixture.ensure(SUPABASE_URL, token, PUBLISHABLE_KEY)
     except Exception as err:  # noqa: BLE001 -- reported, never silently skipped
         print(f"[test_aas_export] could not provision the fixture: {err}")
         return None
@@ -423,7 +423,7 @@ class TestAasExportLive(unittest.TestCase):
         cls.status, cls.body, cls.headers = post_json(
             f"{SUPABASE_URL}/functions/v1/aas-export",
             {"device_id": DEVICE_ID},
-            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
         cls.aas = cls.body.get("aas", {})
         cls.submodels = {s.get("idShort"): s for s in cls.aas.get("submodels", [])}
@@ -458,7 +458,7 @@ class TestAasExportLive(unittest.TestCase):
 
     def test_rejects_unauthenticated_call(self):
         status, _, _ = post_json(
-            f"{SUPABASE_URL}/functions/v1/aas-export", {"device_id": DEVICE_ID}, {"apikey": ANON_KEY})
+            f"{SUPABASE_URL}/functions/v1/aas-export", {"device_id": DEVICE_ID}, {"apikey": PUBLISHABLE_KEY})
         self.assertIn(status, (401, 403), "export must not be reachable without a user token")
 
     def test_rejects_a_non_uuid_device_id(self):
@@ -467,7 +467,7 @@ class TestAasExportLive(unittest.TestCase):
         status, _, _ = post_json(
             f"{SUPABASE_URL}/functions/v1/aas-export",
             {"device_id": TARGET_DEVICE},
-            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
         self.assertEqual(status, 400)
 
@@ -629,7 +629,7 @@ class TestAasExportSchemaConformance(unittest.TestCase):
         cls.status, cls.body, _ = post_json(
             f"{SUPABASE_URL}/functions/v1/aas-export",
             {"device_id": DEVICE_ID},
-            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
 
     def test_schema_file_is_vendored(self):
@@ -679,7 +679,7 @@ class TestAasxPackage(unittest.TestCase):
             data=json.dumps({"device_id": DEVICE_ID}).encode(),
             method="POST",
         )
-        req.add_header("apikey", ANON_KEY)
+        req.add_header("apikey", PUBLISHABLE_KEY)
         req.add_header("Authorization", f"Bearer {TOKEN}")
         req.add_header("Content-Type", "application/json")
         with urllib.request.urlopen(req, timeout=45) as res:
@@ -724,7 +724,7 @@ class TestAasxPackage(unittest.TestCase):
         _, body, _ = post_json(
             f"{SUPABASE_URL}/functions/v1/aas-export",
             {"device_id": DEVICE_ID},
-            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
         # Compared with the 3D model's File.value stripped: bundling deliberately rewrites that
         # one value to a package-relative path (TestVisualRepresentation asserts it is the only
@@ -742,7 +742,7 @@ class TestAasxPackage(unittest.TestCase):
         status, body, _ = post_json(
             f"{SUPABASE_URL}/functions/v1/aas-export?format=xlsx",
             {"device_id": DEVICE_ID},
-            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
         self.assertEqual(status, 400)
         self.assertIn("format", str(body).lower())
@@ -757,7 +757,7 @@ class TestMultiSubmodel(unittest.TestCase):
         _, cls.body, _ = post_json(
             f"{SUPABASE_URL}/functions/v1/aas-export",
             {"device_id": DEVICE_ID},
-            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
 
     def test_reports_how_many_schemas_are_attached(self):
@@ -781,7 +781,7 @@ class TestMultiSubmodel(unittest.TestCase):
 
 def _storage_request(method: str, path: str, data=None, content_type=None):
     req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1{path}", data=data, method=method)
-    req.add_header("apikey", ANON_KEY)
+    req.add_header("apikey", PUBLISHABLE_KEY)
     req.add_header("Authorization", f"Bearer {TOKEN}")
     if content_type:
         req.add_header("Content-Type", content_type)
@@ -798,7 +798,7 @@ def _patch_device(payload: dict):
         data=json.dumps(payload).encode(),
         method="PATCH",
     )
-    req.add_header("apikey", ANON_KEY)
+    req.add_header("apikey", PUBLISHABLE_KEY)
     req.add_header("Authorization", f"Bearer {TOKEN}")
     req.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(req, timeout=20) as res:
@@ -842,7 +842,7 @@ class TestVisualRepresentation(unittest.TestCase):
                 f"{SUPABASE_URL}/storage/v1/object/{MODEL_BUCKET}/{cls.path}",
                 data=cls.MODEL_BYTES, method="PUT",
             )
-            req.add_header("apikey", ANON_KEY)
+            req.add_header("apikey", PUBLISHABLE_KEY)
             req.add_header("Authorization", f"Bearer {TOKEN}")
             req.add_header("Content-Type", "model/gltf-binary")
             req.add_header("x-upsert", "true")
@@ -855,14 +855,14 @@ class TestVisualRepresentation(unittest.TestCase):
         _, cls.body, _ = post_json(
             f"{SUPABASE_URL}/functions/v1/aas-export",
             {"device_id": DEVICE_ID},
-            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
 
         req = urllib.request.Request(
             f"{SUPABASE_URL}/functions/v1/aas-export?format=aasx",
             data=json.dumps({"device_id": DEVICE_ID}).encode(), method="POST",
         )
-        req.add_header("apikey", ANON_KEY)
+        req.add_header("apikey", PUBLISHABLE_KEY)
         req.add_header("Authorization", f"Bearer {TOKEN}")
         req.add_header("Content-Type", "application/json")
         with urllib.request.urlopen(req, timeout=60) as res:
@@ -1035,7 +1035,7 @@ class TestNoVisualRepresentationWithoutAModel(unittest.TestCase):
         _, body, _ = post_json(
             f"{SUPABASE_URL}/functions/v1/aas-export",
             {"device_id": DEVICE_ID},
-            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
         shorts = [s["idShort"] for s in body["aas"]["submodels"]]
         # Guards the premise: if the fixture left a model attached this test would pass vacuously.
@@ -1061,4 +1061,4 @@ if __name__ == "__main__":
         unittest.main(verbosity=2, exit=False)
     finally:
         if LIVE and PROVISION_FIXTURE:
-            aas_fixture.teardown(SUPABASE_URL, TOKEN, ANON_KEY)
+            aas_fixture.teardown(SUPABASE_URL, TOKEN, PUBLISHABLE_KEY)

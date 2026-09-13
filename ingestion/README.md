@@ -11,7 +11,7 @@ allowed to be heard at all.
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
 | [`registry.py`](registry.py) | The counter and histogram registry that `metrics.py` renders |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 43 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 44 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
@@ -1211,7 +1211,7 @@ own it), `gateway_archived`, `quarantined_or_unregistered`, `db_unavailable`, `w
 writer's queue stayed full for the put timeout), and the four directory-unavailable reasons below.
 
 **The directory being unreachable costs a different amount depending on what was lost**, which is
-why it is four reasons and not one. A brief PostgREST restart, Kong reload or failover produces
+why it is four reasons and not one. A brief PostgREST restart, gateway reload or failover produces
 all of them; only the first two are recoverable on their own.
 
 | `reason` | What was dropped | What it costs |

@@ -164,13 +164,13 @@ it; this server answers **404 for anything outside `/v1`**, including `/info`. A
 at `http://localhost:8090` fails its version probe and quietly decides the server is pre-1.0,
 after which nothing it sends is in the right shape.
 
-**2. The token is a user access token, not the anon key.** The anon key authenticates at Kong
+**2. The token is a user access token, not the publishable key.** The publishable key authenticates at the gateway
 and is then rejected by the data layer — `401 The supplied credentials were rejected by the data
 layer` — because RLS grants reads to `authenticated`, not `anon`. Get one with:
 
 ```bash
 curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
-  -H "apikey: $SUPABASE_ANON_KEY" -H "Content-Type: application/json" \
+  -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "Content-Type: application/json" \
   -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
   | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
 ```
@@ -382,7 +382,7 @@ clock.
 | :--- | :--- | :--- |
 | `I3X_PORT` | `8090` | |
 | `SUPABASE_URL` | `http://supabase-kong:8000` | |
-| `SUPABASE_ANON_KEY` | — | For Kong's `key-auth`. **Not** the service-role key |
+| `SUPABASE_PUBLISHABLE_KEY` | — | For the gateway's key check. **Not** the secret key |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | |
 | `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | off | Fails closed: a missing CA stops startup |
 | `I3X_SUBSCRIPTION_TTL_SECONDS` | `300` | Spec MUST — abandoned subscriptions are deleted |

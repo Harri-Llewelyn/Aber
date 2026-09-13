@@ -50,6 +50,11 @@ MQTT_TLS_ENABLED = os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "t
 MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
+# The secret key IS the service-role credential at the gateway: presented as apikey and bearer,
+# it reaches PostgREST as `service_role`. The publishable key is the anonymous caller's. The
+# service-role JWT is read only by check 14, which proves the gateway refuses it as an apikey.
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # Node-RED as reached from the host, the published port. Check 7 asserts this address refuses
@@ -127,7 +132,7 @@ SEEDED = {}
 supabase_client = None
 try:
     from supabase import create_client
-    supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    supabase_client = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
 except Exception as e:
     print(f"Warning: Supabase client init failed: {e}")
 
@@ -225,7 +230,7 @@ def probe_nodered_editor_login():
             return err
 
     try:
-        anon = os.getenv("SUPABASE_ANON_KEY", "")
+        anon = SUPABASE_PUBLISHABLE_KEY
         token = json.loads(fetch(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
             json.dumps({"email": "admin@acs-cymru.local", "password": "acscymru123"}).encode(),
@@ -1440,13 +1445,13 @@ def verify_results():
                 return err.code, err.read().decode()
 
         # 11a. /ping must answer WITHOUT an apikey. The Factory+ component specification requires
-        # it for discovery, and Kong's key-auth would otherwise refuse it at the gateway.
+        # it for discovery, and the gateway's key check would otherwise refuse it.
         status, body = probe("/ping")
         if status == 200 and '"service"' in body and "fplus-directory" in body:
             print("✅ 11. DIRECTORY /ping: answers 200 with no apikey and no bearer token.")
         else:
             print(f"❌ 11. DIRECTORY /ping FAIL: HTTP {status}, body {body[:160]}. Expected 200. "
-                  "A 401 means the Kong route is still behind key-auth; a 404 means the function "
+                  "A 401 means the route is still behind the gateway's key check; a 404 means the function "
                   "is not registered in supabase/functions/main/index.ts.")
             passed = False
 
@@ -1457,12 +1462,12 @@ def verify_results():
             print("✅ 11b. DIRECTORY FAIL-CLOSED: anonymous /v1/device answers 401.")
         else:
             print(f"❌ 11b. DIRECTORY FAIL-CLOSED FAIL: anonymous /v1/device answered {status}. "
-                  "These routes are exempt from Kong's key-auth, so the function's own token "
+                  "These routes are exempt from the gateway's key check, so the function's own token "
                   "check is the ONLY thing in front of the whole address space.")
             passed = False
 
         # 11c. And it must actually work for an authenticated caller.
-        anon = os.getenv("SUPABASE_ANON_KEY", "")
+        anon = SUPABASE_PUBLISHABLE_KEY
         token = None
         try:
             req = urllib.request.Request(
@@ -1664,10 +1669,10 @@ def verify_results():
     try:
         def anon_rpc(fn, args):
             """Call a PostgREST RPC as the anon role and nothing else. Raw urllib rather than the
-            Supabase client, and the anon key in both headers: the point is to be exactly the caller
-            an attacker is.
+            Supabase client, and the publishable key in both headers: the point is to be exactly
+            the caller an attacker is.
             """
-            anon_key = os.getenv("SUPABASE_ANON_KEY", "")
+            anon_key = SUPABASE_PUBLISHABLE_KEY
             req = urllib.request.Request(
                 f"{SUPABASE_URL}/rest/v1/rpc/{fn}",
                 method="POST",
@@ -1738,6 +1743,33 @@ def verify_results():
     except Exception as e:
         print(f"⚠️  13.  ANON PRIVILEGE BASELINE: skipped, could not reach PostgREST: {e}")
 
+    # 14. The gateway admits only the publishable and secret keys. The anon and service-role JWTs
+    # are what it hands its upstreams; one presented as the apikey must be refused at the edge.
+    if SUPABASE_SERVICE_ROLE_KEY:
+        try:
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/devices?limit=1",
+                headers={"apikey": SUPABASE_SERVICE_ROLE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    status, body = resp.status, resp.read().decode()
+            except urllib.error.HTTPError as err:
+                status, body = err.code, err.read().decode()
+            if status == 401 and "Unauthorized" in body:
+                print("✅ 14.  JWT REFUSED AS APIKEY: the service-role JWT presented as the apikey "
+                      "answers 401 at the gateway.")
+            else:
+                print(f"❌ 14.  JWT ACCEPTED AS APIKEY: HTTP {status}, body {body[:160]}. The gateway "
+                      "must admit only the publishable and secret keys; the JWTs are its to "
+                      "substitute, not a caller's credential.")
+                passed = False
+        except Exception as e:
+            print(f"⚠️  14.  JWT REFUSED AS APIKEY: skipped, could not reach the gateway: {e}")
+    else:
+        print("⚠️  14.  JWT REFUSED AS APIKEY: skipped, SUPABASE_SERVICE_ROLE_KEY not set.")
+
     print("==========================================")
     if passed:
         print("🎉 END-TO-END VALIDATION PASSED SUCCESSFULLY!")
@@ -1763,7 +1795,7 @@ if __name__ == "__main__":
     print(f"  Supabase DB  : {SUPABASE_DB_HOST}:{SUPABASE_DB_PORT}/{SUPABASE_DB_NAME}")
     print(f"  Supabase API : {SUPABASE_URL}")
     print(f"  Node-RED     : {NODERED_BASE_URL}")
-    print(f"  Service role key: {'set' if SUPABASE_SERVICE_ROLE_KEY else 'MISSING'}")
+    print(f"  Secret key   : {'set' if SUPABASE_SECRET_KEY else 'MISSING'}")
     print()
 
     # Checked here rather than discovered at cleanup. The suite still runs when this fails, but the

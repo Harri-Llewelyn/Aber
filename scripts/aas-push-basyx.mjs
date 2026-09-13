@@ -84,7 +84,7 @@ basyxUrl = basyxUrl.replace(/\/+$/, '');
 // --- credentials ---------------------------------------------------------------------------------
 // The anon key from the release Secret unless the environment sets it; SUPABASE_URL defaults to
 // the gateway as `npm run dev:forward` publishes it.
-process.env.SUPABASE_ANON_KEY ||= stackCredentials(['SUPABASE_ANON_KEY']).SUPABASE_ANON_KEY;
+process.env.SUPABASE_PUBLISHABLE_KEY ||= stackCredentials(['SUPABASE_PUBLISHABLE_KEY']).SUPABASE_PUBLISHABLE_KEY;
 process.env.SUPABASE_URL ||= 'http://127.0.0.1:54321';
 
 /**
@@ -110,11 +110,11 @@ async function environmentFromFile(file) {
 
 async function environmentFromStack(name) {
   const supabaseUrl = (process.env.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
-  const anonKey = process.env.SUPABASE_ANON_KEY;
+  const anonKey = process.env.SUPABASE_PUBLISHABLE_KEY;
   const email = process.env.AAS_TEST_EMAIL || 'admin@acs-cymru.local';
   const password = process.env.AAS_TEST_PASSWORD || 'acscymru123';
 
-  if (!anonKey) throw new Error('SUPABASE_ANON_KEY is not set; run `npm run setup` first.');
+  if (!anonKey) throw new Error('SUPABASE_PUBLISHABLE_KEY is not set; run `npm run setup` first.');
 
   // A USER token, not the service key. The export runs behind the same RLS an operator has, and
   // pushing a shell somebody could not have exported themselves would be a quiet privilege

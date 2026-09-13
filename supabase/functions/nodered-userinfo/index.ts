@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
  * Identity and permissions endpoint for Node-RED's adminAuth. GoTrue's OIDC server advertises only
@@ -68,7 +69,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     // Read the role with the service key, not the caller's token: the user id is already
     // authenticated above, so this is a lookup rather than an authorisation decision.
-    const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+    const supabaseAdmin = serviceRoleClient(supabaseUrl, serviceKey);
     // A failed lookup is not evidence of a role: returning no permissions lets Node-RED refuse the
     // login.
     const supabaseRole = await resolveUserRole(supabaseAdmin, user.id);

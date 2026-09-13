@@ -36,6 +36,7 @@ secrets:
   # values-file names, precisely so an externally-managed Secret has one obvious contract:
   #
   #   SUPABASE_JWT_SECRET          SUPABASE_ANON_KEY          SUPABASE_SERVICE_ROLE_KEY
+  #   SUPABASE_PUBLISHABLE_KEY     SUPABASE_SECRET_KEY
   #   POSTGRES_PASSWORD            DB_PASSWORD                PG_META_CRYPTO_KEY
   #   REALTIME_DB_ENC_KEY          REALTIME_SECRET_KEY_BASE
   #   MQTT_USER                    MQTT_PASSWORD
@@ -44,9 +45,11 @@ secrets:
   #   NODERED_WEBHOOK_JWT_SECRET   NODERED_ADMIN_TOKEN
   #
   # STILL A SET. SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are HS256 JWTs signed by
-  # SUPABASE_JWT_SECRET. Rotating the signing key in your secret store WITHOUT re-minting both
-  # tokens gives a stack that reports healthy and rejects every request at the gateway -- and the
-  # chart cannot warn you, because it cannot see them. Rotate the three together, always.
+  # SUPABASE_JWT_SECRET, and SUPABASE_PUBLISHABLE_KEY / SUPABASE_SECRET_KEY are the keys callers
+  # present, which the gateway translates to those JWTs. Rotating the signing key in your secret
+  # store WITHOUT re-minting both tokens gives a stack that reports healthy and rejects every
+  # request at the gateway -- and the chart cannot warn you, because it cannot see them. Rotate
+  # them together, always.
   #
   # NODERED_ADMIN_TOKEN must be present but EMPTY. It is a break-glass static token that bypasses
   # Supabase Auth entirely; an absent key and an empty one are the same to the chart, but some
@@ -94,13 +97,16 @@ secrets:
 
   # ---- Only needed when existingSecret is empty -------------------------------------------
   #
-  # THESE THREE ARE A SET. anonKey and serviceRoleKey are HS256 JWTs signed by jwtSecret with
-  # {"iss":"supabase","role":"anon"} and {"iss":"supabase","role":"service_role"}. Changing
-  # jwtSecret alone invalidates both and every request fails at the gateway while the stack
-  # reports healthy.
+  # THESE ARE A SET. anonKey and serviceRoleKey are HS256 JWTs signed by jwtSecret with
+  # {"iss":"supabase","role":"anon"} and {"iss":"supabase","role":"service_role"}; publishableKey
+  # and secretKey are the `sb_publishable_*` / `sb_secret_*` keys callers present, which the
+  # gateway translates to those JWTs. Changing jwtSecret alone invalidates both JWTs and every
+  # request fails at the gateway while the stack reports healthy.
   jwtSecret: ""
   anonKey: ""
   serviceRoleKey: ""
+  publishableKey: ""
+  secretKey: ""
 
   postgresPassword: ""
   timescalePassword: ""
@@ -269,8 +275,7 @@ networkPolicy:
   # THE PORTS ARE THE METRICS ENDPOINTS the ServiceMonitors name (templates/obs/servicemonitors.yaml):
   #   3000  grafana, natively
   #   9901  supabase-envoy's admin listener (requires supabaseEnvoy.metrics.enabled). Envoy serves
-  #         /ready AND /stats/prometheus from this one port; Kong split them across two, which is
-  #         why this used to read 8100.
+  #         /ready AND /stats/prometheus from this one port.
   #   9234  the mosquitto exporter sidecar (requires mosquitto.metrics.enabled)
   #
   # CHANGE THE NAMESPACE to wherever your Prometheus runs. `monitoring` is the convention;
@@ -406,8 +411,8 @@ autoscaling:
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
   # `supabase-envoy`, not `supabase-kong`: the gateway Deployment carries the Envoy name
-  # even though the Service does not. Naming a disabled workload here is now
-  # refused by hpas.yaml rather than rendering nothing -- which is how this line was caught.
+  # even though the Service does not. Naming a workload the chart does not render is refused by
+  # hpas.yaml rather than rendering nothing.
   components: [supabase-rest, supabase-envoy, supabase-functions, frontend]
 
 # THE ONLY RECOVERY PATH THIS STACK HAS: local-path is node-local with no replication, and neither

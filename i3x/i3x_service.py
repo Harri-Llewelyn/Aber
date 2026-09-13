@@ -80,17 +80,10 @@ LISTEN_HOST = os.getenv("I3X_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("I3X_PORT", "8090"))
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://supabase-kong:8000").rstrip("/")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
-
-# THE GATEWAY CREDENTIAL, in whichever format this deployment registered -- the new
-# `sb_publishable_*` key where one has been minted, the legacy anon JWT where it has not.
-#
-# THIS SERVICE IS THE CLEAREST CASE FOR THE NEW FORMAT, because the key does no work here beyond
-# getting past the gate: `_headers()` below sends it as `apikey` and puts the CALLER'S OWN token
-# in Authorization, so RLS decides what the address space contains. Nothing in this process reads
-# a claim out of it, which is exactly why an opaque string serves as well as a JWT.
-SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
+# The publishable key does no work here beyond getting past the gate: `_headers()` sends it as
+# `apikey` and puts the CALLER'S OWN token in Authorization, so RLS decides what the address
+# space contains.
+SUPABASE_GATEWAY_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -148,8 +141,8 @@ class PostgrestClient:
     """
     A PostgREST client bound to ONE caller's bearer token.
 
-    Constructed per request. `apikey` is the anon key -- Kong's `key-auth` needs a registered key and
-    the anon key is the public one -- while `Authorization` is the caller's own JWT, which is what
+    Constructed per request. `apikey` is the publishable key -- the gateway needs a registered key
+    and this is the public one -- while `Authorization` is the caller's own JWT, which is what
     PostgREST resolves the role and RLS context from. The two headers do different jobs and it is the
     second that carries identity.
     """
@@ -1663,8 +1656,8 @@ def main():
         )
     if not SUPABASE_GATEWAY_KEY:
         logger.warning(
-            "Neither SUPABASE_PUBLISHABLE_KEY nor SUPABASE_ANON_KEY is set -- PostgREST reads "
-            "will be refused by the gateway's key-auth."
+            "SUPABASE_PUBLISHABLE_KEY is not set -- PostgREST reads will be refused by the "
+            "gateway."
         )
 
     start_mqtt()

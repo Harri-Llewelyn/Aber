@@ -63,7 +63,7 @@ spec:
           ORDERING ONLY: a worker that cannot reach it fails the job it claimed with the reason,
           which is the behaviour that matters long after boot when no initContainer helps.
         */}}
-        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-kong:8000/auth/v1/health" "describe" "supabase-kong (the capture is read through it)") | nindent 8 }}
+        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-kong:8000/auth/v1/health" "describe" "supabase-kong (the capture is read through it)") | nindent 8 }}
       containers:
         - name: playback
           image: {{ include "acs-cymru.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
@@ -95,12 +95,11 @@ spec:
             - name: SUPABASE_URL
               value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
             {{- /*
-              Both, doing different jobs, exactly as for ingestion: the anon key is the apikey the
-              gateway's filter checks -- it admits two literal keys -- and the playback key is the
-              Authorization bearer that names Service_Playback.
+              Both, doing different jobs, exactly as for ingestion: the publishable key is the
+              apikey the gateway's filter checks -- it admits two literal keys -- and the playback
+              key is the Authorization bearer that names Service_Playback.
             */}}
-            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
-            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PLAYBACK_KEY" "secretName" $secretName "key" "SUPABASE_PLAYBACK_KEY") | nindent 12 }}
             - name: CAPTURE_BUCKET
               value: {{ .Values.supabaseStorage.captureBucket | quote }}

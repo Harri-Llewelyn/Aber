@@ -69,8 +69,7 @@ spec:
                 {{- include "acs-cymru.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" "INGEST_WRITER_PASSWORD") | nindent 16 }}
                 - name: SUPABASE_URL
                   value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
-                {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 16 }}
-                {{- include "acs-cymru.optionalSecretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 16 }}
+                {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 16 }}
                 {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 16 }}
                 - name: PYTHONUNBUFFERED
                   value: "1"

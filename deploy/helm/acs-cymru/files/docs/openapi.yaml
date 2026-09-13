@@ -20,7 +20,7 @@ info:
 
     Every request needs **both** headers, with two documented exceptions:
 
-    * `apikey: <anon key>` — the project's anonymous key.
+    * `apikey: <publishable key>` — the project's `sb_publishable_*` key.
     * `Authorization: Bearer <access_token>` — the JWT from `POST /auth/v1/token`.
 
     The exceptions are `/storage/v1/object/public/…` (public-read bucket) and
@@ -2022,7 +2022,7 @@ paths:
         * **Realtime has no replay.** A dropped socket loses every change in the gap and does
           not tell you. Keep a reconciliation poll.
       parameters:
-        - { name: apikey, in: query, schema: { type: string }, description: 'The anon key, as a query parameter — a browser cannot set headers on a WebSocket.' }
+        - { name: apikey, in: query, schema: { type: string }, description: 'The publishable key, as a query parameter — a browser cannot set headers on a WebSocket.' }
         - { name: vsn, in: query, schema: { type: string, default: '1.0.0' } }
       responses:
         '101': { description: Switching protocols. }
@@ -2481,7 +2481,7 @@ paths:
         Called by a **physical gateway appliance on first boot**, not by a browser. There is no
         user, no session and no role: possession of the single-use enrolment token is the
         authorisation. The request still needs the `apikey` header — the gateway gates `/functions/v1/`
-        with `key-auth` — but the **anon key is sufficient and no user JWT is required**.
+        — but the **publishable key is sufficient and no user JWT is required**.
 
         The token is minted by `issue_gateway_enrollment_token()` when an operator creates a
         physical gateway in the dashboard, is valid for 30 minutes by default, and is bound to
@@ -2674,7 +2674,7 @@ paths:
 
         That gap is recorded, not accidental: making it a fifth `key-auth` exemption widens the
         gateway's open surface, which is a decision to take on its own rather than as a side
-        effect. See `docs/gateway-migration.md`. Note the asymmetry if it is taken — only
+        effect. See `docs/gateway.md`. Note the asymmetry if it is taken — only
         `/description` belongs outside the gate; every other `aas-api` route authenticates the
         caller itself and fails closed.
 
@@ -3200,7 +3200,7 @@ paths:
         **An unset secret answers 503, never 200.** The check fails closed, so a missing environment
         variable is a broken integration rather than an unauthenticated write endpoint.
 
-        **Not exempt from the gateway's API-key check.** The contact point carries the anon key in the query
+        **Not exempt from the gateway's API-key check.** The contact point carries the publishable key in the query
         string (`?apikey=…`) because Grafana's webhook integration exposes only one header pair and
         it is spent on `Authorization`. `hide_credentials` keeps the key from being forwarded on.
 
@@ -3263,7 +3263,7 @@ paths:
         Registered on each gateway repository at enrolment (migration 0095). Gitea delivers every push
         to `main` here, signed: `X-Gitea-Signature` is the hex HMAC-SHA256 of the raw body under
         `GITEA_WEBHOOK_SECRET`, and the signature is the whole of the authentication -- Envoy's key-auth
-        proves only that the caller holds the anon key. On a verified push the gateway named by the
+        proves only that the caller holds the publishable key. On a verified push the gateway named by the
         repository (`gateway-<sparkplug_id>`) records the commit's sha, its message's first line, who
         pushed it, when, and the SHA-256 of `flows.json` at that commit, read through the machine account.
 
@@ -3343,7 +3343,7 @@ paths:
         hand and is left alone. Nothing is created that enrolment would not create, and nothing is
         deleted.
 
-        Authorised by `FORGE_SWEEP_SECRET` in the `x-sweep-secret` header, **not** by the anon key.
+        Authorised by `FORGE_SWEEP_SECRET` in the `x-sweep-secret` header, **not** by the publishable key.
         The identities acted on come from `user_roles` and the forge's own lists, never from the
         request, so a caller holding the secret can only make the forge more correct, and sooner.
       security:
@@ -3471,7 +3471,7 @@ components:
       type: apiKey
       in: header
       name: apikey
-      description: The Supabase anon key. Required on every request except the public-storage and userinfo endpoints.
+      description: The publishable key (`sb_publishable_*`). Required on every request except the public-storage and userinfo endpoints.
     AlertWebhookBearer:
       type: http
       scheme: bearer

@@ -5,7 +5,7 @@
  * WHY THIS EXISTS. Helm cannot read anything outside its own chart directory: `.Files.Glob` is
  * scoped to the chart, and `..` is rejected outright. But the files the chart needs are the SAME
  * files the repository owns -- the TimescaleDB bootstrap scripts, and in later phases
- * the Kong template, the Grafana datasource template, the Mosquitto config and the Node-RED flow.
+ * the gateway template, the Grafana datasource template, the Mosquitto config and the Node-RED flow.
  * Two hand-maintained copies of those is exactly the drift this whole migration is trying to avoid.
  *
  * So: ONE source of truth in the repository, mirrored into the chart mechanically, with a
@@ -93,21 +93,11 @@ const MIRRORS = [
   },
   {
     source: 'supabase',
-    dest: 'kong',
-    match: (name) => name === 'kong.yml',
-    why:
-      'STILL MIRRORED: the gateway is Envoy, and the chart keeps Kong off-not-deleted as the revert '
-      + 'path (supabaseKong.enabled). Deleting this file breaks helm install outright, which is how '
-      + 'it was found. It goes when the chart drops Kong',
-  },
-  {
-    source: 'supabase',
     dest: 'envoy',
     match: (name) => name === 'envoy.yaml',
     why:
-      'The Envoy translation of kong.yml. Mirrored for the SAME reason kong.yml is: '
-      + 'the chart mounts the mirror, and a stale copy is a gateway that behaves differently '
-      + 'from the file in the tree',
+      'The gateway config. The chart mounts the mirror, and a stale copy is a gateway that '
+      + 'behaves differently from the file in the tree',
   },
   {
     source: 'scripts',
@@ -119,7 +109,7 @@ const MIRRORS = [
     source: 'docs',
     dest: 'docs',
     // TWO specs, because they describe two different origins. openapi.yaml is everything behind
-    // Kong on :54321; i3x-openapi.yaml is the i3X server on :8090, which has no Kong route, takes
+    // the gateway on :54321; i3x-openapi.yaml is the i3X server on :8090, which has no gateway route, takes
     // no `apikey`, and would collide on /v1/schema if it were merged in. swagger-ui serves both
     // from one dropdown.
     match: (name) => name === 'openapi.yaml' || name === 'i3x-openapi.yaml',
@@ -209,7 +199,7 @@ const MIRRORS = [
     source: join('grafana', 'provisioning', 'datasources'),
     dest: 'grafana-datasources',
     match: (name) => name === 'datasources.template.yml',
-    why: 'A TEMPLATE -- __DB_PASSWORD__ is substituted by an initContainer, as with kong.yml',
+    why: 'A TEMPLATE -- __DB_PASSWORD__ is substituted by an initContainer, as with envoy.yaml',
   },
   {
     source: join('grafana', 'provisioning', 'dashboards'),

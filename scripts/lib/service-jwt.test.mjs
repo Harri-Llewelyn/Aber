@@ -114,7 +114,7 @@ test('asking for more than the ceiling is refused, not clamped', () => {
 });
 
 test('the ceiling does not apply to an infrastructure key', () => {
-  // They are the stack's API keys -- Kong admits exactly these two literal strings -- so bounding
+  // They are the JWTs the gateway hands its upstreams -- exactly these two literal strings -- so bounding
   // them needs a story for re-issuing them to every client at once. Different change; not this one.
   assert.doesNotThrow(() => mintJwt({ role: 'anon', secret: SECRET, days: INFRASTRUCTURE_KEY_DAYS }));
 });

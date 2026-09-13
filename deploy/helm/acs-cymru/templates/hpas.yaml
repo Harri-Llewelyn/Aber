@@ -77,12 +77,12 @@ generated or trusted.
   or mosquitto cannot scale. Refusing with a less useful reason is its own regression: CI asserts
   that a refused single-writer names "SINGLE-WRITER workload", and it was right to.
 
-  It was not hypothetical. Promoting Envoy turned `supabaseKong.enabled` off while
-  values-prod.yaml.example still asked to autoscale `supabase-kong`, and the render answered with a
-  gateway pinned at one replica where the file plainly asked for two to six. Nothing said so.
+  It was not hypothetical: values-prod.yaml.example once asked to autoscale a gateway workload
+  the chart no longer rendered, and the render answered with a gateway pinned at one replica where
+  the file plainly asked for two to six. Nothing said so.
 */}}
 {{- if and (hasKey $enabledOf .) (not (index $enabledOf .)) }}
-{{- fail (printf "\n\nacs-cymru: autoscaling.components includes %q, but that workload is DISABLED.\n\nAn HPA cannot scale a Deployment the chart does not render, so this would have produced no\nHorizontalPodAutoscaler and no error -- the component would sit at its fixed replica count while\nthe values file said it scaled. Refused rather than ignored, because the symptom only appears\nunder load.\n\nEither enable it, or take it out of autoscaling.components. If you have just promoted Envoy over\nKong, the name you want is supabase-envoy.\n" .) }}
+{{- fail (printf "\n\nacs-cymru: autoscaling.components includes %q, but that workload is DISABLED.\n\nAn HPA cannot scale a Deployment the chart does not render, so this would have produced no\nHorizontalPodAutoscaler and no error -- the component would sit at its fixed replica count while\nthe values file said it scaled. Refused rather than ignored, because the symptom only appears\nunder load.\n\nEither enable it, or take it out of autoscaling.components. The gateway's name is supabase-envoy.\n" .) }}
 {{- end }}
 {{- if index $enabledOf . }}
 ---

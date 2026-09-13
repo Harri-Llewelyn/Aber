@@ -13,9 +13,9 @@ THE TWO THINGS WORTH PROTECTING HERE, both of which fail quietly:
     succeeds, the file is the right size, and it will not open. The client must use a raw fetch();
     this suite proves the SERVER's half by unzipping what it returns.
 
-Requires the stack up and SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY:
+Requires the stack up and SUPABASE_PUBLISHABLE_KEY / SUPABASE_SERVICE_ROLE_KEY:
 
-    SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+    SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
         python supabase/functions/gateway-bundle/test_gateway_bundle.py
 """
 import io
@@ -28,7 +28,7 @@ import urllib.request
 import zipfile
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
-ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 PHYSICAL_GW = "2c000000-0000-4000-8000-000000000001"
@@ -43,15 +43,14 @@ ACCOUNTS = {
 PASSWORD = os.getenv("ACS_DEMO_PASSWORD", "acscymru123")
 
 
-def rest(path, method="GET", body=None, key=None, bearer=None, prefer=None):
-    key = key or SERVICE_ROLE_KEY
+def rest(path, method="GET", body=None, bearer=None, prefer=None):
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1{path}",
         method=method,
         data=json.dumps(body).encode() if body is not None else None,
         headers={
-            "apikey": key,
-            "Authorization": f"Bearer {bearer or key}",
+            "apikey": PUBLISHABLE_KEY,
+            "Authorization": f"Bearer {bearer or SERVICE_ROLE_KEY}",
             "Content-Type": "application/json",
             "X-ACS-Cymru-Actor": "service",
             **({"Prefer": prefer} if prefer else {}),
@@ -67,7 +66,7 @@ def sign_in(email):
         f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
         method="POST",
         data=json.dumps({"email": email, "password": PASSWORD}).encode(),
-        headers={"apikey": ANON_KEY, "Content-Type": "application/json"},
+        headers={"apikey": PUBLISHABLE_KEY, "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=15) as response:
         return json.loads(response.read().decode())["access_token"]
@@ -85,7 +84,7 @@ def download(gateway_id, bearer):
         method="POST",
         data=json.dumps({"gateway_id": gateway_id}).encode(),
         headers={
-            "apikey": ANON_KEY,
+            "apikey": PUBLISHABLE_KEY,
             "Authorization": f"Bearer {bearer}",
             "Content-Type": "application/json",
         },
@@ -106,7 +105,7 @@ def headers_of(response):
     Response headers, keyed in LOWER CASE.
 
     HTTP header names are case-insensitive, and this response proves why that matters rather than
-    being a technicality: Kong and the Deno runtime return a MIXTURE -- `Content-Type` capitalised,
+    being a technicality: the gateway and the Deno runtime return a MIXTURE -- `Content-Type` capitalised,
     `content-disposition` not -- so `dict(response.headers)["Content-Disposition"]` raises KeyError
     against a response that is perfectly correct. Normalising here keeps the assertions about the
     header's VALUE rather than about whichever component last touched its name.
@@ -114,8 +113,8 @@ def headers_of(response):
     return {key.lower(): value for key, value in response.headers.items()}
 
 
-@unittest.skipIf(not ANON_KEY or not SERVICE_ROLE_KEY,
-                 "SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set")
+@unittest.skipIf(not PUBLISHABLE_KEY or not SERVICE_ROLE_KEY,
+                 "SUPABASE_PUBLISHABLE_KEY and SUPABASE_SERVICE_ROLE_KEY must be set")
 class BundleBase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -153,7 +152,7 @@ class BundleBase(unittest.TestCase):
 
 def probe(bearer=None):
     """The readiness GET, as the dashboard sends it. Returns (status, body)."""
-    headers = {"apikey": ANON_KEY}
+    headers = {"apikey": PUBLISHABLE_KEY}
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
     req = urllib.request.Request(f"{SUPABASE_URL}/functions/v1/gateway-bundle", method="GET", headers=headers)
@@ -228,7 +227,7 @@ class TestPermissions(BundleBase):
         req = urllib.request.Request(
             f"{SUPABASE_URL}/functions/v1/gateway-bundle",
             method="POST", data=json.dumps({"gateway_id": PHYSICAL_GW}).encode(),
-            headers={"apikey": ANON_KEY, "Content-Type": "application/json"},
+            headers={"apikey": PUBLISHABLE_KEY, "Content-Type": "application/json"},
         )
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(req, timeout=15)
@@ -323,7 +322,7 @@ class TestTokenEmbedding(BundleBase):
         self.assertNotRegex(env, r"(?i)mqtt_password")
         self.assertNotRegex(env, r"(?i)^ACS_MQTT_PASS")
 
-        self.assertIn("ACS_SUPABASE_ANON_KEY=", env)
+        self.assertIn("ACS_SUPABASE_PUBLISHABLE_KEY=", env)
         self.assertIn("NODERED_CREDENTIAL_SECRET=", env)
         # The address the APPLIANCE dials -- never the in-stack one, which resolves nowhere useful.
         url = re.search(r"^ACS_SUPABASE_URL=(.+)$", env, re.M).group(1)

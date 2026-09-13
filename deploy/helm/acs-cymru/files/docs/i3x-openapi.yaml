@@ -10,14 +10,14 @@ info:
 
     ### This is a different service from the Platform API
 
-    It is **not behind the Kong gateway**. It listens on its own port, takes no `apikey`
+    It is **not behind the gateway**. It listens on its own port, takes no `apikey`
     header, and speaks the i3X wire format rather than PostgREST's. That is why it has its
     own document instead of a section in `openapi.yaml` — one `servers:` block cannot
-    describe two origins, and `/v1/schema` already means something else on Kong.
+    describe two origins, and `/v1/schema` already means something else on the gateway.
 
     | | Platform API (`openapi.yaml`) | i3X (this document) |
     | :--- | :--- | :--- |
-    | Origin | Kong, `:54321` | i3X service, `:8090` |
+    | Origin | the gateway, `:54321` | i3X service, `:8090` |
     | Headers | `apikey` **and** `Authorization` | `Authorization` only |
     | Shape | one path per table/view | one address space, browsed by relationship |
 

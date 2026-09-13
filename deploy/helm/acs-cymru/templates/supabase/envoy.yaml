@@ -6,43 +6,23 @@
 {{- fail "\n\nacs-cymru: files/envoy/envoy.yaml is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nEnvoy refuses to start on a config it cannot parse, so an absent one is a CrashLoopBackOff rather\nthan a silent 404 -- but the message points at a path, not at the sync step, which is why this fails here.\n" }}
 {{- end }}
 {{/*
-THE GATEWAY ON THIS TARGET. Kong is off by default and retained.
-
-WHAT WAS UNPROVEN, AND WHAT CLOSED IT. This template shipped disabled because a hand-installed
-cluster could not exercise anything needing this project's own images -- `db-init` and
-`gateway-credential` are unpublished GHCR tags, so no migrations ran, no edge functions deployed,
-and the authenticated probe's markers cannot be satisfied against empty upstreams. The Realtime
-handshake, the ServiceMonitor scrape and the Ingress were untested for the same class of reason.
-That remainder was downstream of CI, not of the chart:
-the k3d job BUILDS those images and imports them, so `Verify The Live Gateway Surface — Envoy,
-In-Cluster` runs the probe against a stack that has a schema behind it.
-
-WHAT HELD BEFORE THAT, observed rather than translated: the `supabase-kong` Service selects
-`component=supabase-envoy` and gets a live endpoint, so the name adoption the promotion rests on
-works; the unauthenticated probe reports 3 gated / 6 open / 4 exemptions; and
-credentials behave in both directions.
-
-TO RE-RUN IT BY HAND:
+THE GATEWAY (docs/gateway.md). CI runs `check-gateway-surface.mjs --runtime --authenticated`
+against the k3d stack; to re-run it by hand:
 
   kubectl -n <ns> port-forward svc/supabase-kong 18080:8000
-  SUPABASE_ANON_KEY=<the cluster's, from its Secret -- NOT .env's>
+  SUPABASE_PUBLISHABLE_KEY=<the cluster's, from its Secret>
     node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
 
-Two traps worth carrying: the key must come from the CLUSTER's Secret, and Windows reserves
-54328-54427, which silently refuses the obvious port-forward ports. See docs/gateway-migration.md.
+The key must come from the CLUSTER's Secret, and Windows reserves 54328-54427, which silently
+refuses the obvious port-forward ports.
 */}}
-{{- if and .Values.supabaseKong.enabled (eq .Values.supabaseEnvoy.serviceName "supabase-kong") }}
-{{- fail "\n\nacs-cymru: supabaseKong.enabled and supabaseEnvoy.serviceName=supabase-kong at once.\n\nTwo Deployments would answer on one Service name and requests would be load-balanced across the\ngateway being replaced and the one replacing it -- which is not a migration, it is a coin toss per\nrequest, and the probe would report whichever one it happened to reach.\n\nRun them side by side with supabaseEnvoy.serviceName=supabase-envoy, or promote by setting\nsupabaseKong.enabled=false in the same change that renames the Service.\n" }}
-{{- end }}
 ---
 {{/*
-The Envoy config, from the SHARED template -- the same argument kong.yml's ConfigMap makes.
+The Envoy config, from the mirrored template (scripts/sync-helm-chart-files.mjs).
 
-SUBSTITUTION IN AN initContainer, NOT IN HELM, and for the reason recorded on the Kong ConfigMap:
-with `secrets.existingSecret` set, `.Values.secrets.anonKey` is empty and Helm would substitute an
-EMPTY STRING into the Lua key comparison. That is worse here than it was there. Kong's key-auth
-accepts an empty registered key; this filter would accept `key == ""` from any caller presenting an
-empty apikey header, which is every caller who sends the header at all.
+SUBSTITUTION IN AN initContainer, NOT IN HELM: with `secrets.existingSecret` set the chart cannot
+see the keys, and Helm would substitute an EMPTY STRING into the Lua key comparison, which then
+admits any caller presenting an empty apikey header.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -58,18 +38,9 @@ apiVersion: v1
 kind: Service
 metadata:
   {{/*
-  NAMED FROM VALUES, and that is the whole promotion mechanism.
-
-  `http://supabase-kong:8000` is carried by Studio, the edge runtime, Grafana's token_url and
-  api_url, Node-RED's token and userinfo URLs, the ingestion daemon and both e2e Jobs -- fifteen
-  files. Kubernetes has no Service aliasing, so the way to move the gateway without touching any of
-  them is for the replacement to ADOPT THE NAME. Promotion is then two values in one change:
-
-      supabaseKong.enabled: false
-      supabaseEnvoy.serviceName: supabase-kong
-
-  rather than an edit to fifteen consumers, each of which is a chance to miss one. The guard above
-  refuses the state where both are enabled under that name.
+  NAMED FROM VALUES. `http://supabase-kong:8000` is carried by Studio, the edge runtime, Grafana's
+  token_url and api_url, Node-RED's token and userinfo URLs, the ingestion daemon and both e2e
+  Jobs; Kubernetes has no Service aliasing, so the gateway keeps the name every consumer carries.
   */}}
   name: {{ .Values.supabaseEnvoy.serviceName }}
   labels:
@@ -80,7 +51,7 @@ spec:
     {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # 8000, matching Kong's Service port exactly -- consumers carry the port as well as the host.
+      # 8000: consumers carry the port as well as the host.
       port: 8000
       targetPort: http
       protocol: TCP
@@ -100,13 +71,9 @@ spec:
       targetPort: forge
       protocol: TCP
     {{- if .Values.supabaseEnvoy.metrics.enabled }}
-    # NAMED `metrics`, selected BY NAME by the ServiceMonitor, as Kong's is.
-    #
-    # THE PATH DIFFERS FROM KONG'S AND THE SERVICEMONITOR MUST SAY SO. Kong exposes /metrics on a
-    # dedicated status listener; Envoy exposes /stats/prometheus on its ADMIN listener. Same
-    # scrape, different path, and a ServiceMonitor carried over unchanged scrapes 404 while
-    # reporting the target as up -- an unmeasured gateway that reads as an idle one, which is the
-    # exact failure the three Kong prometheus flags were added for.
+    # NAMED `metrics`, selected BY NAME by the ServiceMonitor, which scrapes /stats/prometheus on
+    # the admin listener. A ServiceMonitor with the wrong path scrapes 404 while reporting the
+    # target as up.
     - name: metrics
       port: {{ .Values.supabaseEnvoy.metrics.port }}
       targetPort: metrics
@@ -130,7 +97,7 @@ spec:
         {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
       annotations:
         # Roll the gateway when the ROUTES change. Envoy reads its bootstrap once at start, so
-        # without this a route change would sit in the ConfigMap unread -- same as Kong.
+        # without this a route change would sit in the ConfigMap unread.
         #
         # It does NOT cover the API keys, which live in the Secret the chart may not own. Rotating
         # one needs `kubectl rollout restart deployment/supabase-envoy`.
@@ -152,33 +119,16 @@ spec:
             - -e
             - -c
             - |
-              if [ -z "$SUPABASE_ANON_KEY" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-                echo 'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set -- an empty key substituted into the Lua filter would be accepted from any caller sending an empty apikey.' >&2
-                exit 1
-              fi
-              # THE ONE COMBINATION THAT LOCKS EVERYBODY OUT, refused here rather than
-              # discovered. Legacy off with no new keys registered leaves the filter accepting
-              # NOTHING: every gated route answers 401, every pod reports healthy, and the cause is
-              # one boolean three layers down. Made on both targets for the reason every other check
-              # here is: they share the template and not the substituter.
-              case "$LEGACY_KEYS_ACCEPTED" in
-                true|false) ;;
-                *)
-                  echo "LEGACY_KEYS_ACCEPTED must be exactly 'true' or 'false' -- it is substituted into the Lua filter as a bare boolean. Got: $LEGACY_KEYS_ACCEPTED" >&2
+              # All four, or nothing: an empty key substituted into the Lua filter is matched by
+              # any caller sending an empty apikey, and an empty JWT is a bearer no upstream
+              # accepts, which answers 401 to every request while every pod reports healthy.
+              for name in SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
+                eval "value=\$$name"
+                if [ -z "$value" ]; then
+                  echo "$name must be set -- see secrets in values.yaml; node scripts/setup.mjs mints the set." >&2
                   exit 1
-                  ;;
-              esac
-              if [ "$LEGACY_KEYS_ACCEPTED" = "false" ] && [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
-                echo 'LEGACY_KEYS_ACCEPTED=false with no SUPABASE_PUBLISHABLE_KEY set -- the gateway would accept no API key at all and refuse every request. Mint the new pair first, migrate your consumers onto it, and only then turn the legacy keys off.' >&2
-                exit 1
-              fi
-              # ONE OF THE NEW PAIR IS WORSE THAN NEITHER -- the guard the substituter makes, for
-              # the reason every other check here is: a rule enforced on one
-              # is a per-target divergence that surfaces as a boot failure on the other.
-              if { [ -n "$SUPABASE_PUBLISHABLE_KEY" ] && [ -z "$SUPABASE_SECRET_KEY" ]; } || { [ -z "$SUPABASE_PUBLISHABLE_KEY" ] && [ -n "$SUPABASE_SECRET_KEY" ]; }; then
-                echo 'SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY are a pair -- set BOTH to accept the new key format, or NEITHER to run legacy-only.' >&2
-                exit 1
-              fi
+                fi
+              done
               case "$ENVOY_CORS_ORIGINS" in
                 '['*']') ;;
                 *)
@@ -194,8 +144,8 @@ spec:
                   ;;
               esac
 
-              # Kong takes origins as a JSON array of strings; Envoy takes a list of string
-              # matchers. THE SPACE AFTER THE COLON IS REQUIRED: `{exact:"a"}` is a single scalar
+              # The chart hands over origins as a JSON array of strings; Envoy takes a list of
+              # string matchers. THE SPACE AFTER THE COLON IS REQUIRED: `{exact:"a"}` is a single scalar
               # key in a YAML flow mapping, not a key and a value, and Envoy refuses the whole
               # bootstrap. Measured: Envoy refused to start.
               CORS_MATCHERS=$(printf '%s' "$ENVOY_CORS_ORIGINS" | sed 's/"\([^"]*\)"/{exact: "\1"}/g')
@@ -263,7 +213,6 @@ spec:
                   -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$SUPABASE_SERVICE_ROLE_KEY|g" \
                   -e "s|__SUPABASE_PUBLISHABLE_KEY__|$SUPABASE_PUBLISHABLE_KEY|g" \
                   -e "s|__SUPABASE_SECRET_KEY__|$SUPABASE_SECRET_KEY|g" \
-                  -e "s|__LEGACY_KEYS_ACCEPTED__|$LEGACY_KEYS_ACCEPTED|g" \
                   -e "s|__REALTIME_UPSTREAM_HOST__|$REALTIME_UPSTREAM_HOST|g" \
                   -e "s|__REALTIME_UPSTREAM_ADDRESS__|$REALTIME_UPSTREAM_ADDRESS|g" \
                   -e "s|__CORS_ORIGINS__|$CORS_MATCHERS|g" \
@@ -284,51 +233,19 @@ spec:
               fi
               echo 'envoy.yaml rendered.'
           env:
-            - name: SUPABASE_ANON_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "acs-cymru.secretName" . }}
-                  key: SUPABASE_ANON_KEY
-            - name: SUPABASE_SERVICE_ROLE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "acs-cymru.secretName" . }}
-                  key: SUPABASE_SERVICE_ROLE_KEY
-            # THE NEW KEY FORMAT, and `optional: true` is the whole compatibility story on this
-            # target. With `secrets.existingSecret` set, the chart does not own the Secret and an
-            # operator's existing one has neither of these keys -- a required secretKeyRef would
-            # then refuse to start the gateway on every cluster that upgraded without minting them.
-            # Absent means empty, empty means legacy-only, and the Lua filter checks for exactly
-            # that. The pair guard above catches the half-configured case.
-            - name: SUPABASE_PUBLISHABLE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "acs-cymru.secretName" . }}
-                  key: SUPABASE_PUBLISHABLE_KEY
-                  optional: true
-            - name: SUPABASE_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "acs-cymru.secretName" . }}
-                  key: SUPABASE_SECRET_KEY
-                  optional: true
-            # THE DEACTIVATION SWITCH, from VALUES rather than from the Secret: it is a
-            # posture, not a credential, and it belongs where an operator reads the rest of the
-            # gateway's configuration. See supabaseEnvoy.legacyKeysAccepted in values.yaml.
-            - name: LEGACY_KEYS_ACCEPTED
-              value: {{ .Values.supabaseEnvoy.legacyKeysAccepted | toString | quote }}
-            # Kong's initContainer builds a full URL because Kong routes on one. Envoy splits the
-            # concern: the cluster carries the address, this carries only the Host header.
+            # The two keys callers present, and the two JWTs the filter substitutes for them.
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SECRET_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_SECRET_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            # The cluster carries the address; this carries only the Host header Realtime reads
+            # its tenant from.
             - name: REALTIME_UPSTREAM_HOST
               value: {{ .Values.realtime.serviceName | quote }}
-            # AND THE ADDRESS, which is the same string here. The template used to hard-code a
-            # container name, so this cluster resolved nothing and Realtime answered 503 through a
-            # gateway that was otherwise right.
             - name: REALTIME_UPSTREAM_ADDRESS
               value: {{ .Values.realtime.serviceName | quote }}
             # THE SAME HELPER THE INGRESS HOSTS COME FROM, so an origin cannot name a hostname the
-            # chart does not serve. Identical to Kong's KONG_CORS_ORIGINS for the same reason:
-            # origin policy has one source or it has none.
+            # chart does not serve: origin policy has one source or it has none.
             - name: ENVOY_CORS_ORIGINS
               value: {{ include "acs-cymru.corsOrigins" . | quote }}
             # ------------------------------------------------------------------------------
@@ -445,7 +362,7 @@ spec:
           configMap:
             name: {{ printf "%s-envoy-template" $fullname }}
         # emptyDir, not a Secret: the rendered file carries both API keys and must not outlive the
-        # pod or appear in any manifest. Same treatment as Kong's rendered config.
+        # pod or appear in any manifest.
         - name: config
           emptyDir: {}
 {{- end }}

@@ -379,7 +379,7 @@ def _load_ingestion():
     if "sparkplug_b_pb2" not in sys.modules:
         sys.modules["sparkplug_b_pb2"] = types.ModuleType("sparkplug_b_pb2")
     os.environ.setdefault("SUPABASE_URL", "http://localhost")
-    os.environ.setdefault("SUPABASE_ANON_KEY", "test")
+    os.environ.setdefault("SUPABASE_PUBLISHABLE_KEY", "test")
     os.environ.setdefault("SUPABASE_INGESTION_KEY", "test")
     import ingestion
     return ingestion

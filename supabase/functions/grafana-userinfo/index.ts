@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
  * OIDC userinfo endpoint for Grafana's [auth.generic_oauth] `api_url`. GoTrue's OIDC server
@@ -65,7 +66,7 @@ export default async function handler(req: Request): Promise<Response> {
     // Read the role with the service key, not the caller's token: the user id is already
     // authenticated above, so this is a lookup rather than an authorisation decision, and reading
     // through the caller would couple this endpoint to the shape of the user_roles policy.
-    const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+    const supabaseAdmin = serviceRoleClient(supabaseUrl, serviceKey);
     // A failed lookup is not evidence of a role: returning no role lets Grafana's
     // role_attribute_strict refuse the login.
     const dbRole = await resolveUserRole(supabaseAdmin, user.id);

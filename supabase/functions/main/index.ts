@@ -11,12 +11,11 @@ import { corsHeaders } from "../_shared/cors.ts";
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
 /**
- * Environment every worker needs: how to reach Supabase, and the gateway credential, which is
- * public by construction in either format. SUPABASE_PUBLISHABLE_KEY is passed alongside the anon
- * key; `_shared/gatewayKey.ts` prefers it and falls back. SUPABASE_SERVICE_ROLE_KEY and
- * `sb_secret_*` are not here: the service key is granted per function below.
+ * Environment every worker needs: how to reach Supabase, and the publishable key, which is
+ * public by construction. SUPABASE_SERVICE_ROLE_KEY is not here: it is granted per function
+ * below.
  */
-const COMMON_ENV = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_PUBLISHABLE_KEY"];
+const COMMON_ENV = ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"];
 
 /**
  * The function allow-list, and the secrets each function may see. An allow-list because
@@ -214,7 +213,7 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  // Kong routes /functions/v1/<name> with strip_path, so pathname is "/<name>".
+  // The gateway routes /functions/v1/<name> with the prefix stripped, so pathname is "/<name>".
   const { pathname } = new URL(req.url);
   const serviceName = pathname.split("/")[1];
 

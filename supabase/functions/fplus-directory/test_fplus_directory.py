@@ -42,14 +42,14 @@ DIRECTORY_INDEX = REPO_ROOT / "supabase" / "functions" / "fplus-directory" / "in
 OPENAPI = REPO_ROOT / "docs" / "openapi.yaml"
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
-ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 DEMO_EMAIL = os.getenv("DIRECTORY_TEST_EMAIL", "admin@acs-cymru.local")
 DEMO_PASSWORD = os.getenv("DIRECTORY_TEST_PASSWORD", "acscymru123")
 
 # THE UNPREFIXED PATHS, not /functions/v1/fplus-directory. Both reach the same handler, but only
 # this one is exempt from the gateway's key-auth -- so an anonymous request tested here is refused
 # by the FUNCTION, which is the property worth asserting. Through /functions/v1/ the gateway would
-# answer first and the test would be checking Kong.
+# answer first and the test would be checking the gateway.
 DIRECTORY_BASE = SUPABASE_URL
 
 # A device attached the legacy way, beside the fixture's `device_submodels` one. Pinned and upserted
@@ -73,8 +73,8 @@ def request(method: str, url: str, token: str | None, payload: dict | None = Non
             headers: dict | None = None, send_apikey: bool = True):
     body = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=body, method=method)
-    if send_apikey and ANON_KEY:
-        req.add_header("apikey", ANON_KEY)
+    if send_apikey and PUBLISHABLE_KEY:
+        req.add_header("apikey", PUBLISHABLE_KEY)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     if payload is not None:
@@ -127,7 +127,7 @@ def provision(token):
     second thing to keep in step. `ensure` is idempotent and the runner spawns one suite at a time.
     """
     try:
-        device = aas_fixture.ensure(SUPABASE_URL, token, ANON_KEY)
+        device = aas_fixture.ensure(SUPABASE_URL, token, PUBLISHABLE_KEY)
     except Exception as err:  # noqa: BLE001 -- reported, never silently skipped
         print(f"[test_fplus_directory] could not provision the fixture: {err}")
         return None, []
@@ -166,7 +166,7 @@ def provision(token):
 def teardown(token):
     """Best effort, and the legacy device first: it references the fixture's gateway and schema."""
     rest("DELETE", f"/devices?id=eq.{LEGACY_DEVICE_UUID}", token)
-    aas_fixture.teardown(SUPABASE_URL, token, ANON_KEY)
+    aas_fixture.teardown(SUPABASE_URL, token, PUBLISHABLE_KEY)
 
 
 TOKEN = sign_in()
@@ -217,7 +217,7 @@ class TestTheSourceKeepsItsShape(unittest.TestCase):
         cls.members = body.group(0)
 
     def test_the_bearer_check_still_precedes_every_v1_branch(self):
-        # The file's own argument: Kong exempts these routes, so the check is before routing rather
+        # The file's own argument: the gateway exempts these routes, so the check is before routing rather
         # than inside each branch -- which is what makes a handler added later authenticated by
         # construction rather than by its author remembering.
         auth = self.source.index('Missing Authorization header')

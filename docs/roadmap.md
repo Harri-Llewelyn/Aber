@@ -17,13 +17,12 @@ moves out, and the table below says where it went.
 (`CONTRIBUTING.md` says why), so retiring an entry and renumbering the rest costs one grep of
 `§[0-9]` in this file.
 
-**Ordering.** 1 and 2 are the platform's own: the one item somebody else sets the deadline for,
-then the rehearsal that turns the backup into a capability. 3 and 4 are the edge chain, in
-dependency order: 3 makes a gateway's flow reviewable, 4 makes the appliance a managed artefact and
-shares 3's puller. 5 reviews playback before the chain is folded, because a finding there may
-change the schema. 6 audits the documentation, code and comments once the code has stopped moving.
-7 is last by rule: it folds the migration chain, so every entry that changes the schema must have
-landed before it.
+**Ordering.** 1 is the platform's own: the rehearsal that turns the backup into a capability.
+2 and 3 are the edge chain, in dependency order: 2 makes a gateway's flow reviewable, 3 makes the
+appliance a managed artefact and shares 2's puller. 4 reviews playback before the chain is folded,
+because a finding there may change the schema. 5 audits the documentation, code and comments once
+the code has stopped moving. 6 is last by rule: it folds the migration chain, so every entry that
+changes the schema must have landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -37,9 +36,10 @@ landed before it.
 | Contextual help | [`frontend/README.md`](../frontend/README.md#contextual-help) |
 | The Directory's MQTT half | [`ingestion/README.md`](../ingestion/README.md#the-directory-on-mqtt) |
 | The log store, structured logging and the drop drill-down | [`ingestion/README.md`](../ingestion/README.md#log-fields), `loki/loki.yaml`, `deploy/helm/acs-cymru/templates/obs/alloy.yaml` |
-| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 4 |
+| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 3 |
 | The broker's Dynamic Security plugin (`0102`) | [`mosquitto/README.md`](../mosquitto/README.md) for the policy, the measured facts and the boot reconcile; [`supabase/README.md`](../supabase/README.md#the-access-control-page-states-what-is-outstanding) for the live Broker column, the orphaned-accounts list and a revocation that disconnects |
-| Kong → Envoy, and the new API key translation | [`docs/gateway-migration.md`](gateway-migration.md) |
+| Kong → Envoy, and the new API key translation | [`docs/gateway.md`](gateway.md); Kong is deleted from the chart, not kept as a revert path, because a gateway that cannot match the `sb_*` keys cannot serve any caller |
+| Moving off Supabase's legacy API keys | Shipped, as a code change rather than the operational switch the entry described: with no deployment before 1.0 there was no unknown caller to watch for, so the gateway admits only the `sb_publishable_*` / `sb_secret_*` pair, every consumer presents it, the switch and its two instruments are gone, and `validate.py` proves a JWT presented as an apikey is refused. [`docs/gateway.md`](gateway.md) |
 | The demonstration floor and simulator | Removed; [`tutorial/README.md`](../tutorial/README.md) builds one machine by hand |
 | Horizontal ingestion scaling | Answered, not built: [The single-writer ceiling](../ingestion/README.md#the-single-writer-ceiling). The write path since moved to [the historian writer](../ingestion/README.md#the-historian-writer), one thread and one transaction per batch |
 | Ingress → Gateway API for CORS | Answered, not built: it would state origin policy a second way on one of two targets |
@@ -53,31 +53,7 @@ landed before it.
 
 ---
 
-## 1 · Moving off Supabase's legacy API keys
-
-**Builds on:** the gateway's key translation in [`supabase/envoy.yaml`](../supabase/envoy.yaml) ·
-`LEGACY_KEYS_ACCEPTED` / `supabaseEnvoy.legacyKeysAccepted` · the `acs-legacy-api-key` access log
-and the `rbac.legacy_api_key_.shadow_allowed` counter ·
-[Retiring the legacy pair](gateway-migration.md#retiring-the-legacy-pair-and-how-to-know-it-is-safe)
-
-Supabase deprecates the `anon` and `service_role` JWTs by the end of 2026. The gateway accepts the
-replacement `sb_publishable_*` / `sb_secret_*` keys alongside them on both targets, every caller in
-this repository prefers the new key, and the switch that stops accepting the legacy pair exists and
-refuses the one combination that would lock everybody out.
-
-**What remains is operational, not editorial.** The switch defaults to `true` because turning it
-off is an outage for anything still presenting a legacy key, and this repository cannot know who
-that is. Watch both instruments on a real deployment over a window covering its slowest periodic
-job, then set `LEGACY_KEYS_ACCEPTED=false`. This entry stays until a deployment has run
-deactivated.
-
-The signing algorithm (HS256 on `SUPABASE_JWT_SECRET`) is a different question and not in this
-item; every component verifies with the shared secret, and moving off it would be an item of its
-own.
-
----
-
-## 2 · A restore is rehearsed from a backup the service took
+## 1 · A restore is rehearsed from a backup the service took
 
 **Builds on:** [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) ·
 [`scripts/restore-databases.sh`](../scripts/restore-databases.sh) ·
@@ -115,7 +91,7 @@ retention prune removes exactly the directory the row named and nothing beside i
 
 ---
 
-## 3 · GitOps edge sync
+## 2 · GitOps edge sync
 
 **Builds on:** the forge (`gitea`, `gitea-init.sh`), one private repository per enrolled gateway
 in the `gateways` organisation ([`_shared/forge.ts`](../supabase/functions/_shared/forge.ts)) ·
@@ -167,7 +143,7 @@ from the heartbeat as `ingestion`; the puller never touches the database, so no 
   every repository, and the sweep asserts it.
 - **A required status check refusing `flows_cred.json` by shape.** A file uploaded through the
   forge's own UI meets no check until the puller refuses it on the appliance, which is late. It
-  needs a Gitea Actions runner, which 4 argues on; until then the puller's refusal is the only
+  needs a Gitea Actions runner, which 3 argues on; until then the puller's refusal is the only
   check.
 - **A failed webhook delivery does not alert.** It is visible on the hook's page in the forge and
   nowhere else. A repository from before `0095` gets its hook back from the sweep but not its
@@ -190,7 +166,7 @@ separate rule or a separate home for the notes.
 
 ---
 
-## 4 · The appliance itself, and the code somebody wants to run on it
+## 3 · The appliance itself, and the code somebody wants to run on it
 
 **Builds on:** [`gateway-bundle`](../supabase/functions/gateway-bundle/index.ts) ·
 [`gateway-bundle-template/`](../gateway-bundle-template) · `bootstrap.mjs`'s once-only guard ·
@@ -198,7 +174,7 @@ separate rule or a separate home for the notes.
 [`check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) and
 [`mosquitto-tls-init.mjs`](../scripts/mosquitto-tls-init.mjs) · the clock offset gauge and its
-alert · 3, whose forge, puller and appliance branch this reuses · the three revocation handles
+alert · 2, whose forge, puller and appliance branch this reuses · the three revocation handles
 (`disableClient` in the credential service, `withdraw_gateway_enrollment_tokens()`, and the deploy
 key) · arrives from a request to run custom data-gathering software on gateways, for legacy
 machinery
@@ -256,7 +232,7 @@ When it lands, scheduling and platform convergence become Ansible's; everything 
 
 **The fleet tracks a tag, and the pointer is per gateway.** "Latest tag" gives no staged rollout,
 so the tag an appliance converges to is a small file in its own repository (`platform.yml`),
-changed by pull request through the lane 3 already has. A fleet bump is one pull request per
+changed by pull request through the lane 2 already has. A fleet bump is one pull request per
 gateway or a scripted batch; a canary is one gateway. Nothing tracks `main` of the platform
 repository.
 
@@ -274,7 +250,7 @@ correct device timestamps at ingest.
 
 **Deploy keys, not gateway users.** One SSH key per appliance, generated on it as now, registered
 twice: read-write on its own repository, read-only on the platform repository. `main` on both
-admits no deploy key; `appliance` on the gateway repository admits them and blocks force-push (3).
+admits no deploy key; `appliance` on the gateway repository admits them and blocks force-push (2).
 That is the whole policy: pull and push its own repository, pull the platform's, reach nothing
 else. A Gitea user per gateway would express the same policy through teams, at the cost of a third
 kind of principal the membership sweep would have to exempt, and a user can open issues and create
@@ -350,7 +326,7 @@ token against the same repository, which the deploy-key reconcile makes routine,
 
 ---
 
-## 5 · The playback feature is reviewed end to end
+## 4 · The playback feature is reviewed end to end
 
 **Builds on:** [`playback_worker.py`](../ingestion/playback_worker.py) · [`capture.py`](../ingestion/capture.py) ·
 [`capture_worker.py`](../ingestion/capture_worker.py) · [`playback.yaml`](../deploy/helm/acs-cymru/templates/apps/playback.yaml) ·
@@ -391,7 +367,7 @@ a component entry; and the feature's README sections describe what is built.
 
 ---
 
-## 6 · The documentation, code and comments are audited against the codebase
+## 5 · The documentation, code and comments are audited against the codebase
 
 **Builds on:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) (the comment rule, and where argument and
 history go) · `scripts/check-docs-drift.mjs` · `scripts/check-mirror-drift.mjs` ·
@@ -430,7 +406,7 @@ method so the next one starts from it.
 
 ---
 
-## 7 · The migration chain folds back into the baseline
+## 6 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)
