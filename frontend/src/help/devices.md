@@ -1,6 +1,6 @@
 ## Summary
 
-Devices are what the gateways publish. Most are not created here: they appear because something published a birth certificate underneath a gateway, and this page is where that arrival becomes a modelled asset -- named, located, classified against a schema, and documented.
+Devices are what the gateways publish. Most are not created here: they appear because something published a birth certificate underneath a gateway, and this page is where that arrival becomes a modelled asset -- named, located, classified against a schema, and documented. In ISA-95 terms a device is a work unit, the bottom of the hierarchy, inside the cell it is located in.
 
 ## What the controls do
 

@@ -1,6 +1,6 @@
 ## Summary
 
-An edge gateway is what actually talks to machines and publishes their data to the broker. Every device in this stack arrives underneath one. This page is where gateways are created, enrolled, watched and taken out of service.
+An edge gateway is what actually talks to machines and publishes their data to the broker. Every device in this stack arrives underneath one. This page is where gateways are created, enrolled, watched and taken out of service. A gateway is a Sparkplug edge node, not a level of the ISA-95 hierarchy: the standard names the devices behind it and the places they stand in. A gateway is located in a cell so that the devices reporting through it can inherit that location.
 
 ## What the controls do
 

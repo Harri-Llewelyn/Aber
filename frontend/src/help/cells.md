@@ -1,6 +1,6 @@
 ## Summary
 
-A cell is a zone of the shopfloor -- a line, a bay, a machining area -- and it exists so that gateways and devices have somewhere to be. Cells are where this stack models physical location, and most filters elsewhere in the dashboard are ultimately a question about one.
+A cell is a zone of the shopfloor -- a line, a bay, a machining area -- and it exists so that gateways and devices have somewhere to be. Cells are where this stack models physical location, and most filters elsewhere in the dashboard are ultimately a question about one. In ISA-95 terms a cell is a work center: the standard also calls one kind of work unit a work cell, and this page does not mean that.
 
 ## What the controls do
 
