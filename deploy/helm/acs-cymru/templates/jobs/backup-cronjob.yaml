@@ -152,6 +152,7 @@ spec:
               image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
               imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
               env:
+                {{- with include "acs-cymru.dbClientTlsEnv" . }}{{ . | nindent 16 }}{{- end }}
                 {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PGPASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 16 }}
                 {{- include "acs-cymru.secretEnv" (dict "name" "TS_PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 16 }}
                 - name: RETENTION_DAYS
@@ -270,6 +271,7 @@ spec:
                   {{- end }}
                   echo 'Backup complete.'
               volumeMounts:
+                {{- with include "acs-cymru.dbClientCaMount" . }}{{ . | nindent 16 }}{{- end }}
                 - name: backups
                   mountPath: /backups
                 {{- if $includeStorage }}
@@ -284,6 +286,7 @@ spec:
               resources:
                 {{- toYaml .Values.backup.resources | nindent 16 }}
           volumes:
+            {{- with include "acs-cymru.dbClientCaVolume" . }}{{ . | nindent 12 }}{{- end }}
             - name: backups
               {{- if eq .Values.backup.destination "pvc" }}
               persistentVolumeClaim:

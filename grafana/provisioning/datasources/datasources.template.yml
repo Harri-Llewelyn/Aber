@@ -21,12 +21,15 @@ datasources:
     user: grafana_reader
     database: postgres
     isDefault: true
-    version: 2
     secureJsonData:
       password: __BI_READER_PASSWORD__
     jsonData:
       database: postgres
-      sslmode: disable
+      # verify-full against the chart's CA when the databases serve TLS, disable otherwise. The
+      # renderer drops the marked lines when there is no CA to name.
+      sslmode: __DB_SSLMODE__
+      tlsConfigurationMethod: file-path # __DB_TLS_ONLY__
+      sslRootCertFile: __DB_SSLROOTCERT__ # __DB_TLS_ONLY__
       postgresVersion: 1500
       timescaledb: true
 
@@ -52,12 +55,13 @@ datasources:
     # imported without an explicit datasource, keeps resolving to the telemetry it was written
     # against.
     isDefault: false
-    version: 1
     secureJsonData:
       password: __BI_READER_PASSWORD__
     jsonData:
       database: postgres
-      sslmode: disable
+      sslmode: __DB_SSLMODE__
+      tlsConfigurationMethod: file-path # __DB_TLS_ONLY__
+      sslRootCertFile: __DB_SSLROOTCERT__ # __DB_TLS_ONLY__
       postgresVersion: 1700
       # Not a TimescaleDB connection, whatever the view reaches over the FDW: true would make the
       # query builder offer `time_bucket()` against a server without the extension.
@@ -76,7 +80,6 @@ datasources:
     # NOT default. The historian stays default so an existing panel, and any dashboard imported
     # without an explicit datasource, keeps resolving to the telemetry it was written against.
     isDefault: false
-    version: 1
     jsonData:
       # Matches `global.scrape_interval` in prometheus/prometheus.yml. Grafana uses it to choose a
       # sensible minimum step, and a value larger than the real interval silently coarsens every
@@ -106,7 +109,6 @@ datasources:
     # NOT default. The historian stays default so an existing panel, and any dashboard imported
     # without an explicit datasource, keeps resolving to the telemetry it was written against.
     isDefault: false
-    version: 1
     jsonData:
       # A cap on returned lines per query, not a retention setting and not a bound on the time range.
       # The window is bounded by `limits_config.retention_period` in loki/loki.yaml.

@@ -97,10 +97,15 @@ spec:
             # listens on. NOT 5433, which is only the dev loop's forwarded port. A foreign server
             # pointed at 5433 fails as a relation-level error from PostgREST, which reads as a
             # schema fault; `helm test` (M6) queries the foreign table to catch exactly that.
+            {{- with include "acs-cymru.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
             - name: TS_HOST
               value: {{ include "acs-cymru.timescale.host" . | quote }}
             - name: TS_PORT
               value: {{ include "acs-cymru.timescale.port" . | quote }}
+            # The CA as the SUPABASE server sees it, for the postgres_fdw link it opens to the
+            # historian; empty means the link is not verified, which is only right with TLS off.
+            - name: TS_SSLROOTCERT
+              value: {{ ternary "/etc/acs-cymru/postgres/tls/ca.crt" "" .Values.postgresTls.enabled | quote }}
             - name: TS_DBNAME
               value: {{ .Values.timescaledb.database | quote }}
             - name: TS_USER
@@ -244,6 +249,7 @@ spec:
                     -v ts_dbname="$TS_DBNAME" \
                     -v ts_user="$TS_USER" \
                     -v ts_password="$TS_PASSWORD" \
+                    -v ts_sslrootcert="$TS_SSLROOTCERT" \
                     -v nodered_admin_token="$NODERED_ADMIN_TOKEN" \
                     -v grafana_oauth_client_secret="$GRAFANA_OAUTH_CLIENT_SECRET" \
                     -v grafana_public_url="$GRAFANA_PUBLIC_URL" \
@@ -287,6 +293,7 @@ spec:
 
               echo 'Supabase database initialized successfully.'
           volumeMounts:
+            {{- with include "acs-cymru.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
             - name: seed
               mountPath: /seed
               readOnly: true
@@ -294,6 +301,7 @@ spec:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { memory: 512Mi }
       volumes:
+        {{- with include "acs-cymru.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
         - name: seed
           configMap:
             name: {{ printf "%s-seed" $fullname }}

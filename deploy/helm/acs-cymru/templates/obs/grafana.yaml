@@ -203,9 +203,19 @@ spec:
                 (observability.enabled) unless grafana.prometheusUrl / grafana.lokiUrl name a
                 cluster's; the helpers fail the render when neither applies.
               */}}
+              {{- /* The two database datasources verify the server when postgresTls is on; the
+                     lines that only make sense then carry a marker and are dropped otherwise. */}}
               sed -e "s|__BI_READER_PASSWORD__|$BI_READER_PASSWORD|g" \
                   -e "s|__PROMETHEUS_URL__|{{ include "acs-cymru.prometheusUrl" . }}|g" \
                   -e "s|__LOKI_URL__|{{ include "acs-cymru.lokiUrl" . }}|g" \
+                  {{- if .Values.postgresTls.enabled }}
+                  -e "s|__DB_SSLMODE__|verify-full|g" \
+                  -e "s|__DB_SSLROOTCERT__|{{ include "acs-cymru.dbCaPath" . }}|g" \
+                  -e "s| # __DB_TLS_ONLY__||" \
+                  {{- else }}
+                  -e "s|__DB_SSLMODE__|disable|g" \
+                  -e "/__DB_TLS_ONLY__/d" \
+                  {{- end }}
                   /config/datasources.template.yml > /datasources/datasources.yml
               # Comment lines excluded: the template's own header documents the placeholder
               # convention BY NAME, so a whole-file scan flags the documentation of the rule as a
@@ -373,7 +383,9 @@ spec:
               readOnly: true
             - name: data
               mountPath: /var/lib/grafana
+            {{- with include "acs-cymru.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
       volumes:
+        {{- with include "acs-cymru.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
         - name: config
           configMap:
             name: {{ printf "%s-grafana-config" $fullname }}

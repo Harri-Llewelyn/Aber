@@ -116,6 +116,7 @@ spec:
           image: {{ include "acs-cymru.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
           env:
+            {{- with include "acs-cymru.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
             {{- /*
               The Prometheus endpoint (issues #22, #24). 0 disables it in ingestion.py -- see
               start_metrics_endpoint(), where the disable is a CONFIGURATION decision; metrics.py
@@ -273,13 +274,20 @@ spec:
           */}}
           resources:
             {{- toYaml .Values.ingestion.resources | nindent 12 }}
-          {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
+          {{- $brokerTls := and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
+          {{- if or $brokerTls .Values.postgresTls.enabled }}
           volumeMounts:
+            {{- if $brokerTls }}
             {{- include "acs-cymru.brokerClientCaMount" . | nindent 12 }}
+            {{- end }}
+            {{- with include "acs-cymru.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
           {{- end }}
-      {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
+      {{- if or $brokerTls .Values.postgresTls.enabled }}
       volumes:
+        {{- if $brokerTls }}
         {{- include "acs-cymru.brokerClientCaVolume" . | nindent 8 }}
+        {{- end }}
+        {{- with include "acs-cymru.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
       {{- end }}
 
 {{- if .Values.ingestion.metrics.enabled }}

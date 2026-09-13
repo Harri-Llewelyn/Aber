@@ -98,6 +98,7 @@ spec:
           imagePullPolicy: {{ .Values.backupService.image.pullPolicy }}
           command: ["node", "/scripts/backup-service.mjs"]
           env:
+            {{- with include "acs-cymru.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
             - name: SUPABASE_DB_HOST
               value: {{ include "acs-cymru.supabaseDb.host" . | quote }}
             - name: SUPABASE_DB_PORT
@@ -138,6 +139,7 @@ spec:
           resources:
             {{- toYaml .Values.backupService.resources | nindent 12 }}
           volumeMounts:
+            {{- with include "acs-cymru.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
             - name: scripts
               mountPath: /scripts
               readOnly: true
@@ -154,6 +156,7 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        {{- with include "acs-cymru.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
         - name: scripts
           configMap:
             name: {{ printf "%s-backup-service-scripts" $fullname }}

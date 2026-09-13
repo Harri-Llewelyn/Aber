@@ -69,6 +69,12 @@ spec:
             - name: PG_META_DB_USER
               value: supabase_admin
             {{- include "acs-cymru.secretEnv" (dict "name" "PG_META_DB_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            {{- if .Values.postgresTls.enabled }}
+            # postgres-meta spells the mode in its own connection string and takes the CA as PEM.
+            - name: PG_META_DB_SSL_MODE
+              value: verify-full
+            {{- include "acs-cymru.dbCaPemEnv" (dict "ctx" . "name" "PG_META_DB_SSL_ROOT_CERT") | nindent 12 }}
+            {{- end }}
             # Encrypts stored connection strings. Studio must be given the SAME value or it cannot
             # read what postgres-meta wrote.
             {{- include "acs-cymru.secretEnv" (dict "name" "CRYPTO_KEY" "secretName" $secretName "key" "PG_META_CRYPTO_KEY") | nindent 12 }}
