@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
  * Grafana alert notification receiver. Grafana evaluates the rules in
@@ -191,9 +191,7 @@ export default async function handler(req: Request): Promise<Response> {
     return jsonResponse({ success: true, received: alerts.length, written: 0, skipped }, 200);
   }
 
-  const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    auth: { persistSession: false },
-  });
+  const supabaseAdmin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   // One round trip per subject table, not one per alert: a multi-dimensional rule can deliver six
   // instances in one notification. The two kinds are looked up separately because a wire id is only

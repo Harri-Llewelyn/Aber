@@ -110,8 +110,8 @@ python supabase/functions/fplus-directory/test_fplus_directory.py
 
 # Physical gateway enrolment — signs in as Administrator to mint tokens (issuing is a USER's act,
 # gated on has_role, so the service key cannot do it), then redeems them the way an appliance does:
-# the anon key and no user JWT. Stops the credential service to exercise the 503 rollback path.
-SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+# the publishable key and no user JWT. Stops the credential service to exercise the 503 rollback path.
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/enroll-gateway/test_enroll_gateway.py
 
 # The forge's door, end to end -- the same OAuth flow a browser runs, for each seeded persona --
@@ -121,20 +121,20 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 # sent back through the door, and that Gitea's own sign-out link signs the person out of the
 # platform. Needs the forge and one enrolled gateway (which creates the organisation), and skips
 # without them.
-SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/forge-membership/test_forge_membership.py
 
 # The forge's push webhook (0095): signature refusals, what a push to main records on the gateway
 # row, what is ignored, and one delivery sent by the forge itself for a freshly enrolled gateway.
 # GITEA_WEBHOOK_SECRET is the release Secret's value (the one the edge runtime holds). Skips without it.
-SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
   python supabase/functions/forge-events/test_forge_events.py
 
 # The forge sweep (0099): the secret is checked; a role changed in user_roles behind the door is
 # unseated by one sweep and seated again when it returns; a member seated by hand is left alone; a
 # deleted push webhook comes back; a repository made by hand gets main protected; and the
 # database's own sweep_forge() answers true. FORGE_SWEEP_SECRET is the release Secret's value. Skips without it.
-SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
@@ -143,11 +143,11 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
 # and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
 # backup is released once. Takes a real backup and removes it afterwards; stops the service
 # container for a few seconds for the cancel case.
-SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
 
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
 # integrity, and that the embedded token is the one the database will accept.
-SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/gateway-bundle/test_gateway_bundle.py
 
 # Broker credential issuance — needs the stack up and the service's own bearer token
@@ -358,7 +358,7 @@ apply it. It used to live inline in the workflow, which is why no local runner e
 can pass at all. `0002` falls back to empty and warns rather than failing:
 
 ```
-0038: GATEWAY_REVOKE_SECRET or SUPABASE_ANON_KEY is unset; credential revocation is INERT
+0038: GATEWAY_REVOKE_SECRET or SUPABASE_PUBLISHABLE_KEY is unset; credential revocation is INERT
       on this stack. Archiving will not revoke, and the sweep will do nothing.
 ```
 

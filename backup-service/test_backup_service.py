@@ -11,7 +11,7 @@ and a pinned backup is released once.
 Needs the stack up with the backup-service container, the seeded personas and both keys. The
 cancel test stops the service container for a few seconds. Skips without the keys.
 
-    SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
+    SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
 """
 import json
 import os
@@ -23,7 +23,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "supabase", "functions", "enroll-gateway"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
-from test_enroll_gateway import ADMIN_PASSWORD, ANON_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, rest, sign_in  # noqa: E402
+from test_enroll_gateway import ADMIN_PASSWORD, PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, rest, sign_in  # noqa: E402
 import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
 
 OPERATOR_EMAIL = os.getenv("ACS_OPERATOR_EMAIL", "operator@acs-cymru.local")
@@ -44,18 +44,18 @@ def psql(sql):
 
 def rpc(name, body, bearer):
     try:
-        return rest(f"/rpc/{name}", method="POST", body=body, key=ANON_KEY, bearer=bearer)
+        return rest(f"/rpc/{name}", method="POST", body=body, bearer=bearer)
     except urllib.error.HTTPError as err:
         raw = err.read().decode()
         return err.code, (json.loads(raw) if raw.strip() else None)
 
 
 def query(path, bearer):
-    return rest(path, key=ANON_KEY, bearer=bearer)[1]
+    return rest(path, bearer=bearer)[1]
 
 
 
-@unittest.skipIf(not SERVICE_ROLE_KEY or not ANON_KEY, "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY must be set")
+@unittest.skipIf(not SERVICE_ROLE_KEY or not PUBLISHABLE_KEY, "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY must be set")
 class BackupServiceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

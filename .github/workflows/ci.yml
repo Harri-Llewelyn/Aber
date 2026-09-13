@@ -251,7 +251,7 @@ jobs:
       - name: Build Production Bundle
         env:
           VITE_SUPABASE_URL: http://127.0.0.1:54321
-          VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_acscymru_dev_0000000000000000
         run: |
           cd frontend
           npm run build
@@ -308,42 +308,6 @@ jobs:
       # refused.
       - name: Verify Broker Config Starts And Authenticates On The Pinned Version
         run: node scripts/check-broker-config.mjs --verbose
-
-      # Naming any plugin in Kong's `plugins` property replaces its bundled set, so a plugin kong.yml
-      # references but the list omits makes Kong refuse to boot. The step retires with the chart's
-      # Kong, which is retained off as the revert path.
-      - name: Verify The Chart's Kong Plugin List Covers Everything kong.yml References
-        run: |
-          python3 - <<'PY'
-          import re, sys, yaml
-          kong = yaml.safe_load(open('supabase/kong.yml', encoding='utf-8'))
-          referenced = {p['name'] for p in (kong.get('plugins') or [])}
-          for svc in (kong.get('services') or []):
-              for p in (svc.get('plugins') or []):
-                  referenced.add(p['name'])
-              for rt in (svc.get('routes') or []):
-                  for p in (rt.get('plugins') or []):
-                      referenced.add(p['name'])
-
-                    '; if Kong is genuinely back, restore the two-target comparison '
-                    'this step used to make rather than leaving one target unchecked.')
-              sys.exit(1)
-
-          values = re.search(r'^\s*plugins:\s*([a-z0-9,\-]+)\s*$',
-                             open('deploy/helm/acs-cymru/values.yaml', encoding='utf-8').read(), re.M)
-          if not values:
-              print('::error::could not find supabaseKong.plugins in values.yaml')
-              sys.exit(1)
-
-          declared = set(values.group(1).split(','))
-          print(f"  kong.yml references: {sorted(referenced)}")
-          missing = referenced - declared
-          if missing:
-              print(f"::error::values.yaml supabaseKong.plugins is missing {sorted(missing)} — Kong will refuse to boot")
-              sys.exit(1)
-          print(f"  ok  values.yaml: {sorted(declared)}")
-          sys.exit(0)
-          PY
 
       # A ServiceMonitor whose `port` names nothing on its Service does not fail: Prometheus lists no
       # target and the dashboards are empty.
@@ -418,11 +382,14 @@ jobs:
 
           DEV=deploy/helm/acs-cymru/values-dev.yaml
 
-          # The four Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by
-          # jwtSecret, so a partial set yields a stack that 401s at the gateway while looking fine.
+          # The Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by
+          # jwtSecret, and publishableKey and secretKey are what the gateway translates to them,
+          # so a partial set yields a stack that 401s at the gateway while looking fine.
           expect_failure "no credentials at all" "required credentials are not set"
           expect_failure "jwtSecret set but anonKey empty" "secrets.anonKey" \
             -f "$DEV" --set secrets.anonKey=
+          expect_failure "publishableKey empty" "secrets.publishableKey" \
+            -f "$DEV" --set secrets.publishableKey=
 
           # Lengths enforced by the supabase/realtime container itself; it refuses to boot.
           expect_failure "realtimeDbEncKey not 16 chars" "EXACTLY 16 characters" \
@@ -1356,10 +1323,10 @@ jobs:
             sleep 1
           done
           echo "gateway reachable through the port-forward (first response $CODE)"
-          SUPABASE_ANON_KEY=$(kubectl -n $NS get secret $RELEASE-secrets \
-            -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)
-          export SUPABASE_ANON_KEY
-          test -n "$SUPABASE_ANON_KEY"
+          SUPABASE_PUBLISHABLE_KEY=$(kubectl -n $NS get secret $RELEASE-secrets \
+            -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d)
+          export SUPABASE_PUBLISHABLE_KEY
+          test -n "$SUPABASE_PUBLISHABLE_KEY"
           node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
 
       # The migration model's central invariant, checked: there is no migrations ledger, db-init
@@ -1459,9 +1426,9 @@ jobs:
           trap 'kill $PFI $PFK 2>/dev/null || true' EXIT
           sleep 3
 
-          ANON=$(kubectl -n $NS get secret $RELEASE-secrets -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)
+          KEY=$(kubectl -n $NS get secret $RELEASE-secrets -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d)
           TOKEN=$(curl -s -X POST "http://127.0.0.1:18080/auth/v1/token?grant_type=password" \
-            -H "apikey: $ANON" -H "Content-Type: application/json" \
+            -H "apikey: $KEY" -H "Content-Type: application/json" \
             -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
           test -n "$TOKEN"
@@ -1488,8 +1455,8 @@ jobs:
       - name: Verify Realtime WebSocket Upgrade Through The Ingress
         run: |
           set -eu
-          ANON=$(kubectl -n $NS get secret $RELEASE-secrets \
-                   -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)
+          KEY=$(kubectl -n $NS get secret $RELEASE-secrets \
+                   -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d)
 
           # curl holds an open WebSocket that never sends a body, so it blocks until a timeout and
           # exits non-zero on some builds and zero on others -- the handshake succeeded either way.

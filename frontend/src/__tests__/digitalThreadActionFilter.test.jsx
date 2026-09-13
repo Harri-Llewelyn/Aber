@@ -137,7 +137,7 @@ describe('an unrecognised action must not widen the query', () => {
         }
       },
       SUPABASE_URL: 'http://localhost:54321',
-      SUPABASE_ANON_KEY: 'test'
+      SUPABASE_GATEWAY_KEY: 'test'
     }))
 
     const { api: realApi } = await vi.importActual('../api')

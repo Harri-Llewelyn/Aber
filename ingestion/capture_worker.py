@@ -62,15 +62,9 @@ logger = get_logger("ingestion")
 BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 SUPABASE_INGESTION_KEY = os.getenv("SUPABASE_INGESTION_KEY", "")
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
-
-# THE GATEWAY CREDENTIAL, in whichever format this deployment registered -- the new
-# `sb_publishable_*` key where one has been minted, the legacy anon JWT where it has not. The
-# gateway accepts both at once and translates the new one, so nothing here parses it: it is a
-# string presented as `apikey`. See docs/gateway-migration.md.
-SUPABASE_GATEWAY_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
+# The publishable key, presented as `apikey`; the gateway translates it (docs/gateway.md).
+SUPABASE_GATEWAY_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 
 # How often an idle worker looks for a queued job. Three seconds is the delay an operator sees
 # between pressing Capture and the card appearing; polling faster buys nothing, because the rebirth
@@ -214,7 +208,7 @@ def _storage_client():
     A storage client that authenticates AS THE DAEMON, which the shared one does not.
 
     THE DAEMON'S `supabase_client` UPLOADS AS `anon`, AND NOTHING SAYS SO. ingestion.py builds it
-    with the anon key and then calls `supabase_client.postgrest.auth(SUPABASE_INGESTION_KEY)` --
+    with the gateway key and then calls `supabase_client.postgrest.auth(SUPABASE_INGESTION_KEY)` --
     which authenticates the PostgREST sub-client and ONLY that one. `client.storage` is built
     separately and keeps the key it was constructed with:
 

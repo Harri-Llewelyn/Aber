@@ -14,7 +14,7 @@ is what the rest of this file drives directly.
 Needs the stack, the forge, the seeded personas, the gateways organisation (one enrolment creates
 it) and FORGE_SWEEP_SECRET, the value the edge runtime holds (read it from .env). Skips without them.
 
-    SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \\
+    SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \\
       python supabase/functions/forge-sweep/test_forge_sweep.py
 """
 import base64
@@ -31,7 +31,7 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "enroll-gateway"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "forge-membership"))
 from test_enroll_gateway import (  # noqa: E402
-    ANON_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
+    PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
 )
 from test_forge_membership import (  # noqa: E402
     FORGE_URL, MACHINE_PASSWORD, MACHINE_USER, ORGANISATION, PERSONAS, members_of, request, through_the_door,
@@ -46,7 +46,7 @@ HAND_MADE_REPOSITORY = "playbook-sweep-test"
 
 
 def sweep(secret=SWEEP_SECRET, with_secret=True):
-    headers = {"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}", "Content-Type": "application/json"}
+    headers = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}", "Content-Type": "application/json"}
     if with_secret:
         headers["x-sweep-secret"] = secret
     req = urllib.request.Request(f"{SUPABASE_URL}/functions/v1/forge-sweep", method="POST", data=b"{}", headers=headers)
@@ -74,7 +74,7 @@ def forge(path, method="GET", body=None):
         return err.code, (json.loads(text) if text.strip() else None)
 
 
-@unittest.skipIf(not SERVICE_ROLE_KEY or not ANON_KEY, "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY must be set")
+@unittest.skipIf(not SERVICE_ROLE_KEY or not PUBLISHABLE_KEY, "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY must be set")
 @unittest.skipIf(not SWEEP_SECRET, "FORGE_SWEEP_SECRET must be set to the value the edge runtime holds")
 class ForgeSweepBase(unittest.TestCase):
     @classmethod
@@ -125,7 +125,7 @@ class TestMembership(ForgeSweepBase):
         request(f"{FORGE_URL}/repo/search?q=gateway", jar=jar)
         self.assertIn(sub, members_of(team))
 
-        service = {"apikey": SERVICE_ROLE_KEY, "Authorization": f"Bearer {SERVICE_ROLE_KEY}",
+        service = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {SERVICE_ROLE_KEY}",
                    "Prefer": "return=representation"}
         status, _, text = request(f"{SUPABASE_URL}/rest/v1/user_roles?user_id=eq.{sub}&select=role_id", headers=service)
         self.assertEqual(status, 200, text[:200])
@@ -212,7 +212,7 @@ class TestRepositories(ForgeSweepBase):
                 public_key = handle.read().strip()
         finally:
             shutil.rmtree(key_dir, ignore_errors=True)
-        _, rows = rest("/rpc/issue_gateway_enrollment_token", method="POST", key=ANON_KEY, bearer=self.admin_token,
+        _, rows = rest("/rpc/issue_gateway_enrollment_token", method="POST", bearer=self.admin_token,
                        body={"p_gateway_id": TEST_GW_ID, "p_ttl_minutes": 30})
         status, payload = enroll(rows[0]["token"], ssh_public_key=public_key)
         self.assertEqual(status, 200, payload)
@@ -288,7 +288,7 @@ class TestTheSchedule(ForgeSweepBase):
             self.skipTest(f"could not sign in as the seeded administrator ({err})")
         # `rest()` raises on a 4xx, and the 4xx is the answer under test.
         with self.assertRaises(urllib.error.HTTPError) as refused:
-            rest("/rpc/sweep_forge", method="POST", body={}, key=ANON_KEY, bearer=token)
+            rest("/rpc/sweep_forge", method="POST", body={}, bearer=token)
         self.assertEqual(refused.exception.code, 403, "an Administrator's session could ask for a sweep")
 
 

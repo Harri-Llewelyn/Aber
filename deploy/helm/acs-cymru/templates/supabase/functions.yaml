@@ -15,8 +15,8 @@ spec:
     {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # kong.yml routes /functions/v1/ here on port 9000, including the two exact-path exemptions
-      # for grafana-userinfo and nodered-userinfo.
+      # The gateway routes /functions/v1/ here on port 9000, including the two exact-path
+      # exemptions for grafana-userinfo and nodered-userinfo.
       port: 9000
       targetPort: http
       protocol: TCP
@@ -61,12 +61,11 @@ spec:
           # variables main/index.ts forwards to it -- a value in a ConfigMap the pod does not mount,
           # or a file on disk, is invisible to the function that needs it.
           env:
-            # The gateway as reached from INSIDE the cluster. Functions call back through Kong so
-            # they inherit its routing and its key-auth.
+            # The gateway as reached from INSIDE the cluster. Functions call back through it, so
+            # they inherit its routing and its key check.
             - name: SUPABASE_URL
               value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
-            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
-            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
             # false because EACH FUNCTION CHECKS ITS OWN ROLE CLAIM. approve-quarantine and
@@ -158,7 +157,8 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_CREDENTIAL_SERVICE_TOKEN" "secretName" $secretName "key" "MQTT_CREDENTIAL_SERVICE_TOKEN") | nindent 12 }}
             {{- /* Verified by revoke-gateway-credential. The edge runtime boots with
                    VERIFY_JWT=false, so a function that does not check its own secret is an open
-                   endpoint -- Kong's key-auth proves only that the caller holds the anon key. */}}
+                   endpoint -- the gateway's key check proves only that the caller holds the
+                   publishable key. */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "GATEWAY_REVOKE_SECRET" "secretName" $secretName "key" "GATEWAY_REVOKE_SECRET") | nindent 12 }}
             {{- /* Verified by forge-sweep, for the same reason (0099). */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "FORGE_SWEEP_SECRET" "secretName" $secretName "key" "FORGE_SWEEP_SECRET") | nindent 12 }}

@@ -792,7 +792,7 @@ or keep `gitea.enabled: false` until you do.
 
 ```bash
 helm upgrade ... --set podDisruptionBudgets.enabled=true --set autoscaling.enabled=true \
-  --set supabaseKong.replicas=2 --set supabaseRest.replicas=2 --set frontend.replicas=3
+  --set supabaseEnvoy.replicas=2 --set supabaseRest.replicas=2 --set frontend.replicas=3
 ```
 
 **A PDB is only created for a workload that actually has more than one replica.** That guard matters:
@@ -988,7 +988,7 @@ a vault, SOPS-encrypted values if not. `values-prod.yaml.example` carries the fu
 Two need more:
 
 ```bash
-# Kong's API keys are substituted by an initContainer:
+# The gateway's API keys are substituted by an initContainer:
 kubectl -n acs-cymru rollout restart deployment/supabase-kong
 # The OAuth client secrets are HASHED INTO auth.oauth_clients by db-init:
 helm upgrade ...   # re-runs the post-upgrade hook
@@ -1185,7 +1185,7 @@ Also available, all documented above: **broker TLS on 8883**, the **internal CA*
 ### Service names are not release-prefixed, and must not be
 
 `timescaledb`, `supabase-db`, `mosquitto`, `supabase-kong` — the names every in-cluster URL in
-`grafana.ini`, `kong.yml`, `settings.js` and the edge-function environment carries, so each
+`grafana.ini`, `settings.js` and the edge-function environment carries, so each
 resolves unchanged. Prefixing them would break all of that and buy
 nothing: **two releases in one namespace is not supported** (they would contend for the MQTT host
 port, the Realtime replication slot and the tenant name). Use two namespaces.
@@ -1193,7 +1193,7 @@ port, the Realtime replication slot and the tenant name). Use two namespaces.
 ### `realtime-dev` is named for the tenant, not the workload
 
 Realtime resolves which tenant a request belongs to from the **leading hostname label of the Host
-header**. Kong runs `preserve_host: false`, so that label comes from the Service name. Rename the
+header**. The gateway rewrites the upstream Host to the Service name. Rename the
 Service and every WebSocket handshake fails with a **bare 403 that mentions neither tenants nor
 hostnames**. The chart refuses to render any other name.
 
@@ -1234,9 +1234,9 @@ everything is the standard 5432. A `postgres_fdw` foreign server pointed at 5433
 error from PostgREST, which reads as a schema fault rather than a connection one — the `helm test`
 FDW gate exists to catch exactly that.
 
-### Rotating an API key does not restart Kong
+### Rotating an API key does not restart the gateway
 
-Kong reads its declarative config once at start. The pod's `checksum/kong-template` annotation
+Envoy reads its bootstrap once at start. The pod's `checksum/envoy-template` annotation
 rolls it when the **routes** change, but the API keys come from the Secret — which the chart may
 not even be able to see (`existingSecret`). After rotating `SUPABASE_ANON_KEY` or
 `SUPABASE_SERVICE_ROLE_KEY`:
@@ -1413,7 +1413,7 @@ node scripts/sync-helm-chart-files.mjs           # update the copies
 node scripts/sync-helm-chart-files.mjs --check   # fail if stale (what CI runs)
 ```
 
-Mirrored: the TimescaleDB init and maintenance SQL, the Supabase migrations and seed, the Kong
+Mirrored: the TimescaleDB init and maintenance SQL, the Supabase migrations and seed, the gateway
 template, `storage-init.mjs`, `docs/openapi.yaml`, the Mosquitto config and ACL, the Node-RED flow
 and init script, and Grafana's `grafana.ini`, datasource template, dashboards and alerting rules.
 `scripts/sync-helm-chart-files.mjs` is the authoritative list.
@@ -1433,7 +1433,7 @@ There is no second topology to compare against, so the checks are the ones that 
 - **The chart's own guard rails**, which fail the render rather than the pod: partial credential sets,
   Realtime key lengths, the `realtime-dev` Service name, empty browser-facing URLs, TLS with
   `scheme: http`, single-writer workloads being scaled, missing `fsGroup`, published database ports
-  leaking into wiring, privileged credentials outside a Secret, an origin list Kong would start
+  leaking into wiring, privileged credentials outside a Secret, an origin list the gateway would start
   with and then block every browser request against, OAuth redirect URIs disagreeing between
   what a service advertises and what db-init registers, and a datasource pointed at nothing.
 - **The README component table** — `scripts/check-docs-drift.mjs` holds it to the chart in both

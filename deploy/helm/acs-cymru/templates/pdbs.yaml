@@ -25,7 +25,6 @@ stack where `frontend.replicas: 1` produces no PDB for it rather than an undrain
 */}}
 {{- $candidates := list
   (dict "component" "frontend"           "replicas" .Values.frontend.replicas          "enabled" .Values.frontend.enabled)
-  (dict "component" "supabase-kong"      "replicas" .Values.supabaseKong.replicas      "enabled" .Values.supabaseKong.enabled)
   (dict "component" "supabase-rest"      "replicas" .Values.supabaseRest.replicas      "enabled" .Values.supabaseRest.enabled)
   (dict "component" "supabase-functions" "replicas" .Values.supabaseFunctions.replicas "enabled" .Values.supabaseFunctions.enabled)
 -}}

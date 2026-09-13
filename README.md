@@ -355,12 +355,12 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `supabase-db` | `supabase/postgres:17.6.1.160` | `supabase-db:5432` |
 | `supabase-envoy` | `envoyproxy/envoy:v1.39.1` | the gateway: `api.<domain>` (Service `supabase-kong:8000`), Studio on 8001, the forge on 8002 |
 | `supabase-functions` | `ghcr.io/harri-llewelyn/acs-cymru/edge-runtime` | behind `api.<domain>/functions/v1` |
-| `supabase-kong` | `kong:3.9.3` | off (`supabaseKong.enabled`): the revert path from Envoy |
 | `supabase-meta` | `supabase/postgres-meta:v0.96.6` | in-cluster only, for Studio |
 | `supabase-rest` | `postgrest/postgrest:v14.12` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
 | `supabase-storage` | `supabase/storage-api:v1.60.4` | behind `api.<domain>/storage/v1` |
 | `supabase-studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `studio.<domain>`, off by default, behind the gateway's login |
 | `swagger-ui` | `swaggerapi/swagger-ui:v5.32.14` | `docs.<domain>` |
+| `test-db-tls` | `supabase/postgres:17.6.1.160` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
 | `test-fdw` | `supabase/postgres:17.6.1.160` | `helm test`: the postgres_fdw gate |
 | `timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `timescaledb:5432` |
 | `timescaledb-maintenance` | `timescale/timescaledb:2.29.2-pg17` | hook Job: extension, retention, rollups, roles |
@@ -530,8 +530,8 @@ infer when an asset was created, edited, archived or changed state. In practice 
 side-channel on shift patterns, commissioning activity and the rate of configuration change.
 
 **It cannot be fixed here** — it is upstream `supabase/realtime` behaviour. The gateway's `apikey`
-check does not mitigate it either: the anon key is a registered key that is necessarily shipped to
-every browser, so holding it proves nothing about the caller. What *was* done is narrowing the
+check does not mitigate it either: the publishable key is a registered key that is necessarily
+shipped to every browser, so holding it proves nothing about the caller. What *was* done is narrowing the
 publication: `digital_thread` was removed from it, being the most operationally sensitive stream and
 one nothing subscribed to.
 

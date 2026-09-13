@@ -104,7 +104,7 @@ if (!Number.isFinite(days) || days <= 0 || days > SERVICE_KEY_MAX_DAYS) {
 }
 
 // The keys as the running stack holds them, from the release Secret (or the environment).
-const creds = stackCredentials(['SUPABASE_JWT_SECRET', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_URL', ...KEYS.map((k) => k.env)]);
+const creds = stackCredentials(['SUPABASE_JWT_SECRET', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_URL', ...KEYS.map((k) => k.env)]);
 const envValue = (key) => creds[key] || '';
 
 // -------------------------------------------------------------------------------------------------
@@ -191,7 +191,7 @@ for (const key of minted) {
     const res = await fetch(`${supabaseUrl}/rest/v1/rpc/record_service_token_issued`, {
       method: 'POST',
       headers: {
-        apikey: serviceRoleKey,
+        apikey: envValue('SUPABASE_PUBLISHABLE_KEY'),
         Authorization: `Bearer ${serviceRoleKey}`,
         'Content-Type': 'application/json',
       },

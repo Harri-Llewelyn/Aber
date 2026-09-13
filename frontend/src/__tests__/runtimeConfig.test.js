@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path'
  * These pin that runtime wins, build time is the fallback, an unsubstituted template placeholder
  * counts as absent, and the accessor's key list agrees with the placeholder file a deployment
  * overwrites. Every case re-imports the module under vi.resetModules(), because SUPABASE_URL and
- * SUPABASE_ANON_KEY are resolved once at module load.
+ * SUPABASE_GATEWAY_KEY are resolved once at module load.
  */
 
 const GLOBAL_KEY = '__ACS_CYMRU_CONFIG__'

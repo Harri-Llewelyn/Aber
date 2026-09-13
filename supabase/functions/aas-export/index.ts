@@ -10,6 +10,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
 import { modelContentType } from "../_shared/aas/model3dContentType.ts";
 import {
@@ -169,7 +170,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
     const format = requestedFormat;
 
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+    const supabaseAdmin = serviceRoleClient(supabaseUrl, supabaseServiceRoleKey);
 
     const record = await loadDeviceRecord(supabaseAdmin, String(device_id));
     if (!record) return json({ error: "Device not found" }, 404);

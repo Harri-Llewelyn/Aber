@@ -54,7 +54,7 @@ SB_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
 TS_USER="${TS_USER:-postgres}"
 TS_DB="${TS_DB:-postgres}"
 TS_PASSWORD="${DB_PASSWORD:-postgres}"
-ANON_KEY="${SUPABASE_ANON_KEY:-}"
+GATEWAY_KEY="${SUPABASE_PUBLISHABLE_KEY:-}"
 
 REHEARSAL_EMAIL="${REHEARSAL_EMAIL:-restore-rehearsal@example.invalid}"
 REHEARSAL_PASSWORD="${REHEARSAL_PASSWORD:-rehearsal-Passw0rd!}"
@@ -124,7 +124,7 @@ cmd_seed() {
   code=$(curl -s -o /tmp/signup.json -w '%{http_code}' \
     -X POST "http://127.0.0.1:$AUTH_PORT/signup" \
     -H 'Content-Type: application/json' \
-    ${ANON_KEY:+-H "apikey: $ANON_KEY"} \
+    ${GATEWAY_KEY:+-H "apikey: $GATEWAY_KEY"} \
     -d "{\"email\":\"$REHEARSAL_EMAIL\",\"password\":\"$REHEARSAL_PASSWORD\"}" || true)
   # 422 is "already registered", which is the correct outcome of a second run.
   case "$code" in
@@ -260,7 +260,7 @@ cmd_assert() {
   code=$(curl -s -o /tmp/signin.json -w '%{http_code}' \
     -X POST "http://127.0.0.1:$AUTH_PORT/token?grant_type=password" \
     -H 'Content-Type: application/json' \
-    ${ANON_KEY:+-H "apikey: $ANON_KEY"} \
+    ${GATEWAY_KEY:+-H "apikey: $GATEWAY_KEY"} \
     -d "{\"email\":\"$REHEARSAL_EMAIL\",\"password\":\"$REHEARSAL_PASSWORD\"}" || true)
   [ "$code" = "200" ] || { cat /tmp/signin.json >&2 || true; die "the seeded user cannot sign in after the restore (HTTP $code) -- GoTrue's schema or the JWT secret did not survive"; }
   grep -q 'access_token' /tmp/signin.json \

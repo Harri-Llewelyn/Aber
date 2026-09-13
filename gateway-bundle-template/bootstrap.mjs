@@ -63,12 +63,8 @@ const die = (message, hint) => {
 
 // Configuration, from .env via compose's env_file
 const SUPABASE_URL = (process.env.ACS_SUPABASE_URL || '').replace(/\/+$/, '');
-// The gateway credential, in whichever format the bundle carries. The platform's gateway accepts
-// the legacy anon JWT and the `sb_publishable_*` key alike; it is sent as `apikey` and as the
-// bearer. The fallback to ACS_SUPABASE_ANON_KEY is for bundles downloaded before the platform
-// minted a publishable key, whose single-use token would be spent by a failed first boot.
-const ANON_KEY =
-  process.env.ACS_SUPABASE_PUBLISHABLE_KEY || process.env.ACS_SUPABASE_ANON_KEY || '';
+// The publishable key, sent as `apikey` and as the bearer: the gateway translates it.
+const GATEWAY_KEY = process.env.ACS_SUPABASE_PUBLISHABLE_KEY || '';
 const TOKEN = (process.env.ACS_ENROLLMENT_TOKEN || '').trim();
 const GATEWAY_NAME = process.env.ACS_GATEWAY_NAME || 'gateway';
 const AGENT_VERSION = process.env.ACS_AGENT_VERSION || 'unknown';
@@ -190,10 +186,10 @@ async function enrol() {
       response = await fetch(url, {
         method: 'POST',
         headers: {
-          // The anon key and no user JWT: the gateway requires a key, and the enrolment token is
-          // what authorises the call.
-          apikey: ANON_KEY,
-          Authorization: `Bearer ${ANON_KEY}`,
+          // The publishable key and no user JWT: the gateway requires a key, and the enrolment
+          // token is what authorises the call.
+          apikey: GATEWAY_KEY,
+          Authorization: `Bearer ${GATEWAY_KEY}`,
           'Content-Type': 'application/json',
         },
         // ssh_public_key is the public half only, and may be null if ssh-keygen failed; the
@@ -322,7 +318,7 @@ if (existsSync(MARKER) && !force) {
 
 const missing = [
   !SUPABASE_URL && 'ACS_SUPABASE_URL',
-  !ANON_KEY && 'ACS_SUPABASE_PUBLISHABLE_KEY or ACS_SUPABASE_ANON_KEY',
+  !GATEWAY_KEY && 'ACS_SUPABASE_PUBLISHABLE_KEY',
   !TOKEN && 'ACS_ENROLLMENT_TOKEN',
   !CREDENTIAL_SECRET && 'NODERED_CREDENTIAL_SECRET',
 ].filter(Boolean);

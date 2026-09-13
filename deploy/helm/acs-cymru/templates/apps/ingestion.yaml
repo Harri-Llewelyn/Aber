@@ -73,9 +73,9 @@ spec:
           ingestion.py: an unreachable directory raises DirectoryUnavailable instead of resolving
           to None, because process_dbirth() answers None -- "unregistered" -- by writing a
           quarantine row, which persists and needs an operator to clear. Relying on start order
-          for that would leave the same fault reachable any time Kong restarts.
+          for that would leave the same fault reachable any time the gateway restarts.
         */}}
-        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-kong:8000/auth/v1/health" "describe" "supabase-kong (every device lookup is routed through it)") | nindent 8 }}
+        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-kong:8000/auth/v1/health" "describe" "supabase-kong (every device lookup is routed through it)") | nindent 8 }}
         {{/*
           Waits for the historian's SCHEMA, not just for the server. The daemon writes to the
           `telemetry` hypertable on its first DDATA, and TimescaleDB's bootstrap scripts run only on
@@ -166,19 +166,19 @@ spec:
             */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_INGESTION_USER") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_INGESTION_PASSWORD") | nindent 12 }}
-            # Through Kong, in-cluster. THE DAEMON IS NOT A SERVICE-ROLE CLIENT: that key
+            # Through the gateway, in-cluster. THE DAEMON IS NOT A SERVICE-ROLE CLIENT: that key
             # bypasses RLS entirely and would sit in the process most exposed to the
             # plant network. It registers discovered devices, sets is_quarantined and stamps
             # gateway heartbeats through the SECURITY DEFINER gates in archived migration 0047, as the
             # Service_Ingestor principal seeded by 0046.
             #
-            # BOTH KEYS, DOING DIFFERENT JOBS. The anon key is the apikey the gateway checks --
-            # its filter admits exactly two literal keys, so the ingestion token is refused at the
-            # edge if sent in its place. The ingestion token is the Authorization bearer.
+            # BOTH KEYS, DOING DIFFERENT JOBS. The publishable key is the apikey the gateway
+            # checks -- its filter admits exactly two literal keys, so the ingestion token is
+            # refused at the edge if sent in its place. The ingestion token is the Authorization
+            # bearer.
             - name: SUPABASE_URL
               value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
-            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
-            {{- include "acs-cymru.optionalSecretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 12 }}
             - name: PYTHONUNBUFFERED
               value: "1"

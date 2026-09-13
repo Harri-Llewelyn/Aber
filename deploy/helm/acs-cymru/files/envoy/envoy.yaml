@@ -1,28 +1,26 @@
 # =================================================================================================
-# Envoy gateway -- a translation of supabase/kong.yml, route for route.
+# The gateway (docs/gateway.md).
 #
-# THIS IS A TEMPLATE, NOT A CONFIG. Fourteen `__UPPER_SNAKE__` placeholders are substituted at boot by
-# the gateway's initContainer; `scripts/check-gateway-surface.mjs` asserts that the substituters
-# know every one of them. A real key committed here would be a leaked key, not a config change, and the
-# same script asserts the placeholders are still placeholders.
+# THIS IS A TEMPLATE, NOT A CONFIG. Thirteen `__UPPER_SNAKE__` placeholders are substituted at boot
+# by the gateway's initContainer; `scripts/check-gateway-surface.mjs` asserts that the substituter
+# knows every one of them. A real key committed here would be a leaked key, not a config change,
+# and the same script asserts the placeholders are still placeholders.
 #
-# Four carry the API keys (`__SUPABASE_ANON_KEY__`, `__SUPABASE_SERVICE_ROLE_KEY__`,
-# `__SUPABASE_PUBLISHABLE_KEY__`, `__SUPABASE_SECRET_KEY__`), one carries the posture that decides
-# whether the first two are still accepted (`__LEGACY_KEYS_ACCEPTED__`, a BARE BOOLEAN), three
+# Four carry the API keys: the two the callers present (`__SUPABASE_PUBLISHABLE_KEY__`,
+# `__SUPABASE_SECRET_KEY__`) and the two JWTs the upstreams require (`__SUPABASE_ANON_KEY__`,
+# `__SUPABASE_SERVICE_ROLE_KEY__`), which the filter substitutes and no caller may present. Three
 # carry deployment facts (`__REALTIME_UPSTREAM_HOST__`, `__REALTIME_UPSTREAM_ADDRESS__`,
-# `__CORS_ORIGINS__`), and four belong to the STUDIO LISTENER (`__SUPABASE_PUBLIC_URL__`,
+# `__CORS_ORIGINS__`), four belong to the STUDIO LISTENER (`__SUPABASE_PUBLIC_URL__`,
 # `__STUDIO_PUBLIC_URL__`, `__STUDIO_UPSTREAM_ADDRESS__`, and `__SUPABASE_JWT_SECRET_B64URL__`,
 # the JWKS key the session tokens it admits are verified against), and two to the FORGE LISTENER
 # (`__GITEA_PUBLIC_URL__`, `__GITEA_UPSTREAM_ADDRESS__`), which shares the first and the last of
 # Studio's four.
 #
 # -------------------------------------------------------------------------------------------------
-# THE GATEWAY on both targets (docs/gateway-migration.md). Three listeners: the API on 8000, which
-# accepts the legacy anon/service-role JWTs and the opaque `sb_publishable_*` / `sb_secret_*` keys
-# at once (`__LEGACY_KEYS_ACCEPTED__` ends that, and the access log and RBAC shadow counter below
-# say when it is safe); Studio's login on 8001; the forge's login on 8002.
+# Three listeners: the API on 8000, which admits the opaque `sb_publishable_*` / `sb_secret_*` keys
+# and hands each upstream the JWT it requires; Studio's login on 8001; the forge's login on 8002.
 #
-# Envoy semantics that differ from Kong and produce a stack that looks fine and is not:
+# Envoy semantics that produce a stack that looks fine and is not:
 #   1. Route order is first-match, so `/storage/v1/object/public/` precedes `/storage/v1/` and the
 #      userinfo paths precede `/functions/v1/`.
 #   2. The Realtime client puts the key in the WebSocket URL's query string; a header-only check
@@ -55,25 +53,6 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: gateway
-                # Logs only requests that presented a LEGACY key. An empty log over a window
-                # covering the deployment's slowest periodic job is the evidence that
-                # `LEGACY_KEYS_ACCEPTED=false` is safe; the RBAC shadow counter below gives the
-                # trend, this gives the route and caller.
-                access_log:
-                  - name: envoy.access_loggers.stdout
-                    filter:
-                      metadata_filter:
-                        matcher:
-                          filter: acs.gateway
-                          path: [ { key: key_format } ]
-                          value: { string_match: { exact: "legacy" } }
-                    typed_config:
-                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
-                      log_format:
-                        text_format_source:
-                          # The route name, not the path: the apikey travels in the query string
-                          # on the Realtime route and must not be written to stdout.
-                          inline_string: "acs-legacy-api-key method=%REQ(:METHOD)% route=%ROUTE_NAME% status=%RESPONSE_CODE% ua=%REQ(USER-AGENT)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
                 # Realtime is a WebSocket upstream.
                 upgrade_configs:
                   - upgrade_type: websocket
@@ -95,7 +74,9 @@ static_resources:
                           allow_headers: "*"
                           allow_credentials: true
                       routes:
-                        # EXEMPTION 1 of 4 -- sign-in must work before a session exists.
+                        # EXEMPTION 1 of 4 -- sign-in must work before a session exists. Not
+                        # gated, but still translated: GoTrue's admin endpoints need the
+                        # service-role JWT, which Studio presents as the secret key.
                         - name: auth-v1-routes
                           match: { prefix: "/auth/v1/" }
                           route:
@@ -104,7 +85,7 @@ static_resources:
                           typed_per_filter_config:
                             envoy.filters.http.lua:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
-                              disabled: true
+                              name: translate_bearer
 
                         # EXEMPTION 2 of 4 -- an AAS File URL must resolve with no session.
                         # Before /storage/v1/; the upstream path keeps `/object/public/`.
@@ -217,42 +198,22 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
                       default_source_code:
                         inline_string: |
-                          local ANON = "__SUPABASE_ANON_KEY__"
-                          local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
-
-                          -- The new keys are not JWTs (PostgREST answers PGRST301 to one); this filter
-                          -- matches them as strings and hands the upstream the legacy JWT. Empty means
-                          -- off, and `PUBLISHABLE ~= ""` stops an empty apikey matching an empty key.
+                          -- The keys callers present. Not JWTs (PostgREST answers PGRST301 to one):
+                          -- matched as strings, and each stands for the JWT below.
                           local PUBLISHABLE = "__SUPABASE_PUBLISHABLE_KEY__"
                           local SECRET = "__SUPABASE_SECRET_KEY__"
 
-                          -- A bare Lua boolean. `false` stops the gateway accepting the legacy pair.
-                          local LEGACY_ACCEPTED = __LEGACY_KEYS_ACCEPTED__
+                          -- The JWTs the upstreams require. Presenting one of these IS refused: they
+                          -- are the gateway's to substitute, not a caller's credential.
+                          local ANON = "__SUPABASE_ANON_KEY__"
+                          local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
 
+                          -- The JWT a registered key stands for, or nil for anything else. The
+                          -- initContainer refuses an empty key, so an empty apikey matches nothing.
                           local function translated(key)
-                            if PUBLISHABLE ~= "" and key == PUBLISHABLE then return ANON end
-                            if SECRET ~= "" and key == SECRET then return SERVICE end
+                            if key == PUBLISHABLE then return ANON end
+                            if key == SECRET then return SERVICE end
                             return nil
-                          end
-
-                          -- Which format the caller presented, independent of whether it is accepted.
-                          local function key_format(key)
-                            if key == nil then return "absent" end
-                            if PUBLISHABLE ~= "" and key == PUBLISHABLE then return "new" end
-                            if SECRET ~= "" and key == SECRET then return "new" end
-                            if key == ANON or key == SERVICE then return "legacy" end
-                            return "unregistered"
-                          end
-
-                          -- Recorded before any decision: `handle:respond()` ends the filter chain.
-                          local function record_format(handle, fmt)
-                            handle:streamInfo():dynamicMetadata():set("acs.gateway", "key_format", fmt)
-                          end
-
-                          local function accepted(key)
-                            local fmt = key_format(key)
-                            if fmt == "legacy" then return LEGACY_ACCEPTED end
-                            return fmt == "new"
                           end
 
                           -- The key may arrive in the header or the query string.
@@ -296,78 +257,78 @@ static_resources:
                             end
                           end
 
-                          -- Synthesise the bearer for a NEW key only, and only when Authorization is
-                          -- absent or is the presented key itself: a caller's own JWT (i3X and the edge
-                          -- functions pass the caller's token as the bearer) must never be overwritten.
+                          -- Synthesise the bearer when Authorization is absent, and translate it when
+                          -- it carries either registered key (Studio sends the publishable key as the
+                          -- apikey and the secret key as the bearer). A caller's own JWT (i3X and the
+                          -- edge functions pass the caller's token as the bearer) is never touched.
                           -- Note `apikey: <secret key>` with no Authorization reaches PostgREST as
                           -- `service_role`; the secret key IS the credential.
-                          local function synthesise_bearer(handle, key, jwt)
+                          local function synthesise_bearer(handle, jwt)
                             local auth = handle:headers():get("authorization")
-                            if auth == nil or auth == "" or auth == key or auth == "Bearer " .. key then
+                            if auth == nil or auth == "" then
                               handle:headers():replace("authorization", "Bearer " .. jwt)
+                              return
+                            end
+                            local mapped = translated(string.match(auth, "^[Bb]earer%s+(.+)$") or auth)
+                            if mapped ~= nil then
+                              handle:headers():replace("authorization", "Bearer " .. mapped)
                             end
                           end
 
                           function envoy_on_request(handle)
                             local key = presented_key(handle)
-                            record_format(handle, key_format(key))
                             if key == nil then
                               refuse(handle)
                               return
                             end
-                            if not accepted(key) then
+                            local jwt = translated(key)
+                            if jwt == nil then
+                              -- A different message from the missing-key one: two faults, two
+                              -- names, and clients log them.
                               handle:respond(
                                 { [":status"] = "401", ["content-type"] = "application/json" },
-                                -- Kong answers "Unauthorized" for a RECOGNISED-but-wrong key and
-                                -- "No API key found in request" for a missing one. Two different
-                                -- messages for two different faults, and clients that log them
-                                -- would otherwise see the fault change name at the migration.
                                 '{"message":"Unauthorized"}'
                               )
                               return
                             end
-                            local jwt = translated(key)
-                            if jwt ~= nil then
-                              synthesise_bearer(handle, key, jwt)
-                            end
+                            synthesise_bearer(handle, jwt)
                             -- Strip the key from BOTH the header and the query: a query-string apikey
                             -- reaching PostgREST is parsed as a column filter (PGRST100).
                             handle:headers():remove("apikey")
                             strip_query_key(handle)
                           end
                       source_codes:
-                        keyauth_preserve:
+                        # The sign-in route: no gate, so a caller with no key gets through, but a
+                        # bearer that is one of the two keys is translated to its JWT.
+                        translate_bearer:
                           inline_string: |
-                            local ANON = "__SUPABASE_ANON_KEY__"
-                            local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
                             local PUBLISHABLE = "__SUPABASE_PUBLISHABLE_KEY__"
                             local SECRET = "__SUPABASE_SECRET_KEY__"
+                            local ANON = "__SUPABASE_ANON_KEY__"
+                            local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
 
-                            -- A bare Lua boolean, as in the default filter above.
-                            local LEGACY_ACCEPTED = __LEGACY_KEYS_ACCEPTED__
+                            function envoy_on_request(handle)
+                              local auth = handle:headers():get("authorization")
+                              if auth == nil then return end
+                              local bearer = string.match(auth, "^[Bb]earer%s+(.+)$") or auth
+                              local jwt = nil
+                              if bearer == PUBLISHABLE then jwt = ANON end
+                              if bearer == SECRET then jwt = SERVICE end
+                              if jwt ~= nil then
+                                handle:headers():replace("authorization", "Bearer " .. jwt)
+                              end
+                            end
+                        keyauth_preserve:
+                          inline_string: |
+                            local PUBLISHABLE = "__SUPABASE_PUBLISHABLE_KEY__"
+                            local SECRET = "__SUPABASE_SECRET_KEY__"
+                            local ANON = "__SUPABASE_ANON_KEY__"
+                            local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
 
                             local function translated(key)
-                              if PUBLISHABLE ~= "" and key == PUBLISHABLE then return ANON end
-                              if SECRET ~= "" and key == SECRET then return SERVICE end
+                              if key == PUBLISHABLE then return ANON end
+                              if key == SECRET then return SERVICE end
                               return nil
-                            end
-
-                            local function key_format(key)
-                              if key == nil then return "absent" end
-                              if PUBLISHABLE ~= "" and key == PUBLISHABLE then return "new" end
-                              if SECRET ~= "" and key == SECRET then return "new" end
-                              if key == ANON or key == SERVICE then return "legacy" end
-                              return "unregistered"
-                            end
-
-                            local function record_format(handle, fmt)
-                              handle:streamInfo():dynamicMetadata():set("acs.gateway", "key_format", fmt)
-                            end
-
-                            local function accepted(key)
-                              local fmt = key_format(key)
-                              if fmt == "legacy" then return LEGACY_ACCEPTED end
-                              return fmt == "new"
                             end
 
                             local function presented_key(handle)
@@ -409,7 +370,6 @@ static_resources:
                             -- Nothing is removed here: stripping the key breaks the Realtime handshake.
                             function envoy_on_request(handle)
                               local key = presented_key(handle)
-                              record_format(handle, key_format(key))
                               if key == nil then
                                 handle:respond(
                                   { [":status"] = "401", ["content-type"] = "application/json" },
@@ -417,44 +377,26 @@ static_resources:
                                 )
                                 return
                               end
-                              if not accepted(key) then
+                              local jwt = translated(key)
+                              if jwt == nil then
                                 handle:respond(
                                   { [":status"] = "401", ["content-type"] = "application/json" },
                                   '{"message":"Unauthorized"}'
                                 )
                                 return
                               end
-                              local jwt = translated(key)
-                              if jwt ~= nil then
-                                replace_key(handle, jwt)
-                                -- Same rule as the default filter: somebody else's token is never overwritten.
-                                local auth = handle:headers():get("authorization")
-                                if auth == nil or auth == "" or auth == key or auth == "Bearer " .. key then
-                                  handle:headers():replace("authorization", "Bearer " .. jwt)
+                              replace_key(handle, jwt)
+                              -- Same rule as the default filter: somebody else's token is never overwritten.
+                              local auth = handle:headers():get("authorization")
+                              if auth == nil or auth == "" then
+                                handle:headers():replace("authorization", "Bearer " .. jwt)
+                              else
+                                local mapped = translated(string.match(auth, "^[Bb]earer%s+(.+)$") or auth)
+                                if mapped ~= nil then
+                                  handle:headers():replace("authorization", "Bearer " .. mapped)
                                 end
                               end
                             end
-
-                  # The legacy-key counter, a SHADOW rule that decides nothing (the Lua filter
-                  # cannot create a stat). `rbac.legacy_api_key_.shadow_allowed` is the number of
-                  # requests that presented a legacy key. It counts only while legacy keys are
-                  # accepted: a refusal in the Lua ends the filter chain before this runs, so
-                  # stragglers after the switch appear in the access log (status=401), not here.
-                  - name: envoy.filters.http.rbac
-                    typed_config:
-                      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
-                      shadow_rules_stat_prefix: legacy_api_key_
-                      shadow_rules:
-                        action: ALLOW
-                        policies:
-                          legacy_key:
-                            permissions:
-                              - metadata:
-                                  filter: acs.gateway
-                                  path: [ { key: key_format } ]
-                                  value: { string_match: { exact: "legacy" } }
-                            principals:
-                              - any: true
 
                   - name: envoy.filters.http.router
                     typed_config:

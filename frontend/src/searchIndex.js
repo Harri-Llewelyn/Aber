@@ -57,7 +57,7 @@ export const CARDS = [
   { id: 'vocab-ashrae',         label: 'ASHRAE 223P',          tab: 'vocabulary',     keywords: ['bms', 'building', 'hvac'] },
   { id: 'dir-applications',     label: 'Applications & User Interfaces', tab: 'directory', keywords: ['grafana', 'node-red', 'studio', 'uis'] },
   { id: 'dir-ingestion',        label: 'Ingestion & Messaging', tab: 'directory',     keywords: ['mosquitto', 'broker', 'daemon'] },
-  { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', keywords: ['postgres', 'timescale', 'kong', 'storage'] },
+  { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
 
   { id: 'thread-timeline',      label: 'Digital Thread',       tab: 'digital-thread', keywords: ['timeline', 'events', 'audit trail'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },

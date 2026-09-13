@@ -53,12 +53,13 @@ secrets:
 
   # HS256 signing key shared by GoTrue, PostgREST, Realtime, Storage, the gateway and Node-RED.
   jwtSecret: ""
+  # The JWTs the upstreams require. No caller presents them: the gateway substitutes them for
+  # the two keys below and refuses them as an apikey.
   anonKey: ""
   serviceRoleKey: ""
 
-  # The key format replacing the two above (`sb_publishable_*` / `sb_secret_*`). Not JWTs: the
-  # gateway matches them as strings and hands upstreams the legacy JWT. Optional; empty means
-  # legacy-only. Set BOTH or NEITHER, or the gateway's initContainer refuses to render.
+  # The API keys callers present (`sb_publishable_*` / `sb_secret_*`). Not JWTs: the gateway
+  # matches them as strings and hands upstreams the JWT each stands for. Required.
   publishableKey: ""
   secretKey: ""
   # The ingestion daemon's credential: claims {"iss":"supabase","role":"authenticated",
@@ -382,11 +383,8 @@ supabaseRest:
     limits: { memory: 512Mi }
 
 # -----------------------------------------------------------------------------------------------
-# The gateway (Envoy). Its Service adopts the name `supabase-kong` so the
-# in-cluster consumers that carry `http://supabase-kong:8000` need no change; the template
-# refuses a render with both Kong and Envoy enabled under that name. Kong is retained off as the
-# revert path (`supabaseKong.enabled=true` + `supabaseEnvoy.enabled=false`, in one change).
-# See docs/gateway-migration.md.
+# The gateway (Envoy; docs/gateway.md). Its Service is named `supabase-kong`, the name every
+# in-cluster consumer carries in `http://supabase-kong:8000`.
 # -----------------------------------------------------------------------------------------------
 supabaseEnvoy:
   enabled: true
@@ -397,41 +395,12 @@ supabaseEnvoy:
     pullPolicy: IfNotPresent
   replicas: 1
   logLevel: info
-
-  # Whether the gateway still accepts the legacy anon and service-role JWTs. `false` is an
-  # outage for anything still presenting one, so watch both instruments first:
-  #   rbac.legacy_api_key_.shadow_allowed   on /stats/prometheus, must be flat at zero
-  #   acs-legacy-api-key ...                one stdout line per legacy-key request; silence passes
-  # over a window covering the deployment's slowest periodic job. The initContainer refuses
-  # `false` with no publishable key.
-  legacyKeysAccepted: true
-  # Set `supabase-envoy` to run beside Kong for a side-by-side probe.
   serviceName: supabase-kong
   metrics:
     enabled: true
     # Envoy's admin listener serves /ready and /stats/prometheus. Unauthenticated; not on the
     # Ingress (it can drain listeners and dump the config, keys included).
     port: 9901
-
-# Superseded by supabaseEnvoy; kept off as the revert path.
-supabaseKong:
-  enabled: false
-  image:
-    repository: kong
-    # No `-alpine` suffix: Kong stopped publishing alpine variants after 3.3.1.
-    tag: "3.9.3"
-    pullPolicy: IfNotPresent
-  replicas: 1
-  # Naming a plugin here REPLACES the default `bundled` set. `prometheus` is declared globally in
-  # kong.yml, so removing it makes Kong refuse to boot.
-  plugins: request-transformer,cors,key-auth,prometheus
-  # Kong's Prometheus endpoint on the status listener, never the proxy port.
-  metrics:
-    enabled: false
-    port: 8100
-  resources:
-    requests: { cpu: 100m, memory: 256Mi }
-    limits: { memory: 1Gi }
 
 supabaseFunctions:
   enabled: true

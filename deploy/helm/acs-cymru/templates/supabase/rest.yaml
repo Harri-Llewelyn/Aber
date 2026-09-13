@@ -14,7 +14,7 @@ spec:
     {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # storage-api reaches this as POSTGREST_URL=http://supabase-rest:3000, and kong.yml routes
+      # storage-api reaches this as POSTGREST_URL=http://supabase-rest:3000, and the gateway routes
       # /rest/v1/ to it on the same address.
       port: 3000
       targetPort: http
@@ -107,7 +107,7 @@ spec:
             #
             # NEW WITH v14.12. On v12.2.0 this port served /ready and /live and nothing else.
             #
-            # NOT in the Ingress and NOT routed by Kong. The admin server has NO AUTHENTICATION,
+            # NOT in the Ingress and NOT routed by the gateway. The admin server has NO AUTHENTICATION,
             # and its readiness endpoints describe the database connection -- so it is a
             # ClusterIP-only port for Prometheus, in the same shape as the ingestion daemon's.
             - name: PGRST_ADMIN_SERVER_PORT

@@ -8,7 +8,7 @@
 # `kubectl rollout status deployment/ingestion` reports success the moment the container PROCESS
 # starts. The daemon then connects to the broker and subscribes, and the gap between those two
 # events is unbounded -- on a loaded runner it has been over two minutes, most of it spent in the
-# init containers waiting for Kong and the telemetry table.
+# init containers waiting for the gateway and the telemetry table.
 #
 # validate.py runs immediately afterwards and starts publishing. Nothing waited. The whole suite
 # then completes in fifteen seconds, failing fast, because the records each check polls for were

@@ -7,7 +7,7 @@
 The curated API specs. Mirrored from docs/ by scripts/sync-helm-chart-files.mjs, same as the
 migrations -- Helm cannot read outside its chart.
 
-TWO of them, keyed by filename: openapi.yaml is the Kong-fronted platform surface, and
+TWO of them, keyed by filename: openapi.yaml is the gateway-fronted platform surface, and
 i3x-openapi.yaml is the i3X server, which is a different origin with a different auth model and
 cannot honestly share a `servers:` block with it.
 */}}
@@ -76,7 +76,7 @@ spec:
             # Two curated specs, both served from mounted files.
             #
             # THE POSTGREST LIVE-SCHEMA ENTRY WAS REMOVED. It pointed at
-            # /rest/v1/, which Kong gates with key-auth, so the browser fetched it without an
+            # /rest/v1/, which the gateway gates, so the browser fetched it without an
             # apikey and the definition failed to load as an authorization error. It duplicated
             # openapi.yaml, which is hand-maintained AND enforced by check-docs-drift.mjs against
             # every published relation and edge function -- an auto-generated second view that no

@@ -12,7 +12,7 @@
 //
 // An INFRASTRUCTURE key carries `role` and no `sub`. The anon and service-role keys are these: they
 // are not anybody, PostgREST switches to the named database role, and RLS never asks who is
-// calling. They are the stack's API keys -- Kong admits exactly these two literal strings as
+// calling. They are the stack's API keys -- the gateway hands upstreams exactly these two literal strings as
 // `apikey` -- so they cannot be shortened without a story for re-issuing them to every client at
 // once, which is a different change from this one and is deliberately not attempted here.
 //

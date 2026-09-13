@@ -42,7 +42,7 @@ Release-qualified name, for objects that are NOT addressed by name from inside t
 SERVICE NAMES ARE NOT PREFIXED, and that is the chart's central design decision rather than an
 oversight. Service names are the component names, so in-cluster DNS resolves
 `http://supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` -- the URLs grafana.ini,
-kong.yml, settings.js and the edge-function environment carry.
+settings.js and the edge-function environment carry.
 
 Prefixing them with the release name would break all of that and buy nothing: two releases of this
 stack in one namespace is not a supported configuration (they would contend for the MQTT host
@@ -169,19 +169,19 @@ prometheus.io/path: {{ .path | default "/metrics" | quote }}
 {{/* ---------------------------------------------------------------------------------------- */}}
 
 {{/*
-The four Supabase credentials are a SET.
+The Supabase credentials are a SET.
 
-`anonKey` and `serviceRoleKey` are JWTs signed by `jwtSecret`. Generating one without the others
--- the obvious `randAlphaNum` convenience -- invalidates both pre-minted keys, and every request
-through Kong's key-auth then fails against a stack that looks fine. So: all supplied, or none and
-a legible refusal. The chart never generates them.
+`anonKey` and `serviceRoleKey` are JWTs signed by `jwtSecret`; `publishableKey` and `secretKey`
+are the keys callers present, which the gateway translates to those JWTs. Generating one without
+the others invalidates the rest, and every request then fails at the gateway against a stack that
+looks fine. So: all supplied, or none and a legible refusal. The chart never generates them.
 
 Skipped entirely when `existingSecret` is set, because the values are then not the chart's to see.
 */}}
 {{- define "acs-cymru.validateSecrets" -}}
 {{- if not .Values.secrets.existingSecret -}}
 {{- $missing := list -}}
-{{- range $field, $envName := dict "jwtSecret" "SUPABASE_JWT_SECRET" "anonKey" "SUPABASE_ANON_KEY" "serviceRoleKey" "SUPABASE_SERVICE_ROLE_KEY" "postgresPassword" "POSTGRES_PASSWORD" -}}
+{{- range $field, $envName := dict "jwtSecret" "SUPABASE_JWT_SECRET" "anonKey" "SUPABASE_ANON_KEY" "serviceRoleKey" "SUPABASE_SERVICE_ROLE_KEY" "publishableKey" "SUPABASE_PUBLISHABLE_KEY" "secretKey" "SUPABASE_SECRET_KEY" "postgresPassword" "POSTGRES_PASSWORD" -}}
 {{- if not (get $.Values.secrets $field) -}}
 {{- $missing = append $missing (printf "secrets.%s (%s)" $field $envName) -}}
 {{- end -}}
@@ -259,7 +259,7 @@ issued no playback targets yet.
 {{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required when playback.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback)" -}}
 {{- end -}}
 {{- if $missing -}}
-{{- fail (printf "\n\nacs-cymru: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret, so supplying some and not others yields a stack that reports healthy and rejects\nevery request at the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
+{{- fail (printf "\n\nacs-cymru: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret and publishableKey and secretKey are the keys the gateway translates to them, so\nsupplying some and not others yields a stack that reports healthy and rejects every request\nat the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
 {{- end -}}
 {{/*
 THE DEMO SECRET IS REFUSED ON ANYTHING THAT IS NOT PLAINLY LOCAL.
@@ -268,8 +268,7 @@ THE DEMO SECRET IS REFUSED ON ANYTHING THAT IS NOT PLAINLY LOCAL.
 with it every run — so this cannot simply ban the value. What it bans is the combination that has
 no innocent reading: the demo JWT secret together with a public hostname somebody chose.
 
-Since Kong began running `key-auth`, anonKey and serviceRoleKey are GATEWAY API KEYS as well as
-JWTs. A deployment on the demo set is one where the published keys in this repository authenticate
+A deployment on the demo set is one where the published keys in this repository authenticate
 at the edge, and the giveaway is precisely that nothing looks wrong: every pod is healthy, every
 request succeeds, and the credentials are in a file thousands of people already have.
 
@@ -283,7 +282,7 @@ documents where to put it.
 {{- $domain := .Values.global.publicBaseDomain | default "" -}}
 {{- $isLocal := or (empty $domain) (contains "127.0.0.1" $domain) (contains "localhost" $domain) (contains "192.168." $domain) (hasSuffix ".local" $domain) (hasSuffix ".localhost" $domain) (hasSuffix ".internal" $domain) -}}
 {{- if not $isLocal -}}
-{{- fail (printf "\n\nacs-cymru: refusing to install on the PUBLISHED demo credentials with a public hostname.\n\n  global.publicBaseDomain = %s\n  secrets.jwtSecret       = the Supabase demo value, committed in this repository\n\nanonKey and serviceRoleKey are signed by that secret AND are registered as Kong API keys, so this\ndeployment would authenticate anyone holding a file that ships with the source.\n\nGenerate a matching set:\n\n  node scripts/setup.mjs        # writes values-local.yaml with a fresh, internally consistent set\n\nthen install with -f values-local.yaml (or carry the four values into your own values file, see\nvalues-prod.yaml.example), or set\nsecrets.existingSecret to a Secret managed outside the chart.\n\nIf this really is a private lab, name it as one -- a publicBaseDomain under 127.0.0.1.nip.io,\nlocalhost, 192.168.*, .local, .localhost or .internal is accepted as-is.\n" $domain) -}}
+{{- fail (printf "\n\nacs-cymru: refusing to install on the PUBLISHED demo credentials with a public hostname.\n\n  global.publicBaseDomain = %s\n  secrets.jwtSecret       = the Supabase demo value, committed in this repository\n\nanonKey and serviceRoleKey are signed by that secret, so this deployment would authenticate\nanyone holding a file that ships with the source.\n\nGenerate a matching set:\n\n  node scripts/setup.mjs        # writes values-local.yaml with a fresh, internally consistent set\n\nthen install with -f values-local.yaml (or carry the four values into your own values file, see\nvalues-prod.yaml.example), or set\nsecrets.existingSecret to a Secret managed outside the chart.\n\nIf this really is a private lab, name it as one -- a publicBaseDomain under 127.0.0.1.nip.io,\nlocalhost, 192.168.*, .local, .localhost or .internal is accepted as-is.\n" $domain) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -327,8 +326,8 @@ Only checked when realtime is enabled AND the chart owns the secret.
 Realtime's Service name must have `realtime-dev` as its LEADING LABEL.
 
 Realtime reads the tenant id from the leading hostname label of the Host header, not from the JWT.
-Kong runs preserve_host: false, so the upstream Host comes from the Service name -- rename it and
-every WebSocket handshake fails with a bare 403 that names nothing.
+The gateway rewrites the upstream Host to the Service name -- rename it and every WebSocket
+handshake fails with a bare 403 that names nothing.
 */}}
 {{- define "acs-cymru.validateRealtimeServiceName" -}}
 {{- if .Values.realtime.enabled -}}
@@ -741,7 +740,7 @@ pin it.
 {{- define "acs-cymru.supabaseDb.host" -}}supabase-db{{- end -}}
 {{- define "acs-cymru.supabaseDb.port" -}}5432{{- end -}}
 
-{{/* Kong, as reached from INSIDE the cluster. The browser-facing address is publicUrls.supabase. */}}
+{{/* The gateway, as reached from INSIDE the cluster. The browser-facing address is publicUrls.supabase. */}}
 {{- define "acs-cymru.supabase.internalUrl" -}}http://supabase-kong:8000{{- end -}}
 
 {{/* ---------------------------------------------------------------------------------------- */}}
@@ -924,8 +923,8 @@ using one for both fails in a way that names neither. In-cluster URLs are not co
 {{- define "acs-cymru.mqttUrl" -}}{{ include "acs-cymru.publicUrl" (dict "ctx" . "key" "mqtt" "sub" "mqtt") }}{{- end -}}
 
 {{/*
-The browser origins Kong echoes an Access-Control-Allow-Origin for -- a JSON array, substituted
-into `__CORS_ORIGINS__` in files/kong/kong.yml.
+The browser origins the gateway echoes an Access-Control-Allow-Origin for -- a JSON array,
+substituted into `__CORS_ORIGINS__` in files/envoy/envoy.yaml.
 
 WHY THIS IS DERIVED AND NOT CONFIGURED. It is the stack's ONLY statement of origin policy: the
 edge functions carry no Access-Control-Allow-Origin of their own on purpose (see
@@ -971,7 +970,7 @@ The narrow case that IS this helper's to catch: publicUrls.supabase set, so the 
 browser-facing, while nothing names an origin allowed to call it.
 */}}
 {{- if and (not $origins) (include "acs-cymru.supabaseUrl" .) -}}
-{{- fail "\n\nacs-cymru: Kong would be given an EMPTY browser-origin list.\n\npublicUrls.supabase names a browser-facing API, but no origin could be derived for the\ndashboard or for Swagger UI -- so Kong would start cleanly and then refuse every browser\nrequest to it, returning 200 with no Access-Control-Allow-Origin. That presents as a\ndashboard which signs in and then shows empty tables, with nothing failing anywhere you\nwould think to look.\n\nSet global.publicBaseDomain, or publicUrls.frontend / publicUrls.docs, or\nglobal.corsExtraOrigins if this deployment is reached only through a proxy whose hostname\nthe chart cannot derive.\n" -}}
+{{- fail "\n\nacs-cymru: the gateway would be given an EMPTY browser-origin list.\n\npublicUrls.supabase names a browser-facing API, but no origin could be derived for the\ndashboard or for Swagger UI -- so the gateway would start cleanly and then refuse every browser\nrequest to it, returning 200 with no Access-Control-Allow-Origin. That presents as a\ndashboard which signs in and then shows empty tables, with nothing failing anywhere you\nwould think to look.\n\nSet global.publicBaseDomain, or publicUrls.frontend / publicUrls.docs, or\nglobal.corsExtraOrigins if this deployment is reached only through a proxy whose hostname\nthe chart cannot derive.\n" -}}
 {{- end -}}
 {{- $origins | uniq | toJson -}}
 {{- end -}}
@@ -1021,13 +1020,8 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
 {{- if .Values.frontend.enabled -}}
 {{- $routes = append $routes (dict "name" "frontend" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "frontend")) "service" "frontend" "port" 3000) -}}
 {{- end -}}
-{{/* EITHER GATEWAY, and the service name follows whichever it is. Gated on supabaseKong alone,
-     promoting to Envoy removed the API's ingress rule entirely: the dashboard loads and every
-     call 404s at the controller, with a rendered Ingress that looks correct because the route it
-     is missing was never written. */}}
-{{- if or .Values.supabaseKong.enabled .Values.supabaseEnvoy.enabled -}}
-{{- $gwSvc := ternary .Values.supabaseEnvoy.serviceName "supabase-kong" .Values.supabaseEnvoy.enabled -}}
-{{- $routes = append $routes (dict "name" "supabase" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "supabase")) "service" $gwSvc "port" 8000) -}}
+{{- if .Values.supabaseEnvoy.enabled -}}
+{{- $routes = append $routes (dict "name" "supabase" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "supabase")) "service" .Values.supabaseEnvoy.serviceName "port" 8000) -}}
 {{- end -}}
 {{- if .Values.nodeRed.enabled -}}
 {{- $routes = append $routes (dict "name" "nodered" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "nodered")) "service" "node-red" "port" 1880) -}}
@@ -1042,10 +1036,8 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
      check, so the route names the GATEWAY Service and the Studio Service is reachable in-cluster
      only.
 
-     It follows the gateway's name for the same reason the API route does: `supabaseEnvoy.serviceName`
-     is what the promotion mechanism moves. Gated on the gateway being Envoy AS WELL as on Studio
-     existing -- Kong has no such listener, so on a Kong stack this route has no backend to name and
-     is correctly absent rather than pointed somewhere unauthenticated. */}}
+     Gated on the gateway AS WELL as on Studio existing: without the gateway this route has no
+     backend to name and is correctly absent rather than pointed somewhere unauthenticated. */}}
 {{- if and .Values.supabaseStudio.enabled .Values.supabaseEnvoy.enabled -}}
 {{- $routes = append $routes (dict "name" "studio" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "studio")) "service" .Values.supabaseEnvoy.serviceName "port" 8001) -}}
 {{- end -}}
@@ -1070,8 +1062,8 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
      Studio's is. Gitea runs with reverse-proxy authentication on, which signs in whoever the
      X-WEBAUTH-USER header names -- from any peer, measured. A route naming `gitea:3000` would put
      that on a public hostname, where a request from the internet chooses its own identity. Gated
-     on the gateway being Envoy for the same reason as Studio's: Kong has no such listener, and on a
-     Kong stack the forge's web UI is correctly absent rather than published bare. */}}
+     on the gateway for the same reason as Studio's: without it the forge's web UI is correctly
+     absent rather than published bare. */}}
 {{- $routes = append $routes (dict "name" "gitea" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "gitea")) "service" .Values.supabaseEnvoy.serviceName "port" 8002) -}}
 {{- end -}}
 {{- if .Values.mosquitto.enabled -}}
@@ -1108,7 +1100,7 @@ the render, never the pod -- applied to its own helpers.
 - name: {{ .name | required "acs-cymru.waitFor: `name` is required (it names the initContainer in kubectl output)." }}
   image: {{ .image | default "busybox:1.36" }}
   imagePullPolicy: IfNotPresent
-  {{- /* Optional `env`, for a probe that needs a credential -- a Kong route under key-auth, say.
+  {{- /* Optional `env`, for a probe that needs a credential -- a gated gateway route, say.
          Passed as rendered YAML so the caller composes it with acs-cymru.secretEnv and no secret
          value ever reaches a command line, where `kubectl describe` would show it. */ -}}
   {{- with .env }}
@@ -1188,17 +1180,8 @@ required secretKeyRef stops the pod from starting when the key is absent, which 
 outcome for every credential this chart has ever passed: a container that boots without its
 credential fails later, further away, and in a way that reads as a broken upstream.
 
-THIS EXISTS FOR THE API-KEY MIGRATION, and the asymmetry is the point. Supabase deprecates the
-anon and service-role JWTs by the end of 2026 and replaces them with `sb_publishable_*` /
-`sb_secret_*`. The gateway accepts BOTH formats at once so consumers move one at a time -- and with
-`secrets.existingSecret` set, the chart does not own the Secret, so an operator's existing one has
-neither new key. A required ref would then refuse to start every workload on every cluster that
-upgraded without minting them, turning a migration designed to avoid a flag day into one.
-
-Absent means empty, empty means the consumer falls back to the legacy key, and each consumer does
-that fallback itself. When the legacy pair is finally deactivated, these become required and this
-helper's callers move back to the one above -- which is the change that will prove the sweep is
-finished.
+For a key an install may legitimately not hold: absent means empty, and the consumer treats
+empty as "not configured".
 */}}
 {{- define "acs-cymru.optionalSecretEnv" -}}
 - name: {{ .name }}
@@ -1257,7 +1240,7 @@ than bolted on beside the Deployment that happens to need it first.
 {{ include "acs-cymru.secretEnv" (dict "name" "NODERED_WEBHOOK_JWT_SECRET" "secretName" $secretName "key" "NODERED_WEBHOOK_JWT_SECRET") }}
 {{ include "acs-cymru.secretEnv" (dict "name" "NODERED_ADMIN_TOKEN" "secretName" $secretName "key" "NODERED_ADMIN_TOKEN") }}
 {{ include "acs-cymru.secretEnv" (dict "name" "SUPABASE_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") }}
-{{ include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") }}
+{{ include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") }}
 - name: NODERED_OAUTH_CLIENT_ID
   value: {{ .Values.nodeRed.oauthClientId | default "c0ffee00-0000-4000-8000-000000000002" | quote }}
 {{/* auth_url is followed by the BROWSER, so it is the ingress address. token_url and userinfo are

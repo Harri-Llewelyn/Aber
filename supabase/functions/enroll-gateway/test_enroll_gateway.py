@@ -4,7 +4,7 @@ Integration tests for the enroll-gateway edge function.
 WHAT THIS FUNCTION IS, AND WHY ITS TESTS LOOK UNLIKE THE OTHER FUNCTIONS'. Every other edge function
 authenticates a PERSON and checks a role. This one authenticates an APPLIANCE by possession of a
 single-use token -- there is no user, no session, and the anon key is all that gets the request past
-Kong. So the suite asserts a different set of properties:
+the gateway. So the suite asserts a different set of properties:
 
   * the token is genuinely single-use, and unknown/expired/consumed are INDISTINGUISHABLE (telling
     them apart would let an enumerator learn that a token value once existed);
@@ -18,7 +18,7 @@ Kong. So the suite asserts a different set of properties:
 
 Requires the stack up, and the service-role key (to mint tokens the way the dashboard does):
 
-    SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... python \
+    SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_PUBLISHABLE_KEY=... python \
         supabase/functions/enroll-gateway/test_enroll_gateway.py
 """
 import base64
@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
-ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 
@@ -65,22 +65,21 @@ ADMIN_EMAIL = os.getenv("ACS_ADMIN_EMAIL", "admin@acs-cymru.local")
 ADMIN_PASSWORD = os.getenv("ACS_ADMIN_PASSWORD", "acscymru123")
 
 
-def rest(path, method="GET", body=None, key=None, bearer=None, prefer=None):
+def rest(path, method="GET", body=None, bearer=None, prefer=None):
     """
     A PostgREST or RPC call.
 
-    `key` is the apikey Kong checks; `bearer` is the identity PostgREST resolves. They are the same
-    value for service_role and DIFFERENT for a signed-in user (anon key + their access token), which
-    is exactly the distinction issue_gateway_enrollment_token() turns on.
+    The apikey is the publishable key the gateway checks; `bearer` is the identity PostgREST
+    resolves: service_role by default, a signed-in user's access token otherwise, which is exactly
+    the distinction issue_gateway_enrollment_token() turns on.
     """
-    key = key or SERVICE_ROLE_KEY
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1{path}",
         method=method,
         data=json.dumps(body).encode() if body is not None else None,
         headers={
-            "apikey": key,
-            "Authorization": f"Bearer {bearer or key}",
+            "apikey": PUBLISHABLE_KEY,
+            "Authorization": f"Bearer {bearer or SERVICE_ROLE_KEY}",
             "Content-Type": "application/json",
             "X-ACS-Cymru-Actor": "service",
             **({"Prefer": prefer} if prefer else {}),
@@ -106,20 +105,20 @@ def sign_in(email=ADMIN_EMAIL, password=ADMIN_PASSWORD):
         f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
         method="POST",
         data=json.dumps({"email": email, "password": password}).encode(),
-        headers={"apikey": ANON_KEY, "Content-Type": "application/json"},
+        headers={"apikey": PUBLISHABLE_KEY, "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=15) as response:
         return json.loads(response.read().decode())["access_token"]
 
 
-def enroll(token, agent_version=None, key=None, ssh_public_key=None):
+def enroll(token, agent_version=None, ssh_public_key=None):
     """
-    Call the function the way an APPLIANCE does: the anon key, and no user JWT.
+    Call the function the way an APPLIANCE does: the publishable key, and no user JWT.
 
-    That is the auth contract under test -- Kong gates /functions/v1/ with key-auth, so the request
-    needs an apikey, but nothing about it identifies a person.
+    That is the auth contract under test -- the gateway gates /functions/v1/, so the request needs
+    an apikey, but nothing about it identifies a person.
     """
-    key = ANON_KEY if key is None else key
+    key = PUBLISHABLE_KEY
     payload = {"token": token}
     if agent_version:
         payload["agent_version"] = agent_version
@@ -150,8 +149,8 @@ def enroll(token, agent_version=None, key=None, ssh_public_key=None):
             return err.code, {"raw": raw}
 
 
-@unittest.skipIf(not SERVICE_ROLE_KEY or not ANON_KEY,
-                 "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY must be set")
+@unittest.skipIf(not SERVICE_ROLE_KEY or not PUBLISHABLE_KEY,
+                 "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY must be set")
 class EnrollGatewayBase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -196,7 +195,7 @@ class EnrollGatewayBase(unittest.TestCase):
         """Mint a token exactly as the dashboard does: anon key, Administrator's access token."""
         _, rows = rest(
             "/rpc/issue_gateway_enrollment_token", method="POST",
-            key=ANON_KEY, bearer=self.admin_token,
+            bearer=self.admin_token,
             body={"p_gateway_id": TEST_GW_ID, "p_ttl_minutes": ttl_minutes},
         )
         return rows[0]["token"]
@@ -409,11 +408,11 @@ class TestAuthContract(EnrollGatewayBase):
     def test_the_anon_key_is_sufficient(self):
         """No user JWT anywhere in this flow -- an appliance has no session to present."""
         token = self.issue_token()
-        status, _ = enroll(token, key=ANON_KEY)
+        status, _ = enroll(token)
         self.assertEqual(status, 200)
 
-    def test_kong_refuses_a_request_with_no_apikey(self):
-        """key-auth is the gateway's layer; the enrolment token is the function's."""
+    def test_gateway_refuses_a_request_with_no_apikey(self):
+        """The key check is the gateway's layer; the enrolment token is the function's."""
         req = urllib.request.Request(
             f"{SUPABASE_URL}/functions/v1/enroll-gateway",
             method="POST", data=json.dumps({"token": "f" * 64}).encode(),
@@ -426,7 +425,7 @@ class TestAuthContract(EnrollGatewayBase):
     def test_rejects_a_non_post(self):
         req = urllib.request.Request(
             f"{SUPABASE_URL}/functions/v1/enroll-gateway",
-            method="GET", headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"},
+            method="GET", headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}"},
         )
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(req, timeout=15)

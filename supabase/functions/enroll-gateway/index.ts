@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { brokerPublicHost } from "../_shared/publicAddresses.ts";
@@ -120,13 +120,10 @@ export default async function handler(req: Request): Promise<Response> {
 
   // The service-role client. Its three uses are the RPCs below and one gateway UPDATE -- there is
   // no caller-scoped client here because there is no caller identity to scope one to.
-  const admin = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false },
-    global: {
-      // Names this function in the audit trail rather than leaving it as the generic 'service'.
-      // The digital_thread trigger accepts only ingestion/service/migration from this header.
-      headers: { "X-ACS-Cymru-Actor": "service" },
-    },
+  const admin = serviceRoleClient(supabaseUrl, serviceRoleKey, {
+    // Names this function in the audit trail rather than leaving it as the generic 'service'.
+    // The digital_thread trigger accepts only ingestion/service/migration from this header.
+    "X-ACS-Cymru-Actor": "service",
   });
 
   // 1. Claim. One winner, decided by the database.

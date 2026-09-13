@@ -32,7 +32,7 @@ vi.mock('../lib/supabaseClient', () => {
       functions: { invoke: vi.fn().mockResolvedValue({ data: {}, error: null }) }
     },
     SUPABASE_URL: 'http://localhost:54321',
-    SUPABASE_ANON_KEY: 'anon'
+    SUPABASE_GATEWAY_KEY: 'anon'
   };
 });
 

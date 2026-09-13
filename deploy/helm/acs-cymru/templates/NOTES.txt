@@ -8,7 +8,7 @@ Data tier
   supabase-db        StatefulSet   {{ .Values.supabaseDb.persistence.size }} on {{ .Values.supabaseDb.persistence.storageClass | default .Values.global.storageClass }}
 
 Control plane
-  supabase-kong      :8000   gateway; declarative config rendered by an initContainer
+  supabase-kong      :8000   the gateway (Envoy); config rendered by an initContainer
   supabase-auth      :9999   GoTrue — also the OAuth 2.1 server Grafana and Node-RED use
   supabase-rest      :3000   PostgREST
   {{ .Values.realtime.serviceName }}       :{{ .Values.realtime.port }}   Realtime — named for the TENANT, do not rename

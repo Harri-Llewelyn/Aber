@@ -26,23 +26,23 @@
 #
 # TWO CREDENTIALS ARE IN PLAY HERE AND THEY DO DIFFERENT JOBS:
 #
-#   * `apikey` IN A REQUEST HEADER gets past Kong. `/functions/v1/` carries the `key-auth` plugin
-#     (only four routes are exempt and this is not one of them), so without it the request is
-#     refused at the gateway and never reaches the function. The anon key is public by
-#     construction -- it is shipped to every browser -- and Kong runs `hide_credentials: true` on
-#     this route, so it is not forwarded upstream either.
+#   * `apikey` IN A REQUEST HEADER gets past the gateway. `/functions/v1/` is gated (only four
+#     routes are exempt and this is not one of them), so without it the request is refused at the
+#     gateway and never reaches the function. The publishable key is public by construction -- it
+#     is shipped to every browser -- and the gateway strips it on this route, so it is not
+#     forwarded upstream either.
 #   * `Authorization: Bearer` is the secret the FUNCTION checks. This is the one that matters.
 #
 # THE apikey MOVED OUT OF THE QUERY STRING, and the reason it was ever there has expired. Grafana's
 # webhook integration used to expose exactly one header pair (`authorization_scheme` +
 # `authorization_credentials`), which is spent on the bearer secret below -- so the only remaining
 # place to put a second credential was the URL. A query-string credential is logged: it lands in
-# Grafana's own delivery log and in the access log of anything between here and Kong, which is a
+# Grafana's own delivery log and in the access log of anything between here and the gateway, which is a
 # poor place for a value to sit even when that value is public. Grafana's `headers` map (11.6+;
 # this stack pins 13.1.3, see deploy/helm/acs-cymru/values.yaml) removed the constraint.
 #
 # IF THIS EVER RUNS ON A GRAFANA WITHOUT `headers`, the symptom is specific and worth knowing:
-# Grafana ignores the unknown setting, Kong refuses the request with 401 for a missing apikey, and
+# Grafana ignores the unknown setting, the gateway refuses the request with 401 for a missing apikey, and
 # the notification fails in Grafana's delivery log while the alert rule itself still reports
 # correctly. Nothing appears in the edge function's log, because nothing reached it.
 # =============================================================================================
@@ -62,13 +62,13 @@ contactPoints:
           httpMethod: POST
           authorization_scheme: Bearer
           authorization_credentials: __GRAFANA_ALERT_WEBHOOK_SECRET__
-          # Kong's key-auth reads `apikey` from a header or the query string (kong.yml sets both
-          # for the Realtime client's sake); this is the header form. Separate from the pair above
+          # The gateway reads `apikey` from a header or the query string (the query form is for
+          # the Realtime client's sake); this is the header form. Separate from the pair above
           # because they authenticate at different layers -- this one gets past the GATEWAY, that
           # one is checked by the FUNCTION -- and conflating them is how Grafana ends up holding a
           # credential broader than "may record an alert".
           headers:
-            apikey: __SUPABASE_ANON_KEY__
+            apikey: __SUPABASE_PUBLISHABLE_KEY__
           # 0 means "no cap". A cap silently truncates the alert array, and a multi-dimensional rule
           # over six devices can legitimately deliver six instances in one notification -- dropping
           # some of them would leave the dashboard showing a subset with nothing indicating that.

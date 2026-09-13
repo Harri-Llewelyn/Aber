@@ -15,27 +15,11 @@ So each entry below was verified against the pinned image before it was written:
   grafana         SERVES METRICS NATIVELY on its normal HTTP port at /metrics, unauthenticated.
                   (grafana 11.6.1: 1250 metric series.) Nothing to enable.
 
-  supabase-kong   SERVES METRICS ONLY WITH THE PLUGIN, THE STATUS LISTENER, AND -- SINCE KONG 3.x
-                  -- THREE PLUGIN FLAGS ALL ON. The `prometheus` plugin is declared globally in
-                  kong.yml and named in KONG_PLUGINS; `supabaseKong.metrics.enabled` adds
-                  KONG_STATUS_LISTEN and the port; and `status_code_metrics` / `latency_metrics` /
-                  `bandwidth_metrics` are set in kong.yml because 3.0 made them opt-in.
-                  WITHOUT THOSE FLAGS THIS TARGET IS A LIE OF EXACTLY THE KIND THIS HEADER IS
-                  ABOUT: it scrapes UP, answers 200, and carries only node-level nginx and memory
-                  gauges -- every per-service series silently absent.
-                  (kong 3.9.3: 106 kong_* series on :8100/metrics, measured on the live stack.)
-                  THE MOST VALUABLE TARGET HERE, because every REST, Auth, Storage, Realtime and
-                  edge-function request passes through it -- see the note on supabase-rest.
-
-                  THIS METRIC NAME HAS NOW BEEN WRONG IN BOTH DIRECTIONS, WHICH IS THE LESSON.
-                  It first said `kong_http_requests_total`, written from documentation; a live
-                  scrape of the then-pinned 2.8.1 showed `kong_http_status`, so it was corrected.
-                  The 3.9.3 upgrade renamed it BACK -- 3.x really does expose
-                  `kong_http_requests_total`, `kong_bandwidth_bytes`, and three separate latency
-                  histograms (`kong_request_latency_ms_*`, `kong_upstream_latency_ms_*`,
-                  `kong_kong_latency_ms_*`) in place of 2.8's single `kong_latency_*`.
-                  Every name above was read off the running gateway, not off a changelog. A panel
-                  built from the wrong one draws an empty graph and reports nothing.
+  supabase-envoy  SERVES METRICS ON ITS ADMIN LISTENER at /stats/prometheus, the port that also
+                  answers the readiness probe. The `envoy_http_downstream_rq_xx` family covers
+                  the HTTP tier for every REST, Auth, Storage, Realtime and edge-function
+                  request, which is what makes it the most valuable target here -- see the note
+                  on supabase-rest.
 
   mosquitto       HAS NO HTTP METRICS SURFACE AT ALL and cannot be given one; it publishes to
                   `$SYS/broker/#` MQTT topics. `mosquitto.metrics.enabled` runs an exporter
@@ -57,16 +41,16 @@ So each entry below was verified against the pinned image before it was written:
                   `pgrst_schema_cache_query_time_seconds`, and the three
                   `pgrst_jwt_cache_*_total` counters.
 
-                  THOSE ARE EXACTLY THE THINGS KONG CANNOT SEE. Every PostgREST request does
-                  arrive through Kong, so `kong_http_requests_total` and the
-                  `kong_request_latency_ms_*` histograms cover the HTTP tier -- but a gateway-side
+                  THOSE ARE EXACTLY THE THINGS THE GATEWAY CANNOT SEE. Every PostgREST request
+                  does arrive through it, so its request and latency series cover the HTTP tier
+                  -- but a gateway-side
                   200 says nothing about a schema cache reload or a connection pool with requests
                   queued behind it. Those are process-internal and one hop removed.
 
                   IT IS NOW A TARGET, on the `admin` port, and this entry stays here only
                   because the reason it was wrong is worth keeping. The admin listener is bound by
                   `PGRST_ADMIN_SERVER_PORT` on both deployments; it is a ClusterIP port, absent
-                  from the Ingress and unrouted by Kong, because THE ADMIN SERVER HAS NO
+                  from the Ingress and unrouted by the gateway, because THE ADMIN SERVER HAS NO
                   AUTHENTICATION and its readiness endpoints describe the database connection.
 
 DELIBERATELY ABSENT, and this is the part worth reading:
@@ -103,28 +87,7 @@ Without it the targets are simply DOWN, which reads as the pods being unreachabl
       "path" "/metrics"
       "why" "native, unauthenticated, on the normal HTTP port") -}}
 {{- end -}}
-{{- if and .Values.supabaseKong.enabled .Values.supabaseKong.metrics.enabled -}}
-{{- $targets = append $targets (dict
-      "name" "supabase-kong"
-      "component" "supabase-kong"
-      "service" "supabase-kong"
-      "port" "metrics"
-      "path" "/metrics"
-      "why" "the prometheus plugin on the status listener") -}}
-{{- end -}}
 {{/*
-  ENVOY'S SCRAPE IS A DIFFERENT PORT AND A DIFFERENT PATH, and carrying Kong's over unchanged is
-  the failure this whole file exists to prevent: Prometheus reports the target UP while every
-  scrape 404s, so the gateway reads as idle rather than as unmeasured.
-
-  Kong served /metrics on a dedicated status listener that only existed when KONG_STATUS_LISTEN
-  was set. Envoy serves /stats/prometheus on its ADMIN listener, which also answers the readiness
-  probe -- one port for both.
-
-  THE SERIES NAMES DIFFER TOO (`kong_http_status` -> `envoy_http_downstream_rq_xx`). Nothing in
-  this repository graphs the kong_* series, so no panel breaks; verify against a live scrape before
-  building one, as the note above this block records having had to do once already.
-
   `component` comes from the same helper NetworkPolicy uses, because a ServiceMonitor selects POD
   LABELS and the promoted Service name does not change them.
 */}}
@@ -213,7 +176,7 @@ Rendered as a comment rather than failing, because this is a reachable and legit
 state -- turning the master switch on before the per-component ones, or running with grafana
 disabled. Saying so in the output beats an empty file, which reads as a broken template.
 
-To get targets: supabaseKong.metrics.enabled, mosquitto.metrics.enabled, or grafana.enabled.
+To get targets: supabaseEnvoy.metrics.enabled, mosquitto.metrics.enabled, or grafana.enabled.
 */}}
 {{- end }}
 {{- end }}

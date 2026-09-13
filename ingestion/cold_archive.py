@@ -87,7 +87,7 @@ def _storage_client():
     A storage client that authenticates AS THE DAEMON.
 
     Same construction as capture_worker._storage_client(), and for the same reason its docstring
-    records at length: `create_client(url, anon).storage` keeps the anon key it was built with, so
+    records at length: `create_client(url, key).storage` keeps the key it was built with, so
     the obvious approach uploads as `anon` and fails against a bucket that admits the ingestion
     principal -- an RLS refusal that names RLS and is really about identity.
     """

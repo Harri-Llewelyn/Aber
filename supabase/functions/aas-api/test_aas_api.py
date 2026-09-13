@@ -36,7 +36,7 @@ API_INDEX = REPO_ROOT / "supabase" / "functions" / "aas-api" / "index.ts"
 SHARED_SHELL = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "shell.ts"
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
-ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
 DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
 # Provisioned by this suite, not seeded. See the note in test_aas_export.py -- the two share
@@ -61,7 +61,7 @@ def b64url(value: str) -> str:
 def request(method: str, url: str, token: str | None, payload: dict | None = None):
     body = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=body, method=method)
-    req.add_header("apikey", ANON_KEY)
+    req.add_header("apikey", PUBLISHABLE_KEY)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     if payload is not None:
@@ -100,7 +100,7 @@ def find_device(token: str):
         f"{SUPABASE_URL}/rest/v1/devices?select=id,name,sparkplug_id&name=eq."
         + urllib.parse.quote(TARGET_DEVICE)
     )
-    req.add_header("apikey", ANON_KEY)
+    req.add_header("apikey", PUBLISHABLE_KEY)
     req.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(req, timeout=20) as res:
@@ -120,7 +120,7 @@ def provision(token):
     if not PROVISION_FIXTURE:
         return find_device(token)
     try:
-        device = aas_fixture.ensure(SUPABASE_URL, token, ANON_KEY)
+        device = aas_fixture.ensure(SUPABASE_URL, token, PUBLISHABLE_KEY)
     except Exception as err:  # noqa: BLE001 -- reported, never silently skipped
         print(f"[test_aas_api] could not provision the fixture: {err}")
         return None
@@ -618,7 +618,7 @@ if __name__ == "__main__":
         print("[test_aas_api] jsonschema is not installed; metamodel conformance is SKIPPED")
     runner = unittest.main(verbosity=2, exit=False)
     if LIVE and PROVISION_FIXTURE:
-        aas_fixture.teardown(SUPABASE_URL, TOKEN, ANON_KEY)
+        aas_fixture.teardown(SUPABASE_URL, TOKEN, PUBLISHABLE_KEY)
     if not LIVE:
         print(f"[test_aas_api] live checks skipped: {SKIP_REASON}")
     raise SystemExit(0 if runner.result.wasSuccessful() else 1)

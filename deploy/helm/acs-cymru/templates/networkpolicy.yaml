@@ -24,7 +24,7 @@ is one half of that mitigation; this file is the other.
 
 THE MOST DANGEROUS RULE HERE IS THE ONE THAT IS EASY TO OMIT: `supabase-db -> node-red:1880`.
 The quarantine webhook goes DIRECTLY to Node-RED -- `webhook_endpoints` seeds
-`http://node-red:1880/hooks/quarantine`, not a Kong route -- and pg_net has NO RETRIES, NO ORDERING
+`http://node-red:1880/hooks/quarantine`, not a gateway route -- and pg_net has NO RETRIES, NO ORDERING
 AND NO DLQ. Block it and every quarantine notification is silently dropped: no error, no queue, no
 log, and the first sign is an operator noticing alerts stopped arriving weeks later.
 
@@ -121,14 +121,14 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
 -}}
 {{- /* Filter to edges whose BOTH ends are actually deployed, so a partial install does not carry
      rules naming absent components -- harmless, but it makes the rendered policy misleading. */ -}}
-{{/* $gw, not a literal: NetworkPolicy selects POD LABELS, which the promoted Service name does
-     not change. A hard-coded "supabase-kong" here denies every flow to Envoy while looking right. */}}
+{{/* $gw, not a literal: NetworkPolicy selects POD LABELS, which the Service name does not
+     change. A hard-coded "supabase-kong" here denies every flow to the gateway while looking right. */}}
 {{- $enabledComponents := dict
       "timescaledb" .Values.timescaledb.enabled
       "supabase-db" .Values.supabaseDb.enabled
       "supabase-auth" .Values.supabaseAuth.enabled
       "supabase-rest" .Values.supabaseRest.enabled
-      $gw (or .Values.supabaseKong.enabled .Values.supabaseEnvoy.enabled)
+      $gw .Values.supabaseEnvoy.enabled
       "supabase-functions" .Values.supabaseFunctions.enabled
       "supabase-storage" .Values.supabaseStorage.enabled
       "supabase-meta" .Values.supabaseMeta.enabled

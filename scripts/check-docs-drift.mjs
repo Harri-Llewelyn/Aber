@@ -785,7 +785,7 @@ function edgeFunctionNames() {
 // 11. frontend/Dockerfile's build args are the set we have deliberately decided are not secrets.
 //
 // That Dockerfile carries `# check=skip=SecretsUsedInArgOrEnv`, which switches off BuildKit's
-// warning for the whole file; it is justified for VITE_SUPABASE_ANON_KEY alone. The skip is
+// warning for the whole file; it is justified for VITE_SUPABASE_PUBLISHABLE_KEY alone. The skip is
 // paired with this allowlist so adding an ARG is the moment to ask whether the skip still holds.
 // Vite only inlines `VITE_`-prefixed variables.
 // -------------------------------------------------------------------------------------------------
@@ -793,9 +793,8 @@ function edgeFunctionNames() {
   const FRONTEND_BUILD_ARGS = new Set([
     'VITE_RUNTIME_CONFIG',   // selects baked vs runtime config; not a credential
     'VITE_SUPABASE_URL',     // an endpoint, public
-    'VITE_SUPABASE_ANON_KEY', // public anon JWT -- the reason for the skip; see the Dockerfile
-    // The format replacing the key above, and public for exactly the same reason: it is readable
-    // in any built bundle. `sb_secret_*` is NOT here and must never be -- see the Dockerfile.
+    // Public by construction: it is readable in any built bundle, and is the reason for the
+    // skip. `sb_secret_*` is NOT here and must never be -- see the Dockerfile.
     'VITE_SUPABASE_PUBLISHABLE_KEY',
     'VITE_ENABLE_REALTIME',  // feature flag
     'VITE_GITHUB_REPO_URL',  // issue tracker URL

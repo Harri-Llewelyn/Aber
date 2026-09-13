@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
  * Places a forge login in the team its Postgres role maps to, and takes it out of the one it does
@@ -133,7 +134,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   // Authorisation: user_roles, read with the service key -- a lookup, not a decision made by the
   // caller's own access. A failed lookup is not evidence of a role; it is a 5xx below.
-  const asService = createClient(supabaseUrl, serviceKey);
+  const asService = serviceRoleClient(supabaseUrl, serviceKey);
   let role: string | null;
   try {
     role = await resolveUserRole(asService, user.id);

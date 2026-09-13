@@ -22,7 +22,7 @@ import urllib.parse
 import urllib.request
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
-ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 FORGE_URL = os.getenv("GITEA_TEST_URL", "http://localhost:3003")
 MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "acs_platform")
@@ -89,7 +89,7 @@ def forge_as_machine(path, method="GET"):
 def sign_in(email):
     status, _, text = request(
         f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-        method="POST", headers={"apikey": ANON_KEY}, body={"email": email, "password": PASSWORD},
+        method="POST", headers={"apikey": PUBLISHABLE_KEY}, body={"email": email, "password": PASSWORD},
     )
     if status != 200:
         raise unittest.SkipTest(f"could not sign in as {email} ({status}); the seed personas are absent")
@@ -114,7 +114,7 @@ def through_the_door(email):
     # authorization needs no consent -- and only returns authorization DETAILS the first time, when
     # a POST to approve is required. A test that always POSTed would 400 on the second run of a
     # persona, because the GET had already consumed the authorization.
-    bearer = {"apikey": ANON_KEY, "Authorization": f"Bearer {token}"}
+    bearer = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}"}
     status, _, text = request(
         f"{SUPABASE_URL}/auth/v1/oauth/authorizations/{authorization_id}", headers=bearer,
     )
@@ -151,8 +151,8 @@ def members_of(name):
 class TestTheDoor(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not ANON_KEY or not SERVICE_ROLE_KEY:
-            raise unittest.SkipTest("SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set")
+        if not PUBLISHABLE_KEY or not SERVICE_ROLE_KEY:
+            raise unittest.SkipTest("SUPABASE_PUBLISHABLE_KEY and SUPABASE_SERVICE_ROLE_KEY must be set")
         status, _ = forge_as_machine("/api/v1/version")
         if status != 200:
             raise unittest.SkipTest(f"no forge reachable at {FORGE_URL} ({status})")
@@ -217,7 +217,7 @@ class TestTheDoor(unittest.TestCase):
         request(f"{FORGE_URL}/repo/search?q=gateway", jar=jar)
         self.assertIn(sub, members_of(team))
 
-        service = {"apikey": SERVICE_ROLE_KEY, "Authorization": f"Bearer {SERVICE_ROLE_KEY}",
+        service = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {SERVICE_ROLE_KEY}",
                    "Prefer": "return=representation"}
         status, _, text = request(f"{SUPABASE_URL}/rest/v1/user_roles?user_id=eq.{sub}&select=role_id", headers=service)
         self.assertEqual(status, 200, text[:200])
@@ -261,7 +261,7 @@ class TestTheDoor(unittest.TestCase):
         token = sign_in(email)
         status, _, text = request(
             f"{SUPABASE_URL}/auth/v1/logout?scope=global", method="POST",
-            headers={"apikey": ANON_KEY, "Authorization": f"Bearer {token}"},
+            headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}"},
         )
         self.assertIn(status, (200, 204), text[:200])
 
@@ -293,7 +293,7 @@ class TestTheDoor(unittest.TestCase):
 
         # A dashboard session of the same person, alive before the click.
         dashboard = sign_in(email)
-        me = {"apikey": ANON_KEY, "Authorization": f"Bearer {dashboard}"}
+        me = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {dashboard}"}
         status, _, _ = request(f"{SUPABASE_URL}/auth/v1/user", headers=me)
         self.assertEqual(status, 200)
 

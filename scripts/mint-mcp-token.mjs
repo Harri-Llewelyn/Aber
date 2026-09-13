@@ -145,12 +145,12 @@ const until = new Date(exp * 1000).toISOString().slice(0, 10);
 // is an error with a fix in it rather than a stack trace. The URL defaults to the gateway as
 // `npm run dev:forward` publishes it.
 // =================================================================================================
-const creds = stackCredentials(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']);
+const creds = stackCredentials(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_PUBLISHABLE_KEY']);
 const supabaseUrl = (creds.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
 const serviceKey = creds.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!serviceKey) {
-  console.error(missingCredentialAdvice('SUPABASE_SERVICE_ROLE_KEY'));
+if (!serviceKey || !creds.SUPABASE_PUBLISHABLE_KEY) {
+  console.error(missingCredentialAdvice(serviceKey ? 'SUPABASE_PUBLISHABLE_KEY' : 'SUPABASE_SERVICE_ROLE_KEY'));
   console.error(
     'It is needed to record the issue in the Digital Thread, which happens BEFORE the token is\n' +
     'printed -- a token that cannot be recorded is not handed out.'
@@ -163,7 +163,7 @@ try {
   response = await fetch(`${supabaseUrl}/rest/v1/rpc/record_service_token_issued`, {
     method: 'POST',
     headers: {
-      apikey: serviceKey,
+      apikey: creds.SUPABASE_PUBLISHABLE_KEY,
       Authorization: `Bearer ${serviceKey}`,
       'Content-Type': 'application/json',
       // Names this script in the audit trail rather than leaving it as the generic 'service'. The

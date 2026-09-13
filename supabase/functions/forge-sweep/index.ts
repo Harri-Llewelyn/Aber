@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
  * The forge, reconciled on a timer. `forge-membership` places and removes people as they pass the
@@ -98,7 +98,7 @@ async function listAll<T>(cfg: ForgeConfig, path: string, what: string): Promise
  */
 async function sweepMembership(
   cfg: ForgeConfig,
-  admin: ReturnType<typeof createClient>,
+  admin: ReturnType<typeof serviceRoleClient>,
   teamIds: Record<ForgeTeamRole, number>,
   summary: Summary,
 ): Promise<void> {
@@ -205,7 +205,7 @@ export default async function handler(req: Request): Promise<Response> {
   const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
-    const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+    const admin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     await sweepMembership(cfg, admin, teamIds, summary);
     await sweepRepositories(cfg, summary);
   } catch (err) {

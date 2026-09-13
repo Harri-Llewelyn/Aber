@@ -13,7 +13,7 @@ for a freshly enrolled gateway arrives signed, is verified, and records the bran
 Needs the stack, the forge, and GITEA_WEBHOOK_SECRET (the value the edge runtime holds; read it from
 .env). Skips without them.
 
-    SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \\
+    SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \\
       python supabase/functions/forge-events/test_forge_events.py
 """
 import base64
@@ -32,7 +32,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "enroll-gateway"))
 from test_enroll_gateway import (  # noqa: E402
-    ANON_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
+    PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
 )
 
 WEBHOOK_SECRET = os.getenv("GITEA_WEBHOOK_SECRET", "")
@@ -51,8 +51,8 @@ def deliver(body, event="push", secret=WEBHOOK_SECRET, signed=True):
     """POST a delivery the way Gitea does: raw JSON bytes, the event name, the HMAC of the bytes."""
     raw = body if isinstance(body, bytes) else json.dumps(body).encode()
     headers = {
-        "apikey": ANON_KEY,
-        "Authorization": f"Bearer {ANON_KEY}",
+        "apikey": PUBLISHABLE_KEY,
+        "Authorization": f"Bearer {PUBLISHABLE_KEY}",
         "Content-Type": "application/json",
         "X-Gitea-Event": event,
         "X-Gitea-Delivery": "test",
@@ -106,7 +106,7 @@ def forge_as_machine(path, method="GET", body=None):
         return err.code, (json.loads(text) if text.strip() else None)
 
 
-@unittest.skipIf(not SERVICE_ROLE_KEY or not ANON_KEY, "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY must be set")
+@unittest.skipIf(not SERVICE_ROLE_KEY or not PUBLISHABLE_KEY, "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY must be set")
 @unittest.skipIf(not WEBHOOK_SECRET, "GITEA_WEBHOOK_SECRET must be set to the value the edge runtime holds")
 class ForgeEventsBase(unittest.TestCase):
     @classmethod
@@ -156,7 +156,7 @@ class TestTheSignature(ForgeEventsBase):
         signed_for = json.dumps(payload).encode()
         sent = json.dumps(payload, indent=2).encode()
         headers = {
-            "apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}", "Content-Type": "application/json",
+            "apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}", "Content-Type": "application/json",
             "X-Gitea-Event": "push",
             "X-Gitea-Signature": hmac.new(WEBHOOK_SECRET.encode(), signed_for, hashlib.sha256).hexdigest(),
         }
@@ -255,7 +255,7 @@ class TestTheForgeItself(ForgeEventsBase):
         finally:
             shutil.rmtree(key_dir, ignore_errors=True)
 
-        _, rows = rest("/rpc/issue_gateway_enrollment_token", method="POST", key=ANON_KEY, bearer=self.admin_token,
+        _, rows = rest("/rpc/issue_gateway_enrollment_token", method="POST", bearer=self.admin_token,
                        body={"p_gateway_id": TEST_GW_ID, "p_ttl_minutes": 30})
         status, payload = enroll(rows[0]["token"], ssh_public_key=public_key)
         self.assertEqual(status, 200, payload)

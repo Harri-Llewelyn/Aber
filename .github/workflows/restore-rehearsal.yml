@@ -81,7 +81,7 @@ jobs:
       # psql calls and the chart cannot disagree about them.
       POSTGRES_PASSWORD: postgres
       DB_PASSWORD: postgres
-      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
+      SUPABASE_PUBLISHABLE_KEY: sb_publishable_acscymru_dev_0000000000000000
 
     steps:
       - name: Checkout Code

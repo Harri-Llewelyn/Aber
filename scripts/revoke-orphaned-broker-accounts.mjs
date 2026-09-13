@@ -24,7 +24,7 @@
  *   node scripts/revoke-orphaned-broker-accounts.mjs                 # list, change nothing
  *   node scripts/revoke-orphaned-broker-accounts.mjs --yes           # disable them
  *
- * Requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and MQTT_DYNSEC_ADMIN_USER /
+ * Requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_PUBLISHABLE_KEY, and MQTT_DYNSEC_ADMIN_USER /
  * MQTT_DYNSEC_ADMIN_PASSWORD (read from the release Secret when unset).
  */
 import { execFileSync } from 'node:child_process';
@@ -39,6 +39,7 @@ const apply = args.includes('--yes');
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || '';
 
 /**
  * CHECKED IN main(), NOT AT MODULE SCOPE. `parseAccounts()` and `strays()` decide which accounts
@@ -46,16 +47,17 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
  * imported cannot be tested at all.
  */
 function requireServiceKey() {
-  if (SERVICE_KEY) return;
+  if (SERVICE_KEY && PUBLISHABLE_KEY) return;
   console.error(
-    'SUPABASE_SERVICE_ROLE_KEY is not set. This reads the gateway inventory through PostgREST and\n' +
-    'calls revoke_gateway_credential(), which is granted to service_role alone.'
+    'SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY must be set. This reads the gateway\n' +
+    'inventory through PostgREST and calls revoke_gateway_credential(), which is granted to\n' +
+    'service_role alone.'
   );
   process.exit(1);
 }
 
 const headers = {
-  apikey: SERVICE_KEY,
+  apikey: PUBLISHABLE_KEY,
   Authorization: `Bearer ${SERVICE_KEY}`,
   'Content-Type': 'application/json',
   'X-ACS-Cymru-Actor': 'service',

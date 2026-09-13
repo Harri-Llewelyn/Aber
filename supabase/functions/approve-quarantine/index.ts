@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { isUuid } from "./isUuid.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -123,7 +124,7 @@ export default async function handler(req: Request): Promise<Response> {
       return badRequest("gateway_id must be a gateway UUID");
     }
 
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+    const supabaseAdmin = serviceRoleClient(supabaseUrl, supabaseServiceRoleKey);
 
     // One atomic call. The RPC re-keys asset_config, updates the surviving device and deletes the
     // duplicate in one transaction. `user.id` is passed explicitly because

@@ -11,14 +11,13 @@ makes it work rather than a compromise:
   * Realtime resolves WHICH TENANT a request belongs to from the LEADING HOSTNAME LABEL of the
     Host header -- not from the JWT, not from a setting. `realtime-dev` is the tenant
     SEED_SELF_HOST creates, and TENANT_NAME is ignored.
-  * Kong runs `preserve_host: false` (the default), so the upstream Host header is taken from the
-    service URL in kong.yml. Point it at a Service called `supabase-realtime` and the leading
+  * The gateway rewrites the upstream Host header to the Service name. Point it at a Service called `supabase-realtime` and the leading
     label is `supabase-realtime`, no tenant matches, and EVERY WebSocket handshake is rejected
     with a bare 403 that mentions neither tenants nor hostnames.
 
 NAMING THE SERVICE FOR THE TENANT makes the leading label fall out of ordinary in-cluster DNS.
 `http://realtime-dev:4000/socket/` is then correct with no header rewriting at all, which is why
-supabase/kong.yml carries `__REALTIME_UPSTREAM_URL__` as a placeholder rather than a literal.
+supabase/envoy.yaml carries `__REALTIME_UPSTREAM_HOST__` as a placeholder rather than a literal.
 
 acs-cymru.validateRealtimeServiceName in _helpers.tpl refuses any other name.
 

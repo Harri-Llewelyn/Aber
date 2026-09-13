@@ -1229,7 +1229,7 @@ Three rules moved from Python into SQL with the gates, each previously enforced 
   table.
 - **`first_dbirth_at` being write-once**, previously enforced against a cache that can go stale.
 
-The daemon presents the **anon key as the gateway `apikey` and its own token as the bearer**. That
+The daemon presents the **publishable key as the gateway `apikey` and its own token as the bearer**. That
 is not redundancy: the gateway's filter admits exactly two literal keys, so the ingestion token is
 refused at the edge if sent as the apikey.
 
@@ -2435,8 +2435,8 @@ from the **leading hostname label**, so `__REALTIME_UPSTREAM_HOST__` is the Host
 begin `realtime-dev`.
 
 The `apikey` check gates `/rest/v1/`, `/realtime/v1/`, `/storage/v1/` and `/functions/v1/`, and
-accepts the legacy JWTs and the `sb_publishable_*` / `sb_secret_*` keys alike
-([`docs/gateway-migration.md`](../docs/gateway-migration.md)). **Six routes are open, across four
+accepts the `sb_publishable_*` / `sb_secret_*` keys
+([`docs/gateway.md`](../docs/gateway.md)). **Six routes are open, across four
 exemptions:**
 
 | Route(s) | Exemption | Why |
