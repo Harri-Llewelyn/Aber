@@ -1,6 +1,6 @@
 ## Summary
 
-Every service this stack runs, what it is for, and how to reach it. The page exists because the answer to "which port is Grafana on" should not be a search through a compose file, and because on Kubernetes there is no port to find at all.
+Every service this stack runs, what it is for, and how to reach it. The page exists because the answer to "which port is Grafana on" should not be a search through a deployment file, and because on Kubernetes there is no port to find at all.
 
 ## What the controls do
 

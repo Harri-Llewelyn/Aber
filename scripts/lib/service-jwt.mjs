@@ -139,8 +139,8 @@ export function mintJwt({ role, secret, subject = null, days = null, now = Date.
 /**
  * The claims of a token, without verifying its signature.
  *
- * DELIBERATELY DOES NOT VERIFY, and every caller here is reading a key it already holds out of its
- * own `.env` -- the question is "when does this expire", not "is this genuine". A verifying
+ * DELIBERATELY DOES NOT VERIFY, and every caller here is reading a key it already holds out of the
+ * release Secret -- the question is "when does this expire", not "is this genuine". A verifying
  * variant would need the secret, which would make `--check` require one to answer a question the
  * payload states in clear.
  *

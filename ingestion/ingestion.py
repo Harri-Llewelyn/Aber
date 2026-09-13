@@ -180,7 +180,7 @@ try:
             "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY/SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY "
             "missing. Supabase "
             "integration disabled. SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY -- "
-            "see Machine Identities in supabase/README.md; run scripts/setup.mjs or copy the key from .env.example."
+            "see Machine Identities in supabase/README.md; the chart sets it from secrets.ingestionKey."
         )
 except Exception as e:
     logger.warning("Failed to initialize Supabase client: %s", e)
@@ -3176,9 +3176,9 @@ def main():
         logger.critical(
             "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL, "
             "SUPABASE_PUBLISHABLE_KEY/SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY missing or invalid. "
-            "SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY here (see Machine Identities in supabase/README.md); an "
-            ".env predating that change has no such key -- run scripts/setup.mjs, or copy it from "
-            ".env.example for a demonstration stack. "
+            "SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY here (see Machine Identities in supabase/README.md); a "
+            "values file predating that change has no such key -- npm run setup mints it "
+            "(secrets.ingestionKey). "
             "Ingestion daemon refusing to start MQTT loop in fail-open state. System halting to enforce fail-closed device quarantine gating."
         )
         raise SystemExit(1)

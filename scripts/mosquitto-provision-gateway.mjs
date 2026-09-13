@@ -5,25 +5,21 @@
  * The dashboard and the enrolment bundle are the ordinary paths; this is the break-glass one, for
  * a stack whose credential service is down or whose only Administrator cannot sign in. It sends
  * the same commands the service sends (scripts/lib/mosquitto-dynsec.mjs, issueWithControl) to the
- * broker's Dynamic Security plugin, through `mosquitto_rr` inside the broker container, so the
+ * broker's Dynamic Security plugin, through `mosquitto_rr` inside the broker pod, so the
  * account it issues is the account the service would have issued: its own role, confined to
  * `spBv1.0/+/+/<sparkplug_id>/#`, plus the shared gateway role.
  *
  * Usage:
  *   node scripts/mosquitto-provision-gateway.mjs <sparkplug_id> [password]
- *   node scripts/mosquitto-provision-gateway.mjs --target=k8s <sparkplug_id> [password]
  *
  * With no password one is generated and printed. It is printed EXACTLY ONCE: the plugin stores a
  * hash and there is no way to read it back. The plugin's admin credential comes from
- * MQTT_DYNSEC_ADMIN_USER / MQTT_DYNSEC_ADMIN_PASSWORD, read from the environment or from .env.
+ * MQTT_DYNSEC_ADMIN_USER / MQTT_DYNSEC_ADMIN_PASSWORD, from the environment or the release Secret.
  *
  * Nothing here records the issue in the database. A gateway issued this way reads "No platform
  * record" on the Access Control page beside a live broker account, which is the honest state.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 
 import {
   GATEWAY_ID_PATTERN,
@@ -32,35 +28,24 @@ import {
 } from './lib/mosquitto-credentials.mjs';
 import { issueWithControl } from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
+import { NAMESPACE, missingCredentialAdvice, stackCredentials } from './lib/stack-credentials.mjs';
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-// --- Compose backend -------------------------------------------------------------------------
-const CONTAINER = process.env.MOSQUITTO_CONTAINER || 'acs-cymru_mosquitto';
-
-// --- Kubernetes backend ----------------------------------------------------------------------
-const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru';
 
 const args = process.argv.slice(2);
-let target = 'compose';
+let help = false;
 const positional = [];
 for (const arg of args) {
-  if (arg.startsWith('--target=')) target = arg.slice('--target='.length);
-  else if (arg === '-h' || arg === '--help') target = 'help';
+  if (arg === '-h' || arg === '--help') help = true;
   else positional.push(arg);
 }
 const [sparkplugId, suppliedPassword] = positional;
 
 const usage = () => {
-  console.error('Usage: node scripts/mosquitto-provision-gateway.mjs [--target=compose|k8s] <sparkplug_id> [password]');
+  console.error('Usage: node scripts/mosquitto-provision-gateway.mjs <sparkplug_id> [password]');
   process.exit(2);
 };
 
-if (target === 'help' || !sparkplugId) usage();
-if (target !== 'compose' && target !== 'k8s') {
-  console.error(`Unknown --target='${target}'. Expected 'compose' or 'k8s'.`);
-  process.exit(2);
-}
+if (help || !sparkplugId) usage();
 
 // Refuse anything that is not a gateway id. A username that does not match a real edge-node
 // segment produces an account confined to a subtree nothing will ever publish to -- which fails
@@ -81,21 +66,11 @@ try {
   process.exit(2);
 }
 
-/** The admin pair, from the environment or the repository's .env. */
+/** The admin pair, from the environment or the release Secret. */
 function adminCredential() {
-  const env = { ...process.env };
-  const dotenv = join(REPO, '.env');
-  if ((!env.MQTT_DYNSEC_ADMIN_PASSWORD) && existsSync(dotenv)) {
-    for (const line of readFileSync(dotenv, 'utf8').split('\n')) {
-      const m = /^\s*(MQTT_DYNSEC_ADMIN_(?:USER|PASSWORD))\s*=\s*(.*?)\s*$/.exec(line);
-      if (m && !env[m[1]]) env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
-    }
-  }
+  const env = stackCredentials(['MQTT_DYNSEC_ADMIN_USER', 'MQTT_DYNSEC_ADMIN_PASSWORD']);
   if (!env.MQTT_DYNSEC_ADMIN_PASSWORD) {
-    console.error(
-      'MQTT_DYNSEC_ADMIN_PASSWORD is not set and .env does not carry it. The broker\'s plugin is\n' +
-      'administered as that account; `npm run setup` generates it.'
-    );
+    console.error(missingCredentialAdvice('MQTT_DYNSEC_ADMIN_PASSWORD'));
     process.exit(2);
   }
   return { username: env.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin', password: env.MQTT_DYNSEC_ADMIN_PASSWORD };
@@ -122,17 +97,8 @@ function brokerPod() {
   }
 }
 
-/** Where `mosquitto_rr` runs: inside the broker container, dialling its own loopback. */
+/** Where `mosquitto_rr` runs: inside the broker pod, dialling its own loopback. */
 function execPrefix() {
-  if (target === 'compose') {
-    try {
-      run('docker', ['inspect', '-f', '{{.State.Running}}', CONTAINER]);
-    } catch {
-      console.error(`The '${CONTAINER}' container is not running. (docker compose up -d mosquitto)`);
-      process.exit(1);
-    }
-    return ['docker', 'exec', CONTAINER];
-  }
   const pod = brokerPod();
   if (!pod) {
     console.error(

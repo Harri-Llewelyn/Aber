@@ -193,16 +193,15 @@ export function ColdStorageTab({ showToast, userRole }) {
           )}
 
           {/* Under the table rather than in a tooltip: for every other bucket an object is a copy.
-              Here it is the original, and `docker compose down -v` takes it. */}
+              Here it is the original, and deleting the storage volume takes it. */}
           {summary.archived > 0 && (
             <div className="card-footer" style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
               <strong>These objects are the only copy.</strong> The rows behind
               {' '}{summary.archived} chunk{summary.archived === 1 ? '' : 's'} were dropped from the
               hypertable because their export verified, so deleting an object here loses that
-              history — there is nothing to restore it from. On Compose the objects sit in the
-              {' '}<code>storage_data</code> volume on this host, which{' '}
-              <code>docker compose down -v</code> destroys; <code>npm run stack:reset</code> refuses
-              rather than take them with it.
+              history — there is nothing to restore it from. The objects sit on the storage
+              volume, which <code>helm uninstall</code> keeps and only deleting the namespace or{' '}
+              <code>npm run dev:reset</code> destroys.
             </div>
           )}
         </div>

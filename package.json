@@ -8,10 +8,10 @@
     "setup": "node scripts/setup.mjs",
     "proto": "node scripts/generate-proto.mjs",
     "//test:lib": "Explicit file paths, NOT `node --test scripts/lib/`: the directory form's discovery behaves differently on Windows and reports the directory itself as one failing test.",
-    "test:lib": "node --test scripts/lib/mosquitto-credentials.test.mjs scripts/lib/mosquitto-dynsec.test.mjs scripts/lib/orphaned-accounts.test.mjs scripts/lib/public-host.test.mjs scripts/lib/service-jwt.test.mjs",
-    "//test:db": "The database suites against a THROWAWAY Postgres, not the live stack. They default to port 54322, which is where docker-compose publishes production -- and their committed fixtures leave permanent rows in the append-only digital_thread. Needs Docker and nothing else; --keep leaves the container up.",
+    "test:lib": "node --test scripts/lib/mosquitto-credentials.test.mjs scripts/lib/mosquitto-dynsec.test.mjs scripts/lib/orphaned-accounts.test.mjs scripts/lib/service-jwt.test.mjs",
+    "//test:db": "The database suites against a THROWAWAY Postgres, not the live stack. They default to port 54322, which is where the dev loop forwards the live Supabase database -- and their committed fixtures leave permanent rows in the append-only digital_thread. Needs Docker and nothing else; --keep leaves the container up.",
     "test:db": "node scripts/test-db.mjs",
-    "//test:py": "Every Python suite in a LANE, discovered from the tree rather than listed. scripts/python-suites.mjs says which lane each suite is in and why; the runner refuses to run at all if a test_*.py in the tree has no lane, which is what stopped twenty of them running in no job anywhere (#147). `unit` needs nothing. `db` needs the migrated Postgres and is what test:db runs against its throwaway container. `stack` needs the composed stack and runs in e2e.",
+    "//test:py": "Every Python suite in a LANE, discovered from the tree rather than listed. scripts/python-suites.mjs says which lane each suite is in and why; the runner refuses to run at all if a test_*.py in the tree has no lane, which is what stopped twenty of them running in no job anywhere (#147). `unit` needs nothing. `db` needs the migrated Postgres and is what test:db runs against its throwaway container. `stack` needs a running stack: `npm run dev:test` on k3d, which is what CI runs.",
     "test:py": "node scripts/run-python-suites.mjs --lane unit",
     "test:py:db": "node scripts/run-python-suites.mjs --lane db",
     "test:py:stack": "node scripts/run-python-suites.mjs --lane stack",
@@ -19,12 +19,11 @@
     "keys:check": "node scripts/rotate-service-keys.mjs --check",
     "keys:rotate": "node scripts/rotate-service-keys.mjs",
     "aas:push-basyx": "node scripts/aas-push-basyx.mjs",
-    "//dev": "The development loop on a local k3d cluster (deploy/k8s/README.md, The development loop). up: cluster if absent, cert-manager, the nine images built and imported, helm upgrade --install, every hook and rollout waited for, helm test. test: validate.py and the stack lane from the host through port-forwards on the ports Compose published. reset: a blank stack on the same cluster and images.",
+    "//dev": "The development loop on a local k3d cluster (deploy/k8s/README.md, The development loop). up: cluster if absent, cert-manager, the nine images built and imported, helm upgrade --install, every hook and rollout waited for, helm test. test: validate.py and the stack lane from the host through port-forwards on the ports the suites default to. reset: a blank stack on the same cluster and images.",
     "dev:up": "node scripts/dev-cluster.mjs up",
     "dev:test": "node scripts/dev-cluster.mjs test",
     "dev:forward": "node scripts/dev-cluster.mjs forward",
     "dev:reset": "node scripts/dev-cluster.mjs reset",
-    "dev:down": "node scripts/dev-cluster.mjs down",
-    "stack:reset": "node scripts/stack-reset.mjs"
+    "dev:down": "node scripts/dev-cluster.mjs down"
   }
 }

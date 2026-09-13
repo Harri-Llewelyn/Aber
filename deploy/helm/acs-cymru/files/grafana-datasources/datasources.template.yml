@@ -1,9 +1,8 @@
 # Grafana datasources -- a template, rendered before Grafana reads it.
 #
-# One template serves both targets: on Compose the grafana entrypoint substitutes the
-# `__UPPER_SNAKE__` placeholders with `sed`; on Kubernetes Helm renders them into a Secret
-# mounted at /etc/grafana/provisioning/datasources/datasources.yml. The password is not
-# committed; .env is the single source of truth.
+# The chart's initContainer substitutes the `__UPPER_SNAKE__` placeholders with `sed` into an
+# emptyDir mounted at /etc/grafana/provisioning/datasources/datasources.yml. The password is not
+# committed; the release Secret is the single source of truth.
 #
 # Grafana connects to the historian as `powerbi_reader`, created by timescaledb/roles.sql, which
 # may SELECT the three rollup views and nothing else: a panel querying raw `telemetry` fails with
@@ -17,9 +16,7 @@ datasources:
     uid: timescaledb
     type: postgres
     access: proxy
-    # In-network service name and the STANDARD port, not the host-published 5433. Identical on
-    # both targets -- which is the point of keeping Kubernetes Service names the same as the
-    # Compose service names.
+    # The Service name and the STANDARD port, not the 5433 `npm run dev:test` forwards.
     url: timescaledb:5432
     user: grafana_reader
     database: postgres
@@ -67,8 +64,7 @@ datasources:
       timescaledb: false
 
   # ===============================================================================================
-  # Prometheus: no credential, and the URL is a placeholder because the two targets reach it by
-  # different routes: Compose substitutes the service name; the chart substitutes its own store
+  # Prometheus: no credential, and the URL is a placeholder: the chart substitutes its own store
   # or, with observability.enabled=false, `grafana.prometheusUrl`, and refuses to render with
   # neither. A datasource pointed at nothing reports every rule as DatasourceError.
   # ===============================================================================================
@@ -93,7 +89,7 @@ datasources:
   # password, so no `X-Scope-OrgID` header is needed) and a placeholder URL for the reason
   # Prometheus' is: the chart's own store, or `grafana.lokiUrl` when the cluster runs its own.
   #
-  # Alloy (alloy/config.alloy on Compose, the chart's alloy DaemonSet on Kubernetes) labels streams
+  # The chart's Alloy DaemonSet labels streams
   # by `service` and `container` only; `reason`, `device` and
   # `edge_node` are fields inside the JSON line, so the drill-down from a drop counter is:
   #

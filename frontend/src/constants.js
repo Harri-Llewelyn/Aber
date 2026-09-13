@@ -164,7 +164,7 @@ export const GITHUB_REPO_URL = readSetting(
 
 /**
  * Grafana, as the browser reaches it, for the "View in Grafana" link on an active alert. The
- * default is 3002 (docker-compose.yml publishes it there; the frontend has 3000). Same value as
+ * default is 3002 (`npm run dev:forward` puts it there; the frontend has 3000). Same value as
  * GRAFANA_PUBLIC_URL, which the seed registers as the OAuth redirect origin, so a deployment that
  * moves Grafana sets both. A fallback is kept for the reason GITHUB_REPO_URL keeps one.
  */
@@ -182,7 +182,7 @@ export const STUDIO_URL = readSetting('VITE_STUDIO_URL', 'http://127.0.0.1:54323
 
 /**
  * The forge's door, as the browser reaches it (GITEA_ROOT_URL on the server side). A link as
- * well as a sign-out. The fallback is the Compose default, `localhost`, matching GITEA_ROOT_URL's.
+ * well as a sign-out. The fallback is the port `npm run dev:forward` uses.
  */
 export const GITEA_URL = readSetting('VITE_GITEA_URL', 'http://localhost:3003')
   .replace(/\/+$/, '');

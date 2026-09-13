@@ -5,7 +5,7 @@
 #
 # Single binary, filesystem backend, no object store: one shopfloor host. Not published, and no
 # authentication: `auth_enabled: false` is Loki's multi-tenancy switch, not a password (Loki has
-# none), so the control is who can reach the port, which docker-compose.yml binds to 127.0.0.1.
+# none), so the control is who can reach the port, which has no Ingress route.
 # =============================================================================================
 
 # One tenant: every request is attributed to `fake`, Loki's built-in single-tenant id, so the

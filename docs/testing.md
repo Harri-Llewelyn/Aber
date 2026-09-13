@@ -14,7 +14,7 @@ cd frontend && npm test
 npm run test:py          # lane: unit  — needs nothing at all
 npm run test:py:db       # lane: db    — needs a migrated Postgres (see `npm run test:db` below,
                          #               which starts a throwaway one and runs this same lane)
-npm run test:py:stack    # lane: stack — needs a running stack (Compose; on k3d, npm run dev:test)
+npm run test:py:stack    # lane: stack — needs a running stack (npm run dev:test forwards to k3d and runs it)
 
 # The individual commands below still work and are the reference for WHAT each suite covers. They
 # are not the list CI runs from; there is no such list any more.
@@ -70,8 +70,8 @@ python ingestion/test_directory_refresh.py
 python ingestion/test_capture_playback.py
 # The daemon-side recording engine -- subject matching, the caps, and the manifest
 python ingestion/test_capture_worker.py
-# The startup recovery loop. `depends_on` orders `docker compose up` and nothing else, so when the
-# Docker daemon brings `restart: always` containers back it can start ingestion before the
+# The startup recovery loop. Nothing orders the daemon after the historian at boot, so a node
+# restart can start ingestion before the
 # historian -- measured at 453ms on a development stack. The daemon then reached its MQTT loop
 # having done none of the startup work that needed a database, and retried none of it: the
 # historian gauge read 0 for ever on a quiet stack, and capture reconciliation never ran, which
@@ -167,14 +167,6 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # `factoryplus_ingestion` and stopping the stack ingesting.
 npm run test:lib
 
-# Configuration drift — no services needed, and the ONE check here that reads your own .env.
-# Compares docker-compose.yml against .env.example (enforced in CI) and, when a .env exists,
-# your working file against the template in BOTH directions: keys the template gained and you
-# never copied, keys retired from the template still sitting in your file, and keys Compose
-# reads that the template forgot. All three fail silently otherwise -- Compose substitutes its
-# own default and the stack comes up looking correct on a value nobody chose.
-node scripts/check-env-drift.mjs
-
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
 # time against it. There is no migrations ledger, so "a second run must match no rows" is what
 # the whole schema rests on, and it used to be upheld by review alone. Asserts only what a
@@ -184,13 +176,6 @@ node scripts/check-env-drift.mjs
 # running on a partially-migrated database -- with the telemetry read surface DROPPED rather than
 # stale, because 0001 removes it with CASCADE before later files recreate it. Checks the objects
 # that abort would leave missing, and names the migration that should have made them.
-# Do both deployment targets deploy the same thing? Needs neither a stack nor helm -- it reads
-# docker-compose.yml and the chart templates as text. The file-sync guard above asserts the copies
-# the chart CARRIES are current; this one asserts the chart carries them at all. Six defects in one
-# branch had that shape, three of them found only by installing the chart and watching a pod crash.
-# Known gaps are printed on every run rather than exempted silently.
-node scripts/check-compose-chart-parity.mjs
-
 node scripts/check-schema-surface.mjs
 
 node scripts/check-migration-idempotency.mjs
@@ -198,7 +183,7 @@ node scripts/check-migration-idempotency.mjs
 # Database suites — ALL SIXTEEN, against a throwaway Postgres. Needs Docker and nothing else.
 #
 # RUN THEM THIS WAY. Every suite below defaults to port 54322, and that is where
-# docker-compose.yml publishes the LIVE database -- so the bare `python ...` form points at
+# `npm run dev:forward` publishes the LIVE database -- so the bare `python ...` form points at
 # production data and always has. See the note under this block for what that costs.
 #
 # Brings up a disposable supabase/postgres, applies the same auth fixture CI uses, replays
@@ -311,23 +296,23 @@ python timescaledb/test_historian_role_grants.py
 
 # End-to-end — needs the running stack
 #
-# WAIT FOR THE DAEMON FIRST. `docker compose up --wait` returns on health and the ingestion daemon
-# carries no healthcheck deliberately, so "up" and "subscribed" are different states. Publishing
+# WAIT FOR THE DAEMON FIRST. `rollout status` returns when the process starts and the ingestion daemon
+# carries no readiness probe deliberately, so "up" and "subscribed" are different states. Publishing
 # into that gap makes the suite report a block of conformance failures for a cause none of them
 # names -- ten of them, in the run that produced issue #47. This blocks until the daemon has
 # actually consumed something, and fails naming the wait if it never does.
-WAIT_MODE=compose sh scripts/wait-for-ingestion-consuming.sh
+sh scripts/wait-for-ingestion-consuming.sh
 
-set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
-export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
-python ingestion/validate.py
+# validate.py and the whole stack lane, through port-forwards, with the credentials read out of
+# the release Secret. What CI runs.
+npm run dev:test
 ```
 
 ## Why the database suites get their own Postgres
 
 **The default was production.** Every suite under `supabase/migrations/` resolves its port as
-`os.getenv("SUPABASE_DB_PORT", "54322")`, and `docker-compose.yml` publishes the live Supabase
-database on `${SUPABASE_DB_PORT:-54322}`. So the documented invocation — `python
+`os.getenv("SUPABASE_DB_PORT", "54322")`, and `npm run dev:forward` publishes the live Supabase
+database on 54322. So the documented invocation — `python
 supabase/migrations/test_audit_domain.py`, nothing set — connected to the running stack.
 
 Most of the suites roll back, which helps less than it sounds. `digital_thread` is append-only by
@@ -398,22 +383,19 @@ the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and 
 the CESMII conformance suite skips. See [`ingestion/README.md`](../ingestion/README.md#testing) and
 [`i3x/README.md`](../i3x/README.md).
 
-CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs six jobs:
+CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs five jobs:
 
 | Job | Covers |
 | :--- | :--- |
-| **changes** | Classifies the diff, so a documentation-only change skips the two end-to-end stacks |
+| **changes** | Classifies the diff, so a documentation-only change skips the end-to-end stack |
 | **frontend-build** | Vitest, the mirrored-logic drift guards, production bundle |
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
-| **e2e-validation** | Full Docker Compose stack, `validate.py`, live AAS export |
-| **k8s-validation** | k3d cluster, `helm test`, the same suites in-cluster, ingress assertions |
+| **k8s-validation** | k3d cluster through `dev-cluster up --e2e`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions |
 
-**The last two are the real drift control between deployment targets**, and they are the two
-`changes` gates: eighteen of the workflow's twenty-two minutes are spent here, and a change that
-touches only documentation cannot alter what either asserts. The gate fails open, so a diff range
-it cannot compute runs them anyway. `validate.py` is
-topology-agnostic and runs against both; if both pass, the wiring agrees where it matters.
+**The last one is the `changes` gate**: most of the workflow's minutes are spent there, and a change
+that touches only documentation cannot alter what it asserts. The gate fails open, so a diff range
+it cannot compute runs it anyway.
 
 ## Keeping the pinned versions current
 
@@ -479,7 +461,7 @@ pull requests it opens trigger no workflow runs, so every bump would arrive with
 
 **The scan reports only *fixable* HIGH and CRITICAL findings.** An unfixed CVE in a base image is
 not something this repository can act on, and failing on it would train everyone to ignore the job.
-Its image list is parsed out of `docker-compose.yml` rather than written in the workflow, and it
+Its image list is rendered out of the chart (`helm template`) rather than written in the workflow, and it
 refuses to run if it finds fewer than ten — "found nothing to scan" must not look like "found
 nothing wrong".
 

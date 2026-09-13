@@ -1,12 +1,10 @@
 # Alert delivery -- A TEMPLATE, rendered before Grafana reads it.
 #
-# Same arrangement as datasources.template.yml and supabase/kong.yml:
-#   * Docker Compose: the grafana service's entrypoint substitutes the __PLACEHOLDER__ forms with
-#     `sed` and writes the result into the grafana_provisioning_alerting volume.
-#   * Kubernetes: Helm renders the same placeholders through an initContainer into an emptyDir
-#     mounted at /etc/grafana/provisioning/alerting, and Grafana runs its stock /run.sh.
+# Same arrangement as datasources.template.yml: an initContainer substitutes the __PLACEHOLDER__
+# forms with `sed` into an emptyDir mounted at /etc/grafana/provisioning/alerting, and Grafana
+# runs its stock /run.sh.
 #
-# Both substituters assert that no `__UPPER_SNAKE__` marker survives. An unsubstituted placeholder
+# The substituter asserts that no `__UPPER_SNAKE__` marker survives. An unsubstituted placeholder
 # reaching Grafana would be a contact point that authenticates with the literal string, which the
 # webhook rejects with 401 -- reported by Grafana as a delivery failure buried in its own logs,
 # several steps from the cause.

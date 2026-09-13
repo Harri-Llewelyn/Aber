@@ -110,7 +110,7 @@ The Node-RED editor opens empty. What you need is one broker connection and enou
 B lifecycle to be recognised:
 
 1. Add an **mqtt-broker** config node pointing at `mosquitto:1883`.
-2. Give it the username and password from step 4. On Compose, set them as an env pair in `.env` and
+2. Give it the username and password from step 4. Set them as an env pair on the Node-RED pod and
    name that pair in the broker node's `acsCredentialsEnv` property — `node-red-init` reconciles env
    pairs onto broker nodes at init, which is what keeps the secret out of the flow file and out of
    git.
@@ -170,7 +170,7 @@ is why a token-based test suite passes while the editor is unusable. Probe `GET 
 `runtime/lib/api/settings.js` copies `permissions` off that object into the settings the editor
 reads, and the editor draws a **padlock on Deploy** when it is absent. Sessions persist to
 `/data/.sessions.json` and survive a restart; an in-memory map does not — so every
-`docker compose restart` silently turned a live Administrator into a read-only editor while the
+a restart silently turned a live Administrator into a read-only editor while the
 API would still have accepted the deploy. It is not a logout, which would at least be visible.
 
 The last-resort branch returns a bare `{username}` for a session in neither the map nor the file.

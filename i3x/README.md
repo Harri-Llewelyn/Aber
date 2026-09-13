@@ -277,7 +277,7 @@ and bending objects and history into that shape would export a claim the protoco
 ### It is stdio, so it is not a service
 
 The package is spawned **per-user as a subprocess** by the MCP host, despite "Server" in the
-repository name. There is nothing to deploy in the cluster, nothing to add to `docker-compose.yml`,
+repository name. There is nothing to deploy in the cluster, nothing to add to the chart,
 and nothing that belongs in the Directory page. A shared hosted MCP endpoint would need a
 remote-transport wrapper, which is a separate piece of work.
 
@@ -359,7 +359,7 @@ reachability one — check the scheme before re-minting the token.
 Two suites, and neither substitutes for the other.
 
 ```bash
-# The arbiter: CESMII's own 60 tests. CI runs this against the live Compose stack.
+# The arbiter: CESMII's own 60 tests. CI runs this against the k3d stack over a port-forward.
 git clone https://github.com/cesmii/i3X.git && cd i3X/conformance-tests
 node bin/i3x-test.js run http://localhost:8090/v1 --token "$TOKEN"
 
@@ -476,16 +476,11 @@ than minutes, and why `0` disables the cache outright.
 - **HTTPS terminates at the ingress**, not here, and the conformance suite's CORE-05 advisory on a
   plain-HTTP endpoint is expected rather than outstanding (#135).
 
-  The suite runs against Compose — `http://127.0.0.1:8090/v1` — and **Compose is the local
-  development path, not a deployment target**; Kubernetes is where this is deployed, and the
-  [deployment-target table](../README.md#deployment-targets) is the statement of that. On
-  Kubernetes i3X rides the shared Ingress like every other service (`acs-cymru.ingressRoutes`
-  appends it), which terminates TLS against one wildcard certificate issued by cert-manager, so a
-  production endpoint is served over HTTPS and the advisory does not apply to it.
-
-  **Nothing here is asymmetric.** i3X publishing its port directly on Compose is what twelve of the
-  services do; Envoy fronts the Supabase routes and was never a gateway for the whole stack. In
-  cluster the TLS edge is browser-only, as it is for every other service.
+  The suite runs against a port-forward — `http://127.0.0.1:8090/v1` — which is a loopback
+  socket, not a deployment surface. In the cluster i3X rides the shared Ingress like every other
+  service (`acs-cymru.ingressRoutes` appends it), which terminates TLS against one wildcard
+  certificate issued by cert-manager, so a production endpoint is served over HTTPS and the
+  advisory does not apply to it. The TLS edge is browser-only, as it is for every other service.
 
   So this advisory is noise on the target it fires against. It is recorded here because it is
   raised on every conformance run and is otherwise rediscovered on each reading of the log.

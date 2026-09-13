@@ -42,8 +42,8 @@ that file would have no revocation story at all.
 
 0. **The deployment must know its own address first.** The page asks `gateway-bundle` whether an
    appliance could enrol and, if not, says so above the table and in the form, naming the variable
-   (§7). Save is withheld for a Remote gateway until it can; Host and Simulated are unaffected. On
-   Compose, `npm run setup` asks for the host when it writes a fresh `.env`.
+   (§7). Save is withheld for a Remote gateway until it can; Host and Simulated are unaffected.
+   `npm run setup` asks for the domain when it writes a values file.
 1. **Gateways → New Gateway.** Name it after the machine or the cell it serves.
 2. **Leave “Mark as Virtual Gateway” unchecked.** The form says which way it is going before you
    save: *“Runs on its own hardware. On save you will be given a bundle to copy to that machine.”*
@@ -221,11 +221,11 @@ perfectly and then connects to nothing — the hardest version of this failure t
 | `SUPABASE_PUBLIC_URL` | `gateway-bundle` answers `503` and mints no token. `supabase-kong`, `localhost` and loopback addresses are all refused. |
 | `MQTT_PUBLIC_HOST` | `enroll-gateway` answers `503` **without consuming the token**. `mosquitto`, `supabase-kong`, `localhost` and loopback addresses are refused. |
 
-Both name the same machine, so on Compose they are set from one answer: `npm run setup` asks for
-the hostname or IP appliances reach this machine on and writes the pair (`--public-host=<name>`
-answers it from a script; blank is accepted, and means remote gateways cannot be enrolled).
-`scripts/check-env-drift.mjs` reports a working `.env` that leaves either unset or in-stack. The
-chart derives both from `global.publicBaseDomain`.
+Both name the same machine. The chart derives both from `global.publicBaseDomain`, which
+`npm run setup` asks for (`--domain=<base>` answers it from a script; blank keeps the loopback
+default, and means remote gateways cannot be enrolled). `supabaseFunctions.gatewayEnrolment`
+overrides either where the address appliances dial differs from the domain browsers use, which is
+what `npm run dev:up` does on a laptop.
 
 **The dashboard asks before it offers.** `GET /functions/v1/gateway-bundle` reports both addresses,
 judged by the same predicates the two refusals use (`_shared/publicAddresses.ts`), and the Gateways
@@ -264,9 +264,7 @@ year never has to travel, and the one that has to travel changes once a decade.
 
 The leaf renews on its own. cert-manager re-issues at `renewBefore`, the certificate-reload sidecar
 sends the broker a `SIGHUP`, and Mosquitto re-reads the certificate **in place without dropping a connected
-gateway**. No appliance notices, nothing is redistributed, and there is nothing to do. On Compose the
-equivalent is `node scripts/mosquitto-tls-init.mjs --force-leaf`, which reissues the leaf and leaves
-the root alone.
+gateway**. No appliance notices, nothing is redistributed, and there is nothing to do.
 
 ### What the fleet tells you, and why it is the right question
 
@@ -362,8 +360,7 @@ available and distribute in its own right — but it has a consequence worth sta
 
 **If the root's private key were ever exposed, the only remedy is to mint a new root and repeat the
 distribution above for the entire fleet.** There is no faster path. What keeps that acceptable is
-that the key never leaves cert-manager's `acs-cymru-ca-key-pair` Secret (or `/mosquitto/certs/ca.key`
-on Compose), is never mounted into an application pod, and is never copied to an appliance —
+that the key never leaves cert-manager's `acs-cymru-ca-key-pair` Secret, is never mounted into an application pod, and is never copied to an appliance —
 appliances receive `ca.crt` and only `ca.crt`. Treat that Secret as the most sensitive object in the
 deployment, because it is the one thing here with no revocation story.
 
@@ -531,6 +528,6 @@ They are in the quarantine queue awaiting approval (§10). That is the design, n
   ships in the bundle
 * [`docs/openapi.yaml`](openapi.yaml) — `enroll-gateway` and `gateway-bundle` contracts
 * [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) — the Kubernetes CA
-* [`scripts/mosquitto-tls-init.mjs`](../scripts/mosquitto-tls-init.mjs) — the Compose CA
+* [`scripts/mosquitto-tls-init.mjs`](../scripts/mosquitto-tls-init.mjs) — the broker CA generator the broker config check builds its TLS fixture with
 * [`scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) — issuing a
   credential by hand, without the enrolment path

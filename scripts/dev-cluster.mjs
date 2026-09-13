@@ -6,7 +6,7 @@
  *                                          images, install or upgrade the chart, wait until the stack
  *                                          is consuming, run `helm test`
  *   node scripts/dev-cluster.mjs test      the stack lane and validate.py from the host, through
- *                                          port-forwards shaped like the ports Compose published
+ *                                          port-forwards on the ports the suites default to
  *   node scripts/dev-cluster.mjs forward   open those port-forwards and hold them until Ctrl+C
  *   node scripts/dev-cluster.mjs reset     uninstall, drop every claim, reinstall -- a blank stack
  *                                          on the same cluster with the same images
@@ -19,14 +19,15 @@
  *           --e2e               also run the in-cluster conformance Jobs (`up`, `test`)
  *           --no-validate       skip validate.py, run the lane only (`test`)
  *           --filter=<text>     only suites whose path contains the text (`test`)
- *           --domain=<base>     the base domain of every host, default 127.0.0.1.nip.io; give
- *                               <LAN address>.nip.io to reach the stack from other machines,
- *                               where the resolver answers nip.io names with private addresses
- *                               (many home routers refuse to, as DNS-rebind protection) (`up`)
+ *           --domain=<base>     the base domain of every host, default localhost: browsers treat
+ *                               *.localhost as a secure context, which the Studio and forge
+ *                               logins need over plain HTTP. Give <LAN address>.nip.io to reach
+ *                               the stack from other machines, where the resolver answers nip.io
+ *                               names with private addresses (many home routers refuse to, as
+ *                               DNS-rebind protection); those two logins then need TLS (`up`)
  *
- * It is the sequence CI's k8s-validation job runs, made repeatable on a laptop, with one addition:
- * the stack lane. CI runs that lane against Compose only; here it runs against the cluster through
- * port-forwards, with ACS_STACK=k8s telling the suites that reach into containers to use kubectl.
+ * It is the sequence CI's k8s-validation job runs, made repeatable on a laptop: the stack lane
+ * reaches the cluster through port-forwards, and the suites that reach into containers use kubectl.
  *
  * Node rather than a shell script for the reason stack-reset.mjs gives: on Windows `npm` resolves
  * `bash` to WSL, where Docker is not available by default, and a loop that fails half-way through
@@ -66,7 +67,7 @@ const IMAGES = [
   { name: 'test-runner', file: 'test-harness/Dockerfile', context: '.', args: [`INGESTION_IMAGE=${IMG_NS}/ingestion:VERSION`] },
 ]
 
-// The host ports Compose published, forwarded to the Services that stand behind them, so every
+// The host ports the suites default to, forwarded to the Services that stand behind them, so every
 // host-side tool -- validate.py, the stack lane, the provisioning scripts -- keeps its defaults.
 // MQTT is not here: the k3d load balancer publishes 1883 and 8883 when the cluster was created
 // with those ports, and a forward is added below only when it was not.
@@ -293,13 +294,13 @@ function keptSecret (key) {
 }
 
 async function installChart ({ tls, e2e }) {
-  const domain = option('domain') || '127.0.0.1.nip.io'
+  const domain = option('domain') || 'localhost'
   step(`helm upgrade --install ${RELEASE} on ${domain} (${tls ? 'broker TLS on' : 'no TLS'}${e2e ? ', e2e Jobs on' : ''})`)
   must('node', ['scripts/sync-helm-chart-files.mjs'], 'the chart files are not mirrored')
   if (!capture('kubectl', ['get', 'namespace', NS]).ok) must('kubectl', ['create', 'namespace', NS], 'namespace')
   const sets = ['--set', `global.publicBaseDomain=${domain}`,
     // The backup service (the dashboard's Backups page) and its nightly CronJob, taking
-    // everything a Compose backup takes; the stack lane asserts on the set of components.
+    // everything a full backup takes; the stack lane asserts on the set of components.
     '--set', 'backup.enabled=true', '--set', 'backupService.enabled=true',
     '--set', 'backup.includeStorage=true', '--set', 'backup.includeForge=true',
     '--set', `secrets.forgeSweepSecret=${keptSecret('forgeSweepSecret')}`]
@@ -410,15 +411,6 @@ function printForwards (opened) {
 // ---------------------------------------------------------------------------------------------
 // The environment the host-side suites read
 // ---------------------------------------------------------------------------------------------
-function envExampleValues () {
-  const values = {}
-  for (const line of readFileSync(path.join(REPO, '.env.example'), 'utf8').split('\n')) {
-    const m = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line.trim())
-    if (m) values[m[1]] = m[2].replace(/^"(.*)"$/, '$1')
-  }
-  return values
-}
-
 function clusterSecrets () {
   const r = kubectl('get', 'secret', `${RELEASE}-secrets`, '-o', 'json')
   if (!r.ok) die(`could not read the release Secret: ${r.err}`)
@@ -431,17 +423,16 @@ function tlsEnabled () {
 }
 
 function testEnvironment () {
-  // Non-secret configuration from .env.example, which values-dev.yaml mirrors; every credential
-  // from the cluster's own Secret, so a cluster installed with other values fails rather than
-  // passes with the example's. Then the topology: the forwards above, on Compose's port numbers,
-  // except where a suite follows a browser-facing URL, which only the Ingress answers to.
+  // Every credential from the cluster's own Secret, so a cluster installed with other values
+  // fails rather than passes with the dev ones; the suites carry their own defaults for the
+  // non-secret settings. Then the topology: the forwards above, on the port numbers the suites
+  // default to, except where a suite follows a browser-facing URL, which only the Ingress answers.
   const secrets = clusterSecrets()
-  const domain = releaseValues().global?.publicBaseDomain || '127.0.0.1.nip.io'
+  const domain = releaseValues().global?.publicBaseDomain || 'localhost'
   const modelBase = kubectl('get', 'deploy/supabase-functions', '-o',
     'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="AAS_MODEL_PUBLIC_BASE")].value}').out
   return {
     ...process.env,
-    ...envExampleValues(),
     ...secrets,
     ACS_STACK: 'k8s',
     KUBE_NAMESPACE: NS,
@@ -575,7 +566,7 @@ function down () {
 function status () {
   step('status')
   run('kubectl', ['-n', NS, 'get', 'pods', '-o', 'wide'])
-  const base = releaseValues().global?.publicBaseDomain || '127.0.0.1.nip.io'
+  const base = releaseValues().global?.publicBaseDomain || 'localhost'
   console.log(`
   dashboard  http://app.${base}/         Grafana   http://grafana.${base}/  (admin/admin)
   API        http://api.${base}/         Node-RED  http://nodered.${base}/

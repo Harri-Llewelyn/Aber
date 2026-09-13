@@ -1,239 +1,165 @@
 /**
- * Create `.env` for a local stack, generating the credentials rather than copying them.
+ * Write a values file for a stack of your own, with the credentials generated rather than copied.
  *
- * `.env.example` ships working demo values that are in git and in every self-host guide, and the
- * gateway's key filter admits the anon and service-role JWTs as API keys, so a copied `.env` is
- * a stack that accepts published credentials at its edge.
+ * values-dev.yaml ships working demo values that are in git and in every self-host guide, and the
+ * gateway's key filter admits the anon and service-role JWTs as API keys, so a stack installed
+ * from it accepts published credentials at its edge. This writes
+ * deploy/helm/acs-cymru/values-local.yaml (gitignored) with every secret minted here:
  *
- * The JWTs are a set: `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are HS256 JWTs signed
- * by `SUPABASE_JWT_SECRET`, and rotating the secret without re-minting both yields a stack that
- * comes up healthy and rejects every request. Node's built-in `crypto` does HMAC-SHA256, so this
- * stays a zero-install script.
+ *   npm run setup                        # asks one question on a terminal
+ *   npm run setup -- --domain=acs.example.com
+ *   helm upgrade --install acs-cymru deploy/helm/acs-cymru -n acs-cymru \
+ *     -f deploy/helm/acs-cymru/values-local.yaml
  *
- * `.env.example` keeps its demo values: `--demo` is the supported way for CI to ask for them.
+ * The JWTs are a set: the anon and service-role keys are HS256 JWTs signed by the JWT secret, and
+ * rotating the secret without re-minting both yields a stack that comes up healthy and rejects
+ * every request. Node's built-in `crypto` does HMAC-SHA256, so this stays a zero-install script.
  *
- * One question is asked, on a terminal only: the hostname or IP a physical gateway reaches this
- * machine on. It writes MQTT_PUBLIC_HOST and SUPABASE_PUBLIC_URL together (lib/public-host.mjs).
- * `--public-host=<name>` answers it from a script; without a terminal it is left blank, and blank
- * means remote gateways cannot be enrolled, which is printed rather than discovered later.
+ * One question is asked, on a terminal only: the domain every host is published under, which is
+ * what a browser and a physical gateway both dial. `--domain=<base>` answers it from a script;
+ * without a terminal it is left at the chart's default, and the file says what that withholds.
+ *
+ * For anything another person can reach, an externally managed Secret (`secrets.existingSecret`,
+ * values-prod.yaml.example) is the intended home for these values; this file is the laptop and
+ * the single box.
  */
 
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import readline from 'readline/promises';
 import { fileURLToPath } from 'url';
-import { parsePublicHost, publicAddressLines } from './lib/public-host.mjs';
 // SHARED WITH scripts/rotate-service-keys.mjs, which signs the same two keys again on a live
-// stack (issue #101). Still no new dependencies -- lib/service-jwt.mjs is node:crypto and nothing
-// else, so this remains a zero-install script.
+// stack (issue #101). lib/service-jwt.mjs is node:crypto and nothing else.
 import {
   mintJwt, SERVICE_KEY_DEFAULT_DAYS, INFRASTRUCTURE_KEY_DAYS
 } from './lib/service-jwt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
-const envPath = path.join(rootDir, '.env');
-const envExamplePath = path.join(rootDir, '.env.example');
+const outArg = process.argv.find((a) => a.startsWith('--out='));
+const outPath = path.resolve(rootDir, outArg ? outArg.slice('--out='.length) : 'deploy/helm/acs-cymru/values-local.yaml');
 
-const demoMode = process.argv.includes('--demo');
-
-/** Hex: these values land in connection strings, a mosquitto password file, psql `-v` variables
- *  and YAML, and hex needs no escaping in any of them. */
+/** Hex: these values land in connection strings, psql `-v` variables and YAML, and hex needs no
+ *  escaping in any of them. */
 const hex = (bytes) => crypto.randomBytes(bytes).toString('hex');
 
-/**
- * The claims live in scripts/lib/service-jwt.mjs, shared with the rotation script.
- *
- * The anon and service-role keys stay at ten years: they carry a `role` and no `sub`, and they
- * are the stack's API keys, so shortening them needs a story for re-issuing them to every client
- * at once. The two principal keys are bounded at 90 days, the same ceiling
- * `scripts/mint-mcp-token.mjs` enforces; `npm run keys:rotate` re-signs them with the same
- * secret, and `npm run keys:check` reports the expiry.
- */
+console.log('🚀 ACS-Cymru setup: a values file with credentials of its own');
 
-console.log('🚀 Running ACS-Cymru Asset Tracking Environment Setup...');
-
-if (fs.existsSync(envPath)) {
-  console.log('ℹ️  .env already exists — left untouched. Delete it first if you want fresh credentials.');
-  process.exit(0);
-}
-if (!fs.existsSync(envExamplePath)) {
-  console.error('❌ .env.example not found.');
-  process.exit(1);
-}
-
-let contents = fs.readFileSync(envExamplePath, 'utf8');
-
-if (demoMode) {
-  fs.writeFileSync(envPath, contents);
-  console.log('✅ Created .env from .env.example VERBATIM (--demo).');
-  console.log('⚠️  These are PUBLISHED credentials. Local development and CI only.');
+if (fs.existsSync(outPath)) {
+  console.log(`ℹ️  ${path.relative(rootDir, outPath)} already exists — left untouched. Delete it first for fresh credentials.`);
   process.exit(0);
 }
 
 const jwtSecret = hex(32);
 
-/**
- * Service_Ingestor, seeded by 0002. Pinned rather than looked up: this file runs before any
- * database exists.
- */
+/** Service_Ingestor and Service_Playback, seeded by 0002. Pinned: this runs before any database
+ *  exists. Two machine identities because the two hold different things at the broker. */
 const INGESTION_PRINCIPAL = 'b0000000-0000-4000-8000-000000000002';
-
-/**
- * Service_Playback, seeded by 0002. A second machine identity rather than a second use of the
- * first, because the two hold different things at the broker: the ingestion principal may
- * publish `spBv1.0/+/NCMD/+` only, and the playback worker publishes asset data as one gateway.
- */
 const PLAYBACK_PRINCIPAL = 'b0000000-0000-4000-8000-000000000003';
 
-/**
- * The two bounded keys, minted here rather than inline so their `jti` and expiry can be reported
- * at the moment they are created.
- */
 const ingestionKey = mintJwt({
-  role: 'authenticated', secret: jwtSecret, subject: INGESTION_PRINCIPAL,
-  days: SERVICE_KEY_DEFAULT_DAYS,
+  role: 'authenticated', secret: jwtSecret, subject: INGESTION_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
 });
 const playbackKey = mintJwt({
-  role: 'authenticated', secret: jwtSecret, subject: PLAYBACK_PRINCIPAL,
-  days: SERVICE_KEY_DEFAULT_DAYS,
+  role: 'authenticated', secret: jwtSecret, subject: PLAYBACK_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
 });
 
 /**
- * Every value replaced, and why each is the length it is. Two carry hard limits enforced by the
- * container (supabase/realtime refuses to boot on anything else) and asserted by the chart's
- * `acs-cymru.validateRealtime`. Keep the three in step.
+ * Every `secrets.*` key the chart reads, and why each is the length it is. Two carry hard limits
+ * enforced by the supabase/realtime container and asserted by the chart's validateRealtime.
  */
-const generated = {
-  POSTGRES_PASSWORD: hex(24),
-  DB_PASSWORD: hex(24),
-  SUPABASE_JWT_SECRET: jwtSecret,
-  SUPABASE_ANON_KEY: mintJwt({ role: 'anon', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
-  SUPABASE_SERVICE_ROLE_KEY: mintJwt({ role: 'service_role', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
-  // The key format that replaces the two above, minted alongside them. Opaque random strings,
-  // not JWTs and not derived from SUPABASE_JWT_SECRET: the gateway matches the key as a string
-  // and hands the upstream the legacy JWT. `npm run keys:rotate` does not touch them. Hex, for the
-  // reason every other value here is hex. The prefixes are upstream's, so a leaked `sb_secret_`
-  // is recognisable on sight.
-  SUPABASE_PUBLISHABLE_KEY: `sb_publishable_${hex(24)}`,
-  SUPABASE_SECRET_KEY: `sb_secret_${hex(24)}`,
-  // The ingestion daemon's own credential (see Machine Identities in supabase/README.md):
-  // `authenticated` with a `sub`, which cannot write a row directly; every write goes through a
-  // SECURITY DEFINER gate that checks the caller is Service_Ingestor. The daemon still needs the
-  // anon key as `apikey`; this token travels as the Authorization bearer.
-  SUPABASE_INGESTION_KEY: ingestionKey.token,
-  // The playback worker's own credential, same shape and reasoning. Its narrowness is what makes
-  // the storage read arm meaningful: that policy admits this principal for exactly one object.
-  SUPABASE_PLAYBACK_KEY: playbackKey.token,
-  PG_META_CRYPTO_KEY: hex(32),
-  REALTIME_DB_ENC_KEY: hex(8),          // EXACTLY 16 chars
-  REALTIME_SECRET_KEY_BASE: hex(32),    // AT LEAST 64 chars
-  // Mandatory from realtime v2.102.3 (`System.fetch_env!`). Signs the bearer token its /metrics
-  // endpoint requires. Its own secret rather than SUPABASE_JWT_SECRET.
-  REALTIME_METRICS_JWT_SECRET: hex(32),
+const secrets = {
+  jwtSecret,
+  // Ten years: they carry a `role` and no `sub`, and they are the stack's API keys, so shortening
+  // them needs a story for re-issuing them to every client at once.
+  anonKey: mintJwt({ role: 'anon', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
+  serviceRoleKey: mintJwt({ role: 'service_role', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
+  // The key format Supabase replaces the two above with: opaque strings the gateway matches as
+  // strings, not JWTs. Upstream's prefixes, so a leaked `sb_secret_` is recognisable on sight.
+  publishableKey: `sb_publishable_${hex(24)}`,
+  secretKey: `sb_secret_${hex(24)}`,
+  // The two bounded principal keys (90 days): `authenticated` with a `sub`, which cannot write a
+  // row directly. `npm run keys:check` reports their expiry.
+  ingestionKey: ingestionKey.token,
+  playbackKey: playbackKey.token,
+  postgresPassword: hex(24),
+  timescalePassword: hex(24),
+  pgMetaCryptoKey: hex(32),
+  realtimeDbEncKey: hex(8),          // EXACTLY 16 chars
+  realtimeSecretKeyBase: hex(32),    // AT LEAST 64 chars
+  realtimeMetricsJwtSecret: hex(32),
   // One MQTT password per principal, independently generated: the broker's roles confine each
-  // account to a different subtree. The usernames are not generated: most are `sparkplug_id`s.
-  MQTT_INGESTION_PASSWORD: hex(24),
-  MQTT_I3X_PASSWORD: hex(24),
-  MQTT_VALIDATOR_PASSWORD: hex(24),
-  MQTT_MONITOR_PASSWORD: hex(24),
-  // The account the credential service administers the broker's Dynamic Security plugin as. Its
-  // role reaches $CONTROL/dynamic-security/# and nothing else; mosquitto-init refuses to start
-  // without it, and the service exits without it.
-  MQTT_DYNSEC_ADMIN_PASSWORD: hex(24),
-  // No gateway passwords are minted here: nothing is seeded into the flow, and a gateway's account
-  // is minted against a row that already exists, from the dashboard or by the enrolment bundle,
-  // which is the only order in which its generated sparkplug_id can be known.
-  GRAFANA_ADMIN_PASSWORD: hex(12),
-  // Gitea's administrator, the only account the forge is meant to have. No shopfloor user gets an
-  // account here; roles stay in Postgres.
-  GITEA_ADMIN_PASSWORD: hex(12),
-  // The machine account enroll-gateway authenticates as. Its own value, shared with nothing: the
-  // administrator above is for a human at a browser, this one is held by an edge function, and a
-  // single password would mean one leak grants both.
-  GITEA_MACHINE_PASSWORD: hex(12),
-  GRAFANA_OAUTH_CLIENT_SECRET: hex(32),
-  NODERED_CREDENTIAL_SECRET: hex(32),
-  NODERED_OAUTH_CLIENT_SECRET: hex(32),
-  NODERED_WEBHOOK_JWT_SECRET: hex(32),  // at least 32 chars
-  // The bearer secret Grafana presents to grafana-alert-webhook. Its own value, not shared with any
-  // other credential: it is the whole reason Grafana is not given the service-role key, and a secret
-  // reused elsewhere would mean one leak reopens the authority this one exists to withhold.
-  GRAFANA_ALERT_WEBHOOK_SECRET: hex(32),
-  // The two halves of Studio's door (0081, and the `studio` listener in supabase/envoy.yaml): one
-  // credential the gateway presents at GoTrue and the migration stores the hash of, read from one
-  // variable; and the cookie signing key, which rotating signs everyone out. Generated because
-  // unset silently disables access: an unset pair is a Studio that answers a login nobody can
-  // complete.
-  STUDIO_OAUTH_CLIENT_SECRET: hex(32),
-  STUDIO_PROXY_HMAC_SECRET: hex(32),
-  // The forge's door (0094, and the `forge` listener in supabase/envoy.yaml): the same two halves
-  // as Studio's, for the same reasons.
-  GITEA_OAUTH_CLIENT_SECRET: hex(32),
-  GITEA_PROXY_HMAC_SECRET: hex(32),
-  // The forge's push webhook (0095): what Gitea signs each delivery with and forge-events verifies.
-  // Unset does not disable access, only the dashboard's early word of a merge -- but a secret
-  // nobody chose is a secret nobody can leak, so it is generated with the rest.
-  GITEA_WEBHOOK_SECRET: hex(32),
-  // The bearer token supabase-functions presents to the gateway-credential service. Its own value:
-  // that service can issue a Mosquitto account for any edge node, which is the ability to publish
-  // as that gateway. The service refuses to start if this is shorter than 32 characters.
-  MQTT_CREDENTIAL_SERVICE_TOKEN: hex(32),
-  // The secret the `gateways` trigger presents to revoke-gateway-credential on archive or delete.
-  // Separate from the token above: that authorises issuing for any edge node, this only disabling
-  // a decommissioned gateway's account. Generated because an unset value makes revocation inert.
-  GATEWAY_REVOKE_SECRET: hex(32),
-  // The secret pg_cron presents to forge-sweep every fifteen minutes (0099). Its own value: it
-  // authorises one reconciliation of the forge's teams and repositories and nothing else.
-  // Generated because an unset value makes the sweep inert.
-  FORGE_SWEEP_SECRET: hex(32),
-  // The read-only historian role external BI tools connect as, and the one Grafana uses. Generated
-  // like the rest so a local stack never runs a reporting tool as the `postgres` superuser, which
-  // is what the Grafana datasource did before this existed.
-  BI_READER_PASSWORD: hex(24),
-  // The two historian roles the stack cannot run without (`ingest_writer` for the daemon,
-  // `fdw_reader` for the FDW mapping). Generated because the only alternative credential is the
-  // historian superuser, and a stack that comes up on it says nothing about having done so.
-  INGEST_WRITER_PASSWORD: hex(24),
-  FDW_READER_PASSWORD: hex(24),
+  // account to a different subtree. The usernames keep the chart's defaults.
+  mqttIngestionPassword: hex(24),
+  mqttValidatorPassword: hex(24),
+  mqttMonitorPassword: hex(24),
+  mqttDynsecAdminPassword: hex(24),
+  // The bearer the edge functions present to the credential service (32+ chars, enforced), the
+  // secret the gateways trigger presents to revoke a credential, and the one pg_cron presents to
+  // sweep the forge. Each authorises one thing; generated because unset makes each inert.
+  mqttCredentialServiceToken: hex(32),
+  gatewayRevokeSecret: hex(32),
+  forgeSweepSecret: hex(32),
+  giteaAdminPassword: hex(12),
+  giteaMachinePassword: hex(12),
+  giteaOAuthClientSecret: hex(32),
+  giteaProxyHmacSecret: hex(32),
+  giteaWebhookSecret: hex(32),
+  grafanaAdminPassword: hex(12),
+  grafanaOAuthClientSecret: hex(32),
+  grafanaAlertWebhookSecret: hex(32),
+  // Studio's door: the credential the gateway presents at GoTrue and the cookie signing key.
+  studioOAuthClientSecret: hex(32),
+  studioProxyHmacSecret: hex(32),
+  // The read-only historian role Grafana and BI tools use, and the two roles the stack cannot
+  // run without.
+  biReaderPassword: hex(24),
+  ingestWriterPassword: hex(24),
+  fdwReaderPassword: hex(24),
+  noderedCredentialSecret: hex(32),
+  noderedOAuthClientSecret: hex(32),
+  noderedWebhookJwtSecret: hex(32),  // at least 32 chars
 };
 
-/**
- * Names this script leaves empty, each because a generated value would be a standing credential
- * nobody asked for. NODERED_ADMIN_TOKEN is break-glass: it returns permissions '*' on the
- * Node-RED admin API and bypasses Supabase entirely.
- */
-const deliberatelyEmpty = ['NODERED_ADMIN_TOKEN'];
+/** Left empty on purpose: a generated value would be a standing credential nobody asked for.
+ *  noderedAdminToken is break-glass on the Node-RED admin API and bypasses Supabase entirely. */
+const deliberatelyEmpty = ['noderedAdminToken'];
 
-/**
- * The public host: from `--public-host=`, else asked on a terminal, else blank. Refused values
- * (a URL, a port, an in-stack name) are explained and asked again; blank is accepted first time.
- */
-async function resolvePublicHost() {
-  const flag = process.argv.find((a) => a.startsWith('--public-host='));
+const DOMAIN_SHAPE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+function parseDomain(answer) {
+  const domain = String(answer ?? '').trim().toLowerCase();
+  if (!domain) return { domain: '' };
+  if (/^[a-z]+:\/\//.test(domain) || domain.includes('/') || domain.includes(':')) {
+    return { error: `'${domain}' is a URL or carries a port. Give the base domain alone; the hosts and scheme are derived.` };
+  }
+  if (!DOMAIN_SHAPE.test(domain)) return { error: `'${domain}' is not a domain name.` };
+  if (domain === 'localhost' || domain.endsWith('.localhost') || domain.includes('127.0.0.1')) {
+    return { error: `'${domain}' resolves to this machine only. An appliance cannot dial it; give the name or <ip>.nip.io the plant network resolves, or leave it blank.` };
+  }
+  return { domain };
+}
+
+/** From `--domain=`, else asked on a terminal, else blank. */
+async function resolveDomain() {
+  const flag = process.argv.find((a) => a.startsWith('--domain='));
   if (flag) {
-    const parsed = parsePublicHost(flag.slice('--public-host='.length));
-    if (parsed.error) {
-      console.error(`❌ --public-host: ${parsed.error}`);
-      process.exit(1);
-    }
-    return parsed.host;
+    const parsed = parseDomain(flag.slice('--domain='.length));
+    if (parsed.error) { console.error(`❌ --domain: ${parsed.error}`); process.exit(1); }
+    return parsed.domain;
   }
   if (!process.stdin.isTTY) return '';
-
   console.log('');
-  console.log('🌐 A physical gateway reaches this machine by a name or IP that resolves on the plant');
-  console.log(`   network. This machine calls itself '${os.hostname()}' -- a hint, not an answer: localhost`);
-  console.log('   and 127.0.0.1 are refused because an appliance cannot dial them. Leave it blank if no');
-  console.log('   appliance will enrol against this stack; everything else works without it.');
+  console.log('🌐 Every host is published under one domain: app.<domain>, api.<domain>, mqtt.<domain> and');
+  console.log('   the rest. A browser and a physical gateway both dial it, so it has to resolve on the');
+  console.log('   plant network -- a name, or <ip>.nip.io. Leave it blank to keep the chart\'s loopback');
+  console.log('   default, which works on this machine and withholds remote enrolment.');
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
     for (;;) {
-      const answer = await rl.question('   Hostname or IP appliances reach this machine on [blank = none]: ');
-      const parsed = parsePublicHost(answer);
-      if (!parsed.error) return parsed.host;
+      const answer = await rl.question('   Domain [blank = localhost]: ');
+      const parsed = parseDomain(answer);
+      if (!parsed.error) return parsed.domain;
       console.log(`   ${parsed.error}`);
     }
   } finally {
@@ -241,67 +167,53 @@ async function resolvePublicHost() {
   }
 }
 
-const publicHost = await resolvePublicHost();
-const addresses = publicAddressLines(publicHost, contents);
+const domain = await resolveDomain();
 
-const missing = [];
-for (const [key, value] of Object.entries({ ...generated, ...addresses })) {
-  // Anchored to the start of a line so a mention inside a comment is never rewritten.
-  const pattern = new RegExp(`^${key}=.*$`, 'm');
-  if (!pattern.test(contents)) {
-    missing.push(key);
-    continue;
-  }
-  // Function replacement: a generated secret can contain `$` sequences that `$&`-style
-  // substitution would interpret rather than insert.
-  contents = contents.replace(pattern, () => `${key}=${value}`);
+/** Hand-written YAML: every value is hex, a JWT or a domain, none needs quoting beyond the quotes. */
+const yamlLines = [
+  '# Written by `npm run setup` on ' + new Date().toISOString().slice(0, 10) + '. Not in git (deploy/helm/**/values-local.yaml is',
+  '# ignored). Every credential below was generated for this file and is shared with nothing;',
+  '# the anon and service-role JWTs are signed by jwtSecret, so the three are a matching set.',
+  '#',
+  '#   helm upgrade --install acs-cymru deploy/helm/acs-cymru -n acs-cymru -f ' + path.relative(rootDir, outPath).replace(/\\/g, '/'),
+  '#',
+  '# For a stack other people reach, move these into an externally managed Secret and set',
+  '# secrets.existingSecret instead (values-prod.yaml.example).',
+  '',
+];
+if (domain) {
+  yamlLines.push('global:', `  publicBaseDomain: "${domain}"`, '');
 }
+yamlLines.push('secrets:');
+for (const [key, value] of Object.entries(secrets)) yamlLines.push(`  ${key}: "${value}"`);
+for (const key of deliberatelyEmpty) yamlLines.push(`  # Break-glass only; left empty on purpose.`, `  ${key}: ""`);
+yamlLines.push('');
 
-/**
- * A key this script means to generate but cannot find is a hard failure: a renamed variable in
- * `.env.example` would otherwise silently ship the committed default for that one value.
- */
-if (missing.length) {
-  console.error(`❌ .env.example has no assignment for: ${missing.join(', ')}`);
-  console.error('   Either the variable was renamed or it was removed. Fix scripts/setup.mjs to match');
-  console.error('   — a credential this script cannot find is a credential it cannot rotate.');
-  process.exit(1);
-}
+fs.mkdirSync(path.dirname(outPath), { recursive: true });
+fs.writeFileSync(outPath, yamlLines.join('\n'), { mode: 0o600 });
 
-fs.writeFileSync(envPath, contents, { mode: 0o600 });
-
-console.log(`✅ Created .env with ${Object.keys(generated).length} freshly generated credentials.`);
-console.log('   The anon and service-role JWTs were signed with the new SUPABASE_JWT_SECRET, so the');
-console.log('   three are a matching set. Nothing in .env is shared with any other install.');
-console.log('   A publishable/secret key pair was minted too — the format Supabase replaces the anon');
-console.log('   and service-role JWTs with by the end of 2026. The gateway accepts BOTH formats at');
-console.log('   once, so nothing has to move to them today.');
-console.log(`   Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
+const rel = path.relative(rootDir, outPath).replace(/\\/g, '/');
+console.log(`✅ Wrote ${rel} with ${Object.keys(secrets).length} freshly generated credentials.`);
+console.log('   The anon and service-role JWTs were signed with the new jwtSecret, so the three are a');
+console.log('   matching set. A publishable/secret key pair was minted too; the gateway accepts both');
+console.log(`   formats. Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
 console.log('');
-// SAID AT THE MOMENT THEY ARE CREATED, because these now expire and the failure this change has to
-// avoid is an operator learning the date from ingestion stopping. Issue #101: the ten years these
-// replace were 40x the ceiling the platform enforces on every other principal-bearing token.
-console.log('🔑 The two service keys expire — they are bounded, unlike the anon and service-role keys:');
-console.log(`   SUPABASE_INGESTION_KEY  jti ${ingestionKey.jti}`);
-console.log(`   SUPABASE_PLAYBACK_KEY   jti ${playbackKey.jti}`);
+console.log('🔑 The two service keys expire, unlike the anon and service-role keys:');
+console.log(`   ingestionKey  jti ${ingestionKey.jti}`);
+console.log(`   playbackKey   jti ${playbackKey.jti}`);
 console.log(`   Both valid ${SERVICE_KEY_DEFAULT_DAYS} days, until ${ingestionKey.expiresAt.toISOString().slice(0, 10)}.`);
-console.log('   `npm run keys:check` reports the remaining days; `npm run keys:rotate` re-signs both');
-console.log('   in place. Rotation reuses SUPABASE_JWT_SECRET, so nothing else has to be re-issued.');
+console.log('   `npm run keys:check` reports the remaining days; `npm run keys:rotate` re-signs both.');
 console.log('');
-// The consequence of the one question, said now: the person who runs setup is often not the one
-// who creates a remote gateway later, and the Gateways page repeats this until the pair is set.
-if (publicHost) {
-  console.log(`🌐 Physical gateways will dial ${publicHost}: MQTT_PUBLIC_HOST and SUPABASE_PUBLIC_URL`);
-  console.log('   are set from it, and the broker certificate carries that name from its first boot.');
+if (domain) {
+  console.log(`🌐 Every host is under ${domain}: browsers and physical gateways dial it, and the broker`);
+  console.log('   certificate carries mqtt.' + domain + ' once mosquitto.tls.enabled is on.');
 } else {
-  console.log('🌐 No public host was given, so REMOTE GATEWAYS CANNOT BE ENROLLED against this stack.');
-  console.log('   Host-run and simulated gateways work fully. To enrol an appliance later, set');
-  console.log('   MQTT_PUBLIC_HOST and SUPABASE_PUBLIC_URL in .env and restart (docs/physical-gateways.md,');
-  console.log('   section 7). The Gateways page says the same until they are set.');
+  console.log('🌐 No domain was given, so the dev values\' localhost stays: this machine only, and');
+  console.log('   REMOTE GATEWAYS CANNOT BE ENROLLED. Set global.publicBaseDomain in the file later.');
 }
 console.log('');
-console.log('⚠️  Demo LOGINS are separate and unchanged: admin@acs-cymru.local / acscymru123');
-console.log('   and the other three accounts are seeded by supabase/seed.sql, not by .env.');
-console.log('   Change them before anyone else can reach this stack.');
+console.log('⚠️  Demo LOGINS are separate and unchanged: admin@acs-cymru.local / acscymru123 and the');
+console.log('   other three accounts are seeded by supabase/seed.sql. Change them before anyone else');
+console.log('   can reach this stack.');
 console.log('');
-console.log('🎉 Environment file ready. Run `docker compose up --build -d`.');
+console.log(`🎉 helm upgrade --install acs-cymru deploy/helm/acs-cymru -n acs-cymru -f ${rel}`);

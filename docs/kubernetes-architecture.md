@@ -2,8 +2,12 @@
 
 This document is the **why** behind the Helm chart in `deploy/helm/acs-cymru`: the decisions that
 are not obvious from reading the templates, and the failures each one exists to prevent. The
-operational half — install, upgrade, teardown, and the divergence table against Compose — is
+operational half — install, upgrade, teardown, hardening — is
 [`deploy/k8s/README.md`](../deploy/k8s/README.md).
+
+> **September 2026.** Docker Compose was the second deployment target when this was written and
+> has since been removed. The comparisons below are the record of why the chart is shaped as it is,
+> not a description of a live alternative.
 
 Source files across the repository cite this document **by section number** (`§2.3`, `§5.1`, …), so
 those numbers are a stable interface: add sections, never renumber them.

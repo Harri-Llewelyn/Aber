@@ -38,8 +38,9 @@
  * out at length: two suites tear down fixtures in `if __name__ == "__main__"`, which no collecting
  * runner executes, and the suites share mutable module state that only happens to be harmless.
  *
- * NO ENVIRONMENT IS INVENTED HERE. The db lane needs `SUPABASE_DB_*`, the stack lane needs a `.env`
- * sourced and services up -- and both of those are properties of the CALLER, not of the lane. CI
+ * NO ENVIRONMENT IS INVENTED HERE. The db lane needs `SUPABASE_DB_*`, the stack lane needs the
+ * cluster's credentials and its ports forwarded (scripts/dev-cluster.mjs test) -- and both of
+ * those are properties of the CALLER, not of the lane. CI
  * sets them at the step; scripts/test-db.mjs sets them around its throwaway container. A runner
  * that guessed would send a suite at the wrong database and fail naming a missing table.
  */

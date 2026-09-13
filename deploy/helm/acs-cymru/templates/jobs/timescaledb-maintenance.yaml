@@ -115,8 +115,8 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "FDW_READER_PASSWORD" "secretName" $secretName "key" "FDW_READER_PASSWORD") | nindent 12 }}
           {{- /*
             Values are passed as psql VARIABLES rather than substituted into the SQL at render
-            time, so the chart's copies stay byte-identical to the repository's -- the same files
-            Compose runs, with the same drift check behind them.
+            time, so the chart's copies stay byte-identical to the repository's, with the sync
+            check behind them.
           */}}
           command:
             - /bin/sh
@@ -163,11 +163,9 @@ spec:
               $PSQL -f /sql/storage.sql
 
               {{/*
-                BETWEEN storage.sql AND roles.sql, which is exactly where docker-compose.yml runs
-                it -- and the parity is the point rather than a coincidence. roles.sql grants
-                SELECT on `telemetry_archive_manifest` guarded on the table existing, so running
-                cold_archive.sql after it would push that grant to the SECOND boot and make a
-                fresh Kubernetes install differ from a fresh Compose one.
+                BETWEEN storage.sql AND roles.sql. roles.sql grants SELECT on
+                `telemetry_archive_manifest` guarded on the table existing, so running
+                cold_archive.sql after it would push that grant to the SECOND run.
 
                 IT TAKES NO PSQL VARIABLES. Every threshold cold archival reads lives in
                 `system_settings` in the PLATFORM database and is re-read on each pass, which is

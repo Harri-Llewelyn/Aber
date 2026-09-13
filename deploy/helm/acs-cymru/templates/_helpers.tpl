@@ -2,9 +2,8 @@
 =================================================================================================
 Shared template helpers.
 
-This file is the chart's equivalent of docker-compose.yml's YAML anchors, and it exists for the
-same reason `x-nodered-auth-env` does: several services must be handed the SAME value, and a
-definition repeated per service drifts the first time one of them is edited alone.
+This file exists because several services must be handed the SAME value, and a definition
+repeated per service drifts the first time one of them is edited alone.
 
 Four groups:
   1. Names and labels
@@ -41,10 +40,9 @@ Release-qualified name, for objects that are NOT addressed by name from inside t
 
 {{/*
 SERVICE NAMES ARE NOT PREFIXED, and that is the chart's central design decision rather than an
-oversight. Kubernetes Service names are kept IDENTICAL to the Compose service names, so in-cluster
-DNS resolves `http://supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` exactly as
-Docker's embedded DNS does -- which means every compose-internal URL already in grafana.ini,
-kong.yml, settings.js and the edge-function environment works here UNCHANGED.
+oversight. Service names are the component names, so in-cluster DNS resolves
+`http://supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` -- the URLs grafana.ini,
+kong.yml, settings.js and the edge-function environment carry.
 
 Prefixing them with the release name would break all of that and buy nothing: two releases of this
 stack in one namespace is not a supported configuration (they would contend for the MQTT host
@@ -126,8 +124,7 @@ The Prometheus and Loki the Grafana datasources point at.
 
 Empty in values resolves to the chart's own stores when observability.enabled; with it off, an
 empty value fails the render, because a datasource pointed at nothing gives every alert rule
-DatasourceError against a stack that is otherwise healthy. The Service names are the Compose
-names, as every other Service here.
+DatasourceError against a stack that is otherwise healthy.
 */}}
 {{- define "acs-cymru.prometheusUrl" -}}
 {{- if .Values.grafana.prometheusUrl -}}
@@ -286,7 +283,7 @@ documents where to put it.
 {{- $domain := .Values.global.publicBaseDomain | default "" -}}
 {{- $isLocal := or (empty $domain) (contains "127.0.0.1" $domain) (contains "localhost" $domain) (contains "192.168." $domain) (hasSuffix ".local" $domain) (hasSuffix ".localhost" $domain) (hasSuffix ".internal" $domain) -}}
 {{- if not $isLocal -}}
-{{- fail (printf "\n\nacs-cymru: refusing to install on the PUBLISHED demo credentials with a public hostname.\n\n  global.publicBaseDomain = %s\n  secrets.jwtSecret       = the Supabase demo value, committed in this repository\n\nanonKey and serviceRoleKey are signed by that secret AND are registered as Kong API keys, so this\ndeployment would authenticate anyone holding a file that ships with the source.\n\nGenerate a matching set:\n\n  node scripts/setup.mjs        # writes .env with fresh, internally consistent credentials\n\nthen carry those four values into your own values file (see values-prod.yaml.example), or set\nsecrets.existingSecret to a Secret managed outside the chart.\n\nIf this really is a private lab, name it as one -- a publicBaseDomain under 127.0.0.1.nip.io,\nlocalhost, 192.168.*, .local, .localhost or .internal is accepted as-is.\n" $domain) -}}
+{{- fail (printf "\n\nacs-cymru: refusing to install on the PUBLISHED demo credentials with a public hostname.\n\n  global.publicBaseDomain = %s\n  secrets.jwtSecret       = the Supabase demo value, committed in this repository\n\nanonKey and serviceRoleKey are signed by that secret AND are registered as Kong API keys, so this\ndeployment would authenticate anyone holding a file that ships with the source.\n\nGenerate a matching set:\n\n  node scripts/setup.mjs        # writes values-local.yaml with a fresh, internally consistent set\n\nthen install with -f values-local.yaml (or carry the four values into your own values file, see\nvalues-prod.yaml.example), or set\nsecrets.existingSecret to a Secret managed outside the chart.\n\nIf this really is a private lab, name it as one -- a publicBaseDomain under 127.0.0.1.nip.io,\nlocalhost, 192.168.*, .local, .localhost or .internal is accepted as-is.\n" $domain) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -315,8 +312,7 @@ Only checked when realtime is enabled AND the chart owns the secret.
   `System.fetch_env!`, so the container aborts during boot rather than defaulting. Unset, the pod
   CrashLoopBackOffs and the only clue is an Elixir stack trace ten frames deep.
 
-  docker-compose.yml gained it when the version was pinned, and secret.yaml gained the value at
-  the same time -- but NOTHING CONSUMED IT. The chart carried the secret and never passed it to
+  secret.yaml gained the value when the version was pinned -- but NOTHING CONSUMED IT. The chart carried the secret and never passed it to
   the pod. This is what stops that being possible again.
 
   No length rule: unlike the two above, it only has to exist and be secret.
@@ -332,8 +328,7 @@ Realtime's Service name must have `realtime-dev` as its LEADING LABEL.
 
 Realtime reads the tenant id from the leading hostname label of the Host header, not from the JWT.
 Kong runs preserve_host: false, so the upstream Host comes from the Service name -- rename it and
-every WebSocket handshake fails with a bare 403 that names nothing. Same guard supabase-kong-init
-applies to REALTIME_UPSTREAM_URL on the Compose side.
+every WebSocket handshake fails with a bare 403 that names nothing.
 */}}
 {{- define "acs-cymru.validateRealtimeServiceName" -}}
 {{- if .Values.realtime.enabled -}}
@@ -628,6 +623,31 @@ chart's rule is to validate values and fail the render, never the pod.
 {{- end -}}
 {{- end -}}
 
+{{/*
+A Secure-cookie login published over plain http on a host a browser will not keep the cookie for.
+
+The gateway's studio and gitea listeners sign in through Envoy's oauth2 filter, which writes every
+cookie it uses (nonce, code verifier, HMAC, bearer) with the Secure attribute. A browser keeps a
+Secure cookie only on an https origin or on localhost / *.localhost, so on any other http host the
+authorization round trip returns to a callback holding no state, and Envoy answers 401 `CSRF token
+validation failed`. The dashboard, Grafana and Node-RED are unaffected: their sessions are their
+own. Nothing crashes and no pod is unhealthy; the two doors never open.
+
+The URL is judged, not global.scheme: a publicUrls.* override carries its own scheme.
+*/}}
+{{- define "acs-cymru.validateSecureCookieRoutes" -}}
+{{- if .Values.ingress.enabled -}}
+{{- range (include "acs-cymru.ingressRoutes" . | fromYamlArray) -}}
+{{- if and (or (eq .name "studio") (eq .name "gitea")) (ne (index $.Values.ingress.routes .name) false) -}}
+{{- $url := include (printf "acs-cymru.%sUrl" .name) $ -}}
+{{- if and (hasPrefix "http://" $url) (not (or (eq .host "localhost") (hasSuffix ".localhost" .host))) -}}
+{{- fail (printf "\n\nacs-cymru: ingress.routes.%s is published at %s, where its login cannot complete.\n\nThe %s listener signs in through Envoy's oauth2 filter, which sets every cookie it uses with the\nSecure attribute. A browser keeps those only on an https origin or on localhost / *.localhost; on\nthis host the callback arrives holding no state and answers 401 `CSRF token validation failed`.\nNothing crashes -- the door never opens.\n\nOne of:\n  global.scheme: https with ingress.tls.enabled (or a TLS terminator in front of the ingress)\n  a *.localhost domain on a single machine, e.g. global.publicBaseDomain: localhost\n  ingress.routes.%s: false, and reach it with a port-forward\n" .name $url .name .name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "acs-cymru.validate" -}}
 {{- include "acs-cymru.validateSecrets" . -}}
 {{- include "acs-cymru.validateStudioRoute" . -}}
@@ -637,6 +657,7 @@ chart's rule is to validate values and fail the render, never the pod.
 {{- include "acs-cymru.validatePublicUrls" . -}}
 {{- include "acs-cymru.validateScheme" . -}}
 {{- include "acs-cymru.validateIngress" . -}}
+{{- include "acs-cymru.validateSecureCookieRoutes" . -}}
 {{- include "acs-cymru.validateBrokerTls" . -}}
 {{- include "acs-cymru.validateAutoscaling" . -}}
 {{- end -}}
@@ -706,7 +727,7 @@ it; it is the absence of tls.key that matters here, not the mode.
 {{/*
 M2. TimescaleDB is reached at `timescaledb:5432`, NEVER the host-published 5433.
 
-5433 exists only to keep docker-compose's published port off a developer's local PostgreSQL; the
+5433 exists only to keep the dev loop's forwarded port off a developer's local PostgreSQL; the
 server listens on 5432. The postgres_fdw foreign server in 0001_baseline_schema.sql is the reader
 that matters here -- a wrong port there fails as a relation-level error from PostgREST rather than
 as a connection error, so it reads as a schema fault. `helm test` (M6) queries the foreign table to
@@ -742,7 +763,7 @@ Browser-facing URLs. Each falls back to <sub>.<publicBaseDomain> so a deployment
 THESE ARE NEVER THE IN-CLUSTER ADDRESS. The distinction is the single most repeated hazard in this
 stack: auth_url is followed by the BROWSER, token_url and userinfo are called by the CONTAINER, and
 using one for both fails in a way that names neither. In-cluster URLs are not configurable at all
--- Service names match the Compose service names, so they are constants.
+-- the Service names are the ones every in-cluster URL carries, so they are constants.
 */}}
 {{- define "acs-cymru.publicUrl" -}}
 {{- $explicit := index .ctx.Values.publicUrls .key -}}
@@ -1073,8 +1094,8 @@ INGESTION I3X VALIDATOR MONITOR
 {{- end -}}
 
 {{/*
-Node-RED authentication environment — the chart's counterpart to docker-compose.yml's
-`x-nodered-auth-env` anchor, and load-bearing for the same reason.
+Node-RED authentication environment — one definition included in two places, and load-bearing
+for that reason.
 
 BOTH the node-red container AND its init container must receive this block, identically.
 scripts/node-red-init.mjs's settingsAreCorrect() EVALUATES the settings.js it wrote, and

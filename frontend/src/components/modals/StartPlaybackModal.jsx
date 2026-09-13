@@ -235,7 +235,7 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
                 {`MQTT_PLAYBACK_CREDENTIALS={"${target.sparkplug_id}":"<password>"}`}
               </code>
               <br />
-              then <code>docker compose up -d playback</code>. The password is shown only at the
+              then <code>kubectl rollout restart deploy/playback</code>. The password is shown only at the
               moment the credential is minted — issue a new one from Access Control if it was not
               kept.
             </div>

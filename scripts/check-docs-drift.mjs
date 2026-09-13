@@ -63,122 +63,137 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
 }
 
 // -------------------------------------------------------------------------------------------------
-// 2. README's port table pins the same image tags docker-compose does.
+// 2. README's component table pins the same image tags the chart does. The chart's values are
+// parsed by shape: a `repository:` line followed by its `tag:` line, comments between allowed.
 // -------------------------------------------------------------------------------------------------
+const CHART_VALUES = read('deploy/helm/acs-cymru/values.yaml');
+const chartPins = new Map();
 {
-  const compose = read('docker-compose.yml');
-  const pinned = new Map();
-  for (const line of compose.split('\n')) {
-    const m = line.trim().match(/^image:\s*["']?([^"'\s]+)/);
-    if (!m || m[1].includes('${')) continue;
-    const ref = m[1];
-    const i = ref.lastIndexOf(':');
-    const hasTag = i > ref.lastIndexOf('/');
-    pinned.set(hasTag ? ref.slice(0, i) : ref, hasTag ? ref.slice(i + 1) : 'latest');
+  let repo = null;
+  for (const line of CHART_VALUES.split('\n')) {
+    const r = line.match(/^\s*repository:\s*["']?([^"'\s]+)/);
+    if (r) { repo = r[1]; continue; }
+    const t = line.match(/^\s*tag:\s*["']?([^"'\s]*)/);
+    if (t && repo) {
+      // An empty tag is one of the chart's own builds, resolved to appVersion; not a pin.
+      if (t[1]) chartPins.set(repo, t[1]);
+      repo = null;
+    }
   }
+}
+{
   const readme = read('README.md');
   let checked = 0;
   for (const [, repo, tag] of readme.matchAll(/\|\s*`([a-z0-9][a-z0-9./_-]*):([^`|]+)`\s*\|/g)) {
-    if (!pinned.has(repo)) continue;
+    if (!chartPins.has(repo)) continue;
     checked += 1;
-    if (pinned.get(repo) !== tag) {
-      fail(`README.md image tag drift: ${repo} documented as :${tag}, docker-compose.yml pins :${pinned.get(repo)}`);
+    if (chartPins.get(repo) !== tag) {
+      fail(`README.md image tag drift: ${repo} documented as :${tag}, values.yaml pins :${chartPins.get(repo)}`);
     }
   }
   // An image in the table with NO tag is drift too -- it reads as "unpinned" when it is pinned.
-  for (const repo of pinned.keys()) {
+  for (const repo of chartPins.keys()) {
     if (readme.includes(`\`${repo}\``) && !readme.includes(`\`${repo}:`)) {
-      fail(`README.md lists \`${repo}\` with no tag, but docker-compose.yml pins :${pinned.get(repo)}`);
+      fail(`README.md lists \`${repo}\` with no tag, but values.yaml pins :${chartPins.get(repo)}`);
     }
   }
-  if (checked) pass(`README image tags agree with docker-compose (${checked} checked)`);
+  if (checked) pass(`README image tags agree with the chart (${checked} checked)`);
+  else fail('README.md names none of the images the chart pins; the component table is missing');
 }
 
 // -------------------------------------------------------------------------------------------------
-// 2b. The service directory names every Compose service, and only real ones. Both directions:
-// check 2 matches rows one way and cannot see a row for a retired service or a live service with
-// no row.
+// 2b. The component table names every chart component, and only real ones. Both directions:
+// check 2 matches rows one way and cannot see a row for a retired component or a live one with
+// no row. Components are the `$component := "name"` declarations the templates open with.
 // -------------------------------------------------------------------------------------------------
 {
-  const composeRaw = read('docker-compose.yml');
-
-  // Service keys are the two-space-indented mapping under `services:`. Parsed by shape rather than
-  // with a YAML dependency, which this repo deliberately does not carry for its guards.
-  const services = new Set();
-  let inServices = false;
-  for (const line of composeRaw.split('\n')) {
-    if (/^services:\s*$/.test(line)) { inServices = true; continue; }
-    if (inServices && /^\S/.test(line)) break;           // dedent out of `services:`
-    const m = line.match(/^ {2}([a-z0-9][a-z0-9._-]*):\s*$/);
-    if (inServices && m) services.add(m[1]);
-  }
+  const components = new Set();
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const f = join(dir, e.name);
+      if (e.isDirectory()) walk(f);
+      else if (e.name.endsWith('.yaml')) {
+        for (const m of readFileSync(f, 'utf8').matchAll(/\$component\s*:=\s*"([a-z0-9-]+)"/g)) components.add(m[1]);
+      }
+    }
+  };
+  walk(join(REPO, 'deploy/helm/acs-cymru/templates'));
 
   const readme = read('README.md');
-  const section = readme.slice(readme.indexOf('## Service port directory'));
+  const section = readme.slice(readme.indexOf('## Components'));
   const table = section.slice(0, section.indexOf('\n---'));
-
-  // First cell of each row, which is the service name.
   const listed = new Set();
   for (const [, name] of table.matchAll(/^\|\s*`([a-z0-9][a-z0-9._-]*)`\s*\|/gm)) listed.add(name);
 
-  if (services.size === 0 || listed.size === 0) {
-    fail('service directory check could not parse docker-compose.yml or the README table');
+  if (components.size === 0 || listed.size === 0) {
+    fail('component table check could not parse the chart templates or the README table');
   } else {
-    const ghosts = [...listed].filter((n) => !services.has(n));
-    const missing = [...services].filter((n) => !listed.has(n));
-
+    const ghosts = [...listed].filter((n) => !components.has(n));
+    const missing = [...components].filter((n) => !listed.has(n));
     if (ghosts.length) {
       fail(
-        `README service directory names ${ghosts.length} service(s) docker-compose.yml does not ` +
-        `define: ${ghosts.join(', ')}. A row naming a dead service still passes the image-tag ` +
-        `check whenever the image survives it, which is how supabase-kong-init outlived Kong.`
+        `README component table names ${ghosts.length} component(s) the chart does not ` +
+        `declare: ${ghosts.join(', ')}. A row naming a dead component still passes the image-tag ` +
+        `check whenever the image survives it.`
       );
     }
     if (missing.length) {
       fail(
-        `docker-compose.yml defines ${missing.length} service(s) the README service directory ` +
+        `the chart declares ${missing.length} component(s) the README component table ` +
         `omits: ${missing.join(', ')}. The table is the answer to "what runs here", so an absent ` +
-        `row is a service nobody reading the docs knows about.`
+        `row is a component nobody reading the docs knows about.`
       );
     }
     if (!ghosts.length && !missing.length) {
-      pass(`README service directory matches docker-compose in both directions (${services.size} services)`);
+      pass(`README component table matches the chart in both directions (${components.size} components)`);
     }
   }
 }
 
 // -------------------------------------------------------------------------------------------------
-// 2c. Every Prometheus job the Directory maps still exists in prometheus.yml.
-// `directory_liveness_job_map()` turns a scrape job into a service's liveness; a job renamed in
-// prometheus.yml and not here makes the Directory report "not observed" for a healthy service.
+// 2c. Every Prometheus job the Directory maps is one the collector produces. Alloy labels each
+// scraped pod's job with its component, and the host series `node`; a job named in
+// `directory_liveness_job_map()` that no pod carries makes the Directory report "not observed"
+// for a healthy service.
 // -------------------------------------------------------------------------------------------------
 {
-  const prom = read('prometheus/prometheus.yml');
-  const jobs = new Set(
-    [...prom.matchAll(/^\s*-\s*job_name:\s*["']?([A-Za-z0-9._-]+)/gm)].map((m) => m[1])
-  );
+  const jobs = new Set(['node']);
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const f = join(dir, e.name);
+      if (e.isDirectory()) walk(f);
+      else if (e.name.endsWith('.yaml')) {
+        const text = readFileSync(f, 'utf8');
+        if (!text.includes('acs-cymru.scrapeAnnotations')) continue;
+        for (const m of text.matchAll(/\$component\s*:=\s*"([a-z0-9-]+)"/g)) jobs.add(m[1]);
+      }
+    }
+  };
+  walk(join(REPO, 'deploy/helm/acs-cymru/templates'));
 
-  // IN 0001 SINCE THE SQUASH, not 0054, and the closing delimiter moved with it: the baseline is
-  // generated from a dump of the finished chain, and pg_dump renders every function body with the
-  // plain `$$` tag rather than the `$fn$` the source happened to use.
-  const migration = read('supabase/migrations/0001_baseline_schema.sql');
-  const mapStart = migration.indexOf('CREATE OR REPLACE FUNCTION public.directory_liveness_job_map()');
-  const mapEnd = migration.indexOf('$$;', mapStart);
-  const mapped = [...migration.slice(mapStart, mapEnd).matchAll(/\(\s*'([a-z0-9._-]+)'\s*,/g)]
-    .map((m) => m[1]);
+  // The map is declared by 0001 and redeclared by 0103; the LAST declaration in the chain wins.
+  const mapped = [];
+  for (const name of readdirSync(join(REPO, 'supabase/migrations')).filter((n) => n.endsWith('.sql')).sort()) {
+    const sql = read(`supabase/migrations/${name}`);
+    const start = sql.lastIndexOf('CREATE OR REPLACE FUNCTION public.directory_liveness_job_map()');
+    if (start < 0) continue;
+    const end = sql.indexOf('$$;', start);
+    mapped.length = 0;
+    for (const m of sql.slice(start, end).matchAll(/\(\s*'([a-z0-9._-]+)'\s*,/g)) mapped.push(m[1]);
+  }
 
   if (!jobs.size || !mapped.length) {
-    fail("could not parse prometheus.yml job names or 0054's liveness map");
+    fail("could not parse the chart's scrape targets or the Directory's liveness map");
   } else {
     const orphaned = mapped.filter((j) => !jobs.has(j));
     if (orphaned.length) {
       fail(
-        `0054's directory_liveness_job_map() names Prometheus job(s) that prometheus.yml does not ` +
-        `define: ${orphaned.join(', ')}. The join matches nothing, so those services report as ` +
+        `directory_liveness_job_map() names Prometheus job(s) no scraped pod carries: ` +
+        `${orphaned.join(', ')}. The join matches nothing, so those services report as ` +
         `UNKNOWN on the Directory page -- which reads as a missing exporter, not a stale mapping.`
       );
     } else {
-      pass(`all ${mapped.length} Directory liveness job(s) exist in prometheus.yml`);
+      pass(`all ${mapped.length} Directory liveness job(s) are jobs the collector produces`);
     }
   }
 }
@@ -509,6 +524,9 @@ function edgeFunctionNames() {
     // 0075 adds a fifth argument, `p_actor_id`, and DROPs the four-argument form first so a
     // four-argument call is not ambiguous.
     'public.record_service_token_issued': '0075 adds p_actor_id; the baseline holds the pre-0075 form',
+    // 0103 names the gateway's scrape job as the chart's collector labels it (supabase-envoy);
+    // the baseline holds the Compose-era `envoy`.
+    'public.directory_liveness_job_map': '0103 renames the gateway job to supabase-envoy; the baseline holds envoy',
     // 0074 creates it with the token denylist arm; 0076 rewrites it to add the principal arm, whose
     // check runs first so its message wins once a principal revocation has cascaded to its tokens.
     'public.auth_pre_request': '0076 adds the principal arm; 0074 holds the token-only form',
@@ -1175,7 +1193,6 @@ function edgeFunctionNames() {
 {
   const lib = read('scripts/lib/mosquitto-credentials.mjs');
   const worker = read('ingestion/playback_worker.py');
-  const composeSrc = read('docker-compose.yml');
   const chartSrc = read('deploy/helm/acs-cymru/templates/apps/playback.yaml');
 
   const libPath = lib.match(/PLAYBACK_CREDENTIAL_FILE\s*=\s*'([^']+)'/)?.[1];
@@ -1193,44 +1210,38 @@ function edgeFunctionNames() {
         'succeeds and the read finds nothing, which the worker reports as "no credentials issued".'
     );
   } else {
-    // The DIRECTORY is what the two deployment targets mount; the file is created inside it.
+    // The DIRECTORY is what the chart mounts; the file is created inside it.
     const dir = libPath.replace(/\/[^/]+$/, '');
-    const onCompose = composeSrc.includes(`playback_credentials:${dir}`);
     const onChart = chartSrc.includes(`mountPath: ${dir}`);
     // The Secret key's `path:` is relative to the mount, so it must be the file's basename or the
     // worker reads a directory entry that is not there.
     const basename = libPath.slice(dir.length + 1);
     const chartItem = chartSrc.includes(`path: ${basename}`);
 
-    if (!onCompose || !onChart || !chartItem) {
+    if (!onChart || !chartItem) {
       fail(
-        `the playback delivery path ${libPath} is not carried by both targets (compose mount: ` +
-          `${onCompose ? 'ok' : 'MISSING'}, chart mount: ${onChart ? 'ok' : 'MISSING'}, chart ` +
-          `secret item path: ${chartItem ? 'ok' : 'MISSING'}). An issued playback credential ` +
-          'would be written into a container layer and lost, with no error on either side.'
+        `the playback delivery path ${libPath} is not carried by the chart (mount: ` +
+          `${onChart ? 'ok' : 'MISSING'}, secret item path: ${chartItem ? 'ok' : 'MISSING'}). ` +
+          'An issued playback credential would be written into a container layer and lost, with no ' +
+          'error on either side.'
       );
     } else {
-      pass(`the playback delivery path ${libPath} agrees across both ends and both targets`);
+      pass(`the playback delivery path ${libPath} agrees across both ends and the chart`);
     }
   }
 }
 
 {
-  const compose = read('docker-compose.yml');
   const chart = read('deploy/helm/acs-cymru/templates/supabase/rest.yaml');
 
-  const composeName = compose.match(/PGRST_DB_PRE_REQUEST:\s*([A-Za-z0-9_.]+)/)?.[1];
   const chartName = chart.match(/name:\s*PGRST_DB_PRE_REQUEST\s*\n\s*value:\s*([A-Za-z0-9_.]+)/)?.[1];
+  const composeName = chartName;
 
-  if (!composeName || !chartName) {
+  if (!chartName) {
     fail(
-      'PGRST_DB_PRE_REQUEST is not set on both targets ' +
-        `(compose: ${composeName || 'absent'}, chart: ${chartName || 'absent'}). It is the choke ` +
-        'point 0074 and 0076 revoke through; unset on one target, that target enforces no revocation ' +
-        'at all and says nothing about it.'
+      'PGRST_DB_PRE_REQUEST is not set on supabase-rest. It is the choke point 0074 and 0076 ' +
+        'revoke through; unset, the stack enforces no revocation at all and says nothing about it.'
     );
-  } else if (composeName !== chartName) {
-    fail(`PGRST_DB_PRE_REQUEST differs: compose says ${composeName}, the chart says ${chartName}.`);
   } else {
     // Declared anywhere in the applied chain. The bare name is enough: a function that is dropped
     // and recreated still has to appear in a CREATE, and this is looking for the typo case.

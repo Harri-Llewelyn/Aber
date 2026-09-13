@@ -24,7 +24,7 @@ import { GlobalSearch } from './components/common/GlobalSearch'
    accounts arrive by invitation, admin provisioning or an upstream identity provider; a client-side
    flag is not an access control. */
 
-// Must match GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH in docker-compose.yml. GoTrue appends it
+// Must match GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH on supabase-auth (the chart's auth.yaml). GoTrue appends it
 // to GOTRUE_SITE_URL when redirecting an OAuth client's user here to grant consent.
 const OAUTH_CONSENT_PATH = '/oauth/consent'
 // Where a password-reset email sends the browser. Must be allowed by GOTRUE_URI_ALLOW_LIST.

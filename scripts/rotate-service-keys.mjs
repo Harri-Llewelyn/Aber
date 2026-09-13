@@ -16,7 +16,7 @@
 // `exp` is valid the moment it is signed, so nothing else in the stack is re-issued -- not the anon
 // key, not the service-role key, not a gateway credential. The whole operation is:
 //
-//     mint two tokens -> write them into .env -> restart two containers
+//     mint two tokens -> put them in the release Secret -> restart two workloads
 //
 // Both workers read their key from the environment once, at import (`os.getenv` in ingestion.py and
 // playback_worker.py), so a restart is what picks up a new value. There is no in-process refresh
@@ -42,11 +42,18 @@
 //
 // Usage:
 //   node scripts/rotate-service-keys.mjs --check     # report days remaining, exit 1 if near/past
-//   node scripts/rotate-service-keys.mjs             # re-sign both, rewrite .env, say what to restart
+//   node scripts/rotate-service-keys.mjs             # re-sign both and print them, with the commands to apply
+//   node scripts/rotate-service-keys.mjs --apply     # ... and patch the release Secret, restart the workloads
 //   node scripts/rotate-service-keys.mjs --days 30   # shorter than the 90-day default
-//   node scripts/rotate-service-keys.mjs --print     # print to stdout, do not touch .env (K8s)
+//
+// --apply rewrites the Secret the pods read. A release installed from a values file must carry the
+// new keys there too (--values=<file> rewrites secrets.ingestionKey and .playbackKey in it, and
+// deploy/helm/acs-cymru/values-local.yaml is rewritten when it exists), or the next `helm upgrade`
+// puts the old ones back; an externally managed Secret is updated where it lives.
 // =================================================================================================
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { NAMESPACE, RELEASE, missingCredentialAdvice, stackCredentials } from './lib/stack-credentials.mjs';
 import { hostname, userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -56,7 +63,6 @@ import {
 } from './lib/service-jwt.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const ENV_PATH = join(REPO, '.env');
 
 /**
  * The two keys, their principals and which container reads each.
@@ -68,12 +74,14 @@ const ENV_PATH = join(REPO, '.env');
 const KEYS = [
   {
     env: 'SUPABASE_INGESTION_KEY',
+    valuesKey: 'ingestionKey',
     principal: 'b0000000-0000-4000-8000-000000000002',
     name: 'Service_Ingestor',
     restart: 'ingestion',
   },
   {
     env: 'SUPABASE_PLAYBACK_KEY',
+    valuesKey: 'playbackKey',
     principal: 'b0000000-0000-4000-8000-000000000003',
     name: 'Service_Playback',
     restart: 'playback',
@@ -82,7 +90,9 @@ const KEYS = [
 
 const args = process.argv.slice(2);
 const checkOnly = args.includes('--check');
-const printOnly = args.includes('--print');
+const apply = args.includes('--apply');
+const valuesArg = args.find((a) => a.startsWith('--values='));
+const valuesPath = valuesArg ? valuesArg.slice('--values='.length) : join(REPO, 'deploy', 'helm', 'acs-cymru', 'values-local.yaml');
 const daysArg = args.indexOf('--days');
 const days = daysArg >= 0 ? Number(args[daysArg + 1]) : SERVICE_KEY_DEFAULT_DAYS;
 
@@ -93,16 +103,9 @@ if (!Number.isFinite(days) || days <= 0 || days > SERVICE_KEY_MAX_DAYS) {
   process.exit(1);
 }
 
-if (!existsSync(ENV_PATH)) {
-  console.error('❌ No .env found. Run `npm run setup` first — this script re-signs keys that exist,');
-  console.error('   it does not create a stack.');
-  process.exit(1);
-}
-
-const envText = readFileSync(ENV_PATH, 'utf8');
-
-/** Read one variable out of `.env`, anchored so a mention inside a comment is never matched. */
-const envValue = (key) => envText.match(new RegExp(`^${key}=(.*)$`, 'm'))?.[1]?.trim() ?? '';
+// The keys as the running stack holds them, from the release Secret (or the environment).
+const creds = stackCredentials(['SUPABASE_JWT_SECRET', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_URL', ...KEYS.map((k) => k.env)]);
+const envValue = (key) => creds[key] || '';
 
 // -------------------------------------------------------------------------------------------------
 // --check: the answer to "a date nobody wrote down"
@@ -120,7 +123,7 @@ if (checkOnly) {
   for (const key of KEYS) {
     const token = envValue(key.env);
     if (!token) {
-      console.log(`  ${key.env.padEnd(24)} MISSING from .env`);
+      console.log(`  ${key.env.padEnd(24)} MISSING from the release Secret`);
       worst = -Infinity;
       continue;
     }
@@ -147,7 +150,7 @@ if (checkOnly) {
     console.error(worst < 0
       ? '❌ At least one service key has expired. The worker holding it is failing every write.'
       : `⚠️  At least one service key expires within ${EXPIRY_WARN_DAYS} days.`);
-    console.error('   Run `npm run keys:rotate`, then restart the containers it names.');
+    console.error('   Run `npm run keys:rotate -- --apply`, which restarts the workloads it names.');
     process.exit(1);
   }
   console.log('');
@@ -160,7 +163,8 @@ if (checkOnly) {
 // -------------------------------------------------------------------------------------------------
 const secret = envValue('SUPABASE_JWT_SECRET');
 if (!secret) {
-  console.error('❌ SUPABASE_JWT_SECRET is not set in .env. The new keys have to be signed with the');
+  console.error('❌ ' + missingCredentialAdvice('SUPABASE_JWT_SECRET'));
+  console.error('   The new keys have to be signed with the');
   console.error('   SAME secret the stack already trusts — signing with a new one would invalidate');
   console.error('   the anon and service-role keys along with everything else.');
   process.exit(1);
@@ -174,13 +178,13 @@ const minted = KEYS.map((key) => ({
 // -------------------------------------------------------------------------------------------------
 // Record, best-effort — see the header for why this one is not fatal
 // -------------------------------------------------------------------------------------------------
-const supabaseUrl = envValue('SUPABASE_URL') || 'http://localhost:8000';
+const supabaseUrl = envValue('SUPABASE_URL') || 'http://127.0.0.1:54321';
 const serviceRoleKey = envValue('SUPABASE_SERVICE_ROLE_KEY');
 const unrecorded = [];
 
 for (const key of minted) {
   if (!serviceRoleKey) {
-    unrecorded.push({ ...key, reason: 'SUPABASE_SERVICE_ROLE_KEY is not set in .env' });
+    unrecorded.push({ ...key, reason: 'SUPABASE_SERVICE_ROLE_KEY is not in the release Secret' });
     continue;
   }
   try {
@@ -207,49 +211,48 @@ for (const key of minted) {
 }
 
 // -------------------------------------------------------------------------------------------------
-// --print: hand the values over without touching .env
-//
-// FOR KUBERNETES, where `.env` is not the source of truth -- the chart's secret.yaml is. Writing a
-// file the cluster does not read would report success for a rotation that changed nothing.
+// Apply, or print. The release Secret is what the pods read, so --apply patches it and restarts
+// the two workloads. Without --apply the values are printed with the commands, for a Secret
+// managed outside the cluster (External Secrets, SOPS), where the operator applies them where they
+// live. Either way a values file the release was installed from is rewritten when it exists, or
+// the next `helm upgrade` would put the old keys back.
 // -------------------------------------------------------------------------------------------------
-if (printOnly) {
+const restart = [...new Set(minted.map((k) => `deploy/${k.restart}`))];
+if (existsSync(valuesPath)) {
+  let values = readFileSync(valuesPath, 'utf8');
+  const notFound = [];
+  for (const key of minted) {
+    const pattern = new RegExp(`^(\\s*${key.valuesKey}:\\s*)"?[^"\\n]*"?\\s*$`, 'm');
+    if (!pattern.test(values)) { notFound.push(key.valuesKey); continue; }
+    values = values.replace(pattern, (m, lead) => `${lead}"${key.token}"`);
+  }
+  if (notFound.length) {
+    console.error(`⚠️  ${valuesPath} has no assignment for secrets.${notFound.join(', ')}; not rewritten.`);
+  } else {
+    writeFileSync(valuesPath, values, { mode: 0o600 });
+    console.log(`✅ Rewrote secrets.ingestionKey and secrets.playbackKey in ${valuesPath}.`);
+  }
+}
+if (!apply) {
   for (const key of minted) console.log(`${key.env}=${key.token}`);
   console.error('');
-  console.error('Printed only — .env was not modified. Update the Kubernetes Secret with these, then:');
-  console.error('   kubectl rollout restart deploy/ingestion deploy/playback');
+  console.error(`Printed only. Put these in the release Secret (${RELEASE}-secrets in ${NAMESPACE}), or re-run`);
+  console.error(`with --apply to patch it here; then:  kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
   process.exit(0);
 }
-
-// -------------------------------------------------------------------------------------------------
-// Write .env
-//
-// REPLACED IN PLACE, NOT APPENDED. A duplicate assignment is read differently by docker compose and
-// by a shell that sources the file, so appending would leave the two disagreeing about which key is
-// live -- the class of bug that makes a rotation look applied when it is not. The replacement is a
-// function so that a `$` sequence in a token is inserted rather than interpreted.
-// -------------------------------------------------------------------------------------------------
-let updated = envText;
-const notFound = [];
-for (const key of minted) {
-  const pattern = new RegExp(`^${key.env}=.*$`, 'm');
-  if (!pattern.test(updated)) { notFound.push(key.env); continue; }
-  updated = updated.replace(pattern, () => `${key.env}=${key.token}`);
-}
-
-if (notFound.length) {
-  console.error(`❌ .env has no assignment for: ${notFound.join(', ')}.`);
-  console.error('   Nothing was written. A key this script cannot find is a key it cannot rotate,');
-  console.error('   and a partial rotation is worse than none.');
+const patch = { data: Object.fromEntries(minted.map((k) => [k.env, Buffer.from(k.token).toString('base64')])) };
+const patched = spawnSync('kubectl', ['-n', NAMESPACE, 'patch', 'secret', `${RELEASE}-secrets`, '--type=merge', '-p', JSON.stringify(patch)], { encoding: 'utf8' });
+if (patched.status !== 0) {
+  console.error(`❌ could not patch the Secret: ${(patched.stderr || '').trim()}`);
   process.exit(1);
 }
-
-writeFileSync(ENV_PATH, updated, { mode: 0o600 });
-
-console.log(`✅ Re-signed ${minted.length} service keys for ${days} days, in place in .env.`);
+const restarted = spawnSync('kubectl', ['-n', NAMESPACE, 'rollout', 'restart', ...restart], { encoding: 'utf8' });
+console.log(`✅ Re-signed ${minted.length} service keys for ${days} days, in the release Secret.`);
 for (const key of minted) {
   console.log(`   ${key.env.padEnd(24)} ${key.name}  jti ${key.jti}`);
 }
 console.log(`   Both expire ${minted[0].expiresAt.toISOString().slice(0, 10)}.`);
+console.log(restarted.status === 0 ? `   Restarted ${restart.join(' ')}.` : `   Restart by hand: kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
 console.log('');
 
 if (unrecorded.length) {

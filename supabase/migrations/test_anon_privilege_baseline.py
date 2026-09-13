@@ -27,7 +27,7 @@ database suites run against a throwaway Postgres, which is a first boot every si
 =================================================================================================
 THE ONE EXEMPTION IS NOT A RELAXATION.
 
-`auth_pre_request()` is PostgREST's `db-pre-request` hook -- docker-compose.yml names it in
+`auth_pre_request()` is PostgREST's `db-pre-request` hook -- the chart names it in
 PGRST_DB_PRE_REQUEST -- and PostgREST runs it AFTER switching to the request's role. For an
 unauthenticated request that role is `anon`, so revoking it does not harden anything: it takes the
 whole anonymous API surface down, /ping included. The exemption is matched on name AND arity so an

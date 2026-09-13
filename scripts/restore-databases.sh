@@ -24,12 +24,11 @@
 #
 set -eu
 
-# See the note in backup-databases.sh: Git Bash rewrites container paths passed to `docker compose
-# exec` unless this is set. A no-op on Linux and macOS.
+# See the note in backup-databases.sh: Git Bash rewrites arguments that look like paths unless
+# this is set. A no-op on Linux and macOS.
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-BACKUP_MODE="${BACKUP_MODE:-docker}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 BACKUP_STAMP="${BACKUP_STAMP:-}"
 
@@ -54,7 +53,6 @@ STORAGE_SERVICE="${STORAGE_SERVICE:-supabase-storage}"
 STORAGE_CONTAINER_PATH="${STORAGE_CONTAINER_PATH:-/var/lib/storage}"
 RESTORE_STORAGE="${RESTORE_STORAGE:-true}"
 
-COMPOSE="${COMPOSE:-docker compose}"
 ASSUME_YES="${ASSUME_YES:-false}"
 
 log() { printf '%s  %s\n' "$(date -u +%H:%M:%S)" "$*"; }
@@ -77,7 +75,7 @@ STORAGE_NAME=$(sed -n 's/^storage=//p' "$MANIFEST")
 
 cat <<EOF
 
-  RESTORE $BACKUP_STAMP  (format=$FORMAT mode=$BACKUP_MODE)
+  RESTORE $BACKUP_STAMP  (format=$FORMAT)
 
     supabase-db  <- $SUPABASE_FILE
     timescaledb  <- $TIMESCALE_FILE
@@ -105,21 +103,11 @@ restore_db() {
 
   log "restoring $name from $(basename "$file")"
   if [ "$FORMAT" = "custom" ]; then
-    if [ "$BACKUP_MODE" = "docker" ]; then
-      $COMPOSE exec -T -e PGPASSWORD="$pw" "$service" \
-        pg_restore -U "$user" -d "$db" --clean --if-exists < "$file" || rc=$?
-    else
-      PGPASSWORD="$pw" pg_restore -h "$host" -p "$port" -U "$user" -d "$db" \
-        --clean --if-exists "$file" || rc=$?
-    fi
+    PGPASSWORD="$pw" pg_restore -h "$host" -p "$port" -U "$user" -d "$db" \
+      --clean --if-exists "$file" || rc=$?
   else
-    if [ "$BACKUP_MODE" = "docker" ]; then
-      gunzip -c "$file" | $COMPOSE exec -T -e PGPASSWORD="$pw" "$service" \
-        psql -v ON_ERROR_STOP=1 -U "$user" -d "$db" || rc=$?
-    else
-      gunzip -c "$file" | PGPASSWORD="$pw" psql -v ON_ERROR_STOP=1 \
-        -h "$host" -p "$port" -U "$user" -d "$db" || rc=$?
-    fi
+    gunzip -c "$file" | PGPASSWORD="$pw" psql -v ON_ERROR_STOP=1 \
+      -h "$host" -p "$port" -U "$user" -d "$db" || rc=$?
   fi
 
   [ "$rc" -eq 0 ] || return "$rc"
@@ -127,25 +115,15 @@ restore_db() {
 }
 
 sb_query() {
-  if [ "$BACKUP_MODE" = "docker" ]; then
-    $COMPOSE exec -T -e PGPASSWORD="$SUPABASE_DB_PASSWORD" "$SUPABASE_SERVICE" \
-      psql -v ON_ERROR_STOP=1 -U "$SUPABASE_DB_USER" -d "$SUPABASE_DB_NAME" -tAc "$1"
-  else
-    PGPASSWORD="$SUPABASE_DB_PASSWORD" psql -v ON_ERROR_STOP=1 \
-      -h "$SUPABASE_DB_HOST" -p "$SUPABASE_DB_PORT" \
-      -U "$SUPABASE_DB_USER" -d "$SUPABASE_DB_NAME" -tAc "$1"
-  fi
+  PGPASSWORD="$SUPABASE_DB_PASSWORD" psql -v ON_ERROR_STOP=1 \
+    -h "$SUPABASE_DB_HOST" -p "$SUPABASE_DB_PORT" \
+    -U "$SUPABASE_DB_USER" -d "$SUPABASE_DB_NAME" -tAc "$1"
 }
 
 ts_query() {
-  if [ "$BACKUP_MODE" = "docker" ]; then
-    $COMPOSE exec -T -e PGPASSWORD="$TIMESCALE_DB_PASSWORD" "$TIMESCALE_SERVICE" \
-      psql -v ON_ERROR_STOP=1 -U "$TIMESCALE_DB_USER" -d "$TIMESCALE_DB_NAME" -tAc "$1"
-  else
-    PGPASSWORD="$TIMESCALE_DB_PASSWORD" psql -v ON_ERROR_STOP=1 \
-      -h "$TIMESCALE_DB_HOST" -p "$TIMESCALE_DB_PORT" \
-      -U "$TIMESCALE_DB_USER" -d "$TIMESCALE_DB_NAME" -tAc "$1"
-  fi
+  PGPASSWORD="$TIMESCALE_DB_PASSWORD" psql -v ON_ERROR_STOP=1 \
+    -h "$TIMESCALE_DB_HOST" -p "$TIMESCALE_DB_PORT" \
+    -U "$TIMESCALE_DB_USER" -d "$TIMESCALE_DB_NAME" -tAc "$1"
 }
 
 # --- 0. Preflight: the roles the dump grants to must already exist -----------------------------
@@ -229,13 +207,7 @@ log "  ok -- $AGGS continuous aggregate(s) present"
 # --- 3. Storage objects ------------------------------------------------------------------------
 if [ "$RESTORE_STORAGE" = "true" ] && [ -n "$STORAGE_NAME" ]; then
   log "restoring 3D model objects"
-  if [ "$BACKUP_MODE" = "docker" ]; then
-    $COMPOSE exec -T "$STORAGE_SERVICE" \
-      tar -xzf - -C "$STORAGE_CONTAINER_PATH" < "$BACKUP_DIR/$STORAGE_NAME"
-    log "  ok"
-  else
-    log "  SKIPPED: direct mode cannot reach the volume. Untar $STORAGE_NAME into the storage path."
-  fi
+  log "  SKIPPED: this script cannot reach the volume. Untar $STORAGE_NAME into the storage path."
 elif [ -z "$STORAGE_NAME" ]; then
   log "no storage archive in this backup -- devices.model_3d_path will point at absent objects"
 fi

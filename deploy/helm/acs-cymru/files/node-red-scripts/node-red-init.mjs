@@ -75,7 +75,7 @@ if (missingAuthEnv.length > 0) {
   fail(
     `${missingAuthEnv.join(', ')} not set; refusing to write a settings.js with no adminAuth. ` +
       'Node-RED would come up with its editor and /flows admin API open on port 1880. ' +
-      'See the Node-RED section of .env.example.'
+      'See secrets.nodered* in values.yaml.'
   );
 }
 
@@ -156,14 +156,14 @@ if (mqttTlsEnabled && !mqttTlsCaFile) {
       'would report only a generic connection failure.'
   );
 }
-// The port has to move with the transport. The chart derives it from the TLS flag; Compose has
-// no conditional, and TLS against the plaintext listener fails as a handshake timeout naming
-// neither. Refused here, where the fix is one line of `.env`.
+// The port has to move with the transport. The chart derives it from the TLS flag, and TLS
+// against the plaintext listener fails as a handshake timeout naming neither, so the pair is
+// checked here.
 if (mqttTlsEnabled && (!mqttPortEnv || mqttPortEnv === '1883')) {
   fail(
     `MQTT_TLS_ENABLED is set but MQTT_PORT is ${mqttPortEnv || 'unset, leaving the flow on 1883'}. ` +
       'That is the plaintext listener: the broker node would attempt a TLS handshake against it ' +
-      'and report only a connection failure. Set MQTT_PORT=8883 in the same .env that enabled TLS.'
+      'and report only a connection failure. Set MQTT_PORT=8883 alongside MQTT_TLS_ENABLED.'
   );
 }
 
@@ -719,7 +719,7 @@ function brokerCredentialFor(node) {
       `broker node '${node.id}' declares acsCredentialsEnv='${prefix}', but ` +
         `${prefix}_USER and/or ${prefix}_PASSWORD are not set.\n` +
         '  Mint the credential from the dashboard: Gateways tab, Generate broker credential.\n' +
-        '  Add them to .env (Compose) or to the chart Secret (Kubernetes) and restart node-red-init.'
+        '  Add them to the release Secret and restart node-red-init.'
     );
   }
 

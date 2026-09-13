@@ -10,7 +10,7 @@
 # does not change between two commits an hour apart. CVEs are published on the world's schedule,
 # not on this repository's.
 #
-# THE IMAGE LIST IS READ OUT OF docker-compose.yml RATHER THAN WRITTEN HERE, which is the same rule
+# THE IMAGE LIST IS READ OUT OF THE RENDERED CHART RATHER THAN WRITTEN HERE, which is the same rule
 # every other guard in this repository follows: a hardcoded list is a second place for a version to
 # live, and it would go stale silently -- scanning the images this stack USED to run and reporting
 # green. Images built from this repository are excluded because they are built from these same
@@ -45,21 +45,46 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v5
 
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
       - name: Collect The Pinned Images
         id: collect
         run: |
           set -euo pipefail
-          grep -hoE '^[[:space:]]+image:[[:space:]]+\S+' docker-compose.yml \
-            | awk '{print $2}' \
+          # Every image a full render names, with the optional workloads switched on so their
+          # images are scanned too; the chart's own builds are the release workflow's to scan.
+          helm template acs-cymru deploy/helm/acs-cymru -f deploy/helm/acs-cymru/values-dev.yaml \
+            --set backup.enabled=true --set backupService.enabled=true --set playback.enabled=true \
+            --set e2e.enabled=true --set supabaseKong.enabled=true \
+            | grep -hoE '^[[:space:]]+image:[[:space:]]+"?[^"[:space:]]+' \
+            | sed -E 's/^[[:space:]]+image:[[:space:]]+"?//' \
             | grep -v '^ghcr\.io/harri-llewelyn/' \
             | sort -u > /tmp/images.txt
 
           COUNT=$(wc -l < /tmp/images.txt)
-          # A scan that finds nothing to scan must not report success. If the compose file is
+          # A scan that finds nothing to scan must not report success. If the chart is
           # restructured so this grep stops matching, silence would look exactly like "no
           # vulnerabilities" -- the same class of failure the ServiceMonitor guard is written about.
           if [ "$COUNT" -lt 10 ]; then
-            echo "::error::Only $COUNT image(s) parsed out of docker-compose.yml, expected 10+."
+            echo "::error::Only $COUNT image(s) parsed out of the rendered chart, expected 10+."
             echo "::error::The parser has probably drifted from the file's formatting."
             exit 1
           fi

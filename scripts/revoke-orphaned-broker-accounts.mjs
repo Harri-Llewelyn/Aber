@@ -23,24 +23,19 @@
  * Usage:
  *   node scripts/revoke-orphaned-broker-accounts.mjs                 # list, change nothing
  *   node scripts/revoke-orphaned-broker-accounts.mjs --yes           # disable them
- *   node scripts/revoke-orphaned-broker-accounts.mjs --target=k8s    # the broker pod, not the container
  *
  * Requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and MQTT_DYNSEC_ADMIN_USER /
- * MQTT_DYNSEC_ADMIN_PASSWORD (read from .env when unset).
+ * MQTT_DYNSEC_ADMIN_PASSWORD (read from the release Secret when unset).
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { NAMESPACE, missingCredentialAdvice, stackCredentials } from './lib/stack-credentials.mjs';
 
 import { GATEWAY_ID_PATTERN } from './lib/mosquitto-credentials.mjs';
 import { assertOk, summariseInventory } from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const apply = args.includes('--yes');
-const target = (args.find((a) => a.startsWith('--target=')) || '--target=compose').split('=')[1];
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -77,37 +72,26 @@ async function rest(pathname, init = {}) {
 }
 
 function adminCredential() {
-  const env = { ...process.env };
-  const dotenv = join(REPO, '.env');
-  if (!env.MQTT_DYNSEC_ADMIN_PASSWORD && existsSync(dotenv)) {
-    for (const line of readFileSync(dotenv, 'utf8').split('\n')) {
-      const m = /^\s*(MQTT_DYNSEC_ADMIN_(?:USER|PASSWORD))\s*=\s*(.*?)\s*$/.exec(line);
-      if (m && !env[m[1]]) env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
-    }
-  }
+  const env = stackCredentials(['MQTT_DYNSEC_ADMIN_USER', 'MQTT_DYNSEC_ADMIN_PASSWORD']);
   if (!env.MQTT_DYNSEC_ADMIN_PASSWORD) {
-    console.error('MQTT_DYNSEC_ADMIN_PASSWORD is not set and .env does not carry it.');
+    console.error(missingCredentialAdvice('MQTT_DYNSEC_ADMIN_PASSWORD'));
     process.exit(1);
   }
   return { username: env.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin', password: env.MQTT_DYNSEC_ADMIN_PASSWORD };
 }
 
 /**
- * The broker's client list, read from the plugin the same way the service reads it. Inside the
- * broker container on Compose, inside the broker pod on Kubernetes.
+ * The broker's client list, read from the plugin the same way the service reads it, inside the
+ * broker pod.
  */
 function brokerClients() {
-  const prefix = target === 'k8s'
-    ? (() => {
-      const pod = execFileSync('kubectl', [
-        '-n', process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru', 'get', 'pods',
-        '-l', 'app.kubernetes.io/component=mosquitto', '--field-selector=status.phase=Running',
-        '-o', 'jsonpath={.items[*].metadata.name}',
-      ], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean)[0];
-      if (!pod) throw new Error('no Running mosquitto pod');
-      return ['kubectl', '-n', process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru', 'exec', pod, '-c', 'mosquitto', '--'];
-    })()
-    : ['docker', 'exec', process.env.MOSQUITTO_CONTAINER || 'acs-cymru_mosquitto'];
+  const pod = execFileSync('kubectl', [
+    '-n', NAMESPACE, 'get', 'pods',
+    '-l', 'app.kubernetes.io/component=mosquitto', '--field-selector=status.phase=Running',
+    '-o', 'jsonpath={.items[*].metadata.name}',
+  ], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean)[0];
+  if (!pod) throw new Error('no Running mosquitto pod');
+  const prefix = ['kubectl', '-n', NAMESPACE, 'exec', pod, '-c', 'mosquitto', '--'];
   const admin = adminCredential();
   const send = controlSender({ host: '127.0.0.1', port: 1883, username: admin.username, password: admin.password }, prefix);
   const clients = assertOk(send({ command: 'listClients', verbose: true }));

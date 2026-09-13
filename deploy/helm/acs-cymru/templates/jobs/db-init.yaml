@@ -19,9 +19,8 @@ satisfies both as the chain grows, because the same bytes are counted by each.
 THE SEED STAYS A ConfigMap. It is one small file, and it is the one an operator might legitimately
 replace at install time: demo accounts are a deployment choice, whereas the schema is not.
 
-COMPOSE IS UNAFFECTED and still bind-mounts supabase/migrations/ directly, which keeps a migration
-editable without a rebuild. Both targets now read the SAME source directory -- one mounts it, the
-other has it copied in by `COPY migrations/*.sql` -- so there is no mirrored copy left to drift and
+The image has the source directory copied in by `COPY migrations/*.sql`, so there is no mirrored
+copy left to drift and
 no sync check needed to prove there isn't.
 */}}
 apiVersion: v1
@@ -75,7 +74,6 @@ spec:
           the worst outcome available here because the next replay starts from an inconsistent
           state rather than a clean one.
 
-          docker-compose expresses this as `depends_on: supabase-auth: condition: service_healthy`.
         */}}
         {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-auth" "image" "curlimages/curl:8.10.1" "command" "curl -sf http://supabase-auth:9999/health >/dev/null 2>&1" "describe" "supabase-auth (it owns the auth schema the migrations build on)") | nindent 8 }}
         {{- end }}
@@ -83,9 +81,9 @@ spec:
         - name: db-init
           {{/*
             THIS REPOSITORY'S OWN IMAGE, and the only reason it exists is to carry /migrations --
-            it is supabase/postgres with the chain copied in. check-image-tag-parity.mjs asserts
-            that base tag against the one Compose runs, because psql's client version is what parses
-            this SQL and a client older than the server mis-handles syntax the migrations rely on.
+            it is supabase/postgres with the chain copied in, at the server's own tag, because
+            psql's client version is what parses this SQL and a client older than the server
+            mis-handles syntax the migrations rely on.
           */}}
           image: {{ include "acs-cymru.image" (dict "ctx" . "image" .Values.dbInit.image) | quote }}
           imagePullPolicy: {{ .Values.dbInit.image.pullPolicy }}
@@ -96,7 +94,7 @@ spec:
             # credentials.
             #
             # M2: HOST timescaledb, PORT 5432 -- the in-cluster address and the port the server
-            # listens on. NOT 5433, which is only docker-compose's published port. A foreign server
+            # listens on. NOT 5433, which is only the dev loop's forwarded port. A foreign server
             # pointed at 5433 fails as a relation-level error from PostgREST, which reads as a
             # schema fault; `helm test` (M6) queries the foreign table to catch exactly that.
             - name: TS_HOST
@@ -173,8 +171,7 @@ spec:
               # locks on tables supabase-realtime is concurrently reading for its subscriptions,
               # and without a timeout Postgres resolves the inversion by choosing a deadlock victim
               # -- which can be REALTIME, taking every open dashboard's live updates down so a
-              # migration can proceed. A one-shot Job that retries is the better loser. Same value
-              # as docker-compose.yml, because the two must not diverge (issue #40).
+              # migration can proceed. A one-shot Job that retries is the better loser (issue #40).
               export PGOPTIONS="-c lock_timeout=5s"
               PSQL="psql -v ON_ERROR_STOP=1 -h {{ include "acs-cymru.supabaseDb.host" . }} -p {{ include "acs-cymru.supabaseDb.port" . }} -U postgres -d postgres"
 
@@ -217,7 +214,7 @@ spec:
               fi
               echo "Found $COUNT migration(s) in the image."
 
-              # ORDERING IS LEXICAL, matching docker-compose's `for f in /migrations/*.sql`. The
+              # ORDERING IS LEXICAL: `for f in /migrations/*.sql`. The
               # numeric prefixes are what make that correct; a migration added without one would
               # sort unpredictably against the rest.
               echo 'Applying Supabase database migrations...'

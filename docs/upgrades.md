@@ -49,7 +49,7 @@ Three consequences that matter:
 - **Every migration must be idempotent**, and each says so in its own header. `ADD COLUMN IF NOT
   EXISTS`, `CREATE OR REPLACE`, `INSERT ... ON CONFLICT DO NOTHING`. A migration that is only
   correct the first time is a migration that breaks the *second* boot, not a future upgrade.
-- **Upgrading is `docker compose up -d` / `helm upgrade`.** There is no separate schema step to
+- **Upgrading is `helm upgrade`.** There is no separate schema step to
   forget, and no window in which the code is new and the schema is old.
 - **Ordering is filename order, on every boot** — which is why a later migration can be relied on to
   run after an earlier one, and why a migration that adds a `gateways` column must rebuild
@@ -68,11 +68,11 @@ Postgres then loads the library matching the *installed* version, so a `2.29.2` 
 definitions — indefinitely, silently, and widening on every bump.
 
 `timescaledb-maintenance` now applies [`timescaledb/extension.sql`](../timescaledb/extension.sql)
-first, in its own psql session, on Compose and on Kubernetes alike. It is a no-op when there is
+first, in its own psql session. It is a no-op when there is
 nothing to update, and it **fails the step** if the two versions still disagree afterwards rather
 than letting the stack carry on — which is the whole difference between this and what it replaced.
 
-An operator does nothing: as above, upgrading is still `docker compose up -d` / `helm upgrade`.
+An operator does nothing: as above, upgrading is still `helm upgrade`.
 
 ### Migrations are forward-only
 
@@ -84,7 +84,7 @@ If a rollback is a real possibility for your deployment, **take a backup before 
 is a script for it, and it covers both databases plus the 3D model objects:
 
 ```bash
-bash scripts/backup-databases.sh          # Compose, or BACKUP_MODE=direct against any reachable PG
+bash scripts/backup-databases.sh          # through `npm run dev:forward`, or against any reachable PG
 bash scripts/restore-databases.sh         # the other half
 ```
 
@@ -182,9 +182,9 @@ to look at if you want positive confirmation rather than absence of complaints:
 
 | Check | Where |
 | :--- | :--- |
-| Every migration applied cleanly | `docker compose logs supabase-db-init` — it exits non-zero on any failure |
-| The historian's extension matches its image | `docker compose logs timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
-| Policy jobs are getting workers | `docker compose logs timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
+| Every migration applied cleanly | `kubectl -n acs-cymru logs job/acs-cymru-db-init` — it exits non-zero on any failure |
+| The historian's extension matches its image | `kubectl -n acs-cymru logs job/acs-cymru-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
+| Policy jobs are getting workers | `kubectl -n acs-cymru logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
 | Telemetry still landing | Grafana → *Stack & Ingestion Health* → rows ingested per second |
 | The daemon is not dropping anything new | `curl localhost:9108/metrics \| grep dropped` — every reason is a separate series |

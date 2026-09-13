@@ -1195,67 +1195,6 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 4. THE COLLECTOR IS READING SOMETHING IT CANNOT DECODE. `loki.source.docker` counts a parsing
-      # error when a frame off the Docker API does not decode; `up` is 1, other targets keep shipping
-      # so rule 2 stays quiet, and nothing reaches the store so rule 3 has nothing to count.
-      # Threshold zero: a healthy stack reads 0, and there is no benign source of this. Sum by
-      # `component_id` so the alert names the pipeline.
-      # -------------------------------------------------------------------------------------------
-      - uid: acs-log-collector-parse-errors
-        title: Log Collector Cannot Decode
-        condition: C
-        for: 10m
-        # OK, not Alerting: a cluster running its own log stack (observability.enabled=false) has no
-        # series here, and NoData is the correct state.
-        noDataState: OK
-        execErrState: Error
-        labels:
-          severity: warning
-          entity_type: platform
-        annotations:
-          summary: >-
-            The log collector ({{ $labels.component_id }}) is failing to decode messages off the
-            Docker API, so those lines are being lost before they reach the store. Collection looks
-            healthy from every other angle -- the collector is up and other targets are still
-            shipping -- which is why this has its own rule. Check the collector's own logs for the
-            container it cannot read.
-        data:
-          - refId: A
-            relativeTimeRange:
-              from: 900
-              to: 0
-            datasourceUid: prometheus
-            model:
-              refId: A
-              datasource:
-                type: prometheus
-                uid: prometheus
-              expr: sum by (component_id) (rate(loki_source_docker_target_parsing_errors_total[10m]))
-              instant: true
-          - refId: B
-            datasourceUid: __expr__
-            model:
-              refId: B
-              type: reduce
-              reducer: last
-              expression: A
-              datasource:
-                type: __expr__
-                uid: __expr__
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              refId: C
-              type: threshold
-              expression: B
-              conditions:
-                - evaluator:
-                    type: gt
-                    params: [0]
-              datasource:
-                type: __expr__
-                uid: __expr__
 
   # ===============================================================================================
   # THE HOST. The databases, the metrics store and the log store share one volume, and a full

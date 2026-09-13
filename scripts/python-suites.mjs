@@ -267,7 +267,7 @@ export const SUITES = {
   'ingestion/test_startup_healer.py': {
     lanes: ['unit'],
     why:
-      '`depends_on` orders `docker compose up` and nothing else, so a restart can start ingestion ' +
+      'Nothing orders the daemon after the historian at boot, so a restart can start ingestion ' +
       'before the historian -- measured at 453ms on a development stack. The daemon then reached ' +
       'its MQTT loop having done none of the startup work that needed a database and retried none ' +
       'of it, and BOTH CONSEQUENCES WERE SILENT IN OPPOSITE DIRECTIONS: the historian gauge read ' +
@@ -304,7 +304,7 @@ export const SUITES = {
     why:
       'How the playback worker resolves the broker passwords it holds (0078), and the precedence ' +
       'rule that matters: a DELIVERED credential beats one in the environment. The broker keeps ' +
-      'one password per username, so a value in `.env` is not an alternative to the delivered one ' +
+      'one password per username, so a value in the environment is not an alternative to the delivered one ' +
       '-- it is an older one. If the environment won, "issue a new credential" would be the one ' +
       'repair that could not fix a refused playback (CONNACK rc=5).',
   },
@@ -421,7 +421,7 @@ export const SUITES = {
     lanes: ['db'],
     why:
       "0026's two halves: causation grouping, and -- the security one -- that `service_role` can " +
-      'no longer INSERT into digital_thread directly. That key ships in .env and is held by the ' +
+      'no longer INSERT into digital_thread directly. That key is in the release Secret and is held by the ' +
       'daemon and every edge function; while it could insert, any holder could forge an audit row ' +
       'naming an operator who was not there. A later migration re-granting INSERT would restore ' +
       'that silently and nothing else here would notice.',
@@ -675,15 +675,15 @@ export const SUITES = {
   },
   'gateway-credential/test_gateway_credential.py': {
     // BRIEFLY `manual`, AND THE REASON STOPPED BEING TRUE. It skipped all thirteen checks in e2e
-    // because `setup.mjs --demo` provisions that stack from `.env.example` verbatim, leaving
-    // MQTT_CREDENTIAL_SERVICE_TOKEN empty -- so it was declared manual rather than left as a green
+    // because the demonstration credentials once left MQTT_CREDENTIAL_SERVICE_TOKEN
+    // empty -- so it was declared manual rather than left as a green
     // step over nothing. Then test_enroll_gateway.py turned out to need the SAME token, which made
     // provisioning it in e2e necessary anyway rather than a change to avoid. The suite asserts
     // properly once it is set (13/13 against a provisioned stack), so it comes back.
     lanes: ['stack'],
     why:
       "Broker credential issuance -- needs the stack up AND the service's own bearer token, which " +
-      'the e2e job now writes into `.env` before launch. The exposure tests are the ones that ' +
+      'the dev loop reads out of the release Secret. The exposure tests are the ones that ' +
       'matter most and are invisible anywhere else: this service can issue a Mosquitto account for ' +
       'ANY edge node, and the gateway\'s role turns an account into the ability to publish ' +
       'telemetry as that gateway -- so "it is not published on the host" is a security boundary, ' +

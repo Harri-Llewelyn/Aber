@@ -196,9 +196,8 @@ through `hooks/useRealtimeTable.js`.
 - **Wall-clock-derived state needs `useClockTick`.** A gateway going quiet writes nothing and emits
   no event, so it would otherwise keep its last-rendered status until the next poll.
 
-`VITE_ENABLE_REALTIME` is resolved by `src/config.js` — see **Configuration** below. On the Compose
-path it is still inlined at build time, so flipping it there means rebuilding the image; on Kubernetes
-it comes from a ConfigMap and flips with a `helm upgrade`.
+`VITE_ENABLE_REALTIME` is resolved by `src/config.js` — see **Configuration** below. It comes
+from the frontend ConfigMap and flips with a `helm upgrade`.
 
 ---
 
@@ -208,19 +207,18 @@ it comes from a ConfigMap and flips with a `helm upgrade`.
 can serve any environment.
 
 **Why this layer exists.** Vite inlines `import.meta.env` when the bundle is built, so every setting
-used to be frozen into the image by `Dockerfile`'s build args. Under Compose that is invisible — the
-image is built against the stack it will serve. Under Kubernetes it means **one image cannot serve two
+used to be frozen into the image by `Dockerfile`'s build args. It means **one image cannot serve two
 environments**: a bundle built for staging carries staging's Supabase URL wherever it is deployed,
 which defeats build-once/promote-the-artefact.
 
 `public/config.js` is a shipped **no-op placeholder** that a deployment replaces — on Kubernetes, a
-ConfigMap mounted over `/usr/share/nginx/html/config.js`. Both paths run the same code, so Compose
-behaves exactly as it did before this existed.
+ConfigMap mounted over `/usr/share/nginx/html/config.js`. A bundle served without the ConfigMap keeps
+its build-time values.
 
-| | Docker Compose | Kubernetes |
+| | Build-time (plain `docker build`) | Runtime (the chart) |
 | :--- | :--- | :--- |
-| Build | default; values inlined by Vite | `--build-arg VITE_RUNTIME_CONFIG=true`, nothing inlined |
-| Source of values | `Dockerfile` build args from `.env` | a ConfigMap mounted at `/config.js` |
+| Build | values inlined by Vite | `--build-arg VITE_RUNTIME_CONFIG=true`, nothing inlined |
+| Source of values | `Dockerfile` build args | a ConfigMap mounted at `/config.js` |
 | Changing one | rebuild the image | `helm upgrade` |
 
 Five things about it are load-bearing, and each has a comment in the file saying so:
@@ -286,8 +284,8 @@ names a page that exists. The second direction is the one that rots silently: a 
 behind by a renamed page is never resolved again, and the renamed page quietly has none.
 
 **Why `src/help/` and not `docs/help/`,** which is where the roadmap entry proposed it.
-`frontend/Dockerfile`'s build context is `./frontend` — on Compose, in `release.yml` and in the
-k3d job alike — so `docs/` is not present at image build time at all, for the same reason `.git` is
+`frontend/Dockerfile`'s build context is `./frontend` — in `release.yml` and in `npm run dev:up`
+alike — so `docs/` is not present at image build time at all, for the same reason `.git` is
 not. Bundling from there works on a developer's machine and fails in every container build. The
 properties that placement was chosen for are unaffected: these are markdown in the repository,
 reviewed in the pull request that changes the behaviour they describe, and checked by a guard. They

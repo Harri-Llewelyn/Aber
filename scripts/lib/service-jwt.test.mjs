@@ -136,7 +136,7 @@ test('the signature changes with the secret, so a re-sign under a new secret is 
 });
 
 test('decodeJwt returns null for anything that is not a JWT, rather than throwing', () => {
-  // --check reads whatever is in .env, which may be empty, truncated or a placeholder. Throwing
+  // --check reads whatever the release Secret holds, which may be empty, truncated or a placeholder. Throwing
   // there would turn "this key looks wrong" into a stack trace.
   assert.equal(decodeJwt(''), null);
   assert.equal(decodeJwt('not.a.jwt'), null);

@@ -2,11 +2,11 @@
 {{- $component := "realtime" -}}
 {{- /*
 =================================================================================================
-THE ONE SERVICE WHOSE NAME DELIBERATELY DIFFERS FROM ITS COMPOSE SERVICE NAME.
+THE ONE SERVICE WHOSE NAME IS NOT ITS COMPONENT NAME.
 
-Everywhere else this chart keeps Kubernetes Service names identical to the Compose service names,
-so every compose-internal URL already in the stack's configuration resolves unchanged. Realtime is
-the exception, and the exception is what makes it work rather than a compromise:
+Everywhere else this chart names a Service for its component, so every in-cluster URL in the
+stack's configuration resolves unchanged. Realtime is the exception, and the exception is what
+makes it work rather than a compromise:
 
   * Realtime resolves WHICH TENANT a request belongs to from the LEADING HOSTNAME LABEL of the
     Host header -- not from the JWT, not from a setting. `realtime-dev` is the tenant
@@ -16,17 +16,11 @@ the exception, and the exception is what makes it work rather than a compromise:
     label is `supabase-realtime`, no tenant matches, and EVERY WebSocket handshake is rejected
     with a bare 403 that mentions neither tenants nor hostnames.
 
-On Docker Compose this needs a network ALIAS (`realtime-dev.supabase-realtime`, declared on the
-supabase-realtime service) because the service is already named something else. Kubernetes has no
-per-Service alias of that shape -- but it does not need one: NAMING THE SERVICE FOR THE TENANT
-makes the leading label fall out of ordinary in-cluster DNS. `http://realtime-dev:4000/socket/` is
-then correct with no header rewriting at all.
+NAMING THE SERVICE FOR THE TENANT makes the leading label fall out of ordinary in-cluster DNS.
+`http://realtime-dev:4000/socket/` is then correct with no header rewriting at all, which is why
+supabase/kong.yml carries `__REALTIME_UPSTREAM_URL__` as a placeholder rather than a literal.
 
-That is why supabase/kong.yml carries `__REALTIME_UPSTREAM_URL__` as a placeholder
-rather than a literal: it is the one upstream that genuinely differs between the two targets.
-
-acs-cymru.validateRealtimeServiceName in _helpers.tpl refuses any other name, matching the guard
-supabase-kong-init applies to REALTIME_UPSTREAM_URL on the Compose side.
+acs-cymru.validateRealtimeServiceName in _helpers.tpl refuses any other name.
 
 THE SERVICE NAME IS THE ARCHITECTURAL DECISION here, and the thing later work must not undo; the
 workload behind it is ordinary.

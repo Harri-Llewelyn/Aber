@@ -182,7 +182,7 @@ secrets:
   noderedCredentialSecret: ""
   noderedOAuthClientSecret: ""
   noderedWebhookJwtSecret: ""
-  # Break-glass only; empty means the static-token path is shut. See .env.example.
+  # Break-glass only; empty means the static-token path is shut.
   noderedAdminToken: ""
 
 # ---------------------------------------------------------------------------------------------
@@ -193,7 +193,7 @@ timescaledb:
   enabled: true
   image:
     repository: timescale/timescaledb
-    # Must match docker-compose.yml (check-image-tag-parity.mjs). A version, not a floating tag.
+    # A version, not a floating tag.
     tag: 2.29.2-pg17
     pullPolicy: IfNotPresent
   database: postgres
@@ -287,7 +287,7 @@ realtime:
   replicas: 1
   # DO NOT RENAME. Realtime resolves its tenant from the leading hostname label of the Host
   # header, and `realtime-dev` is the tenant SEED_SELF_HOST creates. The one Service whose name
-  # differs from its Compose service (architecture §3.4).
+  # is not its component name (architecture §3.4).
   serviceName: realtime-dev
   port: 4000
   resources:
@@ -300,8 +300,8 @@ realtime:
 # ---------------------------------------------------------------------------------------------
 # Browser-facing URLs
 #
-# In-cluster URLs are not configurable: Service names match the Compose service names, so
-# `http://supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` resolve unchanged. Each
+# In-cluster URLs are not configurable: the Service names are the ones every in-cluster URL
+# carries, so `http://supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` are constants. Each
 # value below is derived from global.publicBaseDomain unless overridden.
 # ---------------------------------------------------------------------------------------------
 publicUrls:
@@ -323,8 +323,8 @@ publicUrls:
 # ---------------------------------------------------------------------------------------------
 # Supabase control plane
 #
-# Every image tag is pinned to the tag docker-compose.yml runs; realtime and storage-api migrate
-# shared schemas on boot, and studio is Zod-coupled to a postgres-meta version.
+# Every image tag is pinned; realtime and storage-api migrate shared schemas on boot, and studio
+# is Zod-coupled to a postgres-meta version, so the set moves together.
 # ---------------------------------------------------------------------------------------------
 
 supabaseAuth:
@@ -365,7 +365,7 @@ supabaseRest:
     limits: { memory: 512Mi }
 
 # -----------------------------------------------------------------------------------------------
-# The gateway (Envoy), as on Compose. Its Service adopts the name `supabase-kong` so the
+# The gateway (Envoy). Its Service adopts the name `supabase-kong` so the
 # in-cluster consumers that carry `http://supabase-kong:8000` need no change; the template
 # refuses a render with both Kong and Envoy enabled under that name. Kong is retained off as the
 # revert path (`supabaseKong.enabled=true` + `supabaseEnvoy.enabled=false`, in one change).
@@ -673,6 +673,18 @@ playback:
     requests: { cpu: 25m, memory: 96Mi }
     limits: { memory: 256Mi }
 
+# Cold telemetry archival (ingestion/cold_archive.py): the retention policy as move rather than
+# delete. Runs from `ingestion.image` under a different command, like playback. Each run exports
+# the chunks past the hot window, verifies the objects, records them in the manifest, and with
+# `drop` on removes the chunks it verified. See supabase/README.md, "Cold telemetry archival".
+coldArchive:
+  enabled: true
+  schedule: "15 3 * * *"
+  drop: true
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
 ingestion:
   # Which role the daemon connects to the historian as. `ingest_writer` cannot UPDATE, DELETE or
   # TRUNCATE; secrets.ingestWriterPassword is required while this is set. Override to the admin
@@ -697,8 +709,8 @@ ingestion:
     enabled: true
     port: 9108
   # Device liveness watchdog: a device that stops publishing emits no DDEATH. Writes only on the
-  # ONLINE -> OFFLINE transition. 0 disables. MUST MATCH docker-compose.yml (validate.py check 10
-  # reads these).
+  # ONLINE -> OFFLINE transition. 0 disables. validate.py check 10 reads these from its own
+  # environment.
   deviceOfflineTimeoutSeconds: 300
   deviceWatchdogIntervalSeconds: 30
   # Rate limit on NCMD rebirth requests, per edge node.
@@ -770,7 +782,7 @@ nodeRed:
     size: 2Gi
     storageClass: ""
     accessMode: ReadWriteOnce
-  # The `node-red` user is uid/gid 1000. Replaces the Compose init's `chown -R 1000:1000 /data`.
+  # The `node-red` user is uid/gid 1000; local-path hands over a root-owned directory.
   podSecurityContext:
     fsGroup: 1000
     fsGroupChangePolicy: OnRootMismatch
@@ -821,7 +833,7 @@ grafana:
   lokiUrl: ""
   image:
     repository: grafana/grafana
-    # Pinned to the same tag Compose uses (check-image-tag-parity.mjs). grafana.ini depends on
+    # Pinned: grafana.ini depends on
     # `use_pkce`, `auth_style` and the env-override mapping, which have moved between releases.
     tag: "13.2.0"
     pullPolicy: IfNotPresent
@@ -849,7 +861,6 @@ gitea:
   enabled: true
   image:
     repository: gitea/gitea
-    # Pinned to the same tag Compose uses (check-image-tag-parity.mjs).
     tag: "1.27.3"
     pullPolicy: IfNotPresent
   # The local administrator, reachable only through `gitea admin` on the volume: the password
@@ -925,6 +936,10 @@ ingress:
   # by anyone who can reach the ingress. Turning it on requires secrets.studioOAuthClientSecret
   # and secrets.studioProxyHmacSecret (the render fails naming them). Without the route:
   #   kubectl -n <ns> port-forward svc/<release>-acs-cymru-supabase-studio 54323:3000
+  #
+  # The studio and gitea logins set Secure cookies, which a browser keeps only on an https origin
+  # or on localhost / *.localhost. Over plain http on any other domain the render refuses either
+  # route: terminate TLS (ingress.tls) or turn the route off.
   routes:
     studio: false
   #  docs: false
@@ -951,7 +966,7 @@ e2e:
   ttlSecondsAfterFinished: 86400
   # The ingress controller's ClusterIP, used only to add hostAliases to the validate Job. Check
   # 7b signs in through the real OAuth chain and follows browser-facing URLs; with the dev
-  # domain `127.0.0.1.nip.io` those resolve to the pod itself. On k3d:
+  # domain `localhost` those resolve to the pod itself, or to nothing. On k3d:
   #   kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}'
   # Leave empty where the public domain resolves from inside the cluster.
   ingressIp: ""

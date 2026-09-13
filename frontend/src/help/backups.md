@@ -10,7 +10,7 @@ Take a backup of the whole platform without a shell, and see which backups exist
 
 ## What the states mean
 
-A **queued** backup that stays queued means no backup service is running: on Compose the `backup-service` container, on Kubernetes the `backup-service` Deployment. Cancel it or start the service; one backup runs at a time, so a queued one blocks the next.
+A **queued** backup that stays queued means no backup service is running: the `backup-service` Deployment is down. Cancel it or start the service; one backup runs at a time, so a queued one blocks the next.
 
 A backup taken **on request** is **pinned**: the retention window does not apply to it until it is released. A backup taken **on the schedule** is pruned once it is older than the window. Both kinds are listed until the service removes their files.
 

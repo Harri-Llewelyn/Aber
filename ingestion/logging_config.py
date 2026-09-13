@@ -103,9 +103,8 @@ def get_logger(service_name: str) -> logging.Logger:
     THE CODE DEFAULT IS TEXT AND THE DEPLOYMENTS SET JSON, which is deliberate and is not the same
     as "the default is json". Someone running `python ingestion.py` against a local stack is
     reading with their eyes and wants prose; a daemon writing into a log store is being read by a
-    query and wants fields. So `docker-compose.yml` and the chart both set `LOG_FORMAT=json` on
-    ingestion and playback -- both targets, so the daemon behaves identically on each and no
-    divergence row is owed -- and this default serves the case neither of them covers.
+    query and wants fields. So the chart sets `LOG_FORMAT=json` on ingestion and playback, and this
+    default serves the case it does not cover.
 
     An unrecognised value is text, because a typo in an env var must not silently stop the logs
     being readable.

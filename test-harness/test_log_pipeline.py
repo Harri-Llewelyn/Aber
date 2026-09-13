@@ -31,7 +31,6 @@ import sys
 import json
 import time
 import shlex
-import shutil
 import secrets
 import unittest
 import urllib.error
@@ -439,8 +438,6 @@ class MultilineTestCase(unittest.TestCase):
         glued to the last line the service logged before it died, under that line's timestamp.
         """
         image = os.getenv("PROBE_IMAGE") or stack_exec.default_probe_image()
-        if stack_exec.STACK == "compose" and not shutil.which("docker"):
-            skip_or_fail(self, "docker is not on PATH, so the probe container cannot be started")
         if not stack_exec.probe_image_available(image):
             skip_or_fail(self, "the image " + image + " is not built, so the probe cannot run the "
                                "daemon's own formatter: build the ingestion image first")
@@ -449,12 +446,12 @@ class MultilineTestCase(unittest.TestCase):
 
         # A FIXED CONTAINER NAME, WITH THE UNIQUENESS IN THE LINE INSTEAD. `container` is a label,
         # so a per-run name would mint a new Loki stream on every run -- the unbounded cardinality
-        # alloy/config.alloy refuses for `device`, arriving through the back door of a test. One
+        # the collector config refuses for `device`, arriving through the back door of a test. One
         # name means one stream however often this runs; the token separates the runs inside it.
         name = "acs-cymru_multiline_probe"
 
-        # THE SLEEP IS DISCOVERY, NOT PADDING. `discovery.docker` refreshes every 15s, so a
-        # container that starts and dies inside one interval is never seen and collects nothing.
+        # THE SLEEP IS DISCOVERY, NOT PADDING. Pod discovery refreshes every 15s, so a
+        # pod that starts and dies inside one interval is never seen and collects nothing.
         # The probe waits to BE FOUND, then logs, then crashes.
         inner = "\n".join([
             "import time",
@@ -466,8 +463,8 @@ class MultilineTestCase(unittest.TestCase):
         ])
         script = "sleep 25; python -c " + shlex.quote(inner) + "; sleep 10"
 
-        # THE LABEL IS THE WHOLE TRICK. The probe is labelled as the ingestion service (the Compose
-        # service label, or the chart's component label), which discovery.relabel maps to `service`
+        # THE LABEL IS THE WHOLE TRICK. The probe carries the chart's component label for the
+        # ingestion service, which discovery.relabel maps to `service`
         # and the stage.match selector reads. Narrow that selector and this container stops
         # matching -- which is a thing worth having noticed.
         started = stack_exec.run_probe(name, image, script, component="ingestion",

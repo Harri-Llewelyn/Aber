@@ -44,11 +44,7 @@
 // =================================================================================================
 import { createHmac, randomUUID } from 'node:crypto';
 import { hostname, userInfo } from 'node:os';
-import { readFileSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
-
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+import { missingCredentialAdvice, stackCredentials } from './lib/stack-credentials.mjs';
 
 /** The principal seeded by archived migration 0034, and the default when --principal is not given. */
 const DEFAULT_SUBJECT = 'b0000000-0000-4000-8000-000000000001';
@@ -94,21 +90,10 @@ if (days > MAX_DAYS) {
   process.exit(1);
 }
 
-const envPath = join(REPO, '.env');
-if (!existsSync(envPath)) {
-  console.error('No .env in this checkout. Run `npm run setup` first -- the secret is generated there.');
-  process.exit(1);
-}
-const env = Object.fromEntries(
-  readFileSync(envPath, 'utf8')
-    .split('\n')
-    .filter((l) => /^[A-Z_][A-Z0-9_]*=/.test(l))
-    .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()])
-);
-
-const secret = env.SUPABASE_JWT_SECRET;
+// The secret the running stack signs with, from the release's own Secret.
+const { SUPABASE_JWT_SECRET: secret } = stackCredentials(['SUPABASE_JWT_SECRET']);
 if (!secret) {
-  console.error('SUPABASE_JWT_SECRET is not set in .env.');
+  console.error(missingCredentialAdvice('SUPABASE_JWT_SECRET'));
   process.exit(1);
 }
 
@@ -155,18 +140,20 @@ const until = new Date(exp * 1000).toISOString().slice(0, 10);
 // through auth.uid() and this caller has no session. So the RPC is reachable by service_role alone
 // and pins `actor_source` itself -- see 0043, and 0026 for the pattern it copies.
 //
-// THIS IS THE FIRST TIME THIS SCRIPT TOUCHES THE DATABASE. It read .env and computed an HMAC and
-// nothing else, which is why it needs the URL and the key below and why their absence is an error
-// with a fix in it rather than a stack trace.
+// THIS IS THE FIRST TIME THIS SCRIPT TOUCHES THE DATABASE. It read the release Secret and computed
+// an HMAC and nothing else, which is why it needs the URL and the key below and why their absence
+// is an error with a fix in it rather than a stack trace. The URL defaults to the gateway as
+// `npm run dev:forward` publishes it.
 // =================================================================================================
-const supabaseUrl = (env.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
-const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+const creds = stackCredentials(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']);
+const supabaseUrl = (creds.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
+const serviceKey = creds.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!serviceKey) {
-  console.error('SUPABASE_SERVICE_ROLE_KEY is not set in .env.');
+  console.error(missingCredentialAdvice('SUPABASE_SERVICE_ROLE_KEY'));
   console.error(
     'It is needed to record the issue in the Digital Thread, which happens BEFORE the token is\n' +
-    'printed -- a token that cannot be recorded is not handed out. Run `npm run setup` first.'
+    'printed -- a token that cannot be recorded is not handed out.'
   );
   process.exit(1);
 }

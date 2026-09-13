@@ -9,9 +9,9 @@
 {{/*
 Kong's declarative config, from the SHARED template.
 
-supabase/kong.yml is one template serving both deployment targets. Keeping one file rather than
-forking it is the point: a route added for Compose and forgotten on Kubernetes is a gateway that
-behaves differently between environments, which is the class of bug this gateway exists to prevent.
+supabase/kong.yml is one template, mirrored into the chart. Keeping one file rather than forking
+it is the point: a route added in one place and forgotten in another is a gateway that behaves
+differently between environments, which is the class of bug this gateway exists to prevent.
 
 SUBSTITUTION HAPPENS IN AN initContainer, NOT IN HELM, and that is deliberate. Rendering the
 secrets in at template time looks simpler and breaks the `secrets.existingSecret` path in the worst
@@ -20,9 +20,8 @@ Helm would happily substitute EMPTY STRINGS -- registering empty API keys, WHICH
 The gateway would come up looking healthy with its authentication silently disabled.
 
 Reading them from the Secret at pod start works whoever owns it, keeps key material out of the
-rendered manifest entirely, and is the same mechanism `supabase-kong-init` uses on Compose --
-including the leftover-placeholder scan, which skips comment lines because kong.yml's header
-documents the placeholder convention by name.
+rendered manifest entirely -- including the leftover-placeholder scan, which skips comment lines
+because kong.yml's header documents the placeholder convention by name.
 
 Kong 3.x can interpolate `${{env.VAR}}` in declarative config, which 2.8 could not -- so this is
 now a choice rather than a constraint, and on THIS target it is clearly the right one: rendering
@@ -51,7 +50,7 @@ spec:
     {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # PORT 8000, not the 54321 docker-compose publishes. `http://supabase-kong:8000` is what
+      # PORT 8000, not the 54321 the dev loop forwards. `http://supabase-kong:8000` is what
       # every in-cluster consumer already carries -- Studio, the edge runtime, Grafana's token_url
       # and api_url, Node-RED's token and userinfo URLs.
       port: 8000
@@ -102,10 +101,8 @@ spec:
           env:
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
-            # The one upstream that genuinely differs between targets:
-            #   Compose     http://realtime-dev.supabase-realtime:4000/socket/   (a network alias)
-            #   Kubernetes  http://realtime-dev:4000/socket/                     (the Service name)
-            # Either way the LEADING HOSTNAME LABEL must be `realtime-dev` -- Realtime reads its
+            # The Realtime upstream, http://realtime-dev:4000/socket/ (the Service name).
+            # The LEADING HOSTNAME LABEL must be `realtime-dev` -- Realtime reads its
             # tenant from it and answers a bare 403 otherwise.
             - name: REALTIME_UPSTREAM_URL
               value: {{ printf "http://%s:%v/socket/" .Values.realtime.serviceName .Values.realtime.port | quote }}
