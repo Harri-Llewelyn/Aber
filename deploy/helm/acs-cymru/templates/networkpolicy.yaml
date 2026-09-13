@@ -33,10 +33,10 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   networkPolicy.apiServerPorts / Cidr        for the one initContainer that calls the API server
 =================================================================================================
 */}}
-{{- /* The port the in-cluster MQTT clients dial. `mosquitto.tls.internalClients` moves BOTH the
-     ingestion daemon and Node-RED to 8883 at once, so it must move both of their edges at once: an
-     edge left on 1883 while the client moved is a packet dropped at the destination with nothing
-     logging a policy decision, which reads as the broker being down.
+{{- /* The port the in-cluster MQTT clients dial. `mosquitto.tls.internalClients` moves the
+     ingestion daemon, i3X, Node-RED and the e2e validator to 8883 at once, so it must move every
+     one of their edges at once: an edge left on 1883 while the client moved is a packet dropped at
+     the destination with nothing logging a policy decision, which reads as the broker being down.
 
      Declared here rather than inline in the edge list -- a `{{ }}` comment action nested inside the
      `$edges := list` action is a parse error ("unexpected { in operand"), reported at a line inside
@@ -95,7 +95,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "test-fdw"           "to" "timescaledb"        "port" 5432 "why" "M6: checks the hypertable from the far side")
   (dict "from" "e2e-validate"       "to" "supabase-db"        "port" 5432 "why" "audit-row cleanup, out of reach of service_role")
   (dict "from" "e2e-validate"       "to" "timescaledb"        "port" 5432 "why" "telemetry assertions")
-  (dict "from" "e2e-validate"       "to" "mosquitto"          "port" 1883 "why" "publishes Sparkplug fixtures")
+  (dict "from" "e2e-validate"       "to" "mosquitto"          "port" $brokerPort "why" "publishes Sparkplug fixtures")
   (dict "from" "e2e-validate"       "to" $gw      "port" 8000 "why" "seeds through PostgREST")
   (dict "from" "e2e-validate"       "to" "node-red"           "port" 1880 "why" "check 7 probes all three auth surfaces")
   (dict "from" "e2e-validate"       "to" "ingestion"          "port" 9108 "why" "its wait-for-ingestion initContainer reads acs_ingestion_mqtt_connected off the metrics endpoint -- without it the suite publishes before the daemon has subscribed and QoS 0 drops the fixtures")

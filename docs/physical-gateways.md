@@ -78,8 +78,8 @@ Within about a minute the dashboard shows the gateway **ONLINE**.
 * Docker and the Compose plugin.
 * A route to the platform's API — the address in `ACS_SUPABASE_URL`, which the server refuses to set
   to anything in-stack (§7).
-* A route to the broker on **8883**. Physical gateways use MQTTS exclusively; 1883 stays open for
-  in-network services and is not used here.
+* A route to the broker on **8883**. Physical gateways use MQTTS exclusively; 1883 is published only
+  for gateways not yet moved, and is not used here.
 * The broker's hostname must resolve. It also has to be in the certificate's SAN — see §7.
 
 ---

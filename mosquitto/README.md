@@ -5,7 +5,8 @@ roles are declared in [`dynsec-roles.json`](dynsec-roles.json) and applied at ev
 clients are the platform principals from the environment plus one account per gateway, issued by
 the credential service and persisted by the plugin in `/mosquitto/data/dynamic-security.json`.
 [`mosquitto.conf`](mosquitto.conf) is the listener policy and [`mosquitto-tls.conf`](mosquitto-tls.conf)
-the optional MQTTS listener; both are identical on both targets.
+the optional MQTTS listener; the chart's initContainer assembles the two, and rebinds 1883 to
+loopback once no client outside the broker's pod dials it.
 
 `scripts/check-broker-config.mjs` starts this policy on the pinned image and asserts everything
 below by delivery. A config that starts is not a config that is safe.

@@ -20,8 +20,10 @@ moves out, and the table below says where it went.
 **Ordering.** 1 and 2 are the platform's own: the one item somebody else sets the deadline for,
 then the rehearsal that turns the backup into a capability. 3–5 are the edge chain, in dependency
 order: 3 makes a gateway's flow reviewable, 4 makes the appliance a managed artefact and shares
-3's puller, 5 removes what 3 replaced. 6 runs under every other item. 7 is last by rule: it
-folds the migration chain, so every entry that changes the schema must have landed before it.
+3's puller, 5 removes what 3 replaced. 6 runs under every other item. 7 reviews playback before
+the chain is folded, because a finding there may change the schema. 8 audits the documentation,
+code and comments once the code has stopped moving. 9 is last by rule: it folds the migration
+chain, so every entry that changes the schema must have landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -381,34 +383,122 @@ backup now, so a deleted repository is recoverable from one for as long as the b
 [`datasources.template.yml`](../grafana/provisioning/datasources/datasources.template.yml)
 
 **Built:** default-deny NetworkPolicy from one edge list (opt-in), an internal CA outside the
-chart, TLS on the Ingress and the broker's 8883 listener, per-gateway broker roles, the `apikey` gate, the
-database ports and the metrics endpoints on loopback, and no skip-verification setting anywhere.
+chart, TLS on the Ingress and the broker's 8883 listener, every in-cluster broker client on 8883 by
+default with plaintext 1883 withdrawing to loopback once the fleet has moved, per-gateway broker
+roles, the `apikey` gate, the database ports and the metrics endpoints on loopback, and no
+skip-verification setting anywhere.
 
-**The gap is what is on the wire.** NetworkPolicy answers *who*; every internal hop is plaintext:
-`sslmode=disable` on GoTrue's DSN, the PostgREST DSN the chart builds and both Grafana datasources,
-and HTTP between the gateway and every upstream. The Postgres links carry scoped credentials and
-every row.
+**The gap is what is on the wire.** NetworkPolicy answers *who*; the Postgres hops are plaintext,
+and neither database offers TLS at all: `sslmode=disable` on GoTrue's DSN, the PostgREST DSN the
+chart builds and both Grafana datasources, and every other client with no setting. Those links
+carry scoped credentials and every row.
 
-**In order of cost.** Turn on `mosquitto.tls.internalClients` / `MQTT_TLS_ENABLED`, which moves
-ingestion, i3X and Node-RED to 8883 together and fails closed; the work is making it the supported
-posture, not the switch. Then Postgres: `verify-full` needs certificates naming the Service the
-client dials, which cert-manager issues. Then an end state for plaintext 1883, which is
-deliberate today for the fleet migration window.
+**Decided.** `verify-full`, not `require`: `require` verifies nothing, which is the
+skip-verification setting this entry forbids by another name. Every client stack in the chart can
+reach it (libpq, pgx, node-postgres, the Grafana datasource, `postgres_fdw`); a client that cannot
+is a named exception, not the fleet's ceiling. Enforced server-side too, `hostssl` only, so a
+client that forgets the setting is refused rather than silently plaintext. cert-manager is a
+prerequisite of the supported posture, as it already is for the broker; `tls.enabled=false` per
+subsystem is a no-TLS mode, never an unverified one. HTTP between the gateway and its upstreams
+stays plaintext for 1.0: none of them terminates TLS itself, so that hop is a TLS sidecar per pod,
+which is a service mesh, and a service mesh is the complete answer. It leaves as answered, not built.
+
+**The work.** One Certificate per database on the broker's pattern, SANs on the Service names and
+the reload sidecar; `ssl=on` and `hostssl`; then every client, including the `postgres_fdw` server
+options in the baseline migration and the dev loop's port-forward, whose `localhost` needs the
+`extraDnsSans` knob the broker has.
 
 **Client certificates on the gateway link** are not planned: 4 decides that a gateway holds no
 certificate, because the dynsec password and the pinned root already give identity, confinement and
 a revocation that disconnects, and `crlfile` revocation needs a reload.
 
 **Must not touch:** per-gateway broker confinement, the origin policy's single home in `envoy.yaml`, the root's
-residence outside the chart, and the absence of a skip-verification switch. A service mesh is the
-complete answer.
+residence outside the chart, and the absence of a skip-verification switch.
 
-**Worth deciding early.** `require` or `verify-full` for Postgres. `internalClients` and any remaining loopback bindings flip
-in separate changes.
+**Done means:** every non-loopback Postgres backend shows TLS in `pg_stat_ssl`, both databases
+refuse plaintext at `pg_hba`, a `helm test` pins both, and the HTTP hops have a retired-table row.
 
 ---
 
-## 7 · The migration chain folds back into the baseline, and the codebase is audited
+## 7 · The playback feature is reviewed end to end
+
+**Builds on:** [`playback_worker.py`](../ingestion/playback_worker.py) · [`capture.py`](../ingestion/capture.py) ·
+[`capture_worker.py`](../ingestion/capture_worker.py) · [`playback.yaml`](../deploy/helm/acs-cymru/templates/apps/playback.yaml) ·
+the Capture page and [its help](../frontend/src/help/capture.md) ·
+[`ingestion/README.md`](../ingestion/README.md#broker-capture-and-playback) ·
+[`supabase/README.md`](../supabase/README.md#capture-and-playback-orchestration-0055-0056-0057-0058-0060)
+
+**Built:** recording from the daemon into `broker-captures`; the job queue and `Service_Playback`;
+the seeded Playback gateway with shadow devices as lanes; credential delivery rather than minting;
+identity rewriting and timestamp rebasing; the Capture page; and three unit suites
+(`test_capture_playback.py`, `test_capture_worker.py`, `test_playback_credentials.py`).
+
+**Why a review rather than a fix list.** The feature was built across a dozen migrations and three
+incidents (the bucket that was never created, the credential nothing had issued, two publishers on
+one edge node), each fixed where it surfaced. Nothing has since walked the whole path from "Start a
+recording" to a replayed frame in the historian and asked whether every step is still the design.
+Two gaps are already known. The worker is off by default and nothing turns it on: not CI, not the
+k3d loop, not the stack lane, so the only exercise it gets is the three unit suites. And it has no
+NetworkPolicy edge and sits outside the policy's component map, so with policy on it is neither
+allowed nor denied: it can reach everything.
+
+**The review covers:** the end-to-end path on the k3d cluster with the worker on, including
+in-cluster broker TLS; the confinement claims (the target's own account, no wildcard write, shadow
+devices as lanes) re-checked against the Dynamic Security roles rather than the ACL file they were
+written against; quarantine's approval step inside a first playback; what the Capture page shows
+when a job fails past CONNECT, since QoS 0 leaves a publisher nothing to observe; the RLS and role
+boundaries of `Service_Playback` and the capture bucket; and the worker's own comments and README
+sections, which predate the comment rule in `CONTRIBUTING.md`. A finding that is one change is
+fixed here; the rest become issues.
+
+**Must not touch:** the worker never mints a credential (delivery is the platform's; minting stays
+human and audited); a capture cannot be played back as itself; the Playback gateway stays visible;
+a stand-down NCMD stays rejected.
+
+**Done means:** a finding per step of the path, each confirmed, fixed or filed; the worker runs in
+the k3d loop and one conformance check replays a fixture through it; playback has a policy edge and
+a component entry; and the feature's README sections describe what is built.
+
+---
+
+## 8 · The documentation, code and comments are audited against the codebase
+
+**Builds on:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) (the comment rule, and where argument and
+history go) · `scripts/check-docs-drift.mjs` · `scripts/check-mirror-drift.mjs` ·
+[`docs/incidents.md`](incidents.md)
+
+**Built:** the comment rule, and the rewrite that applied it to the chart values, the gateway, the
+active migrations, the frontend, the edge functions and the check scripts; the drift checker, which
+pins the README's component table, every workflow job, every help page and the other claims it
+lists; and the retired-entries table above, where an entry's substance lands when it ships.
+
+**The gap** is three kinds of staleness the checker cannot see. Prose that describes a design since
+replaced: Compose is gone, and "Compose", "both targets" and "the divergence table" survive across
+the tree outside the incident log. Comments that argue history where the rule wants the constraint:
+the Python suites, the rest of `ingestion.py`, the i3X server, the capture, playback and cold-archive
+modules, the broker and setup scripts, and the Helm templates. Rules and tests guarding what
+nothing renders, which the Site Map work found in the stylesheet. And claims the checker could
+verify but does not, which is how the other kinds return.
+
+**Decided.** One sweep per surface, not one pass over everything, and a surface is done when its
+non-comment lines are unchanged (AST minus docstrings for Python, data equality for YAML, stripped
+text for the rest) and its prose names nothing that is not in the tree. Argument and history move
+to the component README or `docs/incidents.md`; they are not deleted. Nothing cites a roadmap
+number. Every claim found that the checker could verify gets a check, so the audit leaves a guard
+rather than a snapshot. The files under `deploy/helm/acs-cymru/files/` are mirrors: the source is
+edited and the sync script run.
+
+**Must not touch:** `supabase/migrations/archive/` (a historical record, not executed) and
+`supabase/config.toml` (the Supabase CLI's stock file).
+
+**Done means:** nothing outside `docs/incidents.md` and the README's history names Compose or a
+second target; every surface above has had its sweep with the non-comment comparison clean; the
+drift checker holds more claims than it does today; and `CONTRIBUTING.md` records the sweep's
+method so the next one starts from it.
+
+---
+
+## 9 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)
@@ -426,12 +516,6 @@ database that could receive it has. Two rules found the hard way carry in: a fil
 function states its own `REVOKE ... FROM PUBLIC, anon` rather than leaning on `0001`'s sweeper,
 which runs earlier and corrects the ACL one boot late; and no file re-asserts an absolute set that
 a later file widens. Constraints are added guarded, never dropped and re-added.
-
-**The audit** is scoped to what the Site Map work exposed, one sweep per surface: help pages and
-README rows that describe a design since replaced; stylesheet rules and the tests guarding them
-that nothing renders; comments that argue history rather than state the present, moved to the
-README or `incidents.md` they belong in; and every claim the drift checker could verify but does
-not yet, made checkable.
 
 **Done means:** a fresh boot and a second boot pass every self-check; every database suite passes
 on the throwaway cluster; the drift check is clean; and the chain is the baseline plus a tail

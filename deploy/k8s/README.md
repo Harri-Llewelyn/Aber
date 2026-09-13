@@ -382,12 +382,16 @@ browser-only — which is what makes an internal CA cheap here.
 with the same credential as on 1883, and TLS stops that credential crossing the plant network in
 clear text and lets the gateway verify it is talking to the real broker.
 
-**1883 stays open, deliberately.** A fleet converts gateway by gateway; flipping the broker to
-TLS-only takes every gateway offline at once and the whole plant re-registers. The order is:
+**1883 stays open while anything dials it.** A fleet converts gateway by gateway; flipping the
+broker to TLS-only takes every gateway offline at once and the whole plant re-registers. The order
+is:
 
-1. `mosquitto.tls.enabled=true` — 8883 appears, 1883 keeps working
+1. `mosquitto.tls.enabled=true` — 8883 appears, 1883 keeps working, and every in-cluster client
+   moves to 8883 at once (`tls.internalClients`, on by default)
 2. move gateways across one at a time
-3. `mosquitto.external.plaintext=false` — withdraws 1883 from the *external* Service only
+3. `mosquitto.external.plaintext=false` — withdraws 1883 from the external Service. Nothing outside
+   the broker's pod dials 1883 now, so the listener binds to loopback for the two sidecars and the
+   in-cluster Service drops the port; the assemble-config log line says so
 4. narrow `networkPolicy.mqttAllowedCidrs`
 
 #### The one thing that will go wrong: SANs
@@ -416,13 +420,14 @@ successful.
 
 #### In-cluster clients
 
-`mosquitto.tls.internalClients=true` moves the ingestion daemon and Node-RED onto 8883 as well. Off
-by default: they reach the broker over the pod network, which never leaves the cluster, so this is
-defence in depth rather than the exposure TLS was added for. The CA is projected into both pods
-**`ca.crt` only** — `mosquitto-tls` is a `kubernetes.io/tls` Secret and also holds the broker's
-private key, which neither client has any business holding.
+`mosquitto.tls.internalClients` moves every in-cluster client onto 8883 as well: the ingestion
+daemon, i3X, Node-RED, playback and the e2e validator. On by default once TLS is on, so the pod
+network carries no broker credential in clear either. One helper sets the host, port and CA path for
+all five, and one NetworkPolicy variable moves their edges, so none can be left behind on 1883. The
+CA is projected into each pod **`ca.crt` only** — `mosquitto-tls` is a `kubernetes.io/tls` Secret
+and also holds the broker's private key, which no client has any business holding.
 
-Both clients **fail closed**: if the CA is missing or unreadable they refuse to start rather than
+Every client **fails closed**: if the CA is missing or unreadable it refuses to start rather than
 fall back to plaintext or to unverified TLS.
 
 ---
@@ -707,7 +712,8 @@ kubectl -n acs-cymru get networkpolicy
 kubectl -n acs-cymru describe networkpolicy acs-cymru-egress-supabase-db
 # Prove it from inside the source pod, which distinguishes DNS from connectivity:
 kubectl -n acs-cymru exec deploy/ingestion -- getent hosts mosquitto
-kubectl -n acs-cymru exec deploy/ingestion -- timeout 5 sh -c 'echo > /dev/tcp/mosquitto/1883' && echo reachable
+# python, not `sh -c 'echo > /dev/tcp/...'`: the image's sh is dash, which has no /dev/tcp
+kubectl -n acs-cymru exec deploy/ingestion -- python -c "import socket; socket.create_connection(('mosquitto', 8883), 5)" && echo reachable
 ```
 
 **If everything goes unready the moment you enable it**, your CNI does not exempt kubelet probes from

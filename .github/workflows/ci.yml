@@ -671,8 +671,8 @@ jobs:
           print("NetworkPolicies are symmetric and cover every load-bearing flow.")
           PY
 
-      # The same property with broker TLS on: `mosquitto.tls.internalClients` moves ingestion and
-      # Node-RED to 8883 and must move their edges too. A second render because the port is a
+      # The same property with broker TLS on: `mosquitto.tls.internalClients` moves every in-cluster
+      # client to 8883 and must move their edges too. A second render because the port is a
       # render-time choice.
       - name: Verify NetworkPolicies Follow The Broker Onto TLS
         run: |
@@ -708,7 +708,7 @@ jobs:
               errors.append(f"egress allowed but ingress missing: {flow[0]} -> {flow[1]}:{flow[2]}")
           for flow in sorted(ingress - egress):
               errors.append(f"ingress allowed but egress missing: {flow[0]} -> {flow[1]}:{flow[2]}")
-          for src in ('ingestion', 'node-red'):
+          for src in ('ingestion', 'node-red', 'i3x-service', 'e2e-validate'):
               if (src, 'mosquitto', 8883) not in egress:
                   errors.append(f"::error::{src} -> mosquitto:8883 missing with internalClients on")
               if (src, 'mosquitto', 1883) in egress:
@@ -725,6 +725,44 @@ jobs:
                   print(e if e.startswith('::error::') else f"::error::{e}")
               sys.exit(1)
           print(f"  in-cluster clients on 8883, external allows {sorted(ext)}; policies symmetric.")
+          PY
+
+      # The end state for plaintext 1883: with every in-cluster client on 8883 and the external
+      # Service no longer publishing it, nothing outside the broker's pod dials it. The listener
+      # binds to loopback and the in-cluster Service and the container stop declaring the port.
+      - name: Verify Plaintext 1883 Withdraws To Loopback
+        run: |
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml \
+            --set networkPolicy.enabled=true \
+            --set mosquitto.tls.enabled=true \
+            --set 'mosquitto.tls.extraIpSans={10.0.0.9}' \
+            --set mosquitto.external.plaintext=false \
+            > /tmp/broker-end.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/broker-end.yaml', encoding='utf-8')) if d]
+          errors = []
+          svc = next(d for d in docs if d['kind'] == 'Service' and d['metadata']['name'] == 'mosquitto')
+          ports = {p['port'] for p in svc['spec']['ports']}
+          if 1883 in ports:
+              errors.append(f"the in-cluster Service still publishes 1883 in the end state; ports {sorted(ports)}")
+          if 8883 not in ports:
+              errors.append(f"the in-cluster Service lost 8883; ports {sorted(ports)}")
+          dep = next(d for d in docs if d['kind'] == 'Deployment' and d['metadata']['name'] == 'mosquitto')
+          pod = dep['spec']['template']['spec']
+          broker = next(c for c in pod['containers'] if c['name'] == 'mosquitto')
+          if any(p['containerPort'] == 1883 for p in broker.get('ports') or []):
+              errors.append("the broker container still declares containerPort 1883 in the end state")
+          init = next(c for c in pod['initContainers'] if c['name'] == 'assemble-config')
+          script = init['command'][-1]
+          if 'listener 1883 127.0.0.1' not in script:
+              errors.append("assemble-config does not rebind 1883 to loopback in the end state")
+          if errors:
+              for e in errors:
+                  print(f"::error::{e}")
+              sys.exit(1)
+          print("  1883 withdrawn to loopback: not on the Service, not on the container, rebound by assemble-config.")
           PY
 
       # An OAuth client's registered redirect_uri must match the callback byte for byte; GoTrue

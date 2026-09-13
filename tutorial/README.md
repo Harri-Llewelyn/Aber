@@ -109,7 +109,9 @@ it is the more realistic one for hardware somebody else configured; see
 The Node-RED editor opens empty. What you need is one broker connection and enough of the Sparkplug
 B lifecycle to be recognised:
 
-1. Add an **mqtt-broker** config node pointing at `mosquitto:1883`.
+1. Add an **mqtt-broker** config node pointing at `mosquitto:1883`. With broker TLS on, the chart
+   moves every broker node to 8883 with the CA on the next start, so leave the port as the chart
+   sets it.
 2. Give it the username and password from step 4. Set them as an env pair on the Node-RED pod and
    name that pair in the broker node's `acsCredentialsEnv` property — `node-red-init` reconciles env
    pairs onto broker nodes at init, which is what keeps the secret out of the flow file and out of
@@ -225,7 +227,7 @@ default.
 | Field | Value |
 | :--- | :--- |
 | Server | `mosquitto` (the Service name, from inside the cluster), or `localhost` from the host with `npm run dev:forward` |
-| Port | `1883` (TCP) / `9001` (WebSocket) |
+| Port | `1883` (TCP) / `9001` (WebSocket); `8883` with TLS, which the chart sets on every broker node when broker TLS is on |
 | Client ID | `node-red-simulator` |
 | Protocol | MQTT v3.1.1 |
 | Auth | Username/password — `allow_anonymous false` |

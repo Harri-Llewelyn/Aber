@@ -82,12 +82,11 @@ spec:
             */}}
             - name: LOG_FORMAT
               value: "json"
+            {{- /* Host, port and TLS follow `mosquitto.tls.internalClients` with every other
+                   in-cluster client; the CA projection below is the same one. */}}
+            {{- include "acs-cymru.brokerClientEnv" . | nindent 12 }}
             {{- /*
-              NO MQTT_HOST OR MQTT_PORT, matching ingestion.yaml: `mosquitto` on 1883 is
-              playback_worker.py's default and is the in-cluster Service name, so setting them
-              would only create a second place for the two targets to disagree.
-
-              NO MQTT_USER OR MQTT_PASSWORD EITHER, and that is not an omission. This worker has no
+              NO MQTT_USER OR MQTT_PASSWORD, and that is not an omission. This worker has no
               broker account of its own: it authenticates AS THE TARGET GATEWAY, username equal to
               that gateway's sparkplug_id, which is what lets `spBv1.0/+/+/<sparkplug_id>/#`
               confine it with no ACL change at all. The passwords are below, one per gateway.

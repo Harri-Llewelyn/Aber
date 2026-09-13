@@ -335,14 +335,14 @@ mosquitto:
     # ==========================================================================================
     extraIpSans:
       - 10.0.0.50
-    # Defence in depth for the pod network. Off in the chart's defaults because the in-cluster
-    # clients never cross a plant boundary; on here because in production they should not have to be
-    # trusted to. Both clients FAIL CLOSED if the CA is unreadable.
+    # The chart's default, stated: every in-cluster client verifies the broker over 8883 and FAILS
+    # CLOSED if the CA is unreadable.
     internalClients: true
   external:
     # LEAVE THIS TRUE UNTIL EVERY GATEWAY IS ON 8883. Setting it false withdraws plaintext 1883 from
     # the external Service, and a Sparkplug device that cannot connect looks, at the dashboard,
-    # exactly like one that is switched off. Migrate the fleet first, then flip it.
+    # exactly like one that is switched off. Migrate the fleet first, then flip it. Once flipped,
+    # with internalClients above, the broker's 1883 listener binds to loopback: the end state.
     plaintext: true
   metrics:
     # Runs an exporter sidecar subscribing to $SYS -- Mosquitto has no HTTP metrics surface of its
