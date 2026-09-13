@@ -341,7 +341,8 @@ mosquitto:
   external:
     # LEAVE THIS TRUE UNTIL EVERY GATEWAY IS ON 8883. Setting it false withdraws plaintext 1883 from
     # the external Service, and a Sparkplug device that cannot connect looks, at the dashboard,
-    # exactly like one that is switched off. Migrate the fleet first, then flip it.
+    # exactly like one that is switched off. Migrate the fleet first, then flip it. Once flipped,
+    # with internalClients above, the broker's 1883 listener binds to loopback: the end state.
     plaintext: true
   metrics:
     # Runs an exporter sidecar subscribing to $SYS -- Mosquitto has no HTTP metrics surface of its

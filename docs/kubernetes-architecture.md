@@ -803,9 +803,9 @@ Port 1883 is raw TCP. Shopfloor gateways connect to it directly.
   machine running both targets.
 - **9001** (MQTT over WebSockets) *can* ride the Ingress and should, on `mqtt.<domain>`.
 
-The broker is plaintext with password auth on 1883. Once it is reachable on a LoadBalancer IP rather
-than a Docker host port, TLS on 8883 stops being optional — the MQTTS listener in §10.5 is that
-answer, and it is opt-in.
+1883 is plaintext with password auth. Reachable on a LoadBalancer IP, TLS on 8883 stops being
+optional — the MQTTS listener in §10.5 is that answer. With it on, the in-cluster clients move to
+8883 by default, and once `external.plaintext` is withdrawn the 1883 listener binds to loopback.
 
 ### 7.3 The callback URL is in the database
 

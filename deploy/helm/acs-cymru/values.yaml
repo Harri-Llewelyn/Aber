@@ -656,8 +656,9 @@ mosquitto:
     tlsNodePort: null
     # Empty means whatever the cluster assigns. Added to the certificate's IP SANs when TLS is on.
     loadBalancerIP: ""
-    # Publish plaintext 1883 externally. Set false only once every gateway is on 8883; the
-    # in-cluster listener is unaffected.
+    # Publish plaintext 1883 externally. Set false only once every gateway is on 8883. With this
+    # false and `tls.internalClients` on, nothing outside the broker's pod dials 1883 and the
+    # listener binds to loopback.
     plaintext: true
   resources:
     requests: { cpu: 50m, memory: 64Mi }

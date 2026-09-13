@@ -11,6 +11,10 @@
 {{- $libDynsec := .Files.Get "files/gateway-credential-lib/mosquitto-dynsec.mjs" -}}
 {{- $libControl := .Files.Get "files/gateway-credential-lib/mosquitto-control.mjs" -}}
 {{- $tls := .Values.mosquitto.tls -}}
+{{- /* True once no client outside this pod dials 1883: every in-cluster client is on 8883 and the
+     external Service no longer publishes it. The listener then binds to loopback, for the two
+     sidecars that share the pod's network namespace, and the in-cluster Service drops the port. */ -}}
+{{- $plaintextLoopback := and $tls.enabled $tls.internalClients (or (not .Values.mosquitto.external.enabled) (not .Values.mosquitto.external.plaintext)) -}}
 {{- $dataClaim := .Values.mosquitto.persistence.existingClaim | default (printf "%s-mosquitto-data" $fullname) -}}
 {{- if and $tls.enabled (not $tlsConf) }}
 {{- fail "\n\nacs-cymru: mosquitto.tls.enabled is set but files/mosquitto/mosquitto-tls.conf is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render rather than silently omitting the listener: the Service would publish 8883, the\nNetworkPolicy would allow it, the certificate would be issued -- and nothing would be listening on\nit. Every gateway would fail to connect against a stack that reports entirely healthy.\n" }}
@@ -215,8 +219,7 @@ data:
 apiVersion: v1
 kind: Service
 metadata:
-  # THE NAME IS `mosquitto`: the ingestion daemon and Node-RED's broker node both address it as
-  # `mosquitto:1883`.
+  # THE NAME IS `mosquitto`: every in-cluster client addresses the broker by it.
   name: mosquitto
   labels:
     {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
@@ -225,15 +228,16 @@ spec:
   selector:
     {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
-    # 1883 is NEVER removed from the in-cluster Service, even with TLS on. The ingestion daemon and
-    # Node-RED both reach the broker over the pod network, which does not cross a plant boundary, and
-    # forcing them onto TLS would mean the CA bundle becoming a hard dependency of two workloads that
-    # gain nothing from it. `mosquitto.external.plaintext: false` is how 1883 stops being published
-    # OUTSIDE -- which is the exposure that matters.
+    {{- if not $plaintextLoopback }}
+    # Published while any client outside the broker's pod still dials it: the in-cluster clients
+    # until `tls.internalClients`, the fleet until `external.plaintext` is withdrawn. With both
+    # gone the listener is on loopback and the port is dropped here, so `kubectl get svc` states
+    # what is reachable.
     - name: mqtt
       port: 1883
       targetPort: mqtt
       protocol: TCP
+    {{- end }}
     - name: mqtt-ws
       port: 9001
       targetPort: mqtt-ws
@@ -342,8 +346,9 @@ spec:
         # The TLS stanza is in the checksum for exactly that reason: turning `tls.enabled` on ADDS A
         # LISTENER, which SIGHUP cannot do. Without it here, enabling TLS would update the ConfigMap,
         # leave the running broker with no 8883, and present as "the port is published but refuses
-        # connections" -- with the ConfigMap showing the listener plainly declared.
-        checksum/policy: {{ printf "%s%s%s" $conf $roles (ternary $tlsConf "" $tls.enabled) | sha256sum }}
+        # connections" -- with the ConfigMap showing the listener plainly declared. The loopback
+        # rebind of 1883 is a listener change too, so its flag is in the checksum for the same reason.
+        checksum/policy: {{ printf "%s%s%s%s" $conf $roles (ternary $tlsConf "" $tls.enabled) (ternary "loopback" "" $plaintextLoopback) | sha256sum }}
         checksum/scripts: {{ printf "%s%s%s%s%s" $init $service $libCredentials $libDynsec $libControl | sha256sum }}
         {{- if .Values.mosquitto.metrics.enabled }}
         # The exporter sidecar; the broker itself has no HTTP surface.
@@ -435,6 +440,19 @@ spec:
               # that the listener was added and that the files were present when it was.
               echo "Appended the MQTTS listener (8883); certificate present at /mosquitto/certs/tls.crt."
               {{- end }}
+              {{- if $plaintextLoopback }}
+
+              # No client outside this pod dials 1883 any more: every in-cluster client is on 8883
+              # and the external Service no longer publishes it. Bind it to loopback for the two
+              # sidecars that share the pod's network namespace. Refuse to start if the line was
+              # not found: a listener silently left on 0.0.0.0 is the state this exists to end.
+              sed -i 's/^listener 1883 0\.0\.0\.0$/listener 1883 127.0.0.1/' /mosquitto/config/mosquitto.conf
+              if ! grep -q '^listener 1883 127\.0\.0\.1$' /mosquitto/config/mosquitto.conf; then
+                echo 'mosquitto.conf has no `listener 1883 0.0.0.0` line to bind to loopback.' >&2
+                exit 1
+              fi
+              echo "Bound the plaintext listener (1883) to loopback: no client outside this pod dials it."
+              {{- end }}
               echo "Assembled broker config."
 
               # The plugin's document. An empty legacy key is not a file to import.
@@ -470,9 +488,11 @@ spec:
           imagePullPolicy: {{ .Values.mosquitto.image.pullPolicy }}
           args: ["/usr/sbin/mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
           ports:
+            {{- if not $plaintextLoopback }}
             - name: mqtt
               containerPort: 1883
               protocol: TCP
+            {{- end }}
             - name: mqtt-ws
               containerPort: 9001
               protocol: TCP
@@ -641,7 +661,8 @@ spec:
               value: {{ .Values.mosquitto.credentials.secretName | quote }}
             - name: ACS_CYMRU_NAMESPACE
               value: {{ .Release.Namespace | quote }}
-            # Loopback: the broker is in this pod, and 1883 is never removed from its listeners.
+            # Loopback: the broker is in this pod, and 1883 always listens there whatever the
+            # Services publish.
             - name: MQTT_HOST
               value: "127.0.0.1"
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_CREDENTIAL_SERVICE_TOKEN" "secretName" $secretName "key" "MQTT_CREDENTIAL_SERVICE_TOKEN") | nindent 12 }}
@@ -693,8 +714,8 @@ spec:
           IT CONNECTS OVER PLAINTEXT 1883 ON LOOPBACK even when MQTTS is enabled. Sharing the pod's
           network namespace, the traffic never leaves the pod, so there is nothing for TLS to
           protect here -- and pointing it at 8883 would make it verify a certificate whose SANs
-          name the Service, not `127.0.0.1`, for no gain. 1883 is never removed from the broker's
-          own listeners (see mosquitto.conf), so this arm is always available.
+          name the Service, not `127.0.0.1`, for no gain. 1883 always listens on loopback, whatever
+          the Services publish (see mosquitto.conf), so this arm is always available.
 
           THE METRICS ARE PREFIXED `broker_`, NOT `mosquitto_`. Alerts written against the latter
           match nothing, silently.
