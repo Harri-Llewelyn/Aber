@@ -1,0 +1,81 @@
+{{- if .Values.postgresTls.enabled }}
+{{- $tls := .Values.postgresTls -}}
+{{- $fullname := include "acs-cymru.fullname" . -}}
+{{/*
+TLS to the databases: a cert-manager Certificate per database, and the pg_hba each serves.
+
+The SANs are the Service names every client dials, in each of their forms, plus
+`postgresTls.extraDnsSans` for anything that dials the database by another name (the dev loop's
+port-forward dials `localhost`). A client that verifies against a name not in this list fails
+its handshake with a hostname mismatch the server does not log.
+
+The pg_hba files keep each image's local and loopback lines, so the probes, the reload sidecar
+and a shell in the pod work as before, and replace the network lines: `hostnossl ... reject`
+first, so a client that forgets its mode is told the file rejected it rather than that no line
+matched, then `hostssl` with password authentication.
+*/}}
+{{- range $db := list "supabase-db" "timescaledb" }}
+{{- if ternary $.Values.supabaseDb.enabled $.Values.timescaledb.enabled (eq $db "supabase-db") }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ printf "%s-%s-tls" $fullname $db }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" $ "component" $db) | nindent 4 }}
+spec:
+  secretName: {{ include "acs-cymru.dbTlsSecretName" $db }}
+  duration: {{ $tls.duration }}
+  renewBefore: {{ $tls.renewBefore }}
+  # A server certificate: clients verify the server, and authenticate with their password.
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    encoding: PKCS1
+    rotationPolicy: Always
+  commonName: {{ $db }}
+  dnsNames:
+    - {{ $db }}
+    - {{ printf "%s.%s" $db $.Release.Namespace }}
+    - {{ printf "%s.%s.svc" $db $.Release.Namespace }}
+    - {{ printf "%s.%s.svc.cluster.local" $db $.Release.Namespace }}
+    {{- range $tls.extraDnsSans }}
+    - {{ . | quote }}
+    {{- end }}
+  issuerRef:
+    name: {{ $tls.clusterIssuer }}
+    kind: {{ $tls.issuerKind }}
+    group: cert-manager.io
+{{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-postgres-tls" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" "supabase-db") | nindent 4 }}
+data:
+  # The supabase/postgres image's own local and loopback lines, then the network on TLS only.
+  supabase-db.pg_hba.conf: |
+    local     all  supabase_admin                trust
+    local     all  all                           peer map=supabase_map
+    host      all  all             127.0.0.1/32  trust
+    host      all  all             ::1/128       trust
+    hostnossl all  all             all           reject
+    hostssl   all  all             all           scram-sha-256
+  # The stock postgres entrypoint's lines, then the network on TLS only.
+  timescaledb.pg_hba.conf: |
+    local     all          all                     trust
+    host      all          all       127.0.0.1/32  trust
+    host      all          all       ::1/128       trust
+    local     replication  all                     trust
+    host      replication  all       127.0.0.1/32  trust
+    host      replication  all       ::1/128       trust
+    hostnossl all          all       all           reject
+    hostssl   all          all       all           scram-sha-256
+{{- end }}

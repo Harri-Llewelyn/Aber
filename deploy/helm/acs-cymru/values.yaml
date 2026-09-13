@@ -274,6 +274,23 @@ supabaseDb:
   tolerations: []
   affinity: {}
 
+# TLS between every service and the two databases. Off by default for the broker's reason: it
+# needs cert-manager and a ClusterIssuer the chart cannot create (deploy/k8s/internal-ca.yaml).
+# On, each database is issued a certificate naming its Service, serves TLS, refuses plaintext
+# from anything but loopback at pg_hba, and every client verifies the certificate against the CA
+# (`verify-full`). There is no unverified mode.
+postgresTls:
+  enabled: false
+  clusterIssuer: acs-cymru-ca
+  issuerKind: ClusterIssuer
+  # 90 days with 30 days' notice. Postgres re-reads its certificate on a reload, which the
+  # reload sidecar in each database pod sends, so a renewal does not restart the server.
+  duration: 2160h
+  renewBefore: 720h
+  watchIntervalSeconds: 15
+  # Names clients dial beyond the Service names. The dev loop's port-forward dials `localhost`.
+  extraDnsSans: []
+
 # ---------------------------------------------------------------------------------------------
 # Realtime
 # ---------------------------------------------------------------------------------------------
