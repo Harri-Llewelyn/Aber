@@ -381,30 +381,40 @@ backup now, so a deleted repository is recoverable from one for as long as the b
 [`datasources.template.yml`](../grafana/provisioning/datasources/datasources.template.yml)
 
 **Built:** default-deny NetworkPolicy from one edge list (opt-in), an internal CA outside the
-chart, TLS on the Ingress and the broker's 8883 listener, per-gateway broker roles, the `apikey` gate, the
-database ports and the metrics endpoints on loopback, and no skip-verification setting anywhere.
+chart, TLS on the Ingress and the broker's 8883 listener, every in-cluster broker client on 8883 by
+default with plaintext 1883 withdrawing to loopback once the fleet has moved, per-gateway broker
+roles, the `apikey` gate, the database ports and the metrics endpoints on loopback, and no
+skip-verification setting anywhere.
 
-**The gap is what is on the wire.** NetworkPolicy answers *who*; every internal hop is plaintext:
-`sslmode=disable` on GoTrue's DSN, the PostgREST DSN the chart builds and both Grafana datasources,
-and HTTP between the gateway and every upstream. The Postgres links carry scoped credentials and
-every row.
+**The gap is what is on the wire.** NetworkPolicy answers *who*; the Postgres hops are plaintext,
+and neither database offers TLS at all: `sslmode=disable` on GoTrue's DSN, the PostgREST DSN the
+chart builds and both Grafana datasources, and every other client with no setting. Those links
+carry scoped credentials and every row.
 
-**In order of cost.** Turn on `mosquitto.tls.internalClients` / `MQTT_TLS_ENABLED`, which moves
-ingestion, i3X and Node-RED to 8883 together and fails closed; the work is making it the supported
-posture, not the switch. Then Postgres: `verify-full` needs certificates naming the Service the
-client dials, which cert-manager issues. Then an end state for plaintext 1883, which is
-deliberate today for the fleet migration window.
+**Decided.** `verify-full`, not `require`: `require` verifies nothing, which is the
+skip-verification setting this entry forbids by another name. Every client stack in the chart can
+reach it (libpq, pgx, node-postgres, the Grafana datasource, `postgres_fdw`); a client that cannot
+is a named exception, not the fleet's ceiling. Enforced server-side too, `hostssl` only, so a
+client that forgets the setting is refused rather than silently plaintext. cert-manager is a
+prerequisite of the supported posture, as it already is for the broker; `tls.enabled=false` per
+subsystem is a no-TLS mode, never an unverified one. HTTP between the gateway and its upstreams
+stays plaintext for 1.0: none of them terminates TLS itself, so that hop is a TLS sidecar per pod,
+which is a service mesh, and a service mesh is the complete answer. It leaves as answered, not built.
+
+**The work.** One Certificate per database on the broker's pattern, SANs on the Service names and
+the reload sidecar; `ssl=on` and `hostssl`; then every client, including the `postgres_fdw` server
+options in the baseline migration and the dev loop's port-forward, whose `localhost` needs the
+`extraDnsSans` knob the broker has.
 
 **Client certificates on the gateway link** are not planned: 4 decides that a gateway holds no
 certificate, because the dynsec password and the pinned root already give identity, confinement and
 a revocation that disconnects, and `crlfile` revocation needs a reload.
 
 **Must not touch:** per-gateway broker confinement, the origin policy's single home in `envoy.yaml`, the root's
-residence outside the chart, and the absence of a skip-verification switch. A service mesh is the
-complete answer.
+residence outside the chart, and the absence of a skip-verification switch.
 
-**Worth deciding early.** `require` or `verify-full` for Postgres. `internalClients` and any remaining loopback bindings flip
-in separate changes.
+**Done means:** every non-loopback Postgres backend shows TLS in `pg_stat_ssl`, both databases
+refuse plaintext at `pg_hba`, a `helm test` pins both, and the HTTP hops have a retired-table row.
 
 ---
 
