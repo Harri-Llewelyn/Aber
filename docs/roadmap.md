@@ -20,9 +20,8 @@ moves out, and the table below says where it went.
 **Ordering.** 1 and 2 are the platform's own: the one item somebody else sets the deadline for,
 then the rehearsal that turns the backup into a capability. 3–5 are the edge chain, in dependency
 order: 3 makes a gateway's flow reviewable, 4 makes the appliance a managed artefact and shares
-3's puller, 5 removes what 3 replaced. 6 runs under every other item. 7 is a rename and sits
-second to last because nothing depends on it. 8 is last by rule: it folds the migration chain, so
-every entry that changes the schema must have landed before it.
+3's puller, 5 removes what 3 replaced. 6 runs under every other item. 7 is last by rule: it
+folds the migration chain, so every entry that changes the schema must have landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -46,6 +45,7 @@ every entry that changes the schema must have landed before it.
 | The ISA-95 Unified Namespace bridge (`0097`) | [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) for the bridge; [`supabase/README.md`](../supabase/README.md#the-plant-gains-areas-and-a-third-scope-0097) for the areas, the site setting and the `area_wide` scope |
 | Microsoft Entra ID sign-in | Not built, and not needed for 1.0: a could-have, reopened as [#183](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/183). Every decision the entry had taken is in the request |
 | Multi-factor authentication | Not built, and not needed for 1.0: a could-have, reopened as [#184](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/184). The `0069` role split it waited on has shipped; the rest is in the request |
+| Cells become work centers | Answered, not built: a cell is itself one of ISA-95's work center types, so the standard's name is given where the hierarchy is named rather than replacing the word. [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) records the decision; each page's help Summary names its ISA-95 level |
 
 ---
 
@@ -408,32 +408,7 @@ in separate changes.
 
 ---
 
-## 7 · Cells become work centers
-
-**Builds on:** `public.cells` and everything that names it · `public.areas` (`0097`) ·
-[The Unified Namespace](../ingestion/README.md#the-unified-namespace) ·
-[`CONTRIBUTING.md`](../CONTRIBUTING.md)
-
-The stack's data model uses plant words where the standards have their own: a `cell` is an ISA-95
-work center, and the Areas page and the `uns/` topics were the first surfaces to use the standard's
-word deliberately. The remaining inconsistency is the table, its API routes, its permission
-(`cell:manage`), its proposal lane, the `CELL` thread kind and the word on every page.
-
-**`devices` stays.** A device is Sparkplug's word and the row is a Sparkplug device; "work unit" is
-the ISA-95 view of the same row and appears only where the hierarchy is being named. ISA-95 also
-uses "cell" at both levels (a process cell is a work center type, a work cell a work unit type), so
-the rename resolves an ambiguity the standard itself carries.
-
-**Decided:** the rename is a migration and a sweep, not a synonym layer. A view named `cells` over
-`work_centers` would give the frontend two names for one thing, which is the state this entry
-exists to remove. The migration is additive-then-subtractive across two releases so the frontend
-and the edge functions can move between them; the `cell:manage` permission UUID is immutable and
-only its name changes. `sparkplug_id` and every topic are untouched: a cell is not addressed on the
-wire.
-
-**Must not touch:** the `uns/` topic shape, which already uses the cell's name and not the table's.
-
-## 8 · The migration chain folds back into the baseline, and the codebase is audited
+## 7 · The migration chain folds back into the baseline, and the codebase is audited
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)
