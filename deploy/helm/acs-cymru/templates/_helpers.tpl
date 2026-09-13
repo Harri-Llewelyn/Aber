@@ -744,9 +744,148 @@ pin it.
 {{/* Kong, as reached from INSIDE the cluster. The browser-facing address is publicUrls.supabase. */}}
 {{- define "acs-cymru.supabase.internalUrl" -}}http://supabase-kong:8000{{- end -}}
 
+{{/* ---------------------------------------------------------------------------------------- */}}
+{{/* TLS to the databases (`postgresTls`)                                                     */}}
+{{/*                                                                                            */}}
+{{/* Both databases are issued by the same issuer, so one CA verifies either. Clients project    */}}
+{{/* `ca.crt` alone from the Supabase database's Secret (the historian's when Supabase is off), */}}
+{{/* for the reason the broker's projection gives: the Secret also holds the server's key.       */}}
+{{/* ---------------------------------------------------------------------------------------- */}}
+
+{{- define "acs-cymru.dbTlsSecretName" -}}{{ printf "%s-tls" . }}{{- end -}}
+{{- define "acs-cymru.dbCaSecretName" -}}
+{{- ternary "supabase-db-tls" "timescaledb-tls" .Values.supabaseDb.enabled -}}
+{{- end -}}
+{{- define "acs-cymru.dbCaPath" -}}/etc/acs-cymru/db-ca/ca.crt{{- end -}}
+
+{{/* Each of these renders nothing while TLS is off, so a caller adds them to an existing list
+     unconditionally and only wraps a list that would otherwise be empty. */}}
+{{- define "acs-cymru.dbClientCaVolume" -}}
+{{- if .Values.postgresTls.enabled }}
+- name: db-ca
+  secret:
+    secretName: {{ include "acs-cymru.dbCaSecretName" . }}
+    defaultMode: 0444
+    items:
+      - key: ca.crt
+        path: ca.crt
+{{- end }}
+{{- end -}}
+
+{{- define "acs-cymru.dbClientCaMount" -}}
+{{- if .Values.postgresTls.enabled }}
+- name: db-ca
+  mountPath: /etc/acs-cymru/db-ca
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{/* libpq's own variables. psql, pg_dump, psycopg2 and PostgREST all read them, so no client
+     needs a flag of its own; absent, libpq negotiates nothing and the server offers nothing. */}}
+{{- define "acs-cymru.dbClientTlsEnv" -}}
+{{- if .Values.postgresTls.enabled }}
+- name: PGSSLMODE
+  value: verify-full
+- name: PGSSLROOTCERT
+  value: {{ include "acs-cymru.dbCaPath" . }}
+{{- end }}
+{{- end -}}
+
+{{/* The DSN tail for the clients that spell the mode in their URL (GoTrue, PostgREST). */}}
+{{- define "acs-cymru.dsnSslParams" -}}
+{{- if .Values.postgresTls.enabled -}}
+sslmode=verify-full&sslrootcert={{ include "acs-cymru.dbCaPath" . }}
+{{- else -}}
+sslmode=disable
+{{- end -}}
+{{- end -}}
+
+{{/* The CA as PEM in an environment variable, which is how storage-api and postgres-meta take
+     it. Public material, so the variable is fine. Usage: (dict "ctx" . "name" "DATABASE_SSL_ROOT_CERT") */}}
+{{- define "acs-cymru.dbCaPemEnv" -}}
+{{- if .ctx.Values.postgresTls.enabled }}
+- name: {{ .name }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "acs-cymru.dbCaSecretName" .ctx }}
+      key: ca.crt
+{{- end }}
+{{- end -}}
+
+{{/*
+The certificate reload sidecar for a database pod. cert-manager renews the leaf in place and
+nothing restarts a StatefulSet for it; Postgres re-reads its certificate files on a reload, so
+this watches the mounted certificate and asks for one over loopback, which pg_hba trusts.
+Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "postgres" "db" "postgres")
+*/}}
+{{- define "acs-cymru.dbCertificateReload" -}}
+- name: certificate-reload
+  image: {{ .image | quote }}
+  imagePullPolicy: {{ .pullPolicy }}
+  command:
+    - /bin/sh
+    - -c
+    - |
+      lastcert=$(md5sum < /etc/acs-cymru/postgres/tls/tls.crt)
+      while :; do
+        sleep {{ .ctx.Values.postgresTls.watchIntervalSeconds }}
+        nowcert=$(md5sum < /etc/acs-cymru/postgres/tls/tls.crt)
+        [ "$nowcert" = "$lastcert" ] && continue
+        lastcert="$nowcert"
+        echo "database certificate changed (renewal); reloading"
+        if psql -h 127.0.0.1 -U {{ .user }} -d {{ .db }} -tAc 'SELECT pg_reload_conf()' >/dev/null; then
+          echo "reloaded; the renewed certificate is served"
+        else
+          echo "reload failed; the server keeps the old certificate until its next reload" >&2
+        fi
+      done
+  volumeMounts:
+    - name: tls
+      mountPath: /etc/acs-cymru/postgres/tls
+      readOnly: true
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 64Mi }
+{{- end -}}
+
+{{/* The server-side settings, as `-c` flags appended to each image's own command. */}}
+{{- define "acs-cymru.dbTlsServerArgs" -}}
+- -c
+- ssl=on
+- -c
+- ssl_cert_file=/etc/acs-cymru/postgres/tls/tls.crt
+- -c
+- ssl_key_file=/etc/acs-cymru/postgres/tls/tls.key
+- -c
+- hba_file=/etc/acs-cymru/postgres/pg_hba.conf
+{{- end -}}
+
+{{/* The server-side mounts and volumes. `tls` is the cert-manager Secret, 0440 so the key is
+     group-readable by the database user (fsGroup) and world-readable by nobody; Postgres
+     accepts a root-owned key at that mode. `hba` is the chart's pg_hba.conf. */}}
+{{- define "acs-cymru.dbTlsServerMounts" -}}
+- name: tls
+  mountPath: /etc/acs-cymru/postgres/tls
+  readOnly: true
+- name: hba
+  mountPath: /etc/acs-cymru/postgres/pg_hba.conf
+  subPath: {{ printf "%s.pg_hba.conf" .db }}
+  readOnly: true
+{{- end -}}
+
+{{- define "acs-cymru.dbTlsServerVolumes" -}}
+- name: tls
+  secret:
+    secretName: {{ include "acs-cymru.dbTlsSecretName" .db }}
+    defaultMode: 0440
+- name: hba
+  configMap:
+    name: {{ printf "%s-postgres-tls" (include "acs-cymru.fullname" .ctx) }}
+{{- end -}}
+
 {{/*
 DSN builder. Usage:
-  {{ include "acs-cymru.dsn" (dict "user" "authenticator" "password" $pw "host" "supabase-db" "port" 5432 "db" "postgres" "params" "sslmode=disable") }}
+  {{ include "acs-cymru.dsn" (dict "user" "authenticator" "password" $pw "host" "supabase-db" "port" 5432 "db" "postgres" "params" (include "acs-cymru.dsnSslParams" .)) }}
 The password is urlquery-escaped: a generated password containing @ or / silently truncates the
 DSN at the wrong character and the failure reads as a bad hostname.
 */}}

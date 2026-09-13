@@ -555,7 +555,7 @@ jobs:
           # The posture the file exists to carry. These are not incidental -- each is a setting
           # that appears in this file and nowhere else in the repository, so nothing else would
           # notice if the chart stopped honouring it.
-          for want in 'kind: Ingress' 'cert-manager.io/cluster-issuer' 'kind: ServiceMonitor'; do
+          for want in 'kind: Ingress' 'cert-manager.io/cluster-issuer' 'kind: ServiceMonitor' 'secretName: supabase-db-tls' 'secretName: timescaledb-tls'; do
             grep -q "$want" /tmp/prod-render.yaml || {
               echo "::error::the production example rendered no '$want'."
               echo "::error::That posture is what this file is FOR, so losing it silently is the"
@@ -763,6 +763,138 @@ jobs:
                   print(f"::error::{e}")
               sys.exit(1)
           print("  1883 withdrawn to loopback: not on the Service, not on the container, rebound by assemble-config.")
+          PY
+
+      # TLS to the databases: with postgresTls on, each database gets a Certificate, its pg_hba
+      # admits the network on TLS only, every client that opens a connection carries the CA one
+      # way or another, and no `sslmode=disable` survives the render.
+      - name: Verify TLS To The Databases Renders Closed
+        run: |
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml \
+            --set postgresTls.enabled=true \
+            --set e2e.enabled=true --set coldArchive.enabled=true \
+            --set backup.enabled=true --set backupService.enabled=true \
+            > /tmp/db-tls.yaml
+          # The nightly CronJob renders only when the backup service does not, so it gets a
+          # render of its own; the clients check reads both.
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml \
+            --set postgresTls.enabled=true \
+            --set backup.enabled=true --set backupService.enabled=false \
+            > /tmp/db-tls-cron.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/db-tls.yaml', encoding='utf-8')) if d]
+          cron = [d for d in yaml.safe_load_all(open('/tmp/db-tls-cron.yaml', encoding='utf-8')) if d and d['kind'] == 'CronJob']
+          errors = []
+          certs = {d['metadata']['name'] for d in docs if d['kind'] == 'Certificate'}
+          for want in ('acs-cymru-supabase-db-tls', 'acs-cymru-timescaledb-tls'):
+              if want not in certs:
+                  errors.append(f"no Certificate {want}; the render has {sorted(certs)}")
+          cm = next((d for d in docs if d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'acs-cymru-postgres-tls'), None)
+          if cm is None:
+              errors.append("no acs-cymru-postgres-tls ConfigMap (the pg_hba files)")
+          else:
+              for key, hba in cm['data'].items():
+                  rules = [l.split() for l in hba.splitlines() if l.strip() and not l.lstrip().startswith('#')]
+                  for r in rules:
+                      if r[0] == 'host' and r[3] not in ('127.0.0.1/32', '::1/128'):
+                          errors.append(f"{key}: a plaintext `host` line admits {r[3]}")
+                  if not any(r[0] == 'hostnossl' and r[-1] == 'reject' for r in rules):
+                      errors.append(f"{key}: no `hostnossl ... reject` line")
+                  if not any(r[0] == 'hostssl' and r[-1] == 'scram-sha-256' for r in rules):
+                      errors.append(f"{key}: no `hostssl ... scram-sha-256` line")
+          if 'sslmode=disable' in open('/tmp/db-tls.yaml', encoding='utf-8').read():
+              errors.append("`sslmode=disable` survives the render with postgresTls on")
+          for db in ('supabase-db', 'timescaledb'):
+              sts = next(d for d in docs if d['kind'] == 'StatefulSet' and d['metadata']['name'] == db)
+              spec = sts['spec']['template']['spec']
+              main = next(c for c in spec['containers'] if c['name'] == db)
+              args = main.get('args') or []
+              for flag in ('ssl=on', 'hba_file=/etc/acs-cymru/postgres/pg_hba.conf'):
+                  if flag not in args:
+                      errors.append(f"{db} does not start with -c {flag}")
+              if not any(c['name'] == 'certificate-reload' for c in spec['containers']):
+                  errors.append(f"{db} has no certificate-reload sidecar")
+          # Not TLS, but the same file: the key script that keeps the root key on the volume. Vault
+          # and pgsodium each read their own setting; a recreated pod mints a new key for whichever
+          # is missing, and Vault is the one that holds secrets.
+          sb = next(d for d in docs if d['kind'] == 'StatefulSet' and d['metadata']['name'] == 'supabase-db')
+          sb_args = next(c for c in sb['spec']['template']['spec']['containers'] if c['name'] == 'supabase-db').get('args') or []
+          for guc in ('pgsodium.getkey_script', 'vault.getkey_script'):
+              if f'{guc}=/etc/acs-cymru/postgres/pgsodium_getkey.sh' not in sb_args:
+                  errors.append(f"supabase-db does not point {guc} at the chart's key script; a recreated pod would mint a new root key")
+          # Every workload that opens a database connection carries the CA one way or another.
+          MARKERS = ('PGSSLROOTCERT', 'DATABASE_SSL_ROOT_CERT', 'PG_META_DB_SSL_ROOT_CERT', 'DB_SSL_CA_CERT', 'sslrootcert=',
+                     'db-ca/ca.crt')  # Grafana: the datasource file names the mounted CA
+          CLIENTS = ('supabase-auth', 'supabase-rest', 'supabase-storage', 'supabase-meta', 'supabase-realtime',
+                     'grafana', 'ingestion', 'backup-service', 'acs-cymru-db-init', 'acs-cymru-db-roles-init',
+                     'acs-cymru-timescaledb-maintenance', 'acs-cymru-cold-archive', 'acs-cymru-backup',
+                     'acs-cymru-e2e-validate', 'acs-cymru-test-fdw', 'acs-cymru-test-db-tls')
+          def pod_spec(d):
+              k = d['kind']
+              if k in ('Deployment', 'StatefulSet', 'Job'): return d['spec']['template']['spec']
+              if k == 'CronJob': return d['spec']['jobTemplate']['spec']['template']['spec']
+              return d['spec']
+          workloads = {d['metadata']['name']: d for d in docs + cron if d['kind'] in ('Deployment', 'StatefulSet', 'Job', 'CronJob', 'Pod')}
+          for name in CLIENTS:
+              d = workloads.get(name)
+              if d is None:
+                  errors.append(f"expected workload {name} is not in the render")
+                  continue
+              blob = yaml.safe_dump(pod_spec(d))
+              if not any(m in blob for m in MARKERS):
+                  errors.append(f"{name} opens a database connection but carries no CA (none of {MARKERS})")
+          if errors:
+              for e in errors:
+                  print(f"::error::{e}")
+              sys.exit(1)
+          print(f"  both databases on TLS with hostssl-only pg_hba; {len(CLIENTS)} clients carry the CA; no sslmode=disable.")
+          PY
+
+      # Helm stores every release as one Secret holding the chart archive and the rendered
+      # manifest, and a Secret may not exceed 1 MiB. This chart is close to it: revision 19 on
+      # the dev cluster was refused on 2026-09-13 for a few kilobytes. The estimate below encodes
+      # the chart and the manifest the way Helm does (base64 inside JSON, then gzip) and reads
+      # about 0.75 of the real payload, so the thresholds are on the estimate. Trimming the chart
+      # archive is what recovers headroom: templates' comment blocks ship in it even though they
+      # render to nothing, and files/ ships twice (once in the archive, once in the manifest).
+      - name: Verify The Release Fits Helm's Secret
+        run: |
+          python3 - <<'PY'
+          import base64, fnmatch, gzip, json, os, sys
+          chart = 'deploy/helm/acs-cymru'
+          rules = [l.strip() for l in open(os.path.join(chart, '.helmignore'), encoding='utf-8')
+                   if l.strip() and not l.startswith('#')]
+          def ignored(rel):
+              parts = rel.split('/')
+              for r in rules:
+                  r = r.rstrip('/')
+                  if r.startswith('/'):
+                      if fnmatch.fnmatch(rel, r[1:]): return True
+                  elif any(fnmatch.fnmatch(p, r) for p in parts) or fnmatch.fnmatch(rel, r):
+                      return True
+              return False
+          templates, files = [], []
+          for root, _, names in os.walk(chart):
+              for n in names:
+                  p = os.path.join(root, n)
+                  rel = os.path.relpath(p, chart).replace(os.sep, '/')
+                  if n == '.helmignore' or ignored(rel): continue
+                  data = base64.b64encode(open(p, 'rb').read()).decode()
+                  (templates if rel.startswith('templates/') else files).append({'name': rel, 'data': data})
+          release = {'chart': {'templates': templates, 'files': files},
+                     'manifest': open('/tmp/db-tls.yaml', encoding='utf-8').read()}
+          est = len(gzip.compress(json.dumps(release).encode(), 9))
+          real = int(est * 1.332)  # revision 19 on the dev cluster: 775527 estimated, 1033188 stored
+          print(f"  estimated release payload {est} bytes (about {real} once Helm encodes it; the ceiling is 1048576)")
+          if est > 785000:
+              print("::error::the release would exceed Helm's 1 MiB Secret ceiling: helm upgrade will be refused with "
+                    "'Secret ... is invalid: data: Too long'. Trim the chart archive (see the comment on this step).")
+              sys.exit(1)
+          if est > 770000:
+              print("::warning::the release is within two percent of Helm's 1 MiB Secret ceiling.")
           PY
 
       # An OAuth client's registered redirect_uri must match the callback byte for byte; GoTrue

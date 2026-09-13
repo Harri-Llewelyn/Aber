@@ -370,10 +370,11 @@ handshake happens in the browser.** A user who learns to click through a warning
 mid-login has been trained to dismiss precisely the warning that would tell them they were being
 intercepted. This is not cosmetic.
 
-Nothing server-side needs the root: every service-to-service hop stays on plaintext HTTP over
-in-cluster Service names (`token_url`, `api_url`, `NODERED_URL`, and the pg_net webhook all do), so
-there is no CA bundle to inject into Grafana, Node-RED or the edge runtime. The TLS edge is
-browser-only — which is what makes an internal CA cheap here.
+Server-side, the root reaches the broker's clients and the database clients (both below) and
+nothing else: every HTTP hop between services stays on plaintext over in-cluster Service names
+(`token_url`, `api_url`, `NODERED_URL`, and the pg_net webhook all do), so Grafana, Node-RED and
+the edge runtime carry no CA bundle for HTTP. That hop is a service mesh's to close, and the
+roadmap records it as answered rather than built.
 
 ### MQTTS on 8883
 
@@ -429,6 +430,60 @@ and also holds the broker's private key, which no client has any business holdin
 
 Every client **fails closed**: if the CA is missing or unreadable it refuses to start rather than
 fall back to plaintext or to unverified TLS.
+
+### TLS to the databases
+
+`postgresTls.enabled` puts both databases on TLS from the same issuer, and every client on
+`verify-full`. Off by default for the broker's reason: cert-manager and a ClusterIssuer are
+prerequisites the chart cannot create. There is no `require` mode and no skip-verification
+switch: `require` encrypts without verifying, which is the setting this chart does not offer.
+
+**The server side.** Each database gets a cert-manager Certificate whose SANs are its Service name
+in every form (`supabase-db`, `supabase-db.<ns>`, `.svc`, `.svc.cluster.local`) plus
+`postgresTls.extraDnsSans`. The chart appends `-c ssl=on`, the certificate paths and
+`-c hba_file=` to each image's own command; the mounted `pg_hba.conf` keeps the image's local and
+loopback lines and replaces the network lines with `hostnossl ... reject` then
+`hostssl ... scram-sha-256`, so a client that forgets its mode is refused by the file rather than
+left on plaintext. A `certificate-reload` sidecar in each database pod watches the mounted
+certificate and calls `pg_reload_conf()` over loopback on renewal; Postgres re-reads its
+certificate on reload, so a renewal does not restart the server.
+
+**The clients.** One CA verifies both databases, projected **`ca.crt` only** from the Supabase
+database's certificate Secret. libpq clients (psql, pg_dump, psycopg2, PostgREST) read
+`PGSSLMODE=verify-full` and `PGSSLROOTCERT`; GoTrue and storage-api spell the same in their URL
+(storage-api has a PEM variable of its own, but its pg-boss queue ignores it and only the URL
+reaches every client); postgres-meta takes the CA as PEM in an environment variable; the Grafana
+datasources take `sslmode: verify-full` with `sslRootCertFile`; and the `postgres_fdw` server the
+baseline migration creates carries `sslmode` and `sslrootcert` as options, the CA path being the
+one the Supabase server itself mounts. Studio opens no connection of its own.
+
+**Realtime is the one named exception.** Its own pool takes the CA as a file (`DB_SSL_CA_CERT`)
+and verifies under OTP 27's client default. Its per-tenant connections follow the tenant row's
+`ssl_enforced`, which the image's seed hardcodes false and which, when true, gives Postgrex
+`verify: :verify_none` with no CA option (measured against v2.102.3). The chart mounts a copy of
+that seed with `ssl_enforced` taken from `DB_SSL`, so the tenant link is encrypted but not verified
+by the client. A tag bump must re-copy the seed.
+
+**Two things this exposed.** A provisioned Grafana datasource with a `version:` in its file is
+never updated once the stored version is higher, which is after the first edit; the datasource
+files carry no version now. And the `supabase/postgres` image kept the Vault root key in the
+container, so the first pod recreation broke Vault until db-init re-seeded it
+(`docs/incidents.md`); the chart now points both `pgsodium.getkey_script` and
+`vault.getkey_script` at a script that keeps the key on the data volume.
+
+**The dev loop** reaches both databases through port-forwards on `localhost`, so
+`values-dev.yaml` adds that name to the SANs and `npm run dev:test` writes the CA to a file and
+sets the two libpq variables for validate.py and the stack lane. Those two forwards are one per
+connection: a libpq session over TLS ends with a TCP reset that containerd treats as fatal to the
+whole port-forward session, so a forward shared by a run died at its first disconnect
+(`openRelay` in `scripts/dev-cluster.mjs`). A forwarded connection arrives on the pod's own
+loopback, which pg_hba trusts as the image always has, so the forward itself enforces neither TLS
+nor the password: the proof of enforcement is the in-cluster test below, and a forward is kubectl
+access, which already reads the Secret.
+
+**Proof.** `helm test` runs `test-db-tls`: a plaintext attempt against each database must be
+rejected by pg_hba, a `verify-full` session must report TLS in `pg_stat_ssl`, and no backend from
+beyond loopback may be without it.
 
 ---
 

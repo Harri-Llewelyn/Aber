@@ -113,9 +113,22 @@ both directions, rather than by observing that it still passes.
 
 ## The pgsodium root key lived in the container, not the volume
 
-**Where the fix lives:** `docker-compose.yml`, the `supabase_db_config` volume on `supabase-db`.
+**Where the fix lives:** the `pgsodium_getkey.sh` ConfigMap in
+`deploy/helm/acs-cymru/templates/data/supabase-db-statefulset.yaml`, named by both
+`-c pgsodium.getkey_script` and `-c vault.getkey_script`; it keeps the key on the data volume.
 **Symptom:** after `docker compose down` and `up`, migration `0006` failed with
-`pgsodium_crypto_aead_det_decrypt_by_id: invalid ciphertext` and `supabase-db-init` exited 3.
+`pgsodium_crypto_aead_det_decrypt_by_id: invalid ciphertext` and `supabase-db-init` exited 3. On
+Kubernetes the same happened on 2026-09-13 the first time a chart change recreated the
+`supabase-db` pod: the ingestion daemon's quarantine writes failed with that error for the ten
+seconds between the pod coming up and db-init re-seeding Vault, and the conformance run, which had
+started on the previous revision's bootstrap flag, reported three quarantine checks failed. The
+Compose-era fix was a volume at `/etc/postgresql-custom`; the chart never had one.
+
+The first chart fix named only `pgsodium.getkey_script`, and the error came back the same day
+after a Docker restart replaced the container: `supabase_vault` 0.3.1 carries its own copy of the
+key loader behind `vault.getkey_script`, whose value in the image's `postgresql.conf` is still the
+image's script. pgsodium had loaded the volume's key and Vault a fresh one minted in the new
+container, and Vault is the one that holds the secrets. `SHOW vault.getkey_script` is the check.
 
 `pgsodium_getkey.sh` in the `supabase/postgres` image reads `/etc/postgresql-custom/pgsodium_root.key`
 and **generates a fresh one when the file is absent**. Without a volume at that path the key was

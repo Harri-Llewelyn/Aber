@@ -42,6 +42,31 @@ spec:
       targetPort: postgres
       protocol: TCP
 ---
+{{/*
+The root key script, in place of the image's, for pgsodium and for Vault (each has its own
+setting naming it). The image's reads and, when absent, mints
+`/etc/postgresql-custom/pgsodium_root.key` in the container's own filesystem, so every recreated
+pod started with a new key and every Vault row written under the old one stopped decrypting
+until db-init re-seeded it. This one keeps the key on the data volume beside the cluster it
+protects. Runs as the server's user, which owns that directory.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-supabase-db-scripts" (include "acs-cymru.fullname" .) }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  pgsodium_getkey.sh: |
+    #!/bin/sh
+    set -eu
+    KEY_FILE=/var/lib/postgresql/data/pgsodium_root.key
+    if [ ! -s "$KEY_FILE" ]; then
+      head -c 32 /dev/urandom | od -A n -t x1 | tr -d ' \n' > "$KEY_FILE"
+      chmod 0600 "$KEY_FILE"
+    fi
+    cat "$KEY_FILE"
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -64,6 +89,11 @@ spec:
     metadata:
       labels:
         {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      {{- if .Values.postgresTls.enabled }}
+      annotations:
+        # pg_hba and the TLS flags are read at start, so a change to either rolls the pod.
+        checksum/tls: {{ include (print $.Template.BasePath "/data/postgres-tls.yaml") . | sha256sum }}
+      {{- end }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -76,6 +106,22 @@ spec:
         - name: supabase-db
           image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
           imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
+          # The image's own command, plus the settings its files get wrong for a pod: the root key
+          # script (the image's keeps the key in the container, so a recreated pod cannot decrypt
+          # Vault; docs/incidents.md) and, with TLS on, ssl=on and the hba_file. `-c` overrides
+          # each without displacing the file. Vault reads its own setting, not pgsodium's: both
+          # name the script, or Vault keeps the image's key and pgsodium the volume's.
+          args:
+            - postgres
+            - -D
+            - /etc/postgresql
+            - -c
+            - pgsodium.getkey_script=/etc/acs-cymru/postgres/pgsodium_getkey.sh
+            - -c
+            - vault.getkey_script=/etc/acs-cymru/postgres/pgsodium_getkey.sh
+            {{- if .Values.postgresTls.enabled }}
+            {{- include "acs-cymru.dbTlsServerArgs" . | nindent 12 }}
+            {{- end }}
           ports:
             - name: postgres
               containerPort: 5432
@@ -163,6 +209,24 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: scripts
+              mountPath: /etc/acs-cymru/postgres/pgsodium_getkey.sh
+              subPath: pgsodium_getkey.sh
+              readOnly: true
+            {{- if .Values.postgresTls.enabled }}
+            {{- include "acs-cymru.dbTlsServerMounts" (dict "db" "supabase-db") | nindent 12 }}
+            {{- end }}
+        {{- if .Values.postgresTls.enabled }}
+        {{- include "acs-cymru.dbCertificateReload" (dict "ctx" . "image" (printf "%s:%s" .Values.supabaseDb.image.repository .Values.supabaseDb.image.tag) "pullPolicy" .Values.supabaseDb.image.pullPolicy "user" "postgres" "db" "postgres") | nindent 8 }}
+        {{- end }}
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ printf "%s-supabase-db-scripts" (include "acs-cymru.fullname" .) }}
+            defaultMode: 0755
+        {{- if .Values.postgresTls.enabled }}
+        {{- include "acs-cymru.dbTlsServerVolumes" (dict "ctx" . "db" "supabase-db") | nindent 8 }}
+        {{- end }}
       {{- with .Values.supabaseDb.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

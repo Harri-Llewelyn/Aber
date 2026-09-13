@@ -143,3 +143,9 @@ supabaseDb:
       memory: 256Mi
     limits:
       memory: 2Gi
+
+# The dev loop reaches both databases through port-forwards on `localhost`, which the certificate
+# has to name for a host-side client to verify it. `npm run dev:up` turns the TLS itself on.
+postgresTls:
+  extraDnsSans:
+    - localhost

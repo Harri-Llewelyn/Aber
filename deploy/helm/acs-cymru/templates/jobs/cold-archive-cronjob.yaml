@@ -54,6 +54,7 @@ spec:
                 - --drop
                 {{- end }}
               env:
+                {{- with include "acs-cymru.dbClientTlsEnv" . }}{{ . | nindent 16 }}{{- end }}
                 - name: LOG_FORMAT
                   value: "json"
                 - name: DB_HOST
@@ -75,4 +76,12 @@ spec:
                   value: "1"
               resources:
                 {{- toYaml .Values.coldArchive.resources | nindent 16 }}
+              {{- if .Values.postgresTls.enabled }}
+              volumeMounts:
+                {{- include "acs-cymru.dbClientCaMount" . | nindent 16 }}
+              {{- end }}
+          {{- if .Values.postgresTls.enabled }}
+          volumes:
+            {{- include "acs-cymru.dbClientCaVolume" . | nindent 12 }}
+          {{- end }}
 {{- end }}

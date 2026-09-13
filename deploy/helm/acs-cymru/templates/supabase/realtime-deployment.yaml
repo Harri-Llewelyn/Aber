@@ -109,6 +109,18 @@ spec:
               value: postgres
             - name: DB_AFTER_CONNECT_QUERY
               value: "SET search_path TO _realtime"
+            {{- if .Values.postgresTls.enabled }}
+            # Realtime's own pool takes the CA as a file and verifies the server against it
+            # (OTP 27's client default). Its per-tenant connections are another matter: they
+            # follow the tenant row's `ssl_enforced`, which the image's seed hardcodes false and
+            # which, when true, gives Postgrex `verify: :verify_none` with no CA option at all.
+            # The seed is overridden below so the tenant encrypts; that link is the one client in
+            # the chart that cannot verify the server.
+            - name: DB_SSL
+              value: "true"
+            - name: DB_SSL_CA_CERT
+              value: {{ include "acs-cymru.dbCaPath" . }}
+            {{- end }}
             {{- include "acs-cymru.secretEnv" (dict "name" "DB_ENC_KEY" "secretName" $secretName "key" "REALTIME_DB_ENC_KEY") | nindent 12 }}
             # Must be the same secret Kong, PostgREST and GoTrue verify with, or every subscriber
             # is rejected at the socket handshake.
@@ -190,4 +202,90 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.realtime.resources | nindent 12 }}
+          {{- if .Values.postgresTls.enabled }}
+          volumeMounts:
+            {{- include "acs-cymru.dbClientCaMount" . | nindent 12 }}
+            # The seed with `ssl_enforced` taken from DB_SSL, over the image's copy. The path
+            # carries the release version, so a tag bump must keep this in step.
+            - name: seeds
+              mountPath: {{ printf "/app/lib/realtime-%s/priv/repo/seeds.exs" (trimPrefix "v" .Values.realtime.image.tag) }}
+              subPath: seeds.exs
+              readOnly: true
+          {{- end }}
+      {{- if .Values.postgresTls.enabled }}
+      volumes:
+        {{- include "acs-cymru.dbClientCaVolume" . | nindent 8 }}
+        - name: seeds
+          configMap:
+            name: {{ printf "%s-realtime-seeds" (include "acs-cymru.fullname" .) }}
+      {{- end }}
+{{- if .Values.postgresTls.enabled }}
+---
+{{/*
+The image's priv/repo/seeds.exs (v2.102.3) with one change: `ssl_enforced` comes from DB_SSL
+instead of being false. SEED_SELF_HOST runs this on every start, deleting and recreating the
+tenant, so a row updated any other way would not survive a restart. Re-copy on a tag bump.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-realtime-seeds" (include "acs-cymru.fullname" .) }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  seeds.exs: |
+    require Logger
+
+    import Ecto.Adapters.SQL, only: [query: 3]
+
+    alias Realtime.Api.Tenant
+    alias Realtime.Repo
+    alias Realtime.Tenants
+
+    tenant_name = System.get_env("SELF_HOST_TENANT_NAME", "realtime-dev")
+    default_db_host = "host.docker.internal"
+
+    {:ok, tenant} =
+      Repo.transaction(fn ->
+        case Repo.get_by(Tenant, external_id: tenant_name) do
+          %Tenant{} = tenant -> Repo.delete!(tenant)
+          nil -> {:ok, nil}
+        end
+
+        %Tenant{}
+        |> Tenant.changeset(%{
+          "name" => tenant_name,
+          "external_id" => tenant_name,
+          "jwt_secret" => System.get_env("API_JWT_SECRET", "super-secret-jwt-token-with-at-least-32-characters-long"),
+          "jwt_jwks" => System.get_env("API_JWT_JWKS") |> then(fn v -> if v, do: Jason.decode!(v) end),
+          "extensions" => [
+            %{
+              "type" => "postgres_cdc_rls",
+              "settings" => %{
+                "db_name" => System.get_env("DB_NAME", "postgres"),
+                "db_host" => System.get_env("DB_HOST", default_db_host),
+                "db_user" => System.get_env("DB_USER", "supabase_admin"),
+                "db_password" => System.get_env("DB_PASSWORD", "postgres"),
+                "db_port" => System.get_env("DB_PORT", "5433"),
+                "region" => "us-east-1",
+                "poll_interval_ms" => 100,
+                "poll_max_record_bytes" => 1_048_576,
+                "ssl_enforced" => System.get_env("DB_SSL", "false") == "true"
+              }
+            }
+          ]
+        })
+        |> Repo.insert!()
+      end)
+
+    tenant = Tenants.get_tenant_by_external_id(tenant_name)
+
+    with res when res in [:noop, :ok] <- Tenants.Migrations.run_migrations(tenant),
+         :ok <- Tenants.Janitor.MaintenanceTask.run(tenant.external_id) do
+      Logger.info("Tenant set-up successfully")
+    else
+      error ->
+        Logger.info("Failed to set-up tenant: #{inspect(error)}")
+    end
+{{- end }}
 {{- end }}

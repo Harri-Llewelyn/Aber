@@ -74,7 +74,7 @@ spec:
                   name: {{ $secretName }}
                   key: POSTGRES_PASSWORD
             - name: PGRST_DB_URI
-              value: "postgres://authenticator:$(POSTGRES_PASSWORD)@{{ include "acs-cymru.supabaseDb.host" . }}:{{ include "acs-cymru.supabaseDb.port" . }}/postgres"
+              value: "postgres://authenticator:$(POSTGRES_PASSWORD)@{{ include "acs-cymru.supabaseDb.host" . }}:{{ include "acs-cymru.supabaseDb.port" . }}/postgres?{{ include "acs-cymru.dsnSslParams" . }}"
             # `storage` is exposed because storage-api resolves the caller's claims through
             # PostgREST; `graphql_public` because the Supabase client expects it to exist.
             - name: PGRST_DB_SCHEMAS
@@ -139,4 +139,12 @@ spec:
             failureThreshold: 4
           resources:
             {{- toYaml .Values.supabaseRest.resources | nindent 12 }}
+          {{- if .Values.postgresTls.enabled }}
+          volumeMounts:
+            {{- include "acs-cymru.dbClientCaMount" . | nindent 12 }}
+          {{- end }}
+      {{- if .Values.postgresTls.enabled }}
+      volumes:
+        {{- include "acs-cymru.dbClientCaVolume" . | nindent 8 }}
+      {{- end }}
 {{- end }}

@@ -118,11 +118,26 @@ SELECT CASE WHEN btrim(:'ts_fdw_user') = '' THEN :'ts_user'     ELSE :'ts_fdw_us
          AS ts_fdw_password
 \gset
 
+-- The link to the historian is verified when the chart serves TLS: db-init passes the CA's path on
+-- THIS server's filesystem and the mode follows. Empty means the chart runs without TLS, and the
+-- link negotiates nothing.
+\if :{?ts_sslrootcert}
+\else
+  \set ts_sslrootcert ''
+\endif
+SELECT btrim(:'ts_sslrootcert') <> '' AS ts_tls,
+       CASE WHEN btrim(:'ts_sslrootcert') = '' THEN 'prefer' ELSE 'verify-full' END AS ts_sslmode
+\gset
+
 DROP SERVER IF EXISTS timescaledb_server CASCADE;
 
 CREATE SERVER timescaledb_server
   FOREIGN DATA WRAPPER postgres_fdw
-  OPTIONS (host :'ts_host', port :'ts_port', dbname :'ts_dbname');
+  OPTIONS (host :'ts_host', port :'ts_port', dbname :'ts_dbname', sslmode :'ts_sslmode');
+
+\if :ts_tls
+  ALTER SERVER timescaledb_server OPTIONS (ADD sslrootcert :'ts_sslrootcert');
+\endif
 
 -- `postgres` keeps its own mapping for admin access. A second mapping FOR PUBLIC covers every
 -- other local role, since the view runs security_invoker and each querying role needs its own

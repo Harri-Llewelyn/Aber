@@ -48,6 +48,7 @@ spec:
       env:
         {{- include "acs-cymru.secretEnv" (dict "name" "PGPASSWORD" "secretName" (include "acs-cymru.secretName" .) "key" "POSTGRES_PASSWORD") | nindent 8 }}
         {{- include "acs-cymru.secretEnv" (dict "name" "TSPASSWORD" "secretName" (include "acs-cymru.secretName" .) "key" "DB_PASSWORD") | nindent 8 }}
+        {{- with include "acs-cymru.dbClientTlsEnv" . }}{{ . | nindent 8 }}{{- end }}
       command:
         - /bin/sh
         - -e
@@ -105,4 +106,12 @@ spec:
       resources:
         requests: { cpu: 50m, memory: 64Mi }
         limits: { memory: 256Mi }
+      {{- if .Values.postgresTls.enabled }}
+      volumeMounts:
+        {{- include "acs-cymru.dbClientCaMount" . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.postgresTls.enabled }}
+  volumes:
+    {{- include "acs-cymru.dbClientCaVolume" . | nindent 4 }}
+  {{- end }}
 {{- end }}

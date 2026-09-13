@@ -318,6 +318,12 @@ ingress:
       # domain is genuinely public -- ACME cannot validate an internal one at all.
       clusterIssuer: acs-cymru-ca
 
+# TLS to both databases, from the same issuer. Every client verifies the server; each database
+# refuses plaintext from anything but its own loopback.
+postgresTls:
+  enabled: true
+  clusterIssuer: acs-cymru-ca
+
 mosquitto:
   tls:
     enabled: true

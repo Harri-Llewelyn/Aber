@@ -79,6 +79,7 @@ spec:
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           env:
             {{- include "acs-cymru.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            {{- with include "acs-cymru.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
           command:
             - /bin/sh
             - -c
@@ -99,12 +100,17 @@ spec:
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }
+          {{- if .Values.postgresTls.enabled }}
+          volumeMounts:
+            {{- include "acs-cymru.dbClientCaMount" . | nindent 12 }}
+          {{- end }}
       containers:
         - name: maintenance
           image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           env:
             {{- include "acs-cymru.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            {{- with include "acs-cymru.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
             {{- /*
               From the Secret, not interpolated into the command at render time: a password in the
               rendered manifest is readable by anyone who can `helm get manifest`, and it would
@@ -203,6 +209,7 @@ spec:
               $PSQL -f /sql/cold_archive.sql
               {{- end }}
           volumeMounts:
+            {{- with include "acs-cymru.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
             - name: sql
               mountPath: /sql
               readOnly: true
@@ -210,6 +217,7 @@ spec:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { memory: 256Mi }
       volumes:
+        {{- with include "acs-cymru.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
         - name: sql
           configMap:
             name: {{ printf "%s-timescaledb-maintenance" $fullname }}

@@ -114,7 +114,11 @@ spec:
                   name: {{ $secretName }}
                   key: POSTGRES_PASSWORD
             - name: DATABASE_URL
-              value: "postgres://supabase_storage_admin:$(POSTGRES_PASSWORD)@{{ include "acs-cymru.supabaseDb.host" . }}:{{ include "acs-cymru.supabaseDb.port" . }}/postgres"
+              # The mode and the CA in the URL, not in DATABASE_SSL_ROOT_CERT: storage-api applies
+              # that variable to its pool and its migrations but not to the pg-boss job queue it
+              # opens at start, which then connects in plaintext and is refused. node-postgres
+              # reads `sslrootcert` from the URL for every client, the queue included.
+              value: "postgres://supabase_storage_admin:$(POSTGRES_PASSWORD)@{{ include "acs-cymru.supabaseDb.host" . }}:{{ include "acs-cymru.supabaseDb.port" . }}/postgres?{{ include "acs-cymru.dsnSslParams" . }}"
             # Storage evaluates RLS on storage.objects by impersonating the caller's role, so it
             # needs the same PostgREST the rest of the stack uses to resolve the JWT's claims.
             - name: POSTGREST_URL
@@ -169,9 +173,11 @@ spec:
           resources:
             {{- toYaml .Values.supabaseStorage.resources | nindent 12 }}
           volumeMounts:
+            {{- with include "acs-cymru.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
             - name: data
               mountPath: /var/lib/storage
       volumes:
+        {{- with include "acs-cymru.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
         - name: data
           {{- if and .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") }}
           persistentVolumeClaim:
