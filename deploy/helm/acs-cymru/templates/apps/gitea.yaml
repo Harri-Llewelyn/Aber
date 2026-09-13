@@ -4,8 +4,7 @@ THE FORGE CONFIGURATION, DEFINED ONCE BECAUSE TWO CONTAINERS BUILD FROM IT.
 Gitea assembles /data/gitea/conf/app.ini from these `GITEA__section__KEY` variables, and BOTH the
 init container and the server run that assembly -- the init container because no `gitea` subcommand
 will run without a config file. A variable set on one and not the other means the account is created
-in one database and the server opens another, with nothing reporting a fault. docker-compose.yml
-shares the same block through a YAML anchor, for the same reason.
+in one database and the server opens another, with nothing reporting a fault.
 */}}
 {{- define "acs-cymru.giteaEnv" -}}
 - name: USER_UID
@@ -32,7 +31,7 @@ shares the same block through a YAML anchor, for the same reason.
 
      ASSERTED FALSE rather than omitted: environment-to-ini MERGES into the app.ini
      already on the volume, so a key written by an earlier revision survives every
-     later one that stops mentioning it. Compose carries the same note. */}}
+     later one that stops mentioning it. */}}
 - name: GITEA__server__START_SSH_SERVER
   value: "false"
 {{/* THE PORT AND HOST A CLONE URL ADVERTISES, which are the EXTERNAL Service's and not
@@ -64,8 +63,8 @@ shares the same block through a YAML anchor, for the same reason.
 - name: GITEA__repository__DEFAULT_PRIVATE
   value: private
 # THE LOGIN, WHICH IS THE GATEWAY'S `forge` LISTENER AND NOT GITEA'S OWN. The argument and the
-# measurements are on the same lines in docker-compose.yml; this block matches it line for line.
-# The one thing the Kubernetes shape has to add is the NetworkPolicy edge list: the identity
+# measurements are in supabase/README.md (the forge). What this adds is the NetworkPolicy edge
+# list: the identity
 # header is trusted from ANY peer (REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For only,
 # measured), so the gateway and the edge runtime are the only pods allowed to reach port 3000.
 - name: GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION
@@ -92,12 +91,11 @@ shares the same block through a YAML anchor, for the same reason.
   value: {{ .Values.gitea.packages.enabled | quote }}
 - name: GITEA__cron.update_checker__ENABLED
   value: "false"
-# Projects and Packages are hidden from every repository; the wiki and issues stay. Same rationale
-# as the Compose file's gitea-env block.
+# Projects and Packages are hidden from every repository; the wiki and issues stay.
 - name: GITEA__repository__DISABLED_REPO_UNITS
   value: "repo.projects,repo.packages"
 # Webhooks may call private addresses: the one they call is the edge runtime (forge-events), a
-# cluster-internal Service. Gitea's default admits public addresses only. See the Compose file.
+# cluster-internal Service. Gitea's default admits public addresses only.
 - name: GITEA__webhook__ALLOWED_HOST_LIST
   value: "private"
 - name: GITEA__log__LEVEL
@@ -117,8 +115,8 @@ shares the same block through a YAML anchor, for the same reason.
 =================================================================================================
 GITEA -- the forge: one private repository per enrolled gateway, cloned by the appliance's puller.
 
-THE ARGUMENT FOR IT IS IN docker-compose.yml AND IS NOT REPEATED HERE. What this file adds is the
-three things the Kubernetes shape has to answer that Compose does not.
+THE ARGUMENT FOR IT IS IN supabase/README.md AND IS NOT REPEATED HERE. What this file adds is the
+three things the Kubernetes shape has to answer.
 
 ONE: SSH IS NOT AN INGRESS CONCERN. Every appliance holds a per-gateway READ-ONLY deploy
 key, and a Gitea deploy key is an SSH key -- there is no per-repository read-only HTTP token to use
@@ -131,8 +129,8 @@ are a directory on that same volume. Two replicas is not "twice the capacity", i
 writing one SQLite file. It is declared in `acs-cymru.singleWriterWorkloads` for the same reason
 grafana is, so the autoscaling guard refuses it rather than discovering it.
 
-THREE: THE ADMIN ACCOUNT IS AN initContainer, where Compose uses a one-shot service. Same script,
-same idempotence, and the same reason it exists at all: `INSTALL_LOCK` closes the web installer, so
+THREE: THE ADMIN ACCOUNT IS AN initContainer, running the mirrored gitea-init.sh. Idempotent, and
+the reason it exists at all: `INSTALL_LOCK` closes the web installer, so
 the first account has to be created out of band or a forge on a plant network is one request away
 from anybody making themselves its administrator.
 =================================================================================================
@@ -182,8 +180,7 @@ spec:
     {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # 3000 in the container on both targets. Compose publishes it on 3003 to clear the frontend
-      # and Grafana; there is no such collision inside a cluster.
+      # 3000 in the container; the forge is reached through the gateway, not by this port.
       port: 3000
       targetPort: http
       protocol: TCP
@@ -303,9 +300,9 @@ spec:
             - name: GITEA_MACHINE_EMAIL
               value: {{ .Values.gitea.machineEmail | quote }}
             {{- include "acs-cymru.optionalSecretEnv" (dict "name" "GITEA_MACHINE_PASSWORD" "secretName" $secretName "key" "GITEA_MACHINE_PASSWORD") | nindent 12 }}
-          {{/* THE SCRIPT IS MIRRORED, NOT INLINE, and the Compose one-shot service runs the same
-               file. Which accounts the forge has -- and that the machine account is NOT an admin --
-               is provisioning policy, and policy hand-copied into two shell blocks drifts. */}}
+          {{/* THE SCRIPT IS MIRRORED, NOT INLINE. Which accounts the forge has -- and that the
+               machine account is NOT an admin -- is provisioning policy, and policy copied into a
+               shell block drifts. */}}
           command: ["/bin/bash", "/seed/gitea-init.sh"]
           volumeMounts:
             - name: init-script
@@ -329,8 +326,7 @@ spec:
               protocol: TCP
           env:
             # Every GITEA__section__KEY is written into app.ini at start, so app.ini stays Gitea's
-            # to own across upgrades and the security posture is stated in ONE place -- here, and
-            # matching docker-compose.yml line for line.
+            # to own across upgrades and the security posture is stated in ONE place -- here.
             {{- include "acs-cymru.giteaEnv" . | nindent 12 }}
           startupProbe:
             # /api/healthz reports the database and the internal caches rather than merely that a

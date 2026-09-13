@@ -60,7 +60,7 @@ describe('the cold storage catalogue', () => {
     // tooltip: for every other bucket an object is a copy; here it is the original.
     await show([row()])
     await waitFor(() => expect(screen.getByText(/only copy/i)).toBeInTheDocument())
-    expect(screen.getByText(/stack:reset/)).toBeInTheDocument()
+    expect(screen.getByText(/dev:reset/)).toBeInTheDocument()
   })
 
   it('does not claim the objects are the only copy when nothing has been dropped', async () => {

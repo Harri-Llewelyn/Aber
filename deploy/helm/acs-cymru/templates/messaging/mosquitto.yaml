@@ -215,8 +215,8 @@ data:
 apiVersion: v1
 kind: Service
 metadata:
-  # THE NAME IS `mosquitto`, matching the Compose service name -- the ingestion daemon and
-  # Node-RED's broker node both address it as `mosquitto:1883` and neither changes between targets.
+  # THE NAME IS `mosquitto`: the ingestion daemon and Node-RED's broker node both address it as
+  # `mosquitto:1883`.
   name: mosquitto
   labels:
     {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
@@ -264,8 +264,8 @@ internal service discovery to an external IP allocation.
 
 MQTT IS RAW TCP AND CANNOT RIDE AN HTTP INGRESS. On k3s the built-in ServiceLB (Klipper) satisfies
 `LoadBalancer` with no MetalLB by binding the port on nodes that have it free -- which also means
-1883 must BE free: a Compose stack running on the same machine holds it and this Service sits
-<pending> with nothing naming the conflict.
+1883 must BE free: anything else holding it on the node leaves this Service at <pending> with
+nothing naming the conflict.
 
 The WebSocket listener (9001) is exposed here too for parity, but it can also ride the
 Ingress, which is the better place for it once TLS terminates there.
@@ -378,7 +378,7 @@ spec:
       initContainers:
         {{/*
           Assembles /mosquitto/config as a WRITABLE emptyDir, then writes the plugin's document
-          onto the data PVC with the same reconcile Compose runs (scripts/mosquitto-dynsec-init.mjs):
+          onto the data PVC with the reconcile in scripts/mosquitto-dynsec-init.mjs:
           the roles from the ConfigMap, the platform principals and the plugin's admin from the
           Secret, every gateway account already in the document kept as it is. A Secret carrying a
           `password_file` from before the plugin is imported on the first start.

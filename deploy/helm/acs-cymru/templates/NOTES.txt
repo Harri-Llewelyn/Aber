@@ -50,7 +50,7 @@ Raw MQTT (1883) is NOT on the ingress -- it is TCP, not HTTP:
   kubectl -n {{ .Release.Namespace }} get svc mosquitto-external
 {{- if eq .Values.mosquitto.external.type "LoadBalancer" }}
   If it sits <pending>: ServiceLB binds 1883 ON THE NODE, so anything else holding it blocks the
-  assignment -- most often a Docker Compose stack still running on the same machine.
+  assignment -- a local broker, or a container left running on the same machine.
 {{- end }}
 {{- end }}
 {{- else }}

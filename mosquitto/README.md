@@ -79,8 +79,7 @@ re-run.
 
 ## The document, and who writes it
 
-`dynamic-security.json` is mutable state. On Compose it lives on the `mosquitto_dynsec` volume; on
-Kubernetes on a PersistentVolumeClaim, which pins the single-replica broker to a node and is the
+`dynamic-security.json` is mutable state. It lives on a PersistentVolumeClaim, which pins the single-replica broker to a node and is the
 cost the roadmap entry accepted.
 
 **Boot reconciles; it never rewrites.** `scripts/mosquitto-dynsec-init.mjs` runs before the broker

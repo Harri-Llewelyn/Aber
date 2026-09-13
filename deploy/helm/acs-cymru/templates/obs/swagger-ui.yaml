@@ -75,7 +75,7 @@ spec:
           env:
             # Two curated specs, both served from mounted files.
             #
-            # THE POSTGREST LIVE-SCHEMA ENTRY WAS REMOVED, matching Compose. It pointed at
+            # THE POSTGREST LIVE-SCHEMA ENTRY WAS REMOVED. It pointed at
             # /rest/v1/, which Kong gates with key-auth, so the browser fetched it without an
             # apikey and the definition failed to load as an authorization error. It duplicated
             # openapi.yaml, which is hand-maintained AND enforced by check-docs-drift.mjs against

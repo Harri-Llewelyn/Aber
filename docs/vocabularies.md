@@ -438,8 +438,7 @@ vocabulary. The next large vocabulary would not have fitted.
 The chart now carries the migrations **gzipped, one archive per file, in `binaryData`**: **149 KiB,
 ~199 KiB once base64-encoded, 20% of the limit**, with room for several more vocabularies of that
 size. SQL is close to ideal compression input — thousands of near-identical `INSERT`s over a handful
-of tables — and `db-init` decompresses into a scratch volume before applying. Compose is untouched;
-it bind-mounts the plain files.
+of tables — and `db-init` decompresses into a scratch volume before applying.
 
 Squashing the chain was the alternative and could not have worked: the generated vocabulary and the
 SQL statements are 81% of the bytes and have to survive verbatim, so the floor was ~703 KiB — still

@@ -5,8 +5,8 @@
  * =================================================================================================
  * THE PROBLEM THIS EXISTS FOR, MEASURED RATHER THAN ASSUMED
  *
- * Every suite under supabase/migrations/ defaults to port 54322, and docker-compose.yml publishes
- * the LIVE Supabase database on exactly that port. So the documented way to run them --
+ * Every suite under supabase/migrations/ defaults to port 54322, and the dev loop's port-forward
+ * publishes the LIVE Supabase database on exactly that port. So the documented way to run them --
  * `python supabase/migrations/test_audit_domain.py`, no environment set -- points at production
  * data, and always has.
  *
@@ -58,7 +58,7 @@
  * WHAT THIS DOES NOT DO
  *
  * It does not PREVENT a suite being run against the live stack -- `SUPABASE_DB_PORT` still defaults
- * to 54322, because .env sets it, validate.py derives from it and both backup scripts read it, so
+ * to 54322, because the dev loop forwards it there, validate.py derives from it and both backup scripts read it, so
  * changing the default here would be overridden by the environment in the common case and would
  * fight four other consumers in the rest. This makes the clean path a one-liner and documents the
  * dirty one. It is a paved road, not a fence.
@@ -144,7 +144,7 @@ console.log(`${c.bold('Starting')} throwaway ${IMAGE} on port ${PORT}…`)
 const up = run('docker', [
   'run', '-d', '--name', CONTAINER,
   '-e', `POSTGRES_PASSWORD=${PASSWORD}`,
-  // LOOPBACK ONLY, matching what docker-compose.yml now does with 5433 and 54322. This one is
+  // LOOPBACK ONLY, as the dev loop's forwards are. This one is
   // throwaway and short-lived, which changes how long the exposure lasts and not what it is:
   // a Postgres with a known password, published on every interface. Every consumer is the
   // suite runner on this machine.
@@ -154,8 +154,8 @@ const up = run('docker', [
 if (up.status !== 0) die('could not start the container.', up.stderr)
 
 // pg_isready ALONE IS NOT ENOUGH on this image: it reports ready during the init scripts' own
-// restart, and a migration applied in that window dies mid-file. The SELECT is what compose's
-// healthcheck adds for the same reason -- see docker-compose.yml's supabase-db healthcheck.
+// restart, and a migration applied in that window dies mid-file. The SELECT is what the chart's
+// readiness probe adds for the same reason -- see templates/supabase/db.yaml.
 process.stdout.write('Waiting for Postgres')
 let ready = false
 for (let i = 0; i < 60; i++) {
@@ -239,7 +239,7 @@ const env = {
   SUPABASE_DB_PASSWORD: PASSWORD,
   // THE BARE `DB_*` FALLBACKS ARE OVERRIDDEN TOO, not just the SUPABASE_ ones. Half the suites
   // read `os.getenv("SUPABASE_DB_PORT", os.getenv("DB_PORT", "54322"))`, and a shell that has
-  // sourced .env carries DB_PORT=5433 -- the HISTORIAN. Leaving it set sends those suites to a
+  // shell set up for the stack lane carries DB_PORT=5433 -- the HISTORIAN. Leaving it set sends those suites to a
   // TimescaleDB that has none of this schema, and the failure names a missing table rather than
   // the wrong database.
   DB_HOST: 'localhost',

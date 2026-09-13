@@ -74,42 +74,25 @@
 #
 set -eu
 
-MODE="${WAIT_MODE:-compose}"
 TIMEOUT="${WAIT_TIMEOUT_SECONDS:-180}"
 INTERVAL="${WAIT_INTERVAL_SECONDS:-3}"
 PORT="${INGESTION_METRICS_PORT:-9108}"
 NS="${NS:-acs-cymru}"
 
 # -------------------------------------------------------------------------------------------------
-# Fetching the endpoint, which is the only part that differs between targets.
-#
-# COMPOSE publishes 9108 to the host deliberately -- "the endpoint is how the daemon is INSPECTED"
-# -- so a plain curl reaches it.
-#
-# KUBERNETES does not. `ingestion-metrics` is headless and cluster-internal, so this execs into the
+# Fetching the endpoint. `ingestion-metrics` is headless and cluster-internal, so this execs into the
 # pod and asks it for its own endpoint. WITH PYTHON, NOT CURL: the image is python:3.10-slim and
 # carries no curl, which a first attempt discovers as `executable file not found`. Spawning a curl
 # pod per poll was the alternative and costs a pod creation every three seconds for something the
 # container can already answer.
 # -------------------------------------------------------------------------------------------------
 fetch() {
-  case "$MODE" in
-    compose)
-      curl -sf --max-time 5 "http://localhost:${PORT}/metrics" 2>/dev/null || true
-      ;;
-    k8s)
-      kubectl -n "$NS" exec deploy/ingestion -c ingestion -- \
-        python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:${PORT}/metrics',timeout=5).read().decode())" \
-        2>/dev/null || true
-      ;;
-    *)
-      echo "wait-for-ingestion-consuming: unknown WAIT_MODE '$MODE' (expected compose or k8s)" >&2
-      exit 2
-      ;;
-  esac
+  kubectl -n "$NS" exec deploy/ingestion -c ingestion -- \
+    python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:${PORT}/metrics',timeout=5).read().decode())" \
+    2>/dev/null || true
 }
 
-echo "waiting up to ${TIMEOUT}s for the ingestion daemon to be consuming (mode=${MODE})..."
+echo "waiting up to ${TIMEOUT}s for the ingestion daemon to be consuming..."
 
 elapsed=0
 last_up="none"

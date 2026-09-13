@@ -84,36 +84,82 @@ the dashboard reads PostgREST and subscribes to Realtime.
 
 ---
 
-## Deployment targets
+## Deployment
 
-**Kubernetes (k3s) is the primary target; Docker Compose is the local development path.** Both are
-maintained, both are exercised in CI, neither is deprecated.
-
-| | Docker Compose | Kubernetes (Helm) |
-| :--- | :--- | :--- |
-| Purpose | Local development, debugging | Deployment |
-| Entry point | `docker compose up -d` | `helm install` — [`deploy/k8s/README.md`](deploy/k8s/README.md) |
-| Reachability | Published ports on `localhost` | `*.<publicBaseDomain>` via one Ingress |
-| TLS | none | cert-manager, internal CA ([`deploy/k8s/internal-ca.yaml`](deploy/k8s/internal-ca.yaml)) |
-| MQTT | 1883 plaintext + 9001 WebSockets | the same, plus optional MQTTS on 8883 |
-| Conformance | `ingestion/validate.py` from the host | the same suite, as an in-cluster Job |
-
-Container images, SQL migrations and init scripts are **shared substrate** — only the *wiring* is
-expressed twice. Intentional differences are enumerated in the divergence table in the Kubernetes
-runbook; anything not in that table is drift. Design rationale is in
-[`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md).
+**Kubernetes is the deployment target.** The Helm chart in
+[`deploy/helm/acs-cymru`](deploy/helm/acs-cymru) deploys the whole platform onto k3s, or onto k3d
+for development; the runbook is [`deploy/k8s/README.md`](deploy/k8s/README.md) and the design
+record is [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md). The one thing that
+runs on Docker Compose is the gateway appliance: a Raspberry Pi runs the bundle the dashboard hands
+it ([`gateway-bundle-template/`](gateway-bundle-template)).
 
 ---
 
-## Quick start — Docker Compose
+## Quick start
+
+Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short version:
 
 ```bash
-npm run setup                   # writes .env with freshly generated credentials; asks one question
-docker compose up --build -d    # launches the whole stack
+# Everything below in one command, plus the waits and helm test: npm run dev:up
+#   (deploy/k8s/README.md, "The development loop"). Step by step:
+# Nine images are built from this repository. They are published to GHCR at the chart's
+# appVersion, and the chart pulls them under exactly these names: a local build that is
+# tagged any other way is ignored. deploy/k8s/README.md says what each one is for.
+NS=ghcr.io/harri-llewelyn/acs-cymru
+V=0.1.0                                       # appVersion in deploy/helm/acs-cymru/Chart.yaml
+docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
+docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
+docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
+docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true -t $NS/frontend:$V frontend
+docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
+docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
+docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
+docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
+docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V -t $NS/test-runner:$V .
+
+# A local cluster: k3d is k3s in Docker, with the Traefik, ServiceLB and local-path that
+# production has. Port 80 is the Ingress; 1883 is the broker for gateways on the LAN.
+k3d cluster create acs-cymru --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
+  --k3s-arg "--disable=metrics-server@server:0" --wait
+k3d image import $(for i in edge-runtime ingestion node-red frontend i3x-service \
+  gateway-credential backup-service db-init test-runner; do echo $NS/$i:$V; done) -c acs-cymru
+
+node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
+
+kubectl create namespace acs-cymru
+helm install acs-cymru deploy/helm/acs-cymru -n acs-cymru \
+  -f deploy/helm/acs-cymru/values-dev.yaml --timeout 15m
+
+# NOT `--wait` — it deadlocks the first install. See deploy/k8s/README.md.
+for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
+  kubectl -n acs-cymru rollout status "$w" --timeout=10m
+done
+
+helm test acs-cymru -n acs-cymru          # the postgres_fdw gate
 ```
 
-Every file in `supabase/migrations/` is applied by `supabase-db-init` on startup and re-applied
-harmlessly on every later start: the schema baseline (`0001`), seed data (`0002`), then `0003` audit
+Serves nine subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`,
+`i3x.`, `git.`, `mqtt.`) plus a LoadBalancer for **raw MQTT on 1883** and a second for **git over SSH**,
+neither of which is HTTP and so neither of which can ride an Ingress.
+
+- **`values-dev.yaml` carries published demo credentials, and they are in git.** `npm run setup`
+  writes `deploy/helm/acs-cymru/values-local.yaml` (gitignored) with credentials minted for this
+  install; for anything another person can reach, start from `values-prod.yaml.example` and point
+  `secrets.existingSecret` at an externally managed Secret.
+- **`npm run dev:reset` is the way back to a blank stack**: it uninstalls, drops every claim and
+  reinstalls on the same cluster and images. `digital_thread` is append-only to every application
+  role, so dropping the volume is the only way to an empty audit trail.
+- **The chart validates its own values and fails the render, not the pod** — a partial credential
+  set, a wrong-length Realtime key, a renamed Realtime Service, TLS with `scheme: http`, or an HPA
+  on a single-writer workload each otherwise produce a stack that reports healthy and refuses every
+  request.
+
+---
+
+## The schema every install applies
+
+Every file in `supabase/migrations/` is applied by the `db-init` Job on every install and upgrade, and re-applied
+harmlessly each time: the schema baseline (`0001`), seed data (`0002`), then `0003` audit
 immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007` metric-name format, `0008` Sparkplug
 group, `0009` withdraws residual `anon` function grants, `0010` telemetry rollups and latest-value
 view, `0011` IDTA Digital Nameplate and per-device nameplate data, `0012` permitted values of a
@@ -144,7 +190,7 @@ that ought to be publishing — and `0030` gives that
 alert table a **7-day retention window**, pruned nightly by `pg_cron`, whose predicate ages out
 closed and superseded occurrences but never the newest firing row of a fingerprint — and `0031`
 adds `public.system_settings`, the runtime configuration plane an `Administrator` edits from the
-dashboard instead of a host `.env`, whose **key set is closed**: RLS grants UPDATE and nothing
+dashboard instead of a values file, whose **key set is closed**: RLS grants UPDATE and nothing
 else, so a new setting arrives by migration beside the code that reads it — and `0032` gives that
 table **numeric bounds** and moves the alert retention window into it as `alerts.retention_days`,
 replacing `prune_platform_alerts()` with a version that reads the setting, so the answer to "how
@@ -241,152 +287,11 @@ Self-registered accounts get read-only `Operator` via the `handle_new_user` trig
 
 **Forgotten passwords** are reset from the sign-in card (*Forgot your password?*), which asks
 GoTrue to email a link to `/reset-password`. The link is sent over SMTP, so set `SMTP_HOST`,
-`SMTP_FROM` and the credentials in `.env` (`supabaseAuth.smtp` and `secrets.smtpPassword` on the
-chart). With no relay configured the request fails and the card tells the user to ask an
+`SMTP_FROM` and the credentials (`supabaseAuth.smtp` and `secrets.smtpPassword` in values). With no relay configured the request fails and the card tells the user to ask an
 administrator, who can set a password through the Auth API or Studio instead.
 
-> **`.env.example` contains working development secrets** — the standard Supabase demo values, also
-> the gateway's registered API keys. **Generate fresh secrets for any shared or hosted environment.**
-
-Teardown: `docker compose down -v` (also drops volumes, invalidating every logged-in browser).
-
-### Windows: `bind: An attempt was made to access a socket in a way forbidden by its access permissions`
-
-```
-Error response from daemon: ports are not available: exposing port TCP 0.0.0.0:54322 -> 127.0.0.1:0:
-listen tcp 0.0.0.0:54322: bind: An attempt was made to access a socket in a way forbidden by its
-access permissions.
-```
-
-**Nothing is wrong with the stack.** Hyper-V/WSL2 reserves blocks of high ports for NAT on boot,
-and those blocks routinely swallow the `543xx` range this stack publishes Supabase on. The port is
-not in use by another process — Windows has withdrawn it.
-
-**Docker names only the first port it fails on, and that is the misleading part.** Three ports are
-in that range, and the one that matters is not the one in the message:
-
-| Port | Service | Consequence if lost |
-| :--- | :--- | :--- |
-| `54321` | Envoy | **the browser has no API** — the dashboard loads and every request fails |
-| `54322` | supabase-db | no `psql` from the host; the stack itself is unaffected |
-| `54323` | Envoy (Studio's listener) | Studio unreachable |
-
-So fixing the port in the error changes nothing: `supabase-db` fails, every service that depends on
-it never starts, and what you see is a dashboard that loads and then reports **`Failed to fetch`**.
-`docker compose ps` shows the shape of it — `frontend`, `swagger-ui` and `timescaledb` up, because
-they are the only three that do not depend on `supabase-db`.
-
-Confirm it is this and not a real conflict:
-
-```powershell
-netsh interface ipv4 show excludedportrange protocol=tcp
-```
-
-A range covering `54321`–`54323` and **no `*`** beside it is a dynamic Hyper-V reservation. (`*`
-marks an administered exclusion — one somebody added deliberately.)
-
-**The fix**, in an **Administrator** PowerShell:
-
-```powershell
-net stop winnat
-netsh int ipv4 add excludedportrange protocol=tcp startport=54320 numberofports=8 store=persistent
-net start winnat
-```
-
-Then `docker compose up -d`.
-
-The middle line is the part that lasts. It claims `54320`–`54327` as an *administered* exclusion,
-so WinNAT cannot take the range again — `store=persistent` carries that across reboots. Restarting
-`winnat` on its own releases the current reservation but simply re-rolls it, so the same failure
-returns on the next boot or Docker Desktop restart.
-
-**If you cannot get an Administrator prompt**, the ports are configurable — `KONG_HTTP_PORT`,
-`SUPABASE_DB_PORT` and `STUDIO_PORT` in `.env`. Moving the gateway port is not a one-line change, though:
-`SUPABASE_URL`, `AAS_MODEL_PUBLIC_BASE` and `AAS_HISTORIAN_ENDPOINT` all carry the port, the
-Node-RED and Grafana OAuth URLs are derived from `SUPABASE_URL`, and `VITE_SUPABASE_URL` is a
-**build arg** — so the frontend needs `--build`, not just a restart. Change `.env` only and leave
-`.env.example` alone, or the divergence follows you into every other environment.
-
-### Resetting to a clean slate
-
-```bash
-npm run stack:reset -- --yes
-```
-
-Tears the stack down **with its volumes**, brings it back, and waits for the schema to exist rather
-than for ports to answer. What comes back is blank: no cells, no gateways, no devices, no schemas
-and an empty Node-RED editor — the state a new install starts in.
-
-Node, not a shell script, so it runs the same on Windows, macOS and Linux
-([#106](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/106)). **It checks that Docker answers
-before it tears anything down** — the shell version discovered an unreachable Docker at the moment
-it was already dropping volumes, which left a half-destroyed stack on the one path nobody exercises
-until something has already gone wrong.
-
-**`--yes` is required and there is no interactive prompt.** A prompt is something people learn to
-dismiss without reading, and this is most dangerous once it is familiar. It also refuses outright
-when `NODE_ENV=production`, and when `COMPOSE_PROJECT_NAME` names a stack this repository does not
-own — so a shell in the wrong directory cannot take down someone else's.
-
-The one thing it exists for that nothing else can do: **`digital_thread` is append-only to every
-application role**, so dropping the volume is the only way back to an empty audit trail.
-
----
-
-## Quick start — Kubernetes
-
-Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short version:
-
-```bash
-# Everything below in one command, plus the waits and helm test: npm run dev:up
-#   (deploy/k8s/README.md, "The development loop"). Step by step:
-# Nine images are built from this repository. They are published to GHCR at the chart's
-# appVersion, and the chart pulls them under exactly these names: a local build that is
-# tagged any other way is ignored. deploy/k8s/README.md says what each one is for.
-NS=ghcr.io/harri-llewelyn/acs-cymru
-V=0.1.0                                       # appVersion in deploy/helm/acs-cymru/Chart.yaml
-docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
-docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
-docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
-docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true -t $NS/frontend:$V frontend
-docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
-docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
-docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
-docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
-docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V -t $NS/test-runner:$V .
-
-# A local cluster: k3d is k3s in Docker, with the Traefik, ServiceLB and local-path that
-# production has. Port 80 is the Ingress; 1883 is the broker for gateways on the LAN.
-k3d cluster create acs-cymru --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
-  --k3s-arg "--disable=metrics-server@server:0" --wait
-k3d image import $(for i in edge-runtime ingestion node-red frontend i3x-service \
-  gateway-credential backup-service db-init test-runner; do echo $NS/$i:$V; done) -c acs-cymru
-
-node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
-
-kubectl create namespace acs-cymru
-helm install acs-cymru deploy/helm/acs-cymru -n acs-cymru \
-  -f deploy/helm/acs-cymru/values-dev.yaml --timeout 15m
-
-# NOT `--wait` — it deadlocks the first install. See deploy/k8s/README.md.
-for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
-  kubectl -n acs-cymru rollout status "$w" --timeout=10m
-done
-
-helm test acs-cymru -n acs-cymru          # the postgres_fdw gate
-```
-
-Serves nine subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`,
-`i3x.`, `git.`, `mqtt.`) plus a LoadBalancer for **raw MQTT on 1883** and a second for **git over SSH**,
-neither of which is HTTP and so neither of which can ride an Ingress.
-
-- **`values-dev.yaml` carries the published demo credentials from `.env.example`, and they are in
-  git.** For anything another person can reach, start from `values-prod.yaml.example` and point
-  `secrets.existingSecret` at an externally managed Secret.
-- **The chart validates its own values and fails the render, not the pod** — a partial credential
-  set, a wrong-length Realtime key, a renamed Realtime Service, TLS with `scheme: http`, or an HPA
-  on a single-writer workload each otherwise produce a stack that reports healthy and refuses every
-  request.
+> **`values-dev.yaml` contains working development secrets** — the standard Supabase demo values, also
+> the gateway's registered API keys. **`npm run setup` mints fresh ones for any shared or hosted environment.**
 
 ---
 
@@ -399,7 +304,7 @@ neither of which is HTTP and so neither of which can ride an Ingress.
 | **[`ingestion/`](ingestion/README.md)** | Sparkplug B parsing, identity resolution, gateway binding, TimescaleDB mapping, `validate.py` |
 | **[`tutorial/`](tutorial/README.md)** | The walkthrough for a blank install: one cell, one gateway, its broker credential, a device, a schema, and the Node-RED flow that publishes as it |
 | **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](i3x/README.md#mcp) |
-| **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, divergence table, releases |
+| **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, the development loop, upgrade, teardown, hardening, releases |
 | [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
 | [`docs/incidents.md`](docs/incidents.md) | Faults whose FIX LOOKS ARBITRARY without the story. Read before "tidying" a guard that seems redundant |
@@ -407,58 +312,58 @@ neither of which is HTTP and so neither of which can ride an Ingress.
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 99 superseded migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
-| [`scripts/`](scripts) | Setup, seeding, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, stack reset, AAS push |
+| [`scripts/`](scripts) | Setup, the dev loop, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, AAS push |
 | [`test-harness/`](test-harness) | Vendored IDTA AAS schema, conformance test-runner image |
 | [`gateway-bundle-template/`](gateway-bundle-template) | The appliance files `gateway-bundle` serves to a physical gateway: Compose file, Dockerfile, bootstrap and flow template |
 
 ---
 
-## Service port directory
+## Components
 
-**Every Compose service appears here and every row names a real one**, asserted in both directions
-by `scripts/check-docs-drift.mjs`. It used to be checked one way and only for image tags, which is
-how a row for `supabase-kong-init` — a service retired with Kong on Compose — survived while five
-live services went unlisted: the tag it named (`alpine:3.24`) still existed, so the check passed.
+**Every chart component appears here and every row names a real one**, asserted in both directions
+by `scripts/check-docs-drift.mjs`, which also holds every image tag here to the chart's pin. The
+chart's own images carry no tag: they are pulled at the chart's `appVersion`.
 
-| Service | Container | Image | Port |
-| :--- | :--- | :--- | :--- |
-| `supabase-db` | `acs-cymru_supabase_db` | `supabase/postgres:17.6.1.160` | `127.0.0.1:54322:5432` |
-| `supabase-db-roles-init` | `acs-cymru_supabase_db_roles_init` | `supabase/postgres:17.6.1.160` | — |
-| `supabase-db-init` | `acs-cymru_supabase_db_init` | `supabase/postgres:17.6.1.160` | — |
-| `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
-| `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v14.12` | — |
-| `supabase-envoy-init` | `acs-cymru_supabase_envoy_init` | `alpine:3.24` | — |
-| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.39.1` | `54321:8000`, `54323:8001` (Studio, behind a login), `3003:8002` (the forge, behind a login) |
-| `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
-| `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.102.3` | — |
-| `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.60.4` | — |
-| `supabase-storage-init` | `acs-cymru_supabase_storage_init` | `node:24-alpine` | — |
-| `supabase-storage-policies` | `acs-cymru_supabase_storage_policies` | `supabase/postgres:17.6.1.160` | — |
-| `supabase-meta` | `acs-cymru_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
-| `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | — (reached through the gateway's `54323` — see below) |
-| `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `127.0.0.1:5433:5432` |
-| `timescaledb-maintenance` | `acs-cymru_timescaledb_maintenance` | `timescale/timescaledb:2.29.2-pg17` | — |
-| `mosquitto-tls-init` | `acs-cymru_mosquitto_tls_init` | `./mosquitto/tls-init/Dockerfile` | — |
-| `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.22` | — |
-| `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
-| `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
-| `ingestion` | `acs-cymru_ingestion` | `./ingestion/Dockerfile` | `127.0.0.1:9108:9108` |
-| `playback` | `acs-cymru_playback` | `./ingestion/Dockerfile` (same image as `ingestion`, different command) | — |
-| `cold-archiver` | `acs-cymru_cold_archiver` | `./ingestion/Dockerfile` (same image as `ingestion`, different command) | — |
-| `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |
-| `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
-| `backup-service` | `acs-cymru_backup_service` | `./backup-service/Dockerfile` | — |
-| `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
-| `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
-| `gitea-init` | `acs-cymru_gitea_init` | `gitea/gitea:1.27.3` | — |
-| `gitea` | `acs-cymru_gitea` | `gitea/gitea:1.27.3` | `2222:22` (HTTP is behind the gateway's forge listener on `3003`) |
-| `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.2.0` | `3002:3000` |
-| `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.32.14` | `8088:8080` |
-| `prometheus` | `acs-cymru_prometheus` | `prom/prometheus:v3.14.0` | `127.0.0.1:9090:9090` |
-| `node-exporter` | `acs-cymru_node_exporter` | `prom/node-exporter:v1.12.1` | — |
-| `loki` | `acs-cymru_loki` | `grafana/loki:3.5.7` | `127.0.0.1:3100:3100` |
-| `alloy` | `acs-cymru_alloy` | `grafana/alloy:v1.11.2` | `127.0.0.1:12345:12345` |
-| `docker-socket-proxy` | `acs-cymru_docker_socket_proxy` | `tecnativa/docker-socket-proxy:0.3.0` | — |
+Hosts are `<name>.<domain>` on the one Ingress. On a laptop, `npm run dev:forward` publishes the
+in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `54321` the API,
+`1880` Node-RED, `3002` Grafana, `9090` Prometheus, `3100` Loki, `8090` i3X, `8088` docs.
+
+| Component | Image | Reached at |
+| :--- | :--- | :--- |
+| `alloy` | `grafana/alloy:v1.11.2` | the one collector: logs, metrics and host metrics; `alloy:12345` |
+| `backup` | `supabase/postgres:17.6.1.160` | the nightly CronJob, when the backup service is off |
+| `backup-service` | `ghcr.io/harri-llewelyn/acs-cymru/backup-service` | the Backups page's worker (`backupService.enabled`) |
+| `cold-archive` | `ghcr.io/harri-llewelyn/acs-cymru/ingestion` | CronJob: exports, verifies and drops cold chunks |
+| `db-init` | `ghcr.io/harri-llewelyn/acs-cymru/db-init` | hook Job: the migration chain, on every install and upgrade |
+| `db-roles-init` | `supabase/postgres:17.6.1.160` | hook Job: the Supabase roles and their passwords |
+| `e2e-aas-export` | `ghcr.io/harri-llewelyn/acs-cymru/test-runner` | Job (`e2e.enabled`): the AAS conformance suite |
+| `e2e-validate` | `ghcr.io/harri-llewelyn/acs-cymru/test-runner` | Job (`e2e.enabled`): `validate.py` in-cluster |
+| `frontend` | `ghcr.io/harri-llewelyn/acs-cymru/frontend` | `app.<domain>` |
+| `gitea` | `gitea/gitea:1.27.3` | `git.<domain>` through the gateway's forge listener; SSH on `gitea-external:22` (LoadBalancer) |
+| `grafana` | `grafana/grafana:13.2.0` | `grafana.<domain>` |
+| `i3x-service` | `ghcr.io/harri-llewelyn/acs-cymru/i3x-service` | `i3x.<domain>` |
+| `ingestion` | `ghcr.io/harri-llewelyn/acs-cymru/ingestion` | no route; `ingestion-metrics:9108` is scraped |
+| `loki` | `grafana/loki:3.5.7` | `loki:3100`, read by Grafana |
+| `mosquitto` | `eclipse-mosquitto:2.0.22`, the `gateway-credential` sidecar, `sapcc/mosquitto-exporter:0.8.0` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
+| `node-red` | `ghcr.io/harri-llewelyn/acs-cymru/node-red` | `nodered.<domain>` |
+| `playback` | `ghcr.io/harri-llewelyn/acs-cymru/ingestion` | the broker playback worker (`playback.enabled`) |
+| `prometheus` | `prom/prometheus:v3.14.0` | `prometheus:9090`, read by Grafana |
+| `realtime` | `supabase/realtime:v2.102.3` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
+| `storage-init` | `node:24-alpine` | hook Job: the storage buckets |
+| `storage-policies` | `supabase/postgres:17.6.1.160` | hook Job: the storage RLS policies |
+| `supabase-auth` | `supabase/gotrue:v2.189.0` | behind `api.<domain>/auth/v1` |
+| `supabase-db` | `supabase/postgres:17.6.1.160` | `supabase-db:5432` |
+| `supabase-envoy` | `envoyproxy/envoy:v1.39.1` | the gateway: `api.<domain>` (Service `supabase-kong:8000`), Studio on 8001, the forge on 8002 |
+| `supabase-functions` | `ghcr.io/harri-llewelyn/acs-cymru/edge-runtime` | behind `api.<domain>/functions/v1` |
+| `supabase-kong` | `kong:3.9.3` | off (`supabaseKong.enabled`): the revert path from Envoy |
+| `supabase-meta` | `supabase/postgres-meta:v0.96.6` | in-cluster only, for Studio |
+| `supabase-rest` | `postgrest/postgrest:v14.12` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
+| `supabase-storage` | `supabase/storage-api:v1.60.4` | behind `api.<domain>/storage/v1` |
+| `supabase-studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `studio.<domain>`, off by default, behind the gateway's login |
+| `swagger-ui` | `swaggerapi/swagger-ui:v5.32.14` | `docs.<domain>` |
+| `test-fdw` | `supabase/postgres:17.6.1.160` | `helm test`: the postgres_fdw gate |
+| `timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `timescaledb:5432` |
+| `timescaledb-maintenance` | `timescale/timescaledb:2.29.2-pg17` | hook Job: extension, retention, rollups, roles |
 
 ---
 
@@ -496,8 +401,7 @@ the same reason: `/docker-entrypoint-initdb.d` runs only on an empty data direct
 **`ingest_writer` and `fdw_reader` are required; the two readers are optional.** BI and Grafana are
 consumers a stack can simply not have. The daemon and the FDW are not — each must authenticate as
 *something* on every query, and the only alternative to these roles is the superuser they replaced.
-So `npm run setup` mints both passwords, Compose refuses to start without them, and the chart fails
-to render. A stack that comes up on the superuser saying nothing is the state this closes.
+So `npm run setup` mints both passwords, and the chart fails to render without them. A stack that comes up on the superuser saying nothing is the state this closes.
 
 **The daemon checks its own credential at startup** and refuses to run as a superuser on the
 historian, naming `ALLOW_HISTORIAN_SUPERUSER=true` as the deliberate way to say otherwise. Every
@@ -529,11 +433,10 @@ and what they must not.
 reaches it holds the SQL editor, the table editor and the Vault UI **as the database owner** — for
 whom RLS is not enforced — which is why it sits behind a door rather than a port.
 
-**On Compose it now has a door, and the gateway is it.** `supabase-envoy` publishes `54323` and
-holds a second listener there: an OAuth 2.1 authorization-code flow against this stack's own GoTrue,
+**It has a door, and the gateway is it.** `supabase-envoy` holds a second listener
+(`studio.<domain>`, off by default): an OAuth 2.1 authorization-code flow against this stack's own GoTrue,
 a session cookie, and an `Administrator` check before anything reaches the console. The Studio
-container publishes nothing — the old `127.0.0.1:54323` binding was removed in the same change,
-because publishing both would leave the previous door open beside the new one.
+pod publishes nothing of its own.
 
 Three things follow, and none of them is obvious:
 
@@ -657,8 +560,7 @@ that bypasses PostgREST is ever added.
 
 #### The broker's internal CA has no revocation list
 
-There is no CRL and no OCSP for the root `mosquitto-tls-init` mints on Compose or
-`deploy/k8s/internal-ca.yaml` issues on Kubernetes. A compromised root private key has no remedy
+There is no CRL and no OCSP for the root `deploy/k8s/internal-ca.yaml` issues. A compromised root private key has no remedy
 short of re-minting the root and re-walking the fleet. Broker *credentials* are revocable and
 immediate (archiving a gateway disables its account and drops its session); the trust anchor is the one thing that is not.
 
@@ -669,19 +571,18 @@ would add a reload-dependent mechanism nothing here consumes.
 **Revisit if** the root is ever exported, if client certificates replace password authentication on
 the broker, or if the fleet grows past what a re-walk can cover in a shift.
 
-#### Compose has no network policy layer
+#### NetworkPolicy is opt-in
 
-On Kubernetes a default-deny NetworkPolicy (opt-in, `networkPolicy.enabled`) says which pod may
-reach which. Compose has one Docker network plus the `forge` network for Gitea, and no equivalent:
-any container can reach any other container's port.
+A default-deny NetworkPolicy (`networkPolicy.enabled`) says which pod may reach which. Off, any
+pod in the namespace can reach any other pod's port, and Gitea signs in whoever the identity
+header names from any peer.
 
-**Accepted because** a single-host Compose stack is one machine, every internal port is
-unpublished or bound to loopback, and the one service whose reachability *is* its access control
-(Gitea, which trusts the identity header from any peer) has been moved onto a network only the
-gateway and the edge runtime join.
+**Accepted because** a single-node k3s box is one machine, every internal port is ClusterIP, and
+the policy is one value away; the runbook says to enable it on any cluster where the forge holds
+real flows.
 
-**Revisit if** a second service ever relies on "only these containers can reach me" as a control,
-or if Compose is used for anything other than a single trusted host.
+**Revisit if** a second service ever relies on "only these pods can reach me" as a control, or if
+the cluster is shared with anything else.
 
 ---
 
@@ -712,7 +613,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Licence
 
 **This repository is MIT licensed** — see [`LICENSE`](LICENSE). That covers everything here: the
-Compose and Helm configuration, the SQL, the services, the flows, the dashboards and the docs.
+Helm configuration, the SQL, the services, the flows, the dashboards and the docs.
 
 It does not cover the third-party images this configuration deploys, which carry their own licences
 and are pulled from their own registries at deploy time. Two are worth knowing about before you
@@ -737,27 +638,24 @@ offering this stack as a hosted service.**
 
 ## Testing
 
-Every suite, what each one needs, the six CI jobs and the release workflow are in
+Every suite, what each one needs, the five CI jobs and the release workflow are in
 **[`docs/testing.md`](docs/testing.md)**. The short version:
 
 ```bash
 cd frontend && npm test                 # Frontend — 1,600+ tests
-node scripts/check-env-drift.mjs        # Configuration drift — no services needed
-
-# End-to-end — needs the running stack
-set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
-export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
-python ingestion/validate.py
+npm run test:py                         # Python unit lane — no services needed
+npm run test:db                         # database lane, against a throwaway Postgres
+npm run dev:test                        # validate.py and the stack lane, against the k3d cluster
 ```
 
-**`validate.py` is topology-agnostic and runs against both deployment targets** — Compose and
-Kubernetes — which is what makes it the real drift control between them.
+**`validate.py` runs in-cluster as a Job (`e2e.enabled`) and from the host through the dev loop's
+port-forwards**, and the two agreeing is the wiring check.
 
 ---
 
 ## Expected behaviour (not defects)
 
-- **`docker compose down -v` invalidates every logged-in browser.** It drops `supabase_db_data`, and
+- **`npm run dev:reset`, or deleting the release's volumes, invalidates every logged-in browser.** It drops the database, and
   with it `auth.sessions`. The dashboard clears the stale tokens and returns to the login screen.
 - **Swagger UI's "Example Value" is documentation, not data.** Press **Execute** and read the
   **Response body** panel.

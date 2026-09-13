@@ -25,7 +25,7 @@ json | reason = "gateway_binding".
 LINES ARE FORWARDED WHOLE. What the store holds is what the container printed. The one
 exception is the traceback rejoin for the two services whose format this repository controls;
 its firstline regex describes logging_config.py's formats and nothing else, and applying it to
-a mixed stream swallows unrelated lines into the wrong record (measured on Compose).
+a mixed stream swallows unrelated lines into the wrong record (measured).
 =================================================================================================
 */}}
 apiVersion: v1
@@ -208,8 +208,8 @@ data:
         source_labels = ["__meta_kubernetes_pod_name"]
         target_label  = "pod"
       }
-      // `job` and `component` as the Compose scrape config set them, so the dashboards and
-      // rules read the same labels on either target.
+      // `job` and `component` both carry the component name, which is what the dashboards and
+      // rules select on.
       rule {
         source_labels = ["service"]
         target_label  = "job"

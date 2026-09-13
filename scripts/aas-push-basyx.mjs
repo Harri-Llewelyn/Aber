@@ -40,6 +40,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stackCredentials } from './lib/stack-credentials.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -80,19 +81,11 @@ if (deviceName && filePath) {
 
 basyxUrl = basyxUrl.replace(/\/+$/, '');
 
-// --- .env -------------------------------------------------------------------------------------
-function loadDotEnv() {
-  const envPath = path.join(rootDir, '.env');
-  if (!fs.existsSync(envPath)) return;
-  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
-    const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
-    if (!match) continue;
-    const [, key, rawValue] = match;
-    if (process.env[key] !== undefined) continue;
-    process.env[key] = rawValue.replace(/^["']|["']$/g, '');
-  }
-}
-loadDotEnv();
+// --- credentials ---------------------------------------------------------------------------------
+// The anon key from the release Secret unless the environment sets it; SUPABASE_URL defaults to
+// the gateway as `npm run dev:forward` publishes it.
+process.env.SUPABASE_ANON_KEY ||= stackCredentials(['SUPABASE_ANON_KEY']).SUPABASE_ANON_KEY;
+process.env.SUPABASE_URL ||= 'http://127.0.0.1:54321';
 
 /**
  * AAS Part 2 path encoding: base64url, no padding.

@@ -3,7 +3,10 @@
 This document is the protocol for proving the two gateways are equivalent, and the plan
 for promoting Envoy once they are.
 
-**Status.** Compose is **migrated** — Envoy publishes 54321 and Kong is retired there. The Helm half
+> **Historical.** Docker Compose was removed in September 2026; the Compose half below records how
+> the migration was verified there.
+
+**Status.** Compose was **migrated** — Envoy publishes 54321 and Kong is retired there. The Helm half
 is **partly verified**: installed into a real cluster, where the Service adoption, routing, all four
 exemptions and both gating directions hold, but where the stack's own images are unpublished so the
 authenticated probe has nothing to reach. Kubernetes still defaults to Kong. See

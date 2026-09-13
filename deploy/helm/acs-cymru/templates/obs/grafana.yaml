@@ -13,7 +13,7 @@
 {{/*
 grafana.ini and the file-based provisioning, all read-only.
 
-THE FILE IS SHARED WITH THE COMPOSE TARGET, unchanged. Everything in it that is deployment-specific
+THE FILE IS THE REPOSITORY'S, unchanged. Everything in it that is deployment-specific
 is a BROWSER-FACING URL, and those are overridden by GF_* environment variables below rather than by
 forking the file -- Grafana's env override maps GF_<SECTION>_<KEY> onto any ini key, so
 `GF_AUTH_GENERIC_OAUTH_AUTH_URL` replaces `[auth.generic_oauth] auth_url` with no edit.
@@ -122,8 +122,8 @@ spec:
     {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # 3000 in the container. docker-compose publishes it on 3002 to avoid colliding with the
-      # frontend's 3000 on the host; there is no such collision inside a cluster.
+      # 3000 in the container. The dev loop forwards it to 3002 on a laptop to avoid colliding
+      # with the frontend's 3000; there is no such collision inside a cluster.
       port: 3000
       targetPort: http
       protocol: TCP
@@ -174,8 +174,8 @@ spec:
           Reading it from the Secret at pod start works whoever owns the Secret and keeps the
           password out of the rendered manifest entirely.
 
-          THIS REPLACES the `sed` entrypoint override and the grafana_provisioning_datasources
-          volume that the Compose service needs. Grafana here runs its stock /run.sh.
+          Grafana runs its stock /run.sh; the substitution is done here rather than by an
+          entrypoint override.
         */}}
         - name: render-datasource
           image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
@@ -252,7 +252,7 @@ spec:
               fi
               # EITHER FORMAT SATISFIES THIS, and the publishable key wins where both are
               # set. The contact point needs A credential the gateway accepts, not
-              # specifically the legacy one. Matches the Compose entrypoint exactly.
+              # specifically the legacy one.
               GATEWAY_KEY="${SUPABASE_PUBLISHABLE_KEY:-$SUPABASE_ANON_KEY}"
               if [ -z "$GATEWAY_KEY" ]; then
                 echo 'SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past the gateway key-auth.' >&2

@@ -84,7 +84,7 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
             - name: PGRST_DB_USE_LEGACY_GUCS
               value: "false"
-            # The revocation choke point (0074), identical to Compose. Run in the caller's role
+            # The revocation choke point (0074). Run in the caller's role
             # before every request; it RAISEs on a revoked `jti` and returns quietly otherwise.
             # A single point of failure by construction -- its fail-open paths are asserted in
             # supabase/migrations/test_service_token_revocation.py, and a misspelling here is a

@@ -15,11 +15,11 @@ and the authenticated probe's markers cannot be satisfied against empty upstream
 handshake, the ServiceMonitor scrape and the Ingress were untested for the same class of reason.
 That remainder was downstream of CI, not of the chart:
 the k3d job BUILDS those images and imports them, so `Verify The Live Gateway Surface — Envoy,
-In-Cluster` runs the same probe the Compose job runs, against a stack that has a schema behind it.
+In-Cluster` runs the probe against a stack that has a schema behind it.
 
 WHAT HELD BEFORE THAT, observed rather than translated: the `supabase-kong` Service selects
 `component=supabase-envoy` and gets a live endpoint, so the name adoption the promotion rests on
-works; the unauthenticated probe reports the same 3 gated / 6 open / 4 exemptions as Compose; and
+works; the unauthenticated probe reports 3 gated / 6 open / 4 exemptions; and
 credentials behave in both directions.
 
 TO RE-RUN IT BY HAND:
@@ -172,9 +172,8 @@ spec:
                 echo 'LEGACY_KEYS_ACCEPTED=false with no SUPABASE_PUBLISHABLE_KEY set -- the gateway would accept no API key at all and refuse every request. Mint the new pair first, migrate your consumers onto it, and only then turn the legacy keys off.' >&2
                 exit 1
               fi
-              # ONE OF THE NEW PAIR IS WORSE THAN NEITHER -- the same guard Compose's substituter
-              # makes, and it has to be made twice for the reason every other check here is: the
-              # two targets share the template and not the substituter, so a rule enforced on one
+              # ONE OF THE NEW PAIR IS WORSE THAN NEITHER -- the guard the substituter makes, for
+              # the reason every other check here is: a rule enforced on one
               # is a per-target divergence that surfaces as a boot failure on the other.
               if { [ -n "$SUPABASE_PUBLISHABLE_KEY" ] && [ -z "$SUPABASE_SECRET_KEY" ]; } || { [ -z "$SUPABASE_PUBLISHABLE_KEY" ] && [ -n "$SUPABASE_SECRET_KEY" ]; }; then
                 echo 'SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY are a pair -- set BOTH to accept the new key format, or NEITHER to run legacy-only.' >&2
@@ -198,7 +197,7 @@ spec:
               # Kong takes origins as a JSON array of strings; Envoy takes a list of string
               # matchers. THE SPACE AFTER THE COLON IS REQUIRED: `{exact:"a"}` is a single scalar
               # key in a YAML flow mapping, not a key and a value, and Envoy refuses the whole
-              # bootstrap. Verified on Compose, where it refused to start.
+              # bootstrap. Measured: Envoy refused to start.
               CORS_MATCHERS=$(printf '%s' "$ENVOY_CORS_ORIGINS" | sed 's/"\([^"]*\)"/{exact: "\1"}/g')
 
               # The signing secret as an `oct` JWKS key, which the studio listener verifies session
@@ -207,7 +206,7 @@ spec:
               # token against.
               JWT_B64URL=$(printf '%s' "$SUPABASE_JWT_SECRET" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
 
-              # FAIL CLOSED, NOT SHUT, matching Compose. The chart does not publish the studio
+              # FAIL CLOSED, NOT SHUT. The chart does not publish the studio
               # listener at all by default (routes.studio is false), so an unset pair here is the
               # ordinary case rather than a misconfiguration -- and refusing to boot over it would
               # take down the gateway every other service sits behind.
@@ -322,9 +321,9 @@ spec:
             # concern: the cluster carries the address, this carries only the Host header.
             - name: REALTIME_UPSTREAM_HOST
               value: {{ .Values.realtime.serviceName | quote }}
-            # AND THE ADDRESS, which on this target is the same string and on Compose is not.
-            # The template used to hard-code Compose's container name, so this cluster resolved
-            # nothing here and Realtime answered 503 through a gateway that was otherwise right.
+            # AND THE ADDRESS, which is the same string here. The template used to hard-code a
+            # container name, so this cluster resolved nothing and Realtime answered 503 through a
+            # gateway that was otherwise right.
             - name: REALTIME_UPSTREAM_ADDRESS
               value: {{ .Values.realtime.serviceName | quote }}
             # THE SAME HELPER THE INGRESS HOSTS COME FROM, so an origin cannot name a hostname the
@@ -360,8 +359,7 @@ spec:
               value: {{ include "acs-cymru.supabaseUrl" . | quote }}
             - name: STUDIO_PUBLIC_URL
               value: {{ include "acs-cymru.studioUrl" . | quote }}
-            # The name Envoy DIALS. Compose has a container of the same name; here it is the
-            # Service in templates/supabase/studio.yaml.
+            # The name Envoy DIALS: the Service in templates/supabase/studio.yaml.
             - name: STUDIO_UPSTREAM_ADDRESS
               value: supabase-studio
             # ------------------------------------------------------------------------------

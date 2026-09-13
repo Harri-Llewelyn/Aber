@@ -837,7 +837,7 @@ describe('publishing a capture back', () => {
     await open()
     fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/server-side setting, not part of the capture file/)).toBeInTheDocument()
-    expect(screen.getByText(/docker compose up -d playback/)).toBeInTheDocument()
+    expect(screen.getByText(/kubectl rollout restart deploy\/playback/)).toBeInTheDocument()
   })
 
   /** "Holds nothing" and "is not running" are different problems, and only the heartbeat tells them apart. */

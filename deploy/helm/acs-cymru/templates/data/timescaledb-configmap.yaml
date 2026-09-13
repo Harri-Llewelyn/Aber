@@ -1,12 +1,11 @@
 {{- /*
 TimescaleDB bootstrap scripts, mounted at /docker-entrypoint-initdb.d.
 
-SOURCED FROM ./timescaledb/init, the same directory docker-compose.yml bind-mounts, so the two
-targets provision the historian from ONE set of files. Helm cannot read outside its own chart, so
+SOURCED FROM ./timescaledb/init, the directory the repository owns. Helm cannot read outside its own chart, so
 the copies under files/ are mirrored by scripts/sync-helm-chart-files.mjs and CI runs that script
 with --check to prove they are current.
 
-SAME CAVEAT AS COMPOSE, and it is sharper here: the postgres entrypoint runs these ONLY on an
+THE CAVEAT: the postgres entrypoint runs these ONLY on an
 EMPTY DATA DIRECTORY. Editing them does not reach an existing database, and on Kubernetes "recreate
 the volume" means deleting the PVC -- `helm upgrade` will not do it, and neither will deleting the
 pod, because the StatefulSet reattaches the same claim. Schema changes to the historian therefore

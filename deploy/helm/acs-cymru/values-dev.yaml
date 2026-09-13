@@ -3,7 +3,7 @@
 #
 #   helm install acs-cymru deploy/helm/acs-cymru -f deploy/helm/acs-cymru/values-dev.yaml
 #
-# EVERY CREDENTIAL BELOW IS A PUBLISHED DEMO VALUE, copied verbatim from .env.example. They are in
+# EVERY CREDENTIAL BELOW IS A PUBLISHED DEMO VALUE, the demonstration set. They are in
 # git, they are in the repository's CI logs, and they are the same on every developer's machine.
 # That is fine for a laptop k3s and is NEVER acceptable anywhere else -- values-prod.yaml.example
 # is the starting point for anything reachable by another person.
@@ -13,10 +13,12 @@
 # =============================================================================================
 
 global:
-  # k3s ships Traefik and CoreDNS; `localhost` here means the ingress hosts resolve via /etc/hosts
-  # or nip.io during development. Feeds both the Ingress rules and the browser-facing URLs the
-  # OAuth clients are registered with -- one value, so they cannot disagree.
-  publicBaseDomain: 127.0.0.1.nip.io
+  # Every `*.localhost` name is this machine: browsers resolve it themselves, Windows and
+  # systemd-resolved resolve it for everything else, and browsers treat it as a secure context,
+  # which the Studio and forge logins need over plain HTTP (they set Secure cookies, which any
+  # other http host loses). Feeds both the Ingress rules and the browser-facing URLs the OAuth
+  # clients are registered with -- one value, so they cannot disagree.
+  publicBaseDomain: localhost
   scheme: http
   # k3s's built-in provisioner. Node-local and ReadWriteOnce -- see values.yaml.
   storageClass: local-path
@@ -44,14 +46,14 @@ secrets:
   # start MQTT loop in fail-open state." Correct behaviour, ten minutes of `0 of 1 updated
   # replicas are available`, and a failure that names neither the chart nor this file.
   #
-  # These are the same demonstration JWTs .env.example carries, signed by the jwtSecret above:
+  # Demonstration JWTs signed by the jwtSecret above:
   # Service_Ingestor is sub b0000000-...-0002 (0046) and Service_Playback is ...-0003 (0056).
   # Neither is `service_role` -- that is the whole point of Machine Identities, and copying the
   # service key here instead would produce a working stack that proves nothing.
   ingestionKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAyIiwiZXhwIjoyMDAwMDAwMDAwfQ.j-rSyTImEPP3Etuq304tYycMSKrk0mxcI_9Pmew3seI
   playbackKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiZXhwIjoyMDAwMDAwMDAwfQ.40LLl4zKVmdJOBBkG-sKUZjXkhESdgzEg8c0aK-DVr4
 
-  # Matching .env.example. Realtime's own metrics endpoint, separate from the session JWT secret.
+  # Realtime's own metrics endpoint, separate from the session JWT secret.
   realtimeMetricsJwtSecret: acscymru_realtime_metrics_jwt_secret_development_only
 
   # EXACTLY 16 characters, and AT LEAST 64 characters. The chart asserts both.
@@ -91,27 +93,34 @@ secrets:
   # neither this value nor the container that refused to start.
   mqttCredentialServiceToken: acs-cymru-dev-credential-service-token-not-a-secret
 
-  # Matches .env.example, so the Compose and k3d stacks bring the forge up on the same account.
   giteaAdminPassword: gitea-admin
   giteaMachinePassword: acs-platform-machine-account
-  # The forge's door (0094). Set here because, unlike Studio's, the gitea route is on by default.
+  # The forge's door (0094).
   giteaOAuthClientSecret: change-me-gitea-oauth-client-secret
   giteaProxyHmacSecret: change-me-gitea-proxy-hmac-secret
   giteaWebhookSecret: change-me-gitea-webhook-secret
+  # Studio's door: on here because ingress.routes.studio is, below.
+  studioOAuthClientSecret: change-me-studio-oauth-client-secret
+  studioProxyHmacSecret: change-me-studio-proxy-hmac-secret
 
   grafanaAdminUser: admin
   grafanaAdminPassword: admin
   grafanaOAuthClientSecret: change-me-grafana-oauth-client-secret
   grafanaAlertWebhookSecret: change-me-grafana-alert-webhook-bearer-min-32-chars
-  # Matches .env.example, so the Compose and k3d stacks come up on the same credential set.
   # Grafana connects to the historian as `powerbi_reader`, never as `postgres`.
   biReaderPassword: acscymru123
 
   noderedCredentialSecret: acscymrusecret
   noderedOAuthClientSecret: change-me-nodered-oauth-client-secret
   noderedWebhookJwtSecret: change-me-nodered-webhook-signing-key-min-32-chars
-  # Break-glass path stays shut by default, matching .env.example.
+  # Break-glass path stays shut by default.
   noderedAdminToken: ""
+
+# Studio's route is off by default as an exposure decision (values.yaml). On a loopback domain
+# there is nothing to expose, and with it on the Directory's studio link works.
+ingress:
+  routes:
+    studio: true
 
 # Small volumes: a laptop k3s is usually running on the same disk as everything else, and
 # local-path takes the space from the node's filesystem immediately.

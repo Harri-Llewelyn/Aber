@@ -84,9 +84,9 @@ spec:
               value: {{ .Values.supabaseStudio.organizationName | quote }}
             - name: DEFAULT_PROJECT_NAME
               value: {{ .Values.supabaseStudio.projectName | quote }}
-            # Studio reads Edge Functions from DISK, not over HTTP. On Compose that is a bind mount
-            # of ./supabase/functions; here there is no repository on the node, and the functions
-            # live baked inside the edge-runtime image instead. Studio therefore gets an emptyDir:
+            # Studio reads Edge Functions from DISK, not over HTTP. There is no repository on the
+            # node, and the functions live baked inside the edge-runtime image, so Studio gets an
+            # emptyDir:
             # its Edge Functions page lists nothing, which is correct -- the functions are not
             # editable through Studio on this target, they ship with the image.
             - name: EDGE_FUNCTIONS_MANAGEMENT_FOLDER
@@ -99,7 +99,7 @@ spec:
               port: http
             periodSeconds: 10
             timeoutSeconds: 5
-            # Next.js cold start; the Compose healthcheck allows a 40s start_period.
+            # Next.js cold start: measured at up to 40s.
             failureThreshold: 30
           readinessProbe:
             httpGet:

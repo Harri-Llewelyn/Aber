@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Replays the migration chain a second time against the same database and asserts nothing moved.
- * There is no migrations ledger: `supabase-db-init` replays every file on every boot, so a second
- * run must match no rows. A live stack is not quiet, so the checks are things only a migration can
- * move. Strict: the schema itself, as a filtered `pg_dump --schema-only` digest; and
+ * There is no migrations ledger: db-init replays every file on every install and upgrade, so a
+ * second run must match no rows. A live stack is not quiet, so the checks are things only a
+ * migration can move. Strict: the schema itself, as a filtered `pg_dump --schema-only` digest; and
  * `digital_thread` rows with `actor_source = 'migration'`, which only a migration writes. Reported:
  * operator-facing row counts, where a fall across a replay is the signature of a destructive
  * one-shot re-running. The dump is filtered because modern pg_dump wraps its output in a `\restrict
@@ -11,34 +11,37 @@
  * sensitive to line endings: replaying from a CRLF tree and then an LF checkout genuinely changes
  * what is stored.
  *
- * Usage: node scripts/check-migration-idempotency.mjs. Environment: DB_CONTAINER (default
- * supabase-db), DB_INIT_SERVICE (supabase-db-init), DB_USER_NAME (postgres), DB_NAME (postgres).
+ * The replay is the db-init hook Job as Helm rendered it for the installed release (`helm get
+ * hooks`), re-created under a new name, so it runs the same image with the same environment. The
+ * live Job cannot be cloned: it is gone once its TTL expires. The clone is deleted afterwards.
+ *
+ * Usage: node scripts/check-migration-idempotency.mjs, against the cluster the kube context points
+ * at. Environment: ACS_CYMRU_NAMESPACE (default acs-cymru), ACS_CYMRU_RELEASE (acs-cymru),
+ * DB_USER_NAME (postgres), DB_NAME (postgres).
  */
-
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
-const DB_CONTAINER = process.env.DB_CONTAINER || 'supabase-db';
-const DB_INIT_SERVICE = process.env.DB_INIT_SERVICE || 'supabase-db-init';
+const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru';
+const RELEASE = process.env.ACS_CYMRU_RELEASE || 'acs-cymru';
 const DB_USER_NAME = process.env.DB_USER_NAME || 'postgres';
 const DB_NAME = process.env.DB_NAME || 'postgres';
+const DB_INIT_JOB = `${RELEASE}-db-init`;
+const REPLAY_JOB = `${RELEASE}-db-init-replay`;
 
 let failed = false;
 const fail = (m) => { failed = true; console.log(`  FAIL  ${m}`); };
 const pass = (m) => console.log(`  ok    ${m}`);
 const note = (m) => console.log(`        ${m}`);
 
-function compose(args, opts = {}) {
-  return spawnSync('docker', ['compose', ...args], {
-    encoding: 'utf8',
-    maxBuffer: 1 << 28,
-    ...opts,
-  });
+function kubectl(args, opts = {}) {
+  return spawnSync('kubectl', ['-n', NAMESPACE, ...args], { encoding: 'utf8', maxBuffer: 1 << 28, ...opts });
 }
 
+/** psql inside the database pod, as the owner, over the socket. */
 function psql(sql) {
-  const r = compose(['exec', '-T', DB_CONTAINER, 'psql', '-U', DB_USER_NAME, '-d', DB_NAME,
-                     '-t', '-A', '-F', '', '-c', sql]);
+  const r = kubectl(['exec', 'statefulset/supabase-db', '--', 'psql', '-U', DB_USER_NAME, '-d', DB_NAME,
+    '-t', '-A', '-F', '', '-c', sql]);
   if (r.status !== 0) {
     throw new Error(`psql failed: ${(r.stderr || '').trim().split('\n').slice(-3).join(' ')}`);
   }
@@ -47,8 +50,8 @@ function psql(sql) {
 
 /** The schema, as a digest. Filtered: pg_dump emits a random `\restrict` nonce on every run. */
 function schemaDigest() {
-  const r = compose(['exec', '-T', DB_CONTAINER, 'pg_dump', '-U', DB_USER_NAME, '-d', DB_NAME,
-                     '--schema-only', '--schema=public']);
+  const r = kubectl(['exec', 'statefulset/supabase-db', '--', 'pg_dump', '-U', DB_USER_NAME, '-d', DB_NAME,
+    '--schema-only', '--schema=public']);
   if (r.status !== 0) {
     throw new Error(`pg_dump failed: ${(r.stderr || '').trim().split('\n').slice(-3).join(' ')}`);
   }
@@ -72,7 +75,7 @@ function rowCounts() {
   const counts = new Map();
   for (const line of out.split('\n')) {
     if (!line.trim()) continue;
-    const [t, n] = line.split('');
+    const [t, n] = line.split('');
     counts.set(t, Number(n));
   }
   return counts;
@@ -86,16 +89,59 @@ function fingerprint() {
   };
 }
 
-// -------------------------------------------------------------------------------------------------
+/** The db-init Job as Helm rendered it for the installed release, or null with the reason. */
+function renderedDbInitJob() {
+  const hooks = spawnSync('helm', ['-n', NAMESPACE, 'get', 'hooks', RELEASE], { encoding: 'utf8', maxBuffer: 1 << 28 });
+  if (hooks.status !== 0) return { job: null, reason: (hooks.stderr || '').trim() };
+  // kubectl turns the multi-document YAML into one JSON object per document, concatenated.
+  const rendered = kubectl(['create', '--dry-run=client', '-o', 'json', '-f', '-'], { input: hooks.stdout });
+  if (rendered.status !== 0) return { job: null, reason: (rendered.stderr || '').trim() };
+  const objects = [];
+  let buf = '';
+  for (const line of rendered.stdout.split('\n')) {
+    buf += line + '\n';
+    if (line === '}') { objects.push(JSON.parse(buf)); buf = ''; }
+  }
+  const job = objects.find((o) => o.kind === 'Job' && o.metadata?.name === DB_INIT_JOB);
+  return job ? { job } : { job: null, reason: `job/${DB_INIT_JOB} is not among the release's hooks` };
+}
 
+/** Run db-init again from the rendered hook and return its outcome. */
+function replayChain(job) {
+  kubectl(['delete', 'job', REPLAY_JOB, '--ignore-not-found', '--wait=true']);
+  const clone = {
+    apiVersion: 'batch/v1',
+    kind: 'Job',
+    metadata: { name: REPLAY_JOB, namespace: NAMESPACE, labels: { 'acs-cymru.io/replay-of': DB_INIT_JOB } },
+    spec: { backoffLimit: job.spec.backoffLimit ?? 0, ttlSecondsAfterFinished: 600, template: job.spec.template },
+  };
+  const created = kubectl(['create', '-f', '-'], { input: JSON.stringify(clone) });
+  if (created.status !== 0) {
+    return { outcome: 'not started', detail: (created.stderr || '').trim() };
+  }
+  const deadline = Date.now() + 15 * 60 * 1000;
+  let outcome = 'timeout';
+  while (Date.now() < deadline) {
+    if (kubectl(['get', `job/${REPLAY_JOB}`, '-o', 'jsonpath={.status.succeeded}']).stdout.trim() === '1') { outcome = 'succeeded'; break; }
+    if (kubectl(['get', `job/${REPLAY_JOB}`, '-o', 'jsonpath={.status.conditions[?(@.type=="Failed")].status}']).stdout.trim() === 'True') { outcome = 'failed'; break; }
+    spawnSync(process.execPath, ['-e', 'setTimeout(() => {}, 5000)']);
+  }
+  const logs = kubectl(['logs', `job/${REPLAY_JOB}`, '--tail=-1']).stdout || '';
+  kubectl(['delete', 'job', REPLAY_JOB, '--ignore-not-found']);
+  return { outcome, detail: logs };
+}
+
+// -------------------------------------------------------------------------------------------------
 console.log('Migration idempotency: replaying the chain a second time and comparing.\n');
 
-if (spawnSync('docker', ['version'], { stdio: 'ignore' }).status !== 0) {
-  console.log('  skip   docker is not available; this check needs a running stack.');
+const ready = kubectl(['get', 'statefulset/supabase-db', '-o', 'jsonpath={.status.readyReplicas}']);
+if (ready.status !== 0 || ready.stdout.trim() !== '1') {
+  console.log(`  skip   supabase-db is not running in namespace ${NAMESPACE}; bring the stack up first.`);
   process.exit(0);
 }
-if (compose(['ps', '-q', DB_CONTAINER]).stdout.trim() === '') {
-  console.log(`  skip   ${DB_CONTAINER} is not running; bring the stack up first.`);
+const { job, reason } = renderedDbInitJob();
+if (!job) {
+  console.log(`  skip   the release ${RELEASE} has no db-init hook to replay (${reason}); install it first.`);
   process.exit(0);
 }
 
@@ -109,29 +155,14 @@ try {
 note(`before: schema ${before.schema.digest.slice(0, 12)}, ` +
      `${before.migrationAuditRows} migration audit row(s)`);
 
-console.log(`\nReplaying ${DB_INIT_SERVICE}...\n`);
-const replay = compose(['up', '--force-recreate', DB_INIT_SERVICE], { stdio: 'inherit' });
-
-// The container's exit code, not `up`'s: `docker compose up <one-shot service>` exits 0 when it
-// started the containers, so an aborting db-init reported green while the chain after the failing
-// file never ran, and a chain that dies changes nothing. `--abort-on-container-exit
-// --exit-code-from` would stop the live database this check is pointed at, so the exit code is read
-// back with `docker inspect`.
-const containerId = (compose(['ps', '-aq', DB_INIT_SERVICE]).stdout || '').trim().split(/[\r\n]+/)[0];
-const inspected = containerId
-  ? spawnSync('docker', ['inspect', '-f', '{{.State.ExitCode}}', containerId], { encoding: 'utf8' })
-  : null;
-// A container that cannot be found or inspected is reported rather than assumed healthy: the whole
-// point of this block is that "no evidence of failure" was being read as "evidence of success".
-const replayExit = inspected && inspected.status === 0
-  ? Number.parseInt(inspected.stdout.trim(), 10)
-  : NaN;
-
-if (replay.status !== 0 || replayExit !== 0) {
-  fail(`${DB_INIT_SERVICE} exited ${Number.isNaN(replayExit) ? `unknown (up: ${replay.status})` : replayExit}. ` +
-       `The chain does not replay cleanly, which is a larger problem than idempotency: db-init ` +
-       `runs on every boot.`);
-  note('Scroll up: the last "Executing migration ..." line above the ERROR names the file.');
+console.log(`\nReplaying ${DB_INIT_JOB} as ${REPLAY_JOB}...\n`);
+const replay = replayChain(job);
+if (replay.outcome !== 'succeeded') {
+  fail(`the replay ${replay.outcome}. The chain does not replay cleanly, which is a larger problem ` +
+       `than idempotency: db-init runs on every install and upgrade.`);
+  const tail = replay.detail.split('\n').filter(Boolean).slice(-20);
+  for (const line of tail) note(`    ${line.slice(0, 160)}`);
+  note('The last "Executing migration ..." line above the ERROR names the file.');
   note('Nothing below this point is meaningful -- a chain that aborts changes nothing, so the');
   note('schema, audit and data comparisons would all agree and all be vacuous.');
   process.exit(1);
@@ -144,7 +175,6 @@ console.log('');
 if (before.schema.digest !== after.schema.digest) {
   fail('the public schema changed across a replay of the same migration chain.');
   note('Only DDL moves this, and DDL between two runs of the same files is drift by definition.');
-
   // The diff, not just the verdict: both dumps exist here, so what moved is printed. Bounded,
   // because the useful signal is in the first few lines; GRANT and REVOKE lines are what this has
   // caught.
@@ -202,8 +232,8 @@ if (lost.length) {
 
 console.log('');
 if (failed) {
-  console.log('The chain is NOT idempotent. Every migration replays on every boot, so this is a ');
-  console.log('defect that reaches every deployment on its next restart.');
+  console.log('The chain is NOT idempotent. Every migration replays on every install and upgrade, so');
+  console.log('this is a defect that reaches every deployment on its next upgrade.');
   process.exit(1);
 }
 console.log('The migration chain replays cleanly: same schema, no new audit rows, no data lost.');

@@ -2,8 +2,7 @@
 
 ## Scope of the MIT licence
 
-The MIT licence in [`LICENSE`](LICENSE) covers the work in this repository: the Compose and Helm
-deployment configuration, the SQL in [`timescaledb/`](timescaledb/) and
+The MIT licence in [`LICENSE`](LICENSE) covers the work in this repository: the Helm chart, the SQL in [`timescaledb/`](timescaledb/) and
 [`supabase/migrations/`](supabase/migrations/), the frontend, the ingestion, playback and i3X
 services, the Node-RED flows, the Grafana dashboard definitions, the scripts and the documentation.
 
@@ -106,7 +105,6 @@ project's own repository.
 | `supabase/postgres-meta:v0.96.6` | Supabase postgres-meta |
 | `supabase/studio:2026.07.07-sha-a6a04f2` | Supabase Studio |
 | `envoyproxy/envoy:v1.39.1` | Envoy Proxy |
-| `prom/node-exporter:v1.12.1` | Prometheus node_exporter |
 | `swaggerapi/swagger-ui:v5.32.14` | Swagger UI |
 | `node:24-alpine`, `alpine:3.24` | Node.js, Alpine Linux and their packages |
 

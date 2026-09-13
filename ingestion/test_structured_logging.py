@@ -158,9 +158,9 @@ class FormatSelectionTestCase(unittest.TestCase):
 
     def test_the_default_is_text(self):
         """
-        NOT AN OVERSIGHT, AND NOT THE SAME CLAIM AS "the stack logs text". Both deployments set
-        `LOG_FORMAT=json` explicitly -- docker-compose.yml and the chart, on ingestion and
-        playback. This default serves the case they do not cover: someone running the daemon by
+        NOT AN OVERSIGHT, AND NOT THE SAME CLAIM AS "the stack logs text". The chart sets
+        `LOG_FORMAT=json` explicitly on ingestion and playback. This default serves the case it
+        does not cover: someone running the daemon by
         hand, who is reading with their eyes rather than with a query.
 
         The assertion is worth keeping precisely because the deployments now override it. If the

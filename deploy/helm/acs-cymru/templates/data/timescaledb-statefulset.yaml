@@ -23,14 +23,11 @@ spec:
       targetPort: postgres
 ---
 {{/*
-THE NAME IS `timescaledb`, matching the Compose service name exactly.
+THE NAME IS `timescaledb`: the postgres_fdw foreign server in 0001_baseline_schema.sql, the
+Grafana datasource and the ingestion daemon all address `timescaledb:5432`. See the Service-name note in _helpers.tpl -- do not prefix it.
 
-That is what makes `timescaledb:5432` resolve identically on both targets, so the postgres_fdw
-foreign server in 0001_baseline_schema.sql, the Grafana datasource and the ingestion daemon all
-work unchanged. See the Service-name note in _helpers.tpl -- do not prefix it.
-
-M2: PORT 5432, the port the server listens on. NOT 5433, which exists only as docker-compose's
-published port so it does not collide with a developer's local PostgreSQL. There is no port
+M2: PORT 5432, the port the server listens on. NOT 5433, which exists only as the dev loop's
+forwarded port so it does not collide with a developer's local PostgreSQL. There is no port
 mapping in Kubernetes and 5433 is meaningless here; a foreign server pointed at it fails as a
 relation-level error from PostgREST, which reads as a schema fault rather than a connection one.
 */}}
@@ -135,7 +132,7 @@ spec:
             # costs nothing on local-path.
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
-          # THREE PROBES, EACH DOING A DIFFERENT JOB. Compose expresses only the middle one.
+          # THREE PROBES, EACH DOING A DIFFERENT JOB.
           #
           # startupProbe holds the other two off while initdb runs and the bootstrap scripts
           # apply -- on a cold volume that is far longer than a steady-state check should tolerate.

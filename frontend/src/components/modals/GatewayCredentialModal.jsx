@@ -251,7 +251,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                           </strong>
                         )}
                         Paste it as it is, then restart the playback worker
-                        (<span className="mono">docker compose up -d playback</span>). Already have
+                        (<span className="mono">kubectl rollout restart deploy/playback</span>). Already have
                         other targets in there? Add this key to the existing object rather than
                         replacing it.
                       </>

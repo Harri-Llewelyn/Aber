@@ -4,7 +4,7 @@
  *
  * WHY THIS EXISTS. Helm cannot read anything outside its own chart directory: `.Files.Glob` is
  * scoped to the chart, and `..` is rejected outright. But the files the chart needs are the SAME
- * files docker-compose.yml bind-mounts -- the TimescaleDB bootstrap scripts, and in later phases
+ * files the repository owns -- the TimescaleDB bootstrap scripts, and in later phases
  * the Kong template, the Grafana datasource template, the Mosquitto config and the Node-RED flow.
  * Two hand-maintained copies of those is exactly the drift this whole migration is trying to avoid.
  *

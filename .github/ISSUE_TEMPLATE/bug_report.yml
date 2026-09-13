@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         **Two things are documented rather than defects**, and are listed in
-        [`SECURITY.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/SECURITY.md): `.env.example` carries working development
+        [`SECURITY.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/SECURITY.md): `values-dev.yaml` carries working development
         secrets on purpose, and a working tree holds secrets `git status` will not show you.
 
         **Do not report a security vulnerability here.** Use
@@ -33,7 +33,7 @@ body:
         database — a quarantined device, a gateway that had gone stale, a metric that had been
         superseded.
       placeholder: |
-        1. npm run setup, then docker compose up -d
+        1. npm run dev:up
         2. ...
         3. ...
     validations:
@@ -90,7 +90,7 @@ body:
     attributes:
       label: Logs and error output
       description: >
-        Paste the relevant output — `docker compose logs <service>`, `kubectl logs`, the browser
+        Paste the relevant output — `kubectl -n acs-cymru logs <pod>`, the browser
         console, or a failing suite's output. It is rendered as a code block, so no backticks
         needed. **Redact credentials before pasting**; a container's environment is dumped in some
         of these.

@@ -5,21 +5,17 @@
 =================================================================================================
 `ingestion/validate.py`, run as a Job IN the namespace.
 
-THIS IS THE SIMPLER OF THE TWO TOPOLOGIES, which is worth saying because it is the opposite of the
-Compose case. On the host, CI has to override DB_HOST, DB_PORT, SUPABASE_DB_HOST, MQTT_HOST and
-SUPABASE_URL back to published ports (5433 / 54322 / 1883 / 54321) because the compose-internal names
-do not resolve outside the network. In-cluster the SERVICE NAMES ARE THE CORRECT CONFIGURATION -- and
-because they are identical to the Compose service names, the values below are the plain defaults with
-no rewriting and no port-forwarding.
+THIS IS THE SIMPLER OF THE TWO WAYS TO RUN IT. From the host (`npm run dev:test`) the script
+reaches the stack through port-forwards on 5433 / 54322 / 1883 / 54321, because the in-cluster names
+do not resolve outside the cluster. In-cluster the SERVICE NAMES ARE THE CORRECT CONFIGURATION, so
+the values below are the plain defaults with no rewriting and no port-forwarding.
 
 NOT A `helm test` HOOK, deliberately, unlike test-fdw. This suite SEEDS AND DELETES fixtures, drives
 real MQTT traffic and takes minutes; `helm test` should stay the cheap gate anyone can run against a
 live stack without thinking about it. Gated on `e2e.enabled` so it exists only when asked for.
 
-IT IS A CONFORMANCE CHECK FOR EITHER TARGET. The same 20 checks run against Compose in CI's
-e2e-validation job; if both pass, the two topologies agree where it matters. That is the drift
-control -- there is no way to automate "these describe the same system", and a check that claimed to
-would pass while they diverged.
+IT IS THE SAME 20 CHECKS `npm run dev:test` runs from the host; if both pass, the wiring agrees
+with itself where it matters.
 =================================================================================================
 */}}
 apiVersion: batch/v1
@@ -55,9 +51,9 @@ spec:
         in-cluster names without testing something else entirely.
 
         But a pod does not resolve those names the way a browser does. With the dev domain
-        `127.0.0.1.nip.io` they resolve, correctly, to 127.0.0.1 -- which inside this pod is THE POD
-        ITSELF. Nothing listens, and 7b failed as `Connection refused`, reading as a broken Node-RED
-        rather than as a name pointing at the wrong host.
+        `localhost` they resolve to 127.0.0.1 -- which inside this pod is THE POD ITSELF -- or, as
+        `*.localhost` names, to nothing. 7b failed as `Connection refused`, reading as a broken
+        Node-RED rather than as a name pointing at the wrong host.
 
         `e2e.ingressIp` maps those hostnames onto the ingress controller instead, so the Job walks
         the same redirect chain a browser would. Left empty the aliases are simply absent, which is
@@ -261,9 +257,7 @@ spec:
               with 403, surfacing as `AuthenticationError: Forbidden`. Nothing is broken; the
               handshake was split across two origins.
 
-              Compose never hit this because both ends default to `http://localhost:1880`, so the
-              flow is single-origin there by accident of the topology rather than by design. Using
-              the public origin here makes Kubernetes single-origin too, and has the side benefit
+              Using the public origin here makes the flow single-origin, and has the side benefit
               that check 7 now exercises the ingress path a real operator uses.
 
               Falls back to the in-cluster Service when no public domain is configured, so a stack
@@ -276,9 +270,8 @@ spec:
               I3X_BASE_URL WAS NEVER SET HERE, so checks 12-12f have never actually run on this
               target. validate.py defaults it to `http://localhost:8090`, which inside this Job's
               own pod is the Job itself -- nothing listens, and the suite reported `/info returned
-              HTTP 0`, indistinguishable from a broken i3X server. The service is named for its
-              Compose counterpart like every other, so this is the same in-cluster name the rest of
-              the stack uses.
+              HTTP 0`, indistinguishable from a broken i3X server. This is the in-cluster name the
+              rest of the stack uses.
             */}}
             {{- if .Values.i3xService.enabled }}
             - name: I3X_BASE_URL

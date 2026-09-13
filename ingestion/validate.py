@@ -340,7 +340,7 @@ def preflight_supabase_admin():
         print(f"❌ PREFLIGHT: cannot reach the Supabase database as the owner ({label}).")
         print(f"   {exc}")
         print("   Set SUPABASE_DB_HOST / SUPABASE_DB_PORT / SUPABASE_DB_NAME / SUPABASE_DB_USER /")
-        print("   POSTGRES_PASSWORD. From the HOST the port is 54322 (docker-compose publishes it");
+        print("   POSTGRES_PASSWORD. From the HOST the port is 54322 (the dev loop forwards it");
         print("   there to avoid colliding with a local PostgreSQL); IN-CLUSTER it is 5432 and the")
         print("   host is `supabase-db`. Without this, audit-row cleanup cannot run.")
         return False
@@ -654,8 +654,8 @@ def run_simulation():
     client = mqtt.Client(protocol=mqtt.MQTTv5)
     # Connects as its own gateway, exactly as a physical edge node does: username ==
     # VAL_GW_SPARKPLUG_ID, confined by its own broker role to its own subtree, so a mismatch shows as
-    # every publish silently dropped. Read from MQTT_VALIDATOR_*, the names docker-compose hands
-    # mosquitto-init. Not `MQTT_USER`/`MQTT_PASSWORD`, the ingestion daemon's credential, which may
+    # every publish silently dropped. Read from MQTT_VALIDATOR_*, the names the release Secret
+    # carries. Not `MQTT_USER`/`MQTT_PASSWORD`, the ingestion daemon's credential, which may
     # only read and publish NCMD; sourcing them would connect as the daemon and have every publish
     # discarded by the ACL. No default password: a stale default fails invisibly.
     mqtt_user = os.getenv("MQTT_VALIDATOR_USER") or VAL_GW_SPARKPLUG_ID
@@ -732,9 +732,9 @@ def run_simulation():
         raise SystemExit(
             f"MQTT: broker refused the connection (CONNACK {connack[0]}: {meaning}).\n"
             f"  Connected as '{mqtt_user}' using MQTT_VALIDATOR_USER/MQTT_VALIDATOR_PASSWORD.\n"
-            "  That account is provisioned by mosquitto-init from the same .env values, so this\n"
-            "  means the two have diverged -- re-run `docker compose up -d mosquitto-init` after\n"
-            "  confirming .env, or regenerate credentials with: node scripts/setup.mjs"
+            "  That account is provisioned at broker boot from the same release Secret, so this\n"
+            "  means the two have diverged -- restart the broker (kubectl rollout restart\n"
+            "  deploy/mosquitto) after confirming the Secret."
         )
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -1733,8 +1733,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Print the resolved endpoints before doing anything, because both ways of misconfiguring this
-    # script fail somewhere other than at the cause: from the host, sourcing the compose .env
-    # wholesale points it at in-network service names; in-cluster, a host left at its default points
+    # script fail somewhere other than at the cause: from the host, an in-cluster Service name
+    # resolves to nothing; in-cluster, a host left at its default points
     # it at its own pod. Supabase's own database is listed too, since only the cleanup path touches
     # it.
     print("Validation targets:")

@@ -71,8 +71,7 @@ spec:
           command: ["python", "playback_worker.py"]
           env:
             {{- /*
-              JSON LOGS, matching docker-compose.yml so the targets do not diverge -- see roadmap
-              13. The daemon's `reason`, `device` and `edge_node` become top-level keys rather
+              JSON LOGS: the daemon's `reason`, `device` and `edge_node` become top-level keys rather
               than an appended `[reason=...]`, which is what makes a log query filter on them.
 
               SET ON BOTH TARGETS EVEN THOUGH THIS CHART DEPLOYS NO LOKI. A cluster's own log
@@ -116,8 +115,7 @@ spec:
             {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
             {{- include "acs-cymru.brokerClientCaMount" . | nindent 12 }}
             {{- end }}
-            # The Kubernetes half of the playback delivery path (0078), matching the
-            # `playback_credentials` volume on Compose. READ-ONLY: this worker consumes credentials
+            # The playback delivery path (0078). READ-ONLY: this worker consumes credentials
             # and never issues them -- playback_worker._credentials() calls that "tier two of
             # three", the property that it cannot authenticate as a gateway whose password it was
             # not given -- so a writable mount would let a compromised worker hand itself one.

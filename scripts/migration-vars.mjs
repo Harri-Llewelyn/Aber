@@ -4,7 +4,7 @@
  * =================================================================================================
  * WHY THIS IS A MODULE AND NOT THREE LITERALS IN TWO PLACES
  *
- * db-init passes these through `psql -v` on every boot (see docker-compose.yml's migration loop).
+ * db-init passes these through `psql -v` on every run (supabase/db-init/Dockerfile's migration loop).
  * `0002` reads them with `\if :{?name}`, falls back to empty, and then WARNS RATHER THAN FAILING:
  *
  *     0038: GATEWAY_REVOKE_SECRET or SUPABASE_ANON_KEY is unset; credential revocation is INERT

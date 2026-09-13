@@ -84,8 +84,7 @@ issue [#155](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/155)
 The backup an Administrator takes on the Backups page has been taken and its digests checked, and
 nothing has yet restored from one. The weekly rehearsal in CI restores the CronJob's flat dumps
 into a disposable cluster and compares row counts; it has been failing since the Actions
-allowance ran out, and it knows nothing of the service's per-stamp directory, the forge archive,
-or a Compose stack. Until one restore has run end to end from a service-made directory, the
+allowance ran out, and it knows nothing of the service's per-stamp directory or the forge archive. Until one restore has run end to end from a service-made directory, the
 README's own line applies: an untested backup is a belief, not a capability.
 
 **What remains.**
@@ -98,9 +97,6 @@ README's own line applies: an untested backup is a belief, not a capability.
   that every gateway repository is back, that `main` is still protected, and that the SSH host
   key is byte-identical to the one an enrolled appliance pinned, because a forge restored without
   it is a fleet-wide re-enrolment.
-- **Rehearse on Compose**, which the CI job does not touch: `docker cp` the directory out of
-  `backup_data`, `restore-databases.sh` with `BACKUP_DIR` pointed at it, and the forge steps
-  from the README, against a stack brought up once so the nine roles exist.
 
 **Decided:** restore stays a runbook and a rehearsal, never a button; the rehearsal is CI's and
 weekly, not the service's; and a rehearsal that restores the data layer alone is reported as
@@ -109,7 +105,7 @@ that, as the workflow's header already insists.
 **Worth deciding early.** Whether the broker's CA and the Dynamic Security plugin's document
 (`mosquitto_certs`, `mosquitto_dynsec`; the `mosquitto-data` PVC on Kubernetes) join the tier 1
 backup. Neither is in it today; losing the root is a fleet-wide re-enrolment, losing the document
-is every gateway re-issued, and on Compose only a tier 2 snapshot saves them. Whether the platform's
+is every gateway re-issued, and only a tier 2 snapshot saves them. Whether the platform's
 own Node-RED data joins for the same reason. Whether the rehearsal should also prove the
 retention prune removes exactly the directory the row named and nothing beside it.
 
@@ -241,11 +237,6 @@ the ingress root are allowed to differ. A cloud-init seed that plants the root i
 zero-circularity answer for a plant that images its own appliances. Since the `apikey` gate is on
 `/functions/v1/`, serving the PEM from the ingress costs no fifth exemption.
 
-**Compose has no HTTPS root of its own.** `mosquitto-tls-init.mjs` owns the broker CA; nothing
-owns a root for the gateway listener, so on Compose there is nothing to pin the installer fetch
-against. Either the command carries two pins or Compose gains a root for the listener. Decide
-before the one-liner is built, not after.
-
 ### The operating system
 
 `unattended-upgrades` without automatic reboot. **`ansible-pull`**, not Ansible: outbound only,
@@ -359,7 +350,7 @@ token against the same repository, which the deploy-key reconcile makes routine,
 
 **Builds on:** the `gateway-backups` bucket in [`storage-init.mjs`](../scripts/storage-init.mjs) ·
 [`storage-policies.sql`](../supabase/storage-policies.sql) · `GATEWAY_BACKUP_BUCKET` in
-`.env.example`, `docker-compose.yml` and `values.yaml` · `test_gateway_enrollment.py`'s policy
+`values.yaml` · `test_gateway_enrollment.py`'s policy
 assertions
 
 The browser half is done: nothing in the dashboard reads or writes the bucket, and a gateway's flow
@@ -387,8 +378,7 @@ backup now, so a deleted repository is recoverable from one for as long as the b
 [`internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
 [`mosquitto-tls.conf`](../mosquitto/mosquitto-tls.conf) · `mosquitto.tls.internalClients` and
 `MQTT_TLS_ENABLED` · the DSN helper in `_helpers.tpl` ·
-[`datasources.template.yml`](../grafana/provisioning/datasources/datasources.template.yml) ·
-[`check-compose-chart-parity.mjs`](../scripts/check-compose-chart-parity.mjs)
+[`datasources.template.yml`](../grafana/provisioning/datasources/datasources.template.yml)
 
 **Built:** default-deny NetworkPolicy from one edge list (opt-in), an internal CA outside the
 chart, TLS on the Ingress and the broker's 8883 listener, per-gateway broker roles, the `apikey` gate, the
@@ -401,19 +391,9 @@ every row.
 
 **In order of cost.** Turn on `mosquitto.tls.internalClients` / `MQTT_TLS_ENABLED`, which moves
 ingestion, i3X and Node-RED to 8883 together and fails closed; the work is making it the supported
-posture, not the switch. Then Postgres: `verify-full` needs certificates naming the Service or
-container the client dials, and Compose has no cert-manager, which is the point where the two
-targets need different mechanisms for one property. Then an end state for plaintext 1883, which is
+posture, not the switch. Then Postgres: `verify-full` needs certificates naming the Service the
+client dials, which cert-manager issues. Then an end state for plaintext 1883, which is
 deliberate today for the fleet migration window.
-
-**The two targets disagree about posture and nothing states it.** The default-deny layer is
-Kubernetes-only and opt-in; Compose has a Docker network and no seam for a policy. That is recorded
-as an accepted risk now; the statement of what each target enforces belongs in
-`check-compose-chart-parity.mjs`, which prints known gaps on every run.
-
-**Port-free URLs on Compose** are a third `Host`-routed listener on `supabase-envoy`, mirroring the
-chart's subdomains, not a second proxy. The blocker is a wildcard DNS record this project does not
-own; design the `nip.io` escape hatch in from the start. MQTT and git-over-SSH do not ride it.
 
 **Client certificates on the gateway link** are not planned: 4 decides that a gateway holds no
 certificate, because the dynsec password and the pinned root already give identity, confinement and
@@ -421,10 +401,9 @@ a revocation that disconnects, and `crlfile` revocation needs a reload.
 
 **Must not touch:** per-gateway broker confinement, the origin policy's single home in `envoy.yaml`, the root's
 residence outside the chart, and the absence of a skip-verification switch. A service mesh is the
-complete answer and does nothing for Compose.
+complete answer.
 
-**Worth deciding early.** Whether Compose is in scope for the posture or only the transport.
-`require` or `verify-full` for Postgres. `internalClients` and any remaining loopback bindings flip
+**Worth deciding early.** `require` or `verify-full` for Postgres. `internalClients` and any remaining loopback bindings flip
 in separate changes.
 
 ---

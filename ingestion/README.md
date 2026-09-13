@@ -575,7 +575,7 @@ no PUBACK — so past the CONNECT there is nothing a publisher can observe, and 
 
 **Two things were wrong and only one was the credential.** `_credentials()` ran *once*, in `main()`,
 so even a correctly issued password reached the worker only after
-`docker compose up -d --force-recreate playback` — and an operator who had just clicked *Generate
+a restart of the playback worker — and an operator who had just clicked *Generate
 broker credential* had no reason to think a container recreate was outstanding. It now re-resolves
 every pass and logs the gateway ids it gains or loses.
 
@@ -800,7 +800,7 @@ slow costs latency and a writer that is stuck costs a counted drop rather than a
 `acs_ingestion_write_queue_depth` is the saturation signal: it grows only while the writer is behind.
 
 **A SIGTERM drains the queue before the process exits**, bounded by
-`TELEMETRY_SHUTDOWN_DRAIN_SECONDS` (8, inside Compose's 10 s grace period). A restart under load
+`TELEMETRY_SHUTDOWN_DRAIN_SECONDS` (8, inside the pod's termination grace period). A restart under load
 loses nothing the daemon had accepted; the log says how many were queued and, if the bound was hit,
 how many were lost.
 
@@ -1069,7 +1069,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
-| `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | Compose-internal name |
+| `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | The in-cluster Service name |
 | `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
 | `DB_HOST` / `DB_PORT` | `timescaledb` / `5432` | Port defaults to `5433` when `DB_HOST` is unset, i.e. running from the host |
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
@@ -1090,7 +1090,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `LOG_LEVEL` | `INFO` | Any level name; an unrecognised one falls back to `INFO` |
 | `LOG_FORMAT` | `text` in code, **`json` in both deployments** | `json` emits one object per line with the drop fields promoted to top level — see [Log fields](#log-fields). An unrecognised value is `text` |
 
-The first three must match between `docker-compose.yml` and the chart's `ingestion.*` values —
+The first three are the chart's `ingestion.*` values —
 `validate.py`'s watchdog check reads them from its own environment to decide whether the window is
 short enough to wait for, and it runs against both targets.
 
@@ -1125,9 +1125,8 @@ published. `device` belongs on the authenticated half and must not migrate onto 
 traceback; `json` promotes them to top level. If the two disagreed, a developer reading
 `docker logs` would be looking at a different record from the one a store kept.
 
-**The code default is `text`; both deployments set `json`.** `docker-compose.yml` and the chart
-each set `LOG_FORMAT=json` on `ingestion` and `playback` — both targets, so the daemon behaves the
-same on each and no divergence is owed. The code default serves the case neither covers: running
+**The code default is `text`; the chart sets `json`** on `ingestion`, `playback` and the cold
+archiver. The code default serves the case neither covers: running
 the daemon by hand, where you are reading with your eyes rather than with a query.
 
 That is what makes the drill-down work. A Loki query filtering on `reason` needs the field to be a
@@ -1159,10 +1158,9 @@ certificate would report a healthy TLS connection while talking to anything at a
 `GET :9108/metrics`, Prometheus text format, **no credential**. `INGESTION_METRICS_PORT=0` disables
 it. Issues #22 and #24.
 
-**The host mapping is `127.0.0.1` only.** `curl localhost:9108/metrics` works on the deployment host
-and nowhere else; the endpoint carries no credential, so who can reach the port is the whole of the
-control. Prometheus is unaffected — it targets `ingestion:9108` over the compose network. A scraper
-on another machine joins that network or comes through a tunnel.
+**The endpoint is cluster-internal.** `ingestion-metrics` is a headless Service with no Ingress
+route; the endpoint carries no credential, so who can reach the port is the whole of the control.
+Prometheus scrapes it in-cluster. From a laptop, `npm run dev:forward` puts it on `localhost:9108`.
 
 **It renders the counter registry the daemon already kept** — it is not a second instrumentation.
 Every `count()` sits at the site that already made the decision, one-to-one with an existing
@@ -1247,7 +1245,7 @@ That is worth knowing rather than smoothing away.
 
 **All seven are provisioned**, in the `Ingestion Pipeline` group of
 [`grafana/provisioning/alerting/alert-rules.yaml`](../grafana/provisioning/alerting/alert-rules.yaml),
-reading the `prometheus` datasource the Compose stack now provides.
+reading the chart's own Prometheus.
 
 **The table stays even though the rules shipped**, because a provisioned rule states its threshold
 and not its reasoning — and the reasoning is the part that has to survive someone deciding a number
@@ -1383,20 +1381,16 @@ are pure-logic tests that need neither Docker nor `protoc`.
 Two ways to run it, and **in-cluster is the simpler of the two** — which is the opposite of what one
 would expect.
 
-**From the host, against Docker Compose:**
+**From the host, through the dev loop's port-forwards:**
 
 ```bash
-docker compose up -d
-set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
-export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
-python ingestion/validate.py
+npm run dev:test          # validate.py, then the stack lane
 ```
 
-> **`validate.py` needs `SUPABASE_SERVICE_ROLE_KEY` but must NOT inherit the rest of `.env`.**
-> Without the key it seeds nothing and fails ~12 of 20 checks in a way that reads like a schema
-> fault, with the real cause one line up: `Service role key: MISSING`. But sourcing `.env` wholesale
-> breaks it a second way — `MQTT_HOST=mosquitto` and `DB_HOST=timescaledb` are compose-internal
-> names that do not resolve from the host, and the script's own defaults are the correct ones there.
+> **`validate.py` needs `SUPABASE_SERVICE_ROLE_KEY`**, which `dev:test` reads out of the release
+> Secret. Without it the script seeds nothing and fails ~12 of 20 checks in a way that reads like a
+> schema fault, with the real cause one line up: `Service role key: MISSING`. Its own host and port
+> defaults are the port-forwards' addresses, so nothing else is set.
 
 **In-cluster, as a Job in the namespace:**
 
@@ -1406,16 +1400,16 @@ helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru \
 kubectl -n acs-cymru logs -f job/acs-cymru-e2e-validate
 ```
 
-**No host or port overrides at all.** Kubernetes Service names are kept identical to the Compose
-service names, so `timescaledb`, `mosquitto` and `supabase-kong` *are* the correct configuration —
+**No host or port overrides at all.** `timescaledb`, `mosquitto` and `supabase-kong` *are* the
+Service names, so the defaults are the configuration —
 there is nothing to rewrite and nothing to port-forward. The Job's environment states the topology
 explicitly all the same, so it reads as a complete description rather than relying on defaults.
 
 Two port defaults are conditional on their host being set, and that is what makes both paths work
-from one file: `DB_PORT` defaults to `5433` only when `DB_HOST` is unset (the published Compose port),
+from one file: `DB_PORT` defaults to `5433` only when `DB_HOST` is unset (the dev loop's forwarded port),
 and `SUPABASE_DB_PORT` to `54322` likewise. Naming a host selects the standard `5432`. The banner
 printed at startup lists every resolved endpoint, because **both ways of misconfiguring this script
-fail somewhere other than at the cause** — from the host, compose-internal names give "Temporary
+fail somewhere other than at the cause** — from the host, in-cluster names give "Temporary
 failure in name resolution"; in-cluster, a default host sends the script to its own pod's localhost.
 
 ### Liveness heartbeat
@@ -1424,7 +1418,7 @@ failure in name resolution"; in-cluster, a default host sends the script to its 
 `INGESTION_HEALTH_INTERVAL` seconds **while its MQTT connection is up**. The Kubernetes liveness probe
 reads nothing but the file's age.
 
-This exists for the one failure Compose cannot detect at all: paho's network loop dies, the process
+This exists for the one failure a restart policy cannot detect: paho's network loop dies, the process
 stays alive, and the daemon silently stops ingesting — nothing crashes, nothing logs, telemetry just
 stops arriving. Gating the write on `client.is_connected()` is what makes the signal mean "my broker
 connection is alive" rather than "my process exists"; a message counter would instead report the

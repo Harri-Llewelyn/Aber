@@ -101,8 +101,8 @@ ordering is simply not the one anybody chose.
 
 ### How the chain reaches each target
 
-**Compose bind-mounts this directory** at `/migrations` and applies the plain files, so a migration
-is editable without a rebuild.
+**The db-init image copies this directory** to `/migrations` (`supabase/db-init/Dockerfile`), so a
+migration change is an image rebuild: `npm run dev:up -- --only=db-init`.
 
 **Kubernetes gets them baked into an image.** `supabase/db-init/Dockerfile` is `supabase/postgres`
 with `COPY migrations/*.sql /migrations/`, and the db-init Job reads them from its own filesystem.
@@ -170,10 +170,6 @@ flaky quarantine bugs**, because on a runner where db-init won the race the whol
 - **`SELECT 1/count(*) …` is deliberate.** `acs-cymru.waitForPostgres` reads the **exit code**, and
   a query matching no rows still exits 0 — which is why the old probe could not have expressed "and
   the chain has finished" whichever table it named. The division makes an empty result an error.
-- **Both targets write it**, though only Kubernetes has the race. Compose orders db-init with
-  `service_completed_successfully` and needs no gate, but a table on one target and not the other is
-  the drift [`check-compose-chart-parity.mjs`](../scripts/check-compose-chart-parity.mjs) exists to
-  catch.
 
 The three alternatives were weighed and rejected in the migration header: waiting on a *late*
 migration's artefact goes stale the moment `0073` lands, reading the Job status through the
@@ -428,7 +424,9 @@ would have said ACTIVE for a service that had been down a week. The Directory pa
 corrected this exact class of fabrication once — it used to render a hardcoded `SYNCED / a8f3e4b`
 for Node-RED, removed because nothing can observe what Node-RED is running.
 
-`refresh_directory_liveness()` writes both every minute from Prometheus's `up` series.
+`refresh_directory_liveness()` writes both every minute from Prometheus's `up` series. The job names
+it joins on are the chart's component names: `0103` renamed the gateway's from the retired scrape
+config's `envoy` to `supabase-envoy`, the name the collector labels the pod with.
 
 | | |
 | :--- | :--- |
@@ -1009,7 +1007,7 @@ guarantee and matches no rows on a settled database.
    `REVOKE INSERT, UPDATE, DELETE` issued against a prior `GRANT ALL` — and **`TRUNCATE` bypasses
    RLS entirely**, so the SELECT policy did not constrain it.
 3. **`enforce_digital_thread_append_only()`** — a `BEFORE UPDATE OR DELETE` trigger that raises for
-   every application role, `service_role` included. The service key ships in `.env` and is held by
+   every application role, `service_role` included. The service key is in the release Secret and is held by
    ingestion and all four edge functions, so an audit trail that key could rewrite was not much of
    an audit trail.
 
@@ -1482,7 +1480,7 @@ here.
 has nothing to say about reading what already was — refusing a traceability question because
 somebody turned future archiving off would be the setting reaching past what it means.
 
-On Compose the objects sit behind storage-api with `STORAGE_BACKEND=file`, so each relevant object
+With the file backend the objects sit behind storage-api, so each relevant object
 is fetched whole rather than range-scanned. Pointing storage at real S3 makes DuckDB read only the
 row groups a query touches, with no change to the SQL.
 
@@ -1523,35 +1521,10 @@ The `cold-archiver` service runs `cold_archive --drop --loop` on `COLD_ARCHIVE_I
 stays inert until the switch is turned on — which is what makes the switch a control rather than a
 note about a command somebody has to remember.
 
-> **The manifest reaches Kubernetes; the archiver does not.** `cold_archive.sql` is mirrored into
-> the chart and applied by the `timescaledb-maintenance` Job, between `storage.sql` and `roles.sql`
-> exactly as Compose runs it — so `telemetry_archive_manifest` exists, `roles.sql`'s guarded grant
-> lands on the first boot rather than the second, and `0068`'s self-check passes for the right
-> reason. What Kubernetes still has no **`cold-archiver` workload**, so nothing exports or drops:
-> the catalogue is there and permanently empty.
->
-> **Compose only, for now.** This sentence used to read *"it runs on every stack"* and that was
-> never true of Kubernetes: the chart declares no `cold-archiver` workload, and `cold_archive.sql`
-> is not in `sync-helm-chart-files.mjs`'s allow-list, so the manifest table the archiver writes does
-> not exist there either.
->
-> **And the absence was not graceful.** `0068`'s self-check probed the manifest over the FDW and
-> raised on any failure, so a Kubernetes install did not merely lack archival — `db-init` failed
-> outright with `BackoffLimitExceeded` and the whole deployment target could not install. The check
-> now distinguishes an *unreachable historian* (skip: it is not part of this deployment) from a
-> *reachable but mismatched* one (fail: that is the column-list coupling it exists to protect).
->
-> That distinction alone did **not** fix Kubernetes, and the reason is worth keeping: there the
-> historian *is* deployed and reachable, so it is the mismatched case, not the absent one. It is the
-> mirrored `cold_archive.sql` above that makes it pass — the skip branch is for the CI job that runs
-> one Postgres and no historian at all.
->
-> With that fixed the gap is what it always claimed to be: `retention.sql`'s conflict warning is
-> gated on the same table existing, so a Kubernetes stack drops chunks on the ordinary timer exactly
-> as it did before archival shipped. **The archive is a Compose feature until the chart carries the
-> workload.** The reason it took a fortnight to notice is that CI could not run: the file-sync guard
-> that watches these copies had been failing at the billing gate since before archival merged, so
-> four stale chart files sat on `main` unreported.
+> **The chart runs the archiver as a CronJob** (`coldArchive`, on by default, `--drop` on): the
+> ingestion image under `python -m cold_archive`, daily. `cold_archive.sql` is mirrored into the
+> chart and applied by the `timescaledb-maintenance` Job, between `storage.sql` and `roles.sql`, so
+> the manifest exists before the first run and `0068`'s self-check passes for the right reason.
 
 It includes `--drop`, and that is the safer option rather than the bolder one: the baseline it
 replaces is `retention.sql` dropping chunks on a timer with **no export and no record at all**.
@@ -1697,7 +1670,7 @@ So on a stack that has never rotated, those two principals show *"No token recor
 statement about **that stack**, not about the platform, and one command closes it:
 
 ```bash
-npm run keys:rotate          # re-signs both, recording each before it writes
+npm run keys:rotate -- --apply   # re-signs both, recording each, and patches the release Secret
 ```
 
 **This gap used to be permanent, for a second reason that is now gone.** Those keys were signed for
@@ -1746,8 +1719,7 @@ the other half was the defect ([#101](https://github.com/Harri-Llewelyn/ACS-Cymr
 
 ```bash
 npm run keys:check    # days remaining per key, exits non-zero within 14 days of expiry
-npm run keys:rotate   # re-sign both, in place in .env, recording each issuance first
-docker compose up -d --force-recreate ingestion playback
+npm run keys:rotate -- --apply   # re-sign both, patch the release Secret, restart the two workloads
 ```
 
 The restart is **not optional and not automatic**. Both workers read their key once at import
@@ -1755,8 +1727,9 @@ The restart is **not optional and not automatic**. Both workers read their key o
 presenting the previous token — which still works, and is exactly what makes it easy to believe a
 rotation is finished when it is not. `keys:rotate` ends by saying so.
 
-On Kubernetes `.env` is not the source of truth, so `--print` emits the two assignments without
-touching it; update the Secret and `kubectl rollout restart deploy/ingestion deploy/playback`.
+Without `--apply` the two assignments are printed, for a Secret managed outside the cluster. A
+release installed from `values-local.yaml` has the file rewritten too, or the next `helm upgrade`
+would put the old keys back.
 
 **Rotation shortens exposure going forward; it cannot withdraw a key already issued.** PostgREST
 validates a signature and consults no table, so the previous key stays valid until its own `exp` —
@@ -1874,8 +1847,8 @@ So a typo in that variable takes the whole API down, reports healthy on both pro
 as **404 rather than 5xx** — invisible to a monitor watching for server errors, and on Kubernetes
 the readiness probe keeps the pod in service.
 
-`scripts/check-docs-drift.mjs` is the control: it asserts the name is identical on Compose and the
-chart, and that a migration declares it. That has to be a **static** check — by the time a runtime
+`scripts/check-docs-drift.mjs` is the control: it asserts the chart sets it and that a migration
+declares it. That has to be a **static** check — by the time a runtime
 probe could notice, the outage has already begun.
 
 **The arm order is about the message.** Both arms refuse the request, so the outcome is identical;
@@ -2448,18 +2421,17 @@ archived migration `0036` removed.
 
 ## API Gateway (`envoy.yaml`)
 
-**One template serves both deployment targets.** [`envoy.yaml`](envoy.yaml) is committed with
-`__UPPER_SNAKE__` placeholders and substituted outside the container: by `supabase-envoy-init`
-(`sed` into a volume) on Compose, and by an initContainer on the gateway pod on Kubernetes. Not by
+**The template is substituted at boot.** [`envoy.yaml`](envoy.yaml) is committed with
+`__UPPER_SNAKE__` placeholders and substituted by an initContainer on the gateway pod. Not by
 Helm at template time, because with an externally-managed Secret the chart cannot see the key
-values and would substitute empty strings, which the key check would then accept. Each substituter
-scans for surviving markers and fails; adding a placeholder means adding it to both
+values and would substitute empty strings, which the key check would then accept. The initContainer
+scans for surviving markers and fails; adding a placeholder means teaching it the new one
 ([`check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) asserts it).
 
-Two placeholders carry the one upstream that differs between targets. Realtime resolves its tenant
+Two placeholders carry the Realtime upstream. Realtime resolves its tenant
 from the **leading hostname label**, so `__REALTIME_UPSTREAM_HOST__` is the Host header
-(`realtime-dev.supabase-realtime` on Compose, `realtime-dev` on Kubernetes) and
-`__REALTIME_UPSTREAM_ADDRESS__` is what Envoy dials. Both substituters refuse a host that does not
+(`realtime-dev`) and
+`__REALTIME_UPSTREAM_ADDRESS__` is what Envoy dials. The substituter refuses a host that does not
 begin `realtime-dev`.
 
 The `apikey` check gates `/rest/v1/`, `/realtime/v1/`, `/storage/v1/` and `/functions/v1/`, and
@@ -2478,8 +2450,7 @@ exemptions:**
 routing and authentication surface against a reviewed inventory, because `validate.py` asserts the
 401s that should happen and nothing can assert the absence of a route nobody wrote.
 
-**The edge functions are delivered differently on the two targets.** Compose bind-mounts
-`functions/`; Kubernetes bakes them into an image (`functions/Dockerfile`, built from the repository
+**The edge functions are baked into an image** (`functions/Dockerfile`, built from the repository
 root because `gateway-bundle` copies `gateway-bundle-template/`), so a rollback rolls the functions
 back with it.
 
@@ -2586,7 +2557,7 @@ nobody can open, which is the same posture as the loopback binding it replaces.
 ### The forge's door, and the room behind it (`0094`)
 
 Gitea's web login is the gateway's `forge` listener in [`envoy.yaml`](envoy.yaml), on `8002`
-(published as `3003` on Compose, `git.<domain>` on Kubernetes). It is the Studio listener with the
+(`git.<domain>`). It is the Studio listener with the
 RBAC widened: an OAuth 2.1 code flow against this stack's GoTrue, a session cookie, `jwt_authn`
 against the shared secret, and a role check admitting `Administrator` and `Shopfloor_Manager`.
 `Operator` and `Auditor` complete the login and meet a 403. `0094` registers the OAuth client and
@@ -2603,9 +2574,8 @@ would be necessary and not sufficient, since the relative paths would remain.
 auto-registration. The username is the token's `sub` (Gitea refuses `@` in a name), the email rides
 in its own header, and the full name carries the email so the UI shows a person. Gitea trusts
 `X-WEBAUTH-USER` from **any** peer — `REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For`
-only — so the access control is reachability: on Compose Gitea sits on a `forge` network only the
-gateway and the edge runtime join; on Kubernetes the NetworkPolicy edge list admits the same two
-pods. The API ignores the header (`ENABLE_REVERSE_PROXY_AUTHENTICATION_API` off), so the machine
+only — so the access control is reachability: the NetworkPolicy edge list admits only the gateway
+and the edge runtime. The API ignores the header (`ENABLE_REVERSE_PROXY_AUTHENTICATION_API` off), so the machine
 account's basic-auth path is not a second door. The listener overwrites or removes the identity
 headers on every route, so a value a browser sent never reaches Gitea.
 
@@ -2651,8 +2621,8 @@ repository, its issues and its wiki as three acts.
 **The forge reports a push.** Enrolment registers a webhook on the repository (`branch_filter:
 main`, one per repository rather than one on the organisation, because only a gateway's repository
 has a row to record on). Gitea delivers every push to `main` to
-[`forge-events`](functions/forge-events), directly over the forge network on Compose and the
-NetworkPolicy edge `gitea → supabase-functions` on Kubernetes, never through the gateway. The
+[`forge-events`](functions/forge-events), directly over the NetworkPolicy edge
+`gitea → supabase-functions`, never through the gateway. The
 delivery's `X-Gitea-Signature` — hex HMAC-SHA256 of the raw body under `GITEA_WEBHOOK_SECRET` — is
 the whole of the authentication, verified over the bytes before they are parsed. On a verified push
 `0095`'s columns on `gateways` record the head: `forge_head_sha`, the message's first line, who,
@@ -2791,7 +2761,7 @@ is being read on the host, so its sibling `localhost` addresses resolve; one ser
 alone, and it is the right trade — the alternative withholds a working link from everyone developing
 on the host to protect a reader who already knows what a tunnel is.
 
-**This describes the Compose deployment the seed describes.** On Kubernetes these rows were wrong
+**The seed's rows described a loopback deployment.** In a cluster these rows were wrong
 before this column was reached — `endpoint_url` said `localhost` while the chart serves
 `grafana.<publicBaseDomain>` through an Ingress — and `0084` does not fix that; `0085` below fixes
 three of them and leaves the rest. What `0084` does is make the remaining wrongness quieter: a row

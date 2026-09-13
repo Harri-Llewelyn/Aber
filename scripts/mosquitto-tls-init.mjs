@@ -1,17 +1,13 @@
 #!/usr/bin/env node
 /**
- * Issue the Compose stack's broker CA and its MQTTS leaf certificate, idempotently.
+ * Issue a broker CA and an MQTTS leaf certificate into mosquitto/tls-init, idempotently.
  *
  * WHY THIS EXISTS. Physical gateways connect over MQTTS on 8883, because a per-gateway broker
- * password crossing a plant network in clear text is not a credential, it is a transcript. The
- * Kubernetes target already has this: cert-manager issues the broker leaf from the ClusterIssuer in
- * deploy/k8s/internal-ca.yaml, and the chart appends mosquitto-tls.conf when the Secret exists.
- * Compose had NOTHING -- mosquitto.conf declares 1883 and 9001 only, and .env.example told the
- * operator to mount a keypair by hand. So the whole physical-gateway flow was Kubernetes-only by
- * accident of certificate management rather than by design.
- *
- * This is the Compose counterpart of that ClusterIssuer, and it deliberately reproduces its
- * PROPERTIES rather than its mechanism:
+ * password crossing a plant network in clear text is not a credential, it is a transcript. In the
+ * cluster, cert-manager issues the broker leaf from the ClusterIssuer in deploy/k8s/internal-ca.yaml
+ * and the chart appends mosquitto-tls.conf when the Secret exists. This script is the off-cluster
+ * fixture check-broker-config.mjs loads mosquitto.conf and that TLS listener against, and it
+ * deliberately reproduces the ClusterIssuer's PROPERTIES rather than its mechanism:
  *
  *   selfSigned -> CA root -> leaf, never selfSigned -> leaf. A self-signed LEAF is verifiable by
  *   nobody, so a gateway would have to be told to skip verification -- and TLS that does not verify

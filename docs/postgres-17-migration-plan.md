@@ -1,5 +1,8 @@
 # PostgreSQL 17 and TimescaleDB 2.29 — Implementation Plan
 
+> **Historical.** The Compose target this plan verified against was removed in September 2026;
+> the pins now live in `values.yaml` alone and the line references below are to the retired file.
+
 **Status (2026-08-10):** Phases **0, 2, 3 and 4 are COMPLETE** and verified on the Compose target.
 Both databases run PostgreSQL 17; the historian runs TimescaleDB on the columnstore API — extension
 2.29.2 as of 2026-08-29, when `ALTER EXTENSION timescaledb UPDATE` started running on every boot and
@@ -71,10 +74,10 @@ first, so it takes `0011` and the vocabulary work starts at `0012`.
 
 - **`latest-pg15` is a dead branch.** TimescaleDB 2.29.0 dropped PostgreSQL 15; 2.28.x was the final
   minor to support it. The tag still resolves, still pulls, and will never advance again. The pin at
-  [docker-compose.yml:49](../docker-compose.yml#L49) reads as "track upstream" and no longer does.
+  `docker-compose.yml:49` reads as "track upstream" and no longer does.
 - **The historian's extension is already current.** `latest-pg15` is 2.28.3, so the TimescaleDB
   *extension* is one minor behind. The gap is entirely in the PostgreSQL major underneath it.
-- **Supabase is two lines behind, not one.** [docker-compose.yml:130](../docker-compose.yml#L130)
+- **Supabase is two lines behind, not one.** `docker-compose.yml:130`
   pins `15.6.1.143`; upstream 15.x is now `15.14.1.160`. The stack is behind on the version it is
   already running, independently of any major bump.
 - **`pgjwt` was expected to be a hard blocker. It is not** — see Phase 0. The changelog says the
@@ -270,10 +273,10 @@ plus `docker compose down -v` — the entire upgrade, in one step, exactly as in
 
 **Pins:**
 
-- [docker-compose.yml:49](../docker-compose.yml#L49), [:87](../docker-compose.yml#L87) →
+- `docker-compose.yml:49`, `:87` →
   `timescale/timescaledb:2.29.1-pg17`
-- [docker-compose.yml:130](../docker-compose.yml#L130), [:151](../docker-compose.yml#L151),
-  [:168](../docker-compose.yml#L168) → `supabase/postgres:17.6.1.160`
+- `docker-compose.yml:130`, `:151`,
+  `:168` → `supabase/postgres:17.6.1.160`
 - [values.yaml:147](../deploy/helm/acs-cymru/values.yaml#L147) and
   [:217](../deploy/helm/acs-cymru/values.yaml#L217) → the same two
 - [ci.yml:854](../.github/workflows/ci.yml#L854) service pin

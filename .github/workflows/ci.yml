@@ -75,9 +75,9 @@ jobs:
 
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           if [ "$CODE" = "true" ]; then
-            echo "non-documentation files changed: the end-to-end stacks will run"
+            echo "non-documentation files changed: the end-to-end stack will run"
           else
-            echo "documentation only: skipping the two end-to-end stacks"
+            echo "documentation only: skipping the end-to-end stack"
           fi
 
   frontend-build:
@@ -232,12 +232,6 @@ jobs:
       - name: Verify Each Image Carries The Sources It Imports
         run: node scripts/check-image-sources.mjs
 
-      # The committed half of check-env-drift.mjs: every variable docker-compose.yml requires with no
-      # default must be declared in .env.example. The working-`.env` comparison cannot run here (the
-      # file is gitignored) and skips loudly.
-      - name: Verify Environment Template Covers Every Required Variable
-        run: node scripts/check-env-drift.mjs
-
       # Negative assertions about the gateway surface: a gated route must be gated, an exemption must
       # be one of the reviewed ones, and the two documents carrying the argument must match. validate.py
       # asserts the 401s that should happen; nothing else can assert the absence of a route nobody
@@ -281,11 +275,6 @@ jobs:
       - name: Verify Chart Files Are In Sync With Their Sources
         run: node scripts/sync-helm-chart-files.mjs --check
 
-      # The set comparison the file-sync check cannot make: a service Compose has and the chart never
-      # gained. Reads both as text, so it runs here rather than behind a 20-minute install.
-      - name: Verify Compose And The Chart Deploy The Same Services
-        run: node scripts/check-compose-chart-parity.mjs
-
       # Chart lint and render run before the satellite checks: a job stops at its first failing step,
       # and this job is named for the chart.
       - name: Lint Chart
@@ -320,12 +309,6 @@ jobs:
       - name: Verify Broker Config Starts And Authenticates On The Pinned Version
         run: node scripts/check-broker-config.mjs --verbose
 
-      # Several pins hold a coupling (realtime and storage-api migrate shared schemas, studio is
-      # coupled to postgres-meta, node-red to settings.js). Two targets on different tags fail on
-      # whichever was bumped second. Also checks supabase/functions/Dockerfile's FROM against Compose.
-      - name: Verify Image Tag Parity Across Both Targets
-        run: node scripts/check-image-tag-parity.mjs --verbose
-
       # Naming any plugin in Kong's `plugins` property replaces its bundled set, so a plugin kong.yml
       # references but the list omits makes Kong refuse to boot. Kubernetes only: Compose runs Envoy
       # and declares no KONG_PLUGINS. The step retires with the chart's Kong, which is retained off as
@@ -343,9 +326,6 @@ jobs:
                   for p in (rt.get('plugins') or []):
                       referenced.add(p['name'])
 
-          compose = open('docker-compose.yml', encoding='utf-8').read()
-          if 'KONG_PLUGINS' in compose:
-              print('::error::docker-compose.yml declares KONG_PLUGINS again. Compose runs Envoy'
                     '; if Kong is genuinely back, restore the two-target comparison '
                     'this step used to make rather than leaving one target unchecked.')
               sys.exit(1)
@@ -471,6 +451,11 @@ jobs:
           expect_failure "TLS enabled but scheme is http" "global.scheme is" \
             -f "$DEV" --set ingress.tls.enabled=true
 
+          # The studio and gitea logins set Secure cookies, which a browser keeps only on https or on
+          # localhost / *.localhost. Over plain http on any other host neither door opens.
+          expect_failure "Secure-cookie login on a plain-http public host" "where its login cannot complete" \
+            -f "$DEV" --set global.publicBaseDomain=127.0.0.1.nip.io
+
           # An Ingress with empty `host:` fields is ACCEPTED by the API server and then matches every
           # request that reaches the controller.
           expect_failure "ingress enabled with no resolvable host" "no route resolved a hostname" \
@@ -589,28 +574,6 @@ jobs:
             echo "::error::project's jwt_secret and both service keys, and its SQL editor runs as"
             echo "::error::the database owner. Publishing it is a deployment's decision to make"
             echo "::error::deliberately, so ingress.routes.studio stays false in this example."
-            exit 1
-          fi
-
-          # The Compose target's equivalent, checked here so the two targets' posture moves together.
-          # studio publishes nothing of its own; 54323 is the gateway's gated listener. Asserting a
-          # loopback binding would demand the weaker control back.
-          awk '/^  supabase-studio:/{f=1;next} /^  [a-z]/{f=0} f' docker-compose.yml > /tmp/studio-block.yaml
-          if [ ! -s /tmp/studio-block.yaml ]; then
-            echo "::error::no supabase-studio service found in docker-compose.yml, so the checks"
-            echo "::error::below would pass vacuously. If the service was renamed, rename it here."
-            exit 1
-          fi
-          if grep -qE '^\s+ports:' /tmp/studio-block.yaml; then
-            echo "::error::the supabase-studio service publishes a port of its own."
-            echo "::error::It is reached through the gateway's authenticating listener; a direct"
-            echo "::error::publish bypasses that login entirely and exposes the console raw."
-            exit 1
-          fi
-          if ! grep -qE '^\s+- "\$\{STUDIO_PORT:-54323\}:8001"' docker-compose.yml; then
-            echo "::error::the gateway does not publish Studio's listener on 54323."
-            echo "::error::Studio has no ports of its own, so without this the console is"
-            echo "::error::unreachable on Compose and the login cannot be exercised at all."
             exit 1
           fi
 
@@ -949,13 +912,13 @@ jobs:
           print("fsGroup is set correctly on every workload with a volume.")
           PY
 
-      # 5433 and 54322 are Compose published ports; there is no port mapping in Kubernetes. A
+      # 5433 and 54322 are the ports the dev loop forwards on the host; there is no port mapping in Kubernetes. A
       # postgres_fdw server pointed at 5433 fails as a relation-level error from PostgREST. Scoped to
       # wiring fields: the seed legitimately contains `postgres://localhost:5433` as display metadata.
       - name: Verify No Host-Published Database Ports Leak Into The Chart's Wiring
         run: |
           if grep -nE '^[[:space:]]*(value|port|containerPort|targetPort):[[:space:]]*"?[^"]*\b(5433|54322)\b' /tmp/rendered.yaml; then
-            echo "::error::a rendered wiring field references a docker-compose published port (5433/54322); in-cluster it is always 5432"
+            echo "::error::a rendered wiring field references a host-side forwarded port (5433/54322); in-cluster it is always 5432"
             exit 1
           fi
           echo "No host-published database ports in the rendered chart's wiring."
@@ -1110,20 +1073,24 @@ jobs:
   # ServiceLB and local-path behave as they will on the target.
   # =============================================================================================
   k8s-validation:
-    # Gated on the diff: eighteen of this workflow's twenty-two minutes are these two jobs,
-    # and a documentation change cannot alter what either one asserts. See `changes` above --
-    # it fails open, so an uncomputable range still runs this.
+    # Gated on the diff: most of this workflow's minutes are this job, and a documentation change
+    # cannot alter what it asserts. See `changes` above -- it fails open, so an uncomputable range
+    # still runs this.
     needs: changes
     if: needs.changes.outputs.code == 'true'
     name: End-to-End Kubernetes (k3d) Stack Validation
     runs-on: ubuntu-latest
     # Sequential inside the job; the whole thing is bounded so a hung wait cannot burn an hour.
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       # Every object below is named "<RELEASE>-<thing>" by the chart's fullname helper, which
       # collapses the "<release>-<chart>" prefix when the release already contains the chart name.
       RELEASE: acs-cymru
       NS: acs-cymru
+      # A commit SHA: the `1.0.0` tag predates the conformance suite, and an unpinned branch would let
+      # someone else's commit decide whether this pipeline is green. Read the suite's CHANGELOG before
+      # bumping: a new MUST test is a real finding about this server.
+      I3X_SUITE_REF: "5010274f4952acb1c23dc77b32bd44eed16f0c2b"
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -1133,8 +1100,32 @@ jobs:
         with:
           version: v3.16.3
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      # The host-side half of the stack lane: validate.py and the suites run on the runner, through
+      # port-forwards, exactly as `npm run dev:test` runs them on a laptop.
+      - name: Install Python Validation Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ingestion/requirements.txt
+          # Official AAS V3 schema validation in the live export checks below.
+          pip install jsonschema
+
+      - name: Install Protobuf Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Generate Sparkplug B Protobuf Module
+        run: |
+          protoc --python_out=. sparkplug_b.proto
+          cp sparkplug_b_pb2.py ingestion/
+
       # This job is disk-bound and the failure does not look like it. The runner starts with ~14 GB
-      # free; five built images, a second copy in the k3d node's containerd, and a dozen pulled images
+      # free; nine built images, a second copy in the k3d node's containerd, and a dozen pulled images
       # do not fit. Below ~3.8 GB the kubelet evicts, and the cascade ends as `context deadline
       # exceeded` on `helm install`. Removing unused toolchains costs seconds. `|| true` on each: the
       # runner image changes between releases.
@@ -1158,199 +1149,35 @@ jobs:
           curl -sfL https://raw.githubusercontent.com/k3d-io/k3d/v5.7.4/install.sh | TAG=v5.7.4 bash
           k3d version
 
-      # Port 80 is mapped so Traefik is reachable from the runner and the ingress is exercised through
-      # the real path. metrics-server is disabled to save memory on a 2-core runner.
-      - name: Create k3d Cluster
+      # THE SAME LOOP A DEVELOPER RUNS. scripts/dev-cluster.mjs creates the cluster (port 80 for
+      # Traefik, 1883 and 8883 for the broker), installs cert-manager and the internal CA, builds the
+      # nine images and imports them into the node -- verified in the node, since `k3d image import`
+      # can report success it did not achieve (docs/incidents.md) -- installs the chart with the dev
+      # values plus broker TLS, the backup service and the in-cluster conformance Jobs, waits for
+      # every hook and rollout and for the daemon to be subscribed, and runs `helm test`. With
+      # --e2e it then waits for the two conformance Jobs and prints their logs.
+      - name: Bring The Stack Up (dev-cluster up --e2e)
+        run: node scripts/dev-cluster.mjs up --e2e
+
+      # The host copies are never read again once imported; dropping them is the largest single
+      # reclaim before the suites run.
+      - name: Reclaim The Host Image Copies
         run: |
-          k3d cluster create acs-cymru \
-            --agents 0 \
-            --port "80:80@loadbalancer" \
-            --k3s-arg "--disable=metrics-server@server:0" \
-            --wait
-          kubectl cluster-info
-          kubectl get nodes -o wide
-
-      # The images this repository builds, built here and imported into the cluster's containerd; no
-      # registry credential is needed. Tagged under their published names at the chart's appVersion,
-      # because the chart resolves an empty `image.tag` to Chart.AppVersion and anything else would
-      # make the pods pull the published image instead. appVersion is read from Chart.yaml.
-      - name: Resolve The Chart's appVersion
-        id: appversion
-        run: |
-          set -eu
-          V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml \
-              | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
-          test -n "$V"
-          echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "Chart appVersion: $V"
-
-      - name: Build Local Images
-        env:
-          # IMG_NS, not NS: the enclosing job already uses NS for the Kubernetes namespace.
-          IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
-          V: ${{ steps.appversion.outputs.version }}
-        run: |
-          set -eu
-          # Context is the REPOSITORY ROOT for these two: gateway-bundle-template and
-          # sparkplug_b.proto both live there.
-          docker build -f supabase/functions/Dockerfile -t "$IMG_NS/edge-runtime:$V" .
-          docker build -f ingestion/Dockerfile          -t "$IMG_NS/ingestion:$V" .
-          docker build -f node-red/Dockerfile           -t "$IMG_NS/node-red:$V" node-red
-          # i3X server -- repository root again, for sparkplug_b.proto.
-          docker build -f i3x/Dockerfile                -t "$IMG_NS/i3x-service:$V" .
-          # Broker credential sidecar. Context is its own directory: the service's CODE is mounted
-          # from a ConfigMap, so this image supplies only the runtime -- node, and the broker's own
-          # mosquitto_passwd, which is why it is built FROM eclipse-mosquitto.
-          docker build -f gateway-credential/Dockerfile  -t "$IMG_NS/gateway-credential:$V" gateway-credential
-          # The backup service's runtime -- the database image for its pg_dump, plus node, sqlite3
-          # and GNU tar. The code is mounted from a ConfigMap, like the credential sidecar's.
-          docker build -f backup-service/Dockerfile      -t "$IMG_NS/backup-service:$V" backup-service
-          # The schema. Context is supabase/, because that is where migrations/ lives and the whole
-          # image is supabase/postgres plus that directory -- see supabase/db-init/Dockerfile for
-          # why the chart cannot carry it.
-          docker build -f supabase/db-init/Dockerfile    -t "$IMG_NS/db-init:$V" supabase
-          # VITE_RUNTIME_CONFIG=true bakes NOTHING -- the whole point of Phase 0. A default build
-          # would carry a baked URL that masks a missing ConfigMap instead of surfacing it.
-          docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-                                                        -t "$IMG_NS/frontend:$V" frontend
-          # The conformance runner: the ingestion image plus jsonschema and the AAS suite. Built
-          # after ingestion because it extends it, and told WHICH ingestion -- the Dockerfile's ARG
-          # default is a convenience for a bare `docker build`, not something to rely on here.
-          docker build -f test-harness/Dockerfile \
-            --build-arg "INGESTION_IMAGE=$IMG_NS/ingestion:$V" -t "$IMG_NS/test-runner:$V" .
-
-      - name: Import Images Into k3d
-        env:
-          # IMG_NS, not NS: the enclosing job already uses NS for the Kubernetes namespace.
-          IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
-          V: ${{ steps.appversion.outputs.version }}
-        run: |
-          # Every image this repository builds. A tag absent from the registry ImagePullBackOffs; a tag
-          # present there silently runs the last release instead of this tree.
-          IMAGE_NAMES="edge-runtime ingestion node-red i3x-service gateway-credential backup-service db-init frontend test-runner"
-          REFS=""
-          for n in $IMAGE_NAMES; do REFS="$REFS $IMG_NS/$n:$V"; done
-
-          # Verified, not trusted: `k3d image import` can fail per node and still print "Successfully
-          # imported" and exit 0. The host copies are removed below on the strength of the result, so the
-          # node's own image list is the check.
-          # See docs/incidents.md -> "k3d image import reported success it did not achieve".
-          verify_images_in_node() {
-            present=$(docker exec k3d-acs-cymru-server-0 ctr -n k8s.io images ls -q 2>/dev/null || true)
-            missing=""
-            for n in $IMAGE_NAMES; do
-              case "$present" in
-                *"$IMG_NS/$n:$V"*) ;;
-                *) missing="$missing $n" ;;
-              esac
-            done
-            if [ -n "$missing" ]; then
-              echo "  not in the node:$missing"
-              return 1
-            fi
-            return 0
-          }
-
-          for attempt in 1 2 3; do
-            # shellcheck disable=SC2086
-            k3d image import -c acs-cymru $REFS || echo "  k3d image import exited non-zero on attempt $attempt"
-            if verify_images_in_node; then
-              echo "all $(echo $IMAGE_NAMES | wc -w) images verified present in the node (attempt $attempt)"
-              break
-            fi
-            if [ "$attempt" = 3 ]; then
-              echo "::error::k3d did not place every image in the node after 3 attempts. Host copies are"
-              echo "::error::still present and nothing has been reclaimed; the cluster would fall back to"
-              echo "::error::GHCR, where db-init and gateway-credential have never been published."
-              exit 1
-            fi
-            echo "  retrying in 10s"
-            sleep 10
-          done
-
-          # `k3d image import` copies into the node's containerd, so after it the host copy is never read
-          # again. Dropping it (and the builder cache) is the largest single reclaim, after the import.
-          docker image rm -f \
-            "$IMG_NS/edge-runtime:$V" "$IMG_NS/ingestion:$V" "$IMG_NS/node-red:$V" \
-            "$IMG_NS/i3x-service:$V" "$IMG_NS/gateway-credential:$V" "$IMG_NS/backup-service:$V" \
-            "$IMG_NS/db-init:$V" "$IMG_NS/frontend:$V" "$IMG_NS/test-runner:$V" || true
+          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^ghcr.io/harri-llewelyn/acs-cymru/' \
+            | xargs -r docker image rm -f || true
           docker builder prune -af || true
           docker image prune -af || true
-          echo "--- disk after import and reclaim"
           df -h / | tail -1
 
-      - name: Mirror Repository Config Into The Chart
-        run: node scripts/sync-helm-chart-files.mjs --check
-
-      # No `--wait` on the install: it deadlocks this chart. Helm blocks on every workload being
-      # Ready before running post-install hooks, and the hooks (db-roles-init) create the roles the
-      # workloads' initContainers wait on. Hooks are still waited on regardless of --wait; readiness
-      # is asserted explicitly below, after the database is usable.
-      - name: Install The Chart
-        run: |
-          set -eu
-          kubectl create namespace $NS
-
-          # The ingress address, for the validate Job's hostAliases only. Check 7b follows browser-facing
-          # URLs, which resolve to 127.0.0.1 inside a pod (the dev domain is 127.0.0.1.nip.io). Read from
-          # k3d's bundled Traefik.
-          INGRESS_IP=$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}')
-          echo "ingress ClusterIP: $INGRESS_IP"
-
-          helm install $RELEASE deploy/helm/acs-cymru \
-            --namespace $NS \
-            --values deploy/helm/acs-cymru/values-dev.yaml \
-            --set e2e.enabled=true \
-            --set e2e.ingressIp="$INGRESS_IP" \
-            --timeout 15m
-
-      - name: Wait For The Init Hooks
-        run: |
-          set -eu
-          for job in db-roles-init db-init storage-init; do
-            echo "--- acs-cymru-$job"
-            kubectl -n $NS wait --for=condition=complete \
-              "job/acs-cymru-$job" --timeout=10m
-            kubectl -n $NS logs "job/acs-cymru-$job" | tail -20
-          done
-
-      # Every workload is checked here, after the hooks, so a component left behind fails naming
-      # itself rather than as an unexplained validate.py failure.
-      - name: Wait For Every Workload To Become Ready
-        run: |
-          set -eu
-          # Named one at a time: `kubectl rollout status <type>` with no name is an error, not a
-          # sweep, and would fail this step for a reason unrelated to any workload's health.
-          for w in $(kubectl -n $NS get statefulset,deploy -o name); do
-            echo "--- $w"
-            kubectl -n $NS rollout status "$w" --timeout=10m
-          done
-
-      # Rolled out is not consuming: `rollout status` returns when the process starts, and the daemon
-      # then connects and subscribes, a gap that has exceeded two minutes on a loaded runner. Not a
-      # readiness probe (apps/ingestion.yaml argues against one); the gate belongs in CI. Sequence
-      # gap warnings during this wait are expected.
-      - name: Wait For The Ingestion Daemon To Be Consuming
-        run: WAIT_MODE=k8s sh scripts/wait-for-ingestion-consuming.sh
-
-      # The cheap gate first. `public.telemetry` is a postgres_fdw projection, and a mistake in the
-      # foreign server surfaces as a relation-level error from PostgREST.
-      - name: Helm Test — postgres_fdw Cross-Database Check
-        run: |
-          helm test $RELEASE --namespace $NS --timeout 5m
-          kubectl -n $NS logs $RELEASE-test-fdw
-
-      # The gateway surface against the live Envoy in the cluster. The same command the Compose job
-      # runs; the script names no gateway concept, so identical output across both targets is the
-      # evidence. The key comes from the cluster's Secret, not from .env, so a cluster installed with
-      # different credentials fails.
+      # The gateway surface against the live Envoy in the cluster. The script names no gateway
+      # concept, so identical output here and on a laptop is the evidence. The key comes from the
+      # cluster's Secret, not from a file, so a cluster installed with different credentials fails.
       - name: Verify The Live Gateway Surface — Envoy, In-Cluster
         run: |
           set -eu
           kubectl -n $NS port-forward svc/supabase-kong 18080:8000 >/tmp/port-forward.log 2>&1 &
           PF=$!
           trap 'kill $PF 2>/dev/null || true' EXIT
-
           # Wait for the tunnel, not for a 2xx: every gated route answers 401 to an unauthenticated
           # caller, so `curl -sf` would treat a perfectly healthy gateway as unreachable. A response
           # code that is not 000 means the connection was made, which is all this needs to know.
@@ -1359,80 +1186,136 @@ jobs:
             [ "$CODE" != "000" ] && break
             sleep 1
           done
-          if [ "$CODE" = "000" ]; then
-            echo "::error::port-forward to svc/supabase-kong never accepted a connection"
-            cat /tmp/port-forward.log || true
-            exit 1
-          fi
           echo "gateway reachable through the port-forward (first response $CODE)"
-
-          SUPABASE_ANON_KEY=$(kubectl -n $NS get secret acs-cymru-secrets             -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)
+          SUPABASE_ANON_KEY=$(kubectl -n $NS get secret $RELEASE-secrets \
+            -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)
           export SUPABASE_ANON_KEY
           test -n "$SUPABASE_ANON_KEY"
-
           node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
 
-      # The same suite, and the same assertions, that e2e-validation runs against Compose. In-cluster
-      # it needs no host/port overrides at all -- the Service names ARE the correct configuration,
-      # which is the simpler of the two topologies.
-      - name: In-Cluster Conformance — validate.py
+      # The migration model's central invariant, checked: there is no migrations ledger, db-init
+      # replays every file on every install and upgrade, so a second run must match no rows. Runs
+      # after the in-cluster validate.py so the replay meets a database in a realistic state.
+      # Did the chain finish? An abort part-way leaves the stack running on a partially migrated
+      # database, and 0001 drops the telemetry read surface before later files put it back.
+      - name: Migration Chain Completed
+        run: node scripts/check-schema-surface.mjs
+
+      - name: Migration Chain Replays Cleanly
+        run: node scripts/check-migration-idempotency.mjs
+
+      # =========================================================================================
+      # The `stack` lane: every suite that needs a running stack, discovered rather than listed.
+      # These cannot go in the no-stack job: without a stack they skip every check and exit 0.
+      # `dev-cluster test` opens the port-forwards, builds the suites' environment from the
+      # release Secret, and runs the lane; --no-validate because validate.py has just run
+      # in-cluster, where it needs no host or port overrides at all.
+      # =========================================================================================
+      - name: Run The Stack Lane Through Port-Forwards (dev-cluster test)
+        run: node scripts/dev-cluster.mjs test --no-validate
+
+      # Every scrape target the chart's Alloy discovers is up. A pod annotated for scraping that
+      # serves nothing does not fail; the dashboards render empty. The list is the set of components
+      # the chart annotates, checked both ways, so a target lost later is reported and a target added
+      # without being declared here is too.
+      - name: Verify Every Prometheus Target Is Up
+        run: |
+          set -euo pipefail
+          kubectl -n $NS port-forward svc/prometheus 19090:9090 >/tmp/pf-prom.log 2>&1 &
+          PF=$!
+          trap 'kill $PF 2>/dev/null || true' EXIT
+          PROM=http://127.0.0.1:19090
+          for i in $(seq 1 30); do
+            if curl -sf "$PROM/-/ready" >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -sf "$PROM/-/ready" >/dev/null || { echo "::error::Prometheus never became ready"; exit 1; }
+
+          # Alloy remote-writes `up` for every target it scrapes; a target it cannot reach is up=0.
+          curl -sf --get "$PROM/api/v1/query" --data-urlencode 'query=up' > /tmp/up.json
+          python3 - <<'PY'
+          import json, sys
+          rows = json.load(open('/tmp/up.json'))['data']['result']
+          if not rows:
+              print('::error::Prometheus holds no `up` series at all -- Alloy is not remote-writing')
+              sys.exit(1)
+          bad = []
+          seen = {}
+          for r in rows:
+              job = r['metric'].get('job', '?')
+              seen[job] = r['value'][1]
+              if r['value'][1] != '1':
+                  bad.append(f"{job}: up={r['value'][1]}")
+              else:
+                  print(f"  ok  {job}")
+          # The set the chart annotates with the dev values (mosquitto's exporter is off there), plus
+          # the host. A job lost from this set is reported; one added must be declared here.
+          expected = {'ingestion', 'node', 'supabase-envoy', 'supabase-rest', 'grafana', 'prometheus', 'loki', 'alloy'}
+          for want in sorted(expected - set(seen)):
+              bad.append(f"scrape job '{want}' is absent -- its pod lost its annotations or the collector cannot reach it")
+          for extra in sorted(set(seen) - expected):
+              bad.append(f"scrape job '{extra}' is scraped but not declared in this check -- add it, so that losing it later would be reported")
+          for b in bad:
+              print(f'::error::{b}')
+          sys.exit(1 if bad else 0)
+          PY
+
+          # The ingestion endpoint must be serving REAL counters, not just answering 200. validate.py
+          # has just published a run's worth of Sparkplug traffic through the daemon.
+          VALUE=$(curl -sf --get "$PROM/api/v1/query" \
+                    --data-urlencode 'query=sum(acs_ingestion_messages_total)' \
+                  | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "0")')
+          echo "  acs_ingestion_messages_total = $VALUE"
+          python3 -c "import sys; sys.exit(0 if float('$VALUE') > 0 else 1)" || {
+            echo "::error::Prometheus scraped the ingestion daemon but recorded no messages."
+            echo "::error::The target is up and the counters are empty, which means the endpoint"
+            echo "::error::is serving but the daemon consumed nothing during the validation run."
+            exit 1
+          }
+
+      # i3X 1.0 conformance, run by CESMII's own suite rather than by assertions of ours, for the
+      # same reason the AAS export is validated against the real IDTA schema. Pinned to a commit. The
+      # expected verdict is 1.0 Compatible, not Full Compliance: Update is a MAY and this server
+      # declares `update.current: false`.
+      - name: i3X Conformance — CESMII Official Suite
         run: |
           set -eu
-          JOB=job/$RELEASE-e2e-validate
-          # Polled rather than `kubectl wait --for=condition=complete`, which blocks for the full timeout
-          # on a Job that has failed. Both terminal conditions are checked each pass.
-          deadline=$(( $(date +%s) + 1200 ))
-          while :; do
-            if kubectl -n $NS get "$JOB" -o jsonpath='{.status.succeeded}' 2>/dev/null | grep -q 1; then
-              STATUS=succeeded; break
-            fi
-            if kubectl -n $NS get "$JOB" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null | grep -q True; then
-              STATUS=failed; break
-            fi
-            if [ "$(date +%s)" -ge "$deadline" ]; then STATUS=timeout; break; fi
-            sleep 10
-          done
-          kubectl -n $NS logs "$JOB" --tail=-1 || true
-          echo "validate.py: $STATUS"
-          [ "$STATUS" = succeeded ]
+          git clone --quiet https://github.com/cesmii/i3X.git /tmp/i3x-spec
+          git -C /tmp/i3x-spec checkout --quiet "$I3X_SUITE_REF"
 
-      # Ordered after validate.py by an initContainer inside the Job itself. The AAS suite provisions
-      # its own subject (test-harness/aas_fixture.py), so the only dependency is the one the
-      # initContainer states: do not run a conformance suite against a stack whose conformance run
-      # did not pass.
-      - name: In-Cluster Conformance — AAS V3 Export
-        run: |
-          set -eu
-          JOB=job/$RELEASE-e2e-aas-export
-          deadline=$(( $(date +%s) + 900 ))
-          while :; do
-            if kubectl -n $NS get "$JOB" -o jsonpath='{.status.succeeded}' 2>/dev/null | grep -q 1; then
-              STATUS=succeeded; break
-            fi
-            if kubectl -n $NS get "$JOB" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null | grep -q True; then
-              STATUS=failed; break
-            fi
-            if [ "$(date +%s)" -ge "$deadline" ]; then STATUS=timeout; break; fi
-            sleep 10
-          done
-          kubectl -n $NS logs "$JOB" --all-containers --tail=-1 > /tmp/aas.log 2>&1 || true
-          cat /tmp/aas.log
-          echo "aas-export: $STATUS"
-          [ "$STATUS" = succeeded ]
+          kubectl -n $NS port-forward svc/i3x-service 18090:8090 >/tmp/pf-i3x.log 2>&1 &
+          PFI=$!
+          kubectl -n $NS port-forward svc/supabase-kong 18080:8000 >/tmp/pf-kong.log 2>&1 &
+          PFK=$!
+          trap 'kill $PFI $PFK 2>/dev/null || true' EXIT
+          sleep 3
 
-          # A green Job is not enough: test_aas_export.py guards its live checks with @skipUnless(LIVE),
-          # so against an unprovisioned stack it skips 47 of 58 and exits 0. Assert the skip's absence.
-          if grep -q 'live checks skipped' /tmp/aas.log; then
-            echo "::error::the AAS suite SKIPPED its live checks -- it verified the offline parity checks only."
-            echo "::error::The suite provisions its own subject through test-harness/aas_fixture.py, so this means"
-            echo "::error::the stack was not reachable, or provisioning was refused -- check the log above for"
-            echo "::error::a 'could not provision the fixture' line naming the HTTP status."
+          ANON=$(kubectl -n $NS get secret $RELEASE-secrets -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)
+          TOKEN=$(curl -s -X POST "http://127.0.0.1:18080/auth/v1/token?grant_type=password" \
+            -H "apikey: $ANON" -H "Content-Type: application/json" \
+            -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+          test -n "$TOKEN"
+
+          cd /tmp/i3x-spec/conformance-tests
+          node bin/i3x-test.js run "http://127.0.0.1:18090/v1" --token "$TOKEN" \
+            | tee /tmp/i3x-conformance.txt
+
+          # Assert on the verdict, not the exit code: "Not Compliant" and "could not reach the server"
+          # are different problems, and an absent verdict line is a failure in its own right.
+          if grep -q "Result: Full 1.0 Compliance" /tmp/i3x-conformance.txt; then
+            echo "i3X: Full 1.0 Compliance"
+          elif grep -q "Result: 1.0 Compatible" /tmp/i3x-conformance.txt; then
+            echo "i3X: 1.0 Compatible (update methods deliberately omitted)"
+          else
+            echo "::error::i3X conformance did not reach a passing verdict."
+            grep -E "Result:|✗" /tmp/i3x-conformance.txt | head -30 || true
             exit 1
           fi
-          echo "AAS live checks ran (not skipped)."
 
-      # Through the ingress, not a port-forward: on Kubernetes the request crosses Traefik and
-      # carries the Realtime tenant hostname. Same 101-status assertion the Compose job makes.
+      # Through the ingress, not a port-forward: the request crosses Traefik and carries the Realtime
+      # tenant hostname. A healthy container behind a misconfigured route would otherwise pass and
+      # fail in the browser.
       - name: Verify Realtime WebSocket Upgrade Through The Ingress
         run: |
           set -eu
@@ -1444,7 +1327,7 @@ jobs:
           # Asserting on the exit code tests the curl build, not the route; assert on the status line.
           ERR=$(mktemp)
           RESP=$(curl -sS -i --max-time 8 --http1.1 \
-            -H "Host: api.127.0.0.1.nip.io" \
+            -H "Host: api.localhost" \
             -H "Connection: Upgrade" -H "Upgrade: websocket" \
             -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
             "http://127.0.0.1/realtime/v1/websocket?apikey=$ANON&vsn=1.0.0" 2>"$ERR" || true)
@@ -1466,13 +1349,13 @@ jobs:
       - name: Verify The Frontend Serves Its Runtime Config Through The Ingress
         run: |
           set -eu
-          CONFIG=$(curl -sS --max-time 10 -H "Host: app.127.0.0.1.nip.io" http://127.0.0.1/config.js)
+          CONFIG=$(curl -sS --max-time 10 -H "Host: app.localhost" http://127.0.0.1/config.js)
           echo "$CONFIG"
-          printf '%s' "$CONFIG" | grep -q 'VITE_SUPABASE_URL: "http://api.127.0.0.1.nip.io"' \
+          printf '%s' "$CONFIG" | grep -q 'VITE_SUPABASE_URL: "http://api.localhost"' \
             || { echo "::error::/config.js does not carry the ingress Supabase URL"; exit 1; }
           # Fixed filename, environment-specific contents: a cached copy points a redeployed
           # dashboard at the previous environment's Supabase URL.
-          curl -sSI --max-time 10 -H "Host: app.127.0.0.1.nip.io" http://127.0.0.1/config.js \
+          curl -sSI --max-time 10 -H "Host: app.localhost" http://127.0.0.1/config.js \
             | grep -i 'cache-control' | grep -q 'no-store' \
             || { echo "::error::/config.js is not served no-store"; exit 1; }
 
@@ -1508,333 +1391,3 @@ jobs:
       - name: Tear Down
         if: always()
         run: k3d cluster delete acs-cymru || true
-
-  e2e-validation:
-    # Gated on the diff: eighteen of this workflow's twenty-two minutes are these two jobs,
-    # and a documentation change cannot alter what either one asserts. See `changes` above --
-    # it fails open, so an uncomputable range still runs this.
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    name: End-to-End Unified Stack Ingestion Validation
-    runs-on: ubuntu-latest
-    env:
-      # A commit SHA: the `1.0.0` tag predates the conformance suite, and an unpinned branch would let
-      # someone else's commit decide whether this pipeline is green. Read the suite's CHANGELOG before
-      # bumping: a new MUST test is a real finding about this server.
-      I3X_SUITE_REF: "5010274f4952acb1c23dc77b32bd44eed16f0c2b"
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.10'
-
-      - name: Install Python Validation Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r ingestion/requirements.txt
-          # Official AAS V3 schema validation in the live export checks below.
-          pip install jsonschema
-
-      - name: Install Protobuf Compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
-
-      - name: Generate Sparkplug B Protobuf Module
-        run: |
-          protoc --python_out=. sparkplug_b.proto
-          cp sparkplug_b_pb2.py ingestion/
-
-      # `--demo` rather than `cp`: "use the published demo keys" is a named request that prints its
-      # own warning. Developers get freshly minted credentials from a bare `npm run setup`.
-      - name: Prepare Environment File
-        run: |
-          node scripts/setup.mjs --demo
-
-          # SUPABASE_PUBLIC_URL: the address a physical appliance dials, blank in .env.example. The
-          # gateway-bundle function refuses to mint without it and refuses loopback and `supabase-kong`
-          # by pattern. Nothing dials it here; a name is honest where an invented IP would not be. It
-          # goes in .env because the edge function reads it from the container environment. Replaced in
-          # place: the key is already present, and check-env-drift.mjs compares key sets.
-          sed -i 's|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=http://api.acs-cymru.test:54321|' .env
-
-          # The two enrolment values enroll-gateway checks before touching the one-shot token.
-          # MQTT_PUBLIC_HOST must not be `mosquitto`, `localhost` or `127.0.0.1` (refused by name); it is
-          # added to the broker certificate's SAN, alongside the base names mosquitto-tls-init always
-          # carries. The token is generated: the credential service refuses anything under 32 characters.
-          sed -i 's|^MQTT_PUBLIC_HOST=.*|MQTT_PUBLIC_HOST=broker.acs-cymru.test|' .env
-          sed -i "s|^MQTT_CREDENTIAL_SERVICE_TOKEN=.*|MQTT_CREDENTIAL_SERVICE_TOKEN=$(openssl rand -hex 32)|" .env
-
-          # Echoed so a future failure can be read off this step rather than inferred from a 503
-          # three hundred lines later. The TOKEN is deliberately not printed: its value is a secret
-          # even on a throwaway stack, and workflow logs are readable by anyone who can see the run.
-          grep -E '^(SUPABASE_PUBLIC_URL|MQTT_PUBLIC_HOST)=' .env
-
-      # Logs on failure, because `up` does not print them: a one-shot dependency failing takes the
-      # whole `up` down and compose reports only the service's name and exit 1.
-      - name: Launch Unified Docker Compose Stack
-        run: |
-          if docker compose up -d; then
-            exit 0
-          fi
-
-          echo "::error::docker compose up failed. Container states and logs follow (#134)."
-
-          # WHICH service failed is already answered -- compose says so itself, in the output
-          # directly above this. This table adds the exit codes and the state of everything else,
-          # which is what separates "one Job exited 1" from "half the stack never started".
-          echo "--- container states ---"
-          docker compose ps -a || true
-
-          # Every service, not just the failed one: selecting them means parsing `docker compose ps
-          # --format json`, whose shape changed at v2.21, in a branch that only runs when the stack is
-          # already broken. `|| true` on each so the step prints what it came to print.
-          echo "--- logs (all services, newest 150 lines each) ---"
-          docker compose logs --no-color --tail 150 || true
-
-          exit 1
-
-      - name: Wait for Services Health
-        run: |
-          echo "Polling Docker Compose service health..."
-          timeout 90s bash -c '
-            until docker compose exec -T timescaledb pg_isready -U postgres >/dev/null 2>&1 && \
-                  docker compose exec -T supabase-db pg_isready -U postgres >/dev/null 2>&1 && \
-                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus_monitor -P acscymru123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
-              echo "Waiting for TimescaleDB, Supabase DB, and Mosquitto to become ready..."
-              sleep 2
-            done
-          '
-          echo "All core services report healthy!"
-
-      # Storage runs its own migrations after supabase-db-init, then supabase-storage-init creates
-      # the asset-3d-models bucket through the REST API. Polled on the bucket itself, since a healthy
-      # storage-api with no bucket yet would still fail the upload.
-      - name: Wait for Storage and the 3D model bucket
-        run: |
-          set -a && . ./.env && set +a
-          timeout 120s bash -c '
-            until curl -sf -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-                       -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
-                       http://127.0.0.1:54321/storage/v1/bucket/asset-3d-models >/dev/null 2>&1; do
-              echo "Waiting for the asset-3d-models bucket..."
-              sleep 3
-            done
-          '
-          echo "Storage is up and the asset-3d-models bucket exists!"
-
-      # Realtime boots slower than the core services (its own migrations, then the tenant seed).
-      # Polled separately on its own timeout. Probed inside the container: the /realtime/v1/ route
-      # rewrites to /socket/, so the tenant API is not routable from outside. The tenant is
-      # `realtime-dev` and the endpoint requires a bearer token.
-      - name: Wait for Supabase Realtime
-        run: |
-          set -a && . ./.env && set +a
-          timeout 90s bash -c '
-            until docker compose exec -T supabase-realtime \
-                  curl -sf -H "Authorization: Bearer '"$SUPABASE_ANON_KEY"'" \
-                  http://localhost:4000/api/tenants/realtime-dev/health >/dev/null 2>&1; do
-              echo "Waiting for Supabase Realtime to become ready..."
-              sleep 3
-            done
-          '
-          echo "Supabase Realtime reports healthy!"
-
-      # The WebSocket route is what the dashboard uses; a healthy container behind a misconfigured
-      # gateway route would otherwise pass CI and fail in the browser. The gateway's CORS handling
-      # runs on the upgrade request.
-      - name: Verify Realtime WebSocket Upgrade Through The Gateway
-        run: |
-          set -a && . ./.env && set +a
-
-          # A successful upgrade leaves curl holding an open WebSocket, so curl's exit code and
-          # %{http_code} test the curl build, not the route. Bound the request with --max-time and assert
-          # on the status line. `|| true` keeps `bash -e` from aborting before the diagnostics run.
-          ERR="$(mktemp)"
-          RESP=$(curl -sS -i --max-time 5 --http1.1 \
-            -H "Connection: Upgrade" -H "Upgrade: websocket" \
-            -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-            "http://127.0.0.1:54321/realtime/v1/websocket?apikey=$SUPABASE_ANON_KEY&vsn=1.0.0" \
-            2>"$ERR" || true)
-
-          if ! printf '%s' "$RESP" | grep -q "101 Switching Protocols"; then
-            echo "::error::Realtime did not complete the WebSocket upgrade through the gateway"
-            echo "--- response headers ---"; printf '%s\n' "$RESP" | head -20
-            echo "--- curl stderr ---";      head -5 "$ERR"
-            docker compose logs --tail 50 supabase-realtime supabase-envoy
-            exit 1
-          fi
-          echo "Realtime completed the WebSocket upgrade through the gateway (101 Switching Protocols)."
-
-      # validate.py reads config via os.getenv. `.env` describes the inside of the compose network,
-      # so the credentials are taken from it and the topology is pointed at the published ports.
-      # MQTT_VALIDATOR_USER/MQTT_VALIDATOR_PASSWORD must reach the script: it refuses to start
-      # without them. See docs/incidents.md -> "The validator's default password matched the demo
-      # credential".
-      # The same consuming gate as the k3d job: `docker compose up --wait` returns on health, and the
-      # ingestion daemon carries no healthcheck. Costs nothing when the daemon is already consuming.
-      - name: Wait For The Ingestion Daemon To Be Consuming
-        run: WAIT_MODE=compose sh scripts/wait-for-ingestion-consuming.sh
-
-      - name: Run End-to-End Validation Script
-        run: |
-          set -a && . ./.env && set +a
-          export DB_HOST=localhost
-          export DB_PORT=5433          # timescaledb  5433:5432
-          export MQTT_HOST=localhost
-          export MQTT_PORT=1883        # mosquitto    1883:1883
-          export SUPABASE_URL=http://127.0.0.1:54321  # supabase-kong 54321:8000
-          python ingestion/validate.py
-
-      # The migration model's central invariant, checked: there is no migrations ledger, db-init
-      # replays every file on every boot, so a second run must match no rows. Runs after validate.py
-      # so the replay meets a database in a realistic state. The script asserts what a migration can
-      # move (schema digest, the 'migration' audit lane) and treats a fall in operator row counts as
-      # failure while ignoring a rise, so concurrent writes cannot make it flaky.
-      # Did the chain finish? An abort part-way leaves the stack running on a partially migrated
-      # database, and 0001 drops the telemetry read surface before later files put it back.
-      - name: Migration Chain Completed
-        run: node scripts/check-schema-surface.mjs
-
-      - name: Migration Chain Replays Cleanly
-        run: node scripts/check-migration-idempotency.mjs
-
-      # The gateway's posture against the running gateway, not its config file: each route is probed
-      # unauthenticated and a gated route must be refused before its upstream sees it. Runs after
-      # validate.py: that asserts the intended surface behaves, this that the surface is still the
-      # intended one. Both passes: --authenticated is what catches a gateway that forwards the apikey
-      # out of the query string to PostgREST.
-      - name: Verify The Live Gateway Surface
-        run: |
-          set -a && . ./.env && set +a
-          node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:54321
-
-      # Every Prometheus target is up. A scrape config naming an endpoint that serves nothing does
-      # not fail; the dashboards render empty. Run after validate.py so the daemon's counters are
-      # non-empty and "up but serving nothing" is separable.
-      - name: Verify Every Prometheus Target Is Up
-        run: |
-          set -euo pipefail
-          PROM=http://127.0.0.1:9090
-
-          # Prometheus needs one scrape interval (15s) plus start-up before every target has been
-          # tried once; a target never yet scraped reports health "unknown", not "down".
-          for i in $(seq 1 20); do
-            if curl -sf "$PROM/-/ready" >/dev/null 2>&1; then break; fi
-            sleep 3
-          done
-          curl -sf "$PROM/-/ready" >/dev/null || { echo "::error::Prometheus never became ready"; exit 1; }
-          sleep 20
-
-          curl -sf "$PROM/api/v1/targets?state=active" > /tmp/targets.json
-
-          python3 - <<'PY'
-          import json, sys
-          targets = json.load(open('/tmp/targets.json'))['data']['activeTargets']
-          if not targets:
-              print('::error::Prometheus has no active targets at all')
-              sys.exit(1)
-          bad = []
-          for t in targets:
-              job = t['labels'].get('job', '?')
-              if t['health'] != 'up':
-                  bad.append(f"{job} ({t['scrapeUrl']}): {t['health']} -- {t.get('lastError') or 'no error reported'}")
-              else:
-                  print(f"  ok  {job} -> {t['scrapeUrl']}")
-          # The list is the whole of prometheus.yml, checked both ways: a job removed from the file fails
-          # here, and so does one added without being declared here.
-          expected = {'ingestion', 'node', 'envoy', 'supabase-rest', 'grafana', 'prometheus'}
-          jobs = {t['labels'].get('job') for t in targets}
-          for want in sorted(expected - jobs):
-              bad.append(f"scrape job '{want}' is absent from prometheus.yml")
-          for extra in sorted(jobs - expected):
-              bad.append(f"scrape job '{extra}' is in prometheus.yml but not declared in this "
-                         f"check -- add it, so that losing it later would be reported")
-          for b in bad:
-              print(f'::error::{b}')
-          sys.exit(1 if bad else 0)
-          PY
-
-          # The ingestion endpoint must be serving REAL counters, not just answering 200. validate.py
-          # has just published a run's worth of Sparkplug traffic through the daemon.
-          VALUE=$(curl -sf --get "$PROM/api/v1/query" \
-                    --data-urlencode 'query=sum(acs_ingestion_messages_total)' \
-                  | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "0")')
-          echo "  acs_ingestion_messages_total = $VALUE"
-          python3 -c "import sys; sys.exit(0 if float('$VALUE') > 0 else 1)" || {
-            echo "::error::Prometheus scraped the ingestion daemon but recorded no messages."
-            echo "::error::The target is up and the counters are empty, which means the endpoint"
-            echo "::error::is serving but the daemon consumed nothing during the validation run."
-            exit 1
-          }
-
-      # Enrolment-token secrecy can only be checked where the seed exists: every assertion is made as
-      # a seeded demo account. REQUIRE_SEEDED_ACCOUNTS turns a fully skipped run into a failure, since
-      # here the seed is guaranteed.
-
-      # i3X 1.0 conformance, run by CESMII's own suite rather than by assertions of ours, for the
-      # same reason the AAS export is validated against the real IDTA schema. Pinned to a commit. The
-      # expected verdict is 1.0 Compatible, not Full Compliance: Update is a MAY and this server
-      # declares `update.current: false`.
-      - name: i3X Conformance — CESMII Official Suite
-        run: |
-          set -eu
-          git clone --quiet https://github.com/cesmii/i3X.git /tmp/i3x-spec
-          git -C /tmp/i3x-spec checkout --quiet "$I3X_SUITE_REF"
-
-          set -a && . ./.env && set +a
-          TOKEN=$(curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
-            -H "apikey: $SUPABASE_ANON_KEY" -H "Content-Type: application/json" \
-            -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
-          test -n "$TOKEN"
-
-          cd /tmp/i3x-spec/conformance-tests
-          node bin/i3x-test.js run "http://127.0.0.1:${I3X_PORT:-8090}/v1" --token "$TOKEN" \
-            | tee /tmp/i3x-conformance.txt
-
-          # Assert on the verdict, not the exit code: "Not Compliant" and "could not reach the server"
-          # are different problems, and an absent verdict line is a failure in its own right.
-          if grep -q "Result: Full 1.0 Compliance" /tmp/i3x-conformance.txt; then
-            echo "i3X: Full 1.0 Compliance"
-          elif grep -q "Result: 1.0 Compatible" /tmp/i3x-conformance.txt; then
-            echo "i3X: 1.0 Compatible (update methods deliberately omitted)"
-          else
-            echo "::error::i3X conformance did not reach a passing verdict."
-            grep -E "Result:|✗" /tmp/i3x-conformance.txt | head -30 || true
-            exit 1
-          fi
-
-      # =========================================================================================
-      # The `stack` lane: every suite that needs a running stack, discovered rather than listed.
-      # These cannot go in the no-stack job: without a stack they skip every check and exit 0.
-      # Alphabetical by path is safe: test_enroll_gateway.py stops the credential container and
-      # restarts it in tearDown, and `gateway-credential/` sorts before `supabase/`.
-      #
-      # One environment, the union of what the suites need; everything else comes from `.env`.
-      #   SUPABASE_URL             the aas suites take the gateway, not the container name.
-      #   SUPABASE_DB_*            test_gateway_enrollment.py connects to Postgres directly; its
-      #                            password is POSTGRES_PASSWORD, not DB_PASSWORD (the historian's).
-      #   REQUIRE_SEEDED_ACCOUNTS  read by test_gateway_enrollment.py; turns a skipped secrecy suite
-      #                            into a failure, because here the seed is guaranteed.
-      # =========================================================================================
-      - name: Run Stack-Dependent Python Suites
-        env:
-          REQUIRE_SEEDED_ACCOUNTS: '1'
-          # test_log_pipeline.py skips when the stores are unreachable or the broker credential is
-          # absent; both are impossible here, so the skip is made a failure.
-          REQUIRE_LOG_PIPELINE: '1'
-          SUPABASE_DB_HOST: localhost
-          SUPABASE_DB_PORT: '54322'
-          # The historian by its published port: `.env` sets DB_HOST=timescaledb, which resolves only
-          # inside the compose network, and these suites run on the runner.
-          TS_TEST_HOST: localhost
-          TS_TEST_PORT: '5433'
-        run: |
-          set -a && . ./.env && set +a
-          export SUPABASE_URL=http://127.0.0.1:54321
-          export SUPABASE_DB_PASSWORD="$POSTGRES_PASSWORD"
-          node scripts/run-python-suites.mjs --lane stack

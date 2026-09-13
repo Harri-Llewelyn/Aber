@@ -64,18 +64,20 @@ npm run dev:reset     # uninstall, drop every claim, reinstall: a blank stack, s
 npm run dev:down      # delete the cluster
 ```
 
-`up` installs on the dev values' loopback domain, so every host resolves on this machine whatever
-the resolver does, and gives the two functions that address an appliance this machine's LAN address
-instead: the broker's TLS listener, which `up` turns on, carries it in its certificate, and the
-bundle's API address is `api.<LAN address>.nip.io`, which resolves only where the resolver answers
-nip.io names carrying private addresses (many home routers refuse to, as DNS-rebind protection).
-`--domain=<LAN address>.nip.io` moves every host onto the LAN where it does. `up` also enables the
-backup service, taking storage and the forge as a Compose backup does, and generates the forge
+`up` installs on the dev values' domain, `localhost`: every `*.localhost` host is this machine,
+and browsers treat it as a secure context, which the Studio and forge logins need over plain HTTP
+(they set Secure cookies, and any other http host loses them). The two functions that address an
+appliance get this machine's LAN address instead: the broker's TLS listener, which `up` turns on,
+carries it in its certificate, and the bundle's API address is `api.<LAN address>.nip.io`, which
+resolves only where the resolver answers nip.io names carrying private addresses (many home routers
+refuse to, as DNS-rebind protection). `--domain=<LAN address>.nip.io` moves every host onto the LAN
+where it does, and those two logins then need `ingress.tls`. `up` also enables the
+backup service, taking storage and the forge too, and generates the forge
 sweep secret once; the stack lane exercises all of it. `--no-tls` leaves the listener off,
 `--no-build` reuses the images already in the node, `--only=ingestion` rebuilds a subset, `--e2e`
 adds the in-cluster conformance Jobs.
 
-The port-forwards carry the host port numbers Compose published (`5433` for the historian,
+The port-forwards carry the port numbers every host-side script and suite defaults to (`5433` for the historian,
 `54322` and `54321` for Supabase, `1880`, `3002`, `9090`, `3100` and the rest), so every host-side
 tool keeps its defaults. `test` builds the suites' environment from `.env.example` for the
 non-secret settings and from the release's own Secret for every credential, and sets
@@ -231,27 +233,29 @@ kubectl -n acs-cymru delete pvc data-timescaledb-0
 
 Eight subdomains, all on one Ingress, all derived from `global.publicBaseDomain`:
 
-| Host | Backend | Compose equivalent |
-|---|---|---|
-| `app.<domain>` | `frontend:3000` | `:3000` |
-| `api.<domain>` | `supabase-kong:8000` | `:54321` |
-| `nodered.<domain>` | `node-red:1880` | `:1880` |
-| `grafana.<domain>` | `grafana:3000` | `:3002` |
-| `studio.<domain>` | `supabase-kong:8001` (the gateway's studio listener — **off by default**) | `:54323` |
-| `docs.<domain>` | `swagger-ui:8080` | `:8088` |
-| `git.<domain>` | `supabase-kong:8002` (the gateway's forge listener; never `gitea:3000`) | `:3003` |
-| `mqtt.<domain>` | `mosquitto:9001` (WebSockets) | `:9001` |
-| — | `mosquitto-external:1883` (LoadBalancer) | `:1883` |
-| — | `<release>-ingress-gitea-ssh:22` (LoadBalancer; `gitea.ssh.external`) | `:2222` |
+| Host | Backend |
+|---|---|
+| `app.<domain>` | `frontend:3000` |
+| `api.<domain>` | `supabase-kong:8000` |
+| `nodered.<domain>` | `node-red:1880` |
+| `grafana.<domain>` | `grafana:3000` |
+| `studio.<domain>` | `supabase-kong:8001` (the gateway's studio listener — **off by default**) |
+| `docs.<domain>` | `swagger-ui:8080` |
+| `git.<domain>` | `supabase-kong:8002` (the gateway's forge listener; never `gitea:3000`) |
+| `mqtt.<domain>` | `mosquitto:9001` (WebSockets) |
+| — | `mosquitto-external:1883` (LoadBalancer) |
+| — | `<release>-ingress-gitea-ssh:22` (LoadBalancer; `gitea.ssh.external`) |
 
 **Raw MQTT on 1883 is not on the Ingress** and cannot be — it is TCP, not HTTP. That is the
 `mosquitto-external` Service's job.
 
-For local k3s, `values-dev.yaml` uses `127.0.0.1.nip.io`, which resolves to loopback with no `/etc/hosts`
-editing. Traefik listens on the node's :80.
+For local k3s, `values-dev.yaml` uses `localhost`: browsers resolve every `*.localhost` name to
+loopback themselves, with no `/etc/hosts` editing, and treat it as a secure context, so the two
+logins that set Secure cookies (Studio and the forge) work over plain HTTP. On any other domain the
+render refuses those two routes unless `ingress.tls` terminates TLS. Traefik listens on the node's :80.
 
 ```bash
-curl -H 'Host: app.127.0.0.1.nip.io' http://127.0.0.1/
+curl -H 'Host: app.localhost' http://127.0.0.1/
 kubectl -n acs-cymru get ingress
 ```
 
@@ -458,9 +462,8 @@ kubectl -n acs-cymru wait --for=condition=complete \
 kubectl -n acs-cymru logs job/acs-cymru-e2e-validate
 ```
 
-- **`validate.py`** — the same 20 checks CI runs against Compose. In-cluster it needs **no host or
-  port overrides at all**: the Service names *are* the correct configuration, which makes this the
-  simpler of the two topologies.
+- **`validate.py`** — the same 20 checks `npm run dev:test` runs from the host. In-cluster it needs
+  **no host or port overrides at all**: the Service names *are* the correct configuration.
 - **`test_aas_export.py`** — starts automatically once the first Job completes, ordered by an
   initContainer inside the Job rather than by the order you run things. Its subject, `Sim_CNC_Mill_01`,
   is **seeded** — registered by migration `0002` and given its schema and IDTA nameplate by `0020` —
@@ -480,8 +483,8 @@ Object names come from the chart's `fullname` helper, which **collapses the usua
 
 ### Running `validate.py` from the host instead
 
-Possible but it is the Compose arrangement, not this one: `DB_HOST`, `SUPABASE_DB_HOST`, `MQTT_HOST`
-and `SUPABASE_URL` all need overriding to point at port-forwards. Prefer the Job.
+`npm run dev:test` does it: the port-forwards give `DB_HOST`, `SUPABASE_DB_HOST`, `MQTT_HOST` and
+`SUPABASE_URL` their defaults, and the credentials come from the release Secret.
 
 ## Upgrade / uninstall
 
@@ -718,9 +721,8 @@ pg_net has no retries or DLQ, so blocking it drops every notification silently.
 
 **The forge depends on this policy for its login, and the policy is off by default.** Gitea runs
 with reverse-proxy authentication and signs in whoever the `X-WEBAUTH-USER` header names, from any
-peer (`REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For` only). On Compose, Gitea sits on a
-network only the gateway and the edge runtime join. On Kubernetes the equivalent is the two
-NetworkPolicy edges to `gitea:3000` — so with `networkPolicy.enabled: false` **any pod in the
+peer (`REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For` only). The two NetworkPolicy
+edges to `gitea:3000` are what confine it — so with `networkPolicy.enabled: false` **any pod in the
 namespace can reach Gitea's HTTP port and become any user**, Node-RED included, which runs whatever
 JavaScript a flow author writes. Enable the policy on any cluster where the forge holds real flows,
 or keep `gitea.enabled: false` until you do.
@@ -748,8 +750,7 @@ deliberately.)
 
 Two tiers, answering different questions. **Tier 1 recovers data; tier 2 recovers a machine.**
 Neither substitutes for the other — a volume snapshot cannot restore one dropped table, and a
-logical dump cannot rebuild a dead node. The reasoning behind the tier 1 dumps, and the same
-strategy for the Compose target, is in
+logical dump cannot rebuild a dead node. The reasoning behind the tier 1 dumps is in
 [`../../supabase/README.md`](../../supabase/README.md#backup-and-recovery).
 
 #### Tier 1: logical dumps
@@ -783,9 +784,9 @@ kubectl -n acs-cymru exec -i statefulset/timescaledb -- \
   env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > timescaledb.dump
 ```
 
-`scripts/backup-databases.sh` covers the same ground for Compose and for any reachable PostgreSQL
-(`BACKUP_MODE=direct`), and writes a manifest so a restore does not have to infer which files belong
-together. Use `BACKUP_FORMAT=custom` there when both targets must produce one artefact shape.
+`scripts/backup-databases.sh` covers the same ground from the host, against the two databases
+through `npm run dev:forward` or a port-forward of your own, and writes a manifest so a restore does
+not have to infer which files belong together.
 
 Restore:
 
@@ -828,8 +829,8 @@ kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
 > kubectl -n acs-cymru exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_post_restore()'
 > ```
 >
-> Run `post_restore()` **even if the restore failed.** `scripts/restore-databases.sh` does this for
-> the Compose target and verifies `public.telemetry` through the wrapper afterwards.
+> Run `post_restore()` **even if the restore failed.** `scripts/restore-databases.sh` does this and
+> verifies `public.telemetry` through the wrapper afterwards.
 
 #### Rehearsing the restore, weekly and by hand
 
@@ -1110,9 +1111,9 @@ Also available, all documented above: **broker TLS on 8883**, the **internal CA*
 
 ### Service names are not release-prefixed, and must not be
 
-`timescaledb`, `supabase-db`, `mosquitto`, `supabase-kong` — identical to the Compose service
-names, so every compose-internal URL already in `grafana.ini`, `kong.yml`, `settings.js` and the
-edge-function environment resolves unchanged. Prefixing them would break all of that and buy
+`timescaledb`, `supabase-db`, `mosquitto`, `supabase-kong` — the names every in-cluster URL in
+`grafana.ini`, `kong.yml`, `settings.js` and the edge-function environment carries, so each
+resolves unchanged. Prefixing them would break all of that and buy
 nothing: **two releases in one namespace is not supported** (they would contend for the MQTT host
 port, the Realtime replication slot and the tenant name). Use two namespaces.
 
@@ -1154,9 +1155,9 @@ Options, in rough order of how often they suit this stack:
 
 ### Port 5433 does not exist here
 
-`docker-compose.yml` publishes TimescaleDB on 5433 (and Supabase Postgres on 54322) only to avoid
-colliding with a developer's local PostgreSQL. There is no port mapping in Kubernetes: everything
-is the standard 5432. A `postgres_fdw` foreign server pointed at 5433 fails as a *relation-level*
+`npm run dev:test` forwards TimescaleDB to 5433 (and Supabase Postgres to 54322) only to avoid
+colliding with a developer's local PostgreSQL. Inside the cluster there is no such mapping:
+everything is the standard 5432. A `postgres_fdw` foreign server pointed at 5433 fails as a *relation-level*
 error from PostgREST, which reads as a schema fault rather than a connection one — the `helm test`
 FDW gate exists to catch exactly that.
 
@@ -1188,9 +1189,9 @@ Between the StatefulSet becoming ready and the hook finishing, PostgREST serves 
 
 ### MQTT needs a free host port
 
-k3s's ServiceLB satisfies `type: LoadBalancer` by binding the port on the node. **A Compose stack
-running on the same machine holds 1883**, and `mosquitto-external` then sits `<pending>` with no
-obvious cause. Most likely first-boot surprise for anyone running both targets on one laptop.
+k3s's ServiceLB satisfies `type: LoadBalancer` by binding the port on the node. **Anything else
+listening on 1883 on that machine** (a local broker, a leftover container) leaves
+`mosquitto-external` at `<pending>` with no obvious cause.
 
 ```bash
 kubectl -n acs-cymru get svc mosquitto-external
@@ -1269,17 +1270,15 @@ Editing the Ingress by hand does *not* do that. The database keeps the old redir
 `/oauth/authorize` answers `invalid redirect_uri`, which reads as a Grafana or Node-RED fault. Change
 it in values and upgrade.
 
-### Grafana keeps one `grafana.ini`, shared with Compose
+### Grafana keeps one `grafana.ini`
 
-Only the two browser-facing URLs differ between targets, and they are overridden with `GF_*`
-environment variables rather than by forking the file: `GF_SERVER_ROOT_URL` and
-`GF_AUTH_GENERIC_OAUTH_AUTH_URL`. `token_url` and `api_url` inside the file are already in-cluster
-(`http://supabase-kong:8000`) and are correct on both targets untouched.
+The two browser-facing URLs are set with `GF_*` environment variables rather than in the file:
+`GF_SERVER_ROOT_URL` and `GF_AUTH_GENERIC_OAUTH_AUTH_URL`. `token_url` and `api_url` inside the
+file are in-cluster (`http://supabase-kong:8000`) and are correct untouched.
 
 Its datasource is rendered by an initContainer, same as Kong's config and for the same reason — with
 `existingSecret` the chart cannot see the password, and Helm would substitute an empty string. That
-is what removes the `sed` entrypoint override the Compose service needs; Grafana here runs its stock
-`/run.sh`.
+so Grafana runs its stock `/run.sh`.
 
 `fsGroup` is **472**, not 1000. The wrong value presents as "GF_PATHS_DATA is not writable" on a
 volume that looks perfectly fine.
@@ -1332,7 +1331,7 @@ forever.
 ## Chart files
 
 Helm cannot read outside its own chart directory, but several files the chart needs are the same
-ones `docker-compose.yml` bind-mounts. `scripts/sync-helm-chart-files.mjs` mirrors them into
+ones the suites and scripts read from the working tree. `scripts/sync-helm-chart-files.mjs` mirrors them into
 `deploy/helm/acs-cymru/files/`, the copies are committed (a packaged chart must install with no
 build step), and CI runs the script with `--check` to prove they are current.
 
@@ -1348,76 +1347,21 @@ and init script, and Grafana's `grafana.ini`, datasource template, dashboards an
 
 ---
 
-## Divergences from Docker Compose
+## What keeps the chart honest
 
-Both targets must keep working, and `ingestion/validate.py` is the conformance check for either.
-Where they differ, they differ deliberately:
+There is no second topology to compare against, so the checks are the ones that fail early:
 
-**This table is the only stated contract for what may differ**, and no CI guard parses it — so it
-rots silently and a stale row certifies the wrong thing. The Kong → Envoy migration left two rows
-describing a Compose service that no longer exists, while the divergence it actually created — Envoy
-on Compose, Kong in the chart — appeared nowhere, which by this table's own closing rule made the
-best-argued difference in the repository formally *drift*. Anyone adding a divergence adds a row;
-anyone retiring one deletes it, in the same commit as the change.
-
-| Compose | Kubernetes | Why |
-|---|---|---|
-| `supabase-envoy-init` renders `envoy.yaml` with `sed` | An initContainer renders it into the pod | Compose has no templating; Kubernetes has initContainers. Same template file, different substituter |
-| Grafana entrypoint `sed`s the datasource template | Helm renders it into a Secret; stock `/run.sh` | Same |
-| Frontend build args bake `VITE_*` into the bundle | `VITE_RUNTIME_CONFIG=true` + a ConfigMap at `/config.js` | One image cannot serve two environments if the values are baked |
-| `supabase-functions` bind-mounts the repo | `supabase/functions/Dockerfile` bakes them | No repository on a cluster node; functions must version with the image |
-| Network alias `realtime-dev.supabase-realtime` | Service *named* `realtime-dev` | Kubernetes has no per-Service alias; naming it for the tenant is cleaner |
-| `deno_cache` volume | `emptyDir` | Compose-only hot-reload convenience |
-| `node-red-init` runs `chown -R 1000:1000 /data` | `podSecurityContext.fsGroup: 1000` | Kubernetes does it natively on mount |
-| `mosquitto-init` writes the plugin's document onto a named volume | An initContainer runs the same reconcile onto a PVC | The document is the broker's own state, rewritten by the plugin on every change; it needs a volume the broker keeps, and there is no other copy |
-| `gitea-init` one-shot creates the forge's administrator and machine account | An initContainer on the gitea pod, running the same `gitea-init.sh` | Same arrangement as `mosquitto-init`: provisioning against the volume the server mounts |
-| Gitea sits on a `forge` Docker network that only the gateway and the edge runtime join | NetworkPolicy edges from the gateway and `supabase-functions` to `gitea:3000`, **only when `networkPolicy.enabled`** | Gitea signs in whoever `X-WEBAUTH-USER` names, from any peer, so reachability of port 3000 is the forge's access control. With the policy off (the default) every pod in the namespace can reach it; see the security note under *Hardening* |
-| Gateway provisioning via `docker exec` | `--target=k8s`: the same plugin commands through `kubectl exec` | Same script, two backends, so the role reasoning stays in one place |
-| Ingestion has no healthcheck | Liveness probe on the heartbeat file's age | A wedged paho loop is invisible on Compose; Kubernetes can restart it |
-| `alloy` reaches the Docker API through a read-only socket proxy | A read-only ClusterRole on its ServiceAccount; pods and their logs come through the API server | There is no Docker socket to front, and the kubelet supplies the pod and container names the proxy exists to obtain on Compose. Streams carry the same two labels, `service` and `container`, from `app.kubernetes.io/component` |
-| Prometheus scrapes a static target list in `prometheus/prometheus.yml` | Alloy scrapes every pod annotated `prometheus.io/scrape` and remote-writes; Prometheus scrapes only itself | Pods have no fixed address. The annotation is the convention any cluster Prometheus reads too, and one collector for logs, metrics and host means one place to look for a missing target |
-| `node-exporter` is its own container | `prometheus.exporter.unix` inside the Alloy DaemonSet | The same collectors in the collector's own process; one fewer image. Same series names, so the Host Disk Filling rule reads either |
-| Gateway CORS origins default to `localhost:3000` / `:8088` | Derived from `publicBaseDomain` by `acs-cymru.corsOrigins` | Compose serves the dashboard on a published port; the chart serves it on `app.<domain>` and calls the API on `api.<domain>`, which is cross-origin. Same `__CORS_ORIGINS__` placeholder, different substituter — substituted into `envoy.yaml` on Compose and into whichever gateway the chart deploys |
-
-**Image tags must match between the two targets, and CI enforces it.**
-
-```bash
-node scripts/check-image-tag-parity.mjs --verbose
-```
-
-Several pins carry a paragraph explaining why, and every one is about a **coupling**:
-`supabase/realtime` and `supabase/storage-api` migrate shared schemas on boot, `supabase/studio` is
-Zod-coupled to a `postgres-meta` version, `nodered/node-red` is what `settings.js` depends on. Two
-targets on different tags break exactly those couplings — and **asymmetrically**: a schema migrated by
-a newer `storage-api` on one target is then read by an older one on the other, and the failure appears
-on whichever target was bumped second, days later, looking like that target's fault.
-
-The check also covers one coupling a repository-name comparison structurally cannot see:
-`supabase/functions/Dockerfile` builds `FROM supabase/edge-runtime`, which **Compose runs directly**.
-Bumping one and not the other means the two targets run different runtimes against identical function
-code.
-
-Bumping an image is fine. Bumping it in one place is not. If a divergence is genuinely intended,
-record it in the script's `TARGET_SPECIFIC` map *with a reason* — the map exists so that adding a name
-is a decision rather than a way to silence the check.
-
-## How the two targets are kept honest
-
-There is no way to automate "these two topologies describe the same system", and a check claiming to
-would pass while they diverged. What is actually done instead:
-
-- **The same conformance suite runs against both.** `ingestion/validate.py` is topology-agnostic —
-  CI's `e2e-validation` job runs it against Compose, `k8s-validation` runs it in-cluster as a Job. If
-  both pass, the wiring agrees where it matters. This is the real drift control; everything else below
-  is a cheaper check that fails earlier.
-- **Image tag parity**, above.
+- **The conformance suite runs in-cluster and from the host.** `ingestion/validate.py` runs as the
+  `e2e-validate` Job with no overrides at all, and `npm run dev:test` runs it from the host through
+  port-forwards. Both pass or the wiring disagrees with itself.
 - **Chart file sync** — `scripts/sync-helm-chart-files.mjs --check`. Helm cannot read outside its
-  chart, so repository-owned config is mirrored in and committed; a stale copy would provision a
-  *different* database than Compose does and would only surface at the first telemetry write.
+  chart, so repository-owned config is mirrored in and committed; a stale copy provisions a
+  different stack than the repository describes.
 - **The chart's own guard rails**, which fail the render rather than the pod: partial credential sets,
   Realtime key lengths, the `realtime-dev` Service name, empty browser-facing URLs, TLS with
   `scheme: http`, single-writer workloads being scaled, missing `fsGroup`, published database ports
   leaking into wiring, privileged credentials outside a Secret, an origin list Kong would start
-  with and then block every browser request against, and OAuth redirect URIs disagreeing between
-  what a service advertises and what db-init registers.
-- **This divergence table.** Anything intentional is written down; anything not written down is drift.
+  with and then block every browser request against, OAuth redirect URIs disagreeing between
+  what a service advertises and what db-init registers, and a datasource pointed at nothing.
+- **The README component table** — `scripts/check-docs-drift.mjs` holds it to the chart in both
+  directions, and every image tag in it to the chart's pin.

@@ -40,9 +40,8 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # THE NAME IS `node-red`, matching the Compose service name: webhook_endpoints seeds
-  # http://node-red:1880/hooks/quarantine as the pg_net target, and that address does not change
-  # between targets. (The deploy-nodered function reached the same Service at /flows until it was
+  # THE NAME IS `node-red`: webhook_endpoints seeds http://node-red:1880/hooks/quarantine as the
+  # pg_net target. (The deploy-nodered function reached the same Service at /flows until it was
   # retired with the demonstrator.)
   name: node-red
   labels:
@@ -89,9 +88,9 @@ spec:
       {{/*
         M5. The `node-red` user is uid/gid 1000, and local-path hands over a root-owned directory.
 
-        THIS REPLACES the `chown -R 1000:1000 /data` the Compose init entrypoint runs -- Kubernetes
-        does it natively on volume mount, and OnRootMismatch avoids a recursive chgrp on every
-        restart. The initContainer below therefore does NOT chown, which is the one difference
+        fsGroup does the `chown -R 1000:1000 /data` natively on volume mount, and OnRootMismatch
+        avoids a recursive chgrp on every restart. The initContainer below therefore does NOT chown,
+        which is the one difference
         between the two targets' provisioning.
       */}}
       securityContext:
@@ -112,7 +111,7 @@ spec:
           One image value feeds both containers, so they cannot drift apart.
 
           THREE WRITES WITH THREE LIFETIMES, and collapsing them behind one guard is what broke the
-          Compose stack twice: the FLOW is user content (seed once, guarded on
+          stack twice: the FLOW is user content (seed once, guarded on
           /data/.factoryplus-seeded), while settings.js and the CREDENTIALS are stack configuration
           that must be reconciled on every boot -- a volume outlives a fix.
           =========================================================================================
@@ -128,9 +127,8 @@ spec:
               BOTH MUST RECEIVE IT, IDENTICALLY. settings.js resolves every one of these from
               process.env at load time, and settingsAreCorrect() evaluates that same file from
               here. A value present when the file is written and absent when it is read makes the
-              settings look wrong on every boot and get rewritten forever. This is the chart's
-              counterpart to docker-compose.yml's `x-nodered-auth-env` anchor and exists for
-              exactly that reason -- one definition, included twice.
+              settings look wrong on every boot and get rewritten forever. One definition, included
+              twice, for exactly that reason.
             */}}
             {{- include "acs-cymru.noderedAuthEnv" . | nindent 12 }}
             {{- /*

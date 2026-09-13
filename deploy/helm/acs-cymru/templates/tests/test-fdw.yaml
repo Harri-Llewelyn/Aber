@@ -64,11 +64,11 @@ spec:
             echo 'FAIL: foreign server timescaledb_server does not exist. db-init has not run, or 0001 failed part-way.' >&2
             exit 1
           fi
-          # M2. 5433 and 54322 are docker-compose PUBLISHED ports and mean nothing in a cluster;
+          # M2. 5433 and 54322 are the dev loop's FORWARDED ports and mean nothing in a cluster;
           # the server listens on 5432. This is the specific mistake M6 exists to catch.
           case "$SRV" in
             *port=5432*) ;;
-            *) echo "FAIL: foreign server is not on port 5432 -- got '$SRV'. In-cluster it is always 5432; 5433 is only docker-compose's published port." >&2; exit 1 ;;
+            *) echo "FAIL: foreign server is not on port 5432 -- got '$SRV'. In-cluster it is always 5432; 5433 is only the dev loop's forwarded port." >&2; exit 1 ;;
           esac
           case "$SRV" in
             *host={{ include "acs-cymru.timescale.host" . }}*) ;;

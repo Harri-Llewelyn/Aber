@@ -139,7 +139,7 @@ function authFixture() {
   if (r.status !== 0 || !r.stdout.includes('CREATE TABLE')) {
     throw new Error(
       `could not dump the auth schema from ${LIVE_DB}. This script needs a running stack to take ` +
-      `GoTrue's schema from -- start one with \`docker compose up -d\` first.`);
+      `GoTrue's schema from -- bring one up with \`npm run dev:up\` and forward it with \`npm run dev:forward\` first.`);
   }
   return r.stdout;
 }
@@ -203,7 +203,7 @@ function dumpSchema(name) {
   if (r.status !== 0) throw new Error(`pg_dump failed on ${name}: ${r.stderr.trim()}`);
   // CARRIAGE RETURNS ARE STRIPPED, and they are not cosmetic -- they are a property of the
   // CHECKOUT, not of the migrations. `.gitattributes` carries `* text=auto` with an `eol=lf` rule
-  // for *.sh only, so a Windows working tree holds every *.sql as CRLF. compose bind-mounts that
+  // for *.sh only, so a Windows working tree holds every *.sql as CRLF. A db-init image built from that
   // tree straight into psql, so every function body created from it is STORED with a \r on each
   // line, and the same chain applied from a Linux checkout stores those bodies without one. Two
   // correct stacks therefore hold schemas differing by 1,556 lines of pure line-ending noise.

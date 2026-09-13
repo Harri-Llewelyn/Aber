@@ -2,9 +2,9 @@
 #
 # Tier 1 logical backup: both databases plus the 3D model objects.
 #
-# Runs against Docker Compose (default) or any reachable PostgreSQL (BACKUP_MODE=direct), so the
-# same script serves a developer machine, an edge appliance and a CI job. The Kubernetes equivalent
-# is the chart's backup CronJob (`backup.enabled=true`), which writes the same three artefacts.
+# Runs against any reachable PostgreSQL: the two databases through `npm run dev:forward` or a
+# port-forward of your own, an edge appliance, or a CI job. The in-cluster equivalent is the backup
+# service (`backupService.enabled=true`), which writes the same artefacts from the Backups page.
 #
 # WHAT THIS DOES NOT DO. It is a logical dump, not PITR: recovery is to the last run and no finer.
 # It also does not capture roles -- `supabase_auth_admin`, `authenticator` and
@@ -15,24 +15,22 @@
 # record: the durable half of everything that matters is already in the dump as rows --
 # digital_thread, which is the audit trail and the conformance record both, and platform_alerts --
 # while the logs are the volatile half, there to be queried during an incident rather than
-# restored after one. See the volume's own comment in docker-compose.yml for the full argument.
+# restored after one. See the Loki values in the chart for the full argument.
 #
 # Full runbook, including the two-tier strategy this is tier 1 of:
 #   supabase/README.md -> "Backup and Recovery"
 #
 set -eu
 
-# GIT BASH REWRITES ARGUMENTS THAT LOOK LIKE PATHS. Without this, `-C /var/lib/storage` reaches the
-# container as `C:/Program Files/Git/var/lib/storage` and tar fails with "can't change directory".
-# Every absolute path passed to `docker compose exec` below is a CONTAINER path, so blanket
-# suppression is correct here. A no-op on Linux and macOS.
+# GIT BASH REWRITES ARGUMENTS THAT LOOK LIKE PATHS. Without this, `-C /var/lib/storage` becomes
+# `C:/Program Files/Git/var/lib/storage` and tar fails with "can't change directory". A no-op on
+# Linux and macOS.
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
 # -------------------------------------------------------------------------------------------------
-# Configuration. Every value is env-overridable; the defaults target Docker Compose.
+# Configuration. Every value is env-overridable; the defaults are the dev loop's port-forwards.
 # -------------------------------------------------------------------------------------------------
-BACKUP_MODE="${BACKUP_MODE:-docker}"          # docker | direct
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 
@@ -66,7 +64,6 @@ STORAGE_CONTAINER_PATH="${STORAGE_CONTAINER_PATH:-/var/lib/storage}"
 STORAGE_HOST_PATH="${STORAGE_HOST_PATH:-}"
 INCLUDE_STORAGE="${INCLUDE_STORAGE:-true}"
 
-COMPOSE="${COMPOSE:-docker compose}"
 
 # A dump smaller than this is treated as a failure. pg_dump exits non-zero on a mid-flight error,
 # but an empty database, a wrong -d, or a container that died mid-write can all produce a
@@ -78,10 +75,6 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 log()  { printf '%s  %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-case "$BACKUP_MODE" in
-  docker|direct) ;;
-  *) die "BACKUP_MODE must be 'docker' or 'direct', got '$BACKUP_MODE'" ;;
-esac
 # --clean --if-exists ON THE PLAIN FORMAT IS NOT OPTIONAL, and a restore rehearsal is the only way
 # to find that out. A plain dump is replayed by psql, which simply executes what it is given -- so
 # without DROP guards the very first statement to touch an object the target already has fails:
@@ -109,14 +102,8 @@ dump_db() {
   out="$BACKUP_DIR/${name}-${STAMP}.${DUMP_EXT}"
 
   log "dumping $name -> $out"
-  if [ "$BACKUP_MODE" = "docker" ]; then
-    # shellcheck disable=SC2086
-    $COMPOSE exec -T -e PGPASSWORD="$pw" "$service" \
-      pg_dump $DUMP_ARGS -U "$user" -d "$db" > "$out"
-  else
-    # shellcheck disable=SC2086
-    PGPASSWORD="$pw" pg_dump $DUMP_ARGS -h "$host" -p "$port" -U "$user" -d "$db" -f "$out"
-  fi
+  # shellcheck disable=SC2086
+  PGPASSWORD="$pw" pg_dump $DUMP_ARGS -h "$host" -p "$port" -U "$user" -d "$db" -f "$out"
 
   size=$(wc -c < "$out" | tr -d ' ')
   [ "$size" -ge "$MIN_DUMP_BYTES" ] || die "$out is only ${size} bytes -- refusing to record a short dump as a backup"
@@ -129,18 +116,14 @@ dump_storage() {
   if [ -n "$STORAGE_HOST_PATH" ]; then
     [ -d "$STORAGE_HOST_PATH" ] || die "STORAGE_HOST_PATH '$STORAGE_HOST_PATH' is not a directory"
     tar -czf "$out" -C "$STORAGE_HOST_PATH" .
-  elif [ "$BACKUP_MODE" = "docker" ]; then
-    # tar compresses inside the container so the only failure-capable process is the one whose
-    # exit status this shell reads.
-    $COMPOSE exec -T "$STORAGE_SERVICE" tar -czf - -C "$STORAGE_CONTAINER_PATH" . > "$out"
   else
-    die "storage backup in direct mode needs STORAGE_HOST_PATH (the objects live on a volume, not in a database)"
+    die "storage backup needs STORAGE_HOST_PATH (the objects live on a volume, not in a database)"
   fi
   log "  ok $(wc -c < "$out" | tr -d ' ') bytes"
 }
 
 # -------------------------------------------------------------------------------------------------
-log "backup $STAMP  (mode=$BACKUP_MODE format=$BACKUP_FORMAT dir=$BACKUP_DIR)"
+log "backup $STAMP  (format=$BACKUP_FORMAT dir=$BACKUP_DIR)"
 
 dump_db "supabase-db" "$SUPABASE_SERVICE" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \
         "$SUPABASE_DB_HOST" "$SUPABASE_DB_PORT" "$SUPABASE_DB_PASSWORD"
@@ -160,7 +143,6 @@ fi
 MANIFEST="$BACKUP_DIR/manifest-${STAMP}.txt"
 {
   echo "stamp=$STAMP"
-  echo "mode=$BACKUP_MODE"
   echo "format=$BACKUP_FORMAT"
   echo "supabase_db=supabase-db-${STAMP}.${DUMP_EXT}"
   echo "timescaledb=timescaledb-${STAMP}.${DUMP_EXT}"

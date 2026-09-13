@@ -19,14 +19,12 @@ spec:
       targetPort: postgres
 ---
 {{/*
-THE NAME IS `supabase-db`, matching the Compose service name.
+THE NAME IS `supabase-db`: GoTrue, PostgREST, Realtime, Storage, postgres-meta and Studio all
+address it by that name in their existing configuration.
 
-GoTrue, PostgREST, Realtime, Storage, postgres-meta and Studio all address it by that name in
-their existing configuration; keeping it means none of those strings changes between targets.
-
-PORT 5432. docker-compose publishes it on 54322 to avoid colliding with a local PostgreSQL; that
-number has no meaning inside a cluster. validate.py's SUPABASE_DB_PORT carries the same
-distinction: its default is conditional on where it runs.
+PORT 5432. The dev loop forwards it to 54322 on a laptop to avoid colliding with a local
+PostgreSQL; that number has no meaning inside a cluster. validate.py's SUPABASE_DB_PORT carries
+the same distinction: its default is conditional on where it runs.
 */}}
 apiVersion: v1
 kind: Service
@@ -110,8 +108,6 @@ spec:
 
             on a volume the entrypoint has just reported initialising successfully, with every
             Supabase service behind it stuck on an init container and nothing naming the cause.
-            docker-compose sets no PGDATA, which is why this only ever broke Kubernetes -- exactly
-            the class of divergence CI runs validate.py against both targets to catch.
 
             Left unset, the image's own default IS the mount root, the root entrypoint chowns it to
             postgres before dropping privileges, and both targets agree.
@@ -124,13 +120,13 @@ spec:
             That difference is precisely why timescaledb came up healthy in the same cluster where
             supabase-db crash-looped, which made the fault look like a Supabase problem.
             */}}
-          # The Compose healthcheck runs pg_isready AND `psql -c 'SELECT 1'`, because this image
+          # pg_isready AND `psql -c 'SELECT 1'`, because this image
           # answers pg_isready during its own bootstrap while still refusing connections. Both are
           # kept: readiness gates the init Jobs, and a database that accepts a connection
           # but not a query would let the migrations start and fail.
           #
-          # AND BOTH GATING PROBES ASK OVER TCP (-h 127.0.0.1), for the reason recorded at the
-          # Compose healthcheck: the temporary server initdb runs listens on the UNIX SOCKET ONLY,
+          # AND BOTH GATING PROBES ASK OVER TCP (-h 127.0.0.1): the temporary server initdb runs
+          # listens on the UNIX SOCKET ONLY,
           # so a socket-only probe reports Ready in the middle of the bootstrap and lets the init
           # Jobs connect as roles that do not exist yet. Liveness below is deliberately left on the
           # socket -- it asks whether the process is lost, long after any of this.

@@ -37,7 +37,6 @@ pairs must move together is in [`docs/testing.md`](docs/testing.md). The drift g
 cheapest ones to run and the easiest to trip:
 
 ```bash
-node scripts/check-env-drift.mjs        # docker-compose.yml against .env.example
 node scripts/check-schema-surface.mjs
 node scripts/check-migration-idempotency.mjs
 node scripts/check-image-sources.mjs    # a new .py in ingestion/ is a TWO-file change
@@ -50,7 +49,7 @@ crash-loops the container on the first boot that runs it. `check-image-sources.m
 sees it.
 
 Getting started with the stack itself — prerequisites, `npm run setup`, and bringing it up on
-Compose or Kubernetes — is in the [README](README.md).
+k3d or a cluster — is in the [README](README.md).
 
 ## Related
 

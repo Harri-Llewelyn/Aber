@@ -78,8 +78,8 @@ spec:
               THE BROKER CREDENTIAL WAS MISSING HERE ENTIRELY, and this is a fix rather than a
               rename. brokerClientEnv carries host, port and TLS only, so on Kubernetes this pod
               connected anonymously to a broker running `allow_anonymous false` -- refused with
-              CONNACK 5, after which i3x_service falls back to its Python default and Compose
-              happened to supply the shared account that no longer exists. The service came up,
+              CONNACK 5, after which i3x_service fell back to its Python default, the shared
+              account that no longer exists. The service came up,
               answered /info, and served an address space whose values never updated.
 
               READ-ONLY, and separate from the ingestion account on purpose: this server refuses

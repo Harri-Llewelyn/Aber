@@ -124,7 +124,6 @@ spec:
               values.yaml as a FLOAT, so `quote` alone renders "5.24288e+07" -- which storage-api
               reads with parseInt as **5**. Every upload over five bytes was then rejected as "The
               object exceeded the maximum allowed size", on a stack where nothing else looked wrong.
-              Compose was never affected: it reads the number from .env as a string.
             */}}
             - name: FILE_SIZE_LIMIT
               value: {{ .Values.supabaseStorage.fileSizeLimit | int64 | quote }}
@@ -145,9 +144,8 @@ spec:
           # first and storage-api binds 0.0.0.0 (IPv4 only), so a localhost probe gets
           # ECONNREFUSED against a healthy server and the pod never leaves `starting`.
           #
-          # An httpGet probe uses the pod IP and would be fine, but the exec form keeps this
-          # identical to the Compose healthcheck -- and keeps the reason documented where someone
-          # editing it will read it.
+          # An httpGet probe uses the pod IP and would be fine; the exec form keeps the reason
+          # documented where someone editing it will read it.
           startupProbe:
             exec:
               command: ["wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]

@@ -22,9 +22,8 @@ A refresh policy feeds the trend panels and a retention policy is a hard delete,
 is skipped because no worker was free is invisible in both directions.
 
 TWO KINDS OF TEST, FAILING IN DIFFERENT CIRCUMSTANCES. The first asks the running server what it
-actually has. The second asks both deployment files, needs no stack, and is what catches the pool
-being raised on one target and not the other -- or the arithmetic being pinned to a number that
-stops tracking its own terms.
+actually has. The second asks the chart, needs no stack, and is what catches the arithmetic being
+pinned to a number that stops tracking its own terms.
 """
 import os
 import re
@@ -33,7 +32,7 @@ from pathlib import Path
 
 import psycopg2
 
-# The HISTORIAN, not Supabase. 5433 is where docker-compose publishes it.
+# The HISTORIAN, not Supabase. 5433 is where `npm run dev:test` forwards it.
 DB_HOST = os.getenv("TS_TEST_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("TS_TEST_PORT", "5433")
 DB_NAME = os.getenv("DB_NAME", "postgres")
@@ -41,7 +40,6 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 REPO = Path(__file__).resolve().parent.parent
-COMPOSE = REPO / "docker-compose.yml"
 VALUES = REPO / "deploy" / "helm" / "acs-cymru" / "values.yaml"
 STATEFULSET = (
     REPO / "deploy" / "helm" / "acs-cymru" / "templates" / "data" / "timescaledb-statefulset.yaml"
@@ -56,7 +54,7 @@ class WorkerPoolTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not DB_PASSWORD:
-            raise unittest.SkipTest("DB_PASSWORD is unset; source .env before running this suite.")
+            raise unittest.SkipTest("DB_PASSWORD is unset; run this through `npm run dev:test`.")
         cls.conn = psycopg2.connect(
             host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD
         )
@@ -85,8 +83,8 @@ class WorkerPoolTestCase(unittest.TestCase):
             f"max_worker_processes is {pool}, and the workers that may ask for a slot are "
             f"{background} background + {parallel} parallel + {LAUNCHER} launcher = {required}. "
             f"Policy jobs that come due together will fail to launch, retry, and leave nothing "
-            f"behind but a WARNING. Both deployment targets set these explicitly -- see the "
-            f"`command:` on the timescaledb service in docker-compose.yml.",
+            f"behind but a WARNING. The chart sets these explicitly -- see the historian's "
+            f"`args:` in timescaledb-statefulset.yaml.",
         )
 
     def test_the_settings_were_chosen_rather_than_inherited(self):
@@ -110,8 +108,8 @@ class WorkerPoolTestCase(unittest.TestCase):
             inherited,
             [],
             f"{', '.join(inherited)} still read `source = default`, so this server was started "
-            f"without the flags that pin them. Recreate the container: "
-            f"`docker compose up -d timescaledb`.",
+            f"without the flags that pin them. Recreate the pod: "
+            f"`kubectl rollout restart statefulset/timescaledb`.",
         )
 
     def test_no_job_failed_to_launch_since_this_server_started(self):
@@ -140,42 +138,7 @@ class WorkerPoolTestCase(unittest.TestCase):
 
 
 class DeploymentFilesTestCase(unittest.TestCase):
-    """No database needed. Both targets must size the pool, and size it the same way."""
-
-    def compose_flags(self):
-        text = COMPOSE.read_text(encoding="utf-8")
-        # The historian's own `command:` block, not the maintenance service's psql lines.
-        service = text[text.index("  timescaledb:"):text.index("  timescaledb-maintenance:")]
-        return {
-            name: int(value)
-            for name, value in re.findall(
-                r"-\s*(max_worker_processes|timescaledb\.max_background_workers|"
-                r"max_parallel_workers)=(\d+)",
-                service,
-            )
-        }
-
-    def test_compose_sizes_the_pool_from_its_own_terms(self):
-        flags = self.compose_flags()
-        for name in (
-            "max_worker_processes",
-            "timescaledb.max_background_workers",
-            "max_parallel_workers",
-        ):
-            self.assertIn(
-                name,
-                flags,
-                f"docker-compose.yml no longer passes {name} to the historian, so it falls back "
-                f"to a default nobody chose.",
-            )
-        self.assertGreaterEqual(
-            flags["max_worker_processes"],
-            LAUNCHER
-            + flags["timescaledb.max_background_workers"]
-            + flags["max_parallel_workers"],
-            "docker-compose.yml sets a pool smaller than the workers it also permits, which is the "
-            "original defect with the numbers written down.",
-        )
+    """No database needed. The chart must size the pool from its own terms."""
 
     def test_the_chart_derives_the_pool_rather_than_repeating_it(self):
         """
@@ -196,19 +159,18 @@ class DeploymentFilesTestCase(unittest.TestCase):
         for flag in ("timescaledb.max_background_workers=", "max_parallel_workers="):
             self.assertIn(flag, statefulset, f"the StatefulSet no longer passes {flag}")
 
-    def test_both_targets_start_from_the_same_numbers(self):
+    def test_the_defaults_leave_room_for_the_launcher(self):
         """
-        Compose hardcodes; the chart takes values. They still have to agree by default, or a
-        cluster and a laptop schedule policies differently for no reason anybody chose.
+        The two terms the chart adds up are values, so the default pair is what every install
+        starts from. Both must be positive: a zero is a policy that never runs.
         """
-        flags = self.compose_flags()
         values = VALUES.read_text(encoding="utf-8")
         block = values[values.index("  workers:"):]
         background = int(re.search(r"background:\s*(\d+)", block).group(1))
         parallel = int(re.search(r"parallel:\s*(\d+)", block).group(1))
 
-        self.assertEqual(flags["timescaledb.max_background_workers"], background)
-        self.assertEqual(flags["max_parallel_workers"], parallel)
+        self.assertGreater(background, 0)
+        self.assertGreater(parallel, 0)
 
 
 if __name__ == "__main__":

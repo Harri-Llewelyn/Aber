@@ -5,7 +5,7 @@
 > does not see them.
 
 ```bash
-docker compose down -v && git status    # drop the volumes, confirm the tree is clean
+npm run dev:down && git status    # delete the k3d cluster, confirm the tree is clean
 ```
 
 **`git status` clean is not the same as safe to hand over**, and the gap is the point of this

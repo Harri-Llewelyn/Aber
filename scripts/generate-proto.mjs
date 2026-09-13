@@ -59,29 +59,19 @@ console.log('protoc not on PATH; falling back to the ingestion image.');
 if (!quiet('docker', ['info'])) {
   console.error(
     'Neither protoc nor a running Docker daemon is available.\n' +
-    'Install protobuf-compiler, or start Docker and run `docker compose build ingestion` first.'
+    'Install protobuf-compiler, or start Docker: the ingestion image is built here if absent.'
   );
   process.exit(1);
 }
 
-// `docker compose images -q` names the image compose actually built, rather than guessing at the
-// project-prefixed name, which varies with the directory the stack was brought up from.
-let image;
-try {
-  image = run('docker', ['compose', 'images', '-q', 'ingestion']).trim().split(/\s+/)[0];
-} catch {
-  image = '';
-}
-
-if (!image) {
-  console.log('Ingestion image not built yet; building it (this is a one-off).');
-  run('docker', ['compose', 'build', 'ingestion'], { stdio: 'inherit' });
-  image = run('docker', ['compose', 'images', '-q', 'ingestion']).trim().split(/\s+/)[0];
-}
-
-if (!image) {
-  console.error('Could not resolve the ingestion image. Try `docker compose build ingestion`.');
-  process.exit(1);
+// The image under the name the chart pulls it by, at the chart's appVersion, so `npm run dev:up`
+// and this script build the same thing and neither has to guess a project-prefixed name.
+const chart = readFileSync(join(REPO, 'deploy', 'helm', 'acs-cymru', 'Chart.yaml'), 'utf8');
+const version = chart.match(/^appVersion:\s*"?([^"\s]+)"?/m)?.[1] || 'dev';
+const image = `ghcr.io/harri-llewelyn/acs-cymru/ingestion:${version}`;
+if (!quiet('docker', ['image', 'inspect', image])) {
+  console.log(`${image} is not built yet; building it (this is a one-off).`);
+  run('docker', ['build', '-f', 'ingestion/Dockerfile', '-t', image, '.'], { stdio: 'inherit', cwd: REPO });
 }
 
 // A stopped container is enough to copy a file out of; it is never started.

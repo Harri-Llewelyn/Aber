@@ -81,7 +81,7 @@ This file is mounted OVER the shipped no-op placeholder at /usr/share/nginx/html
 index.html loads it from <head> as a plain classic script, so it executes before the deferred module
 bundle and src/config.js reads it from window.__ACS_CYMRU_CONFIG__.
 
-KEYS ARE THE `VITE_*` NAMES, unchanged from .env and the Dockerfile build args -- there is no second
+KEYS ARE THE `VITE_*` NAMES, unchanged from the Dockerfile build args -- there is no second
 vocabulary to keep in step. src/config.js's RUNTIME_SETTING_NAMES is the authoritative list and
 runtimeConfig.test.js asserts it matches public/config.js.
 
@@ -113,7 +113,7 @@ spec:
     {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # 3000 in the container, matching nginx.conf's `listen 3000` and the Compose published port.
+      # 3000 in the container, matching nginx.conf's `listen 3000`.
       port: 3000
       targetPort: http
       protocol: TCP

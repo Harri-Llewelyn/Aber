@@ -27,7 +27,7 @@ WHY SUBDOMAINS AND NOT PATHS. Path-based routing on one host looks tidier and is
 Grafana needs `serve_from_sub_path` plus a matching root_url, Node-RED needs BOTH httpAdminRoot and
 httpNodeRoot moved -- which changes the quarantine webhook's path, and that path is REGISTERED IN
 THE DATABASE in webhook_endpoints -- and Studio is a Next.js app with its own basePath assumptions.
-Subdomains avoid all three, and they mirror the Compose published-port layout one-for-one.
+Subdomains avoid all three.
 
 EVERY HOST COMES FROM THE SAME HELPER the service itself is configured from. That is the point of
 §7's URL split: `acs-cymru.grafanaUrl` feeds this Ingress rule, Grafana's GF_SERVER_ROOT_URL, and

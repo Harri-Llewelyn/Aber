@@ -3,7 +3,7 @@
  * Assert the broker's configuration starts on the pinned image and enforces the policy.
  *
  * Mosquitto's own parser is the only authority on what it accepts, so mosquitto.conf is started on
- * the tag docker-compose.yml pins. A config that starts is not a config that is safe, so the check
+ * the tag the chart pins. A config that starts is not a config that is safe, so the check
  * then connects with no credentials and requires a refusal, and asserts BY DELIVERY that each role
  * in mosquitto/dynsec-roles.json confines its principal: a denied publish at QoS 0 exits 0 and the
  * broker says nothing, so exit status proves nothing.
@@ -38,12 +38,12 @@ const log = (m) => verbose && console.log(`       ${m}`);
 const problems = [];
 const ok = [];
 
-/** The tag docker-compose pins, so this tests what actually runs -- never `latest`. */
+/** The tag the chart pins, so this tests what actually runs -- never `latest`. */
 function pinnedTag() {
-  const compose = readFileSync(join(REPO, 'docker-compose.yml'), 'utf8');
-  const m = compose.match(/^\s*image:\s*["']?eclipse-mosquitto:([^\s"']+)/m);
+  const values = readFileSync(join(REPO, 'deploy', 'helm', 'acs-cymru', 'values.yaml'), 'utf8');
+  const m = values.match(/repository:\s*eclipse-mosquitto\s*\n\s*tag:\s*["']?([^\s"']+)/);
   if (!m) {
-    throw new Error('could not find the eclipse-mosquitto image pin in docker-compose.yml');
+    throw new Error('could not find the eclipse-mosquitto image pin in values.yaml');
   }
   return m[1];
 }
@@ -706,7 +706,7 @@ try {
       const certs = join(work, 'issued');
       mkdirSync(certs, { recursive: true });
 
-      /** Run the real generator against `certs`, exactly as the compose service does. */
+      /** Run the real generator against `certs`, exactly as the broker init did. */
       const generate = (extraArgs = []) => docker([
         'run', '--rm',
         '-v', `${certs}:/mosquitto/certs`,
@@ -741,7 +741,7 @@ try {
           problems.push(
             'RE-RUNNING mosquitto-tls-init MINTED A NEW ROOT. Every physical gateway trusts the '
             + 'previous one by hand-distributed copy, so this would take the whole fleet offline '
-            + 'on the next `docker compose up` while the stack reported itself healthy.'
+            + 'on the next broker start while the stack reported itself healthy.'
           );
         } else {
           ok.push('re-running mosquitto-tls-init reuses the existing root (fingerprint unchanged)');
@@ -831,7 +831,7 @@ if (problems.length) {
   console.error('\nBroker configuration is broken:\n');
   for (const p of problems) console.error(`  ${p}`);
   console.error(
-    `\nThis is checked against ${IMAGE} -- the tag docker-compose.yml pins -- because mosquitto's\n` +
+    `\nThis is checked against ${IMAGE} -- the tag the chart pins -- because mosquitto's\n` +
       'accepted syntax and the plugin\'s behaviour CHANGE BETWEEN MINOR VERSIONS. A config that works\n' +
       'on `latest` can take the broker down on both targets the moment the image is pinned, and the\n' +
       'plugin\'s treatment of `%u`, of a deleted role and of a disabled session is measured, not\n' +

@@ -280,7 +280,8 @@ if (RUNTIME) {
     if (!anonKey) {
       console.error(
         '\n--authenticated needs SUPABASE_ANON_KEY to present a valid credential.\n'
-        + 'Run `set -a && . ./.env && set +a` first. Refusing rather than skipping: a pass that\n'
+        + 'Export it: kubectl -n acs-cymru get secret acs-cymru-secrets -o jsonpath={.data.SUPABASE_ANON_KEY} | base64 -d\n'
+        + 'Refusing rather than skipping: a pass that\n'
         + 'silently checked nothing is the failure this whole mode exists to prevent.\n'
       );
       process.exit(1);
@@ -398,15 +399,13 @@ if (RUNTIME) {
 // Template hygiene, the default mode. Two assertions about the template rather than the gateway: no
 // literal credential is committed (every key must be an `__UPPER_SNAKE__` placeholder, and in
 // envoy.yaml the key is inlined into a Lua string), and both substituters know every placeholder
-// (Compose's `supabase-envoy-init` and the chart's initContainer each scan for leftovers at
-// runtime, so one taught to only one target is a boot failure on the other). The route surface is
-// asserted by `--runtime`.
+// (the chart's initContainer scans for leftovers at boot, so a placeholder it was not taught is a
+// boot failure). The route surface is asserted by `--runtime`.
 
 const ENVOY_TEMPLATE = 'supabase/envoy.yaml';
-const COMPOSE_FILE = 'docker-compose.yml';
 const CHART_ENVOY = 'deploy/helm/acs-cymru/templates/supabase/envoy.yaml';
 
-/** Substituted by BOTH targets. All three lists below must agree. */
+/** Substituted by the chart's initContainer. The lists below must agree. */
 const TEMPLATE_PLACEHOLDERS = [
   '__CORS_ORIGINS__',
   // Not a credential: a bare `true`/`false` substituted into the Lua filter, deciding whether the
@@ -493,42 +492,26 @@ const template = read(ENVOY_TEMPLATE);
   }
 }
 
-// ---- 3. Both substituters handle every placeholder. --------------------------------------------
+// ---- 3. The substituter handles every placeholder. ---------------------------------------------
 {
-  const compose = read(COMPOSE_FILE);
   const chart = read(CHART_ENVOY);
-  for (const [file, text] of [[COMPOSE_FILE, compose], [CHART_ENVOY, chart]]) {
-    const missing = TEMPLATE_PLACEHOLDERS.filter((x) => !text.includes(x));
-    if (missing.length) {
-      fail(
-        `${file} does not substitute ${missing.join(', ')}. Its own leftover scan would catch this `
-        + 'at boot -- on that target only, which is how the two drift.'
-      );
-    } else {
-      pass(`${file} substitutes all ${TEMPLATE_PLACEHOLDERS.length} placeholders`);
-    }
+  const missing = TEMPLATE_PLACEHOLDERS.filter((x) => !chart.includes(x));
+  if (missing.length) {
+    fail(
+      `${CHART_ENVOY} does not substitute ${missing.join(', ')}. Its own leftover scan would catch this `
+      + 'at boot, as a gateway that refuses to start.'
+    );
+  } else {
+    pass(`${CHART_ENVOY} substitutes all ${TEMPLATE_PLACEHOLDERS.length} placeholders`);
   }
 }
 
-// ---- 4. Kong is retired from COMPOSE, and still present for Kubernetes. -----------------------
+// ---- 4. Kong is off, and its template still has its file. --------------------------------------
 {
-  // Not "kong.yml is gone": the chart still deploys Kong on demand, and deleting the shared
-  // template broke `helm install` on a missing file while `helm lint` passed. The claim asserted is
-  // the narrower true one: Compose no longer reads it.
-  const compose = read(COMPOSE_FILE);
-  if (/kong\.yml/.test(compose)) {
-    fail(
-      `${COMPOSE_FILE} still references kong.yml. Envoy is the gateway on Compose; a Kong config `
-      + 'mounted there is a file that reads as authoritative and is loaded by nothing.'
-    );
-  } else {
-    pass(`${COMPOSE_FILE} no longer reads kong.yml`);
-  }
-
-  // The converse: supabase/kong.yml is mirrored into the chart and read by
-  // templates/supabase/kong.yaml. Kong is off by default on Kubernetes too, and this did not relax
-  // with it: `supabaseKong.enabled=true` is the documented revert, and it is a broken `helm
-  // install` the moment this file goes. It can go when the template does.
+  // supabase/kong.yml is mirrored into the chart and read by templates/supabase/kong.yaml. Kong is
+  // off by default and this did not relax with it: `supabaseKong.enabled=true` is the documented
+  // revert, and it is a broken `helm install` the moment this file goes. It can go when the
+  // template does.
   let present = true;
   try {
     read('supabase/kong.yml');
