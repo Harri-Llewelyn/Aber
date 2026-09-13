@@ -72,80 +72,6 @@ CREATE POLICY "asset_3d_models_delete_privileged" ON storage.objects
     AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
   );
 
--- =============================================================================================
--- gateway-backups -- Node-RED flow backups from physical gateway appliances
--- =============================================================================================
---
--- Private; reads go through a signed URL minted for a caller whose role has been checked.
---
---   Administrator, Shopfloor_Manager   read, write, replace, delete
---   Auditor                            read only
---   Operator                           nothing
---
--- See ./README.md -> "Storage buckets and why they differ".
---
--- The path is confined by the database: every object must live under `<sparkplug_id>/` naming a
--- gateway that exists (`storage.foldername(name)[1]` is the leading folder), as mosquitto/README.md
--- confines a client to its own edge node. SELECT is not path-confined, so a reader can find the
--- backups of a gateway that has since been deleted.
---
--- `storage.objects.name` is fully qualified inside the subquery, and must be: `public.gateways`
--- has its own `name`, and an unqualified reference binds to the gateway's display label, which
--- refuses every upload and would accept any prefix if a gateway were ever named something
--- path-shaped. test_path_is_confined_to_an_existing_gateway asserts a valid path is accepted as
--- well as that invalid ones are refused.
--- =============================================================================================
-
-DROP POLICY IF EXISTS "gateway_backups_read_privileged" ON storage.objects;
-CREATE POLICY "gateway_backups_read_privileged" ON storage.objects
-  FOR SELECT TO authenticated
-  USING (
-    bucket_id = 'gateway-backups'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
-  );
-
-DROP POLICY IF EXISTS "gateway_backups_insert_privileged" ON storage.objects;
-CREATE POLICY "gateway_backups_insert_privileged" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    bucket_id = 'gateway-backups'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-    -- storage.objects.name, QUALIFIED: public.gateways has a `name` column of its own and would
-    -- otherwise capture this reference. See the header block above.
-    AND EXISTS (
-      SELECT 1 FROM public.gateways g
-       WHERE g.sparkplug_id = (storage.foldername(storage.objects.name))[1]
-    )
-  );
-
--- UPDATE covers `upsert: true`. Both halves are gated: USING decides which existing objects may
--- be targeted, WITH CHECK what the result may look like.
-DROP POLICY IF EXISTS "gateway_backups_update_privileged" ON storage.objects;
-CREATE POLICY "gateway_backups_update_privileged" ON storage.objects
-  FOR UPDATE TO authenticated
-  USING (
-    bucket_id = 'gateway-backups'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-  )
-  WITH CHECK (
-    bucket_id = 'gateway-backups'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-    -- storage.objects.name, QUALIFIED: public.gateways has a `name` column of its own and would
-    -- otherwise capture this reference. See the header block above.
-    AND EXISTS (
-      SELECT 1 FROM public.gateways g
-       WHERE g.sparkplug_id = (storage.foldername(storage.objects.name))[1]
-    )
-  );
-
-DROP POLICY IF EXISTS "gateway_backups_delete_privileged" ON storage.objects;
-CREATE POLICY "gateway_backups_delete_privileged" ON storage.objects
-  FOR DELETE TO authenticated
-  USING (
-    bucket_id = 'gateway-backups'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-  );
-
 -- ---------------------------------------------------------------------------------------------
 -- Grants.
 -- ---------------------------------------------------------------------------------------------
@@ -178,49 +104,34 @@ BEGIN
   RAISE NOTICE 'storage policies reconciled (4 policies on storage.objects).';
 END $$;
 
--- A SECOND BLOCK RATHER THAN A WIDER COUNT IN THE FIRST. The assertion above is scoped by prefix
--- and should stay that way: one count of "8 policies" would be satisfied by five of one bucket's
--- and three of the other's, which is precisely the state it exists to rule out.
-DO $$
-DECLARE
-  n int;
-  v_auditor_writes int;
-BEGIN
-  SELECT count(*) INTO n FROM pg_policies
-   WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'gateway_backups_%';
-  IF n <> 4 THEN
-    RAISE EXCEPTION 'expected 4 gateway_backups_* policies on storage.objects, found %', n;
-  END IF;
-
-  -- The asymmetry is the policy, so it is asserted: Auditor holds SELECT and nothing else.
-  SELECT count(*) INTO v_auditor_writes FROM pg_policies
-   WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'gateway_backups_%'
-     AND cmd <> 'SELECT'
-     AND (qual LIKE '%Auditor%' OR with_check LIKE '%Auditor%');
-  IF v_auditor_writes <> 0 THEN
-    RAISE EXCEPTION
-      '% gateway_backups_* write policy/policies name Auditor. Auditor is READ ONLY on this '
-      'bucket -- write authority is Administrator and Shopfloor_Manager only.', v_auditor_writes;
-  END IF;
-
-  RAISE NOTICE 'gateway-backups policies reconciled (4 policies; Auditor read-only).';
-END $$;
-
 -- =============================================================================================
 -- broker-captures -- recorded Sparkplug traffic, for playback
 -- =============================================================================================
 --
--- Modelled on gateway-backups above: the same four policies, role split and prefix rule. A
--- capture records every edge node, device id, metric name and value that spoke in the window,
--- so the privacy argument applies at least as strongly. Captures are filed under the subject
--- recorded; a capture filed under gateway A can name gateway B, which the admitted roles can
--- already enumerate through the directory. Auditor is read only, re-asserted at the end.
+-- Private; reads go through a signed URL minted for a caller whose role has been checked.
+--
+--   Administrator, Shopfloor_Manager   read, write, replace, delete
+--   Auditor                            read only, re-asserted at the end
+--   Operator                           nothing
+--   the ingestion daemon               one object, for the duration of one job (below)
+--
+-- A capture records every edge node, device id, metric name and value that spoke in the window.
+-- Captures are filed under the subject recorded; a capture filed under gateway A can name
+-- gateway B, which the admitted roles can already enumerate through the directory.
+--
+-- The path is confined by the database: every object must live under `<subject prefix>/`
+-- naming a gateway or device that exists (`storage.foldername(name)[1]` is the leading folder),
+-- as mosquitto/README.md confines a client to its own edge node. SELECT is not path-confined,
+-- so a reader can find the capture of a subject that has since been deleted.
+--
+-- `storage.objects.name` is fully qualified inside every policy, and must be: `public.gateways`
+-- has its own `name`, and an unqualified reference binds to the gateway's display label, which
+-- refuses every upload and would accept any prefix if a gateway were ever named something
+-- path-shaped. See ./README.md -> "Storage buckets and why they differ".
 -- =============================================================================================
 
 -- ---------------------------------------------------------------------------------------------
--- Two changes from the bucket above, required by the capture page.
+-- Two things the capture page needs that the asset bucket above does not.
 --
 -- 1. The prefix rule admits devices as well as gateways: `public.is_capture_subject_prefix()`,
 --    shared with the gate that builds the path so the two cannot drift.
@@ -264,7 +175,7 @@ CREATE POLICY "broker_captures_insert_privileged" ON storage.objects
     bucket_id = 'broker-captures'
     AND (
       -- storage.objects.name, QUALIFIED: public.gateways has a `name` column of its own and would
-      -- otherwise capture this reference. Same trap as the bucket above documents at length.
+      -- otherwise capture this reference. See the header block above.
       (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
        AND public.is_capture_subject_prefix((storage.foldername(storage.objects.name))[1]))
       OR (public.is_ingestion_caller()

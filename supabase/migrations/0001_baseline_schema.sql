@@ -1534,7 +1534,7 @@ COMMENT ON COLUMN public.gateways.is_shadow IS 'True when this gateway exists on
 -- COLUMN gateways.deployment :: COMMENT
 --
 
-COMMENT ON COLUMN public.gateways.deployment IS 'Where this gateway''s connector runs: ''host'' (inside this stack) or ''remote'' (an edge appliance on the plant network). This is the axis every behaviour branching on is_virtual was actually about -- bundles, flow backups, enrolment. Kept in step with is_virtual by sync_gateway_deployment() until that column is retired.';
+COMMENT ON COLUMN public.gateways.deployment IS 'Where this gateway''s connector runs: ''host'' (inside this stack) or ''remote'' (an edge appliance on the plant network). This is the axis every behaviour branching on is_virtual was actually about -- bundles, enrolment. Kept in step with is_virtual by sync_gateway_deployment() until that column is retired.';
 
 --
 

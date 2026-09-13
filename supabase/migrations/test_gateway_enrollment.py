@@ -501,15 +501,15 @@ class TestGatewayStatusView(GatewayEnrollmentBase):
         self.assertFalse(is_stale)
 
 
-class TestGatewayBackupPolicies(GatewayEnrollmentBase):
+class TestBrokerCapturePolicies(GatewayEnrollmentBase):
     """
-    RLS on the gateway-backups bucket, from supabase/storage-policies.sql.
+    RLS on the broker-captures bucket, from supabase/storage-policies.sql.
 
     NOT IN THE MIGRATION, and therefore worth testing from here rather than assuming: those
-    policies are applied by a separate service (supabase-storage-policies) because storage.objects
-    does not exist until storage-api has migrated it into being, long after db-init has finished.
-    A stack where that service failed has a bucket with NO policies -- which denies everything and
-    looks like a broken uploader.
+    policies are applied by a separate Job (storage-policies) because storage.objects does not
+    exist until storage-api has migrated it into being, long after db-init has finished. A stack
+    where that Job failed has a bucket with NO policies -- which denies everything and looks like
+    a broken uploader. Lives here because the prefix rule names a gateway's sparkplug_id.
     """
 
     @classmethod
@@ -523,11 +523,11 @@ class TestGatewayBackupPolicies(GatewayEnrollmentBase):
                 raise unittest.SkipTest("storage.objects does not exist -- storage-api has not booted")
             cur.execute(
                 "SELECT count(*) FROM pg_policies WHERE schemaname = 'storage' "
-                " AND tablename = 'objects' AND policyname LIKE 'gateway_backups_%';"
+                " AND tablename = 'objects' AND policyname LIKE 'broker_captures_%';"
             )
             if cur.fetchone()[0] != 4:
                 raise unittest.SkipTest(
-                    "the gateway_backups_* policies are not applied -- run supabase/storage-policies.sql"
+                    "the broker_captures_* policies are not applied -- run supabase/storage-policies.sql"
                 )
             cur.execute("SELECT sparkplug_id FROM public.gateways WHERE id = %s;", (PHYSICAL_GW,))
             cls.sparkplug_id = cur.fetchone()[0]
@@ -537,40 +537,40 @@ class TestGatewayBackupPolicies(GatewayEnrollmentBase):
     def _insert_as(self, user, role, path):
         as_role(self.cur, user, role)
         self.cur.execute(
-            "INSERT INTO storage.objects (bucket_id, name) VALUES ('gateway-backups', %s);", (path,)
+            "INSERT INTO storage.objects (bucket_id, name) VALUES ('broker-captures', %s);", (path,)
         )
 
     def test_privileged_roles_may_upload_under_a_real_gateway_prefix(self):
         for user, role in ((ADMIN_USER, "Administrator"), (MANAGER_USER, "Shopfloor_Manager")):
             with self.subTest(role=role):
-                self._insert_as(user, role, f"{self.sparkplug_id}/{role}-flows.json")
+                self._insert_as(user, role, f"{self.sparkplug_id}/{role}-capture.json")
                 self.conn.rollback()
 
-    def test_path_is_confined_to_an_existing_gateway(self):
+    def test_path_is_confined_to_an_existing_subject(self):
         """
         The client does not get to assert where its data belongs -- the same idea as the broker's
-        per-gateway role, one layer up. Storage's REST API is reachable with any authenticated session, so a
-        convention the frontend happens to follow would be no control at all.
+        per-gateway role, one layer up. Storage's REST API is reachable with any authenticated
+        session, so a convention the frontend happens to follow would be no control at all.
         """
         for path in (
-            "flows.json",                       # no prefix
-            "not-a-gateway/flows.json",         # prefix names nothing
-            "gwy000000000000000000000/f.json",  # well-formed but not a real gateway
-            f"../{self.sparkplug_id}/f.json",   # traversal-shaped
+            "capture.json",                     # no prefix
+            "not-a-subject/capture.json",       # prefix names nothing
+            "gwy000000000000000000000/c.json",  # well-formed but not a real gateway
+            f"../{self.sparkplug_id}/c.json",   # traversal-shaped
         ):
             with self.subTest(path=path):
                 with self.assertRaises(
                     pg_errors.InsufficientPrivilege,
-                    msg=f"an object was accepted at {path!r}, outside any gateway's folder",
+                    msg=f"an object was accepted at {path!r}, outside any subject's folder",
                 ):
                     self._insert_as(ADMIN_USER, "Administrator", path)
                 self.conn.rollback()
 
     def test_auditor_may_read_but_not_write(self):
         """
-        THE ASYMMETRY IS THE DESIGN. An auditor's job is to see what the edge was configured to do;
-        letting them upload would let them rewrite the record they exist to examine -- the same
-        objection that makes digital_thread append-only.
+        THE ASYMMETRY IS THE DESIGN. An auditor's job is to see what the edge published; letting
+        them upload would let them rewrite the record they exist to examine -- the same objection
+        that makes digital_thread append-only.
         """
         path = f"{self.sparkplug_id}/auditor-read.json"
         self._insert_as(ADMIN_USER, "Administrator", path)
@@ -578,14 +578,14 @@ class TestGatewayBackupPolicies(GatewayEnrollmentBase):
 
         as_role(self.cur, AUDITOR_USER, "Auditor")
         self.cur.execute(
-            "SELECT count(*) FROM storage.objects WHERE bucket_id = 'gateway-backups' AND name = %s;",
+            "SELECT count(*) FROM storage.objects WHERE bucket_id = 'broker-captures' AND name = %s;",
             (path,),
         )
-        self.assertEqual(self.cur.fetchone()[0], 1, "Auditor cannot read a backup")
+        self.assertEqual(self.cur.fetchone()[0], 1, "Auditor cannot read a capture")
 
-        with self.assertRaises(pg_errors.InsufficientPrivilege, msg="Auditor could upload a backup"):
+        with self.assertRaises(pg_errors.InsufficientPrivilege, msg="Auditor could upload a capture"):
             self.cur.execute(
-                "INSERT INTO storage.objects (bucket_id, name) VALUES ('gateway-backups', %s);",
+                "INSERT INTO storage.objects (bucket_id, name) VALUES ('broker-captures', %s);",
                 (f"{self.sparkplug_id}/auditor-write.json",),
             )
 
@@ -609,16 +609,16 @@ class TestGatewayBackupPolicies(GatewayEnrollmentBase):
         # both raise. LOCAL, so it dies with the transaction rather than leaking into a later test.
         self.cur.execute("SET LOCAL storage.allow_delete_query = 'true';")
         self.cur.execute(
-            "DELETE FROM storage.objects WHERE bucket_id = 'gateway-backups' AND name = %s;", (path,)
+            "DELETE FROM storage.objects WHERE bucket_id = 'broker-captures' AND name = %s;", (path,)
         )
         # DELETE under RLS removes no row rather than raising -- so the assertion has to be that the
         # object SURVIVED, not that an error was thrown.
         self.cur.execute("RESET ROLE;")
         self.cur.execute(
-            "SELECT count(*) FROM storage.objects WHERE bucket_id = 'gateway-backups' AND name = %s;",
+            "SELECT count(*) FROM storage.objects WHERE bucket_id = 'broker-captures' AND name = %s;",
             (path,),
         )
-        self.assertEqual(self.cur.fetchone()[0], 1, "Auditor deleted a backup")
+        self.assertEqual(self.cur.fetchone()[0], 1, "Auditor deleted a capture")
 
     def test_operator_has_no_access_at_all(self):
         path = f"{self.sparkplug_id}/operator-denied.json"
@@ -627,14 +627,14 @@ class TestGatewayBackupPolicies(GatewayEnrollmentBase):
 
         as_role(self.cur, OPERATOR_USER, "Operator")
         self.cur.execute(
-            "SELECT count(*) FROM storage.objects WHERE bucket_id = 'gateway-backups' AND name = %s;",
+            "SELECT count(*) FROM storage.objects WHERE bucket_id = 'broker-captures' AND name = %s;",
             (path,),
         )
-        self.assertEqual(self.cur.fetchone()[0], 0, "Operator can read backups")
+        self.assertEqual(self.cur.fetchone()[0], 0, "Operator can read captures")
 
         with self.assertRaises(pg_errors.InsufficientPrivilege):
             self.cur.execute(
-                "INSERT INTO storage.objects (bucket_id, name) VALUES ('gateway-backups', %s);",
+                "INSERT INTO storage.objects (bucket_id, name) VALUES ('broker-captures', %s);",
                 (f"{self.sparkplug_id}/operator-write.json",),
             )
 
@@ -643,10 +643,10 @@ class TestGatewayBackupPolicies(GatewayEnrollmentBase):
         `public: true` would make storage-api serve these objects WITHOUT consulting storage.objects
         RLS at all, so the whole role split above would silently stop applying to reads.
         """
-        self.cur.execute("SELECT public FROM storage.buckets WHERE id = 'gateway-backups';")
+        self.cur.execute("SELECT public FROM storage.buckets WHERE id = 'broker-captures';")
         row = self.cur.fetchone()
-        self.assertIsNotNone(row, "the gateway-backups bucket does not exist")
-        self.assertFalse(row[0], "the gateway-backups bucket is PUBLIC; it must be private")
+        self.assertIsNotNone(row, "the broker-captures bucket does not exist")
+        self.assertFalse(row[0], "the broker-captures bucket is PUBLIC; it must be private")
 
 
 # ---------------------------------------------------------------------------------------------

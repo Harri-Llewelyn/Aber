@@ -3125,18 +3125,18 @@ not a capability.
 
 ## Storage buckets and why they differ
 
-Five buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
+Four buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
 first two are opposites in the one setting that matters, and the reasoning belongs together rather
 than split across comment blocks in the policy file. `telemetry-archive` is described with cold
 storage; `floor-plans` is the odd one out below.
 
-| | `asset-3d-models` | `gateway-backups` | `broker-captures` | `floor-plans` |
-| :--- | :--- | :--- | :--- | :--- |
-| Public read | **yes** | **no** | **no** | **no** |
-| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager | those two, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing floor's prefix |
-| Read | anyone, including `anon` | those two plus **Auditor** | those two plus **Auditor** | every signed-in role |
-| Operator | read | nothing | nothing | read |
-| Reached by | a plain public URL | a signed URL, minted after a role check | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
+| | `asset-3d-models` | `broker-captures` | `floor-plans` |
+| :--- | :--- | :--- | :--- |
+| Public read | **yes** | **no** | **no** |
+| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing floor's prefix |
+| Read | anyone, including `anon` | those two plus **Auditor** | every signed-in role |
+| Operator | read | nothing | read |
+| Reached by | a plain public URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
 
 `floor-plans` is readable by every signed-in role because the Overview is the page an Operator
 lives on, and private because a plan is a drawing of the plant and SVG is active content: the
@@ -3152,39 +3152,35 @@ The consequence is a constraint on what may go in it: **nothing beyond machine g
 are gated on `device:manage` rather than merely `authenticated`, because an upload both changes
 what a shell publishes *and* puts bytes at a world-readable URL.
 
-### `gateway-backups` is private, and holds behaviour rather than secrets
+### `broker-captures` is private, and holds the plant's traffic
 
-A `flows.json` describes the plant's edge topology, its broker addresses, its device ids and its
-processing logic. None of that is public, and there is deliberately no `getPublicUrl()` path for
-this bucket.
-
-**`flows.json` only.** `flows_cred.json` — Node-RED's credential store, encrypted with
-`NODERED_CREDENTIAL_SECRET` — is excluded on purpose. Stored here it would either be useless (the
-secret is not in this bucket) or catastrophic (if the secret ever were). A restored appliance
-re-injects its credentials from the environment enrolment wrote, exactly as
-`scripts/node-red-init.mjs` already does for the platform's own Node-RED. So a backup describes
-behaviour, never secrets.
+A capture is a recording of every edge node, device id, metric name and value that spoke in the
+window. None of that is public, and there is deliberately no `getPublicUrl()` path for this
+bucket: `public: true` would make storage-api serve the objects without consulting
+`storage.objects` RLS at all, so the role split below would silently stop applying to reads.
+`storage-init.mjs` re-asserts `public: false` on every boot.
 
 ### The role split is asymmetric on purpose
 
-An auditor's job is to see what the plant was configured to do and when it changed, and a flow
-backup is the only artefact that answers that for the edge — so `SELECT` is the point of the role.
-`INSERT` would let an auditor rewrite the record they exist to examine, which is the same objection
-that makes `digital_thread` append-only.
+An auditor's job is to see what the plant did and when, and a capture is the record of what the
+edge actually published — so `SELECT` is the point of the role. `INSERT` would let an auditor
+rewrite the record they exist to examine, which is the same objection that makes `digital_thread`
+append-only.
 
-Operator gets nothing: nothing on the operator dashboard reads or writes a backup, and a role that
+Operator gets nothing: nothing on the operator dashboard reads or writes a capture, and a role that
 cannot use a capability should not hold it.
 
 ### The path is confined by the database, not by the uploader
 
-Every object must live under `<sparkplug_id>/`, and that folder must name a gateway that exists.
-Same idea as the broker's per-gateway role (`spBv1.0/+/+/<sparkplug_id>/#`) one layer up: **the client does
-not get to assert where its data belongs.** A convention the frontend happens to follow is not a
-control — Storage's REST API is reachable with any authenticated session.
+Every object must live under `<subject>/`, and that folder must name a gateway or device that
+exists (`is_capture_subject_prefix()`). Same idea as the broker's per-gateway role
+(`spBv1.0/+/+/<sparkplug_id>/#`) one layer up: **the client does not get to assert where its data
+belongs.** A convention the frontend happens to follow is not a control — Storage's REST API is
+reachable with any authenticated session.
 
-`SELECT` is deliberately *not* path-confined: a reader may list the bucket to find backups, and
-requiring a valid gateway prefix on read would hide the backups of a gateway that had since been
-deleted — which is exactly when someone is looking for them.
+`SELECT` is deliberately *not* path-confined: a reader may list the bucket to find captures, and
+requiring a valid prefix on read would hide the capture of a subject that had since been deleted —
+which is exactly when someone is looking for it.
 
 The trap in writing that policy, and why its test asserts an *accepted* path as well as rejected
 ones, is recorded inline in `storage-policies.sql`, because it constrains the SQL on the very next

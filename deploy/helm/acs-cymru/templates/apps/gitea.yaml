@@ -155,8 +155,8 @@ metadata:
   annotations:
     # KEPT ACROSS `helm uninstall`, and this is the volume in the chart where that matters most
     # after the databases. It holds every repository -- the only copy of every gateway's edge
-    # flow, since nothing writes to the gateway-backups bucket any more -- plus the SSH host
-    # keys appliances carry in known_hosts. Losing those does not merely lose data: every gateway
+    # flow -- plus the SSH host keys appliances carry in known_hosts. Losing those does not
+    # merely lose data: every gateway
     # refuses to clone with a host-key mismatch, which reads as an attack rather than as a restore.
     "helm.sh/resource-policy": keep
 spec:

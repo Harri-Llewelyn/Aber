@@ -304,13 +304,6 @@ const mapDigitalThreadRow = (t) => ({
  */
 const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-models');
 
-/*
- * The `gateway-backups` bucket is no longer touched by the browser: a gateway's flow is
- * reviewed in its own repository behind the forge. The bucket still exists for storage-init and
- * the policies until it is retired as one piece (docs/roadmap.md, "Retiring the flow-backup
- * bucket").
- */
-
 /**
  * Broker captures: recorded Sparkplug traffic, for playback through `ingestion/capture.py`.
  *
@@ -537,7 +530,7 @@ const apiMethods = {
   },
 
   // ===============================================================================================
-  // Physical gateway enrolment and flow backups
+  // Physical gateway enrolment
   // ===============================================================================================
 
   /**

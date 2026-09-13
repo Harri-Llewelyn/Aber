@@ -18,12 +18,12 @@ moves out, and the table below says where it went.
 `§[0-9]` in this file.
 
 **Ordering.** 1 and 2 are the platform's own: the one item somebody else sets the deadline for,
-then the rehearsal that turns the backup into a capability. 3–5 are the edge chain, in dependency
-order: 3 makes a gateway's flow reviewable, 4 makes the appliance a managed artefact and shares
-3's puller, 5 removes what 3 replaced. 6 reviews playback before the chain is folded, because a
-finding there may change the schema. 7 audits the documentation, code and comments once the code
-has stopped moving. 8 is last by rule: it folds the migration chain, so every entry that changes
-the schema must have landed before it.
+then the rehearsal that turns the backup into a capability. 3 and 4 are the edge chain, in
+dependency order: 3 makes a gateway's flow reviewable, 4 makes the appliance a managed artefact and
+shares 3's puller. 5 reviews playback before the chain is folded, because a finding there may
+change the schema. 6 audits the documentation, code and comments once the code has stopped moving.
+7 is last by rule: it folds the migration chain, so every entry that changes the schema must have
+landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -49,6 +49,7 @@ the schema must have landed before it.
 | Multi-factor authentication | Not built, and not needed for 1.0: a could-have, reopened as [#184](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/184). The `0069` role split it waited on has shipped; the rest is in the request |
 | Cells become work centers | Answered, not built: a cell is itself one of ISA-95's work center types, so the standard's name is given where the hierarchy is named rather than replacing the word. [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) records the decision; each page's help Summary names its ISA-95 level |
 | The transport between services | Built for the broker and both databases: [`deploy/k8s/README.md`](../deploy/k8s/README.md#mqtts-on-8883) (in-cluster clients on 8883 by default, 1883 withdrawing to loopback) and [`deploy/k8s/README.md`](../deploy/k8s/README.md#tls-to-the-databases) (`postgresTls`: `verify-full` everywhere, `hostssl`-only pg_hba, Realtime's tenant link as the one named exception). HTTP between the gateway and its upstreams stays plaintext: none of them terminates TLS itself, so that hop is a TLS sidecar per pod, which is a service mesh, and a service mesh is the complete answer. Answered, not built. Gateways hold no client certificate: the dynsec password and the pinned root already give identity, confinement and a revocation that disconnects |
+| Retiring the flow-backup bucket | Removed: the `gateway-backups` bucket, its policies, its chart values and its policy test are gone, and no install had stored anything in it. A gateway's flow lives in its repository in the forge ([`docs/physical-gateways.md`](physical-gateways.md)); the repository pointer stays derived (`gateway-<sparkplug_id>` in the organisation `constants.js` names), a column is earned only if a gateway ever needs re-pointing. Archiving a gateway does not yet archive its repository: a could-have, reopened as [#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197), which also carries the rule that deleting one is a decision, never a cascade |
 
 ---
 
@@ -349,33 +350,7 @@ token against the same repository, which the deploy-key reconcile makes routine,
 
 ---
 
-## 5 · Retiring the flow-backup bucket
-
-**Builds on:** the `gateway-backups` bucket in [`storage-init.mjs`](../scripts/storage-init.mjs) ·
-[`storage-policies.sql`](../supabase/storage-policies.sql) · `GATEWAY_BACKUP_BUCKET` in
-`values.yaml` · `test_gateway_enrollment.py`'s policy
-assertions
-
-The browser half is done: nothing in the dashboard reads or writes the bucket, and a gateway's flow
-lives in its repository in the forge. What remains is the bucket itself, deliberately still created
-and governed so nothing can quietly start writing to it, and the one change that removes it has to
-decide what happens to whatever an earlier install already stored there. Retention is now decided
-once, in the backup service (a window for scheduled backups, a pin for requested ones), and the
-bucket's contents fall under the same answer: kept in a backup, not in a second store.
-
-The repository pointer is derived (`gateway-<sparkplug_id>` in the organisation named in
-`constants.js`), not stored; a column is earned only if a gateway ever needs re-pointing. A tracked
-branch other than `main` is the one part that genuinely does not fit and is a small separate
-decision. **Archiving a gateway archives its repository and its wiki** (Gitea archives both
-together) and removes its deploy key links (4); the `appliance` branch is the last thing the
-gateway reported and survives the archive, which is a better record than the heartbeat table,
-which stops. Deleting one is the retention question again: the wiki is the one place a plant's
-notes about a gateway live, so a delete is a decision and never a cascade. The forge is in every
-backup now, so a deleted repository is recoverable from one for as long as the backup is kept.
-
----
-
-## 6 · The playback feature is reviewed end to end
+## 5 · The playback feature is reviewed end to end
 
 **Builds on:** [`playback_worker.py`](../ingestion/playback_worker.py) · [`capture.py`](../ingestion/capture.py) ·
 [`capture_worker.py`](../ingestion/capture_worker.py) · [`playback.yaml`](../deploy/helm/acs-cymru/templates/apps/playback.yaml) ·
@@ -416,7 +391,7 @@ a component entry; and the feature's README sections describe what is built.
 
 ---
 
-## 7 · The documentation, code and comments are audited against the codebase
+## 6 · The documentation, code and comments are audited against the codebase
 
 **Builds on:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) (the comment rule, and where argument and
 history go) · `scripts/check-docs-drift.mjs` · `scripts/check-mirror-drift.mjs` ·
@@ -455,7 +430,7 @@ method so the next one starts from it.
 
 ---
 
-## 8 · The migration chain folds back into the baseline
+## 7 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)
