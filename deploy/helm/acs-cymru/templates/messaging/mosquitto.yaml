@@ -24,7 +24,7 @@
 {{- end }}
 ---
 {{/*
-Broker policy: repository-managed, read-only, identical on both targets.
+Broker policy: repository-managed and read-only; the initContainer assembles the copy the broker reads.
 
 mosquitto.conf declares `allow_anonymous` and the Dynamic Security `plugin` GLOBALLY rather than
 per-listener, and that is what guarantees the TCP (1883), WebSocket (9001) and TLS (8883) listeners
@@ -103,8 +103,7 @@ spec:
     rotationPolicy: Always
   commonName: mosquitto
   dnsNames:
-    # The in-cluster name, which is what the ingestion daemon and Node-RED connect to and is
-    # identical on both targets.
+    # The in-cluster name, which every in-cluster client dials.
     - mosquitto
     - {{ printf "mosquitto.%s" .Release.Namespace }}
     - {{ printf "mosquitto.%s.svc" .Release.Namespace }}
@@ -263,7 +262,7 @@ spec:
 External exposure for shopfloor gateways.
 
 A SECOND Service, not a change of type on the one above: the in-cluster name must stay a plain
-ClusterIP so `mosquitto:1883` resolves the same way on both targets, and mixing the two would tie
+ClusterIP so `mosquitto` keeps resolving for the in-cluster clients, and mixing the two would tie
 internal service discovery to an external IP allocation.
 
 MQTT IS RAW TCP AND CANNOT RIDE AN HTTP INGRESS. On k3s the built-in ServiceLB (Klipper) satisfies

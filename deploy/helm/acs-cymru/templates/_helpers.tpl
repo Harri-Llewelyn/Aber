@@ -696,7 +696,7 @@ The CA-only projection of the broker certificate Secret.
 
 ONLY `ca.crt` IS PROJECTED, AND THAT IS THE POINT. `mosquitto-tls` is a kubernetes.io/tls Secret, so
 it holds `tls.key` -- THE BROKER'S PRIVATE KEY -- alongside the CA certificate. Mounting the whole
-Secret into the ingestion daemon and Node-RED would hand both of them the key that lets anything
+Secret into every client pod would hand each of them the key that lets anything
 impersonate the broker, to verify a certificate they only need the public CA for.
 
 `items` restricts the projection at the kubelet, so the key is never written into either pod's
