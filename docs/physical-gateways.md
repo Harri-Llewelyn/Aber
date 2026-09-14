@@ -614,6 +614,29 @@ journalctl -u acs-gateway-converge -n 50        # what the last convergence did
 jq .custom /var/lib/acs-gateway/data/gitops/converged.json
 ```
 
+### Two rows in the drawer, and what each is for
+
+The forge reports that push, so the gateway's drawer shows the last convergence without anybody
+opening a shell:
+
+| Row | Reads | Means |
+| :--- | :--- | :--- |
+| **Platform** | `v0.1.0 · converged 40 minutes ago` | the playbook version this appliance is actually on. Different tags across the fleet is a rollout in progress, which is what the per-gateway pointer is for |
+| **Platform** | `v0.1.0 · failed` | `ansible-pull` did not complete. The timer retries within the hour; the appliance's journal says why |
+| **Custom** | *(empty)* | this gateway's repository carries no playbook of its own. The ordinary case |
+| **Custom** | `converged at a1b2c3d` | its adapter is running, from that commit |
+| **Custom** | `failed at a1b2c3d` | its adapter is **not** running |
+
+**A failing adapter turns nothing else amber, and that is the point of the row.** The gateway keeps
+publishing its heartbeat and every device behind Node-RED, so it reads ONLINE and its flow is
+converged — because it is. The adapter is a container with no heartbeat of its own, and this row is
+the only place its absence shows. Check it after any change to a gateway's own playbook.
+
+**A gateway seeded from the example** starts with the adapter's README and compose project already
+in its repository: the forge's **Use this template** on `platform/gateway-custom-example`, before
+the appliance is commissioned. Enrolment adopts a repository that already exists and furnishes it
+the same way as an empty one.
+
 ## 13. Troubleshooting
 
 **The Gateways page says remote gateways cannot be enrolled on this deployment.**

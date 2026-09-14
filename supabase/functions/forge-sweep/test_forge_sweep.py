@@ -45,6 +45,7 @@ SWEEP_SECRET = os.getenv("FORGE_SWEEP_SECRET", "")
 # Must agree with _shared/forge.ts.
 PLATFORM_ORGANISATION = "platform"
 PLATFORM_REPOSITORY = "gateway-platform"
+CUSTOM_EXAMPLE_REPOSITORY = "gateway-custom-example"
 
 # Differs from every other suite's fixture id in its FIRST block: sparkplug_id is the first 21 hex
 # characters of the uuid, so ids that differ only at the end collide on the generated id.
@@ -432,6 +433,46 @@ class TestThePlatform(ForgeSweepBase):
         self.assertEqual(status, 200, body)
         self.assertEqual(body["published"], [], body)
         self.assertEqual(body["errors"], [], body)
+
+    def test_the_custom_example_is_published_as_a_template_and_never_tagged(self):
+        """
+        THE SECOND PUBLISHED REPOSITORY (0106). The example a gateway needing code of its own is
+        copied from. Tagged or not is what the repository is FOR: the playbook is converged to, so
+        an appliance pins a released version of it; the example is copied once by a person, so it
+        carries main alone and is marked as a template for the forge's "Use this template".
+        """
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["errors"], [], body)
+
+        status, repo = forge(f"/repos/{PLATFORM_ORGANISATION}/{CUSTOM_EXAMPLE_REPOSITORY}")
+        self.assertEqual(status, 200, "the custom example does not exist after a sweep")
+        self.assertTrue(repo["private"], repo)
+        self.assertTrue(repo["template"], "the example must be a template, or nobody can copy it")
+
+        for path in ("README.md", "custom.yml", "custom/docker-compose.yml", "custom/Dockerfile"):
+            status, _ = forge(f"/repos/{PLATFORM_ORGANISATION}/{CUSTOM_EXAMPLE_REPOSITORY}/contents/{path}")
+            self.assertEqual(status, 200, f"{path} is not published")
+
+        # NOT flows.json and NOT platform.yml. A flow copied from a template would be deployed over
+        # the one enrolment installed, and a copied pointer would be KEPT by seedPlatformPointer,
+        # pinning every gateway seeded from this to a tag that was current when it was written.
+        for path in ("flows.json", "platform.yml"):
+            status, _ = forge(f"/repos/{PLATFORM_ORGANISATION}/{CUSTOM_EXAMPLE_REPOSITORY}/contents/{path}")
+            self.assertEqual(status, 404, f"{path} must not be in the template")
+
+        status, tags = forge(f"/repos/{PLATFORM_ORGANISATION}/{CUSTOM_EXAMPLE_REPOSITORY}/tags?limit=50")
+        self.assertEqual(status, 200, tags)
+        self.assertEqual(tags, [], f"the example is copied, not converged to, so it takes no tag: {tags}")
+
+        status, rule = forge(f"/repos/{PLATFORM_ORGANISATION}/{CUSTOM_EXAMPLE_REPOSITORY}/branch_protections/main")
+        self.assertEqual(status, 200, rule)
+        self.assertEqual(rule["push_whitelist_usernames"], [MACHINE_USER], rule)
+        self.assertFalse(rule["push_whitelist_deploy_keys"], rule)
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["published"], [], body)
 
 
 class TestTheSchedule(ForgeSweepBase):

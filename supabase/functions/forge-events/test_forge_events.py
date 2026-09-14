@@ -52,7 +52,11 @@ ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
 # characters of the uuid, so ids that differ only at the end collide on the generated id.
 TEST_GW_ID = "f0e9e000-0000-4000-8000-000000000001"
 HEAD_COLUMNS = ("forge_head_sha,forge_head_message,forge_head_by,forge_head_at,forge_head_flow_sha256,"
-                "forge_appliance_sha,forge_appliance_at,forge_appliance_flow_sha256")
+                "forge_appliance_sha,forge_appliance_at,forge_appliance_flow_sha256,"
+                # 0106: what converged.json on the appliance branch said.
+                "forge_appliance_platform_tag,forge_appliance_platform_outcome,"
+                "forge_appliance_converged_at,forge_appliance_custom_outcome,"
+                "forge_appliance_custom_revision")
 
 
 def deliver(body, event="push", secret=WEBHOOK_SECRET, signed=True):
@@ -141,6 +145,9 @@ class ForgeEventsBase(unittest.TestCase):
             "forge_head_sha": None, "forge_head_message": None, "forge_head_by": None,
             "forge_head_at": None, "forge_head_flow_sha256": None,
             "forge_appliance_sha": None, "forge_appliance_at": None, "forge_appliance_flow_sha256": None,
+            "forge_appliance_platform_tag": None, "forge_appliance_platform_outcome": None,
+            "forge_appliance_converged_at": None, "forge_appliance_custom_outcome": None,
+            "forge_appliance_custom_revision": None,
         })
 
     def head(self):
@@ -200,6 +207,12 @@ class TestWhatIsRecorded(ForgeEventsBase):
         # The head of main is untouched: the two branches are two columns.
         self.assertIsNone(row["forge_head_sha"])
         self.assertIsNone(row["forge_head_by"])
+        # No such repository in the forge, so no converged.json to read (0106). Absent is nulls,
+        # never a failed delivery: a non-2xx is what Gitea records as a failed hook, and the flow
+        # half of this push landed.
+        self.assertIsNone(row["forge_appliance_platform_tag"])
+        self.assertIsNone(row["forge_appliance_platform_outcome"])
+        self.assertIsNone(row["forge_appliance_custom_outcome"])
 
     def test_a_push_to_another_branch_is_ignored(self):
         status, body = deliver(push(self.sparkplug_id, ref="refs/heads/tighten-poll"))
@@ -404,7 +417,17 @@ class TestTheApplianceItself(ForgeEventsBase):
             handle.write(flow)
         with open(os.path.join(self.clone, "deployed.json"), "w", encoding="utf-8") as handle:
             handle.write('{"revision":null,"source":"enrolment"}\n')
-        self.git("add", "--", "flows.json", "deployed.json")
+        # The third file on the allowlist (0106): what acs-gateway-converge recorded,
+        # including a custom.yml that FAILED, which is the state the Custom row exists for.
+        converged = {
+            "outcome": "converged", "tag": "v9.9.9", "detail": "ansible-pull succeeded",
+            "converged_at": "2026-09-14T10:11:12Z",
+            "custom": {"outcome": "failed", "revision": "a" * 40,
+                       "detail": "custom.yml exited 2", "ran_at": "2026-09-14T10:11:20Z"},
+        }
+        with open(os.path.join(self.clone, "converged.json"), "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(converged))
+        self.git("add", "--", "flows.json", "deployed.json", "converged.json")
         self.commit("Report: running from enrolment")
         code, out = self.git("push", "--quiet", "origin", "appliance:appliance")
         self.assertEqual(code, 0, f"the deploy key could not push the appliance branch: {out}")
@@ -418,6 +441,15 @@ class TestTheApplianceItself(ForgeEventsBase):
             row = self.head()
         self.assertEqual(row["forge_appliance_sha"], pushed, f"the appliance push did not land: {row}")
         self.assertEqual(row["forge_appliance_flow_sha256"], hashlib.sha256(flow.encode()).hexdigest())
+        # Read out of converged.json at that same commit, through the machine account
+        # (0106). The platform half and the custom half are separate columns, so a failing
+        # adapter on a gateway whose platform converged reads as exactly that.
+        self.assertEqual(row["forge_appliance_platform_tag"], "v9.9.9")
+        self.assertEqual(row["forge_appliance_platform_outcome"], "converged")
+        self.assertTrue(row["forge_appliance_converged_at"].startswith("2026-09-14T10:11:12"),
+                        row["forge_appliance_converged_at"])
+        self.assertEqual(row["forge_appliance_custom_outcome"], "failed")
+        self.assertEqual(row["forge_appliance_custom_revision"], "a" * 40)
         # Not None: Gitea resolves a push's hooks when it processes the queued push, so the incident
         # template committed a moment before the hook existed is delivered too, and main's head is
         # filled at enrolment (measured). What must hold is that the appliance push is not it.
