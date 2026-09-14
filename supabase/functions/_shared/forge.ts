@@ -118,6 +118,36 @@ const CATCH_ALL_RULE = "**";
 const WEBHOOK_BRANCH_FILTER = `{main,${APPLIANCE_BRANCH}}`;
 
 /**
+ * The platform playbook's own organisation and repository: one repository the whole fleet reads,
+ * outside `gateways` so that organisation's rules (both teams may create repositories; the sweep
+ * protects whatever it finds) do not apply. Its `main` admits pushes from the machine account
+ * alone, because its content is this repository's gateway-platform/, published by forge-sweep.
+ * Named here and in gateway-platform/README.md.
+ */
+export const PLATFORM_ORGANISATION = "platform";
+export const PLATFORM_REPOSITORY = "gateway-platform";
+/** Both dashboard teams read the platform repository through this team; nobody writes it. */
+export const PLATFORM_READERS_TEAM = "readers";
+/** The file in a gateway's repository naming the tag its appliance converges to. */
+export const PLATFORM_POINTER_PATH = "platform.yml";
+/** The digest of what the published repository holds, so a sweep compares in one read. */
+const PLATFORM_MANIFEST_PATH = ".acs/manifest.json";
+
+/**
+ * The platform's version, from ACS_PLATFORM_VERSION (the chart's appVersion), or null when unset
+ * or not a version. The tag is `v<version>`, the same form the release workflow tags this
+ * repository with.
+ */
+export function platformVersion(): string | null {
+  const raw = (Deno.env.get("ACS_PLATFORM_VERSION") ?? "").trim().replace(/^v/, "");
+  return /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(raw) ? raw : null;
+}
+
+export function platformTag(version: string): string {
+  return `v${version}`;
+}
+
+/**
  * The public half of an OpenSSH key, or null. Shape-checked and confined to the two algorithms
  * bootstrap.mjs can generate, so this endpoint cannot write arbitrary strings into another system's
  * authorised-keys list.
@@ -359,7 +389,11 @@ export async function ensureBranchProtection(
   }
   // THE LAST MOMENT ANYTHING CAN BE COMMITTED TO `main` DIRECTLY. The protection below binds the
   // machine account too, so what the repository is to carry from the start goes in here, first.
-  if (options.seedTemplate) await seedIssueTemplate(cfg, name);
+  if (options.seedTemplate) {
+    await seedIssueTemplate(cfg, name);
+    const version = platformVersion();
+    if (version) await seedPlatformPointer(cfg, name, platformTag(version));
+  }
   const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections`, {
     branch_name: "main",
     enable_push: false,
@@ -452,44 +486,288 @@ function keyMaterial(publicKey: string): string {
   return publicKey.trim().split(/\s+/).slice(0, 2).join(" ");
 }
 
-export async function listDeployKeys(cfg: ForgeConfig, repo: string): Promise<DeployKey[]> {
-  const listed = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${repo}/keys?limit=50`);
-  if (!listed.ok) throw await refused(`could not list the deploy keys on '${repo}'`, listed);
+/** The title a gateway's key carries on every repository it is registered on. */
+export function deployKeyTitle(sparkplugId: string): string {
+  return `gateway ${sparkplugId}`;
+}
+
+/** The inverse: the sparkplug_id a key's title names, or null for a key somebody titled by hand. */
+export const DEPLOY_KEY_TITLE = /^gateway (gwy[0-9a-f]{21})$/;
+
+/** A repository by owner and name; the gateway organisation unless said otherwise. */
+export interface RepositoryRef {
+  owner?: string;
+  name: string;
+}
+
+function repoPath(ref: RepositoryRef): string {
+  return `${ref.owner ?? FORGE_ORGANISATION}/${ref.name}`;
+}
+
+export async function listDeployKeys(cfg: ForgeConfig, ref: RepositoryRef): Promise<DeployKey[]> {
+  const listed = await forgeApi(cfg, "GET", `/repos/${repoPath(ref)}/keys?limit=50`);
+  if (!listed.ok) throw await refused(`could not list the deploy keys on '${repoPath(ref)}'`, listed);
   return await listed.json() as DeployKey[];
 }
 
-export async function deleteDeployKey(cfg: ForgeConfig, repo: string, key: DeployKey): Promise<void> {
-  const deleted = await forgeApi(cfg, "DELETE", `/repos/${FORGE_ORGANISATION}/${repo}/keys/${key.id}`);
+export async function deleteDeployKey(cfg: ForgeConfig, ref: RepositoryRef, key: DeployKey): Promise<void> {
+  const deleted = await forgeApi(cfg, "DELETE", `/repos/${repoPath(ref)}/keys/${key.id}`);
   if (!deleted.ok && deleted.status !== 404) {
-    throw await refused(`could not remove deploy key '${key.title}' from '${repo}'`, deleted);
+    throw await refused(`could not remove deploy key '${key.title}' from '${repoPath(ref)}'`, deleted);
   }
 }
 
 /**
  * Register a public key on a repository in the wanted mode: kept if it is already there in that
  * mode, re-registered if it is there in the other (Gitea has no edit for a deploy key), added
- * otherwise. Titled by sparkplug_id so revocation has an obvious target. Returns what happened.
+ * otherwise. Titled by sparkplug_id so revocation has an obvious target; a key already carrying
+ * that title with other material is a replaced appliance's, and goes first, because Gitea refuses
+ * a second key under one title (measured). Returns what happened.
  */
 export async function ensureDeployKey(
   cfg: ForgeConfig,
-  repo: string,
+  ref: RepositoryRef,
   sparkplugId: string,
   publicKey: string,
   readOnly: boolean,
 ): Promise<"kept" | "registered" | "rewritten"> {
   const material = keyMaterial(publicKey);
-  const found = (await listDeployKeys(cfg, repo)).find((k) => keyMaterial(k.key) === material);
+  const title = deployKeyTitle(sparkplugId);
+  const keys = await listDeployKeys(cfg, ref);
+  const found = keys.find((k) => keyMaterial(k.key) === material);
   if (found && found.read_only === readOnly) return "kept";
-  if (found) await deleteDeployKey(cfg, repo, found);
+  if (found) await deleteDeployKey(cfg, ref, found);
+  for (const stale of keys.filter((k) => k.title === title && keyMaterial(k.key) !== material)) {
+    await deleteDeployKey(cfg, ref, stale);
+    console.log(`forge: removed a superseded key titled '${title}' from '${repoPath(ref)}'`);
+  }
 
-  const response = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${repo}/keys`, {
-    title: `gateway ${sparkplugId}`,
+  const response = await forgeApi(cfg, "POST", `/repos/${repoPath(ref)}/keys`, {
+    title,
     key: publicKey,
     read_only: readOnly,
   });
-  if (!response.ok) throw await refused(`could not register the deploy key on '${repo}'`, response);
-  console.log(`forge: ${sparkplugId}'s key is ${readOnly ? "read-only" : "read-write"} on '${repo}'`);
+  if (!response.ok) throw await refused(`could not register the deploy key on '${repoPath(ref)}'`, response);
+  console.log(`forge: ${sparkplugId}'s key is ${readOnly ? "read-only" : "read-write"} on '${repoPath(ref)}'`);
   return found ? "rewritten" : "registered";
+}
+
+// The platform repository
+
+/**
+ * The platform organisation and its readers team, created if absent. Private, like `gateways`;
+ * the readers team has read on every repository in it and may create none, and both dashboard
+ * teams are seated in it by forge-membership and the sweep. Returns the team's id.
+ */
+export async function ensurePlatformOrganisation(cfg: ForgeConfig): Promise<number> {
+  const org = await forgeApi(cfg, "GET", `/orgs/${PLATFORM_ORGANISATION}`);
+  if (org.status === 404) {
+    const created = await forgeApi(cfg, "POST", "/orgs", {
+      username: PLATFORM_ORGANISATION,
+      full_name: "Platform",
+      description: "The playbook every appliance converges to. Published by ACS-Cymru; changed in its repository, never here.",
+      visibility: "private",
+      repo_admin_change_team_access: false,
+    });
+    if (!created.ok) throw await refused(`could not create organisation '${PLATFORM_ORGANISATION}'`, created);
+    console.log(`forge: created organisation '${PLATFORM_ORGANISATION}'`);
+  } else if (!org.ok) {
+    throw await refused(`could not read organisation '${PLATFORM_ORGANISATION}'`, org);
+  }
+
+  const listed = await forgeApi(cfg, "GET", `/orgs/${PLATFORM_ORGANISATION}/teams?limit=50`);
+  if (!listed.ok) throw await refused("could not list the platform organisation's teams", listed);
+  const teams = await listed.json() as { id: number; name: string }[];
+  const existing = teams.find((t) => t.name === PLATFORM_READERS_TEAM);
+  if (existing) return existing.id;
+
+  const created = await forgeApi(cfg, "POST", `/orgs/${PLATFORM_ORGANISATION}/teams`, {
+    name: PLATFORM_READERS_TEAM,
+    description: "Everyone the forge admits, reading the platform playbook. Placed by forge-membership.",
+    permission: "read",
+    includes_all_repositories: true,
+    can_create_org_repo: false,
+    units: ["repo.code", "repo.issues", "repo.releases", "repo.wiki"],
+  });
+  if (!created.ok) throw await refused(`could not create team '${PLATFORM_READERS_TEAM}'`, created);
+  console.log(`forge: created team '${PLATFORM_READERS_TEAM}' in '${PLATFORM_ORGANISATION}'`);
+  return ((await created.json()) as { id: number }).id;
+}
+
+/**
+ * The platform repository, created if absent, with `main` admitting pushes from the machine
+ * account and from nobody else: its content is published from this repository's own tree, and a
+ * change to it is a pull request here, not there. Deploy keys are not whitelisted, so every
+ * appliance's read-only key reads it and none writes it.
+ */
+export async function ensurePlatformRepository(cfg: ForgeConfig): Promise<ForgeRepository> {
+  await ensurePlatformOrganisation(cfg);
+  const path = `/repos/${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}`;
+  let repo: ForgeRepository;
+  const existing = await forgeApi(cfg, "GET", path);
+  if (existing.ok) {
+    repo = await existing.json() as ForgeRepository;
+  } else if (existing.status === 404) {
+    const created = await forgeApi(cfg, "POST", `/orgs/${PLATFORM_ORGANISATION}/repos`, {
+      name: PLATFORM_REPOSITORY,
+      description: "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by ACS-Cymru.",
+      private: true,
+      auto_init: true,
+      default_branch: "main",
+    });
+    if (!created.ok) throw await refused(`could not create repository '${PLATFORM_REPOSITORY}'`, created);
+    repo = await created.json() as ForgeRepository;
+    console.log(`forge: created '${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}'`);
+  } else {
+    throw await refused(`could not read repository '${PLATFORM_REPOSITORY}'`, existing);
+  }
+
+  const rule = await forgeApi(cfg, "GET", `${path}/branch_protections/main`);
+  if (rule.status === 404) {
+    const created = await forgeApi(cfg, "POST", `${path}/branch_protections`, {
+      branch_name: "main",
+      enable_push: true,
+      enable_push_whitelist: true,
+      push_whitelist_usernames: [cfg.user],
+      push_whitelist_teams: [],
+      push_whitelist_deploy_keys: false,
+      enable_force_push: false,
+    });
+    if (!created.ok) throw await refused(`could not protect 'main' on '${PLATFORM_REPOSITORY}'`, created);
+    console.log(`forge: 'main' on '${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}' admits the machine account alone`);
+  } else if (!rule.ok) {
+    throw await refused(`could not read the branch protection on '${PLATFORM_REPOSITORY}'`, rule);
+  }
+  return repo;
+}
+
+function base64(text: string): string {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+}
+
+/** A file's text at a ref, or null when absent. */
+async function fileAt(cfg: ForgeConfig, ref: RepositoryRef, path: string, at: string): Promise<string | null> {
+  const raw = await forgeApi(cfg, "GET", `/repos/${repoPath(ref)}/raw/${path}?ref=${encodeURIComponent(at)}`);
+  if (raw.status === 404) return null;
+  if (!raw.ok) throw await refused(`could not read '${path}' of '${repoPath(ref)}' at ${at}`, raw);
+  return await raw.text();
+}
+
+async function manifestDigestAt(cfg: ForgeConfig, at: string): Promise<string | null> {
+  const text = await fileAt(cfg, { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY }, PLATFORM_MANIFEST_PATH, at);
+  if (text === null) return null;
+  try {
+    const digest = (JSON.parse(text) as { digest?: unknown }).digest;
+    return typeof digest === "string" ? digest : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface PlatformPublication {
+  repository: ForgeRepository;
+  tag: string;
+  /** Whether this call committed anything. */
+  published: boolean;
+  /** A tag found at other content than this build ships, which is a release that cannot move. */
+  warning: string | null;
+}
+
+/**
+ * Publish the platform playbook: `main` holds what this build ships, and the tag for this build's
+ * version points at it. One read decides whether `main` is current (the digest in the manifest
+ * file); otherwise one commit writes every file, updates what changed and deletes what is no
+ * longer shipped. The tag is created once and never moved: a released version's playbook is
+ * immutable, and a tag found at other content is reported, not corrected. Bump the version, or
+ * on a development forge delete the tag by hand.
+ */
+export async function publishPlatform(
+  cfg: ForgeConfig,
+  version: string,
+  files: Record<string, string>,
+  digest: string,
+): Promise<PlatformPublication> {
+  const repository = await ensurePlatformRepository(cfg);
+  const ref = { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY };
+  const path = `/repos/${repoPath(ref)}`;
+  const tag = platformTag(version);
+  let published = false;
+
+  if ((await manifestDigestAt(cfg, "main")) !== digest) {
+    const tree = await forgeApi(cfg, "GET", `${path}/git/trees/main?recursive=true&per_page=1000`);
+    if (!tree.ok) throw await refused(`could not read the tree of '${PLATFORM_REPOSITORY}'`, tree);
+    const existing = new Map(
+      (((await tree.json()) as { tree?: { path: string; type: string; sha: string }[] }).tree ?? [])
+        .filter((e) => e.type === "blob")
+        .map((e) => [e.path, e.sha]),
+    );
+    const wanted: Record<string, string> = {
+      ...files,
+      [PLATFORM_MANIFEST_PATH]: JSON.stringify({ digest, version, published_at: new Date().toISOString() }, null, 2) + "\n",
+    };
+    const operations = [
+      ...Object.entries(wanted).map(([p, text]) => (
+        existing.has(p)
+          ? { operation: "update", path: p, sha: existing.get(p), content: base64(text) }
+          : { operation: "create", path: p, content: base64(text) }
+      )),
+      ...[...existing.keys()].filter((p) => !(p in wanted)).map((p) => ({ operation: "delete", path: p, sha: existing.get(p) })),
+    ];
+    const committed = await forgeApi(cfg, "POST", `${path}/contents`, {
+      branch: "main",
+      message: `Publish the platform playbook shipped with ${tag} (${digest.slice(0, 12)})`,
+      files: operations,
+    });
+    if (!committed.ok) throw await refused(`could not publish the platform playbook to '${PLATFORM_REPOSITORY}'`, committed);
+    published = true;
+    console.log(`forge: published the platform playbook (${operations.length} operations, digest ${digest.slice(0, 12)})`);
+  }
+
+  let warning: string | null = null;
+  const found = await forgeApi(cfg, "GET", `${path}/tags/${encodeURIComponent(tag)}`);
+  if (found.status === 404) {
+    const created = await forgeApi(cfg, "POST", `${path}/tags`, {
+      tag_name: tag,
+      target: "main",
+      message: `The platform playbook shipped with ${tag}`,
+    });
+    if (!created.ok) throw await refused(`could not tag '${PLATFORM_REPOSITORY}' as ${tag}`, created);
+    console.log(`forge: tagged the platform playbook ${tag}`);
+  } else if (!found.ok) {
+    throw await refused(`could not read tag ${tag} on '${PLATFORM_REPOSITORY}'`, found);
+  } else if ((await manifestDigestAt(cfg, tag)) !== digest) {
+    warning = `${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY} is tagged ${tag} at other content than this build ships; ` +
+      "a released version's playbook does not move. Bump the version, or on a development forge delete the tag.";
+    console.warn(`forge: ${warning}`);
+  }
+  return { repository, tag, published, warning };
+}
+
+/**
+ * The pointer file in a gateway's repository, committed to `main` in the same moment as the
+ * incident template: before the branch is protected. Names the platform tag current at enrolment;
+ * afterwards it is changed by pull request. A repository that already holds one keeps it.
+ */
+async function seedPlatformPointer(cfg: ForgeConfig, name: string, tag: string): Promise<void> {
+  const present = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/contents/${PLATFORM_POINTER_PATH}`);
+  if (present.ok) return;
+  if (present.status !== 404) throw await refused(`could not read '${PLATFORM_POINTER_PATH}' on '${name}'`, present);
+  const content = [
+    "# The tag of platform/gateway-platform this appliance converges to. Changed by pull request:",
+    "# a fleet bump is one pull request per gateway, and a canary is one gateway. `vars` are",
+    "# applied to this appliance alone; gateway-platform/README.md in the platform repository",
+    "# says which the playbook accepts.",
+    "platform:",
+    `  tag: ${tag}`,
+    "",
+  ].join("\n");
+  const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/contents/${PLATFORM_POINTER_PATH}`, {
+    content: base64(content),
+    message: `Converge to the platform at ${tag}`,
+    branch: "main",
+  });
+  if (!created.ok) throw await refused(`could not commit '${PLATFORM_POINTER_PATH}' to '${name}'`, created);
+  console.log(`forge: '${name}' points at the platform ${tag}`);
 }
 
 /**
@@ -505,12 +783,12 @@ async function ensureOnlyDeployKey(
   publicKey: string,
 ): Promise<void> {
   const material = keyMaterial(publicKey);
-  for (const key of await listDeployKeys(cfg, repo)) {
+  for (const key of await listDeployKeys(cfg, { name: repo })) {
     if (keyMaterial(key.key) === material) continue;
-    await deleteDeployKey(cfg, repo, key);
+    await deleteDeployKey(cfg, { name: repo }, key);
     console.log(`forge: removed deploy key '${key.title}' from '${repo}'; a re-enrolment replaces the appliance`);
   }
-  await ensureDeployKey(cfg, repo, sparkplugId, publicKey, false);
+  await ensureDeployKey(cfg, { name: repo }, sparkplugId, publicKey, false);
 }
 
 /**
@@ -591,13 +869,23 @@ export async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<boo
   return true;
 }
 
-/** Provision the organisation, the repository, its protection and the key. Returns null on any failure, having logged it. */
+/** What enrolment tells the appliance about the platform repository, when this platform has one. */
+export interface PlatformLink {
+  ssh_url: string;
+  tag: string;
+}
+
+/**
+ * Provision the organisation, the repository, its protection and the key, and register the same
+ * key read-only on the platform repository. Returns null on any failure, having logged it; the
+ * platform half is null on its own when this deployment names no version.
+ */
 export async function provisionGatewayRepository(
   cfg: ForgeConfig,
   sparkplugId: string,
   gatewayName: string,
   publicKey: string,
-): Promise<ForgeRepository | null> {
+): Promise<{ repository: ForgeRepository; platform: PlatformLink | null } | null> {
   const name = repositoryNameFor(sparkplugId);
   try {
     await ensureOrganisation(cfg);
@@ -608,6 +896,18 @@ export async function provisionGatewayRepository(
     await ensureApplianceProtection(cfg, name);
     await ensureOnlyDeployKey(cfg, name, sparkplugId, publicKey);
     console.log(`forge: ${sparkplugId} pulls ${repo.full_name} over ${repo.ssh_url} and reports on '${APPLIANCE_BRANCH}'`);
+
+    // The platform repository: the same key, read-only. Its content is the sweep's to publish;
+    // enrolment only makes sure it exists to be cloned and that this appliance may clone it.
+    let platform: PlatformLink | null = null;
+    const version = platformVersion();
+    if (version) {
+      const platformRepo = await ensurePlatformRepository(cfg);
+      await ensureDeployKey(cfg, { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY }, sparkplugId, publicKey, true);
+      platform = { ssh_url: platformRepo.ssh_url, tag: platformTag(version) };
+    } else {
+      console.warn(`forge: ACS_PLATFORM_VERSION is unset, so ${sparkplugId} gets no platform repository to converge to`);
+    }
     // After the key, and not on the path to `return null`: a wiki the forge could not seed costs a
     // log line, never the repository the appliance is about to clone.
     try {
@@ -622,7 +922,7 @@ export async function provisionGatewayRepository(
     } catch (err) {
       console.warn(`forge: the push webhook on '${name}' was not registered (${err instanceof Error ? err.message : err}); the repository is unaffected`);
     }
-    return repo;
+    return { repository: repo, platform };
   } catch (err) {
     // LOUD, because nothing else will say so. The appliance sees `repository: null` and carries on
     // publishing telemetry; without this line the only symptom is a gateway that never converges.

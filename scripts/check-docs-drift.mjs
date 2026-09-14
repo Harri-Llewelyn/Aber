@@ -467,13 +467,15 @@ function edgeFunctionNames() {
       .map((e) => e.name.match(/^(\d+)_/)[1])
   );
 
-  // Everything this repository authors. The chart's files/ are generated mirrors, the archive is
-  // the thing being cited, and node_modules is not ours.
+  // Everything this repository authors. The chart's files/ and the platform playbook's module
+  // are generated mirrors (their sources are scanned in their own right), the archive is the
+  // thing being cited, and node_modules is not ours.
   const scanned = allFiles.filter(
     (f) =>
       /\.(js|jsx|ts|mjs|py|sql|md|ya?ml)$/.test(f) &&
       !f.startsWith('supabase/migrations/archive/') &&
       !f.startsWith('deploy/helm/acs-cymru/files/') &&
+      f !== 'supabase/functions/_shared/gatewayPlatform.generated.ts' &&
       !f.startsWith('.claude/') &&
       !f.startsWith('frontend/dist/')
   );

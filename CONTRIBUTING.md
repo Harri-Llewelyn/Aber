@@ -12,6 +12,11 @@ generated columns and views in [`supabase/migrations/0001_baseline_schema.sql`](
 and the edge functions duplicate two mappers the browser bundle cannot share. CI enforces the pairs
 it can compare — [`scripts/check-mirror-drift.mjs`](scripts/check-mirror-drift.mjs),
 [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs), `supabase/functions/aas-export/test_aas_export.py`.
+Two directories are mirrored mechanically and the copies are committed: the chart's `files/`
+([`scripts/sync-helm-chart-files.mjs`](scripts/sync-helm-chart-files.mjs)) and the platform
+playbook's module for the edge runtime
+([`scripts/sync-gateway-platform.mjs`](scripts/sync-gateway-platform.mjs)); edit the source,
+run the script, and CI's `--check` refuses a stale copy.
 
 ## Two rules worth stating up front
 

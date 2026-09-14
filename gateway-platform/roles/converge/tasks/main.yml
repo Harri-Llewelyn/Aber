@@ -1,0 +1,62 @@
+---
+# The script that runs this playbook again, and the timer that runs the script.
+
+- name: Ansible, for ansible-pull
+  ansible.builtin.apt:
+    name: ansible-core
+    state: present
+
+- name: The converge script
+  ansible.builtin.copy:
+    src: acs-gateway-converge
+    dest: /usr/local/bin/acs-gateway-converge
+    mode: "0755"
+
+- name: The converge service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/acs-gateway-converge.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=ACS-Cymru gateway: converge to the platform tag this gateway names
+      After=network-online.target docker.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/acs-gateway-converge
+      # ansible-pull clones over SSH with the appliance's own key; nothing here needs a terminal.
+      Environment=GIT_TERMINAL_PROMPT=0
+  register: converge_service
+
+- name: The converge timer, hourly and after boot
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/acs-gateway-converge.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=ACS-Cymru gateway: converge hourly
+
+      [Timer]
+      OnBootSec=5min
+      OnUnitActiveSec=1h
+      RandomizedDelaySec=10min
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+  register: converge_timer
+
+- name: Systemd reloaded when a unit changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when:
+    - acs_systemd
+    - converge_service.changed or converge_timer.changed
+
+- name: The timer enabled and started
+  ansible.builtin.systemd:
+    name: acs-gateway-converge.timer
+    state: started
+    enabled: true
+  when: acs_systemd

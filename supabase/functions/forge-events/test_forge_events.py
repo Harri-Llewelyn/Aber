@@ -440,6 +440,23 @@ class TestTheApplianceItself(ForgeEventsBase):
             self.assertNotEqual(code, 0, f"the deploy key pushed to '{other}'")
             self.assertIn("protected branch", out)
 
+        # The platform repository: the same key reads it and cannot write it.
+        platform_url = payload["repository"].get("platform_ssh_url")
+        if platform_url:
+            self.assertIn("/platform/gateway-platform", platform_url.replace(":", "/"))
+            self.assertRegex(payload["repository"]["platform_tag"], r"^v\d+\.\d+\.\d+")
+            platform_clone = os.path.join(self.work, "platform")
+            code, out = self.git("clone", "--quiet", f"{FORGE_SSH.rstrip('/')}/platform/gateway-platform.git", platform_clone, cwd=self.work)
+            self.assertEqual(code, 0, f"the deploy key could not read the platform repository: {out}")
+            self.assertTrue(os.path.exists(os.path.join(platform_clone, "site.yml")), "the platform repository holds no playbook")
+            with open(os.path.join(platform_clone, "site.yml"), "a", encoding="utf-8") as handle:
+                handle.write("# from an appliance\n")
+            self.git("add", "--", "site.yml", cwd=platform_clone)
+            self.commit("Widen myself", cwd=platform_clone)
+            code, out = self.git("push", "--quiet", "origin", "HEAD:main", cwd=platform_clone)
+            self.assertNotEqual(code, 0, "the deploy key wrote the platform repository")
+            self.assertIn("not authorized to write", out)
+
         # A rewritten appliance branch: append-only means a force-push is refused.
         self.assertEqual(self.git("checkout", "--quiet", "appliance")[0], 0)
         self.git("-c", f"user.name=gateway {self.sparkplug_id}", "-c", "user.email=appliance@acs-cymru.invalid",

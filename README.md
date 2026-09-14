@@ -315,6 +315,7 @@ administrator, who can set a password through the Auth API or Studio instead.
 | [`scripts/`](scripts) | Setup, the dev loop, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, AAS push |
 | [`test-harness/`](test-harness) | Vendored IDTA AAS schema, conformance test-runner image |
 | [`gateway-bundle-template/`](gateway-bundle-template) | The appliance files `gateway-bundle` serves to a physical gateway: Compose file, Dockerfile, bootstrap and flow template |
+| [`gateway-platform/`](gateway-platform) | The platform playbook every appliance converges to with `ansible-pull`, published into the forge as `platform/gateway-platform` and tagged at the platform's version |
 
 ---
 

@@ -143,6 +143,12 @@ spec:
             - name: GITEA_WEBHOOK_URL
               value: "http://supabase-functions:9000/forge-events"
             {{- include "acs-cymru.optionalSecretEnv" (dict "name" "GITEA_WEBHOOK_SECRET" "secretName" $secretName "key" "GITEA_WEBHOOK_SECRET") | nindent 12 }}
+            {{- /* The platform's version, which is the tag forge-sweep publishes the platform
+                   playbook under in the forge and the tag a new gateway's platform.yml points at.
+                   The chart's appVersion, the same value the images are pulled at, so the playbook
+                   an appliance converges to and the platform it reports to ship from one tag. */}}
+            - name: ACS_PLATFORM_VERSION
+              value: {{ .Chart.AppVersion | quote }}
             {{- end }}
             - name: MQTT_PUBLIC_HOST
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicHost

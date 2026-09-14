@@ -1,0 +1,22 @@
+---
+# Docker from Ubuntu's own archive: no third-party apt source, and the versions Ubuntu's security
+# team patches. The engine builds the appliance image on the box (gateway-bundle-template/Dockerfile
+# says why), so the architecture found here is the architecture the image is built for.
+
+- name: Docker engine and the Compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+    state: present
+
+- name: Docker running and enabled
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  when: acs_systemd
+
+- name: The architecture this appliance builds for, for the record
+  ansible.builtin.debug:
+    msg: "docker builds for {{ ansible_facts['architecture'] }} on {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"

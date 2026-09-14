@@ -1,0 +1,6 @@
+---
+- name: Reload chrony sources
+  ansible.builtin.command: chronyc reload sources
+  changed_when: true
+  failed_when: false
+  when: acs_systemd

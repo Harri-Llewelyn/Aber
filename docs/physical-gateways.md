@@ -510,7 +510,47 @@ last line, and a required status check in the forge is the next one (docs/roadma
 
 ---
 
-## 12. Troubleshooting
+## 12. The operating system, and the platform playbook
+
+The bundle covers what runs *in* Docker. What runs *under* it — the packages, the upgrade
+policy, the clock, Docker itself, and the timer that keeps all of that converged — is the
+**platform playbook**, [`gateway-platform/`](../gateway-platform), published into the forge as
+`platform/gateway-platform` and tagged `v<version>` once per platform version.
+
+**The fleet tracks a tag, and the pointer is per gateway.** Enrolment seeds `platform.yml` on
+the gateway's `main` naming the tag current at that moment; changing it is a pull request in the
+gateway's own repository, so a fleet bump is one pull request per gateway or a scripted batch,
+and a canary is one gateway. Nothing tracks `main` of the platform repository, and `main` there
+admits pushes from the platform's machine account and nobody else: the playbook is changed in
+the platform's own repository and reviewed there.
+
+**`ansible-pull`, not Ansible.** The appliance runs `acs-gateway-converge` hourly and after boot:
+it reads the tag from the puller's checkout of the gateway's `main`, runs `ansible-pull` against
+the platform repository at that tag over SSH with the same deploy key and the same pinned host
+key the puller uses (the key is read-only there; measured to be refused when it pushes), and
+records the outcome in `/data/gitops/converged.json`, which the puller adds to the `appliance`
+branch. Outbound only, no inventory, self-healing on a timer, idempotent by construction.
+
+**What it decides** is in the playbook's README: Ubuntu and Ubuntu Server, amd64 and arm64;
+`unattended-upgrades` without automatic reboot, with Docker's packages held out of it; Docker
+from Ubuntu's own archive; `chrony` pointed at what `platform.yml` names (`vars.chrony_servers`)
+or Ubuntu's pool; and the compose volume bound to `/var/lib/acs-gateway/data`, so the host's
+converge script can reach what `bootstrap.mjs` wrote inside the container.
+
+**The first run is a person's** (or the installer's, when the one-liner lands): the playbook
+installs the timer that runs it afterwards.
+
+```bash
+sudo apt-get install -y ansible-core
+sudo ansible-pull -U ssh://git@<forge>/platform/gateway-platform.git -C v<version> \
+  -i localhost, site.yml
+```
+
+That expects an enrolled `/data` under `/var/lib/acs-gateway/data` and the bundle's `.env` at
+`/opt/acs-gateway/.env`; without the `.env` the playbook sets the host up and says the compose
+project was not started.
+
+## 13. Troubleshooting
 
 **The Gateways page says remote gateways cannot be enrolled on this deployment.**
 One of the two addresses in §7 is unset or in-stack; the notice names which. Set it where the

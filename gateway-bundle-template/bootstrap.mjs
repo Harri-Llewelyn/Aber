@@ -524,6 +524,11 @@ if (enrolment.repository && enrolment.repository.ssh_url) {
         branch: enrolment.repository.branch || 'main',
         deploy_key: DEPLOY_KEY,
         known_hosts: knownHosts ? KNOWN_HOSTS : null,
+        // The platform repository the same key reads, and the tag current at enrolment. Read by
+        // acs-gateway-converge on the host, which the platform playbook installs; the tag is the
+        // fallback until the puller has fetched this gateway's own platform.yml.
+        platform_ssh_url: enrolment.repository.platform_ssh_url || null,
+        platform_tag: enrolment.repository.platform_tag || null,
         recorded_at: new Date().toISOString(),
       },
       null,
@@ -532,6 +537,9 @@ if (enrolment.repository && enrolment.repository.ssh_url) {
     { mode: 0o600 },
   );
   log(`this gateway pulls from ${enrolment.repository.ssh_url}`);
+  if (enrolment.repository.platform_ssh_url) {
+    log(`and converges to the platform at ${enrolment.repository.platform_tag} from ${enrolment.repository.platform_ssh_url}`);
+  }
   if (!knownHosts) {
     log('WARNING: the platform sent no SSH host key for the forge, so this appliance cannot verify');
     log('it and will NOT converge. Restart the forge to publish one, then re-run enrolment.');
