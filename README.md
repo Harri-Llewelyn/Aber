@@ -91,7 +91,7 @@ the dashboard reads PostgREST and subscribes to Realtime.
 for development; the runbook is [`deploy/k8s/README.md`](deploy/k8s/README.md) and the design
 record is [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md). The one thing that
 runs on Docker Compose is the gateway appliance: a Raspberry Pi runs the bundle the dashboard hands
-it ([`gateway-bundle-template/`](gateway-bundle-template)).
+it ([`forge/gateway-platform/appliance/`](forge/gateway-platform/appliance)).
 
 ---
 
@@ -314,8 +314,7 @@ administrator, who can set a password through the Auth API or Studio instead.
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
 | [`scripts/`](scripts) | Setup, the dev loop, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, AAS push |
 | [`test-harness/`](test-harness) | Vendored IDTA AAS schema, conformance test-runner image |
-| [`gateway-bundle-template/`](gateway-bundle-template) | The appliance files `gateway-bundle` serves to a physical gateway: Compose file, Dockerfile, bootstrap and flow template |
-| [`gateway-platform/`](gateway-platform) | The platform playbook every appliance converges to with `ansible-pull`, published into the forge as `platform/gateway-platform` and tagged at the platform's version |
+| [`forge/`](forge) | Everything the platform publishes into the forge as a repository. `gateway-platform/` is the playbook every appliance converges to with `ansible-pull`, tagged at the platform's version; its `appliance/` is the compose project the appliance runs, which the installer lays down and the ZIP bundle ships |
 
 ---
 

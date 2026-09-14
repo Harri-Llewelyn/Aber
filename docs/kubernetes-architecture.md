@@ -151,17 +151,21 @@ by design, and it is already readable in the shipped bundle.
 
 ### 2.2 Edge runtime: build an image instead of mounting the repo
 
-`supabase-functions` bind-mounts `./supabase/functions` and `./gateway-bundle-template`, then uses a
-shell entrypoint to read the bundle templates into `GW_BUNDLE_*` because an edge-runtime user worker
-has no filesystem access to the mount. There is no repository on a cluster node to mount, and "which
-revision of `aas-export` is running" must be a property of the deployed artefact if a rollback is
-to roll the functions back.
+`supabase-functions` used to bind-mount `./supabase/functions` and the appliance's template
+directory, then use a shell entrypoint to read the template files into `GW_BUNDLE_*` variables
+because an edge-runtime user worker has no filesystem access to the mount. There is no repository
+on a cluster node to mount, and "which revision of `aas-export` is running" must be a property of
+the deployed artefact if a rollback is to roll the functions back.
 
-`supabase/functions/Dockerfile` now bakes both, with the same entrypoint export moved into the
-image so the Deployment needs no command override.
+`supabase/functions/Dockerfile` bakes the functions in. The appliance's files no longer travel as
+environment variables at all: they are part of the platform playbook under
+`forge/gateway-platform/`, which `scripts/sync-gateway-platform.mjs` writes into a generated module
+under `_shared/` that the functions import like any other code. The entrypoint's one remaining
+export is the platform's root for the one-liner's pin.
 
-- **The build context is the repository root**, not `supabase/functions/` — `gateway-bundle-template`
-  lives outside this directory and has to be reachable. `docker build -f supabase/functions/Dockerfile .`
+- **The build context is the repository root** by convention, shared by the release workflow and
+  the dev loop: `docker build -f supabase/functions/Dockerfile .`. Nothing outside
+  `supabase/functions/` is copied any more.
 - **`.dockerignore` added at the root and in `frontend/`.** The root context now includes the whole
   repository, so this is no longer optional; `frontend/.dockerignore` excludes `node_modules`,
   where the host's tree can carry platform-specific binaries the alpine builder cannot execute. It

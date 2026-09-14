@@ -1,6 +1,6 @@
 ---
 # Docker from Ubuntu's own archive: no third-party apt source, and the versions Ubuntu's security
-# team patches. The engine builds the appliance image on the box (gateway-bundle-template/Dockerfile
+# team patches. The engine builds the appliance image on the box (appliance/Dockerfile
 # says why), so the architecture found here is the architecture the image is built for.
 
 - name: Docker engine and the Compose plugin

@@ -258,7 +258,7 @@ jobs:
       - name: Verify The Platform Playbook Parses
         run: |
           python3 -m pip install --quiet ansible-core
-          cd gateway-platform
+          cd forge/gateway-platform
           ansible-playbook --syntax-check site.yml
 
       # vite.config.js fails fast if these are unset. Docker passes them as build args; a bare

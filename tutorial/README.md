@@ -22,7 +22,8 @@ somebody else's plant in it. What that floor knew is in this file instead.
 | Grafana | `http://localhost:3002` |
 | Broker config and roles | [`../mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf), [`../mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`../mosquitto/README.md`](../mosquitto/README.md) |
 | Node-RED provisioning | [`../scripts/node-red-init.mjs`](../scripts/node-red-init.mjs) |
-| Credential tool, physical gateways | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
+| Physical gateways (the pasted command, the bundle, the forge, the playbook) | [`../docs/physical-gateways.md`](../docs/physical-gateways.md) |
+| Break-glass credential rotation | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
 
 ---
 
@@ -66,11 +67,15 @@ Still on the gateway's row: **Generate broker credential**. The password is **re
 cannot be read back afterwards, because the broker stores only a hash.
 
 This is the step that used to require a shell on the host. It goes through the same one-verb
-credential service the enrolment bundle uses, authorised by role rather than by a single-use token,
-because you are holding a session and an appliance is not.
+credential service an appliance's enrolment uses, authorised by role rather than by a single-use
+token, because you are holding a session and an appliance is not.
 
-**A physical gateway takes the other path** — the enrolment bundle, which carries its own credential
-and refuses a virtual gateway outright, since there would be no appliance to install it on. See
+**A physical gateway takes the other path.** Its row is created with *Virtual* unchecked, and the
+dashboard hands you a command to paste on a fresh Ubuntu machine (or a bundle to copy to one that
+already has Docker). Either carries a single-use claim, never a credential: the appliance installs
+itself, enrols, mints its own broker account, and from then on pulls its flow from its own
+repository in the forge and converges its operating system to a tagged platform playbook. A virtual
+gateway is refused outright, since there would be no appliance to install on. See
 [`../docs/physical-gateways.md`](../docs/physical-gateways.md).
 
 ### 5. Author a schema
@@ -494,8 +499,8 @@ what makes that binding resolvable.
 There is no script that creates gateways for you any more, and that is deliberate rather than a gap:
 a gateway row is useless without the Mosquitto account that goes with it, the account's username is
 the row's GENERATED `sparkplug_id`, and so the row has to exist before the credential can be minted.
-Step 3 and step 4 above are that order, and it is the same order for an appliance — the enrolment
-bundle just performs both on the operator's behalf.
+Step 3 and step 4 above are that order, and it is the same order for an appliance — enrolment just
+performs the second on the appliance's behalf, against the row the operator created.
 
 ---
 
@@ -504,7 +509,8 @@ bundle just performs both on the operator's behalf.
 | Item | Recommendation |
 | :--- | :--- |
 | Binary Sparkplug B encoding | Install `node-red-contrib-sparkplug-b` |
-| Per-gateway MQTT credentials | `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` for every physical gateway |
+| Per-gateway MQTT credentials | Minted by the dashboard for a host-run gateway (step 4) and by enrolment for an appliance; `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` only to rotate one by hand |
+| Appliance operating systems | Converge to the platform playbook at the tag each gateway's `platform.yml` names; bump the tag by pull request in the gateway's repository, one gateway first |
 | Node-RED admin auth | Configured by default (Supabase Auth SSO). Set `NODERED_PUBLIC_URL` to the address browsers actually use, or `/oauth/authorize` answers `invalid redirect_uri` |
 | Broker credentials | Rotate `MQTT_PASSWORD`; ingestion refuses to start without it |
 | Poll interval | Adjust the Inject node repeat interval to match your scan rate |

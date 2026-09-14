@@ -595,7 +595,7 @@ NS=ghcr.io/harri-llewelyn/acs-cymru
 V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml | head -1 \
     | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
 
-# Edge functions — context is the REPOSITORY ROOT, because gateway-bundle-template is outside supabase/functions/
+# Edge functions — context is the REPOSITORY ROOT by convention (the image copies only supabase/functions/)
 docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
 
 # Ingestion daemon — also repository root; ingestion/Dockerfile compiles sparkplug_b.proto with protoc
