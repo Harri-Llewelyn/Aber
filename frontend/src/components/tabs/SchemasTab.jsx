@@ -862,24 +862,14 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             Metric Catalog
             <HelpTip
               label="About the metric catalog"
-              text="The metrics a schema can be built from, grouped by name prefix. Search reaches a known metric without opening every group; Use on the Vocabulary page starts a new one from a standard's entry."
+              text="The metrics a schema can be built from, grouped by the first segment of their name — Axes/C/ANGLE and Axes/X/POSITION both belong to Axes, and a name with no / is listed under Ungrouped. The group is part of the name a device publishes, so it reaches MQTT, TimescaleDB and Grafana, and cannot be changed afterwards. Search reaches a known metric without opening every group; Use on the Vocabulary page starts a new one from a standard's entry."
             />
           </h3>
-          {/* Beside Add Metric because the groups start collapsed; typing auto-expands the groups
-              that matched (isGroupOpen). */}
-          <input
-            className="form-control"
-            style={{ width: '200px', marginLeft: 'auto', marginRight: '10px' }}
-            value={catalogSearch}
-            onChange={e => setCatalogSearch(e.target.value)}
-            placeholder="Search metrics…"
-            aria-label="Search the metric catalog"
-            title="Filter the catalog by metric name"
-          />
           {/* The label follows the form's state rather than naming a fixed action, so the control
               always says what pressing it will do. */}
           <button
             className={`btn btn-ghost btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
+            style={{ marginLeft: 'auto' }}
             disabled={!canManageSchema}
             aria-expanded={showAddMetric}
             onClick={() => canManageSchema && toggleAddMetric()}
@@ -895,14 +885,19 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
         {/* `.card-body`, so the inset matches the header's by rule rather than by coincidence. */}
         <div className="card-body">
-        <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: 0 }}>
-          Metrics are grouped by the first segment of their name — <span className="mono">Axes/C/ANGLE</span> and{' '}
-          <span className="mono">Axes/X/POSITION</span> both belong to <strong>Axes</strong>. The <span className="mono">/</span>{' '}
-          separator is the one Sparkplug B uses for its own names (<span className="mono">Node Control/Rebirth</span>),
-          and the one Factory+ and MTConnect use for component paths. The group is part of the name a device publishes,
-          so it is visible in MQTT, TimescaleDB and Grafana, and — like the name itself — cannot be edited afterwards.
-          Names without a separator are listed under <strong>Ungrouped</strong>.
-        </p>
+        {/* The groups start collapsed, so typing is how a known metric is reached; it auto-expands
+            the groups that matched (isGroupOpen). */}
+        <div className="filter-bar">
+          <input
+            className="form-control"
+            style={{ width: '260px' }}
+            value={catalogSearch}
+            onChange={e => setCatalogSearch(e.target.value)}
+            placeholder="Search metrics…"
+            aria-label="Search the metric catalog"
+            title="Filter the catalog by metric name"
+          />
+        </div>
         </div>{/* .card-body */}
 
         {showAddMetric && (

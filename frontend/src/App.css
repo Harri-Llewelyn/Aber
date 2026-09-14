@@ -2709,10 +2709,13 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
    `min-width: 0` on the main column is what lets it give up width: a flex item defaults to
    `min-width: auto` and refuses to shrink below its content. `align-items: flex-start` so the panel
    does not stretch to the height of a long table. */
+/* No `gap`: a gap applies between the flex items whether or not the drawer has any width, so every
+   page that renders a ContextPanel gave up 16px on its right edge permanently and ended short of
+   the pages that render no drawer at all (Archives, Directory, Vocabulary). The space belongs to
+   the open drawer, so the open drawer carries it. */
 .page-layout {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
 }
 
 .page-main {
@@ -2743,13 +2746,16 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
      someone scrolls the list beside it -- otherwise selecting row 200 shows a panel 200 rows up. */
   top: 0;
   max-height: calc(100vh - 84px);
-  transition: width 0.25s ease, visibility 0s linear 0.25s;
+  transition: width 0.25s ease, margin-left 0.25s ease, visibility 0s linear 0.25s;
 }
 
+/* The margin is the page's gutter, and it opens and closes with the drawer -- transitioned
+   alongside the width so the table beside it reflows once rather than twice. */
 .context-panel-open {
   width: var(--context-panel-width);
+  margin-left: 16px;
   visibility: visible;
-  transition: width 0.25s ease, visibility 0s;
+  transition: width 0.25s ease, margin-left 0.25s ease, visibility 0s;
 }
 
 .context-panel-inner {
@@ -3045,6 +3051,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
        the whole viewport rather than against the space left over, so vw is the wrong basis for
        its width -- but a flat 360px overflows a 320px phone. A cap, not a proportion. */
     width: min(360px, 90vw);
+    /* The desktop gutter is between two columns; as an overlay there is no column beside it. */
+    margin-left: 0;
     max-height: none;
     z-index: 90;
   }
@@ -3080,41 +3088,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* The value column holds anything the device reported, including strings nobody sized for. */
 .modal-table .telemetry-value { overflow-wrap: anywhere; }
 
-/* ===== Vocabulary Reference =====
-   The header carries the title and its explanation and nothing else. The standard pills and the
-   search box moved out to a `.filter-bar` above the card, so neither has to be wrapped around. */
-.vocab-header {
-  display: block;
-  padding-bottom: 12px;
-}
-
-.vocab-subtitle {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 3px;
-  line-height: 1.5;
-  /* Deliberately uncapped: a measure cap on two or three sentences at the top of a full-width card
-     stacks them into short lines with the rest of the row empty. */
-  max-width: none;
-  width: 100%;
-}
-
-.vocab-description {
-  padding: 12px var(--inset) 0;
-  font-size: 12px;
-  color: var(--text-muted);
-  /* Same reasoning as .vocab-subtitle: the notes are one or two lines each, not paragraphs. */
-  max-width: none;
-  width: 100%;
-}
-
-.vocab-description p { margin: 0; line-height: 1.55; max-width: none; }
-
-/* Each caveat on its own line with its point in front of it. This was one paragraph of six
-   sentences, and the two facts in it that stop someone making a mistake were mid-run. */
-.vocab-note { margin-top: 5px; }
-
-.vocab-note-label { color: var(--text-primary); font-weight: 600; }
 
 /* Cells table, the same shape Gateways and Devices use. The icon column is fixed and narrow: it
    carries a 16px glyph, and under auto layout it would take an equal share of the row. */
