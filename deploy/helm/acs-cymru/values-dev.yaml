@@ -158,3 +158,13 @@ postgresTls:
 supabaseFunctions:
   gatewayEnrolment:
     allowPlaintextInstaller: true
+
+# On here, off in values.yaml, and the dev loop is the reason. The worker is a diagnostic tool a
+# production install has no use for until it has a playback target; but with it off nothing
+# exercises the publish path at all, so the only cover it had was three unit suites over
+# `plan_playback()`. `test_playback_replay.py` replays a fixture onto the seeded Playback gateway
+# through the real worker, real broker and real daemon, and needs the Deployment running.
+# No credential is set here: one is minted and DELIVERED during that suite, which is the half
+# that has broken twice.
+playback:
+  enabled: true

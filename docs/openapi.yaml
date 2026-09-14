@@ -4398,8 +4398,9 @@ components:
           type: string
           description: |
             The target's `sparkplug_id`, and also the MQTT USERNAME the worker connects as — which
-            is what lets `pattern readwrite spBv1.0/+/+/%u/#` confine a playback to one edge node
-            with no ACL change.
+            is what confines a playback to one edge node with no policy change: the broker
+            generates a role per gateway granting `spBv1.0/+/+/<that id>/#`, and a client holding
+            it can publish nowhere else.
           example: gwy130000000000400080000
         sparkplug_group: { type: string, example: ACS-Cymru }
         device_map:

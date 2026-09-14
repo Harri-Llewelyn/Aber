@@ -345,7 +345,7 @@ class TheDefault(unittest.TestCase):
         """
         A Directory document is not a Sparkplug message and must not arrive looking like one -- and
         a separate root means mosquitto's default-deny covers it until a rule says otherwise,
-        rather than the per-gateway `spBv1.0/+/+/%u/#` pattern reaching it by accident.
+        rather than a per-gateway `spBv1.0/+/+/<id>/#` role reaching it by accident.
         """
         self.assertFalse(directory_publish.DIRECTORY_MQTT_TOPIC_PREFIX.startswith("spBv1.0"))
 

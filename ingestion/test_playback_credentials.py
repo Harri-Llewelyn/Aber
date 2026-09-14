@@ -53,6 +53,22 @@ class FileCredentials(unittest.TestCase):
         """
         self.assertEqual(playback_worker._file_credentials(self.path), {})
 
+    def test_an_empty_file_is_absent_rather_than_malformed(self):
+        """
+        THE FORM ABSENT ACTUALLY TAKES ON KUBERNETES, and the one that was not handled. The chart
+        creates `playback_credentials.json` as a key of the broker's credential Secret on every
+        install, and the playback pod projects that key whether or not anything has been delivered
+        -- so a fresh stack presents a BLANK file, never a missing one. Read as malformed it
+        produced the exact log the missing-file arm exists to prevent: an ERROR every poll,
+        forever, on a stack whose only fault was having no playback target yet. Measured on k3d,
+        where the worker's first run logged one every three seconds.
+        """
+        for blank in ("", "\n", "   \n\t"):
+            with self.subTest(blank=repr(blank)):
+                self.write(blank)
+                with self.assertNoLogs(playback_worker.logger, level="ERROR"):
+                    self.assertEqual(playback_worker._file_credentials(self.path), {})
+
     def test_a_delivered_credential_is_read(self):
         self.write(json.dumps({"gwy160000000000400080000": "delivered-password-000000"}))
         self.assertEqual(

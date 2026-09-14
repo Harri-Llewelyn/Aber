@@ -84,6 +84,17 @@ python ingestion/test_startup_healer.py
 # one. If the environment won, "issue a new credential" would be the one repair that could not fix
 # a refused playback.
 python ingestion/test_playback_credentials.py
+
+# A STORED CAPTURE REACHES THE HISTORIAN, through the real worker, broker and daemon. Needs the
+# stack up and `playback.enabled` (values-dev.yaml sets it); runs in the stack lane. The two suites
+# above are properties of the source, and this feature has twice been broken by things neither can
+# see -- a credential nothing had issued, and a worker that read its credentials once at startup.
+# Each left every page saying the right thing and no telemetry moving. So this mints the credential
+# (which is what exercises the delivery path), waits out the kubelet's Secret refresh, replays a
+# fixture, and asserts the rows arrived. THE SENTINEL METRIC IS LOAD BEARING: a name unique to the
+# run can only have come from the replay, which is what makes "it landed under the replay lane and
+# under nothing else" checkable against a live historian.
+python ingestion/test_playback_replay.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
 # Deliberately narrow: the export path needs a historian, object storage and a chunk to mean

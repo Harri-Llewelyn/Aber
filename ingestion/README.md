@@ -334,19 +334,25 @@ the fleet as idle.
 
 A capture replayed onto devices this deployment has not registered publishes under ids nobody
 enrolled — which is zero-touch onboarding working as designed. The telemetry is held and dropped
-until an `Administrator` approves it, and that is correct and stays correct. It means **"play a
-capture" has an approval step inside it** the first time a target device is used.
+until an `Administrator` approves it, and that is correct and stays correct.
+
+**Which path you take decides whether you meet it.** From the **Capture** page you do not:
+`ensure_shadow_devices()` mints each replay lane as a registered device bound to the playback
+gateway before the job is queued, so every id the replay publishes under is one this stack already
+knows and nothing is held. From the CLI you can, because `--map` takes any `dev…` id and does not
+check it against the directory — so mapping onto an id this deployment has never registered puts an
+approval step inside the playback, the first time that id is used.
 
 The way around it is not to weaken quarantine but to map onto devices that already exist, which is
-what `--map` requires anyway.
+what the page does for you.
 
 ### Marking what was replayed
 
 Replayed telemetry is written to the historian exactly like observed telemetry, because that is the
 point. `gateways.is_simulated` (`0052`) is what says otherwise, and **devices inherit it through
-`gateway_id` rather than carrying a flag of their own** — see that migration's header, and roadmap
-item 15, for why a stored device-level copy would need two triggers to maintain an invariant the
-join gives for nothing.
+`gateway_id` rather than carrying a flag of their own** — see that migration's header for why a
+stored device-level copy would need two triggers to maintain an invariant the join gives for
+nothing.
 
 It is a label, not a filter: nothing on the ingestion path branches on it. Retention, dashboards and
 reports can tell replayed data apart through a join they already make, and synthetic devices roll up
@@ -521,6 +527,22 @@ is. One says what the worker may do in the database, the other what the broker w
 | credential possession | the worker holds credentials only for gateways issued as playback targets, so it cannot authenticate as a real one |
 | the broker role | `spBv1.0/+/+/<sparkplug_id>/#` confines each credential to its own edge node, so even a compromised worker reaches one gateway |
 
+**That third tier is a generated role, not a pattern, and the difference is measurable.** The
+Dynamic Security plugin does **not** substitute `%u` in a role's topic (`mosquitto/README.md`
+records the measurement), so there is no single rule that says "your own edge node". Every gateway
+gets a role of its own — `gateway-<sparkplug_id>`, granting `publishClientSend` and
+`publishClientReceive` on `spBv1.0/+/+/<that id>/#` — and holds it alongside a shared `gateway`
+role. Confinement is per-role and per-account rather than per-pattern, which is why issuing a
+credential also generates a role and why nothing in this repository ever deletes one.
+
+**A playback worker can therefore subscribe widely and receive narrowly, and that is deliberate.**
+The shared role grants `subscribePattern spBv1.0/#` so that a client's wildcard subscription
+succeeds rather than being refused outright; what is *delivered* is decided separately by
+`publishClientReceive`, which the shared role grants only for `spBv1.0/STATE/#` and the per-gateway
+role only for that gateway's own subtree. `defaultACLAccess` denies both. So a worker holding a
+target's credential may issue `spBv1.0/#` and still be handed nothing outside that edge node — the
+confinement claim above holds, and it holds at delivery rather than at subscription.
+
 **The broker cannot say "simulated gateways", and does not need to.** A role is a list of topic
 patterns; `is_simulated` is a database predicate, and no role can consult Postgres. Per-gateway
 confinement delivers the guarantee anyway — a worker connected as
@@ -533,9 +555,16 @@ segment is a gateway's generated `sparkplug_id` and `verify_gateway_binding()` r
 **The gate is only a gate because RLS forbids the direct write.** `playback_jobs` takes no direct
 write from any application role; `start_playback_job()` is the only path and the checks live inside
 it, which is what makes "cannot target a production gateway" a property of the schema rather than of
-the client. The worker also needs a read gate for Storage: `broker_captures_read_privileged` admits
-`Administrator`, `Shopfloor_Manager` and `Auditor`, and a worker holding `Operator` would get
-`42501` — a job failing for a reason nothing surfaces.
+the client.
+
+**The worker's read of Storage is an arm of that policy, scoped to one object.**
+`broker_captures_read_privileged` admits `Administrator`, `Shopfloor_Manager` and `Auditor` — and
+`Service_Playback` holds none of those, so without an arm of its own every job would fail at its
+first read with `42501`, visible only as a failed job. The arm is
+`is_playback_caller() AND is_active_playback_capture(name)`: the capture of a job that is `RUNNING`
+right now, and nothing else. With no playback in flight the worker can reach nothing at all in the
+bucket, and it appears on the `SELECT` policy alone — a process holding broker publish rights must
+not be able to overwrite the recordings it replays.
 
 **The credential predicate is `gateway_has_broker_credential()`, not
 `gateway_holds_a_credential()`.** The latter is `g.deployment = 'remote' AND g.enrolled_at IS NOT NULL` —
@@ -612,6 +641,29 @@ second Secret: `gateway-credential`'s Role grants `patch` on exactly one Secret 
 one would widen the authority of the component that mints broker credentials. The playback pod
 mounts that one key via `items:`, so it never receives anything else the Secret holds.
 
+**Delivery is not instant on Kubernetes, and the wait is the kubelet's.** The service patches the
+Secret as it answers the request, but the worker reads a *projected Secret volume*, and those are
+refreshed on the kubelet's sync period — a minute by default, plus its cache TTL. Measured on k3d:
+the Secret held the new password while the pod's copy was still empty, and the worker logged the
+gain about a minute after the mint. So a credential issued from the page reaches the worker within
+roughly a minute rather than "within a few seconds", and a playback started inside that window is
+refused by the dialog for a target the platform has already provisioned.
+
+**On a re-issue nothing can tell you when it has landed**, which is worth stating because it is the
+ordinary case: the broker holds one password per gateway, so every mint after the first *replaces*
+one. `playback_report_credentials()` carries edge-node ids and nothing else, so the reported set is
+identical before and after a rotation — the worker goes on reporting the target while still holding
+the previous password, and the only symptom is a job that fails at CONNACK with `rc=5`. Waiting out
+the sync period is the whole remedy; `test_playback_replay.py` does exactly that rather than
+trusting the report, and says so.
+
+**The empty file is the normal state and must not read as a fault.** The chart creates
+`playback_credentials.json` on every install and the pod projects it whether or not anything has
+been delivered, so a stack with no playback target presents a *blank* file rather than a missing
+one. `_file_credentials()` treats both as "nothing delivered": read as malformed, the blank file
+produced an `ERROR` every three-second poll, forever, on a stack whose only fault was having no
+playback target yet.
+
 ### The Playback gateway, and its shadow devices
 
 [`0060`](../supabase/migrations/archive/0060_playback_gateway_and_shadow_devices.sql) seeds a dedicated
@@ -679,6 +731,37 @@ is_simulated`, so choosing Remote or Host in the Type control sets `is_simulated
 save comes back a CHECK violation. Two of that control's three options are dead ends on this one
 row. Deletion is deliberately *not* guarded — `0060` re-seeds the row on the next boot, so a delete
 repairs itself where an archive survives one.
+
+### What a failed playback looks like, and the one thing it cannot show
+
+Every refusal the worker can make is written to `playback_jobs.error` and shown verbatim on the
+Capture page, because the sentence the gate or the broker produced is the one an operator can act
+on. The job is `FAILED` and the banner carries the reason: no credential held for the target, the
+capture unreadable or not JSON, a device in the file with no mapping, a rebasing the daemon would
+reject, a broker that refused the socket — and, the one that used to be silent, a CONNACK that
+never came or came back non-zero. `rc=4` and `rc=5` are named apart from the rest, because they are
+the two an operator fixes by re-issuing the credential rather than by looking at the broker.
+
+**A playback the operator stops is `CANCELLED`, not `COMPLETED`** (`0107`). `request_playback_stop()`
+can only set the flag while a job is running, and the worker reports the count it reached with no
+error, so the end state used to be indistinguishable from a capture published in full. The status
+now reads the flag, and an error still outranks it: a job that was asked to stop *and* failed is a
+failure.
+
+**Past the CONNACK there is nothing to observe, and that is a property of Sparkplug rather than of
+this worker.** A publish the broker refuses is dropped with no PUBACK at QoS 0, so a job whose
+topics were wrong would count every message as sent and report success having moved nothing. The
+answer is not an instrument — there is none to build at QoS 0 — it is that the topics cannot be
+wrong: `plan_playback()` rewrites every one onto the edge node the worker authenticated as, and
+`test_playback_replay.py` replays a fixture on a live stack and asserts the rows arrived under the
+replay lane and under no other asset. That check is the observation the protocol will not give.
+
+**The gap that remains is the sanity window.** A capture carrying timestamps the daemon will drop —
+a stale reading, a device clock skewed against the recorder's, a hand edit — is refused by
+`capture.py play` unless `--allow-unsane` is passed, but the worker only logs a warning and
+publishes anyway. Those metrics are counted by the daemon and discarded, so the job reports success
+and the historian stays empty, which is the one failure shape a reader of this page cannot
+distinguish from a working replay.
 
 ### What the page adds that the CLI cannot, and two things neither does
 

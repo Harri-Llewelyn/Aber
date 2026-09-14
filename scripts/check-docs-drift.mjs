@@ -550,6 +550,9 @@ function edgeFunctionNames() {
     // that column; the writes to the seven health columns are the baseline's.
     'public.ingest_record_gateway_health': '0100 adds the FLOW_DEPLOYED row on a changed flow hash; the baseline holds the health writes alone',
     'public.publish_schema_version': '0087 narrows the gate to schema:manage; the baseline holds the pair',
+    // 0107 reads `stop_requested` so a playback the operator interrupted is CANCELLED rather than
+    // COMPLETED; the baseline decides on the error alone and cannot tell the two apart.
+    'public.playback_finish': '0107 reads stop_requested and records an interrupted playback as CANCELLED; the baseline holds the error-only form',
     // 0088 adds the queue's second lane and the functions that admit it in the same file; 0090
     // replaces the withdrawn schema lane with the asset and link lanes.
     'public.may_decide_proposal': '0090 replaces the withdrawn schema lane with cells, gateways and the three *_links lanes, all resolving authority rather than role names; 0088 holds the form that introduced it',

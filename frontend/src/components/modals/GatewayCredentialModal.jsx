@@ -226,9 +226,12 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                 </strong>
                 <div style={{ color: 'var(--text-muted)', marginTop: '6px' }}>
                   Nothing further to do — no <span className="mono">.env</span> edit and no restart.
-                  The worker picks this up within a few seconds and logs{' '}
-                  <span className="mono">Playback credentials changed</span>. Copy the password above
-                  only if you want it for something else; it is not shown again.
+                  The worker reads this from a mounted Secret, which Kubernetes refreshes on its own
+                  schedule, so allow about a minute before starting a playback; the worker logs{' '}
+                  <span className="mono">Playback credentials changed</span> when it has it. Until
+                  then the playback dialog still reports this gateway as one it cannot publish as.
+                  Copy the password above only if you want it for something else; it is not shown
+                  again.
                 </div>
               </div>
             ) : (

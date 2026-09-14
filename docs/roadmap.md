@@ -18,8 +18,7 @@ moves out, and the table below says where it went.
 `§[0-9]` in this file.
 
 **Ordering.** 1 is the platform's own: the rehearsal that turns the backup into a capability.
-2 reviews playback before the chain is folded, because a finding there may change the schema.
-3 audits the documentation, code and comments once the code has stopped moving. 4 is last by
+2 audits the documentation, code and comments once the code has stopped moving. 3 is last by
 rule: it folds the migration chain, so every entry that changes the schema must have landed
 before it.
 
@@ -50,6 +49,7 @@ before it.
 | Cells become work centers | Answered, not built: a cell is itself one of ISA-95's work center types, so the standard's name is given where the hierarchy is named rather than replacing the word. [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) records the decision; each page's help Summary names its ISA-95 level |
 | The transport between services | Built for the broker and both databases: [`deploy/k8s/README.md`](../deploy/k8s/README.md#mqtts-on-8883) (in-cluster clients on 8883 by default, 1883 withdrawing to loopback) and [`deploy/k8s/README.md`](../deploy/k8s/README.md#tls-to-the-databases) (`postgresTls`: `verify-full` everywhere, `hostssl`-only pg_hba, Realtime's tenant link as the one named exception). HTTP between the gateway and its upstreams stays plaintext: none of them terminates TLS itself, so that hop is a TLS sidecar per pod, which is a service mesh, and a service mesh is the complete answer. Answered, not built. Gateways hold no client certificate: the dynsec password and the pinned root already give identity, confinement and a revocation that disconnects |
 | The appliance itself, and the code somebody wants to run on it | Built across five pull requests, and its four subjects went four ways. **The one-liner and the CA:** [`supabase/README.md`](../supabase/README.md#the-one-liner-0105) and [`docs/physical-gateways.md`](physical-gateways.md#on-the-appliance-the-command), which now also carries the cloud-init seed for a plant that images its own appliances. **The operating system and the gateway's own playbook:** [`forge/gateway-platform/README.md`](../forge/gateway-platform/README.md), with the time source answered in four parts there and in [§8](physical-gateways.md#the-clock-is-part-of-certificate-verification); CI runs the playbook twice in a container and the converge script has a suite of its own. **The forge as the appliance sees it, and the required status check:** [`supabase/README.md`](../supabase/README.md#the-forge-checks-a-flow-before-it-is-merged) — built without the Actions runner the entry assumed it needed, because branch protection takes a commit status the platform posts on a webhook it was already receiving. **Custom code:** [`forge/gateway-custom-example/README.md`](../forge/gateway-custom-example/README.md) and [`supabase/README.md`](../supabase/README.md#a-gateway-that-needs-code-of-its-own-0106) for the template repository, the vars a gateway's playbook is handed, and the two drawer rows. **Revocation and rotation:** [`docs/physical-gateways.md` §8](physical-gateways.md#8-certificates-and-the-two-clocks-they-run-on) — the root now rides on `main` of the platform repository rather than under a tag, the appliance refuses a bundle that would cut it off, and the page says which gateways are still holding an older root. The rebuilt-appliance answer is in [§6](physical-gateways.md#a-rebuilt-appliance-is-a-re-issue-and-keeps-its-repository). Three could-haves left as feature requests: a Gitea Actions runner for CI on the platform repository ([#211](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/211)), a time source on the platform for a plant with no route to NTP ([#212](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/212)), and minting the `#cloud-config` seed beside the command ([#213](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/213)) |
+| The playback feature is reviewed end to end | Reviewed against a live stack rather than read. The worker now runs in the k3d loop (`playback.enabled`, `values-dev.yaml`), so the feature is exercised by something other than three unit suites, and [`ingestion/test_playback_replay.py`](../ingestion/test_playback_replay.py) mints the credential, waits out the kubelet's Secret refresh, replays a fixture and asserts the rows arrived **under the replay lane and under no other asset** — the observation QoS 0 will not give, since a publish the broker refuses is dropped with no PUBACK. Playback also gained its NetworkPolicy edges and an entry in the policy's component map, so it is confined rather than merely unmentioned. **Three defects fixed.** A blank delivery file was read as malformed, logging an `ERROR` every three seconds *forever* on any stack with no playback target — the chart creates that Secret key empty, so on Kubernetes "absent" is always blank, which is the one form the code did not handle. A playback the operator stopped was recorded `COMPLETED`, indistinguishable from one published in full (`0107`; [`supabase/README.md`](../supabase/README.md#capture-and-playback-orchestration-0055-0056-0057-0058-0060)). And the confinement claims still described the pre-Dynamic-Security ACL file, where `%u` was substituted and one pattern confined every gateway. **The measured facts** are in [`ingestion/README.md`](../ingestion/README.md#broker-capture-and-playback): a delivered credential takes about a kubelet sync period to reach the worker, a `DBIRTH` announces a device and writes no telemetry of its own, the per-gateway role confines *delivery* rather than subscription, and the page path meets no quarantine because the lanes are minted registered. Two findings left as issues: a capture whose timestamps fall outside the daemon's sanity window replays "successfully" and writes nothing ([#216](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/216)), and nothing can tell an operator when a *re-issued* credential has reached the worker, because the status row carries ids and a rotation does not change them ([#217](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/217)) |
 | Retiring the flow-backup bucket | Removed: the `gateway-backups` bucket, its policies, its chart values and its policy test are gone, and no install had stored anything in it. A gateway's flow lives in its repository in the forge ([`docs/physical-gateways.md`](physical-gateways.md)); the repository pointer stays derived (`gateway-<sparkplug_id>` in the organisation `constants.js` names), a column is earned only if a gateway ever needs re-pointing. Archiving a gateway does not yet archive its repository: a could-have, reopened as [#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197), which also carries the rule that deleting one is a decision, never a cascade |
 
 ---
@@ -92,48 +92,7 @@ retention prune removes exactly the directory the row named and nothing beside i
 
 ---
 
-## 2 · The playback feature is reviewed end to end
-
-**Builds on:** [`playback_worker.py`](../ingestion/playback_worker.py) · [`capture.py`](../ingestion/capture.py) ·
-[`capture_worker.py`](../ingestion/capture_worker.py) · [`playback.yaml`](../deploy/helm/acs-cymru/templates/apps/playback.yaml) ·
-the Capture page and [its help](../frontend/src/help/capture.md) ·
-[`ingestion/README.md`](../ingestion/README.md#broker-capture-and-playback) ·
-[`supabase/README.md`](../supabase/README.md#capture-and-playback-orchestration-0055-0056-0057-0058-0060)
-
-**Built:** recording from the daemon into `broker-captures`; the job queue and `Service_Playback`;
-the seeded Playback gateway with shadow devices as lanes; credential delivery rather than minting;
-identity rewriting and timestamp rebasing; the Capture page; and three unit suites
-(`test_capture_playback.py`, `test_capture_worker.py`, `test_playback_credentials.py`).
-
-**Why a review rather than a fix list.** The feature was built across a dozen migrations and three
-incidents (the bucket that was never created, the credential nothing had issued, two publishers on
-one edge node), each fixed where it surfaced. Nothing has since walked the whole path from "Start a
-recording" to a replayed frame in the historian and asked whether every step is still the design.
-Two gaps are already known. The worker is off by default and nothing turns it on: not CI, not the
-k3d loop, not the stack lane, so the only exercise it gets is the three unit suites. And it has no
-NetworkPolicy edge and sits outside the policy's component map, so with policy on it is neither
-allowed nor denied: it can reach everything.
-
-**The review covers:** the end-to-end path on the k3d cluster with the worker on, including
-in-cluster broker TLS; the confinement claims (the target's own account, no wildcard write, shadow
-devices as lanes) re-checked against the Dynamic Security roles rather than the ACL file they were
-written against; quarantine's approval step inside a first playback; what the Capture page shows
-when a job fails past CONNECT, since QoS 0 leaves a publisher nothing to observe; the RLS and role
-boundaries of `Service_Playback` and the capture bucket; and the worker's own comments and README
-sections, which predate the comment rule in `CONTRIBUTING.md`. A finding that is one change is
-fixed here; the rest become issues.
-
-**Must not touch:** the worker never mints a credential (delivery is the platform's; minting stays
-human and audited); a capture cannot be played back as itself; the Playback gateway stays visible;
-a stand-down NCMD stays rejected.
-
-**Done means:** a finding per step of the path, each confirmed, fixed or filed; the worker runs in
-the k3d loop and one conformance check replays a fixture through it; playback has a policy edge and
-a component entry; and the feature's README sections describe what is built.
-
----
-
-## 3 · The documentation, code and comments are audited against the codebase
+## 2 · The documentation, code and comments are audited against the codebase
 
 **Builds on:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) (the comment rule, and where argument and
 history go) · `scripts/check-docs-drift.mjs` · `scripts/check-mirror-drift.mjs` ·
@@ -151,13 +110,19 @@ the Python suites, the rest of `ingestion.py`, the i3X server, the capture, play
 modules, the broker and setup scripts, and the Helm templates, whose comment blocks ship in
 every release's Secret and have brought it within two percent of Helm's 1 MiB ceiling (a CI step
 estimates it; revision 19 on the dev cluster was refused on 2026-09-13). Rules and tests guarding
-what nothing renders, which the Site Map work found in the stylesheet. And claims the checker
-could verify but does not, which is how the other kinds return.
+what nothing renders, which the Site Map work found in the stylesheet. Comments that are
+internally coherent and false, which the playback review found in the worker: a docstring
+reasoning at length about a credential file the chart never leaves absent, while the state it
+does leave — present and empty — went unhandled and logged an error every three seconds forever.
+And claims the checker could verify but does not, which is how the other kinds return.
 
 **Decided.** One sweep per surface, not one pass over everything, and a surface is done when its
 non-comment lines are unchanged (AST minus docstrings for Python, data equality for YAML, stripped
-text for the rest) and its prose names nothing that is not in the tree. Argument and history move
-to the component README or `docs/incidents.md`; they are not deleted. Nothing cites a roadmap
+text for the rest) and its prose names nothing that is not in the tree. **That comparison proves a
+sweep changed no behaviour and says nothing about whether the surviving comment is true**, so a
+comment asserting a runtime state is read against whatever produces that state — the chart, the
+migration, the deployment target — rather than left shorter and still wrong. Argument and history
+move to the component README or `docs/incidents.md`; they are not deleted. Nothing cites a roadmap
 number. Every claim found that the checker could verify gets a check, so the audit leaves a guard
 rather than a snapshot. The files under `deploy/helm/acs-cymru/files/` are mirrors: the source is
 edited and the sync script run.
@@ -172,7 +137,7 @@ method so the next one starts from it.
 
 ---
 
-## 4 · The migration chain folds back into the baseline
+## 3 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)
