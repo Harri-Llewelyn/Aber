@@ -12,8 +12,12 @@
  * on re-enrolment, not recreated.
  *
  * The private key is never seen here: the appliance generates its keypair in bootstrap.mjs and
- * sends the public half, registered read-only so an appliance cannot author the flow it will be
- * asked to deploy.
+ * sends the public half, registered read-write on the gateway's own repository and nowhere else.
+ * A writable key on a repository whose `main` admits no deploy key lets an appliance REPORT and
+ * never DEPLOY: `main` is protected with pushes disabled and deploy keys not whitelisted, the
+ * `appliance` branch admits deploy keys alone and blocks force-push, and a `**` rule closes every
+ * other branch to them. Measured against gitea/gitea:1.27.3: the key can also push to the wiki,
+ * which no rule covers; README.md records that under accepted risks.
  *
  * Failure here is non-fatal: by the time this runs the token is spent and the broker credential
  * exists, and telemetry needs nothing from the forge. A failure is logged loudly, `repository`
@@ -95,6 +99,23 @@ export function repositoryNameFor(sparkplugId: string): string {
 
 /** The inverse: a gateway's repository, and the sparkplug_id in its name. Must agree with the above. */
 export const GATEWAY_REPOSITORY = /^gateway-(gwy[0-9a-f]{21})$/;
+
+/**
+ * The branch the appliance writes and nobody else does: what is running, beside `main`, which is
+ * what was approved. Must agree with REPORT_BRANCH in gateway-bundle-template/flow-sync.mjs and
+ * with the compare link in frontend/src/components/common/GatewayRepositoryPanel.jsx.
+ */
+export const APPLIANCE_BRANCH = "appliance";
+
+/**
+ * The rule that closes every branch but the two named ones to deploy keys. `**` and not `*`:
+ * Gitea matches rules with a glob whose `*` stops at a slash, so `*` left `feature/x` open
+ * (measured).
+ */
+const CATCH_ALL_RULE = "**";
+
+/** The pushes the hook delivers: the two branches forge-events records, nothing else. */
+const WEBHOOK_BRANCH_FILTER = `{main,${APPLIANCE_BRANCH}}`;
 
 /**
  * The public half of an OpenSSH key, or null. Shape-checked and confined to the two algorithms
@@ -309,9 +330,12 @@ async function seedIssueTemplate(cfg: ForgeConfig, name: string): Promise<void> 
  * `enable_push: false` is what makes "deploy only what is committed" mean "deploy only what was
  * reviewed"; merging stays allowed to anyone with write once approvals are met, so a manager can
  * merge after an administrator approves. `dismiss_stale_approvals` means a change pushed after
- * approval needs approving again. Applied once: an existing protection is left as an administrator
- * may have tuned it. Returns whether it was applied now. `seedTemplate` is for a gateway's
- * repository; a playbook made by hand is protected the same way and is not a gateway's incident log.
+ * approval needs approving again. An existing protection is left as an administrator may have
+ * tuned it, except for the two fields that keep a deploy key off `main`: `enable_push` and
+ * `push_whitelist_deploy_keys` are closed again if either is found open, because the appliance's
+ * key is writable and this rule is what makes it a reporting key. Returns whether anything was
+ * changed. `seedTemplate` is for a gateway's repository; a playbook made by hand is protected the
+ * same way and is not a gateway's incident log.
  */
 export async function ensureBranchProtection(
   cfg: ForgeConfig,
@@ -319,7 +343,17 @@ export async function ensureBranchProtection(
   options: { seedTemplate: boolean } = { seedTemplate: true },
 ): Promise<boolean> {
   const existing = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`);
-  if (existing.ok) return false;
+  if (existing.ok) {
+    const rule = await existing.json() as { enable_push?: boolean; push_whitelist_deploy_keys?: boolean };
+    if (!rule.enable_push && !rule.push_whitelist_deploy_keys) return false;
+    const closed = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`, {
+      enable_push: false,
+      push_whitelist_deploy_keys: false,
+    });
+    if (!closed.ok) throw await refused(`could not close 'main' on '${name}' to pushes`, closed);
+    console.warn(`forge: 'main' on '${name}' admitted pushes; closed again`);
+    return true;
+  }
   if (existing.status !== 404) {
     throw await refused(`could not read the branch protection on '${name}'`, existing);
   }
@@ -341,33 +375,142 @@ export async function ensureBranchProtection(
 }
 
 /**
- * Attach the appliance's public key to its repository, read-only. Titled by sparkplug_id so
- * revocation has an obvious target.
+ * The two rules beside `main` on a gateway's repository. `appliance`: pushes admitted from deploy
+ * keys and from nobody else, force-push blocked, so the branch is append-only and written only by
+ * the appliance (the machine account's contents API answers 403 on it; measured). `**`: every
+ * other branch closed to deploy keys and open to both teams, which is what an appliance holding a
+ * writable key must never widen. Both may be created before the branch exists. A found rule that
+ * disagrees on the fields that matter is patched. Returns whether anything was changed.
  */
-async function ensureDeployKey(
+export async function ensureApplianceProtection(cfg: ForgeConfig, name: string): Promise<boolean> {
+  const rules = [
+    {
+      rule: APPLIANCE_BRANCH,
+      wanted: {
+        enable_push: true,
+        enable_push_whitelist: true,
+        push_whitelist_deploy_keys: true,
+        push_whitelist_usernames: [],
+        push_whitelist_teams: [],
+        enable_force_push: false,
+      },
+      differs: (r: Record<string, unknown>) =>
+        r.enable_push !== true || r.enable_push_whitelist !== true || r.push_whitelist_deploy_keys !== true ||
+        r.enable_force_push === true ||
+        ((r.push_whitelist_usernames as string[] | undefined) ?? []).length !== 0 ||
+        ((r.push_whitelist_teams as string[] | undefined) ?? []).length !== 0,
+    },
+    {
+      rule: CATCH_ALL_RULE,
+      wanted: {
+        enable_push: true,
+        enable_push_whitelist: true,
+        push_whitelist_deploy_keys: false,
+        push_whitelist_teams: [FORGE_TEAMS.Administrator, FORGE_TEAMS.Shopfloor_Manager],
+        // Rules are matched by ascending priority and the first match decides, so the catch-all
+        // sits behind every named rule whatever order they were created in.
+        priority: 1000,
+      },
+      differs: (r: Record<string, unknown>) =>
+        r.enable_push !== true || r.enable_push_whitelist !== true || r.push_whitelist_deploy_keys === true,
+    },
+  ];
+
+  let changed = false;
+  for (const { rule, wanted, differs } of rules) {
+    const path = `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/${encodeURIComponent(rule)}`;
+    const existing = await forgeApi(cfg, "GET", path);
+    if (existing.ok) {
+      if (!differs(await existing.json() as Record<string, unknown>)) continue;
+      const patched = await forgeApi(cfg, "PATCH", path, wanted);
+      if (!patched.ok) throw await refused(`could not correct the '${rule}' rule on '${name}'`, patched);
+      console.warn(`forge: the '${rule}' rule on '${name}' disagreed with the policy; corrected`);
+      changed = true;
+      continue;
+    }
+    if (existing.status !== 404) throw await refused(`could not read the '${rule}' rule on '${name}'`, existing);
+    const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections`, {
+      branch_name: rule,
+      ...wanted,
+    });
+    if (!created.ok) throw await refused(`could not create the '${rule}' rule on '${name}'`, created);
+    console.log(`forge: '${rule}' on '${name}' is protected`);
+    changed = true;
+  }
+  return changed;
+}
+
+interface DeployKey {
+  id: number;
+  key: string;
+  title: string;
+  read_only: boolean;
+}
+
+/** The algorithm and material of a public key, without its comment: what Gitea compares on. */
+function keyMaterial(publicKey: string): string {
+  return publicKey.trim().split(/\s+/).slice(0, 2).join(" ");
+}
+
+export async function listDeployKeys(cfg: ForgeConfig, repo: string): Promise<DeployKey[]> {
+  const listed = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${repo}/keys?limit=50`);
+  if (!listed.ok) throw await refused(`could not list the deploy keys on '${repo}'`, listed);
+  return await listed.json() as DeployKey[];
+}
+
+export async function deleteDeployKey(cfg: ForgeConfig, repo: string, key: DeployKey): Promise<void> {
+  const deleted = await forgeApi(cfg, "DELETE", `/repos/${FORGE_ORGANISATION}/${repo}/keys/${key.id}`);
+  if (!deleted.ok && deleted.status !== 404) {
+    throw await refused(`could not remove deploy key '${key.title}' from '${repo}'`, deleted);
+  }
+}
+
+/**
+ * Register a public key on a repository in the wanted mode: kept if it is already there in that
+ * mode, re-registered if it is there in the other (Gitea has no edit for a deploy key), added
+ * otherwise. Titled by sparkplug_id so revocation has an obvious target. Returns what happened.
+ */
+export async function ensureDeployKey(
+  cfg: ForgeConfig,
+  repo: string,
+  sparkplugId: string,
+  publicKey: string,
+  readOnly: boolean,
+): Promise<"kept" | "registered" | "rewritten"> {
+  const material = keyMaterial(publicKey);
+  const found = (await listDeployKeys(cfg, repo)).find((k) => keyMaterial(k.key) === material);
+  if (found && found.read_only === readOnly) return "kept";
+  if (found) await deleteDeployKey(cfg, repo, found);
+
+  const response = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${repo}/keys`, {
+    title: `gateway ${sparkplugId}`,
+    key: publicKey,
+    read_only: readOnly,
+  });
+  if (!response.ok) throw await refused(`could not register the deploy key on '${repo}'`, response);
+  console.log(`forge: ${sparkplugId}'s key is ${readOnly ? "read-only" : "read-write"} on '${repo}'`);
+  return found ? "rewritten" : "registered";
+}
+
+/**
+ * The appliance's own key on its own repository, read-write, and no other key beside it: a
+ * re-enrolment is a replaced appliance, and the key the old one held would otherwise stay able to
+ * write the `appliance` branch. Every other key on the repository is removed first, whoever added
+ * it: Gitea refuses a second key under one title (measured), and the title is the sparkplug id.
+ */
+async function ensureOnlyDeployKey(
   cfg: ForgeConfig,
   repo: string,
   sparkplugId: string,
   publicKey: string,
 ): Promise<void> {
-  const response = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${repo}/keys`, {
-    title: `gateway ${sparkplugId}`,
-    key: publicKey,
-    // NEVER false. See the header: a writable key lets an appliance author what it will later be
-    // asked to deploy.
-    read_only: true,
-  });
-
-  if (response.ok) return;
-
-  // 422 is "this key is already registered", which is what re-enrolling an appliance that kept its
-  // /data volume looks like. That is a success: the key it holds is the key the repository trusts.
-  if (response.status === 422) {
-    console.log(`deploy key for ${sparkplugId} was already registered on '${repo}'`);
-    return;
+  const material = keyMaterial(publicKey);
+  for (const key of await listDeployKeys(cfg, repo)) {
+    if (keyMaterial(key.key) === material) continue;
+    await deleteDeployKey(cfg, repo, key);
+    console.log(`forge: removed deploy key '${key.title}' from '${repo}'; a re-enrolment replaces the appliance`);
   }
-
-  throw await refused(`could not register the deploy key on '${repo}'`, response);
+  await ensureDeployKey(cfg, repo, sparkplugId, publicKey, false);
 }
 
 /**
@@ -412,9 +555,10 @@ async function ensureWikiHome(
 /**
  * Register the push webhook on the repository, once. One hook per repository rather than one on the
  * organisation, because only a gateway's repository has a gateway row to record on. Found again by
- * URL on re-enrolment and by the sweep. The secret is the one forge-events verifies with.
- * `branch_filter: main` so pushes to a proposal branch are not delivered. Returns whether it was
- * registered now.
+ * URL on re-enrolment and by the sweep. The secret is the one forge-events verifies with. The
+ * branch filter admits `main` and `appliance`, so a push to a proposal branch is not delivered; a
+ * found hook with another filter (one registered before the appliance branch existed) is patched.
+ * Returns whether anything was changed.
  */
 export async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<boolean> {
   if (!cfg.webhookUrl) {
@@ -423,14 +567,23 @@ export async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<boo
   }
   const listed = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/hooks`);
   if (!listed.ok) throw await refused(`could not list the hooks on '${name}'`, listed);
-  const hooks = await listed.json() as { id: number; config?: { url?: string } }[];
-  if (hooks.some((h) => h.config?.url === cfg.webhookUrl)) return false;
+  const hooks = await listed.json() as { id: number; branch_filter?: string; config?: { url?: string } }[];
+  const ours = hooks.find((h) => h.config?.url === cfg.webhookUrl);
+  if (ours) {
+    if (ours.branch_filter === WEBHOOK_BRANCH_FILTER) return false;
+    const patched = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${name}/hooks/${ours.id}`, {
+      branch_filter: WEBHOOK_BRANCH_FILTER,
+    });
+    if (!patched.ok) throw await refused(`could not widen the push webhook on '${name}' to the appliance branch`, patched);
+    console.log(`forge: the push webhook on '${name}' now delivers ${WEBHOOK_BRANCH_FILTER}`);
+    return true;
+  }
 
   const created = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${name}/hooks`, {
     type: "gitea",
     active: true,
     events: ["push"],
-    branch_filter: "main",
+    branch_filter: WEBHOOK_BRANCH_FILTER,
     config: { url: cfg.webhookUrl, content_type: "json", secret: cfg.webhookSecret },
   });
   if (!created.ok) throw await refused(`could not register the push webhook on '${name}'`, created);
@@ -450,8 +603,11 @@ export async function provisionGatewayRepository(
     await ensureOrganisation(cfg);
     const repo = await ensureRepository(cfg, name, gatewayName);
     await ensureBranchProtection(cfg, name);
-    await ensureDeployKey(cfg, name, sparkplugId, publicKey);
-    console.log(`forge: ${sparkplugId} reads ${repo.full_name} over ${repo.ssh_url}`);
+    // BEFORE THE KEY: a writable key on a repository whose other branches are still open would be
+    // a key that can push anywhere for the moment between the two calls.
+    await ensureApplianceProtection(cfg, name);
+    await ensureOnlyDeployKey(cfg, name, sparkplugId, publicKey);
+    console.log(`forge: ${sparkplugId} pulls ${repo.full_name} over ${repo.ssh_url} and reports on '${APPLIANCE_BRANCH}'`);
     // After the key, and not on the path to `return null`: a wiki the forge could not seed costs a
     // log line, never the repository the appliance is about to clone.
     try {

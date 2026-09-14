@@ -18,11 +18,11 @@ moves out, and the table below says where it went.
 `§[0-9]` in this file.
 
 **Ordering.** 1 is the platform's own: the rehearsal that turns the backup into a capability.
-2 and 3 are the edge chain, in dependency order: 2 makes a gateway's flow reviewable, 3 makes the
-appliance a managed artefact and shares 2's puller. 4 reviews playback before the chain is folded,
-because a finding there may change the schema. 5 audits the documentation, code and comments once
-the code has stopped moving. 6 is last by rule: it folds the migration chain, so every entry that
-changes the schema must have landed before it.
+2 is the edge chain: the appliance as a managed artefact, on the forge, puller and appliance
+branch that have shipped. 3 reviews playback before the chain is folded, because a finding there
+may change the schema. 4 audits the documentation, code and comments once the code has stopped
+moving. 5 is last by rule: it folds the migration chain, so every entry that changes the schema
+must have landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -33,10 +33,11 @@ changes the schema must have landed before it.
 | The approvals queue (`0086`–`0091`) | [`supabase/README.md`](../supabase/README.md#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-0086) |
 | The forge's door and membership (`0094`) | [`supabase/README.md`](../supabase/README.md#the-forges-door-and-the-room-behind-it-0094) |
 | The appliance puller, deploy keys and host-key distribution | [`docs/physical-gateways.md`](physical-gateways.md) |
+| GitOps edge sync (`0094`, `0095`, `0099`, `0104`) | [`supabase/README.md`](../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-0104) for the appliance branch, the writable key and the three rules that confine it, and the sweep's key reconcile; [`docs/physical-gateways.md`](physical-gateways.md#what-the-appliance-reports-back) for the operator's view. The one bullet not built, a required status check refusing `flows_cred.json` by shape, needs the runner and moved into *The appliance itself*. Two small things stay unbuilt and are recorded in the README section: a failed webhook delivery is visible only on the hook's page in the forge, and a repository from before `0095` gets no incident template from the sweep |
 | Contextual help | [`frontend/README.md`](../frontend/README.md#contextual-help) |
 | The Directory's MQTT half | [`ingestion/README.md`](../ingestion/README.md#the-directory-on-mqtt) |
 | The log store, structured logging and the drop drill-down | [`ingestion/README.md`](../ingestion/README.md#log-fields), `loki/loki.yaml`, `deploy/helm/acs-cymru/templates/obs/alloy.yaml` |
-| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 3 |
+| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 2 |
 | The broker's Dynamic Security plugin (`0102`) | [`mosquitto/README.md`](../mosquitto/README.md) for the policy, the measured facts and the boot reconcile; [`supabase/README.md`](../supabase/README.md#the-access-control-page-states-what-is-outstanding) for the live Broker column, the orphaned-accounts list and a revocation that disconnects |
 | Kong → Envoy, and the new API key translation | [`docs/gateway.md`](gateway.md); Kong is deleted from the chart, not kept as a revert path, because a gateway that cannot match the `sb_*` keys cannot serve any caller |
 | Moving off Supabase's legacy API keys | Shipped, as a code change rather than the operational switch the entry described: with no deployment before 1.0 there was no unknown caller to watch for, so the gateway admits only the `sb_publishable_*` / `sb_secret_*` pair, every consumer presents it, the switch and its two instruments are gone, and `validate.py` proves a JWT presented as an apikey is refused. [`docs/gateway.md`](gateway.md) |
@@ -91,82 +92,7 @@ retention prune removes exactly the directory the row named and nothing beside i
 
 ---
 
-## 2 · GitOps edge sync
-
-**Builds on:** the forge (`gitea`, `gitea-init.sh`), one private repository per enrolled gateway
-in the `gateways` organisation ([`_shared/forge.ts`](../supabase/functions/_shared/forge.ts)) ·
-the per-gateway deploy key and the host key delivered at enrolment
-([`enroll-gateway`](../supabase/functions/enroll-gateway/index.ts)) · the puller
-[`flow-sync.mjs`](../gateway-bundle-template/flow-sync.mjs) · the forge's door and
-[`forge-membership`](../supabase/functions/forge-membership/index.ts) (`0094`) · the push webhook and
-[`forge-events`](../supabase/functions/forge-events/index.ts) (`0095`) · the flow hash in the
-heartbeat · issue [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
-
-**What is built** is documented in [`docs/physical-gateways.md`](physical-gateways.md) and
-[The forge's door](../supabase/README.md#the-forges-door-and-the-room-behind-it-0094): an
-appliance clones its own repository over SSH with a deploy key, verifies the forge against the
-host key it received at enrolment, deploys `flows.json` and reloads Node-RED when the tracked branch
-advances; it refuses a rewritten history, an unverifiable forge, and a commit whose `mqtt-broker`
-node id is not a key in `flows_cred.json`. Administrators and managers sign in to the forge with
-their dashboard identity; `main` is protected on every repository with one approval required from
-`administrators`. The proposal lane through an edge function was built and retired the same day: a
-pull request opened in the forge under the author's own name is the better record, and the dashboard
-links the repository, its issues and its wiki instead. Each repository comes furnished: a wiki Home
-page naming the gateway (the unreviewed half, by design), an *Incident* issue template, and a push
-webhook that records the head of `main` on the gateway row so a merge shows in the drawer at once
-([What a gateway's repository comes with](../supabase/README.md#what-a-gateways-repository-comes-with-and-how-the-forge-reports-back-0095)).
-Both teams may create repositories in the organisation. Gitea's own sign-out is the platform's.
-A sweep on a timer (`0099`) reconciles team membership with `user_roles`, re-registers a missing
-push webhook, and protects `main` on any repository made by hand in the organisation. The forge's
-volume, host keys included, is in every backup the backup service takes (`0101`). A flow the
-appliance deploys is a `FLOW_DEPLOYED` row in the digital thread (`0100`), written by the daemon
-from the heartbeat as `ingestion`; the puller never touches the database, so no fourth actor kind.
-
-**What remains.**
-
-- **The appliance reports on a branch of its own.** `main` is what was approved; a second
-  branch, `appliance`, is what is running, written only by the appliance and read by people in
-  the forge rather than by a shell on the box. The pusher commits an allowlist and never widens
-  it: `flows.json`, the deployed record (the platform tag it converged to, the commit of its own
-  repository, the digest of any custom container), and the playbook it ran when that differs from
-  `main`. `flows_cred.json` is on no list. The branch is append-only: a second protection rule
-  on `appliance` admits deploy keys and blocks force-push, so the branch is tamper-evident and is
-  the record that survives a decommission. The heartbeat's flow hash stays the dashboard's source
-  of truth, because it arrives over the broker credential; the branch is the human-readable copy,
-  and the forge's compare view between the two branches is the drift diff the drawer links to.
-  The webhook, which ignores every ref but the tracked one today, records the head of `appliance`
-  on the gateway row beside the head of `main`.
-- **The deploy key becomes read-write, on the gateway's own repository only.** `read_only: true`
-  in `forge.ts` flips, and the header that argues for it is rewritten: a writable key on a
-  repository whose `main` admits no deploy key lets an appliance *report* and never *deploy*.
-  Branch protection on `main` keeps `enable_push: false` with deploy keys not whitelisted, on
-  every repository, and the sweep asserts it.
-- **A required status check refusing `flows_cred.json` by shape.** A file uploaded through the
-  forge's own UI meets no check until the puller refuses it on the appliance, which is late. It
-  needs a Gitea Actions runner, which 3 argues on; until then the puller's refusal is the only
-  check.
-- **A failed webhook delivery does not alert.** It is visible on the hook's page in the forge and
-  nowhere else. A repository from before `0095` gets its hook back from the sweep but not its
-  incident template, which the machine account cannot commit to a protected `main`; an
-  administrator adds it by pull request. Small, and not urgent.
-
-**Constraints.** Deploy only what is committed to `main`; a revert is a new commit and never a
-force-push (branch protection in the forge, and `flow-sync.mjs` refuses a non-descendant head);
-`flows_cred.json` never leaves the appliance in a backup, a commit or a diff; the enrolment token
-stays single-use and the appliance enrols once; an appliance can push to a branch and can never
-merge, approve, open a pull request or reach another gateway's repository; `Operator` and
-`Auditor` hold no forge login and no shopfloor person is a Gitea user. If
-[Microsoft Entra ID sign-in](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/183) is ever
-built, federating the forge to Entra directly is an alternative to the Envoy door and the choice
-re-opens on the evidence of both.
-
-**Worth measuring first.** Whether a writable deploy key can push to the repository's wiki. If it
-can, the wiki stops being the place a plant keeps notes only people wrote, and the answer is a
-separate rule or a separate home for the notes.
-
----
-
-## 3 · The appliance itself, and the code somebody wants to run on it
+## 2 · The appliance itself, and the code somebody wants to run on it
 
 **Builds on:** [`gateway-bundle`](../supabase/functions/gateway-bundle/index.ts) ·
 [`gateway-bundle-template/`](../gateway-bundle-template) · `bootstrap.mjs`'s once-only guard ·
@@ -174,10 +100,12 @@ separate rule or a separate home for the notes.
 [`check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) and
 [`mosquitto-tls-init.mjs`](../scripts/mosquitto-tls-init.mjs) · the clock offset gauge and its
-alert · 2, whose forge, puller and appliance branch this reuses · the three revocation handles
-(`disableClient` in the credential service, `withdraw_gateway_enrollment_tokens()`, and the deploy
-key) · arrives from a request to run custom data-gathering software on gateways, for legacy
-machinery
+alert · the forge, the puller and the appliance branch
+([`docs/physical-gateways.md`](physical-gateways.md), [The appliance reports on a branch of its
+own](../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-0104)), which this
+reuses · the three revocation handles (`disableClient` in the credential service,
+`withdraw_gateway_enrollment_tokens()`, and the deploy key reconcile in `forge-sweep`) · arrives
+from a request to run custom data-gathering software on gateways, for legacy machinery
 
 Four subjects that are one appliance: commissioning as a pasted command, the operating system as
 a managed artefact, the forge as the appliance sees it, and a lane for bespoke adapters. They
@@ -232,7 +160,7 @@ When it lands, scheduling and platform convergence become Ansible's; everything 
 
 **The fleet tracks a tag, and the pointer is per gateway.** "Latest tag" gives no staged rollout,
 so the tag an appliance converges to is a small file in its own repository (`platform.yml`),
-changed by pull request through the lane 2 already has. A fleet bump is one pull request per
+changed by pull request through the lane the forge already has. A fleet bump is one pull request per
 gateway or a scripted batch; a canary is one gateway. Nothing tracks `main` of the platform
 repository.
 
@@ -249,18 +177,26 @@ correct device timestamps at ingest.
 ### The forge, as the appliance sees it
 
 **Deploy keys, not gateway users.** One SSH key per appliance, generated on it as now, registered
-twice: read-write on its own repository, read-only on the platform repository. `main` on both
-admits no deploy key; `appliance` on the gateway repository admits them and blocks force-push (2).
-That is the whole policy: pull and push its own repository, pull the platform's, reach nothing
-else. A Gitea user per gateway would express the same policy through teams, at the cost of a third
-kind of principal the membership sweep would have to exempt, and a user can open issues and create
-repositories in the organisation, which a deploy key cannot. **The sweep reconciles keys** the way
-it reconciles webhooks and membership: an active gateway holds exactly those two links, an
-archived one holds none.
+twice: read-write on its own repository (built, `0104`), read-only on the platform repository.
+`main` on both admits no deploy key; `appliance` on the gateway repository admits them and blocks
+force-push, and a `**` rule closes every other branch (built). That is the whole policy: pull and
+push its own repository, pull the platform's, reach nothing else. A Gitea user per gateway would
+express the same policy through teams, at the cost of a third kind of principal the membership
+sweep would have to exempt, and a user can open issues and create repositories in the
+organisation, which a deploy key cannot. **The sweep reconciles keys** the way it reconciles
+webhooks and membership: an active gateway holds its own repository's key read-write and, once the
+platform repository exists, its key there read-only; an archived one holds none. The own-repository
+half is built; the platform half lands with the repository.
 
-**Worth measuring first.** Whether Gitea accepts one public key as a deploy key on two
-repositories with a different mode on each. If not, the platform repository takes a read-only
-key of its own per appliance, generated beside the first.
+**Measured** (gitea/gitea:1.27.3): one public key is accepted as a deploy key on two repositories
+with a different mode on each (`key_id` shared, `read_only` per repository), so the appliance
+generates one key and no second. A writable deploy key can push to the repository's wiki, which
+no rule covers; that is an [accepted risk](../README.md#accepted-risks).
+
+**A required status check refusing `flows_cred.json` by shape.** A file uploaded through the
+forge's own UI meets no check until the puller refuses it on the appliance, which is late. It
+needs the Gitea Actions runner argued under *Custom code*; until then the puller's refusal is the
+only check.
 
 ### Custom code
 
@@ -275,7 +211,7 @@ fourth credential plane: the deploy key is the only thing the appliance holds an
 could not have accepted it. Pin the base image by digest; an image for the wrong architecture
 fails at `docker run` in front of whoever is commissioning it, so the platform playbook declares
 the architecture it found. A Gitea Actions runner is still wanted, for CI on the platform
-repository and the status check in 3; a runner executes arbitrary code and should not share a host
+repository and the status check above; a runner executes arbitrary code and should not share a host
 with the database. It does not build gateway images.
 
 **The adapter holds no credential.** It publishes locally (HTTP or a local topic) and Node-RED
@@ -326,7 +262,7 @@ token against the same repository, which the deploy-key reconcile makes routine,
 
 ---
 
-## 4 · The playback feature is reviewed end to end
+## 3 · The playback feature is reviewed end to end
 
 **Builds on:** [`playback_worker.py`](../ingestion/playback_worker.py) · [`capture.py`](../ingestion/capture.py) ·
 [`capture_worker.py`](../ingestion/capture_worker.py) · [`playback.yaml`](../deploy/helm/acs-cymru/templates/apps/playback.yaml) ·
@@ -367,7 +303,7 @@ a component entry; and the feature's README sections describe what is built.
 
 ---
 
-## 5 · The documentation, code and comments are audited against the codebase
+## 4 · The documentation, code and comments are audited against the codebase
 
 **Builds on:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) (the comment rule, and where argument and
 history go) · `scripts/check-docs-drift.mjs` · `scripts/check-mirror-drift.mjs` ·
@@ -406,7 +342,7 @@ method so the next one starts from it.
 
 ---
 
-## 6 · The migration chain folds back into the baseline
+## 5 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)

@@ -10,6 +10,12 @@ to other branches, repositories that are not a gateway's, and unknown gateways a
 the one that proves the wiring rather than the function -- that a delivery the FORGE itself sends
 for a freshly enrolled gateway arrives signed, is verified, and records the branch's real head.
 
+The last class acts as the appliance: it enrols with a key it generated, clones the repository over
+SSH with that key, and pushes what it is running to `appliance` the way flow-sync.mjs does, then
+asserts that the forge delivered that push and the row records it, that `main` refused the same
+key, and that a force-push to `appliance` was refused. It needs GITEA_TEST_SSH, the forge's SSH
+address as reachable from this host (`ssh://git@127.0.0.1:2222` behind the dev loop's forward).
+
 Needs the stack, the forge, and GITEA_WEBHOOK_SECRET (the value the edge runtime holds; read it from
 .env). Skips without them.
 
@@ -37,6 +43,7 @@ from test_enroll_gateway import (  # noqa: E402
 
 WEBHOOK_SECRET = os.getenv("GITEA_WEBHOOK_SECRET", "")
 FORGE_URL = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
+FORGE_SSH = os.getenv("GITEA_TEST_SSH", "")
 MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "acs_platform")
 MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "acs-platform-machine-account")
 ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
@@ -44,7 +51,8 @@ ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
 # Differs from every other suite's fixture id in its FIRST block: sparkplug_id is the first 21 hex
 # characters of the uuid, so ids that differ only at the end collide on the generated id.
 TEST_GW_ID = "f0e9e000-0000-4000-8000-000000000001"
-HEAD_COLUMNS = "forge_head_sha,forge_head_message,forge_head_by,forge_head_at,forge_head_flow_sha256"
+HEAD_COLUMNS = ("forge_head_sha,forge_head_message,forge_head_by,forge_head_at,forge_head_flow_sha256,"
+                "forge_appliance_sha,forge_appliance_at,forge_appliance_flow_sha256")
 
 
 def deliver(body, event="push", secret=WEBHOOK_SECRET, signed=True):
@@ -132,6 +140,7 @@ class ForgeEventsBase(unittest.TestCase):
         rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={
             "forge_head_sha": None, "forge_head_message": None, "forge_head_by": None,
             "forge_head_at": None, "forge_head_flow_sha256": None,
+            "forge_appliance_sha": None, "forge_appliance_at": None, "forge_appliance_flow_sha256": None,
         })
 
     def head(self):
@@ -180,6 +189,17 @@ class TestWhatIsRecorded(ForgeEventsBase):
         self.assertTrue(row["forge_head_at"].startswith("2026-09-10T12:00:00"), row["forge_head_at"])
         # No such repository in the forge, so no flows.json to hash: "not known", never "unchanged".
         self.assertIsNone(row["forge_head_flow_sha256"])
+
+    def test_a_push_to_the_appliance_branch_lands_beside_main_and_names_nobody(self):
+        status, body = deliver(push(self.sparkplug_id, ref="refs/heads/appliance", sha="d" * 40))
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["recorded"]["branch"], "appliance", body)
+        row = self.head()
+        self.assertEqual(row["forge_appliance_sha"], "d" * 40)
+        self.assertEqual(row["forge_appliance_at"], "2026-09-10T12:00:00+00:00")
+        # The head of main is untouched: the two branches are two columns.
+        self.assertIsNone(row["forge_head_sha"])
+        self.assertIsNone(row["forge_head_by"])
 
     def test_a_push_to_another_branch_is_ignored(self):
         status, body = deliver(push(self.sparkplug_id, ref="refs/heads/tighten-poll"))
@@ -287,6 +307,146 @@ class TestTheForgeItself(ForgeEventsBase):
         self.assertIsNotNone(row["forge_head_at"])
         # A fresh repository carries a README and the incident template, and no flows.json yet.
         self.assertIsNone(row["forge_head_flow_sha256"])
+
+
+@unittest.skipIf(not FORGE_SSH, "GITEA_TEST_SSH must name the forge's SSH address as reachable from this host")
+class TestTheApplianceItself(ForgeEventsBase):
+    """
+    THE APPLIANCE'S HALF, END TO END. Enrolment registers the key it generated as read-write on
+    its own repository and puts three rules on it; this pushes with that key the way flow-sync.mjs
+    does and lets the forge's own hook deliver the push. What is asserted is the policy those
+    rules are for: `appliance` takes the push and the row records it, `main` refuses the same key,
+    a branch outside the two refuses it, and a rewritten `appliance` is refused.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        status, _ = forge_as_machine("/api/v1/version")
+        if status != 200:
+            raise unittest.SkipTest(f"no forge reachable at {FORGE_URL} ({status})")
+        try:
+            cls.admin_token = sign_in()
+        except Exception as err:  # noqa: BLE001
+            raise unittest.SkipTest(f"could not sign in as the seeded administrator ({err})")
+        cls.repo = f"gateway-{cls.sparkplug_id}"
+        cls.delete_repo()
+        cls.work = tempfile.mkdtemp(prefix="acs-appliance-")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.delete_repo()
+        delete_broker_account(cls.sparkplug_id)
+        shutil.rmtree(cls.work, ignore_errors=True)
+        super().tearDownClass()
+
+    @classmethod
+    def delete_repo(cls):
+        for owner in (ORGANISATION, MACHINE_USER):
+            forge_as_machine(f"/api/v1/repos/{owner}/{cls.repo}", method="DELETE")
+
+    def git(self, *args, cwd=None):
+        env = {
+            **os.environ,
+            "GIT_SSH_COMMAND": f'ssh -i "{self.key}" -o IdentitiesOnly=yes -o UserKnownHostsFile="{self.known_hosts}" '
+                               "-o StrictHostKeyChecking=no -o BatchMode=yes",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+        result = subprocess.run(["git", *args], cwd=cwd or self.clone, env=env, capture_output=True, text=True)
+        return result.returncode, (result.stdout + result.stderr).strip()
+
+    def commit(self, message, cwd=None):
+        code, out = self.git("-c", f"user.name=gateway {self.sparkplug_id}", "-c", "user.email=appliance@acs-cymru.invalid",
+                             "commit", "--quiet", "-m", message, cwd=cwd)
+        self.assertEqual(code, 0, out)
+
+    def test_the_appliance_reports_on_its_branch_and_nowhere_else(self):
+        self.key = os.path.join(self.work, "id_ed25519")
+        self.known_hosts = os.path.join(self.work, "known_hosts")
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "test", "-f", self.key], check=True, capture_output=True)
+        with open(f"{self.key}.pub", encoding="utf-8") as handle:
+            public_key = handle.read().strip()
+
+        _, rows = rest("/rpc/issue_gateway_enrollment_token", method="POST", bearer=self.admin_token,
+                       body={"p_gateway_id": TEST_GW_ID, "p_ttl_minutes": 30})
+        status, payload = enroll(rows[0]["token"], ssh_public_key=public_key)
+        self.assertEqual(status, 200, payload)
+        self.assertIsNotNone(payload.get("repository"), payload)
+
+        # What enrolment put on the repository: the key, read-write, and the three rules.
+        status, keys = forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{self.repo}/keys")
+        self.assertEqual(status, 200, keys)
+        self.assertEqual([k["read_only"] for k in keys], [False], keys)
+        status, rules = forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{self.repo}/branch_protections")
+        self.assertEqual(status, 200, rules)
+        by_name = {r["rule_name"]: r for r in rules}
+        self.assertEqual(set(by_name), {"main", "appliance", "**"}, by_name.keys())
+        self.assertFalse(by_name["main"]["enable_push"])
+        self.assertFalse(by_name["main"]["push_whitelist_deploy_keys"])
+        self.assertTrue(by_name["appliance"]["push_whitelist_deploy_keys"])
+        self.assertFalse(by_name["appliance"]["enable_force_push"])
+        self.assertFalse(by_name["**"]["push_whitelist_deploy_keys"])
+        self.assertLess(by_name["appliance"]["priority"], by_name["**"]["priority"], "the catch-all must come after the named rule")
+
+        # The clone URL names the forge's own address (scp-like when SSH is on 22); from this host
+        # the forward answers, for the same repository.
+        self.assertIn(f"{ORGANISATION}/{self.repo}", payload["repository"]["ssh_url"])
+        url = f"{FORGE_SSH.rstrip('/')}/{ORGANISATION}/{self.repo}.git"
+        self.clone = os.path.join(self.work, "repo")
+        code, out = self.git("clone", "--quiet", "--branch", "main", "--single-branch", url, self.clone, cwd=self.work)
+        self.assertEqual(code, 0, out)
+
+        # As flow-sync.mjs does: the report branch from the root commit, the allowlist, a push.
+        root = self.git("rev-list", "--max-parents=0", "HEAD")[1].splitlines()[0]
+        self.assertEqual(self.git("checkout", "--quiet", "-B", "appliance", root)[0], 0)
+        flow = '[{"id":"acs-broker","type":"mqtt-broker"}]\n'
+        with open(os.path.join(self.clone, "flows.json"), "w", encoding="utf-8") as handle:
+            handle.write(flow)
+        with open(os.path.join(self.clone, "deployed.json"), "w", encoding="utf-8") as handle:
+            handle.write('{"revision":null,"source":"enrolment"}\n')
+        self.git("add", "--", "flows.json", "deployed.json")
+        self.commit("Report: running from enrolment")
+        code, out = self.git("push", "--quiet", "origin", "appliance:appliance")
+        self.assertEqual(code, 0, f"the deploy key could not push the appliance branch: {out}")
+        pushed = self.git("rev-parse", "HEAD")[1]
+
+        # The forge delivered it, signed, and the row records the head and the flow's digest.
+        deadline = time.time() + 20
+        row = self.head()
+        while row["forge_appliance_sha"] != pushed and time.time() < deadline:
+            time.sleep(1)
+            row = self.head()
+        self.assertEqual(row["forge_appliance_sha"], pushed, f"the appliance push did not land: {row}")
+        self.assertEqual(row["forge_appliance_flow_sha256"], hashlib.sha256(flow.encode()).hexdigest())
+        # Not None: Gitea resolves a push's hooks when it processes the queued push, so the incident
+        # template committed a moment before the hook existed is delivered too, and main's head is
+        # filled at enrolment (measured). What must hold is that the appliance push is not it.
+        self.assertNotEqual(row["forge_head_sha"], pushed, "a push to appliance must not be recorded as main")
+
+        # The same key on main, with a commit that IS a fast-forward of it, so the refusal can only
+        # be the rule's and not git's.
+        self.assertEqual(self.git("checkout", "--quiet", "main")[0], 0)
+        with open(os.path.join(self.clone, "flows.json"), "w", encoding="utf-8") as handle:
+            handle.write(flow)
+        self.git("add", "--", "flows.json")
+        self.commit("Deploy myself")
+        code, out = self.git("push", "--quiet", "origin", "main:main")
+        self.assertNotEqual(code, 0, "the deploy key pushed to main")
+        self.assertIn("protected branch", out)
+
+        # A branch outside the two: the catch-all, and a slash in the name does not slip past it.
+        for other in ("proposal", "feature/x"):
+            code, out = self.git("push", "--quiet", "origin", f"main:{other}")
+            self.assertNotEqual(code, 0, f"the deploy key pushed to '{other}'")
+            self.assertIn("protected branch", out)
+
+        # A rewritten appliance branch: append-only means a force-push is refused.
+        self.assertEqual(self.git("checkout", "--quiet", "appliance")[0], 0)
+        self.git("-c", f"user.name=gateway {self.sparkplug_id}", "-c", "user.email=appliance@acs-cymru.invalid",
+                 "commit", "--quiet", "--amend", "-m", "Rewritten")
+        code, out = self.git("push", "--quiet", "--force", "origin", "appliance:appliance")
+        self.assertNotEqual(code, 0, "the appliance branch took a force-push")
+        self.assertIn("force push", out)
 
 
 if __name__ == "__main__":

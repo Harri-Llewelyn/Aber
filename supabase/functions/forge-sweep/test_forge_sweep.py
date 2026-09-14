@@ -7,9 +7,12 @@ organisation's repositories. So, in order of what would be worst to get wrong: a
 secret, or with the wrong one, is refused and changes nothing; a person whose role was changed in
 the database WITHOUT passing the door again is taken out of their team by one sweep, and seated
 again when the role returns; a gateway repository whose push webhook was deleted gets it back; a
-repository somebody made by hand in the organisation has `main` protected; and the database's own
-sweep_forge() answers true, which is "asked" -- that call is asynchronous, and the function itself
-is what the rest of this file drives directly.
+repository somebody made by hand in the organisation has `main` protected; a gateway repository
+whose `appliance` and `**` rules were deleted and whose `main` was opened to deploy keys gets all
+three back the way enrolment set them; a key somebody re-registered read-only is read-write again;
+an archived gateway's key is removed; and the database's own sweep_forge() answers true, which is
+"asked" -- that call is asynchronous, and the function itself is what the rest of this file drives
+directly.
 
 Needs the stack, the forge, the seeded personas, the gateways organisation (one enrolment creates
 it) and FORGE_SWEEP_SECRET, the value the edge runtime holds (read it from .env). Skips without them.
@@ -26,6 +29,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "enroll-gateway"))
@@ -245,6 +249,79 @@ class TestRepositories(ForgeSweepBase):
         self.assertEqual(status, 200, body)
         self.assertNotIn(self.repo, body["hooked"], body)
         self.assertNotIn(self.repo, body["protected"], body)
+
+    def keys(self):
+        status, keys = forge(f"/repos/{ORGANISATION}/{self.repo}/keys")
+        self.assertEqual(status, 200, keys)
+        return keys
+
+    def rule(self, name):
+        status, rule = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections/{urllib.parse.quote(name, safe='')}")
+        return status, rule
+
+    def test_a_key_downgraded_by_hand_is_registered_read_write_again(self):
+        """An enrolment from before the appliance branch left a read-only key; the sweep re-registers it."""
+        self.enrol()
+        (key,) = self.keys()
+        self.assertFalse(key["read_only"], key)
+        status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/keys/{key['id']}", method="DELETE")
+        self.assertEqual(status, 204)
+        status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/keys", method="POST",
+                          body={"title": key["title"], "key": key["key"], "read_only": True})
+        self.assertEqual(status, 201)
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertTrue(any(entry.startswith(self.repo) for entry in body["rekeyed"]), body)
+        (restored,) = self.keys()
+        self.assertFalse(restored["read_only"], restored)
+        self.assertEqual(restored["key"].split()[:2], key["key"].split()[:2], "the sweep must re-register the same material")
+
+    def test_the_rules_are_restored_and_main_is_closed_again(self):
+        self.enrol()
+        status, _ = self.rule("appliance")
+        self.assertEqual(status, 200)
+        for name in ("appliance", "**"):
+            status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections/{urllib.parse.quote(name, safe='')}", method="DELETE")
+            self.assertEqual(status, 204, name)
+        # And main opened to deploy keys by hand, which is the one edit that would let the
+        # appliance deploy what it reports.
+        status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections/main", method="PATCH",
+                          body={"enable_push": True, "enable_push_whitelist": True, "push_whitelist_deploy_keys": True})
+        self.assertEqual(status, 200)
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertIn(self.repo, body["protected"], body)
+        self.assertIn(f"{self.repo} (appliance)", body["protected"], body)
+        status, main = self.rule("main")
+        self.assertEqual(status, 200)
+        self.assertFalse(main["enable_push"], main)
+        self.assertFalse(main["push_whitelist_deploy_keys"], main)
+        status, appliance = self.rule("appliance")
+        self.assertEqual(status, 200)
+        self.assertTrue(appliance["push_whitelist_deploy_keys"], appliance)
+        status, catch_all = self.rule("**")
+        self.assertEqual(status, 200)
+        self.assertFalse(catch_all["push_whitelist_deploy_keys"], catch_all)
+        self.assertGreater(catch_all["priority"], appliance["priority"])
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertNotIn(self.repo, body["protected"], body)
+
+    def test_an_archived_gateway_holds_no_key(self):
+        self.enrol()
+        self.assertEqual(len(self.keys()), 1)
+        status, _ = rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
+        self.assertIn(status, (200, 204))
+        try:
+            status, body = sweep()
+            self.assertEqual(status, 200, body)
+            self.assertTrue(any(entry.startswith(self.repo) for entry in body["revoked"]), body)
+            self.assertEqual(self.keys(), [], "an archived gateway's appliance can still reach the forge")
+        finally:
+            rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": False})
 
     def test_a_hand_made_repository_has_main_protected(self):
         status, created = forge(f"/orgs/{ORGANISATION}/repos", method="POST",

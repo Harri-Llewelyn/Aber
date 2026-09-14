@@ -124,15 +124,21 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/forge-membership/test_forge_membership.py
 
-# The forge's push webhook (0095): signature refusals, what a push to main records on the gateway
-# row, what is ignored, and one delivery sent by the forge itself for a freshly enrolled gateway.
-# GITEA_WEBHOOK_SECRET is the release Secret's value (the one the edge runtime holds). Skips without it.
+# The forge's push webhook (0095, 0104): signature refusals, what a push to main or to appliance
+# records on the gateway row, what is ignored, one delivery sent by the forge itself for a freshly
+# enrolled gateway, and one class that acts as the appliance: it pushes with the key it enrolled
+# with and asserts the branch rules (appliance taken, main and every other branch refused, no
+# force-push). GITEA_WEBHOOK_SECRET is the release Secret's value (the one the edge runtime
+# holds); GITEA_TEST_SSH is the forge's SSH address from this host (the dev loop forwards it to
+# ssh://git@127.0.0.1:2222). Each class skips without its own.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
-  python supabase/functions/forge-events/test_forge_events.py
+  GITEA_TEST_SSH=ssh://git@127.0.0.1:2222 python supabase/functions/forge-events/test_forge_events.py
 
-# The forge sweep (0099): the secret is checked; a role changed in user_roles behind the door is
+# The forge sweep (0099, 0104): the secret is checked; a role changed in user_roles behind the door is
 # unseated by one sweep and seated again when it returns; a member seated by hand is left alone; a
-# deleted push webhook comes back; a repository made by hand gets main protected; and the
+# deleted push webhook comes back; a repository made by hand gets main protected; a gateway
+# repository gets its appliance and catch-all rules back and main closed again; a key downgraded
+# to read-only is re-registered read-write; an archived gateway's key is removed; and the
 # database's own sweep_forge() answers true. FORGE_SWEEP_SECRET is the release Secret's value. Skips without it.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py

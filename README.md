@@ -571,6 +571,25 @@ would add a reload-dependent mechanism nothing here consumes.
 **Revisit if** the root is ever exported, if client certificates replace password authentication on
 the broker, or if the fleet grows past what a re-walk can cover in a shift.
 
+#### An appliance's deploy key can write its repository's wiki
+
+Since `0104` an appliance's deploy key is writable on its own repository, so that it can report
+what it is running on the `appliance` branch. Branch rules confine it there: `main` and every
+other branch refuse it. The wiki is a second git repository beside the first, and Gitea has no
+rule for it: measured against `gitea/gitea:1.27.3`, a clone of `<repo>.wiki.git` with the key and
+a push to it succeed. A compromised appliance, or its key taken from a cabinet, could therefore
+rewrite the notes people keep about that gateway. The flow is unaffected.
+
+**Accepted because** the wiki is a git history, so a rewrite is recoverable and visible in it;
+the key opens nothing beyond its own gateway's repository; the alternative homes for the notes
+(a second repository per gateway, or a fork in a second organisation) double the furniture the
+sweep reconciles for a page that holds where a box is and who to call; and `flows_cred.json`,
+the only secret on the appliance, is on no list the pusher commits.
+
+**Revisit if** the wiki comes to hold anything a person acts on without checking (a commissioning
+sign-off, a safety note), or if Gitea gains a per-unit permission for deploy keys, at which point
+the key loses the wiki unit and nothing else changes.
+
 #### NetworkPolicy is opt-in
 
 A default-deny NetworkPolicy (`networkPolicy.enabled`) says which pod may reach which. Off, any

@@ -2,24 +2,27 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
- * The forge says when `main` moved, and the gateway row remembers. Gitea delivers a push event to
- * this function (the hook is registered at enrolment, forge.ts), and this records the head of
- * `main` on the gateway: sha, message, who, when, and the SHA-256 of `flows.json` at that head.
- * That hash is the forge's half of the drift check: the appliance's heartbeat carries the hash of
- * the flow flow-sync.mjs last deployed, and the gateway drawer compares the two.
+ * The forge says when `main` or `appliance` moved, and the gateway row remembers. Gitea delivers a
+ * push event to this function (the hook is registered at enrolment, forge.ts), and this records
+ * the head of `main` on the gateway: sha, message, who, when, and the SHA-256 of `flows.json` at
+ * that head. That hash is the forge's half of the drift check: the appliance's heartbeat carries
+ * the hash of the flow flow-sync.mjs last deployed, and the gateway drawer compares the two. A
+ * push to `appliance`, which only the appliance's deploy key can make, records the head of that
+ * branch beside it (0104): when the appliance last reported, and the digest of the flows.json it
+ * says it is running.
  *
  * The signature is the whole of the authentication: `X-Gitea-Signature` is the hex HMAC-SHA256 of
  * the raw body under the hook's secret, verified against GITEA_WEBHOOK_SECRET. The body is read as
  * bytes before it is parsed. A missing or wrong signature is 401; an unset secret is 503, never a
  * pass, since the edge runtime boots with VERIFY_JWT=false.
  *
- * Ignored and answered 200 with a reason: a push to any branch but the tracked one, a repository
+ * Ignored and answered 200 with a reason: a push to any branch but those two, a repository
  * outside the `gateways` organisation or not named for a gateway, a deleted branch, a non-push
  * event, an unknown gateway. A non-2xx is what Gitea records as a failed delivery, and none of
  * these is a failure.
  */
 
-import { FORGE_ORGANISATION, forgeApi, forgeConfig, GATEWAY_REPOSITORY } from "../_shared/forge.ts";
+import { APPLIANCE_BRANCH, FORGE_ORGANISATION, forgeApi, forgeConfig, GATEWAY_REPOSITORY } from "../_shared/forge.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -141,11 +144,13 @@ export default async function handler(req: Request): Promise<Response> {
   const sparkplugId = named[1];
 
   const tracked = `refs/heads/${payload.repository?.default_branch || "main"}`;
-  if (payload.ref !== tracked) return json({ ignored: `'${payload.ref}' is not the tracked branch` }, 200);
+  const reported = `refs/heads/${APPLIANCE_BRANCH}`;
+  const branch = payload.ref === tracked ? "main" : payload.ref === reported ? APPLIANCE_BRANCH : null;
+  if (!branch) return json({ ignored: `'${payload.ref}' is neither the tracked branch nor '${APPLIANCE_BRANCH}'` }, 200);
 
   const sha = payload.after ?? payload.head_commit?.id ?? "";
   if (!sha) return json({ error: "The push names no commit" }, 400);
-  if (NO_COMMIT.test(sha)) return json({ ignored: "the tracked branch was deleted" }, 200);
+  if (NO_COMMIT.test(sha)) return json({ ignored: `the '${branch}' branch was deleted` }, 200);
 
   const head = payload.head_commit ?? payload.commits?.at(-1) ?? null;
   const by = payload.pusher?.email || payload.pusher?.login || head?.committer?.email || head?.committer?.name || null;
@@ -155,16 +160,22 @@ export default async function handler(req: Request): Promise<Response> {
 
   const flowSha256 = await flowHashAt(repository, sha);
 
-  const admin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-  const { data, error } = await admin
-    .from("gateways")
-    .update({
+  // Nobody is named for the appliance branch: a deploy-key push carries whatever author the
+  // appliance set, and the branch's protection already says who can have written it.
+  const record = branch === APPLIANCE_BRANCH
+    ? { forge_appliance_sha: sha, forge_appliance_at: at, forge_appliance_flow_sha256: flowSha256 }
+    : {
       forge_head_sha: sha,
       forge_head_message: subjectOf(head?.message),
       forge_head_by: by,
       forge_head_at: at,
       forge_head_flow_sha256: flowSha256,
-    })
+    };
+
+  const admin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+  const { data, error } = await admin
+    .from("gateways")
+    .update(record)
     .eq("sparkplug_id", sparkplugId)
     .select("id");
 
@@ -176,8 +187,8 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ ignored: `no gateway has sparkplug id '${sparkplugId}'` }, 200);
   }
 
-  console.log(`forge-events: ${sparkplugId} main is at ${sha.slice(0, 12)}${flowSha256 ? ` (${FLOW_FILE} ${flowSha256.slice(0, 12)})` : ` (no ${FLOW_FILE})`}`);
-  return json({ recorded: { sparkplug_id: sparkplugId, sha, flow_sha256: flowSha256 } }, 200);
+  console.log(`forge-events: ${sparkplugId} ${branch} is at ${sha.slice(0, 12)}${flowSha256 ? ` (${FLOW_FILE} ${flowSha256.slice(0, 12)})` : ` (no ${FLOW_FILE})`}`);
+  return json({ recorded: { sparkplug_id: sparkplugId, branch, sha, flow_sha256: flowSha256 } }, 200);
 }
 
 serve(handler);

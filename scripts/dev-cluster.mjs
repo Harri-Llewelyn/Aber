@@ -78,6 +78,9 @@ const FORWARDS = [
   { local: 54321, service: 'supabase-kong', remote: 8000, what: 'Supabase API (the gateway)' },
   { local: 54323, service: 'supabase-kong', remote: 8001, what: 'Studio, behind the gateway login' },
   { local: 3003, service: 'supabase-kong', remote: 8002, what: 'the forge, behind the gateway' },
+  // The forge over SSH, which the appliance suites push to with a deploy key: the k3d load
+  // balancer publishes 22 on the cluster network only.
+  { local: 2222, service: 'gitea', remote: 22, what: 'the forge over SSH' },
   { local: 1880, service: 'node-red', remote: 1880, what: 'Node-RED' },
   { local: 3002, service: 'grafana', remote: 3000, what: 'Grafana' },
   { local: 3000, service: 'frontend', remote: 3000, what: 'the dashboard' },
@@ -565,6 +568,9 @@ function testEnvironment () {
     AAS_MODEL_PUBLIC_BASE: modelBase,
     // The forge's door is an OAuth flow whose registered callback is the Ingress host.
     GITEA_TEST_URL: `http://git.${domain}`,
+    // Where a suite that acts as an appliance clones and pushes from this host; the clone URL
+    // enrolment hands out names the forge's own address, which only the cluster network reaches.
+    GITEA_TEST_SSH: 'ssh://git@127.0.0.1:2222',
     LOKI_TEST_URL: 'http://127.0.0.1:3100',
     PROMETHEUS_TEST_URL: 'http://127.0.0.1:9090',
     // Skips would otherwise read as passes: here the seed and both stores are guaranteed.

@@ -19,6 +19,14 @@
  * refused with CONNACK 5, and the next deploy prunes the orphaned ciphertext for good.
  * `assertBrokerCredentials()` therefore refuses to converge rather than warning.
  *
+ * The pusher is the same file. After each pass this reports what is running on a branch of its
+ * own, `appliance`, which the deploy key may write and no login may (the branch's protection in
+ * the forge admits deploy keys alone and blocks force-push). It commits an allowlist and never
+ * widens it: `flows.json` as Node-RED is running it, and `deployed.json`. `flows_cred.json` is on
+ * no list, and a staged path outside the list aborts the commit. The branch is the human-readable
+ * copy; the heartbeat's flow hash stays the dashboard's source of truth, because it arrives over
+ * the broker credential. Nothing is pushed unless the files differ from what was last pushed.
+ *
  * `--once` runs a single pass and exits, which is what an `ansible-pull` task would run when
  * scheduling moves to Ansible.
  */
@@ -47,9 +55,27 @@ const DEPLOYED = join(GITOPS_DIR, 'deployed.json');
 
 const FLOWS = join(DATA_DIR, 'flows.json');
 const CREDS = join(DATA_DIR, 'flows_cred.json');
+/** Written by bootstrap.mjs at enrolment; read here for the identity the report is committed as. */
+const MARKER = join(DATA_DIR, '.enrolled.json');
 
 /** The one file a gateway repository holds. Must agree with FLOW_PATH in _shared/forge.ts. */
 const FLOW_FILE = 'flows.json';
+
+/** The branch this appliance reports on. Must agree with APPLIANCE_BRANCH in _shared/forge.ts. */
+const REPORT_BRANCH = 'appliance';
+/** A second checkout for the report branch, so the puller's is never dirtied. */
+const REPORT_CHECKOUT = join(GITOPS_DIR, 'appliance');
+/** What was last pushed: a digest of the report's content, so an unchanged report costs no fetch. */
+const REPORTED = join(GITOPS_DIR, 'reported.json');
+/**
+ * THE ALLOWLIST. Everything the report branch may carry, by name in the repository and path on
+ * this appliance. flows_cred.json is not here and must never be: it is encrypted with a secret
+ * that is in this appliance's .env, so committed it is either useless or dangerous.
+ */
+const REPORT_FILES = [
+  { name: FLOW_FILE, path: FLOWS },
+  { name: 'deployed.json', path: DEPLOYED },
+];
 
 const INTERVAL_MS = Math.max(30, Number(process.env.FLOW_SYNC_INTERVAL_SECONDS || 300)) * 1000;
 const once = process.argv.slice(2).includes('--once');
@@ -87,13 +113,22 @@ function sshCommand() {
   ].map((part) => (/\s/.test(part) ? `"${part}"` : part)).join(' ');
 }
 
-function git(args, cwd) {
-  return execFileSync('git', ['-c', `safe.directory=${CHECKOUT}`, ...args], {
+function git(args, cwd = CHECKOUT) {
+  return execFileSync('git', ['-c', `safe.directory=${cwd}`, ...args], {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, GIT_SSH_COMMAND: sshCommand(), GIT_TERMINAL_PROMPT: '0' },
   }).trim();
+}
+
+function gitClone(url, args, target) {
+  mkdirSync(dirname(target), { recursive: true });
+  execFileSync('git', ['clone', '--quiet', ...args, url, target], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, GIT_SSH_COMMAND: sshCommand(), GIT_TERMINAL_PROMPT: '0' },
+  });
 }
 
 /**
@@ -139,15 +174,8 @@ function syncCheckout(repository) {
   const branch = repository.branch || 'main';
 
   if (!existsSync(join(CHECKOUT, '.git'))) {
-    mkdirSync(dirname(CHECKOUT), { recursive: true });
     log(`cloning ${repository.ssh_url} (${branch})`);
-    execFileSync('git', [
-      'clone', '--quiet', '--branch', branch, '--single-branch', repository.ssh_url, CHECKOUT,
-    ], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, GIT_SSH_COMMAND: sshCommand(), GIT_TERMINAL_PROMPT: '0' },
-    });
+    gitClone(repository.ssh_url, ['--branch', branch, '--single-branch'], CHECKOUT);
   }
 
   const { remote } = fetchBranch(branch);
@@ -320,17 +348,21 @@ function readDeployed() {
   }
 }
 
-async function syncOnce() {
+/**
+ * Where this appliance pulls from and pushes to, or null with the reason said once: no repository
+ * is a deployment without the forge, and a missing host key or deploy key is a refusal.
+ */
+function configuredRepository() {
   if (!existsSync(REPOSITORY)) {
     sayOnce('no-repo', 'this gateway has no repository, so there is nothing to converge to. That is'
       + ' a deployment without the forge, not a fault.');
-    return;
+    return null;
   }
 
   const repository = JSON.parse(readFileSync(REPOSITORY, 'utf8'));
   if (!repository.ssh_url) {
     sayOnce('no-url', `${REPOSITORY} names no ssh_url; nothing to pull from.`);
-    return;
+    return null;
   }
 
   // THE ONE PRECONDITION WITH NO WORKAROUND. See the header: there is no flag here that skips it.
@@ -339,13 +371,19 @@ async function syncOnce() {
       `REFUSING TO SYNC: ${KNOWN_HOSTS} does not exist, so this appliance cannot verify the forge`
       + ' it would be pulling from. Restart the forge so it publishes its host key, then re-enrol'
       + ' this appliance. Telemetry is unaffected.');
-    return;
+    return null;
   }
   if (!existsSync(DEPLOY_KEY)) {
     sayOnce('no-key', `REFUSING TO SYNC: ${DEPLOY_KEY} does not exist, so there is no identity to`
       + ' authenticate to the forge with.');
-    return;
+    return null;
   }
+  return repository;
+}
+
+async function syncOnce() {
+  const repository = configuredRepository();
+  if (!repository) return;
 
   const revision = syncCheckout(repository);
   const deployed = readDeployed();
@@ -403,19 +441,132 @@ async function syncOnce() {
   );
 }
 
+// Reporting what is running
+
+/** The report's content: every allowlisted file that exists, and a digest over the lot. */
+function reportContent() {
+  const files = REPORT_FILES
+    .filter(({ path }) => existsSync(path))
+    .map(({ name, path }) => ({ name, text: readFileSync(path, 'utf8') }));
+  const digest = sha256(files.map(({ name, text }) => `${name}\n${sha256(text)}\n`).join(''));
+  return { files, digest };
+}
+
+/**
+ * The report checkout on the report branch at the forge's head of it, created from the root
+ * commit of the tracked branch when the forge has no such branch yet, so the two branches share
+ * an ancestor and the forge's compare view between them is a plain diff. Always reset to the
+ * remote head first: the branch is append-only and this appliance's copy is derived from the
+ * files, never the other way round.
+ */
+function prepareReportCheckout(repository) {
+  const tracked = repository.branch || 'main';
+  if (!existsSync(join(REPORT_CHECKOUT, '.git'))) {
+    log(`cloning ${repository.ssh_url} again for the '${REPORT_BRANCH}' branch`);
+    gitClone(repository.ssh_url, ['--branch', tracked, '--single-branch'], REPORT_CHECKOUT);
+  }
+  let remoteHead = null;
+  try {
+    git(['fetch', '--quiet', 'origin', REPORT_BRANCH], REPORT_CHECKOUT);
+    remoteHead = git(['rev-parse', 'FETCH_HEAD'], REPORT_CHECKOUT);
+  } catch {
+    // No such branch at the forge yet: the first report creates it.
+  }
+  if (remoteHead) {
+    git(['checkout', '--quiet', '--force', '-B', REPORT_BRANCH, remoteHead], REPORT_CHECKOUT);
+    return remoteHead;
+  }
+  git(['fetch', '--quiet', 'origin', tracked], REPORT_CHECKOUT);
+  const root = git(['rev-list', '--max-parents=0', 'FETCH_HEAD'], REPORT_CHECKOUT).split('\n')[0];
+  git(['checkout', '--quiet', '--force', '-B', REPORT_BRANCH, root], REPORT_CHECKOUT);
+  return null;
+}
+
+/** The identity the report is committed as: the gateway's sparkplug id, which the forge already knows. */
+function reportIdentity() {
+  let sparkplugId = 'gateway';
+  try {
+    sparkplugId = JSON.parse(readFileSync(MARKER, 'utf8')).sparkplug_id || sparkplugId;
+  } catch {
+    // Enrolled before the marker carried it, or not through bootstrap; the commit still says who.
+  }
+  return { name: `gateway ${sparkplugId}`, email: `${sparkplugId}@gateway.acs-cymru.invalid` };
+}
+
+function readReported() {
+  try {
+    return JSON.parse(readFileSync(REPORTED, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Push the report if it differs from the last one pushed. The commit is refused here, before
+ * anything reaches the forge, if a staged path is not on the allowlist. A push the forge refuses
+ * (a rewritten branch, a rule somebody removed) is an error on this tick and a retry on the next.
+ */
+async function reportOnce() {
+  const repository = configuredRepository();
+  if (!repository) return;
+
+  const { files, digest } = reportContent();
+  if (files.length === 0) return;
+  if (readReported().digest === digest) return;
+
+  prepareReportCheckout(repository);
+  for (const { name, text } of files) writeFileSync(join(REPORT_CHECKOUT, name), text);
+  git(['add', '--', ...files.map(({ name }) => name)], REPORT_CHECKOUT);
+
+  const staged = git(['diff', '--cached', '--name-only'], REPORT_CHECKOUT).split('\n').filter(Boolean);
+  const allowed = new Set(REPORT_FILES.map(({ name }) => name));
+  const outside = staged.filter((name) => !allowed.has(name));
+  if (outside.length) {
+    git(['reset', '--quiet'], REPORT_CHECKOUT);
+    throw new Error(`refusing to report: ${outside.join(', ')} is staged and is not on the allowlist`);
+  }
+
+  if (staged.length === 0) {
+    // The forge already holds exactly this: a re-clone, or a reported.json that was lost.
+    writeFileSync(REPORTED, JSON.stringify({ digest, revision: git(['rev-parse', 'HEAD'], REPORT_CHECKOUT), pushed_at: new Date().toISOString() }, null, 2));
+    return;
+  }
+
+  const deployed = readDeployed();
+  const identity = reportIdentity();
+  const flowText = files.find(({ name }) => name === FLOW_FILE)?.text ?? '';
+  const subject = `Report: running ${sha256(flowText).slice(0, 12)}`
+    + (deployed.revision ? ` from ${deployed.revision.slice(0, 12)}` : ' from enrolment');
+  git([
+    '-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`,
+    'commit', '--quiet', '--no-verify', '-m', subject,
+  ], REPORT_CHECKOUT);
+  git(['push', '--quiet', 'origin', `${REPORT_BRANCH}:${REPORT_BRANCH}`], REPORT_CHECKOUT);
+
+  const revision = git(['rev-parse', 'HEAD'], REPORT_CHECKOUT);
+  writeFileSync(REPORTED, JSON.stringify({ digest, revision, pushed_at: new Date().toISOString() }, null, 2));
+  log(`reported ${revision.slice(0, 12)} on '${REPORT_BRANCH}': ${subject}`);
+}
+
 // The loop
 
 /**
  * A failed tick is never fatal: an unreachable forge, a Node-RED still starting or a dropped plant
  * link is ordinary, so each pass is caught, named and retried on the next tick. A refusal (a
  * rewritten history, a mismatched broker id) is logged at every occurrence, because a person has to
- * decide something.
+ * decide something. The report runs after the sync and is caught on its own: a report the forge
+ * refuses must not stop the next approved flow from arriving.
  */
 async function tick() {
   try {
     await syncOnce();
   } catch (err) {
     warn(`sync failed: ${err.message}`);
+  }
+  try {
+    await reportOnce();
+  } catch (err) {
+    warn(`report failed: ${err.message}`);
   }
 }
 

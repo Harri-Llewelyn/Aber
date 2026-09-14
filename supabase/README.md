@@ -2584,8 +2584,8 @@ the listener's `ext_authz` step: one call per non-static request, the role read 
 and the person placed in the team that role warrants — `administrators` or `managers` in the
 `gateways` organisation — through the machine account. A login whose role has gone since the
 token was signed is taken out of both teams and refused. What that does not cover is a revoked
-login that never returns; a sweep on a timer is the remaining piece
-([`docs/roadmap.md`](../docs/roadmap.md), *GitOps edge sync*).
+login that never returns, which is what [the sweep on a timer](#the-forge-is-swept-on-a-timer-0099)
+is for.
 
 **Authorisation stays in Postgres.** `user_roles` and `has_role()` decide who passes the door;
 Gitea's teams decide what they may do inside, and the team is a function of the verified role,
@@ -2619,8 +2619,8 @@ no protection until a gateway enrols under its name and adopts it. The gateway d
 repository, its issues and its wiki as three acts.
 
 **The forge reports a push.** Enrolment registers a webhook on the repository (`branch_filter:
-main`, one per repository rather than one on the organisation, because only a gateway's repository
-has a row to record on). Gitea delivers every push to `main` to
+{main,appliance}`, one per repository rather than one on the organisation, because only a
+gateway's repository has a row to record on). Gitea delivers every push to `main` to
 [`forge-events`](functions/forge-events), directly over the NetworkPolicy edge
 `gitea → supabase-functions`, never through the gateway. The
 delivery's `X-Gitea-Signature` — hex HMAC-SHA256 of the raw body under `GITEA_WEBHOOK_SECRET` — is
@@ -2675,6 +2675,57 @@ should have been reviewed from the start. A member who is not a dashboard identi
 hand and is left alone. Nothing is created that enrolment would not create, and nothing is deleted.
 An empty secret leaves the sweep inert, and `0002` says so at boot. `test_forge_sweep.py` drives a
 role changed behind the door, a deleted hook and a hand-made repository.
+
+### The appliance reports on a branch of its own (`0104`)
+
+`main` is what was approved; **`appliance` is what is running**, a second branch in the gateway's
+repository written only by the appliance and read by people in the forge. After every pass
+`flow-sync.mjs` pushes an allowlist there when it has changed, `flows.json` as Node-RED is running
+it and `deployed.json`, and never widens it: `flows_cred.json` is on no list, and a staged path
+outside the list aborts the commit on the appliance. The branch is based on the repository's root
+commit so the two branches share an ancestor and the forge's compare view between them
+(`compare/main..appliance`, two dots for the direct diff) is the drift diff, which the drawer's
+repository panel links as **Running vs approved** once the appliance has pushed.
+
+**The deploy key is read-write, and three rules make that a reporting key.** `read_only` in
+[`_shared/forge.ts`](functions/_shared/forge.ts) flipped, on the gateway's own repository only.
+`main` keeps `enable_push: false` with deploy keys not whitelisted; an `appliance` rule admits
+pushes from deploy keys and from nobody else and blocks force-push; and a `**` rule closes every
+other branch to deploy keys while admitting both teams. Four things were measured against
+`gitea/gitea:1.27.3`: a rule can be created before its branch exists; rules are matched by
+ascending priority and the first match decides, so the catch-all is created at priority 1000;
+`*` as a rule name does not match a slash, so `feature/x` stayed open until the rule became `**`;
+and the machine account's contents API answers 403 on `appliance`, so nothing but a deploy key
+writes it. Enrolment creates both rules before it registers the key, and removes every other
+key on the repository, because a re-enrolment is a replaced appliance. The same key can be
+registered in a different mode on another repository (`key_id` is shared, `read_only` is per
+repository; measured), which is what the platform repository will use.
+
+**One thing no rule covers.** A writable deploy key can push to the repository's wiki (measured:
+a clone of `<repo>.wiki.git` with the key and a push to it succeed). The wiki therefore stops
+being a place only people wrote; [Accepted risks](../README.md#accepted-risks) records the
+decision to keep it there.
+
+**The webhook records both heads.** Its branch filter is `{main,appliance}`; the sweep patches a
+hook registered before this. Gitea resolves a push's hooks when it processes the queued push
+rather than when the push happens, so the incident template committed a moment before the hook is
+registered is delivered too, and a fresh repository's **Committed** row is filled at enrolment
+(measured). `forge-events` records a push to `appliance` as
+`forge_appliance_sha`, `forge_appliance_at` and `forge_appliance_flow_sha256`, the digest of the
+flows.json on that branch, and names nobody: a deploy-key push carries whatever author the
+appliance set. The drawer's **Reported** row shows the head and says *edited on the appliance*
+when that digest differs from the heartbeat's `flow_hash`, which is an edit made in the box's
+editor since the last deploy (`flowEditedOnAppliance()` in `frontend/src/utils/flowDrift.js`).
+
+**The sweep reconciles keys, the third revocation handle.** A gateway holds three things and
+loses all three on archive: the broker client (`disableClient`), any unredeemed enrolment token
+(`withdraw_gateway_enrollment_tokens()`), and now the deploy key. `forge-sweep` reads
+`gateways` and, per gateway repository, removes every key when the row is archived or gone, and
+re-registers a read-only key read-write when the row is active, from the material the forge lists
+(Gitea has no edit for a deploy key). It also creates the two rules on a repository from before
+this and closes `main` again if a rule was found admitting pushes. `test_forge_events.py` covers
+the appliance push; `test_forge_sweep.py` covers the rules, a key downgraded by hand, and an
+archived gateway's key.
 
 ## A replay lane is minted, not assigned (`0083`)
 

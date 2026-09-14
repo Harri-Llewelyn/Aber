@@ -442,6 +442,29 @@ ten minutes after a merge means the appliance refused the commit or cannot reach
 `docker compose logs flow-sync` on the appliance says which. An edit made in the appliance's editor
 is in neither hash, and the next approved deploy overwrites it.
 
+### What the appliance reports back
+
+`main` is what was approved. **`appliance` is what is running**, a second branch in the same
+repository that only the appliance writes and people read in the forge rather than through a shell
+on the box. After every pass `flow-sync` pushes two files there when they have changed:
+`flows.json` exactly as Node-RED is running it, and `deployed.json`, the record of what was last
+deployed and from which commit. That is the whole allowlist; `flows_cred.json` is on no list, and
+a staged path outside the list aborts the commit before anything reaches the forge.
+
+The branch is append-only and tamper-evident by the forge's rules, not by the appliance's good
+behaviour: the `appliance` rule admits pushes from deploy keys and from no login, and blocks
+force-push; `main` admits no deploy key; and a `**` rule closes every other branch to them. So the
+deploy key, which is now writable, lets an appliance *report* and never *deploy*. The machine
+account cannot write the branch either (its contents API answers 403 there), so what it holds is
+what an appliance said.
+
+**Watching it.** The drawer's **Reported** row shows the head of `appliance` and when it was
+pushed, and says *edited on the appliance* when the flows.json on the branch differs from the one
+the puller last deployed, which is an edit somebody made in the box's editor. The repository
+panel's **Running vs approved** link opens the forge's diff between the two branches, which is the
+drift in a form a person can read. The heartbeat's flow hash stays the dashboard's source of truth
+for what is deployed, because it arrives over the broker credential.
+
 ### What the appliance refuses to deploy
 
 `flow-sync` is the last of three checks on a `flows.json` and the only one on the appliance, so it
@@ -482,7 +505,7 @@ when an appliance enrols with a deploy key, and a host-run gateway never enrols.
 **`flows_cred.json` is never committed.** It is encrypted with a secret that exists only in the
 appliance's `.env`, so a copy on the platform would be either useless or dangerous. Nothing between
 the forge's web editor and the appliance checks its shape yet — the puller's refusal above is the
-last line, and a required status check in the forge is the next one (docs/roadmap.md, "GitOps edge sync").
+last line, and a required status check in the forge is the next one (docs/roadmap.md, "The appliance itself").
 
 
 ---
