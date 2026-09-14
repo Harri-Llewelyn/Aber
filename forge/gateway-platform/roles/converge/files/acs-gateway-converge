@@ -46,7 +46,11 @@ TAG=""
 EXTRA="{}"
 if [ -f "$POINTER" ]; then
   TAG=$(python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])) or {}; print((d.get("platform") or {}).get("tag") or "")' "$POINTER" 2>/dev/null)
-  EXTRA=$(python3 -c 'import sys, json, yaml; d = yaml.safe_load(open(sys.argv[1])) or {}; print(json.dumps((d.get("platform") or {}).get("vars") or {}))' "$POINTER" 2>/dev/null)
+  # Assigned only when it parsed. The pointer is changed by pull request, so it can arrive
+  # unparseable; a failed read would otherwise replace the declared default with the empty string
+  # and pass that to ansible-pull as its extra variables.
+  POINTER_VARS=$(python3 -c 'import sys, json, yaml; d = yaml.safe_load(open(sys.argv[1])) or {}; print(json.dumps((d.get("platform") or {}).get("vars") or {}))' "$POINTER" 2>/dev/null)
+  if [ -n "$POINTER_VARS" ]; then EXTRA="$POINTER_VARS"; fi
 fi
 if [ -z "$TAG" ]; then
   TAG=$(jq -r '.platform_tag // empty' "$REPOSITORY")
