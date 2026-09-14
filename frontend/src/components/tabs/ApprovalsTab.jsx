@@ -4,7 +4,7 @@ import { POLL_INTERVAL_MS, PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconPlus, IconPencil, IconCheck, IconX, IconArchive, IconHistory } from '../common/Icons'
+import { IconPencil, IconCheck, IconX, IconArchive, IconHistory } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 
 /**

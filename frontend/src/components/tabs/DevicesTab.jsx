@@ -51,8 +51,8 @@ import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gat
 import {
   IconShieldCheck,
   IconCpu,
-  IconDrive,
   IconFileText,
+  IconTag,
   IconPlus,
   IconPencil,
   IconArchive,
@@ -1517,7 +1517,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                       onClick={() => onSelectSchema?.(schema.schema_uuid)}
                       title={`Open ${schema.schema_name} on the Schemas page`}
                     >
-                      <IconFileText size={11} />
+                      <IconClipboardList size={11} />
                       <span className="chip-name">{schema.schema_name}</span>
                     </button>
                   ))}
@@ -1599,7 +1599,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           {
             // A read of what the device declared at birth: not gated on device:manage and not
             // refused for an archived device, like the AAS export.
-            label: 'Configuration Parameters', icon: <IconClipboardList size={13} />,
+            label: 'Configuration Parameters', icon: <IconFileText size={13} />,
             onClick: () => setConfigAsset(selectedDevice),
             title: 'Inspect the DBIRTH metric parameters this device reported'
           },
@@ -1608,7 +1608,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           !selectedDevice.shadow_of && {
             // Directly above the two exports on purpose: it is the only thing here that changes
             // what they contain.
-            label: 'Digital Nameplate…', icon: <IconClipboardList size={13} />,
+            label: 'Digital Nameplate…', icon: <IconTag size={13} />,
             onClick: () => setNameplateFor(selectedDevice),
             title: canManage
               ? "Manufacturer, serial number and versions — exported in this device's AAS"

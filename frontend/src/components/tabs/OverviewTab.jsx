@@ -39,7 +39,6 @@ import {
   IconAlertTriangle,
   IconAlertCircle,
   IconZap,
-  IconCog,
   IconRadio,
   IconCpu,
   IconImage
@@ -225,7 +224,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         style={{ cursor: 'pointer', userSelect: 'none', opacity: isArch ? 0.7 : 1 }}
         title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
       >
-        {isArch ? <IconArchive size={11} /> : <IconCog size={11} />}
+        {isArch ? <IconArchive size={11} /> : <IconCpu size={11} />}
         <span className="chip-name">{a.asset_name}</span>
         {isArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
         {!isArch && status === DEVICE_STATUS.QUARANTINED && (

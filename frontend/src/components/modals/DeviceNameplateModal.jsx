@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
-import { IconLock, IconClipboardList, IconCheck, IconAlertTriangle } from '../common/Icons'
+import { IconLock, IconTag, IconCheck, IconAlertTriangle } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { patchFromForm, submitProposal } from '../../utils/proposeFromForm'
@@ -118,7 +118,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
     <div className="modal-overlay">
       <div className="modal modal-xl">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <IconClipboardList size={18} />
+          <IconTag size={18} />
           <span>Digital Nameplate — <span className="mono">{asset.asset_name}</span></span>
         </div>
 

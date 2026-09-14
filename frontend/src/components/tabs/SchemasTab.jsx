@@ -61,7 +61,7 @@ import {
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import {
-  IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive, IconCpu,
+  IconCheck, IconPlus, IconClipboardList, IconAlertTriangle, IconArchive, IconCpu,
   IconChevronDown, IconChevronUp, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
@@ -711,7 +711,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               onClick={() => canManageSchema && setShowBuilderModal(true)}
               title={!canManageSchema ? 'Requires Admin permissions' : 'Build a schema from the metric catalog, then download a spec sheet or provision a device'}
             >
-              <IconFileCode size={14} /> Build Schema from Catalog
+              <IconClipboardList size={14} /> Build Schema from Catalog
             </button>
           {/* The Archived Versions toggle is an option in the status select above. */}
           </div>
@@ -763,7 +763,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           /* Says why it is empty, as the catalog's empty state does: a blank table reads as a
              failed load rather than a filter doing its job. */
           <div className="empty-state" style={{ padding: '20px var(--inset)' }}>
-            <div className="empty-icon"><IconFileCode size={36} /></div>
+            <div className="empty-icon"><IconClipboardList size={36} /></div>
             <div className="empty-text">
               {schemas.length === 0
                 ? 'No schemas registered yet — build one from the metric catalog below.'
@@ -1482,7 +1482,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         actions={selectedSchema ? [
           {
             label: isSchemaEditable(selectedSchema) ? 'Edit Draft' : 'View Schema Detail',
-            icon: isSchemaEditable(selectedSchema) ? <IconPencil size={13} /> : <IconFileCode size={13} />,
+            icon: isSchemaEditable(selectedSchema) ? <IconPencil size={13} /> : <IconClipboardList size={13} />,
             onClick: () => setDetailSchema(selectedSchema),
             primary: true,
             title: isSchemaEditable(selectedSchema)

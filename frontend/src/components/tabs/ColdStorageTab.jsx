@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { useSetting } from '../../hooks/useSettings'
 import CopyableId from '../common/CopyableId'
-import { IconArchive, IconAlertTriangle } from '../common/Icons'
+import { IconDatabase, IconAlertTriangle } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import {
   COLD_STATES,
@@ -99,7 +99,7 @@ export function ColdStorageTab({ showToast, userRole }) {
 
           {!error && rows.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon"><IconArchive size={36} /></div>
+              <div className="empty-icon"><IconDatabase size={36} /></div>
               {/* Two empty states. cold_storage_rows() gates on the role in its body, so a caller
                   without one gets zero rows rather than a refusal, and "nothing archived" would be
                   a claim the page has no basis for. */}
