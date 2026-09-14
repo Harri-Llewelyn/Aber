@@ -2,9 +2,10 @@
 // DO NOT EDIT: edit the sources and run the script. CI fails when this file is stale.
 //
 // What forge-sweep publishes as platform/gateway-platform, and what gateway-bundle and
-// gateway-install hand to an appliance: every file of the platform playbook, the installer, and
-// the compose project under appliance/. The digest is what the published repository carries in
-// .acs/manifest.json, so one read says whether the forge holds this build's copy.
+// gateway-install hand to an appliance: every file of the platform playbook, the installer,
+// and the compose project under appliance/.
+// The digest is what the published repository carries in .acs/manifest.json, so one read says
+// whether the forge holds this build's copy.
 
 export const GATEWAY_PLATFORM_DIGEST = "f0c72baf7c24ac2d0d5ee64bc922e4434d0edc615cf860f3581d6f8cf030239c";
 

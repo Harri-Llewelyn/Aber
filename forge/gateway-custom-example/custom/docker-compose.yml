@@ -1,0 +1,33 @@
+# The adapter's own compose project, built and run on the appliance by ../custom.yml.
+#
+# Its own project, not a second service in the platform's: the platform replaces its own project
+# from the bundle template on every convergence, and a service added there would be removed by the
+# next one.
+services:
+  adapter:
+    build: .
+    container_name: acs-custom-adapter
+    restart: unless-stopped
+    # NO PORTS PUBLISHED. Nothing outside the appliance addresses this, and a published port is an
+    # inbound path on a plant network, which the design exists to avoid.
+    environment:
+      # Where to hand readings. Node-RED is on the appliance network below, by service name.
+      NODE_RED_URL: "http://node-red:1880/custom/readings"
+      POLL_SECONDS: "5"
+    networks:
+      - appliance
+    # A serial adapter is the motivating case and needs its device. Left commented because a
+    # device that does not exist stops the container, and this example has no hardware.
+    # devices:
+    #   - "/dev/ttyUSB0:/dev/ttyUSB0"
+    logging:
+      # Bounded, because this runs for years on an SD card.
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  appliance:
+    # The platform's own compose network, joined rather than created: that is where Node-RED is.
+    # custom.yml passes the name, derived from the directory the platform deployed to.
+    external: true
+    name: "${ACS_APPLIANCE_NETWORK:-acs-gateway_default}"

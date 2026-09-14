@@ -653,7 +653,10 @@ export const SUITES = {
       'changed in user_roles behind the door is unseated by one sweep and seated again when it ' +
       'returns; a member seated by hand is left alone; a gateway repository whose push webhook ' +
       'was deleted gets it back; a repository made by hand in the organisation has main protected ' +
-      "without the incident template; and the database's sweep_forge() answers true. Needs the " +
+      "without the incident template; and the database's sweep_forge() answers true. It also " +
+      'covers the two repositories the platform publishes into its own organisation: the playbook, ' +
+      'tagged per version, and the custom example, marked as a template and never tagged because ' +
+      'it is copied rather than converged to. Needs the ' +
       'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',
   },
   'backup-service/test_backup_service.py': {

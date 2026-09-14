@@ -29,6 +29,7 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  */
 
 import {
+  CUSTOM_EXAMPLE_REPOSITORY,
   deleteDeployKey,
   DEPLOY_KEY_TITLE,
   ensureApplianceProtection,
@@ -49,8 +50,10 @@ import {
   PLATFORM_READERS_TEAM,
   PLATFORM_REPOSITORY,
   platformVersion,
-  publishPlatform,
+  type PublishSpec,
+  publishToForge,
 } from "../_shared/forge.ts";
+import { GATEWAY_CUSTOM_EXAMPLE_DIGEST, GATEWAY_CUSTOM_EXAMPLE_FILES } from "../_shared/gatewayCustomExample.generated.ts";
 import { GATEWAY_PLATFORM_DIGEST, GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
 
 /** The platform repository, as the key functions address it. */
@@ -78,7 +81,7 @@ interface Summary {
   rekeyed: string[];
   /** Keys removed from an archived or deleted gateway's repository. */
   revoked: string[];
-  /** The platform playbook committed or tagged. */
+  /** A repository the platform publishes -- the playbook, the custom example -- committed or tagged. */
   published: string[];
   errors: string[];
 }
@@ -300,8 +303,10 @@ async function sweepRepositories(
 let saidNoVersion = false;
 
 /**
- * The platform playbook, published under this build's version. Nothing on a deployment that
- * names no version, said once.
+ * What the platform publishes into its own organisation: the playbook every appliance converges
+ * to, tagged per platform version, and the example custom repository a person copies when a
+ * gateway needs code of its own. The example is untagged and marked as a template, because it is
+ * copied once rather than converged to, and it is never handed to an appliance.
  */
 async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolean> {
   const version = platformVersion();
@@ -312,11 +317,35 @@ async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolea
     }
     return false;
   }
-  const publication = await publishPlatform(cfg, version, GATEWAY_PLATFORM_FILES, GATEWAY_PLATFORM_DIGEST);
-  if (publication.published) {
-    summary.published.push(`${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY} at ${GATEWAY_PLATFORM_DIGEST.slice(0, 12)} (${publication.tag})`);
+
+  const specs: PublishSpec[] = [
+    {
+      name: PLATFORM_REPOSITORY,
+      description: "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by ACS-Cymru.",
+      files: GATEWAY_PLATFORM_FILES,
+      digest: GATEWAY_PLATFORM_DIGEST,
+      version,
+    },
+    {
+      name: CUSTOM_EXAMPLE_REPOSITORY,
+      description: "An example custom gateway repository: what a gateway that needs code of its own looks like. Copy it with 'Use this template'. Published by ACS-Cymru.",
+      files: GATEWAY_CUSTOM_EXAMPLE_FILES,
+      digest: GATEWAY_CUSTOM_EXAMPLE_DIGEST,
+      version: null,
+      template: true,
+    },
+  ];
+
+  for (const spec of specs) {
+    const publication = await publishToForge(cfg, spec);
+    if (publication.published) {
+      summary.published.push(
+        `${PLATFORM_ORGANISATION}/${spec.name} at ${spec.digest.slice(0, 12)}`
+          + (publication.tag ? ` (${publication.tag})` : ""),
+      );
+    }
+    if (publication.warning) summary.errors.push(publication.warning);
   }
-  if (publication.warning) summary.errors.push(publication.warning);
   return true;
 }
 

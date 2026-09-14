@@ -941,6 +941,53 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + 'approved deploy overwrites that. The repository panel links the forge\'s diff '
                 + 'between the two branches. Empty until the appliance has reported once.'
             },
+            /**
+             * What the last hourly convergence did, from converged.json on the same branch (0106).
+             * The platform half says which version of the playbook this appliance is actually on,
+             * which is how a fleet mid-rollout is read one gateway at a time.
+             */
+            {
+              label: 'Platform',
+              value: selected.forge_appliance_platform_tag
+                ? [
+                  selected.forge_appliance_platform_tag,
+                  selected.forge_appliance_platform_outcome === 'converged'
+                    ? `converged ${formatHeartbeat(selected.forge_appliance_converged_at)}`
+                    : selected.forge_appliance_platform_outcome,
+                ].filter(Boolean).join(' · ')
+                : null,
+              danger: Boolean(selected.forge_appliance_platform_outcome)
+                && selected.forge_appliance_platform_outcome !== 'converged',
+              title: 'The platform playbook tag this appliance last converged to, and how that run '
+                + 'ended. It converges hourly and after boot. "failed" means ansible-pull did not '
+                + 'complete and the timer will try again; the appliance\'s own journal '
+                + '(journalctl -u acs-gateway-converge) says why. The tag is changed by a pull '
+                + 'request on platform.yml in this gateway\'s repository, so a fleet mid-rollout '
+                + 'shows different tags here. Empty on an appliance that runs the bundle alone.'
+            },
+            /**
+             * The failure this lane is most likely to produce and least likely to notice: a
+             * bespoke adapter is a container on somebody else's hardware with no heartbeat of its
+             * own, and a gateway whose adapter is crash-looping still publishes and reads ONLINE.
+             */
+            {
+              label: 'Custom',
+              value: selected.forge_appliance_custom_outcome
+                ? [
+                  selected.forge_appliance_custom_outcome,
+                  selected.forge_appliance_custom_revision
+                    ? `at ${selected.forge_appliance_custom_revision.slice(0, 7)}`
+                    : null,
+                ].filter(Boolean).join(' ')
+                : null,
+              danger: selected.forge_appliance_custom_outcome === 'failed',
+              title: 'How this gateway\'s own custom.yml ended on the last convergence, and the '
+                + 'commit it ran from. A gateway whose repository carries a playbook of its own -- '
+                + 'a bespoke adapter for machinery no standard node reaches -- runs it after the '
+                + 'platform playbook. "failed" is the adapter not running: the gateway keeps '
+                + 'publishing everything else, so nothing else here turns amber. Empty when this '
+                + 'repository carries no playbook of its own.'
+            },
           ] : []),
           {
             label: 'Description',

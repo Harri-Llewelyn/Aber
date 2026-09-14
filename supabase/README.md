@@ -2779,6 +2779,58 @@ platform repository with its key and is refused when it pushes.
 service hands the root out only inside an enrolment, so the publisher has nothing to put in the
 repository yet; [`docs/roadmap.md`](../docs/roadmap.md) keeps the rotation design.
 
+### A gateway that needs code of its own (`0106`)
+
+Some machinery — serial, Modbus, OPC-DA — no Node-RED node reaches, and the adapter that does is
+worth nothing to anybody else. It is admissible on one condition: **a container built from a
+commit, never a payload handed to the appliance.** The repository carries a `custom.yml` beside its
+flow, the converge script runs it after the platform playbook, and the image is built on the
+appliance from the checkout. That costs no registry, no new credential and no fourth revocation
+handle, because the deploy key is all the appliance holds and a registry could not have accepted
+it.
+
+**Cloning is seeding, and the seed is a template repository.**
+[`forge/gateway-custom-example/`](../forge/gateway-custom-example) is published by the sweep as
+`platform/gateway-custom-example`, in the same organisation as the playbook and marked as a
+template, so the forge offers **Use this template**. Untagged, because it is copied once rather
+than converged to: `publishToForge()` takes a `version` of `null` and returns without tagging.
+Somebody making a gateway that needs an adapter generates
+`gateways/gateway-<sparkplug_id>` from it before commissioning, and enrolment adopts what it finds
+— `ensureRepository` reads the repository that is already there, then the protection, the pointer
+and the key follow as they always do. **No column records the choice**; the repository is the
+record.
+
+Four things were measured against `gitea/gitea:1.27.3`: the machine account may set `template` on
+a repository it owns (`PATCH /repos/{owner}/{name}`); `POST /repos/{owner}/{name}/generate` into
+the `gateways` organisation answers 201; a generated repository is **not** itself a template and
+carries **no** branch protection, so enrolment's is the first; and generation copies the whole
+tree, `.acs/manifest.json` included. That last one is why `ensureBranchProtection()` removes that
+file in the same window it commits the incident template — the one moment the machine account may
+still write `main` — since a manifest stating the digest and date of the *example* is a file
+about the wrong repository. It is not fatal if the removal fails: a stray file reads badly and
+works identically, and the protection matters more.
+
+**The example carries no `flows.json` and no `platform.yml`, deliberately.** A flow copied from a
+template would be deployed over the one enrolment installed, taking the gateway's heartbeat with
+it; and `seedPlatformPointer()` keeps a pointer that already exists, so a copied `platform.yml`
+would pin every gateway seeded from it to whatever tag was current when the example was written.
+
+**What the operator sees.** `acs-gateway-converge` records both outcomes in `converged.json`,
+which the puller already pushes to the `appliance` branch under the allowlist it never widens. On
+that push `forge-events` reads the file at the pushed commit the way it reads `flows.json`'s
+digest, and `0106` records five columns: the platform tag and outcome, when the appliance recorded
+it, and the custom playbook's outcome and revision. The gateway drawer shows them as **Platform**
+and **Custom**. Every field is treated as untrusted — it is JSON from a box in a cabinet arriving
+over a deploy key — so an absent, malformed or oddly-shaped file resolves to nulls rather than to
+a failed delivery, and a `converged_at` that will not parse is dropped rather than handed to
+Postgres, which would refuse the whole update.
+
+**Custom is the row that earns its place.** A bespoke adapter is a container on somebody else's
+hardware with no heartbeat of its own, so a gateway whose adapter is crash-looping keeps
+publishing everything else and reads ONLINE. `custom.yml` in the example therefore asserts the
+service is actually running after `up -d`, because compose reports success for a container that
+started and exited.
+
 ### The one-liner (`0105`)
 
 Commissioning as a pasted command

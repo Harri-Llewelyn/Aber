@@ -8,8 +8,9 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  * that head. That hash is the forge's half of the drift check: the appliance's heartbeat carries
  * the hash of the flow flow-sync.mjs last deployed, and the gateway drawer compares the two. A
  * push to `appliance`, which only the appliance's deploy key can make, records the head of that
- * branch beside it (0104): when the appliance last reported, and the digest of the flows.json it
- * says it is running.
+ * branch beside it (0104): when the appliance last reported, the digest of the flows.json it says
+ * it is running, and what `converged.json` on that branch says its last convergence did -- the
+ * platform tag and outcome, and what this gateway's own custom.yml did (0106).
  *
  * The signature is the whole of the authentication: `X-Gitea-Signature` is the hex HMAC-SHA256 of
  * the raw body under the hook's secret, verified against GITEA_WEBHOOK_SECRET. The body is read as
@@ -30,6 +31,8 @@ const WEBHOOK_SECRET = Deno.env.get("GITEA_WEBHOOK_SECRET") ?? "";
 
 const NO_COMMIT = /^0+$/;
 const FLOW_FILE = "flows.json";
+/** What acs-gateway-converge records, carried on the same branch by the same allowlist. */
+const CONVERGED_FILE = "converged.json";
 
 interface Commit {
   id?: string;
@@ -109,6 +112,75 @@ async function flowHashAt(repository: string, sha: string): Promise<string | nul
   return hex(await crypto.subtle.digest("SHA-256", await raw.arrayBuffer()));
 }
 
+/** The five columns `converged.json` fills, all null when there is nothing to read. */
+interface ConvergenceRecord {
+  forge_appliance_platform_tag: string | null;
+  forge_appliance_platform_outcome: string | null;
+  forge_appliance_converged_at: string | null;
+  forge_appliance_custom_outcome: string | null;
+  forge_appliance_custom_revision: string | null;
+}
+
+const NO_CONVERGENCE: ConvergenceRecord = {
+  forge_appliance_platform_tag: null,
+  forge_appliance_platform_outcome: null,
+  forge_appliance_converged_at: null,
+  forge_appliance_custom_outcome: null,
+  forge_appliance_custom_revision: null,
+};
+
+/** A string field of an object, trimmed and length-capped, or null for anything else. */
+function field(source: Record<string, unknown> | null, name: string, max = 200): string | null {
+  const value = source?.[name];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+/**
+ * What the appliance converged to, from `converged.json` at the head of the `appliance` branch.
+ * The file is written by `acs-gateway-converge` on the appliance and pushed here by the puller.
+ *
+ * EVERY FIELD IS TREATED AS UNTRUSTED. It is JSON from a box in a cabinet, arriving over a deploy
+ * key: absent, malformed and unexpected shapes all resolve to nulls rather than to a failed
+ * delivery, because a non-2xx is a failed webhook on the hook's page and the flow half of this
+ * push is what actually matters. A timestamp that is not one is dropped rather than passed to
+ * Postgres, which would refuse the whole update.
+ */
+async function convergenceAt(repository: string, sha: string): Promise<ConvergenceRecord> {
+  const cfg = forgeConfig();
+  if (!cfg) return NO_CONVERGENCE;
+  const raw = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${repository}/raw/${CONVERGED_FILE}?ref=${sha}`);
+  // The ordinary state of an appliance that runs the bundle without the platform playbook.
+  if (raw.status === 404) return NO_CONVERGENCE;
+  if (!raw.ok) {
+    console.warn(`forge-events: could not read ${CONVERGED_FILE} of '${repository}' at ${sha.slice(0, 12)} (${raw.status})`);
+    return NO_CONVERGENCE;
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(await raw.text()) as Record<string, unknown>;
+    if (typeof parsed !== "object" || parsed === null) throw new Error("not an object");
+  } catch (err) {
+    console.warn(`forge-events: ${CONVERGED_FILE} of '${repository}' is not readable JSON (${err instanceof Error ? err.message : err})`);
+    return NO_CONVERGENCE;
+  }
+
+  const custom = typeof parsed.custom === "object" && parsed.custom !== null
+    ? parsed.custom as Record<string, unknown>
+    : null;
+  const at = field(parsed, "converged_at");
+
+  return {
+    forge_appliance_platform_tag: field(parsed, "tag", 64),
+    forge_appliance_platform_outcome: field(parsed, "outcome", 32),
+    forge_appliance_converged_at: at && Number.isFinite(Date.parse(at)) ? at : null,
+    forge_appliance_custom_outcome: field(custom, "outcome", 32),
+    forge_appliance_custom_revision: field(custom, "revision", 64),
+  };
+}
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { status: 200 });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -163,7 +235,12 @@ export default async function handler(req: Request): Promise<Response> {
   // Nobody is named for the appliance branch: a deploy-key push carries whatever author the
   // appliance set, and the branch's protection already says who can have written it.
   const record = branch === APPLIANCE_BRANCH
-    ? { forge_appliance_sha: sha, forge_appliance_at: at, forge_appliance_flow_sha256: flowSha256 }
+    ? {
+      forge_appliance_sha: sha,
+      forge_appliance_at: at,
+      forge_appliance_flow_sha256: flowSha256,
+      ...(await convergenceAt(repository, sha)),
+    }
     : {
       forge_head_sha: sha,
       forge_head_message: subjectOf(head?.message),

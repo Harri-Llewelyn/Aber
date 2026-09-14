@@ -126,6 +126,12 @@ const WEBHOOK_BRANCH_FILTER = `{main,${APPLIANCE_BRANCH}}`;
  */
 export const PLATFORM_ORGANISATION = "platform";
 export const PLATFORM_REPOSITORY = "gateway-platform";
+/**
+ * The example custom gateway repository, in the same organisation and published the same way. A
+ * template rather than a tagged release: it is copied once, when somebody makes a gateway that
+ * needs code of its own, and nothing converges to it.
+ */
+export const CUSTOM_EXAMPLE_REPOSITORY = "gateway-custom-example";
 /** Both dashboard teams read the platform repository through this team; nobody writes it. */
 export const PLATFORM_READERS_TEAM = "readers";
 /** The file in a gateway's repository naming the tag its appliance converges to. */
@@ -356,6 +362,39 @@ async function seedIssueTemplate(cfg: ForgeConfig, name: string): Promise<void> 
 }
 
 /**
+ * Remove `.acs/manifest.json` from a gateway's repository, in the same window as the template
+ * above. A repository generated from `platform/gateway-custom-example` carries a copy of it
+ * (measured against gitea/gitea:1.27.3: `POST /generate` copies the whole tree), and that file
+ * states the digest and publication date of the *example*, about a repository that is now one
+ * gateway's own. Nothing reads it here -- the sweep only reads manifests in the platform
+ * organisation -- so this is about the repository being the record rather than about correctness.
+ * Absent on every repository not seeded from the template, which is the ordinary case.
+ */
+async function dropCopiedManifest(cfg: ForgeConfig, name: string): Promise<void> {
+  const path = `/repos/${FORGE_ORGANISATION}/${name}/contents/${PLATFORM_MANIFEST_PATH}`;
+  const present = await forgeApi(cfg, "GET", path);
+  if (present.status === 404) return;
+  if (!present.ok) {
+    console.warn(`forge: could not check '${PLATFORM_MANIFEST_PATH}' on '${name}' (${present.status}); leaving it`);
+    return;
+  }
+  const { sha } = await present.json() as { sha?: string };
+  if (!sha) return;
+  const removed = await forgeApi(cfg, "DELETE", path, {
+    sha,
+    message: "Remove the manifest copied from the template; this repository is this gateway's own",
+    branch: "main",
+  });
+  // NOT FATAL. A repository that keeps a stray file is worse reading and works identically; the
+  // branch protection below matters more and must still be applied.
+  if (!removed.ok) {
+    console.warn(`forge: could not remove '${PLATFORM_MANIFEST_PATH}' from '${name}' (${removed.status}); leaving it`);
+    return;
+  }
+  console.log(`forge: '${name}' was seeded from a template; removed the copied ${PLATFORM_MANIFEST_PATH}`);
+}
+
+/**
  * Protect `main`: no direct pushes, one approval from `administrators` before a merge.
  * `enable_push: false` is what makes "deploy only what is committed" mean "deploy only what was
  * reviewed"; merging stays allowed to anyone with write once approvals are met, so a manager can
@@ -390,6 +429,7 @@ export async function ensureBranchProtection(
   // THE LAST MOMENT ANYTHING CAN BE COMMITTED TO `main` DIRECTLY. The protection below binds the
   // machine account too, so what the repository is to carry from the start goes in here, first.
   if (options.seedTemplate) {
+    await dropCopiedManifest(cfg, name);
     await seedIssueTemplate(cfg, name);
     const version = platformVersion();
     if (version) await seedPlatformPointer(cfg, name, platformTag(version));
@@ -595,31 +635,45 @@ export async function ensurePlatformOrganisation(cfg: ForgeConfig): Promise<numb
 }
 
 /**
- * The platform repository, created if absent, with `main` admitting pushes from the machine
- * account and from nobody else: its content is published from this repository's own tree, and a
- * change to it is a pull request here, not there. Deploy keys are not whitelisted, so every
+ * A repository the platform publishes into, created if absent, with `main` admitting pushes from
+ * the machine account and from nobody else: its content comes from this repository's own tree, and
+ * a change to it is a pull request here, not there. Deploy keys are not whitelisted, so every
  * appliance's read-only key reads it and none writes it.
+ *
+ * `template` marks it as one the forge's **Use this template** button copies. Set on an existing
+ * repository too, because the flag arrived after the repository did on any forge that predates it.
  */
-export async function ensurePlatformRepository(cfg: ForgeConfig): Promise<ForgeRepository> {
+async function ensurePublishedRepository(
+  cfg: ForgeConfig,
+  name: string,
+  description: string,
+  template = false,
+): Promise<ForgeRepository> {
   await ensurePlatformOrganisation(cfg);
-  const path = `/repos/${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}`;
-  let repo: ForgeRepository;
+  const path = `/repos/${PLATFORM_ORGANISATION}/${name}`;
+  let repo: ForgeRepository & { template?: boolean };
   const existing = await forgeApi(cfg, "GET", path);
   if (existing.ok) {
-    repo = await existing.json() as ForgeRepository;
+    repo = await existing.json() as ForgeRepository & { template?: boolean };
   } else if (existing.status === 404) {
     const created = await forgeApi(cfg, "POST", `/orgs/${PLATFORM_ORGANISATION}/repos`, {
-      name: PLATFORM_REPOSITORY,
-      description: "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by ACS-Cymru.",
+      name,
+      description,
       private: true,
       auto_init: true,
       default_branch: "main",
     });
-    if (!created.ok) throw await refused(`could not create repository '${PLATFORM_REPOSITORY}'`, created);
-    repo = await created.json() as ForgeRepository;
-    console.log(`forge: created '${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}'`);
+    if (!created.ok) throw await refused(`could not create repository '${name}'`, created);
+    repo = await created.json() as ForgeRepository & { template?: boolean };
+    console.log(`forge: created '${PLATFORM_ORGANISATION}/${name}'`);
   } else {
-    throw await refused(`could not read repository '${PLATFORM_REPOSITORY}'`, existing);
+    throw await refused(`could not read repository '${name}'`, existing);
+  }
+
+  if (template && repo.template !== true) {
+    const marked = await forgeApi(cfg, "PATCH", path, { template: true });
+    if (!marked.ok) throw await refused(`could not mark '${name}' as a template repository`, marked);
+    console.log(`forge: '${PLATFORM_ORGANISATION}/${name}' is a template repository`);
   }
 
   const rule = await forgeApi(cfg, "GET", `${path}/branch_protections/main`);
@@ -633,12 +687,24 @@ export async function ensurePlatformRepository(cfg: ForgeConfig): Promise<ForgeR
       push_whitelist_deploy_keys: false,
       enable_force_push: false,
     });
-    if (!created.ok) throw await refused(`could not protect 'main' on '${PLATFORM_REPOSITORY}'`, created);
-    console.log(`forge: 'main' on '${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}' admits the machine account alone`);
+    if (!created.ok) throw await refused(`could not protect 'main' on '${name}'`, created);
+    console.log(`forge: 'main' on '${PLATFORM_ORGANISATION}/${name}' admits the machine account alone`);
   } else if (!rule.ok) {
-    throw await refused(`could not read the branch protection on '${PLATFORM_REPOSITORY}'`, rule);
+    throw await refused(`could not read the branch protection on '${name}'`, rule);
   }
   return repo;
+}
+
+/**
+ * The platform repository. Enrolment calls this to be sure there is something for the appliance's
+ * read-only key to be registered against; the sweep publishes its content.
+ */
+export async function ensurePlatformRepository(cfg: ForgeConfig): Promise<ForgeRepository> {
+  return await ensurePublishedRepository(
+    cfg,
+    PLATFORM_REPOSITORY,
+    "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by ACS-Cymru.",
+  );
 }
 
 function base64(text: string): string {
@@ -653,8 +719,8 @@ async function fileAt(cfg: ForgeConfig, ref: RepositoryRef, path: string, at: st
   return await raw.text();
 }
 
-async function manifestDigestAt(cfg: ForgeConfig, at: string): Promise<string | null> {
-  const text = await fileAt(cfg, { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY }, PLATFORM_MANIFEST_PATH, at);
+async function manifestDigestAt(cfg: ForgeConfig, name: string, at: string): Promise<string | null> {
+  const text = await fileAt(cfg, { owner: PLATFORM_ORGANISATION, name }, PLATFORM_MANIFEST_PATH, at);
   if (text === null) return null;
   try {
     const digest = (JSON.parse(text) as { digest?: unknown }).digest;
@@ -666,36 +732,48 @@ async function manifestDigestAt(cfg: ForgeConfig, at: string): Promise<string | 
 
 export interface PlatformPublication {
   repository: ForgeRepository;
-  tag: string;
+  /** The tag this publication carries, or null for a repository published untagged. */
+  tag: string | null;
   /** Whether this call committed anything. */
   published: boolean;
   /** A tag found at other content than this build ships, which is a release that cannot move. */
   warning: string | null;
 }
 
+/** What one published repository is, so the sweep declares them rather than repeating this. */
+export interface PublishSpec {
+  /** Repository name inside the platform organisation. */
+  name: string;
+  description: string;
+  files: Record<string, string>;
+  digest: string;
+  /** The version to tag this build's content with, or null to publish untagged. */
+  version: string | null;
+  /** Whether the forge's **Use this template** button copies it. */
+  template?: boolean;
+}
+
 /**
- * Publish the platform playbook: `main` holds what this build ships, and the tag for this build's
- * version points at it. One read decides whether `main` is current (the digest in the manifest
- * file); otherwise one commit writes every file, updates what changed and deletes what is no
- * longer shipped. The tag is created once and never moved: a released version's playbook is
- * immutable, and a tag found at other content is reported, not corrected. Bump the version, or
- * on a development forge delete the tag by hand.
+ * Publish one repository the platform owns: `main` holds what this build ships, and the tag for
+ * this build's version, when it takes one, points at it. One read decides whether `main` is
+ * current (the digest in the manifest file); otherwise one commit writes every file, updates what
+ * changed and deletes what is no longer shipped. The tag is created once and never moved: a
+ * released version's content is immutable, and a tag found at other content is reported, not
+ * corrected. Bump the version, or on a development forge delete the tag by hand.
  */
-export async function publishPlatform(
+export async function publishToForge(
   cfg: ForgeConfig,
-  version: string,
-  files: Record<string, string>,
-  digest: string,
+  { name, description, files, digest, version, template = false }: PublishSpec,
 ): Promise<PlatformPublication> {
-  const repository = await ensurePlatformRepository(cfg);
-  const ref = { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY };
+  const repository = await ensurePublishedRepository(cfg, name, description, template);
+  const ref = { owner: PLATFORM_ORGANISATION, name };
   const path = `/repos/${repoPath(ref)}`;
-  const tag = platformTag(version);
+  const tag = version === null ? null : platformTag(version);
   let published = false;
 
-  if ((await manifestDigestAt(cfg, "main")) !== digest) {
+  if ((await manifestDigestAt(cfg, name, "main")) !== digest) {
     const tree = await forgeApi(cfg, "GET", `${path}/git/trees/main?recursive=true&per_page=1000`);
-    if (!tree.ok) throw await refused(`could not read the tree of '${PLATFORM_REPOSITORY}'`, tree);
+    if (!tree.ok) throw await refused(`could not read the tree of '${name}'`, tree);
     const existing = new Map(
       (((await tree.json()) as { tree?: { path: string; type: string; sha: string }[] }).tree ?? [])
         .filter((e) => e.type === "blob")
@@ -715,13 +793,19 @@ export async function publishPlatform(
     ];
     const committed = await forgeApi(cfg, "POST", `${path}/contents`, {
       branch: "main",
-      message: `Publish the platform playbook shipped with ${tag} (${digest.slice(0, 12)})`,
+      message: tag
+        ? `Publish ${name} shipped with ${tag} (${digest.slice(0, 12)})`
+        : `Publish ${name} (${digest.slice(0, 12)})`,
       files: operations,
     });
-    if (!committed.ok) throw await refused(`could not publish the platform playbook to '${PLATFORM_REPOSITORY}'`, committed);
+    if (!committed.ok) throw await refused(`could not publish '${name}'`, committed);
     published = true;
-    console.log(`forge: published the platform playbook (${operations.length} operations, digest ${digest.slice(0, 12)})`);
+    console.log(`forge: published ${name} (${operations.length} operations, digest ${digest.slice(0, 12)})`);
   }
+
+  // An untagged repository is finished here: the example is copied, never converged to, so there
+  // is no released version of it for an appliance to pin.
+  if (tag === null) return { repository, tag: null, published, warning: null };
 
   let warning: string | null = null;
   const found = await forgeApi(cfg, "GET", `${path}/tags/${encodeURIComponent(tag)}`);
@@ -729,15 +813,15 @@ export async function publishPlatform(
     const created = await forgeApi(cfg, "POST", `${path}/tags`, {
       tag_name: tag,
       target: "main",
-      message: `The platform playbook shipped with ${tag}`,
+      message: `${name} shipped with ${tag}`,
     });
-    if (!created.ok) throw await refused(`could not tag '${PLATFORM_REPOSITORY}' as ${tag}`, created);
-    console.log(`forge: tagged the platform playbook ${tag}`);
+    if (!created.ok) throw await refused(`could not tag '${name}' as ${tag}`, created);
+    console.log(`forge: tagged ${name} ${tag}`);
   } else if (!found.ok) {
-    throw await refused(`could not read tag ${tag} on '${PLATFORM_REPOSITORY}'`, found);
-  } else if ((await manifestDigestAt(cfg, tag)) !== digest) {
-    warning = `${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY} is tagged ${tag} at other content than this build ships; ` +
-      "a released version's playbook does not move. Bump the version, or on a development forge delete the tag.";
+    throw await refused(`could not read tag ${tag} on '${name}'`, found);
+  } else if ((await manifestDigestAt(cfg, name, tag)) !== digest) {
+    warning = `${PLATFORM_ORGANISATION}/${name} is tagged ${tag} at other content than this build ships; ` +
+      "a released version's content does not move. Bump the version, or on a development forge delete the tag.";
     console.warn(`forge: ${warning}`);
   }
   return { repository, tag, published, warning };
