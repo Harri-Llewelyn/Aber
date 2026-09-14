@@ -110,13 +110,19 @@ the Python suites, the rest of `ingestion.py`, the i3X server, the capture, play
 modules, the broker and setup scripts, and the Helm templates, whose comment blocks ship in
 every release's Secret and have brought it within two percent of Helm's 1 MiB ceiling (a CI step
 estimates it; revision 19 on the dev cluster was refused on 2026-09-13). Rules and tests guarding
-what nothing renders, which the Site Map work found in the stylesheet. And claims the checker
-could verify but does not, which is how the other kinds return.
+what nothing renders, which the Site Map work found in the stylesheet. Comments that are
+internally coherent and false, which the playback review found in the worker: a docstring
+reasoning at length about a credential file the chart never leaves absent, while the state it
+does leave — present and empty — went unhandled and logged an error every three seconds forever.
+And claims the checker could verify but does not, which is how the other kinds return.
 
 **Decided.** One sweep per surface, not one pass over everything, and a surface is done when its
 non-comment lines are unchanged (AST minus docstrings for Python, data equality for YAML, stripped
-text for the rest) and its prose names nothing that is not in the tree. Argument and history move
-to the component README or `docs/incidents.md`; they are not deleted. Nothing cites a roadmap
+text for the rest) and its prose names nothing that is not in the tree. **That comparison proves a
+sweep changed no behaviour and says nothing about whether the surviving comment is true**, so a
+comment asserting a runtime state is read against whatever produces that state — the chart, the
+migration, the deployment target — rather than left shorter and still wrong. Argument and history
+move to the component README or `docs/incidents.md`; they are not deleted. Nothing cites a roadmap
 number. Every claim found that the checker could verify gets a check, so the audit leaves a guard
 rather than a snapshot. The files under `deploy/helm/acs-cymru/files/` are mirrors: the source is
 edited and the sync script run.

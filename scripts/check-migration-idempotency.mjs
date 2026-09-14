@@ -15,6 +15,15 @@
  * hooks`), re-created under a new name, so it runs the same image with the same environment. The
  * live Job cannot be cloned: it is gone once its TTL expires. The clone is deleted afterwards.
  *
+ * THE IMAGE IS THE CHAIN, NOT THE WORKING TREE, and this is the thing to check first when the
+ * answer surprises you. db-init replays `/migrations/*.sql` as baked into the image it was built
+ * from, so a migration added on disk is in no replay until the image is rebuilt. It misleads in
+ * both directions: the check passes without ever executing the new file, which is a green tick
+ * over nothing; or, where the database already holds that migration by some other route, the
+ * replay reverts it, the digest differs, and the report names YOUR OWN function as the thing that
+ * moved -- which reads as a defect in the migration rather than a stale image. Rebuild before
+ * believing either answer: node scripts/dev-cluster.mjs up --only=db-init
+ *
  * Usage: node scripts/check-migration-idempotency.mjs, against the cluster the kube context points
  * at. Environment: ACS_CYMRU_NAMESPACE (default acs-cymru), ACS_CYMRU_RELEASE (acs-cymru),
  * DB_USER_NAME (postgres), DB_NAME (postgres).
