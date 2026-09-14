@@ -6,10 +6,11 @@
  * function node's body at the first tick. Checks: 1. every function node's body compiles, in the
  * wrapper Node-RED puts around it; 2. no metric uses the `{ type, value }` encoding the daemon
  * discards; 3. every placeholder is one `bootstrap.mjs` substitutes; 4. every wire resolves, the
- * heartbeat is driven only by its injects, and the host-metric and deployed-flow branches terminate
- * in the cache; 5. every `env.get()` the flow reads is a variable `bootstrap.mjs` writes into
- * /data/gateway.env; 6. the deployed-flow branch reads the file `bootstrap.mjs` and `flow-sync.mjs`
- * agree on. It does not check that the flow works; that needs a broker, an enrolment and hardware.
+ * heartbeat is driven only by its injects, and all three collector branches terminate in the cache;
+ * 5. every `env.get()` the flow reads is a variable `bootstrap.mjs` writes into /data/gateway.env;
+ * 6. the deployed-flow branch reads the file `bootstrap.mjs` and `flow-sync.mjs` agree on, and the
+ * broker-root branch the one `bootstrap.mjs` and `acs-gateway-converge` agree on. It does not check
+ * that the flow works; that needs a broker, an enrolment and hardware.
  *
  * Usage: node scripts/check-gateway-flow-template.mjs [--verbose]
  */
@@ -180,7 +181,11 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
 
   // Both collector branches write a cache the heartbeat reads. A wire out of either would be a
   // second path to the broker, or a way to make the heartbeat wait on a collector.
-  for (const [cache, what] of [['acs-host-parse', 'host-metric'], ['acs-deployed-parse', 'deployed-flow']]) {
+  for (const [cache, what] of [
+    ['acs-host-parse', 'host-metric'],
+    ['acs-deployed-parse', 'deployed-flow'],
+    ['acs-ca-parse', 'broker-root'],
+  ]) {
     if (!byId[cache]) {
       fail(`the ${what} cache node '${cache}' is gone; the heartbeat reads what it writes.`);
     } else if (JSON.stringify(byId[cache].wires) !== '[[]]') {
@@ -196,7 +201,8 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
 // a branch reading some other file would report a hash that matches nothing, forever.
 {
   const FLOW_SYNC = 'forge/gateway-platform/appliance/flow-sync.mjs';
-  const reader = flow.find((n) => n.type === 'file in');
+  // BY ID, not by type: there are two `file in` nodes and the other one reads the broker root.
+  const reader = byId['acs-deployed-read'];
   const placeholder = '__DEPLOYED_FILE__';
   if (!reader) {
     fail('no `file in` node reads deployed.json, so the heartbeat cannot report what was deployed.');
@@ -212,6 +218,33 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
         + `('${inBootstrap}' vs '${inSync}'); the flow would read one and the puller write the other.`);
     } else {
       pass(`the deployed-flow branch reads ${inBootstrap}, which bootstrap.mjs and flow-sync.mjs both name`);
+    }
+  }
+}
+
+// 6b. The broker-root branch reads the record bootstrap.mjs writes at enrolment and the converge
+// script rewrites when the platform publishes a new bundle. The heartbeat reports the expiry out
+// of it, and the Gateways page puts that beside the platform root's own: a branch reading some
+// other file would report the enrolment root's date forever, which is the case this replaced.
+{
+  const CONVERGE = 'forge/gateway-platform/roles/converge/files/acs-gateway-converge';
+  const reader = byId['acs-ca-read'];
+  const placeholder = '__CA_JSON_FILE__';
+  if (!reader) {
+    fail('no `file in` node reads ca.json, so the heartbeat cannot report when the root expires.');
+  } else if (reader.filename !== placeholder || reader.filenameType !== 'str') {
+    fail(`the broker-root \`file in\` node reads '${reader.filename}' (${reader.filenameType}); `
+      + `expected the placeholder ${placeholder}.`);
+  } else {
+    // bootstrap names it as a path segment; the converge script builds the same path from $CERTS.
+    const inBootstrap = (read(BOOTSTRAP).match(/const CA_JSON = join\(DATA_DIR, 'certs', '([^']+)'\)/) || [])[1];
+    const inConverge = (read(CONVERGE).match(/^CA_JSON="\$CERTS\/([^"]+)"$/m) || [])[1];
+    if (!inBootstrap || !inConverge || inBootstrap !== inConverge) {
+      fail(`bootstrap.mjs and acs-gateway-converge disagree on the root record's file name `
+        + `('${inBootstrap}' vs '${inConverge}'); the flow would read one and the converge script `
+        + 'write the other, so a re-issued root would never be reported.');
+    } else {
+      pass(`the broker-root branch reads certs/${inBootstrap}, which bootstrap.mjs and the converge script both name`);
     }
   }
 }

@@ -123,6 +123,28 @@ export function isCertExpiring(certExpiresAt, now = Date.now()) {
 }
 
 /**
+ * A gateway that has not been given the root the platform is publishing.
+ *
+ * THE QUESTION BETWEEN THE TWO HALVES OF A ROTATION. The root is re-issued, the sweep publishes
+ * the new bundle, and each appliance installs it within the hour of its next convergence. Only
+ * once every appliance has it is it safe to switch the broker's leaf to the new root; until then
+ * this says who has not converged yet. An appliance that never reported an expiry is not counted:
+ * unknown is not the same as behind.
+ *
+ * A DAY'S TOLERANCE, because the two dates come from different clocks and a re-issue that moves
+ * `notAfter` by hours is not a rotation anybody has to wait for.
+ */
+export const ROOT_LAG_TOLERANCE_DAYS = 1;
+
+export function holdsOlderRoot(certExpiresAt, platformNotAfter) {
+  if (!certExpiresAt || !platformNotAfter) return false;
+  const held = new Date(certExpiresAt).getTime();
+  const published = new Date(platformNotAfter).getTime();
+  if (Number.isNaN(held) || Number.isNaN(published)) return false;
+  return published - held > ROOT_LAG_TOLERANCE_DAYS * 86_400_000;
+}
+
+/**
  * Bytes at the precision an operator acts on, in binary units, because node_exporter counts in them
  * and `df -h` on the appliance agrees. Zero is a real reading; only null and undefined are absent.
  */

@@ -37,6 +37,14 @@ const CREDS = join(DATA_DIR, 'flows_cred.json');
 const SETTINGS = join(DATA_DIR, 'settings.js');
 const GATEWAY_ENV = join(DATA_DIR, 'gateway.env');
 const CA_PATH = join(DATA_DIR, 'certs', 'ca.crt');
+/**
+ * What this appliance knows about the root beside it, read by the flow and reported on the
+ * heartbeat. Written here for the enrolment root and replaced by acs-gateway-converge whenever the
+ * platform publishes a different bundle, which is why it is a file and not an environment
+ * variable: a reload does not re-source gateway.env, so a value put there would be the enrolment
+ * root's date for the life of the container. Must agree with acs-gateway-converge.
+ */
+const CA_JSON = join(DATA_DIR, 'certs', 'ca.json');
 // The GitOps identity: this appliance's own SSH keypair, and where the platform told it to pull
 // from. See generateDeployKey() for why the private half is generated here rather than issued.
 const GITOPS_DIR = join(DATA_DIR, 'gitops');
@@ -399,7 +407,10 @@ const flow = template
   // identical failure with MQTT_TLS_CA_FILE.
   .replaceAll('__CA_FILE__', CA_PATH)
   // Read every minute by the flow's `read deployed.json` branch; see the record written below.
-  .replaceAll('__DEPLOYED_FILE__', DEPLOYED);
+  .replaceAll('__DEPLOYED_FILE__', DEPLOYED)
+  // Read every minute by the flow's `read ca.json` branch. Written below for the enrolment root
+  // and rewritten by acs-gateway-converge when the platform publishes a different one.
+  .replaceAll('__CA_JSON_FILE__', CA_JSON);
 
 if (flow.includes('__')) {
   const leftover = [...new Set(flow.match(/__[A-Z0-9_]+__/g) || [])];
@@ -435,10 +446,10 @@ writeFileSync(
 );
 log(`wrote ${DEPLOYED} for the enrolment flow`);
 
-// Two facts the heartbeat reports that Node-RED cannot work out for itself. A function node runs in
-// a sandbox with no `require`, `fs` or `process`, so these are resolved here and handed to the flow
-// as environment variables that `env.get()` reads. Both are fixed for the life of an enrolment; an
-// operator who replaces the CA without re-enrolling keeps reporting the date recorded here.
+// One fact the heartbeat reports that Node-RED cannot work out for itself. A function node runs in
+// a sandbox with no `require`, `fs` or `process`, so it is resolved here and handed to the flow as
+// an environment variable that `env.get()` reads. It is fixed for the life of an enrolment, which
+// is what an environment variable can express; the root beside it is not, and goes to a file.
 
 /**
  * `ACS_AGENT_VERSION` comes from the operator's .env and is about to enter a shell file:
@@ -453,22 +464,40 @@ if (SAFE_AGENT_VERSION !== AGENT_VERSION) {
 }
 
 /**
- * The CA's notAfter, in epoch milliseconds. The CA is distributed by hand into every appliance's
- * trust store, so re-minting it drops the whole fleet with no signal but absence; reporting the
- * date each appliance holds gives a month's warning. A CA that cannot be parsed is not fatal: the
- * appliance simply does not claim an expiry.
+ * What this appliance knows about the root it was given, in the shape acs-gateway-converge
+ * rewrites when the platform publishes a new bundle. The heartbeat reports `not_after_ms` as
+ * `Cert_Expires_At`, so an operator sees who is still holding a root that is about to expire and,
+ * after a re-issue, who has not yet been given the new one.
+ *
+ * The pin is RFC 7469's: the SHA-256 of the SubjectPublicKeyInfo, base64. The same value the
+ * one-liner's stage 0 compares and `_shared/caPin.ts` computes, so the three agree by construction.
+ *
+ * A ROOT THAT CANNOT BE PARSED IS NOT FATAL. The appliance connects on the bytes, not on what is
+ * known about them; it simply does not claim an expiry until a bundle it can read replaces this.
  */
-let caExpiresMs = '';
-try {
-  caExpiresMs = String(Date.parse(new X509Certificate(enrolment.ca_cert).validTo));
-  if (!Number.isFinite(Number(caExpiresMs))) caExpiresMs = '';
-} catch {
-  caExpiresMs = '';
+function caRecord(pem) {
+  const certificate = new X509Certificate(pem);
+  const notAfter = Date.parse(certificate.validTo);
+  if (!Number.isFinite(notAfter)) throw new Error(`unreadable notAfter: ${certificate.validTo}`);
+  const pin = createHash('sha256')
+    .update(certificate.publicKey.export({ type: 'spki', format: 'der' }))
+    .digest('base64');
+  return {
+    not_after_ms: notAfter,
+    not_after: certificate.validTo,
+    spki_sha256: pin,
+    roots: [pin],
+    written_at: new Date().toISOString(),
+  };
 }
-if (caExpiresMs) {
-  log(`broker CA expires ${new Date(Number(caExpiresMs)).toISOString()}`);
-} else {
-  log('WARNING: could not read the broker CA expiry; Cert_Expires_At will not be reported.');
+
+try {
+  const record = caRecord(enrolment.ca_cert);
+  writeFileSync(CA_JSON, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o644 });
+  log(`wrote ${CA_JSON}; the broker CA expires ${new Date(record.not_after_ms).toISOString()}`);
+} catch (err) {
+  log(`WARNING: could not read the broker CA (${err.message}); Cert_Expires_At will not be `
+    + 'reported until the platform publishes a bundle this appliance can read.');
 }
 
 // 3. The broker credential, encrypted.
@@ -492,9 +521,8 @@ writeFileSync(
     `export GATEWAY_SPARKPLUG_ID='${enrolment.sparkplug_id}'`,
     `export GATEWAY_SPARKPLUG_GROUP='${enrolment.sparkplug_group}'`,
     // Read by the flow's `build node-level message` function through env.get(), and reported on
-    // the heartbeat. See the block above for why they are resolved here rather than in the flow.
+    // the heartbeat. See the block above for why it is resolved here rather than in the flow.
     `export GATEWAY_AGENT_VERSION='${SAFE_AGENT_VERSION}'`,
-    `export GATEWAY_CA_EXPIRES_MS='${caExpiresMs}'`,
     `export NODERED_CREDENTIAL_SECRET='${CREDENTIAL_SECRET}'`,
     '',
   ].join('\n'),

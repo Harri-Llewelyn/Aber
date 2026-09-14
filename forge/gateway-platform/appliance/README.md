@@ -86,7 +86,7 @@ actually doing" is answerable from the dashboard instead of by getting a shell o
 | 1-minute load, available memory, free disk on `/` | `node_exporter`, polled locally |
 | bundle version | recorded by `bootstrap` at enrolment |
 | flow hash | `/data/gitops/deployed.json`, written by `flow-sync` after every deploy and by `bootstrap` for the enrolment flow |
-| broker CA expiry | read from the CA this appliance installed |
+| broker root expiry | `/data/certs/ca.json`, written by `bootstrap` for the root enrolment installed and by `acs-gateway-converge` for every bundle the platform publishes afterwards |
 
 **`node_exporter` runs here and is never scraped from the centre.** It has no published port. The
 platform's Prometheus does not reach into plants: this appliance dials out to the broker and
@@ -101,11 +101,18 @@ disk read stop the gateway reporting ONLINE — which is a worse failure than an
 Readings go stale after five minutes and are then omitted rather than repeated, so a number on the
 dashboard is always one this appliance really took.
 
-**The CA expiry is the one that earns its place.** The broker's CA is distributed by hand into
-every appliance's trust store, so re-minting it does not fail loudly — it succeeds, and every
-gateway drops off at once with no signal but absence. Reporting the date *this* appliance holds
-turns the worst fleet-wide failure into a dated warning. It is read once, at enrolment, from the CA
-that was installed; replacing that file by hand without re-enrolling will not update it.
+**The root's expiry is the one that earns its place.** Re-issuing the broker's root does not fail
+loudly — it succeeds, and every appliance still holding the old one drops off at once with no
+signal but absence. Reporting the date *this* appliance holds turns the worst fleet-wide failure
+into a dated warning, and after a re-issue it is also how the platform says which appliances have
+been given the new root and which have not.
+
+**The root follows the bundle, not the enrolment.** `acs-gateway-converge` reads
+`trust/ca-bundle.pem` from `main` of the platform repository on every pass, tries each root in it
+against the broker this appliance actually dials, and installs the bundle only if one of them
+verifies. Then it writes `/data/certs/ca.json` and restarts Node-RED, which is what makes the
+reported date move. A bundle that verifies nothing is refused and recorded; this appliance keeps
+the root it has.
 
 ## What this gateway is allowed to publish
 

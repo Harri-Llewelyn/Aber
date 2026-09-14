@@ -22,16 +22,30 @@ regresses:
   * THE INVENTORY CARRIES NO HASH. `listClients` returns each client's salt and iterations; the
     service drops them, because the Access Control page shows what it returns.
 
+  * THE ROOT IT REPORTS IS THE ONE THE BROKER PRESENTS, with the pin an appliance computes for
+    itself. The trust bundle on the platform repository is published from `GET /ca`, so a wrong
+    pin or a stale certificate here reaches every converging appliance as a bundle it refuses --
+    or, worse, one it accepts and then cannot connect through.
+
 Requires the stack up (Compose, or a cluster with ACS_STACK=k8s) and MQTT_CREDENTIAL_SERVICE_TOKEN:
 
     MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 """
+import base64
+import hashlib
 import json
 import os
 import sys
 import unittest
 import urllib.error
 import urllib.request
+
+try:
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+except ImportError:  # the pin assertion skips; every other assertion here stands
+    x509 = None
+    serialization = None
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
 import stack_exec  # noqa: E402  -- docker exec on Compose, kubectl exec on Kubernetes (ACS_STACK)
@@ -314,6 +328,55 @@ class TestInventory(CredentialServiceBase):
         self.assertIn("factoryplus_ingestion", [c["username"] for c in payload["clients"]])
         gateway_role = next(r for r in payload["roles"] if r["rolename"] == "gateway")
         self.assertTrue(any(a["topic"] == "spBv1.0/#" for a in gateway_role["acls"]))
+
+
+class TestCertificateAuthority(CredentialServiceBase):
+    """
+    `GET /ca` is what forge-sweep publishes the trust bundle from, so an appliance that has never
+    been visited learns of a re-issued root through it. Three things have to hold: the pin is the
+    one the appliance's own `openssl` computes, the dates are the certificate's and not this
+    request's, and a deployment with no root says so rather than answering with a blank.
+    """
+
+    def test_the_root_is_returned_with_its_dates_and_its_pin(self):
+        status, payload = call(path="/ca", method="GET")
+        self.assertEqual(status, 200)
+        self.assertIn("BEGIN CERTIFICATE", payload["ca_cert"])
+        self.assertEqual(set(payload), {"ca_cert", "not_before", "not_after", "spki_sha256", "read_at"})
+
+        # The window is the certificate's own. A root whose validity had already passed would be
+        # published into the bundle and then refused by every appliance that checked it.
+        self.assertLess(payload["not_before"], payload["not_after"])
+        self.assertGreater(payload["not_after"], payload["read_at"])
+
+        # THE PIN IS THE SubjectPublicKeyInfo'S, computed here by a different implementation. The
+        # appliance computes it with an openssl pipeline and _shared/caPin.ts walks the DER in the
+        # worker; a service computing a third thing would look right in every response and match
+        # nothing that checked it. Skipped rather than weakened where the parser is absent: the
+        # broker's own image carries no openssl, so there is nothing to fall back to in-container.
+        if x509 is None:
+            self.skipTest("the `cryptography` package is not installed; the pin cannot be recomputed")
+        certificate = x509.load_pem_x509_certificate(payload["ca_cert"].encode())
+        spki = certificate.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        self.assertEqual(payload["spki_sha256"], base64.b64encode(hashlib.sha256(spki).digest()).decode())
+
+    def test_the_root_is_the_one_the_broker_presents(self):
+        # The whole point of reading it here rather than from a Secret somewhere: this service sits
+        # beside the broker, so what it returns is what a gateway will actually be shown.
+        presented = stack_exec.output(
+            "credential", "sh", "-c",
+            'cat "${MQTT_CA_FILE:-/mosquitto/certs/ca.crt}"',
+        )
+        _, payload = call(path="/ca", method="GET")
+        self.assertEqual(payload["ca_cert"].strip(), presented.strip())
+
+    def test_the_root_needs_the_token_and_only_answers_a_GET(self):
+        status, _ = call(path="/ca", method="GET", token=None)
+        self.assertEqual(status, 401)
+        status, _ = call({}, path="/ca")
+        self.assertEqual(status, 405)
 
 
 class TestExposure(CredentialServiceBase):

@@ -25,3 +25,5 @@ An edge gateway is what actually talks to machines and publishes their data to t
 **Type** says where the gateway runs and how far to trust its numbers. **Remote** runs on its own hardware out on the plant network. **Host** is a connector inside this stack, with nothing to install and no appliance to enrol. **Simulated** is host-run and its readings are generated rather than observed. **Shadow** belongs to playback and is not something you create.
 
 A certificate within 30 days of expiry is called out in the gateway's drawer. That warning is the only notice before the appliance stops being able to connect.
+
+The same row reads **holds an older root** when this appliance has not yet been given the root the platform is publishing. Each appliance picks it up at its next hourly convergence, so a gateway can sit there for an hour after a root is re-issued and nothing is wrong. One that stays there has not converged -- look at the gateway's `appliance` branch in the forge for what it said about the last attempt.

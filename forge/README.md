@@ -18,6 +18,13 @@ A repository the platform provisions per gateway (`gateways/gateway-<sparkplug_i
 directory here: it is created empty at enrolment, or copied from the example above, and its
 content is the gateway's own from that moment.
 
+**`trust/` on `platform/gateway-platform` has no directory here either**, and cannot: it is the
+root the broker is presenting today, which this repository does not know and which changes without
+a release. `forge-sweep` writes it from the credential service onto `main`, and it is declared
+`unmanaged` in the playbook's `PublishSpec` so publishing the tree neither ships nor deletes it.
+It is on `main` rather than in a tag because every appliance must read it whatever tag it is
+pinned to (`../supabase/README.md`, "The broker's root rides on `main`").
+
 **Adding one.** Put the directory beside `gateway-platform/`, add a row to `PUBLISHED` in
 [`scripts/sync-gateway-platform.mjs`](../scripts/sync-gateway-platform.mjs) so the edge runtime
 carries it as a generated module (an edge worker has no filesystem), add a `PublishSpec` to the

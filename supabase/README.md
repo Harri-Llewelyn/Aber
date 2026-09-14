@@ -2775,9 +2775,45 @@ appliance. `test_forge_sweep.py` asserts one sweep leaves the repository publish
 protected and a second publishes nothing; `test_forge_events.py`'s appliance class clones the
 platform repository with its key and is refused when it pushes.
 
-**Not built here:** the CA bundle the playbook was to carry for a root rotation. The credential
-service hands the root out only inside an enrolment, so the publisher has nothing to put in the
-repository yet; [`docs/roadmap.md`](../docs/roadmap.md) keeps the rotation design.
+### The broker's root rides on `main` of the platform repository
+
+An appliance is given the broker's root at enrolment and then never told about a re-issue, which
+made re-minting the root the one operation that takes the whole fleet down at once. `trust/` on
+`main` of the platform repository is what replaces that.
+
+**The sweep is the publisher, and the credential service is the source.** `GET /ca` on
+[`scripts/gateway-credential-service.mjs`](../scripts/gateway-credential-service.mjs) returns the
+certificate, the window it is valid for, and the pin of its public key, read from the file the
+broker itself loads — that service is a sidecar in the broker's pod and is the one component that
+can say what a gateway will actually be shown. `forge-sweep` reads it on every pass and writes
+`trust/ca-bundle.pem` and `trust/manifest.json` through `publishTrust()`.
+
+**On a branch, not in a tag.** Everything else in that repository is pinned: an appliance reads the
+tag its own `platform.yml` names, and a fleet on three platform versions reads three trees. A
+re-issued root has to reach all of them, so it goes on the one ref they all share. `PublishSpec`
+gained an `unmanaged` field for this: without it, the next publication of the playbook would delete
+`trust/` as a file this build no longer ships, and the two would take turns removing each other's
+work.
+
+**The bundle is a union.** `mergeTrustBundle()` keeps the current root plus every previously
+published root whose `not_after` is still ahead, keyed by pin, the current one first. A broker
+presenting either verifies, which is what makes "publish the new root" and "switch the broker's
+leaf to it" two independent steps rather than a flag day. A root the manifest cannot date is kept
+rather than dropped: dropping one that is still signing the broker's certificate takes the fleet
+off the air, and keeping an expired one costs nothing.
+
+**It is compared by its bytes, not by its set of keys.** `internal-ca.yaml` re-issues the root with
+`rotationPolicy: Never`, so a re-issue keeps the same public key and changes only the certificate —
+the case the fleet most needs to be given, and the one a set comparison would miss.
+
+**The appliance refuses a bundle that would cut it off.** `acs-gateway-converge` offers each root
+to the live broker with `openssl s_client -verify_return_error` and installs nothing unless one
+verifies; then it writes `/data/certs/ca.crt` and `ca.json` and restarts Node-RED once, only if the
+bytes changed. The flow reads `ca.json` every minute through a file-in node — the `deployed.json`
+pattern — and reports `Cert_Expires_At` from it, so the date on the Gateways page is the root the
+appliance holds now. `gateway-bundle`'s readiness `GET` reports the platform's own root beside it,
+and the drawer says *holds an older root* when a gateway is more than a day behind. That is the
+signal the runbook's rotation waits on (`docs/physical-gateways.md` §8).
 
 ### The forge checks a flow before it is merged
 

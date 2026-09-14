@@ -100,6 +100,10 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "ACS_CA_PEM",
     "ACS_CA_URL",
     "ACS_INSTALLER_ALLOW_HTTP",
+    // The readiness probe reports when the BROKER's root expires, which is a different root and
+    // is read where it is presented. `GET /ca` alone: a root certificate, never a private key.
+    "MQTT_CREDENTIAL_SERVICE_URL",
+    "MQTT_CREDENTIAL_SERVICE_TOKEN",
   ],
 
   // What the one-liner fetches with the enrolment token in a header: the installer, the platform
@@ -176,6 +180,8 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // FORGE_SWEEP_SECRET, and the function walks the teams and repositories through the machine
   // account. The webhook pair is what lets it re-register a hook a repository lost. The version
   // is what it publishes the platform playbook under; the playbook itself is a module import.
+  // The credential service's bearer reads `GET /ca` alone here, which returns a root certificate
+  // and no private key; it is the same token enrolment holds, and the sweep issues nothing.
   "forge-sweep": [
     "SUPABASE_SERVICE_ROLE_KEY",
     "FORGE_SWEEP_SECRET",
@@ -185,6 +191,8 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_WEBHOOK_URL",
     "GITEA_WEBHOOK_SECRET",
     "ACS_PLATFORM_VERSION",
+    "MQTT_CREDENTIAL_SERVICE_URL",
+    "MQTT_CREDENTIAL_SERVICE_TOKEN",
   ],
 
   // Factory+ Directory adapter. No service-role key: it authenticates the caller and queries as

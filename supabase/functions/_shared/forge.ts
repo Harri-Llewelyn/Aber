@@ -24,6 +24,10 @@
  * comes back null, and the response says so.
  */
 
+// The trust bundle below is keyed by the same pin the appliance and the one-liner compute, so it
+// is computed by the same code rather than by a second reading of the same RFC.
+import { spkiPin } from "./caPin.ts";
+
 export interface ForgeConfig {
   baseUrl: string;
   user: string;
@@ -155,6 +159,19 @@ export const PLATFORM_READERS_TEAM = "readers";
 export const PLATFORM_POINTER_PATH = "platform.yml";
 /** The digest of what the published repository holds, so a sweep compares in one read. */
 const PLATFORM_MANIFEST_PATH = ".acs/manifest.json";
+/**
+ * The roots an appliance should trust, on `main` of the platform repository and nowhere else.
+ *
+ * EVERYTHING ELSE IN THAT REPOSITORY IS A TAG. An appliance converges to the tag its own
+ * platform.yml names, so a fleet spread across three platform versions reads three different
+ * trees -- and a re-issued root has to reach all of them, including the ones nobody is upgrading.
+ * A directory on `main`, fetched separately from the tagged checkout, is the one thing every
+ * appliance can read whatever it is pinned to. It is written by the sweep and excluded from what
+ * the published tree manages, so publishing a new playbook neither deletes it nor tags it.
+ */
+export const TRUST_PREFIX = "trust/";
+export const TRUST_BUNDLE_PATH = `${TRUST_PREFIX}ca-bundle.pem`;
+export const TRUST_MANIFEST_PATH = `${TRUST_PREFIX}manifest.json`;
 
 /**
  * The platform's version, from ACS_PLATFORM_VERSION (the chart's appVersion), or null when unset
@@ -816,6 +833,12 @@ export interface PublishSpec {
   version: string | null;
   /** Whether the forge's **Use this template** button copies it. */
   template?: boolean;
+  /**
+   * Path prefixes this build does not ship and must not remove. `trust/` is written by the sweep
+   * from the broker's own root rather than from this repository's tree, so without this the next
+   * publication of the playbook would delete it as a file no longer shipped.
+   */
+  unmanaged?: string[];
 }
 
 /**
@@ -828,7 +851,7 @@ export interface PublishSpec {
  */
 export async function publishToForge(
   cfg: ForgeConfig,
-  { name, description, files, digest, version, template = false }: PublishSpec,
+  { name, description, files, digest, version, template = false, unmanaged = [] }: PublishSpec,
 ): Promise<PlatformPublication> {
   const repository = await ensurePublishedRepository(cfg, name, description, template);
   const ref = { owner: PLATFORM_ORGANISATION, name };
@@ -854,7 +877,9 @@ export async function publishToForge(
           ? { operation: "update", path: p, sha: existing.get(p), content: base64(text) }
           : { operation: "create", path: p, content: base64(text) }
       )),
-      ...[...existing.keys()].filter((p) => !(p in wanted)).map((p) => ({ operation: "delete", path: p, sha: existing.get(p) })),
+      ...[...existing.keys()]
+        .filter((p) => !(p in wanted) && !unmanaged.some((prefix) => p.startsWith(prefix)))
+        .map((p) => ({ operation: "delete", path: p, sha: existing.get(p) })),
     ];
     const committed = await forgeApi(cfg, "POST", `${path}/contents`, {
       branch: "main",
@@ -890,6 +915,152 @@ export async function publishToForge(
     console.warn(`forge: ${warning}`);
   }
   return { repository, tag, published, warning };
+}
+
+/**
+ * One root in the bundle: the certificate, and what the credential service said about it.
+ */
+export interface TrustRoot {
+  ca_cert: string;
+  not_before: string;
+  not_after: string;
+  spki_sha256: string;
+}
+
+/** What `trust/manifest.json` records about each root in the bundle beside it. */
+export interface TrustEntry {
+  spki_sha256: string;
+  not_before: string;
+  not_after: string;
+}
+
+/** Every certificate block in a PEM, in the order they appear. */
+function certificateBlocks(text: string): string[] {
+  return [...text.matchAll(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g)]
+    .map((m) => m[0].trim());
+}
+
+export interface TrustBundle {
+  bundle: string;
+  manifest: string;
+  roots: TrustEntry[];
+  /** Whether this differs from what is on `main` and therefore has to be committed. */
+  changed: boolean;
+}
+
+/**
+ * The bundle an appliance should hold: the root the broker presents now, plus every root already
+ * published that has not expired.
+ *
+ * THE OLD ROOT STAYS UNTIL IT EXPIRES, and that ordering is the whole mechanism. An appliance
+ * converges hourly, so at any moment some of the fleet holds the new bundle and some the old one.
+ * A bundle carrying only the new root would cut off every appliance that has not converged yet the
+ * moment the broker's leaf is re-issued under it; a bundle carrying both verifies a broker
+ * presenting either, which makes the two changes independent and the order of them recoverable.
+ * Trusting a root whose replacement is already in the same bundle costs nothing this deployment
+ * did not already accept when it issued it.
+ *
+ * A ROOT THE MANIFEST CANNOT DATE IS KEPT. The manifest is written here, so the case is a bundle
+ * edited by hand; dropping a root that is still signing the broker's certificate takes the fleet
+ * off the air, and keeping one that has expired costs nothing -- an expired root verifies nothing.
+ *
+ * Pure, and told the time rather than reading it, so a test can place a root either side of now.
+ */
+export async function mergeTrustBundle(
+  bundle: string | null,
+  manifest: string | null,
+  root: TrustRoot,
+  now: Date,
+): Promise<TrustBundle> {
+  const dated = new Map<string, TrustEntry>();
+  let previous: TrustEntry[] = [];
+  try {
+    previous = ((JSON.parse(manifest ?? "null") ?? {}) as { roots?: TrustEntry[] }).roots ?? [];
+    for (const entry of previous) {
+      if (entry && typeof entry.spki_sha256 === "string") dated.set(entry.spki_sha256, entry);
+    }
+  } catch {
+    // An unparseable manifest is one nobody here wrote. The bundle beside it is still read, and
+    // every root in it is kept for the reason above.
+  }
+
+  const current = certificateBlocks(root.ca_cert)[0] ?? "";
+  if (!current) throw new Error("the credential service returned no certificate to publish");
+  const held = new Map<string, { pem: string; entry: TrustEntry }>();
+  for (const pem of certificateBlocks(bundle ?? "")) {
+    const pin = await spkiPin(pem);
+    // A block whose public key cannot be read is not a certificate an appliance could use either.
+    if (!pin || pin === root.spki_sha256) continue;
+    const entry = dated.get(pin);
+    if (entry && Date.parse(entry.not_after) <= now.getTime()) continue;
+    held.set(pin, {
+      pem,
+      entry: entry ?? { spki_sha256: pin, not_before: "", not_after: "" },
+    });
+  }
+
+  // The current root first, so the file reads as "this one, and these until they expire", and so
+  // the bytes are stable across passes rather than following the order of a tree read.
+  const ordered = [
+    { pem: current, entry: { spki_sha256: root.spki_sha256, not_before: root.not_before, not_after: root.not_after } },
+    ...[...held.values()].sort((a, b) => a.entry.spki_sha256.localeCompare(b.entry.spki_sha256)),
+  ];
+  const roots = ordered.map((r) => r.entry);
+  const text = ordered.map((r) => `${r.pem}\n`).join("");
+  return {
+    bundle: text,
+    manifest: JSON.stringify(
+      { current: root.spki_sha256, roots, published_at: now.toISOString() },
+      null,
+      2,
+    ) + "\n",
+    roots,
+    // THE BYTES, NOT THE SET OF KEYS. A root re-issued with the same key -- which is what
+    // internal-ca.yaml's `rotationPolicy: Never` does a year before expiry -- keeps its pin and
+    // changes its certificate, and that is precisely the change the fleet has to be given.
+    changed: text !== (bundle ?? "") || JSON.stringify(roots) !== JSON.stringify(previous),
+  };
+}
+
+/**
+ * Publish the trust bundle onto `main` of a published repository, from the root the credential
+ * service reports. One read of each file, one commit when they differ, nothing at all when they
+ * do not -- which is every pass but the ones after a re-issue.
+ */
+export async function publishTrust(
+  cfg: ForgeConfig,
+  name: string,
+  root: TrustRoot,
+): Promise<{ published: boolean; roots: TrustEntry[] }> {
+  const ref = { owner: PLATFORM_ORGANISATION, name };
+  const path = `/repos/${repoPath(ref)}`;
+  const bundle = await fileAt(cfg, ref, TRUST_BUNDLE_PATH, "main");
+  const manifest = await fileAt(cfg, ref, TRUST_MANIFEST_PATH, "main");
+  const merged = await mergeTrustBundle(bundle, manifest, root, new Date());
+  if (!merged.changed) return { published: false, roots: merged.roots };
+
+  const wanted: [string, string][] = [
+    [TRUST_BUNDLE_PATH, merged.bundle],
+    [TRUST_MANIFEST_PATH, merged.manifest],
+  ];
+  const operations = [];
+  for (const [file, content] of wanted) {
+    const present = await forgeApi(cfg, "GET", `${path}/contents/${file}?ref=main`);
+    const sha = present.ok ? ((await present.json()) as { sha?: string }).sha : undefined;
+    operations.push(
+      sha
+        ? { operation: "update", path: file, sha, content: base64(content) }
+        : { operation: "create", path: file, content: base64(content) },
+    );
+  }
+  const committed = await forgeApi(cfg, "POST", `${path}/contents`, {
+    branch: "main",
+    message: `Trust: ${merged.roots.length} root(s), current ${root.spki_sha256.slice(0, 12)}`,
+    files: operations,
+  });
+  if (!committed.ok) throw await refused(`could not publish the trust bundle on '${name}'`, committed);
+  console.log(`forge: published ${TRUST_PREFIX} on ${name} (${merged.roots.length} root(s))`);
+  return { published: true, roots: merged.roots };
 }
 
 /**

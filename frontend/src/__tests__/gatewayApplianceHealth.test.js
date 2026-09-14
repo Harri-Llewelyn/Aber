@@ -9,12 +9,39 @@ import {
   CERT_EXPIRY_WARN_DAYS,
   certExpiryDays,
   formatCertExpiry,
+  holdsOlderRoot,
   isCertExpiring,
   formatBytes,
 } from '../utils/gatewayStatus';
 
 const NOW = Date.parse('2026-08-24T12:00:00Z');
 const inDays = (d) => new Date(NOW + d * 86_400_000).toISOString();
+
+describe('a gateway that has not been given the published root', () => {
+  // The question between the two halves of a rotation: the root is re-issued and published, and
+  // the broker's leaf must not be switched to it until every appliance has converged onto it.
+  it('is one whose reported expiry is behind the platform root', () => {
+    expect(holdsOlderRoot(inDays(30), inDays(395))).toBe(true);
+  });
+
+  it('is not one that has the same root, or one an hour of clock skew apart', () => {
+    expect(holdsOlderRoot(inDays(395), inDays(395))).toBe(false);
+    expect(holdsOlderRoot(inDays(395), inDays(395.2))).toBe(false);
+  });
+
+  it('is never one that reported nothing, or a platform that publishes nothing', () => {
+    // Unknown is not behind. A gateway on an older bundle reports no expiry at all, and colouring
+    // it as out of date would send somebody looking for a rotation that never happened.
+    expect(holdsOlderRoot(null, inDays(395))).toBe(false);
+    expect(holdsOlderRoot(inDays(30), null)).toBe(false);
+    expect(holdsOlderRoot(inDays(30), undefined)).toBe(false);
+    expect(holdsOlderRoot('not-a-date', inDays(395))).toBe(false);
+  });
+
+  it('is never one ahead of the platform, which is a leaf re-issued early', () => {
+    expect(holdsOlderRoot(inDays(400), inDays(30))).toBe(false);
+  });
+});
 
 describe('certificate expiry', () => {
   it('reports whole days remaining, and negative once it has passed', () => {
