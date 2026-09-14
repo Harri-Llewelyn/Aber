@@ -16,6 +16,7 @@ import {
   IconDownload, IconPlay, IconRecord, IconShieldAlert, IconTrash, IconUpload, IconX
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
+import { PageHeading } from '../common/PageHeading'
 
 /**
  * Recording the broker, and publishing a recording back.
@@ -372,6 +373,12 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   return (
     <div className="page-layout">
       <div className="page-main">
+
+        <PageHeading icon={<IconRecord size={15} />} title="Capture and playback">
+          What the plant actually published, kept verbatim and replayed on demand. A capture is one
+          recording per subject, so a new one replaces it; a playback republishes a stored capture
+          through the real broker and the real ingestion path, as a simulated gateway.
+        </PageHeading>
 
         {/* Playback in a card of its own, above capture: it writes into the historian under a
             gateway's identity. */}

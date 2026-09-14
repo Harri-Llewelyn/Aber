@@ -4,8 +4,9 @@ import { POLL_INTERVAL_MS, PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconPencil, IconCheck, IconX, IconArchive, IconHistory } from '../common/Icons'
+import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconShieldCheck } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
+import { PageHeading } from '../common/PageHeading'
 
 /**
  * The Approvals page: one inbox for every change somebody proposed but may not apply.
@@ -565,19 +566,12 @@ export function ApprovalsTab({
       <div className="page-main">
 
         {/* No Propose a Change card: the act starts on the asset's own page. */}
-        <div className="card approvals-card">
-          <div className="card-header">
-            <h3 className="section-title">Approvals</h3>
-          </div>
-          <div className="card-body">
-            <p className="approvals-blurb">
-              A proposal is a request, not a change: nothing is written until somebody who may make
-              it approves. {canPropose
-                ? 'To ask for one, open the asset on its own page and use Propose a Change — the same dialog that edits it.'
-                : 'Your role can decide proposals but not file them.'}
-            </p>
-          </div>
-        </div>
+        <PageHeading icon={<IconShieldCheck size={15} />} title="Approvals">
+          A proposal is a request, not a change: nothing is written until somebody who may make
+          it approves. {canPropose
+            ? 'To ask for one, open the asset on its own page and use Propose a Change — the same dialog that edits it.'
+            : 'Your role can decide proposals but not file them.'}
+        </PageHeading>
 
         <div className="card approvals-card">
           <div className="card-header">

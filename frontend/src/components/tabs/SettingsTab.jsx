@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
-import { IconSettings, IconX } from '../common/Icons'
+import { IconSettings, IconX, IconAlertTriangle } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
+import { PageHeading } from '../common/PageHeading'
 
 /**
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
@@ -185,6 +186,10 @@ export function SettingsTab({ showToast }) {
   const [settings, setSettings] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
+  /* The category on screen, held by name rather than index: the list is rebuilt on every read, and
+     an index would move the operator to a different category when one arrives or empties. Null
+     until the first read resolves, then the first category the API returned. */
+  const [category, setCategory] = useState(null)
 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
@@ -196,6 +201,12 @@ export function SettingsTab({ showToast }) {
   useEffect(() => { load(true) }, [load])
 
   const groups = useMemo(() => groupByCategory(settings), [settings])
+
+  /* Falls back to the first category whenever the held one is not in the current list -- the first
+     read, and a category that disappears. Chosen during render rather than in an effect, so the page
+     never paints a tablist with nothing selected. */
+  const activeCategory = groups.some(g => g.category === category) ? category : groups[0]?.category
+  const activeGroup = groups.find(g => g.category === activeCategory)
 
   if (loading) {
     return (
@@ -210,27 +221,22 @@ export function SettingsTab({ showToast }) {
   return (
     <div className="page-layout">
       <div className="page-main">
-        {/* The page states its own limits, because both are surprising and deliberate: the list
-            cannot be added to from here, and nothing secret is stored here. */}
-        {/* Header, then body, the shape every other card uses. */}
-        <div className="card settings-preamble" style={{ marginBottom: '12px' }}>
-          <div className="card-header">
-            <h3 className="section-title">
-              <IconSettings size={15} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
-              Runtime configuration
-            </h3>
-          </div>
-          <div className="card-body">
-            <p>
-              These take effect without a restart and override the environment defaults they name.
-              The list is fixed: a setting appears here because code reads it, so new ones arrive
-              with the feature that needs them rather than being added by hand.
-            </p>
-            <p className="settings-preamble-warning">
-              <strong>Nothing secret is stored here.</strong> Every signed-in user can read this
-              page. Credentials — S3 keys, OIDC client secrets — belong in the secret store, not in
-              a setting.
-            </p>
+        {/* The page states its own limit, because it is surprising and deliberate: the list cannot
+            be added to from here. */}
+        <PageHeading icon={<IconSettings size={15} />} title="Runtime configuration">
+          These take effect without a restart and override the environment defaults they name. The
+          list is fixed: a setting appears here because code reads it, so new ones arrive with the
+          feature that needs them rather than being added by hand.
+        </PageHeading>
+
+        {/* The second thing to say is a warning rather than a description, so it keeps the shape a
+            warning has everywhere else instead of being a second paragraph nobody reads. */}
+        <div className="callout callout-warning callout-page">
+          <IconAlertTriangle size={14} className="callout-icon" />
+          <div>
+            <strong>Nothing secret is stored here.</strong> Every signed-in user can read this
+            page. Credentials — S3 keys, OIDC client secrets — belong in the secret store, not in
+            a setting.
           </div>
         </div>
 
@@ -244,16 +250,37 @@ export function SettingsTab({ showToast }) {
               reads them.
             </div>
           </div>
-        ) : (
-          groups.map(group => (
-            <div className="card settings-group" key={group.category}>
-              <div className="settings-group-title">{group.category}</div>
-              {group.settings.map(s => (
+        ) : (<>
+          {/* One category at a time, the switch Access Control uses. The categories were stacked as
+              titled cards, which made a page of thirty settings a scroll to find the one being
+              changed. The tab is now the only place the category is named. */}
+          <div
+            role="tablist"
+            aria-label="Settings category"
+            style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: 'var(--stack)' }}
+          >
+            {groups.map(group => (
+              <button
+                key={group.category}
+                role="tab"
+                aria-selected={group.category === activeCategory}
+                className={`btn btn-sm ${group.category === activeCategory ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setCategory(group.category)}
+                title={`${group.settings.length} setting${group.settings.length === 1 ? '' : 's'}`}
+              >
+                {group.category} <span className="section-count">{group.settings.length}</span>
+              </button>
+            ))}
+          </div>
+
+          {activeGroup && (
+            <div className="card settings-group" key={activeGroup.category}>
+              {activeGroup.settings.map(s => (
                 <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} />
               ))}
             </div>
-          ))
-        )}
+          )}
+        </>)}
       </div>
     </div>
   )

@@ -65,6 +65,7 @@ import {
   IconChevronDown, IconChevronUp, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
+import { PageHeading } from '../common/PageHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 /**
@@ -676,6 +677,12 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   return (
     <div className="page-layout">
       <div className="page-main">
+
+      <PageHeading icon={<IconClipboardList size={15} />} title="Schemas and metrics">
+        A schema is the contract a device is modelled to publish against; the catalog below is the
+        vocabulary of metrics every schema is built from. Neither is edited in place — a published
+        schema versions forward, and a metric no longer wanted is deprecated rather than removed.
+      </PageHeading>
 
       {/* Registered schemas first, catalog second: every visit after the first is to read or
           version a schema that already exists. */}
