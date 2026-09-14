@@ -71,10 +71,58 @@ function slug(name: string): string {
 }
 
 /**
+ * Whether stage 0 would actually get the root, asked by fetching it the way the appliance does.
+ *
+ * WHY THIS IS WORTH A REQUEST. Stage 0 is `curl -fsSL <ACS_CA_URL>` over plain HTTP, and `curl`
+ * here follows no redirect: a deployment that redirects HTTP to HTTPS on the dashboard's host --
+ * which is an ordinary thing for somebody to put in front of this -- makes that fetch stop with
+ * nothing fetched. The command then fails on its first clause, on the appliance, in front of
+ * whoever is commissioning it, and says only that a certificate could not be installed. The chart
+ * adds no such redirect; something else may.
+ *
+ * Redirects are disabled rather than followed, because following one would report success for a
+ * command that cannot follow it. Anything but a 200 is a reason, including the request failing:
+ * every one of them breaks stage 0 the same way, and the consequence of being wrong here is that
+ * the modal offers the bundle, which works everywhere.
+ *
+ * BOUNDED, BECAUSE THIS SITS IN AN ANSWER A PAGE WAITS ON. The two failures measured on k3d --
+ * a 301 and a name that does not resolve -- both answer in under a second, but a connect to an
+ * address that silently drops packets does not, and a firewall between the functions and the
+ * dashboard's host is exactly the deployment this check exists for. Three seconds is generous for
+ * a request to a Service in the same cluster and short enough that a caller waits rather than
+ * gives up.
+ */
+const ROOT_PROBE_TIMEOUT_MS = 3000;
+
+async function rootIsFetchable(caUrl: string): Promise<string | null> {
+  try {
+    const response = await fetch(caUrl, {
+      redirect: "manual",
+      headers: { Accept: "*/*" },
+      signal: AbortSignal.timeout(ROOT_PROBE_TIMEOUT_MS),
+    });
+    // Drain the body: an unread response body keeps the connection open in Deno.
+    await response.body?.cancel();
+    if (response.status >= 300 && response.status < 400) {
+      return `${caUrl} answers ${response.status}, and stage 0 follows no redirect, so the command `
+        + "would stop before anything was sent. Serve the root on plain HTTP at that path, or use the bundle";
+    }
+    if (!response.ok) return `${caUrl} answers ${response.status}, so an appliance has no root to fetch`;
+    return null;
+  } catch (err) {
+    const why = err instanceof Error && err.name === "TimeoutError"
+      ? `did not answer within ${ROOT_PROBE_TIMEOUT_MS} ms`
+      : `could not be fetched (${err instanceof Error ? err.message : err})`;
+    return `${caUrl} ${why}, so an appliance has no root to fetch`;
+  }
+}
+
+/**
  * Whether this deployment can mint the one-liner, and why not: the installer route must be served
- * over TLS (or the development switch set), and the pin needs the root. Without the root the
- * command is still minted on a deployment whose public URL is plain HTTP under the switch, with
- * no stage 0, which is what a laptop cluster gets and nothing else should.
+ * over TLS (or the development switch set), the pin needs the root, and the root has to be
+ * fetchable the way stage 0 fetches it. Without the root the command is still minted on a
+ * deployment whose public URL is plain HTTP under the switch, with no stage 0, which is what a
+ * laptop cluster gets and nothing else should.
  */
 async function installerAvailability(): Promise<{ available: boolean; reason: string | null; pin: string | null; caUrl: string | null }> {
   const transport = installerTransport();
@@ -91,6 +139,11 @@ async function installerAvailability(): Promise<{ available: boolean; reason: st
       pin,
       caUrl,
     };
+  }
+  // Only where there is a stage 0 to break. A command minted without one fetches no root.
+  if (pin && caUrl) {
+    const unreachable = await rootIsFetchable(caUrl);
+    if (unreachable) return { available: false, reason: unreachable, pin, caUrl };
   }
   return { available: true, reason: null, pin, caUrl };
 }
