@@ -39,7 +39,6 @@ import {
   IconAlertTriangle,
   IconAlertCircle,
   IconZap,
-  IconCog,
   IconRadio,
   IconCpu,
   IconImage
@@ -52,7 +51,7 @@ import {
  * on the plan from the Cells page. One context panel serves the lanes and the pins: whichever was
  * clicked last.
  */
-export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, showToast, hasPermission, onNavigateTab, activeAlerts = [] }) {
+export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, showToast, hasPermission, onNavigateTab, activeAlerts = [] }) {
   const [cells, setCells]     = useState([])
   const [areas, setAreas]     = useState([])
   const [gwList, setGwList]   = useState([])
@@ -133,7 +132,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   /**
    * The height the plan may take at zoom 1: the room left in the scrolling column below the
    * stage's top edge, so the whole page fits without scrolling. Measured, not guessed: the
-   * Overview card above it varies with the hierarchy row and the lanes.
+   * card above it varies with the hierarchy row and the lanes.
    */
   const stageRef = useRef(null)
   const [fitHeight, setFitHeight] = useState(null)
@@ -225,7 +224,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         style={{ cursor: 'pointer', userSelect: 'none', opacity: isArch ? 0.7 : 1 }}
         title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
       >
-        {isArch ? <IconArchive size={11} /> : <IconCog size={11} />}
+        {isArch ? <IconArchive size={11} /> : <IconCpu size={11} />}
         <span className="chip-name">{a.asset_name}</span>
         {isArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
         {!isArch && status === DEVICE_STATUS.QUARANTINED && (
@@ -319,7 +318,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   }))
   const openLaneView = laneViews.find(v => v.lane.key === openLane) || null
 
-  if (loading) return <div className="loading-wrap"><div className="spinner" /> Loading overview…</div>
+  if (loading) return <div className="loading-wrap"><div className="spinner" /> Loading site map…</div>
 
   const gw = gatewayFleetCounts(gwList)
   // The ISA-95 enterprise is the Sparkplug group the gateways publish under; several groups are

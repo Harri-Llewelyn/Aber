@@ -747,6 +747,31 @@ html, body, #root {
   margin-left: 10px;
 }
 
+/* A page's own title and description, above its cards. Deliberately not a card: a page whose
+   subject is split across several lists needs one place to name the subject, and a frame around a
+   sentence reads as one more thing to act on. The title keeps `.section-title`'s page-level 20px --
+   the 15px override applies only inside `.card-header` -- so it outranks the card titles below it.
+
+   Not licence to restate the rail: a heading that only repeats the tab's name was removed from
+   Overview for saying nothing, and `navigationShell.test.jsx` still guards that. The description is
+   what earns the block. */
+.page-heading {
+  margin: 0 0 var(--stack);
+}
+
+.page-heading .section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-heading p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
 /* ===== Cards & Containers ===== */
 .card {
   background: var(--bg-card);
@@ -991,6 +1016,14 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .callout-warning .callout-icon { color: var(--warning); }
 .callout strong { color: var(--text-primary); }
+
+/* A callout that qualifies a whole page rather than the card it sits in. AFTER `.callout`, not
+   before: the two selectors have equal specificity, so the one declared later is the one that wins
+   the margin. `.callout` insets itself by `--inset` to line up with a card's contents and leaves no
+   gap beneath, both of which are wrong out on the page. */
+.callout-page {
+  margin: 0 0 var(--stack);
+}
 
 /* Group header row: a collapsible category inside a table body. `--bg-card` mixed toward the text
    colour, separated from both the row background and the `--bg-glass` hover colour, so a category
@@ -2676,10 +2709,13 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
    `min-width: 0` on the main column is what lets it give up width: a flex item defaults to
    `min-width: auto` and refuses to shrink below its content. `align-items: flex-start` so the panel
    does not stretch to the height of a long table. */
+/* No `gap`: a gap applies between the flex items whether or not the drawer has any width, so every
+   page that renders a ContextPanel gave up 16px on its right edge permanently and ended short of
+   the pages that render no drawer at all (Archives, Directory, Vocabulary). The space belongs to
+   the open drawer, so the open drawer carries it. */
 .page-layout {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
 }
 
 .page-main {
@@ -2710,13 +2746,16 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
      someone scrolls the list beside it -- otherwise selecting row 200 shows a panel 200 rows up. */
   top: 0;
   max-height: calc(100vh - 84px);
-  transition: width 0.25s ease, visibility 0s linear 0.25s;
+  transition: width 0.25s ease, margin-left 0.25s ease, visibility 0s linear 0.25s;
 }
 
+/* The margin is the page's gutter, and it opens and closes with the drawer -- transitioned
+   alongside the width so the table beside it reflows once rather than twice. */
 .context-panel-open {
   width: var(--context-panel-width);
+  margin-left: 16px;
   visibility: visible;
-  transition: width 0.25s ease, visibility 0s;
+  transition: width 0.25s ease, margin-left 0.25s ease, visibility 0s;
 }
 
 .context-panel-inner {
@@ -3012,6 +3051,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
        the whole viewport rather than against the space left over, so vw is the wrong basis for
        its width -- but a flat 360px overflows a 320px phone. A cap, not a proportion. */
     width: min(360px, 90vw);
+    /* The desktop gutter is between two columns; as an overlay there is no column beside it. */
+    margin-left: 0;
     max-height: none;
     z-index: 90;
   }
@@ -3047,41 +3088,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* The value column holds anything the device reported, including strings nobody sized for. */
 .modal-table .telemetry-value { overflow-wrap: anywhere; }
 
-/* ===== Vocabulary Reference =====
-   The header carries the title and its explanation and nothing else. The standard pills and the
-   search box moved out to a `.filter-bar` above the card, so neither has to be wrapped around. */
-.vocab-header {
-  display: block;
-  padding-bottom: 12px;
-}
-
-.vocab-subtitle {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 3px;
-  line-height: 1.5;
-  /* Deliberately uncapped: a measure cap on two or three sentences at the top of a full-width card
-     stacks them into short lines with the rest of the row empty. */
-  max-width: none;
-  width: 100%;
-}
-
-.vocab-description {
-  padding: 12px var(--inset) 0;
-  font-size: 12px;
-  color: var(--text-muted);
-  /* Same reasoning as .vocab-subtitle: the notes are one or two lines each, not paragraphs. */
-  max-width: none;
-  width: 100%;
-}
-
-.vocab-description p { margin: 0; line-height: 1.55; max-width: none; }
-
-/* Each caveat on its own line with its point in front of it. This was one paragraph of six
-   sentences, and the two facts in it that stop someone making a mistake were mid-run. */
-.vocab-note { margin-top: 5px; }
-
-.vocab-note-label { color: var(--text-primary); font-weight: 600; }
 
 /* Cells table, the same shape Gateways and Devices use. The icon column is fixed and narrow: it
    carries a 16px glyph, and under auto layout it would take an equal share of the row. */
@@ -3741,36 +3747,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* ===== Settings ============================================================================= */
 
-/* The preamble states the two things about this page that surprise people: the list cannot be added
-   to, and nothing secret may be stored in it. */
-/* The padding moved to `.card-body`, which every card now uses. What is left is the type: this
-   preamble reads at 12px rather than the 13px a table description uses, because it is two
-   paragraphs rather than one and the second is a warning. */
-.settings-preamble {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.55;
-}
-
-.settings-preamble-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-secondary);
-}
-
-.settings-preamble p { margin-bottom: 6px; }
-.settings-preamble p:last-child { margin-bottom: 0; }
-
-/* --danger-text, not --danger: this is a sentence to read, and the bare signal colour measures
-   below AA as text on the card. */
-.settings-preamble-warning { color: var(--danger-text); }
-
 .settings-load-error {
   padding: 12px 16px;
   margin-bottom: 12px;
@@ -3779,16 +3755,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 .settings-group { padding: 0; margin-bottom: 12px; }
-
-.settings-group-title {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.7px;
-  color: var(--text-secondary);
-}
 
 /* Label and control side by side, wrapping to stacked on a narrow viewport rather than
    squeezing the input to unusability. */

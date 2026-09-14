@@ -27,10 +27,10 @@ describe('the groups', () => {
     }
   })
 
-  it('leads with Overview alone', () => {
+  it('leads with the Site Map alone', () => {
     // The landing page, and the one page that answers "how is everything right now" rather than
     // belonging to a subject.
-    expect(TABS.filter(t => t.group === NAV_GROUPS[0].id).map(t => t.id)).toEqual(['overview'])
+    expect(TABS.filter(t => t.group === NAV_GROUPS[0].id).map(t => t.id)).toEqual(['site-map'])
   })
 
   /**

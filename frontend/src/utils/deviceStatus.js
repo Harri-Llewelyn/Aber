@@ -1,6 +1,6 @@
 /**
  * A device's lifecycle status, and how it is drawn: one definition for every render site (the
- * Overview map, the Devices table and the context drawer).
+ * Site Map, the Devices table and the context drawer).
  *
  * The map used to run a client-side rule engine over the latest telemetry with literal
  * thresholds, no persistence and exact metric names, and conflated process condition with

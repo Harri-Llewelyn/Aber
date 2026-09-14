@@ -1848,7 +1848,7 @@ const apiMethods = {
     }
 
     // Latest value per (device, metric) inside a bounded recent window. Used by the
-    // Overview map, which only needs current state -- not the full history the
+    // Site Map, which only needs current state -- not the full history the
     // export dialog pages through.
     if (path.startsWith('/api/v1/telemetry/latest')) {
       const url = new URL(path, window.location.origin);

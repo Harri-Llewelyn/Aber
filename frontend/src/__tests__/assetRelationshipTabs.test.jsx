@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, within, act } from '@testing-librar
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
-import { OverviewTab } from '../components/tabs/OverviewTab'
+import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
 
@@ -233,9 +233,9 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 // Paging a fleet-wide stream has no equivalent in the per-device drawer, which shows the latest
 // value per metric and defers history to the CSV export. See deviceTelemetryAccordion.test.jsx.
 
-// Overview -> Cells hand-over: a pin on the Site Map opens the cell's panel, whose action emits
+// Site Map -> Cells hand-over: a pin on the Site Map opens the cell's panel, whose action emits
 // the cell id, and Cells consumes it the way Gateways and Devices consume theirs.
-describe('Overview hands a cell over to the Cells page', () => {
+describe('The Site Map hands a cell over to the Cells page', () => {
   const floor = { floor_id: 'floor-g', area_id: 'area-1', level: 0, name: 'Ground floor', plan_path: null, plan_aspect: null }
   const area = { area_id: 'area-1', area_name: 'Building A', icon: 'Factory', floors: [floor], floor_count: 1, cells: [] }
   const placedCell = { ...cell, area_id: 'area-1', floor_id: 'floor-g', plan_x: 0.4, plan_y: 0.6 }
@@ -244,8 +244,8 @@ describe('Overview hands a cell over to the Cells page', () => {
     return routeGet({ cells: [placedCell] })(path)
   }
 
-  const renderOverview = (props = {}) => render(
-    <OverviewTab
+  const renderSiteMap = (props = {}) => render(
+    <SiteMapTab
       onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
       hasPermission={() => true} onNavigateTab={vi.fn()} {...props}
     />
@@ -260,7 +260,7 @@ describe('Overview hands a cell over to the Cells page', () => {
   it('passes the clicked cell id to onSelectCell', async () => {
     api.get.mockImplementation(routes)
     const onSelectCell = vi.fn()
-    renderOverview({ onSelectCell })
+    renderSiteMap({ onSelectCell })
 
     fireEvent.click(await openPanel())
 
@@ -271,7 +271,7 @@ describe('Overview hands a cell over to the Cells page', () => {
   it('still navigates when no onSelectCell is wired, rather than doing nothing', async () => {
     api.get.mockImplementation(routes)
     const onNavigateTab = vi.fn()
-    renderOverview({ onNavigateTab })
+    renderSiteMap({ onNavigateTab })
 
     fireEvent.click(await openPanel())
 

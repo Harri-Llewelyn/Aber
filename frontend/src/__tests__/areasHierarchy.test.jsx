@@ -1,13 +1,13 @@
 /**
  * The ISA-95 rung above the cells: the Areas page files cells into areas and manages their floors,
- * and the Overview draws each area's floors on the Site Map. Both read the same lists every other
+ * and the Site Map draws each area's floors. Both read the same lists every other
  * page reads.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AreasTab } from '../components/tabs/AreasTab'
-import { OverviewTab } from '../components/tabs/OverviewTab'
+import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -89,14 +89,14 @@ const follows = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITI
 const shownFloor = () => within(screen.getByRole('group', { name: 'Floor' })).getAllByRole('button').find(b => b.getAttribute('aria-pressed') === 'true')?.textContent
 const hierarchy = () => screen.getByRole('group', { name: 'Hierarchy' })
 
-describe('OverviewTab draws the areas on the Site Map', () => {
-  const renderOverview = async () => {
-    render(<OverviewTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
+describe('SiteMapTab draws the areas on the Site Map', () => {
+  const renderSiteMap = async () => {
+    render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
     await waitFor(() => expect(thumbs().length).toBeGreaterThan(0))
   }
 
-  it('names the enterprise and the site in the Overview card, and says when the site is not set', async () => {
-    await renderOverview()
+  it('names the enterprise and the site in the Site Map card, and says when the site is not set', async () => {
+    await renderSiteMap()
     const hierarchy = screen.getByRole('group', { name: 'Hierarchy' })
     expect(within(hierarchy).getByText('ACS-Cymru')).toBeInTheDocument()
     expect(within(hierarchy).getByText(/Not set — name it on the Settings page/)).toBeInTheDocument()
@@ -109,14 +109,14 @@ describe('OverviewTab draws the areas on the Site Map', () => {
 
   it('names the site once the setting holds a name', async () => {
     api.get.mockImplementation(routeGet({ settings: [{ key: 'site.name', value: 'Broughton' }] }))
-    await renderOverview()
+    await renderSiteMap()
     const hierarchy = screen.getByRole('group', { name: 'Hierarchy' })
     await waitFor(() => expect(within(hierarchy).getByText('Broughton')).toBeInTheDocument())
     expect(within(hierarchy).queryByText(/Not set/)).toBeNull()
   })
 
   it('shows every area as its ground floor with its counts at the top, and the unfiled cells beside them', async () => {
-    await renderOverview()
+    await renderSiteMap()
     expect(thumbs().map(t => within(t).getByText(/Building/).textContent)).toEqual(['Building A', 'Building B'])
     // Cells, gateways and devices in the header; Area-Wide assets count, so Building A's BMS does.
     expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('2 cells · GW 1 · Dev 2')).toBeInTheDocument()
@@ -132,10 +132,10 @@ describe('OverviewTab draws the areas on the Site Map', () => {
     expect(within(unfiled).getByText('Loose End')).toBeInTheDocument()
   })
 
-  it('keeps the three campus lanes side by side in the Overview card, each in its own hue, with no area selector', async () => {
+  it('keeps the three campus lanes side by side in the Site Map card, each in its own hue, with no area selector', async () => {
     // Site-Wide, Simulated and Unassigned belong to no area. Area-Wide is not among them: it
     // belongs to an area and is listed beside that area's plan.
-    await renderOverview()
+    await renderSiteMap()
     expect(lanes().map(l => l.textContent.replace(/GW.*$/, '').trim())).toEqual(['Site-Wide', 'Simulated', 'Unassigned'])
     expect(lanes().map(l => l.className)).toEqual([
       expect.stringContaining('site-lane-site'),
@@ -155,7 +155,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
 
   it('opens a lane into the details panel listing its assets, one lane at a time', async () => {
     api.get.mockImplementation(routeGet({ devices: [device, bms, { ...device, asset_id: 'dev-2', asset_name: 'Loose_Device', effective_cell_id: null, gateway_cell_id: null, location_source: 'unassigned', effective_area_id: null }] }))
-    await renderOverview()
+    await renderSiteMap()
     expect(document.querySelector('.context-panel-open')).toBeNull()
     // The one lane holding something draws its dot; the empty two do not.
     expect(lanes().map(l => !!l.querySelector('.tile-dot'))).toEqual([false, false, true])
@@ -175,7 +175,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
   })
 
   it('gives the panel to whichever of a lane or a pin was clicked last', async () => {
-    await renderOverview()
+    await renderSiteMap()
     fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Bay 1' }))
     expect(within(panel()).getByText('Building A · Ground floor')).toBeInTheDocument()
@@ -186,7 +186,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
   })
 
   it('opens an area on its ground floor, with a floor rail, its pins, and the tray beside the plan', async () => {
-    await renderOverview()
+    await renderSiteMap()
     fireEvent.click(within(thumbs()[0]).getByText('Building A'))
 
     await waitFor(() => expect(pins().length).toBe(1))
@@ -211,7 +211,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
   })
 
   it('walks the floors from the rail and from the arrows, listing an unplaced cell beside the plan', async () => {
-    await renderOverview()
+    await renderSiteMap()
     fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
     await waitFor(() => expect(pins().length).toBe(1))
 
@@ -233,7 +233,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
   })
 
   it('lists a cell on no floor beside the plan, and shows the default outline for a floor with no plan', async () => {
-    await renderOverview()
+    await renderSiteMap()
     fireEvent.click(screen.getByRole('button', { name: 'Building B' }))
     await waitFor(() => expect(within(hierarchy()).getByText('Building B')).toBeInTheDocument())
     expect(shownFloor()).toMatch(/Ground floor/)
@@ -244,7 +244,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
   })
 
   it('zooms the plan in and out, and fits it again', async () => {
-    await renderOverview()
+    await renderSiteMap()
     fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
     await waitFor(() => expect(pins().length).toBe(1))
     const inner = () => document.querySelector('.site-map-stage-inner')
@@ -260,7 +260,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
   })
 
   it('opens a pin into the details panel, naming where the cell is and what it holds', async () => {
-    await renderOverview()
+    await renderSiteMap()
     fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Bay 1' }))
     const panel = document.querySelector('.context-panel')
@@ -276,7 +276,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
   })
 
   it('keeps the tray under the floor rail, and the plan sized from the room the page measured', async () => {
-    await renderOverview()
+    await renderSiteMap()
     fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
     await waitFor(() => expect(pins().length).toBe(1))
     const side = document.querySelector('.site-map-side')
@@ -297,7 +297,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
   })
 
   it('steps a thumbnail through its floors without opening the area, and opens on the floor shown', async () => {
-    await renderOverview()
+    await renderSiteMap()
     const stepper = () => within(thumbs()[0]).getByRole('group', { name: 'Floor of Building A' })
     // One button per floor, the lowest leftmost, the ground floor pressed to start.
     const floorButtons = () => within(stepper()).getAllByRole('button').filter(b => /floor|basement/i.test(b.textContent))
@@ -331,7 +331,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
   })
 
   it('returns to every area with All areas', async () => {
-    await renderOverview()
+    await renderSiteMap()
     fireEvent.click(screen.getByRole('button', { name: 'Building B' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'All areas' })).toBeInTheDocument())
     expect(thumbs()).toHaveLength(0)
@@ -341,7 +341,7 @@ describe('OverviewTab draws the areas on the Site Map', () => {
 
   it('offers no area selector and says what to do on a plant with no areas', async () => {
     api.get.mockImplementation(routeGet({ areas: [], devices: [device] }))
-    render(<OverviewTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
+    render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
     await waitFor(() => expect(screen.getByText(/No areas yet/)).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'All areas' })).toBeNull()
     expect(thumbs()).toHaveLength(0)

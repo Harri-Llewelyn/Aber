@@ -49,10 +49,10 @@ import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
 import {
-  IconShieldCheck,
+  IconInbox,
   IconCpu,
-  IconDrive,
   IconFileText,
+  IconTag,
   IconPlus,
   IconPencil,
   IconArchive,
@@ -83,7 +83,7 @@ const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
 export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewThread, onPropose, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
   /**
-   * Which devices have an alert firing on them, via utils/deviceAlerts.js so Overview, Cells and
+   * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
    * Gateways resolve alerts the same way.
    */
   const alertsByDevice = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
@@ -1517,7 +1517,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                       onClick={() => onSelectSchema?.(schema.schema_uuid)}
                       title={`Open ${schema.schema_name} on the Schemas page`}
                     >
-                      <IconFileText size={11} />
+                      <IconClipboardList size={11} />
                       <span className="chip-name">{schema.schema_name}</span>
                     </button>
                   ))}
@@ -1585,7 +1585,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             label: openForSelected.length === 1
               ? '1 change awaiting decision'
               : `${openForSelected.length} changes awaiting decision`,
-            icon: <IconShieldCheck size={13} />,
+            icon: <IconInbox size={13} />,
             onClick: () => onViewApprovals?.(selectedDevice),
             title: 'Open the approvals queue, filtered to this device'
           },
@@ -1599,7 +1599,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           {
             // A read of what the device declared at birth: not gated on device:manage and not
             // refused for an archived device, like the AAS export.
-            label: 'Configuration Parameters', icon: <IconClipboardList size={13} />,
+            label: 'Configuration Parameters', icon: <IconFileText size={13} />,
             onClick: () => setConfigAsset(selectedDevice),
             title: 'Inspect the DBIRTH metric parameters this device reported'
           },
@@ -1608,7 +1608,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           !selectedDevice.shadow_of && {
             // Directly above the two exports on purpose: it is the only thing here that changes
             // what they contain.
-            label: 'Digital Nameplate…', icon: <IconClipboardList size={13} />,
+            label: 'Digital Nameplate…', icon: <IconTag size={13} />,
             onClick: () => setNameplateFor(selectedDevice),
             title: canManage
               ? "Manufacturer, serial number and versions — exported in this device's AAS"

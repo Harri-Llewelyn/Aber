@@ -119,6 +119,13 @@ describe('the page', () => {
     await waitFor(() => expect(screen.getByText('Lanes drawn before folding')).toBeInTheDocument())
   }
 
+  /* One category is on screen at a time, so a test about a setting outside the first one has to
+     open its tab first -- the same click the operator makes. */
+  const showCategory = async (category) => {
+    await show()
+    fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^${category}`) }))
+  }
+
   it('renders each setting with its label, and its description behind a tip', async () => {
     await show()
     expect(screen.getByText('Refresh interval (seconds)')).toBeInTheDocument()
@@ -201,12 +208,12 @@ describe('the page', () => {
 
   it('shows the permitted range rather than hiding it in the input attributes', async () => {
     /* `min`/`max` give a browser its spinner limits and a reader nothing. */
-    await show()
+    await showCategory('Retention')
     expect(screen.getByText('Between 1 and 3650')).toBeInTheDocument()
   })
 
   it('refuses an out-of-range value before sending it', async () => {
-    await show()
+    await showCategory('Retention')
     fireEvent.change(screen.getByLabelText('Alert history kept for (days)'), { target: { value: '0' } })
     fireEvent.click(screen.getAllByRole('button', { name: /^Save$/ })[0])
 
@@ -214,11 +221,19 @@ describe('the page', () => {
     expect(api.patchSetting).not.toHaveBeenCalled()
   })
 
-  it('groups the retention setting apart from the UI ones', async () => {
-    // Category drives the page's sections, and a retention window is not a Digital Thread control.
+  it('offers each category as its own tab, and shows one at a time', async () => {
+    /* Category drives the page's sections, and a retention window is not a Digital Thread control.
+       The tab is now the only place a category is named, so these queries are unambiguous. */
     await show()
-    expect(screen.getByText('Retention')).toBeInTheDocument()
-    expect(screen.getByText('Digital Thread')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Digital Thread/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Retention/ })).toBeInTheDocument()
+
+    // The first category the API returned is selected, and the other category's rows are absent.
+    expect(screen.queryByLabelText('Alert history kept for (days)')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Retention/ }))
+    expect(screen.getByLabelText('Alert history kept for (days)')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Lanes drawn before folding')).toBeNull()
   })
 
   it('says plainly that nothing secret belongs here', async () => {

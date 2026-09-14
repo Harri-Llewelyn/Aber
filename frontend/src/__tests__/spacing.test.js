@@ -71,11 +71,12 @@ describe('every container refers to the token rather than restating it', () => {
   })
 
   /**
-   * The two found by sweeping: both sit inside a card and must follow its inset, or they end up
-   * proud of the text above them.
+   * Found by sweeping: it sits inside a card and must follow its inset, or it ends up proud of the
+   * text above it. `.callout-page` is the exception and overrides this, because out on the page
+   * there is no card edge to line up with.
    */
-  it.each([['.callout'], ['.vocab-description']])('%s follows the card it sits in', (selector) => {
-    expect(rule(selector)).toMatch(/(padding|margin):[^;]*var\(--inset\)/)
+  it('.callout follows the card it sits in', () => {
+    expect(rule('.callout')).toMatch(/(padding|margin):[^;]*var\(--inset\)/)
   })
 })
 
@@ -104,8 +105,7 @@ describe('components do not reintroduce an inset of their own', () => {
    * inline style landing back in it is a hand-picked value beside the one they could not see. Below
    * 17px is left alone. Scoped to the pages because the token describes one relationship, the inset
    * from a page-grid edge to its content: a modal floats, the login screen renders instead of the
-   * dashboard, and a widget's padding is its own affordance. The vocabulary panel is covered by the
-   * `.vocab-description` assertion above.
+   * dashboard, and a widget's padding is its own affordance.
    */
   const files = jsxFiles(path.join(SRC, 'components', 'tabs'))
 

@@ -16,7 +16,7 @@ const isExpanded = () => rail().classList.contains('sidebar-expanded')
 
 const renderRail = (props = {}) => {
   const onChangeMode = vi.fn()
-  render(<Sidebar tabs={adminTabs()} currentTab="overview" onNavigate={vi.fn()} mode="hover" onChangeMode={onChangeMode} {...props} />)
+  render(<Sidebar tabs={adminTabs()} currentTab="site-map" onNavigate={vi.fn()} mode="hover" onChangeMode={onChangeMode} {...props} />)
   return onChangeMode
 }
 

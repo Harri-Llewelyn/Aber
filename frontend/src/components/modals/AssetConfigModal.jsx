@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { SPARKPLUG_TYPES } from '../../constants'
 import { modelledMetricsAcross, schemasForDevice } from '../../utils/deviceTags'
-import { IconClipboardList, IconShieldAlert, IconFileCode, IconCheck, IconAlertTriangle } from '../common/Icons'
+import { IconFileText, IconShieldAlert, IconClipboardList, IconCheck, IconAlertTriangle } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 // showToast/hasPermission are gone with the 3D uploader: this modal now only reads. Everything
@@ -80,13 +80,13 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
           from `Axes/Y/...`. */}
       <div className="modal modal-wide">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <IconClipboardList size={18} />
+          <IconFileText size={18} />
           <span>Device Configuration Parameters — <span className="mono">{asset.asset_id}</span></span>
         </div>
 
         {attachedSchemas.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
-            <IconFileCode size={13} />
+            <IconClipboardList size={13} />
             <span>
               Compared against {attachedSchemas.length === 1 ? 'assigned schema' : `${attachedSchemas.length} attached submodels`}{' '}
               <strong>{attachedSchemas.map(s => s.schema_name).join(', ')}</strong>
@@ -112,7 +112,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
         ) : attachedSchemas.length > 0 ? (
           comparisonRows.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon"><IconClipboardList size={36} /></div>
+              <div className="empty-icon"><IconFileText size={36} /></div>
               <div className="empty-text">This schema has no required metrics.</div>
             </div>
           ) : (
@@ -150,7 +150,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
           )
         ) : config.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon"><IconClipboardList size={36} /></div>
+            <div className="empty-icon"><IconFileText size={36} /></div>
             <div className="empty-text">No DBIRTH parameters received for this device yet.</div>
           </div>
         ) : (

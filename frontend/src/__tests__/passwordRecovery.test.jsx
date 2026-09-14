@@ -77,7 +77,7 @@ describe('arriving from a password-reset link', () => {
 
     await waitFor(() => expect(supabase.auth.updateUser).toHaveBeenCalledWith({ password: 'correct-horse' }))
     expect(await screen.findByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument()
-    expect(window.location.pathname).toBe('/overview')
+    expect(window.location.pathname).toBe('/site-map')
   })
 
   it('shows the server refusal and clears both fields', async () => {

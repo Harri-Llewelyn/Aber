@@ -4,7 +4,7 @@ import { downloadCSV } from '../../utils/downloadCSV'
 import { ContextPanel } from '../common/ContextPanel'
 import {
   IconHistory, IconDownload, IconX, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
-  IconShieldCheck, IconLock, IconFileCode, IconSettings
+  IconShieldCheck, IconLock, IconClipboardList, IconSettings
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import {
@@ -328,7 +328,7 @@ const SECTION_ICONS = {
   // are, then the contracts and settings that shape both.
   ACCESS:             IconShieldCheck,
   'SERVICE IDENTITY': IconLock,
-  SCHEMA:             IconFileCode,
+  SCHEMA:             IconClipboardList,
   SETTING:            IconSettings
 }
 

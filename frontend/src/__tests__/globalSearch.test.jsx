@@ -35,7 +35,7 @@ describe('what the index holds', () => {
 
     expect(found).not.toContain('settings')
     expect(found).not.toContain('access-control')
-    expect(found).toContain('overview')
+    expect(found).toContain('site-map')
   })
 
   it('drops a card whose page this session cannot open', () => {
@@ -133,7 +133,7 @@ describe('the palette', () => {
 
   const props = () => ({
     tabs: adminTabs(),
-    currentTab: 'overview',
+    currentTab: 'site-map',
     onNavigate: vi.fn(),
     onSelectDevice: vi.fn(),
     onSelectGateway: vi.fn(),

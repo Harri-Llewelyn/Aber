@@ -221,6 +221,12 @@ describe('Panel layout pushes rather than covers', () => {
     expect(openRule).toMatch(/width:\s*var\(--context-panel-width\)/)
     expect(innerRule).toMatch(/width:\s*var\(--context-panel-width\)/)
     expect(APP_CSS).toMatch(/--context-panel-width:\s*clamp\(/)
+
+    /* The gutter between the two columns belongs to the OPEN drawer, not to the row. As a `gap` it
+       applied whether or not the drawer had width, so every page with a drawer ended 16px short of
+       the pages without one (Archives, Directory, Vocabulary) and the card edges disagreed. */
+    expect(layout).not.toMatch(/gap:/)
+    expect(openRule).toMatch(/margin-left:\s*16px/)
   })
 })
 

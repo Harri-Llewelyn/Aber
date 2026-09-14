@@ -1,7 +1,7 @@
 import { isGatewayOnline, isGatewayPending } from './gatewayStatus'
 
 /**
- * The Overview ribbon's figures. A shadow row is not part of the fleet: the playback gateway is
+ * The Site Map ribbon's figures. A shadow row is not part of the fleet: the playback gateway is
  * neither archived nor pending, so counted raw it lands in OFFLINE. The shadow count is returned
  * separately; the four buckets stay mutually exclusive and sum to `total`.
  */

@@ -3,8 +3,9 @@ import { api } from '../../api'
 import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { describeAuthFailure } from '../../utils/sessionError'
-import { IconExternalLink, IconCopy, IconCheck } from '../common/Icons'
+import { IconExternalLink, IconCopy, IconCheck, IconBookOpen } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
+import { PageHeading } from '../common/PageHeading'
 import { copyText } from '../common/CopyableId'
 
 /**
@@ -344,7 +345,11 @@ export function DirectoryTab({ showToast }) {
 
   return (
     <>
-      {/* No heading or description: the rail names the page and the groups say what each is. */}
+      <PageHeading icon={<IconBookOpen size={15} />} title="Directory">
+        Every service this deployment runs, grouped by what it is for: where to reach it, whether
+        anything in the stack observes it, and whether that address works from anywhere but the
+        deployment host. The rows are registered by migration, not added here.
+      </PageHeading>
 
       {/* No search box or type picker: the grouping solves the scanning problem those controls
           existed for. */}

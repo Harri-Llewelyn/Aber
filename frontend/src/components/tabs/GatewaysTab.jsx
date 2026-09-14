@@ -40,7 +40,6 @@ import {
   IconHistory,
   IconBookOpen,
   IconExternalLink,
-  IconZap,
   IconShieldAlert,
   IconLayoutDashboard,
   IconX,

@@ -53,8 +53,6 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
 
   return (
     <>
-      {/* No page heading: the panel's card title carries it, and the sentence distinguishing this
-          page from the Metric Catalog is the panel's subtitle. */}
       {loading && <div style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Loading vocabularies…</div>}
 
       {!loading && (

@@ -8,6 +8,7 @@ import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal
 import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevocationModal'
 import { IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
+import { PageHeading } from '../common/PageHeading'
 import { ContextPanel } from '../common/ContextPanel'
 import {
   CREDENTIAL_STATES,
@@ -232,9 +233,17 @@ export function AccessControlTab({ showToast }) {
   return (
     <div className="page-layout">
       <div className="page-main">
+        <PageHeading icon={<IconLock size={15} />} title="Access Control">
+          Who and what may reach this stack, and with which credential. A gateway authenticates to
+          the broker as an account issued against it; the stack's own processes hold identities on
+          two separate planes — a database identity is a set of permissions, a broker identity is an
+          ACL entry, and nothing here holds both.
+        </PageHeading>
+
         {/* Two sections, one page: a gateway's credential and a service's identity are different
             questions with different actions, and interleaving their cards read as one long list.
-            Same tablist markup as the Capture page's subject switch. */}
+            The heading above does not change with the tab, because the subject does not. Same
+            tablist markup as the Capture page's subject switch. */}
         <div
           role="tablist"
           aria-label="Access Control section"
@@ -261,16 +270,6 @@ export function AccessControlTab({ showToast }) {
         </div>
 
         {section === 'gateways' && (<>
-        <div style={{ margin: '0 0 10px' }}>
-          <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <IconLock size={15} /> Gateway credentials
-          </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '6px 0 0' }}>
-            The accounts gateways authenticate to the broker as: what the platform issued against each
-            gateway, and what the broker holds that no gateway claims.
-          </p>
-        </div>
-
         {/* One card for one list: title, description, controls and rows. The page states its own
             limit before the first row, so a reader knows what it can and cannot see before acting
             on one. */}
@@ -548,22 +547,9 @@ export function AccessControlTab({ showToast }) {
         {/* Service identities: two lists rather than one, because nothing holds an identity on both
             planes. The ingestion daemon connects to the broker as `factoryplus_ingestion` and
             reaches the database with the service-role key. */}
-        {/* A heading, not a card: one sentence introducing the two cards beneath, in the page's one
-            title treatment. */}
-        <div style={{ margin: '0 0 10px' }}>
-          <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <IconLock size={15} /> Service identities
-          </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '6px 0 0' }}>
-            The non-human clients that can reach this stack. They are two separate lists because they
-            live on two separate planes — a database identity is a set of permissions, a broker
-            identity is an ACL entry, and nothing here holds both.
-          </p>
-        </div>
-
         {/* The same column rhythm as the credentials table: an identity, what it holds, what that
             reaches, where it comes from. */}
-        <div className="card" style={{ marginTop: 'var(--stack)' }}>
+        <div className="card">
           <div className="card-header">
             <h3 className="section-title">
               Database principals

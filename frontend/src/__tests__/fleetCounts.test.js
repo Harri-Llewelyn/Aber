@@ -8,7 +8,7 @@ import {
 import { HEARTBEAT_STALE_MS } from '../utils/gatewayStatus'
 
 /**
- * The Overview ribbon's arithmetic. A playback gateway and its shadow device must not be counted in
+ * The Site Map ribbon's arithmetic. A playback gateway and its shadow device must not be counted in
  * the fleet; counted raw, the playback gateway lands in OFFLINE and reports a permanent fault.
  */
 

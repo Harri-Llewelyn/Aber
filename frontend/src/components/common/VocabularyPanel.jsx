@@ -1,11 +1,14 @@
 import React, { useState, useMemo } from 'react'
-import { IconChevronDown, IconChevronUp, IconCheck, IconX } from './Icons'
+import { IconChevronDown, IconChevronUp, IconCheck, IconX, IconFileCode } from './Icons'
+import { HelpTip } from './HelpTip'
+import { PageHeading } from './PageHeading'
 
 /**
- * One browsable reference card covering every standard vocabulary, with a standard selector. What
- * differs per standard arrives as a tab descriptor (how sections are derived, what an entry's
- * tooltip says, what counts as in use); see common/MTConnectVocabularyPanel.jsx and its siblings.
- * Sections start collapsed, and searching expands only the sections that match.
+ * The standard vocabularies as a page: one heading that does not change, a tab per standard, and
+ * the selected standard's entries in a card of its own -- the shape Access Control and Settings
+ * use. What differs per standard arrives as a tab descriptor (how sections are derived, what an
+ * entry's tooltip says, what counts as in use); see common/MTConnectVocabularyPanel.jsx and its
+ * siblings. Sections start collapsed, and searching expands only the sections that match.
  */
 export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subtitle, tabs, canAddMetric }) {
   const available = (tabs || []).filter(Boolean)
@@ -45,59 +48,68 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
   const isOpen = (key) => (query ? expanded[key] !== false : expanded[key] === true)
   const toggle = (key) => setExpanded(prev => ({ ...prev, [key]: !isOpen(key) }))
 
+  /* The standard's own description and its caveats, read on demand rather than standing above every
+     entry: they say what the vocabulary is, which is a thing to check once, not a thing to re-read
+     on each visit. */
+  const standardTip = (
+    <>
+      {active.description}
+      {(active.notes || []).map((note, i) => (
+        <span key={i} style={{ display: 'block', marginTop: '6px' }}>
+          {note.label && <strong>{note.label}</strong>}
+          {note.body}
+        </span>
+      ))}
+    </>
+  )
+
   return (
     <>
+    <PageHeading icon={<IconFileCode size={15} />} title={title}>{subtitle}</PageHeading>
+
+    {/* A segmented control rather than a dropdown so all four counts are visible at once. Above the
+        card, not inside it: the heading names the page and this names which vocabulary is in it.
+        The search text survives a switch, so one query asks every standard. */}
+    <div
+      role="tablist"
+      aria-label="Standard"
+      style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: 'var(--stack)' }}
+    >
+      {available.map(tab => {
+        const selected = tab.id === active.id
+        return (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-selected={selected}
+            onClick={() => setActiveId(tab.id)}
+            className={`btn btn-sm ${selected ? 'btn-primary' : 'btn-ghost'}`}
+            title={tab.hint || `Browse the ${tab.label} vocabulary`}
+          >
+            {tab.label}
+            <span className="section-count" style={{ marginLeft: '6px' }}>
+              {(tab.sections || []).reduce((n, s) => n + s.items.length, 0)}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+
     <div className="card" style={{ marginBottom: 'var(--stack)' }}>
-      {/* The header is the title and its explanation, full width, with nothing floating in it. */}
-      <div className="card-header vocab-header">
-        <div>
-          <h3 className="section-title">
-            {title} <span className="section-count">{query ? `${matches} / ${total}` : total}</span>
-          </h3>
-          {subtitle && <div className="vocab-subtitle">{subtitle}</div>}
-        </div>
+      {/* The card names the standard on show; the page heading above it says what the page is. */}
+      <div className="card-header">
+        <h3 className="section-title">
+          {active.label}
+          <HelpTip label={`About the ${active.label} vocabulary`} text={standardTip} />
+          <span className="section-count">{query ? `${matches} / ${total}` : total}</span>
+        </h3>
       </div>
 
-      {/* Lead sentence, then the caveats as separate labelled lines. */}
-      <div className="vocab-description">
-        <p>{active.description}</p>
-        {(active.notes || []).map((note, i) => (
-          <p key={i} className="vocab-note">
-            {note.label && <strong className="vocab-note-label">{note.label}</strong>}
-            {note.body}
-          </p>
-        ))}
-      </div>
-
-      {/* One control row inside the card, below the description, like every other list page: what
-          you are looking at on the left, what you are looking for on the right. */}
+      {/* One control row inside the card, where every other list page keeps its filters. */}
       <div className="card-body">
       <div className="filter-bar">
-        {/* A segmented control rather than a dropdown so all four counts are visible at once. The
-            search text survives a switch, so one query asks every standard. */}
-        <div role="tablist" aria-label="Standard" style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-          {available.map(tab => {
-            const selected = tab.id === active.id
-            return (
-              <button
-                key={tab.id}
-                role="tab"
-                aria-selected={selected}
-                onClick={() => setActiveId(tab.id)}
-                className={`btn btn-sm ${selected ? 'btn-primary' : 'btn-ghost'}`}
-                title={tab.hint || `Browse the ${tab.label} vocabulary`}
-              >
-                {tab.label}
-                <span className="section-count" style={{ marginLeft: '6px' }}>
-                  {(tab.sections || []).reduce((n, s) => n + s.items.length, 0)}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-
         <input
-          className="form-control filter-bar-spacer"
+          className="form-control"
           style={{ width: '240px' }}
           value={search}
           onChange={e => setSearch(e.target.value)}

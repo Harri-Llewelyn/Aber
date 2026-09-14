@@ -53,7 +53,7 @@ import { BugReportModal } from './components/modals/BugReportModal'
 import { ShortcutsModal } from './components/modals/ShortcutsModal'
 
 // Lazy-load Tab components
-const OverviewTab      = lazy(() => import('./components/tabs/OverviewTab').then(m => ({ default: m.OverviewTab })))
+const SiteMapTab       = lazy(() => import('./components/tabs/SiteMapTab').then(m => ({ default: m.SiteMapTab })))
 const AreasTab         = lazy(() => import('./components/tabs/AreasTab').then(m => ({ default: m.AreasTab })))
 const CellsTab         = lazy(() => import('./components/tabs/CellsTab').then(m => ({ default: m.CellsTab })))
 const GatewaysTab      = lazy(() => import('./components/tabs/GatewaysTab').then(m => ({ default: m.GatewaysTab })))
@@ -415,11 +415,11 @@ function Dashboard({ session, onSignOut }) {
   /* Leave a tab this user can no longer see: the route outlives a session, so an Operator can sign
      in on `settings` and get a blank page. Waits for loadingPerms because userRole is null while
      the fetch is in flight, and acting early would bounce an Administrator off Settings on every
-     refresh. Overview has no gate. */
+     refresh. The Site Map has no gate. */
   useEffect(() => {
     if (loadingPerms) return
     const current = TABS.find(t => t.id === tab)
-    if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('overview')
+    if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('site-map')
   }, [tab, loadingPerms, userRole, hasPermission, setTab])
 
   /* `?` opens the shortcuts list. It is a printable character, so the handler stands down for any
@@ -469,7 +469,7 @@ function Dashboard({ session, onSignOut }) {
             filters a drill-down handed over are cleared. */}
         <button
           className="topbar-brand"
-          onClick={() => handleNavClick('overview')}
+          onClick={() => handleNavClick('site-map')}
           title="ACS Cymru — go to the Site Map page"
           aria-label="ACS Cymru, go to the Site Map page"
         >
@@ -565,7 +565,7 @@ function Dashboard({ session, onSignOut }) {
 
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
-            {tab === 'overview'       && <OverviewTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
+            {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewThread={a => viewThreadFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
             {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
@@ -712,7 +712,7 @@ export default function App() {
   if (recovering) {
     const finish = () => {
       setRecovering(false)
-      window.history.replaceState({}, '', '/overview')
+      window.history.replaceState({}, '', '/site-map')
     }
     if (session) return <ResetPasswordScreen email={session.user?.email} onDone={finish} />
     // The link's token was rejected or already spent: no session arrived with it.
