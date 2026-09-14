@@ -17,13 +17,25 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  * bytes before it is parsed. A missing or wrong signature is 401; an unset secret is 503, never a
  * pass, since the edge runtime boots with VERIFY_JWT=false.
  *
- * Ignored and answered 200 with a reason: a push to any branch but those two, a repository
- * outside the `gateways` organisation or not named for a gateway, a deleted branch, a non-push
- * event, an unknown gateway. A non-2xx is what Gitea records as a failed delivery, and none of
- * these is a failure.
+ * A push to any OTHER branch is a proposal. Nothing on the gateway row moves, but the flows.json
+ * at that commit is checked for shape and the `acs/flow-shape` status main requires is posted, so
+ * a file uploaded through the forge's own UI meets a check before an administrator merges it
+ * rather than being refused on the appliance afterwards.
+ *
+ * Ignored and answered 200 with a reason: a repository outside the `gateways` organisation or not
+ * named for a gateway, a deleted branch, a non-push event, an unknown gateway. A non-2xx is what
+ * Gitea records as a failed delivery, and none of these is a failure.
  */
 
-import { APPLIANCE_BRANCH, FORGE_ORGANISATION, forgeApi, forgeConfig, GATEWAY_REPOSITORY } from "../_shared/forge.ts";
+import {
+  APPLIANCE_BRANCH,
+  FLOW_SHAPE_CONTEXT,
+  FORGE_ORGANISATION,
+  forgeApi,
+  forgeConfig,
+  GATEWAY_REPOSITORY,
+  postCommitStatus,
+} from "../_shared/forge.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -110,6 +122,69 @@ async function flowHashAt(repository: string, sha: string): Promise<string | nul
     return null;
   }
   return hex(await crypto.subtle.digest("SHA-256", await raw.arrayBuffer()));
+}
+
+/**
+ * Why a committed flow would be refused, or null when it would not.
+ *
+ * THE SAME TWO CHECKS `flow-sync.mjs` MAKES, and they must stay the same two: this one runs in the
+ * forge before a merge, the puller's runs on the appliance after one, and a file that passes here
+ * and fails there is worse than no check at all, because a person was told it was fine. Kept in
+ * step by hand; `flowRejectionReason()` in
+ * forge/gateway-platform/appliance/flow-sync.mjs is the other copy.
+ */
+function flowRejectionReason(flow: unknown): string | null {
+  if (!Array.isArray(flow)) {
+    return "a Node-RED flow export is a JSON array of nodes, and this file is not one";
+  }
+  // Every entry an object with no `type` is the shape of flows_cred.json, which is a map of node
+  // id to encrypted credential. Deployed as a flow it gives the broker node an empty username and
+  // the gateway is refused with CONNACK 5.
+  if (flow.length && flow.every((n) => typeof n === "object" && n !== null && !(n as { type?: unknown }).type)) {
+    return "this looks like flows_cred.json rather than flows.json, and a credential file must never be deployed as a flow";
+  }
+  return null;
+}
+
+/**
+ * Check the `flows.json` at a pushed commit and post the status `main` requires.
+ *
+ * A repository with no `flows.json` yet passes: that is the ordinary state of one enrolment just
+ * created, and a proposal that adds something else to it is not a flow change. A file the forge
+ * cannot be asked about is an `error` status rather than a pass, because "not known" must not
+ * merge.
+ */
+async function checkFlowShape(repository: string, sha: string): Promise<Record<string, unknown>> {
+  const cfg = forgeConfig();
+  if (!cfg) return { posted: false, reason: "this deployment has no forge configured" };
+
+  const raw = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${repository}/raw/${FLOW_FILE}?ref=${sha}`);
+  if (raw.status === 404) {
+    await postCommitStatus(cfg, repository, sha, "success", `no ${FLOW_FILE} in this commit`);
+    return { state: "success", detail: `no ${FLOW_FILE}` };
+  }
+  if (!raw.ok) {
+    const detail = `could not read ${FLOW_FILE} (${raw.status})`;
+    await postCommitStatus(cfg, repository, sha, "error", detail);
+    return { state: "error", detail };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await raw.text());
+  } catch (err) {
+    const detail = `${FLOW_FILE} is not valid JSON (${err instanceof Error ? err.message : err})`;
+    await postCommitStatus(cfg, repository, sha, "failure", detail);
+    return { state: "failure", detail };
+  }
+
+  const rejection = flowRejectionReason(parsed);
+  if (rejection) {
+    await postCommitStatus(cfg, repository, sha, "failure", rejection);
+    return { state: "failure", detail: rejection };
+  }
+  await postCommitStatus(cfg, repository, sha, "success", `${FLOW_FILE} is a Node-RED flow array`);
+  return { state: "success", detail: `${FLOW_FILE} is a flow array` };
 }
 
 /** The five columns `converged.json` fills, all null when there is nothing to read. */
@@ -218,11 +293,22 @@ export default async function handler(req: Request): Promise<Response> {
   const tracked = `refs/heads/${payload.repository?.default_branch || "main"}`;
   const reported = `refs/heads/${APPLIANCE_BRANCH}`;
   const branch = payload.ref === tracked ? "main" : payload.ref === reported ? APPLIANCE_BRANCH : null;
-  if (!branch) return json({ ignored: `'${payload.ref}' is neither the tracked branch nor '${APPLIANCE_BRANCH}'` }, 200);
 
   const sha = payload.after ?? payload.head_commit?.id ?? "";
   if (!sha) return json({ error: "The push names no commit" }, 400);
-  if (NO_COMMIT.test(sha)) return json({ ignored: `the '${branch}' branch was deleted` }, 200);
+  if (NO_COMMIT.test(sha)) {
+    return json({ ignored: `the '${payload.ref}' branch was deleted` }, 200);
+  }
+
+  // A PROPOSAL BRANCH. Nothing on the gateway row moves -- only main and appliance are recorded --
+  // but the shape of the flows.json being proposed is checked here, and the status main requires
+  // is posted. A file uploaded through the forge's own UI met no check until the appliance refused
+  // it, which is after an administrator had approved and merged it.
+  if (!branch) {
+    const checked = await checkFlowShape(repository, sha);
+    console.log(`forge-events: ${sparkplugId} ${payload.ref} ${FLOW_SHAPE_CONTEXT}=${checked.state} (${checked.detail})`);
+    return json({ checked: { sparkplug_id: sparkplugId, ref: payload.ref, context: FLOW_SHAPE_CONTEXT, ...checked } }, 200);
+  }
 
   const head = payload.head_commit ?? payload.commits?.at(-1) ?? null;
   const by = payload.pusher?.email || payload.pusher?.login || head?.committer?.email || head?.committer?.name || null;
@@ -231,6 +317,10 @@ export default async function handler(req: Request): Promise<Response> {
     : new Date().toISOString();
 
   const flowSha256 = await flowHashAt(repository, sha);
+  // The merged head carries the status too. Nothing requires it there -- protection applies to a
+  // merge INTO main -- but it is what the forge shows beside the commit, and a check whose result
+  // disappears at the moment it is merged reads as one that did not run.
+  if (branch === "main") await checkFlowShape(repository, sha);
 
   // Nobody is named for the appliance branch: a deploy-key push carries whatever author the
   // appliance set, and the branch's protection already says who can have written it.

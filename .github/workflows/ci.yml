@@ -1261,8 +1261,9 @@ jobs:
       - name: Run Python Unit Suites
         run: node scripts/run-python-suites.mjs --lane unit
 
-      # The suites under `scripts/lib/`: the appliance's converge script, the mosquitto credential
-      # merge, the orphan sweep's filter and the service JWT. Explicit file paths, not the
+      # The suites under `scripts/lib/`: the two copies of the flow shape check, the appliance's
+      # converge script, the mosquitto credential merge, the orphan sweep's filter and the service
+      # JWT. Explicit file paths, not the
       # directory (see `npm run test:lib`). The converge suite needs `jq` on PATH, which this
       # runner has and a Windows development box does not; it skips loudly rather than silently.
       - name: Run Node Library Suites

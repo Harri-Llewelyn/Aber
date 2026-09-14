@@ -2779,6 +2779,49 @@ platform repository with its key and is refused when it pushes.
 service hands the root out only inside an enrolment, so the publisher has nothing to put in the
 repository yet; [`docs/roadmap.md`](../docs/roadmap.md) keeps the rotation design.
 
+### The forge checks a flow before it is merged
+
+`flow-sync.mjs` refuses a `flows.json` it cannot deploy, and that refusal happens on the appliance,
+after an administrator has approved and merged the change. A file uploaded through the forge's own
+web UI met no check before that. **`main` on every gateway repository now requires the commit
+status `acs/flow-shape`**, and the platform posts it.
+
+**No Actions runner, which is the part worth stating.** The obvious reading of "required status
+check" is CI, and CI on the forge means enabling Gitea Actions -- a runner that executes whatever a
+repository tells it to, on a host beside the database, plus a registry as a fourth credential plane.
+None of that is needed here. The platform already holds the machine account and already receives
+every push; posting a commit status is one API call on a delivery it was going to get anyway. The
+runner stays off (`gitea.actions.enabled: false`) and so does the registry.
+
+**How it runs.** The push webhook's branch filter widens from `{main,appliance}` to `*`, so a push
+to a proposal branch reaches [`forge-events`](functions/forge-events). Nothing on the gateway row
+moves for it -- those two branches are what it records -- but the `flows.json` at that commit is
+read through the machine account, checked, and the status posted. A repository with no `flows.json`
+at that commit passes: that is the ordinary state of a fresh enrolment, and a proposal changing
+something else is not a flow change. A file the forge cannot be asked about is `error`, never a
+pass, because "not known" must not merge.
+
+**Two copies of the check, held together by a test.** The same two refusals live in
+`flow-sync.mjs` on the appliance and in `forge-events` here, because they run in two places and
+neither can import the other. A divergence would be worse than no check: a file that passes in the
+forge and fails on the appliance was approved by somebody who was told it was fine, and the gateway
+then stops converging with the only evidence in its own log. `scripts/lib/flow-shape.test.mjs`
+lifts both copies out of their files and runs the same fixtures through them.
+
+**Measured against `gitea/gitea:1.27.3`.** A merge is refused `405 Not all required status checks
+successful` both when no such status exists and when it is `failure`, and succeeds on `success`.
+The pull request's own `mergeable` field stays `true` throughout -- it reports conflicts, not
+checks -- so the merge endpoint is the enforcement and `mergeable` is not the signal to read. A
+status must be posted against a **commit** sha: Gitea answers 500 for a blob's, which is easy to
+reach because a contents-API response carries both. And a webhook's `branch_filter` glob is not the
+branch rules': `*` matches across a slash here, so `feature/x` is delivered, where a branch rule
+needed `**` for the same reach.
+
+**Reconciled, not only created.** `ensureBranchProtection()` adds the context to a repository that
+predates it, keeping whatever else `main` already requires, so the fifteen-minute sweep brings an
+older gateway up without anybody visiting it. `test_forge_events.py` covers the four answers and
+that a proposal moves no column; `test_forge_sweep.py` covers the reconcile.
+
 ### A gateway that needs code of its own (`0106`)
 
 Some machinery — serial, Modbus, OPC-DA — no Node-RED node reaches, and the adapter that does is

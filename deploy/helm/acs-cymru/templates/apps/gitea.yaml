@@ -84,7 +84,8 @@ in one database and the server opens another, with nothing reporting a fault.
 - name: GITEA__security__REVERSE_PROXY_LIMIT
   value: "1"
 # Off: a runner executes whatever a repository tells it to, and a registry is a fourth credential
-# plane. Turning either on is a decision (docs/roadmap.md, "The appliance itself").
+# plane. The required status check on a proposed flow is posted by the platform, not built by a
+# runner (supabase/README.md, "The forge checks a flow before it is merged").
 - name: GITEA__actions__ENABLED
   value: {{ .Values.gitea.actions.enabled | quote }}
 - name: GITEA__packages__ENABLED

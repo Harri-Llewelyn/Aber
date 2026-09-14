@@ -865,9 +865,11 @@ gitea:
   machineUser: acs_platform
   machineEmail: acs-platform@acs-cymru.invalid
   logLevel: info
-  # Off. Actions is a build runner that executes whatever a repository tells it to, and the
-  # registry is a fourth credential plane. Turning either on is a decision
-  # (docs/roadmap.md, "The appliance itself").
+  # Off, and nothing here needs them. Actions is a build runner that executes whatever a
+  # repository tells it to, on a host beside the database; the registry is a fourth credential
+  # plane. The one thing that looked like it needed a runner -- the required status check on a
+  # proposed flows.json -- is posted by the platform instead (supabase/README.md, "The forge
+  # checks a flow before it is merged"). Turning either on is a decision.
   actions:
     enabled: false
   packages:
