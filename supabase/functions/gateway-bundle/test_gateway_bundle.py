@@ -22,6 +22,7 @@ import io
 import json
 import os
 import re
+import time
 import unittest
 from datetime import datetime, timezone
 import urllib.error
@@ -207,6 +208,28 @@ class TestReadiness(BundleBase):
         _, body = probe(self.tokens["Operator"])
         self.assertNotIn("ca_cert", body["ca"])
         self.assertNotIn("PRIVATE KEY", json.dumps(body))
+
+    def test_the_probe_answers_promptly_and_says_why_when_it_withholds(self):
+        """
+        THE READINESS ANSWER REACHES THE PAGE ON LOAD, so it must not be able to hang. It now
+        fetches ACS_CA_URL the way stage 0 does -- with redirects disabled, because `curl -fsSL`
+        follows none, and a deployment that redirects HTTP to HTTPS on the dashboard's host would
+        otherwise mint a command that stops on its first clause, on the appliance, saying only that
+        a certificate could not be installed.
+
+        What is asserted here is what holds on every deployment: the probe answers inside its own
+        bound, and a withheld command carries a reason an operator can act on. Whether the root is
+        fetchable is a property of the deployment, not of this build -- CI's stack mints an
+        unpinned command and has no stage 0 to break.
+        """
+        started = time.monotonic()
+        status, body = probe(self.tokens["Administrator"])
+        elapsed = time.monotonic() - started
+        self.assertEqual(status, 200, body)
+        self.assertLess(elapsed, 10, f"the readiness probe took {elapsed:.1f}s; it is asked on page load")
+        self.assertIn("available", body["installer"])
+        if not body["installer"]["available"]:
+            self.assertTrue(body["installer"]["reason"], "a withheld command with no reason is a dead end")
 
     def test_probe_needs_a_signed_in_user(self):
         status, _ = probe()

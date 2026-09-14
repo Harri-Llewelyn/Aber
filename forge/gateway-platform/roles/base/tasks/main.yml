@@ -6,7 +6,7 @@
     that: ansible_facts['distribution'] == 'Ubuntu'
     fail_msg: >-
       This playbook is for Ubuntu and Ubuntu Server; another operating system is a feature request
-      (docs/roadmap.md, "The appliance itself"). Found {{ ansible_facts['distribution'] }}.
+      (see this repository's README, "What is decided here"). Found {{ ansible_facts['distribution'] }}.
 
 - name: Base packages
   ansible.builtin.apt:

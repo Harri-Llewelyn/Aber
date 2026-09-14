@@ -18,11 +18,10 @@ moves out, and the table below says where it went.
 `§[0-9]` in this file.
 
 **Ordering.** 1 is the platform's own: the rehearsal that turns the backup into a capability.
-2 is the edge chain: the appliance as a managed artefact, on the forge, puller and appliance
-branch that have shipped. 3 reviews playback before the chain is folded, because a finding there
-may change the schema. 4 audits the documentation, code and comments once the code has stopped
-moving. 5 is last by rule: it folds the migration chain, so every entry that changes the schema
-must have landed before it.
+2 reviews playback before the chain is folded, because a finding there may change the schema.
+3 audits the documentation, code and comments once the code has stopped moving. 4 is last by
+rule: it folds the migration chain, so every entry that changes the schema must have landed
+before it.
 
 **Retired entries, and where their substance went.**
 
@@ -33,11 +32,11 @@ must have landed before it.
 | The approvals queue (`0086`–`0091`) | [`supabase/README.md`](../supabase/README.md#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-0086) |
 | The forge's door and membership (`0094`) | [`supabase/README.md`](../supabase/README.md#the-forges-door-and-the-room-behind-it-0094) |
 | The appliance puller, deploy keys and host-key distribution | [`docs/physical-gateways.md`](physical-gateways.md) |
-| GitOps edge sync (`0094`, `0095`, `0099`, `0104`) | [`supabase/README.md`](../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-0104) for the appliance branch, the writable key and the three rules that confine it, and the sweep's key reconcile; [`docs/physical-gateways.md`](physical-gateways.md#what-the-appliance-reports-back) for the operator's view. The one bullet not built, a required status check refusing `flows_cred.json` by shape, needs the runner and moved into *The appliance itself*. Two small things stay unbuilt and are recorded in the README section: a failed webhook delivery is visible only on the hook's page in the forge, and a repository from before `0095` gets no incident template from the sweep |
+| GitOps edge sync (`0094`, `0095`, `0099`, `0104`) | [`supabase/README.md`](../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-0104) for the appliance branch, the writable key and the three rules that confine it, and the sweep's key reconcile; [`docs/physical-gateways.md`](physical-gateways.md#what-the-appliance-reports-back) for the operator's view. The one bullet not built, a required status check refusing `flows_cred.json` by shape, is built and needed no runner: [`supabase/README.md`](../supabase/README.md#the-forge-checks-a-flow-before-it-is-merged). Two small things stay unbuilt and are recorded in the README section: a failed webhook delivery is visible only on the hook's page in the forge, and a repository from before `0095` gets no incident template from the sweep |
 | Contextual help | [`frontend/README.md`](../frontend/README.md#contextual-help) |
 | The Directory's MQTT half | [`ingestion/README.md`](../ingestion/README.md#the-directory-on-mqtt) |
 | The log store, structured logging and the drop drill-down | [`ingestion/README.md`](../ingestion/README.md#log-fields), `loki/loki.yaml`, `deploy/helm/acs-cymru/templates/obs/alloy.yaml` |
-| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source itself is in 2 |
+| The appliance clock offset measurement | [`ingestion/README.md`](../ingestion/README.md) (the `acs_ingestion_gateway_clock_offset_seconds` gauge and its rule); the time source is chrony on the appliance, pointed at what `platform.yml` names ([`forge/gateway-platform/README.md`](../forge/gateway-platform/README.md)), with the four questions the measurement was taken for answered in [`docs/physical-gateways.md` §8](physical-gateways.md#four-questions-about-the-clock-answered) |
 | The broker's Dynamic Security plugin (`0102`) | [`mosquitto/README.md`](../mosquitto/README.md) for the policy, the measured facts and the boot reconcile; [`supabase/README.md`](../supabase/README.md#the-access-control-page-states-what-is-outstanding) for the live Broker column, the orphaned-accounts list and a revocation that disconnects |
 | Kong → Envoy, and the new API key translation | [`docs/gateway.md`](gateway.md); Kong is deleted from the chart, not kept as a revert path, because a gateway that cannot match the `sb_*` keys cannot serve any caller |
 | Moving off Supabase's legacy API keys | Shipped, as a code change rather than the operational switch the entry described: with no deployment before 1.0 there was no unknown caller to watch for, so the gateway admits only the `sb_publishable_*` / `sb_secret_*` pair, every consumer presents it, the switch and its two instruments are gone, and `validate.py` proves a JWT presented as an apikey is refused. [`docs/gateway.md`](gateway.md) |
@@ -50,6 +49,7 @@ must have landed before it.
 | Multi-factor authentication | Not built, and not needed for 1.0: a could-have, reopened as [#184](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/184). The `0069` role split it waited on has shipped; the rest is in the request |
 | Cells become work centers | Answered, not built: a cell is itself one of ISA-95's work center types, so the standard's name is given where the hierarchy is named rather than replacing the word. [`ingestion/README.md`](../ingestion/README.md#the-unified-namespace) records the decision; each page's help Summary names its ISA-95 level |
 | The transport between services | Built for the broker and both databases: [`deploy/k8s/README.md`](../deploy/k8s/README.md#mqtts-on-8883) (in-cluster clients on 8883 by default, 1883 withdrawing to loopback) and [`deploy/k8s/README.md`](../deploy/k8s/README.md#tls-to-the-databases) (`postgresTls`: `verify-full` everywhere, `hostssl`-only pg_hba, Realtime's tenant link as the one named exception). HTTP between the gateway and its upstreams stays plaintext: none of them terminates TLS itself, so that hop is a TLS sidecar per pod, which is a service mesh, and a service mesh is the complete answer. Answered, not built. Gateways hold no client certificate: the dynsec password and the pinned root already give identity, confinement and a revocation that disconnects |
+| The appliance itself, and the code somebody wants to run on it | Built across five pull requests, and its four subjects went four ways. **The one-liner and the CA:** [`supabase/README.md`](../supabase/README.md#the-one-liner-0105) and [`docs/physical-gateways.md`](physical-gateways.md#on-the-appliance-the-command), which now also carries the cloud-init seed for a plant that images its own appliances. **The operating system and the gateway's own playbook:** [`forge/gateway-platform/README.md`](../forge/gateway-platform/README.md), with the time source answered in four parts there and in [§8](physical-gateways.md#the-clock-is-part-of-certificate-verification); CI runs the playbook twice in a container and the converge script has a suite of its own. **The forge as the appliance sees it, and the required status check:** [`supabase/README.md`](../supabase/README.md#the-forge-checks-a-flow-before-it-is-merged) — built without the Actions runner the entry assumed it needed, because branch protection takes a commit status the platform posts on a webhook it was already receiving. **Custom code:** [`forge/gateway-custom-example/README.md`](../forge/gateway-custom-example/README.md) and [`supabase/README.md`](../supabase/README.md#a-gateway-that-needs-code-of-its-own-0106) for the template repository, the vars a gateway's playbook is handed, and the two drawer rows. **Revocation and rotation:** [`docs/physical-gateways.md` §8](physical-gateways.md#8-certificates-and-the-two-clocks-they-run-on) — the root now rides on `main` of the platform repository rather than under a tag, the appliance refuses a bundle that would cut it off, and the page says which gateways are still holding an older root. The rebuilt-appliance answer is in [§6](physical-gateways.md#a-rebuilt-appliance-is-a-re-issue-and-keeps-its-repository). Three could-haves left as feature requests: a Gitea Actions runner for CI on the platform repository ([#211](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/211)), a time source on the platform for a plant with no route to NTP ([#212](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/212)), and minting the `#cloud-config` seed beside the command ([#213](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/213)) |
 | Retiring the flow-backup bucket | Removed: the `gateway-backups` bucket, its policies, its chart values and its policy test are gone, and no install had stored anything in it. A gateway's flow lives in its repository in the forge ([`docs/physical-gateways.md`](physical-gateways.md)); the repository pointer stays derived (`gateway-<sparkplug_id>` in the organisation `constants.js` names), a column is earned only if a gateway ever needs re-pointing. Archiving a gateway does not yet archive its repository: a could-have, reopened as [#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197), which also carries the rule that deleting one is a decision, never a cascade |
 
 ---
@@ -92,165 +92,7 @@ retention prune removes exactly the directory the row named and nothing beside i
 
 ---
 
-## 2 · The appliance itself, and the code somebody wants to run on it
-
-**Builds on:** [`gateway-bundle`](../supabase/functions/gateway-bundle/index.ts) ·
-[`forge/gateway-platform/appliance/`](../forge/gateway-platform/appliance) · `bootstrap.mjs`'s once-only guard ·
-[`docs/physical-gateways.md`](physical-gateways.md) · the `apikey` gate and its four exemptions ·
-[`check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) ·
-[`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) and
-[`mosquitto-tls-init.mjs`](../scripts/mosquitto-tls-init.mjs) · the clock offset gauge and its
-alert · the forge, the puller and the appliance branch
-([`docs/physical-gateways.md`](physical-gateways.md), [The appliance reports on a branch of its
-own](../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-0104)), which this
-reuses · the platform playbook ([`forge/gateway-platform/`](../forge/gateway-platform),
-[published by the sweep](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep)) · the three revocation handles (`disableClient` in the credential service,
-`withdraw_gateway_enrollment_tokens()`, and the deploy key reconcile in `forge-sweep`) · arrives
-from a request to run custom data-gathering software on gateways, for legacy machinery
-
-Four subjects that are one appliance: commissioning as a pasted command, the operating system as
-a managed artefact, the forge as the appliance sees it, and a lane for bespoke adapters. They
-should not be started as one piece of work. Ubuntu and Ubuntu Server are the operating system,
-amd64 and arm64 alike; another OS is a feature request.
-
-### The one-liner and the CA
-
-**Built** (`0105`, `gateway-install`, `forge/gateway-platform/install.sh`;
-[The one-liner](../supabase/README.md#the-one-liner-0105) and
-[`docs/physical-gateways.md`](physical-gateways.md#on-the-appliance-the-command)): the dashboard
-mints the token and an SPKI pin of the platform's root beside it over the authenticated session;
-stage 0 fetches the root as inert bytes over plain HTTP from the dashboard's host, checks the pin,
-installs it; stage 1 fetches the installer over verified TLS with the token in a header, never the
-query string, and runs it with the token in its environment; the installer, the playbook and the
-per-gateway `.env` are token-gated fetches that validate without consuming
-(`peek_gateway_enrollment_token()`), never cacheable, with the credential secret generated per
-fetch and written once; install first, enrol last, the same command re-runnable until enrolment;
-the body a function invoked on the last line. The installer is served from the platform's own copy
-of the playbook, which is the content the tag in the forge carries, rather than read from the
-forge at the tag: same bytes, no forge dependency on the commissioning path. The route refuses a
-plain-HTTP public URL, which decided the *worth deciding early* question; the development values
-alone override it. The appliance checks the root it enrols with against the pin and notes a
-difference rather than refusing, since that root arrived over TLS the pin verified.
-
-**Still open:** a cloud-init seed that plants the root, the zero-circularity answer for a plant
-that images its own appliances (the command works there too, with stage 0 finding the root
-already trusted). A deployment that redirects plain HTTP to HTTPS on the dashboard's host breaks
-stage 0 closed (curl stops, nothing is sent); the chart adds no such redirect.
-
-### The operating system
-
-**Built**, as [`forge/gateway-platform/`](../forge/gateway-platform) and
-[The platform playbook is published by the sweep](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep):
-`unattended-upgrades` without automatic reboot, Docker's packages held out of it; **`ansible-pull`**,
-not Ansible, on an hourly timer the playbook itself installs; the **platform** playbook in one
-repository the whole fleet reads, in its own `platform` organisation with `main` admitting the
-machine account alone; `platform.yml` in each gateway's repository as the per-gateway pointer,
-seeded at enrolment and changed by pull request; `chrony` in the package set, pointed at what
-`platform.yml` names; and the compose project deployed from the tagged copy of the bundle
-template. Scheduling and platform convergence are Ansible's; everything below `flow-sync.mjs`'s
-`deployFlow()` stays Node-RED knowledge, which is why `--once` exists.
-
-**Not yet:** the optional **custom** playbook in a gateway's own repository beside its flow (every
-gateway runs the platform playbook; "custom" is a gateway whose repository also carries a
-playbook, not a choice between two), which the converge script does not look for yet; and the CA
-bundle, which is under *Revocation and rotation*.
-
-**The time source: decide, with the measurement in hand,** whether an appliance with a bad clock
-should publish at all (today it is fail-open inside five minutes and fail-closed outside); whether
-the platform is itself a time source for the air-gapped case; whether an RTC module is a hardware
-requirement for single-board appliances; and whether `TELEMETRY_MAX_FUTURE_SECONDS` is right. Do not
-correct device timestamps at ingest.
-
-### The forge, as the appliance sees it
-
-**Built.** One SSH key per appliance, generated on it, registered twice: read-write on its own
-repository, read-only on the platform repository. `main` on both admits no deploy key;
-`appliance` on the gateway repository admits them and blocks force-push, and a `**` rule closes
-every other branch. That is the whole policy: pull and push its own repository, pull the
-platform's, reach nothing else, and the sweep reconciles both links per gateway (an archived one
-holds none). A Gitea user per gateway would have expressed the same policy through teams, at the
-cost of a third kind of principal the membership sweep would have to exempt, and a user can open
-issues and create repositories in the organisation, which a deploy key cannot. Both dashboard
-teams read the platform repository through its `readers` team.
-
-**Measured** (gitea/gitea:1.27.3): one public key is accepted as a deploy key on two repositories
-with a different mode on each (`key_id` shared, `read_only` per repository), so the appliance
-generates one key and no second. A writable deploy key can push to the repository's wiki, which
-no rule covers; that is an [accepted risk](../README.md#accepted-risks).
-
-**A required status check refusing `flows_cred.json` by shape.** A file uploaded through the
-forge's own UI meets no check until the puller refuses it on the appliance, which is late. It
-needs the Gitea Actions runner argued under *Custom code*; until then the puller's refusal is the
-only check.
-
-### Custom code
-
-Admissible on one condition: **a container built from a commit, never a payload handed to the
-appliance.** The motivating case is legacy machinery (serial, Modbus, OPC-DA) that no Node-RED
-node reaches; the adapter is worth nothing to anybody else and has no business in this repository,
-and it runs unattended for years, which is the argument for the forge being mandatory.
-
-**Built on the appliance, from the tagged checkout of the gateway's own repository.** The bundle
-already builds its image on the appliance, so this costs no new mechanism, no registry, and no
-fourth credential plane: the deploy key is the only thing the appliance holds and the registry
-could not have accepted it. Pin the base image by digest; an image for the wrong architecture
-fails at `docker run` in front of whoever is commissioning it, so the platform playbook declares
-the architecture it found. A Gitea Actions runner is still wanted, for CI on the platform
-repository and the status check above; a runner executes arbitrary code and should not share a host
-with the database. It does not build gateway images.
-
-**The adapter holds no credential.** It publishes locally (HTTP or a local topic) and Node-RED
-republishes on the one Sparkplug connection the appliance holds, so per-gateway confinement still
-means what it says and schema conformance and quarantine still apply. A workload that needs its own
-identity is a second gateway and should enrol as one. Not Portainer; not a k3s agent on gateways.
-
-**Cloning is seeding.** A new gateway's repository is seeded from a template: an example custom
-repository the platform ships, or another gateway's repository. No column records the choice; the
-repository is the record.
-
-### Revocation and rotation
-
-**A gateway holds three things and loses all three on archive:** the broker client
-(`disableClient`, which drops the live session), the deploy key links (the sweep, above), and any
-unredeemed enrolment token (`withdraw_gateway_enrollment_tokens()`). Only the second is unbuilt.
-
-**There is no HTTPS credential to revoke, and none is to be added.** After enrolment an appliance
-makes no HTTPS call; the publishable key is public by construction. Every design that hands a
-gateway an HTTPS credential, a registry token included, is a fourth revocation to build.
-
-**Gateways hold no client certificate.** Identity is the dynsec password and the SSH key, and the
-server is verified against a pinned root and a pinned host key. Client certificates would add a
-per-gateway leaf lifecycle and a `crlfile` the broker reloads badly, for nothing dynsec does not
-already give: identity, confinement, and a revocation that disconnects.
-
-**The root rotates through the platform playbook.** The playbook ships a CA bundle holding the
-old and new roots for an overlap window, delivered over SSH whose host key does not depend on the
-X.509 chain. Not built with the playbook: the credential service hands the root out only inside
-an enrolment, so the publisher has nothing to put in the repository; it needs a `GET` for the
-root on that service, and a decision on whether the bundle rides under the version tag (a
-rotation is then a release) or on a branch of its own that the playbook reads beside the tag. Rotation becomes a tagged release, not a visit to every cabinet. The heartbeat already
-reports the expiry each appliance holds; reporting the `notAfter` of the root the platform is
-currently issuing from, beside it, makes a rotation in progress visible. Read it from the
-credential service's `ca.crt`, never from the Kubernetes API.
-
-**No VPN for 1.0.** Every link is outbound-only, verified, and confined per gateway; the exposed
-surface is three ports, and a firewall allowlisting the plant's subnets is the control. A VPN adds
-a key plane per gateway (a fourth thing to issue at enrolment and revoke on archive) and a
-concentrator, does not remove TLS inside it, and makes inbound access to gateways easy, which the
-design exists to avoid. The case for it is gateways at remote sites over the public internet; if
-that arrives, WireGuard with keys issued at enrolment is the shape.
-
-**Worth deciding early.** Whether `unattended-upgrades` holds Docker's packages, which a
-convergence run does not expect to change under it. What the heartbeat reports about a failing
-custom container, which is the failure this lane is most likely to produce and least likely to
-notice. Whether the HTTPS side should refuse to run unencrypted the way the physical-gateway
-enrolment leg already does. Whether a rebuilt appliance (a dead SD card) re-enrols with a new
-token against the same repository, which the deploy-key reconcile makes routine, and what its
-`appliance` branch shows for the gap.
-
----
-
-## 3 · The playback feature is reviewed end to end
+## 2 · The playback feature is reviewed end to end
 
 **Builds on:** [`playback_worker.py`](../ingestion/playback_worker.py) · [`capture.py`](../ingestion/capture.py) ·
 [`capture_worker.py`](../ingestion/capture_worker.py) · [`playback.yaml`](../deploy/helm/acs-cymru/templates/apps/playback.yaml) ·
@@ -291,7 +133,7 @@ a component entry; and the feature's README sections describe what is built.
 
 ---
 
-## 4 · The documentation, code and comments are audited against the codebase
+## 3 · The documentation, code and comments are audited against the codebase
 
 **Builds on:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) (the comment rule, and where argument and
 history go) · `scripts/check-docs-drift.mjs` · `scripts/check-mirror-drift.mjs` ·
@@ -330,7 +172,7 @@ method so the next one starts from it.
 
 ---
 
-## 5 · The migration chain folds back into the baseline
+## 4 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)

@@ -91,8 +91,27 @@ forge; the timer the playbook installed does the rest.
 **Why the command is not `curl | bash` alone.** A fresh appliance does not trust the platform's
 internal root, and a one-liner that ends in `curl -k` would be worse than the bundle. The pin is
 what lets the appliance trust the root it fetched without trusting the network it fetched it
-over. A plant that images its own appliances can plant the root with cloud-init instead and skip
-stage 0.
+over.
+
+**A plant that images its own appliances plants the root at build time**, and nothing here changes.
+Put the PEM from `/.well-known/acs-cymru/ca.pem` into the image's `#cloud-config`:
+
+```yaml
+#cloud-config
+ca_certs:
+  trusted:
+    - |
+      -----BEGIN CERTIFICATE-----
+      MIIF...
+      -----END CERTIFICATE-----
+```
+
+cloud-init installs it and runs `update-ca-certificates` on first boot. The pasted command still
+works unchanged: stage 0 fetches the same bytes, computes the same pin, finds it matches, and
+installs a root the machine already trusts — `update-ca-certificates` then changes nothing. The
+circularity people expect here does not exist, because the pin travels over the dashboard's
+authenticated session and not over the network the root is fetched on. Minting the `#cloud-config`
+beside the command in the dashboard is a feature request; the PEM is one `curl` away today.
 
 **On a deployment without TLS on its API**, the command is not offered: the installer route
 carries the token and the credential secret, and `gateway-install` refuses to serve them over
@@ -244,6 +263,29 @@ The **Re-issue Bundle** action is deliberately absent once a gateway is `ONLINE`
 would invalidate the credential a working appliance is using, which is destructive dressed up as a
 convenience. To rotate a live gateway's credential, use
 `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` or re-enrol on purpose.
+
+### A rebuilt appliance is a re-issue, and keeps its repository
+
+A dead SD card, a replaced box, a destroyed volume: re-issue, install, and the gateway carries on
+under the same identity. **Nothing about the repository changes and there is no cleanup step.**
+
+* **The repository is the same one.** Enrolment adopts a repository that already exists under the
+  gateway's name rather than creating a second, so the flow, `platform.yml`, the incident template
+  and every pull request that ever ran through it are where they were.
+* **The new key replaces the old, on both repositories.** The rebuilt appliance generates its own
+  keypair, as every appliance does, and `ensureOnlyDeployKey()` removes every other key from the
+  gateway's repository while `ensureDeployKey()` removes the superseded key of the same title from
+  the platform repository. The old appliance, if it is ever powered on again, opens nothing.
+* **The `appliance` branch resumes rather than restarting.** `flow-sync` fetches
+  `origin/appliance` and resets to its head before it writes, so the branch is one continuous
+  record across the rebuild.
+
+**What the branch shows for the gap** is exactly the interval between its last two commits: the
+last report the old appliance managed, and the first from the new one. The rebuild itself is
+visible as the `deployed.json` commit carrying `"source": "enrolment"` — `bootstrap.mjs` writes
+that at enrolment and `flow-sync` never does, so it appears only when an appliance is new or
+rebuilt. There is no record of *why* the gap happened, and there should not be: that belongs in the
+repository's wiki or an issue, which is what they are for.
 
 ### A refused enrolment cannot tell you why
 
@@ -435,6 +477,34 @@ heartbeat against the time it arrived:
 **Nothing on the platform corrects it, deliberately.** Rewriting a device's timestamps centrally
 would swap a visible clock fault for an invisible one and destroy the only evidence the appliance
 is wrong. The fix is time synchronisation on the appliance, every time.
+
+#### Four questions about the clock, answered
+
+**Should an appliance with a bad clock publish at all?** Yes, and it is the platform that decides
+what to keep. The appliance does not gate itself, because a gate on the box would have to trust
+the clock it is doubting — an appliance that stopped publishing on its own suspicion would take
+itself off the air for the one fault it cannot measure. The platform keeps what is inside the
+window and refuses what is outside it, counts the refusals per gateway, and alerts at a minute of
+drift long before either. Fail-open inside five minutes, fail-closed outside; unchanged.
+
+**Is the platform a time source?** No, and it should not become one. A plant with no route to
+public NTP names its own server in `platform.yml`'s `chrony_servers` and the playbook points every
+appliance at it; that is a per-gateway setting changed by pull request like any other. A chrony pod
+on the platform would mean UDP 123 through a LoadBalancer and a second thing every appliance in the
+plant depends on the platform for — a feature request with a real case behind it, not a default.
+
+**Is an RTC module required?** It is a recommendation for single-board appliances, not a
+requirement. Without one and without NTP at boot the clock starts in the past, TLS fails until a
+time source appears, and the appliance is dead in a way that is obvious in front of whoever is
+holding it — which is the failure to prefer. `timedatectl` above finds it in one line, and Ubuntu's
+chrony steps the clock rather than slewing it (`makestep`), so the appliance recovers on its own
+once a source is reachable.
+
+**Is `TELEMETRY_MAX_FUTURE_SECONDS` right at five minutes?** Yes, on the measurement. The Gateway
+Clock Skew alert fires at one minute sustained for fifteen, which is four minutes of warning before
+anything is refused, on a drift that takes hours to accumulate. Nothing measured on the development
+fleet has approached it. Lowering it would trade that warning for refusals; raising it would widen
+the window in which a plausible-looking wrong time is written.
 
 ### There is no revocation list, and that is a decision
 

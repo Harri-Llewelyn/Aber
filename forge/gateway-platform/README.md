@@ -114,7 +114,14 @@ is what was approved either way.
   security team patches.
 - **`chrony` is the time source**, pointed at what `platform.yml` names (`chrony_servers`) or
   Ubuntu's pool by default. The platform measures each appliance's clock offset and alerts on it;
-  this is the fix.
+  this is the fix. **The platform is not itself a time source** — a plant with no route to public
+  NTP names its own server here, rather than the platform serving UDP 123 through a LoadBalancer
+  and every appliance in the plant depending on it for one more thing. **An appliance never gates
+  its own publishing on its clock**, because that gate would have to trust the clock it doubts;
+  the platform refuses what is more than five minutes ahead and counts it. An **RTC module** is a
+  recommendation for single-board appliances and not a requirement: without one the clock starts
+  in the past, TLS fails visibly, and chrony's `makestep` recovers it once a source is reachable.
+  `docs/physical-gateways.md` §8 carries the reasoning.
 - **The compose volume is a bind mount** under `/var/lib/acs-gateway/data`, so the host's
   converge script can reach the deploy key, the host key and the repository checkout that
   `bootstrap.mjs` wrote inside the container.
