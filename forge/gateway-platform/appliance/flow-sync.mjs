@@ -76,8 +76,9 @@ const REPORT_FILES = [
   { name: FLOW_FILE, path: FLOWS },
   { name: 'deployed.json', path: DEPLOYED },
   // Written by acs-gateway-converge (the platform playbook's converge role) after each
-  // ansible-pull: which platform tag this appliance ran and whether it succeeded. Absent on an
-  // appliance that runs the bundle alone.
+  // ansible-pull: which platform tag this appliance ran, whether it succeeded, and what this
+  // gateway's own custom.yml did if it carries one. Absent on an appliance that runs the bundle
+  // alone.
   { name: 'converged.json', path: join(GITOPS_DIR, 'converged.json') },
 ];
 

@@ -26,9 +26,23 @@ so the `gateways` organisation's rules (both teams may create repositories; the 
 whatever it finds) do not apply to it. `main` here admits pushes from the machine account and
 nobody else, because its content comes from the platform's own repository, where it is reviewed.
 
-An optional **custom** playbook lives in a gateway's own repository beside its flow, and runs
-after this one. Every gateway runs the platform playbook; "custom" is a gateway whose repository
-also carries a playbook, not a choice between two.
+An optional **custom** playbook lives in a gateway's own repository beside its flow, as
+`custom.yml` at the root, and runs after this one. Every gateway runs the platform playbook;
+"custom" is a gateway whose repository also carries a playbook, not a choice between two. Its
+reviewed lane is the one `main` already has: a pull request an administrator approves.
+
+**What it is run with.** From the puller's checkout of the gateway's `main`, so `roles/`, `files/`
+and `templates/` beside it resolve; as root; with the `vars` from that gateway's `platform.yml`,
+and then the paths the platform owns — `acs_state_dir`, `acs_data_dir`, `acs_compose_dir`,
+`acs_repo_dir` and `acs_platform_tag`. The paths are passed last, so a custom playbook can read
+where the platform put things and cannot move them.
+
+**What it cannot do to the platform.** It is not attempted when the platform run failed, because
+the platform is what puts Docker, the compose project and those directories in place, and a custom
+playbook run without them fails for the platform's reason while reporting its own. Its outcome is
+recorded separately in `converged.json`, so a gateway's own broken playbook never reads as the
+platform failing to converge. Its exit status is the script's: a failure has to reach the timer's
+unit status, or the only record is a field in the forge nobody is watching.
 
 ## How an appliance gets here
 
@@ -50,10 +64,26 @@ enrolment. The runbook is in `docs/physical-gateways.md`.
 2. runs `ansible-pull` against this repository at that tag, over SSH with the appliance's own
    deploy key and the forge's pinned host key, the same identity and the same verification the
    puller uses; the key is read-only here and read-write on the gateway's own repository;
-3. records what it did in `/var/lib/acs-gateway/data/gitops/converged.json`, which the puller
-   pushes to the gateway's `appliance` branch, so the forge shows which tag each appliance ran.
+3. runs `custom.yml` from that same checkout, when the repository carries one;
+4. records what it did in `/var/lib/acs-gateway/data/gitops/converged.json`, which the puller
+   pushes to the gateway's `appliance` branch, so the forge shows which tag each appliance ran
+   and what its own playbook did:
 
-A fleet bump is one pull request per gateway, or a scripted batch; a canary is one gateway.
+```json
+{
+  "outcome": "converged", "tag": "v0.1.0", "detail": "ansible-pull succeeded",
+  "converged_at": "2026-09-14T11:00:07Z",
+  "custom": { "outcome": "failed", "revision": "…", "detail": "custom.yml exited 2", "ran_at": "…" }
+}
+```
+
+`custom` is `null` when the repository carries no playbook of its own, and when the platform run
+failed before one could be attempted.
+
+A fleet bump is one pull request per gateway, or a scripted batch; a canary is one gateway. The
+checkout step 3 runs from is at the head of the tracked branch whatever the puller decided about
+the flow: a flow refused for its shape does not hold the checkout back, because what is on `main`
+is what was approved either way.
 
 ## What is decided here
 

@@ -3,28 +3,85 @@
 #
 # Reads platform.yml from the puller's checkout of the gateway's main, runs ansible-pull against
 # the platform repository at that tag with the appliance's own deploy key and the forge's pinned
-# host key, and records the result where the puller will push it to the appliance branch. Every
-# path here is what bootstrap.mjs wrote under /data, reached through the bind mount the appliance
-# role sets up. Outbound only, verified, no inventory.
+# host key, then runs this gateway's own custom.yml if its repository carries one, and records both
+# results where the puller will push them to the appliance branch. Every path here is what
+# bootstrap.mjs wrote under /data, reached through the bind mount the appliance role sets up.
+# Outbound only, verified, no inventory.
+#
+# The custom playbook runs from the puller's checkout, which is at the head of the tracked branch
+# whatever the puller decided about the flow: a flow refused for its shape does not hold the
+# checkout back, because what is on main is what was approved either way.
 set -u
 
 STATE_DIR=${ACS_STATE_DIR:-/var/lib/acs-gateway}
 DATA_DIR=${ACS_DATA_DIR:-$STATE_DIR/data}
+COMPOSE_DIR=${ACS_COMPOSE_DIR:-/opt/acs-gateway}
 GITOPS="$DATA_DIR/gitops"
 KEY="$GITOPS/id_ed25519"
 KNOWN_HOSTS="$GITOPS/known_hosts"
 REPOSITORY="$GITOPS/repository.json"
-POINTER="$GITOPS/repo/platform.yml"
+REPO_DIR="$GITOPS/repo"
+POINTER="$REPO_DIR/platform.yml"
+CUSTOM="$REPO_DIR/custom.yml"
 CONVERGED="$GITOPS/converged.json"
 CHECKOUT="$STATE_DIR/platform"
+
+# What this gateway's own playbook did, as a JSON value. `null` means it has not run: either the
+# repository carries none, or the platform run failed before it could.
+CUSTOM_RECORD=null
 
 log() { echo "[acs-gateway-converge] $*"; }
 
 record() {
   # $1 outcome, $2 tag, $3 detail. Read by nothing on this box; pushed by flow-sync.mjs.
   jq -n --arg outcome "$1" --arg tag "$2" --arg detail "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{outcome: $outcome, tag: $tag, detail: $detail, converged_at: $at}' > "$CONVERGED.tmp" \
+    --argjson custom "$CUSTOM_RECORD" \
+    '{outcome: $outcome, tag: $tag, detail: $detail, converged_at: $at, custom: $custom}' > "$CONVERGED.tmp" \
     && mv "$CONVERGED.tmp" "$CONVERGED"
+}
+
+custom_record() {
+  # $1 outcome, $2 revision, $3 detail. Kept separate from the platform's outcome above, so a
+  # gateway's own broken playbook is never read as the platform failing to converge.
+  jq -n --arg outcome "$1" --arg revision "$2" --arg detail "$3" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{outcome: $outcome, revision: $revision, detail: $detail, ran_at: $at}'
+}
+
+# This gateway's own playbook, beside its flow on the branch an administrator approved. Every
+# gateway runs the platform playbook; "custom" is a gateway whose repository also carries one.
+# Run after the platform's and never instead of it, because the platform is what puts Docker, the
+# compose project and the directories below in place.
+run_custom() {
+  if [ ! -f "$CUSTOM" ]; then
+    log "$REPO_DIR holds no custom.yml; this gateway runs the platform playbook alone"
+    return 0
+  fi
+
+  local revision paths rc
+  revision=$(git -c safe.directory="$REPO_DIR" -C "$REPO_DIR" rev-parse HEAD 2>/dev/null) || revision=""
+
+  # Where the platform put things, so a custom playbook states no path of its own. After the
+  # gateway's own vars, so these cannot be overridden by the file being run. `-c` because this
+  # becomes one command-line argument, and jq prints an object over several lines by default.
+  paths=$(jq -c -n --arg state "$STATE_DIR" --arg data "$DATA_DIR" --arg compose "$COMPOSE_DIR" \
+    --arg repo "$REPO_DIR" --arg tag "$TAG" \
+    '{acs_state_dir: $state, acs_data_dir: $data, acs_compose_dir: $compose, acs_repo_dir: $repo, acs_platform_tag: $tag}')
+
+  log "running this gateway's own custom.yml at ${revision:-an unknown revision}"
+  # From the checkout, so roles/, files/ and templates/ beside custom.yml resolve.
+  ( cd "$REPO_DIR" && ansible-playbook --inventory localhost, \
+      --extra-vars "$EXTRA" --extra-vars "$paths" custom.yml )
+  rc=$?
+
+  if [ "$rc" -eq 0 ]; then
+    CUSTOM_RECORD=$(custom_record converged "$revision" "custom.yml succeeded")
+    log "this gateway's custom.yml converged"
+    return 0
+  fi
+  CUSTOM_RECORD=$(custom_record failed "$revision" "custom.yml exited $rc")
+  log "this gateway's custom.yml exited $rc; the platform convergence above stands"
+  return "$rc"
 }
 
 for f in "$KEY" "$KNOWN_HOSTS" "$REPOSITORY"; do
@@ -66,13 +123,24 @@ export GIT_TERMINAL_PROMPT=0
 export ANSIBLE_LOCALHOST_WARNING=false
 
 log "converging to $TAG from $PLATFORM_URL"
-if ansible-pull --url "$PLATFORM_URL" --checkout "$TAG" --directory "$CHECKOUT" --purge \
-     --inventory localhost, --extra-vars "$EXTRA" site.yml; then
-  record converged "$TAG" "ansible-pull succeeded"
-  log "converged to $TAG"
-else
-  rc=$?
+ansible-pull --url "$PLATFORM_URL" --checkout "$TAG" --directory "$CHECKOUT" --purge \
+  --inventory localhost, --extra-vars "$EXTRA" site.yml
+rc=$?
+
+if [ "$rc" -ne 0 ]; then
+  # custom.yml is not attempted, and CUSTOM_RECORD stays null: a gateway's own playbook run
+  # without the platform underneath it would fail for the platform's reason and report its own.
   record failed "$TAG" "ansible-pull exited $rc"
   log "ansible-pull exited $rc; recorded, and the timer will try again"
   exit $rc
 fi
+log "converged to $TAG"
+
+run_custom
+custom_rc=$?
+
+# The platform's outcome is what it was, whatever this gateway's own playbook did. The exit status
+# is not: a failing custom.yml has to reach the unit's status, or the only record of it is a field
+# in the forge nobody is watching.
+record converged "$TAG" "ansible-pull succeeded"
+exit $custom_rc
