@@ -31,9 +31,9 @@ endpoint -- Prometheus `/metrics` -- and because a flag survives a page reload.
 publishes. It does the least it can: a tuple comparison, an append, and two counters, under a lock
 held for the length of an append.
 
-Related: supabase/migrations/0055_capture_orchestration.sql (the tables and every gate called here),
-         capture.py (the file format, and the encoding preservation this reuses),
-         README.md item 17.
+Related: supabase/migrations/archive/0055_capture_orchestration.sql (the tables and every gate
+         called here), capture.py (the file format, and the encoding preservation this reuses),
+         README.md -> "Recording from the dashboard".
 """
 
 import json

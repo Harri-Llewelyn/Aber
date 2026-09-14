@@ -713,6 +713,23 @@ export const SUITES = {
       'The read-only BI role. Four of its five checks skip without a historian; the point of it ' +
       'is that a reporting credential cannot write, which only means anything against a real one.',
   },
+  'ingestion/test_playback_replay.py': {
+    lanes: ['stack'],
+    why:
+      'THE ONLY CHECK THAT A STORED CAPTURE REACHES THE HISTORIAN. The unit suites prove ' +
+      'plan_playback() computes the right topics and that the worker resolves the passwords it ' +
+      'holds; both are properties of the source, and this feature has twice been broken by things ' +
+      'neither can see -- a credential nothing had issued, and a worker that read its credentials ' +
+      'once at startup. Each left every page saying the right thing and no telemetry moving, ' +
+      'because a refused MQTT connection is invisible past CONNECT and Sparkplug publishes at ' +
+      'QoS 0. So this mints the credential (which is what exercises the DELIVERY path), waits for ' +
+      'the worker to report that it holds the target, replays a fixture, and asserts the rows ' +
+      'arrived. THE SENTINEL METRIC IS LOAD BEARING: the recorded device is a real device the ' +
+      'seeded fleet is publishing as, so "nothing was written under the recorded id" cannot be ' +
+      'asserted directly -- a metric name unique to the run can only have come from this replay, ' +
+      'which is what makes the identity rewrite checkable against a live historian. Needs ' +
+      '`playback.enabled`, which values-dev.yaml sets.',
+  },
   'test-harness/test_log_pipeline.py': {
     // STACK ONLY, AND IT CANNOT BE ANYTHING ELSE. Every assertion here is about four processes
     // and two independent stores agreeing at run time -- broker, daemon, collector, store. The

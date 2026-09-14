@@ -41,8 +41,9 @@ and otherwise carries out what it is given.
 The publishing itself is `capture.py`'s, unchanged: `plan_playback()` decides every topic, payload
 and delay with no broker and no clock, so this file is a loop that cannot make a new decision.
 
-Related: supabase/migrations/0056_playback_orchestration.sql (every gate called here),
-         capture.py (the plan, the identity rewrite, the rebasing), README.md item 17 section 5.
+Related: supabase/migrations/archive/0056_playback_orchestration.sql (every gate called here),
+         capture.py (the plan, the identity rewrite, the rebasing),
+         README.md -> "Playback from the dashboard".
 """
 
 import json
@@ -115,15 +116,17 @@ def _file_credentials(path=None):
     """
     The delivered credentials, or an empty map if none have been.
 
-    ABSENT IS NORMAL AND IS NOT AN ERROR. A stack that has never issued a playback credential has no
-    file, and a worker logging an error every three seconds about a file it does not need would
-    train an operator to ignore the log that also carries the real refusals. Unreadable or malformed
-    IS an error, because that is a delivery that happened and did not arrive.
+    ABSENT IS NORMAL AND IS NOT AN ERROR, and absent has two forms: no file at all, and a file with
+    nothing in it -- which is what the chart's Secret projection presents until something has been
+    delivered. A stack that has never issued a playback credential is in that state, and a worker
+    logging an error every three seconds about a file it does not need would train an operator to
+    ignore the log that also carries the real refusals. Unreadable or malformed IS an error,
+    because that is a delivery that happened and did not arrive.
     """
     path = path or PLAYBACK_CREDENTIAL_FILE
     try:
         with open(path, "r", encoding="utf-8") as handle:
-            parsed = json.load(handle)
+            raw = handle.read()
     except FileNotFoundError:
         return {}
     except OSError as err:
@@ -132,6 +135,18 @@ def _file_credentials(path=None):
             "Gateways page will not reach this worker until it is readable.", path, err,
         )
         return {}
+
+    # EMPTY IS ABSENT, and on Kubernetes it is the ONLY form absent takes. The chart creates
+    # `playback_credentials.json` as a key of the broker's credential Secret on every install and
+    # the projection mounts it whether or not anything has been delivered, so the file a fresh
+    # stack presents is blank rather than missing. Parsing that as malformed logged an error every
+    # poll -- forever, on any stack with no playback target yet, which is exactly the log the
+    # FileNotFoundError arm above exists to avoid producing.
+    if not raw.strip():
+        return {}
+
+    try:
+        parsed = json.loads(raw)
     except ValueError as err:
         logger.error(
             "The playback credential file at %s is not valid JSON (%s), so no delivered credential "

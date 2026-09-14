@@ -511,7 +511,10 @@ explicitly, which is how the page follows a running job at all, and `0055` self-
 publication membership survived.
 
 **`Service_Playback` (`0056`) is a machine principal in `0048`'s sense** — no user row, reached
-through `is_playback_caller()` — and it holds four gates and one storage object, not `service_role`.
+through `is_playback_caller()` — and it holds five gates and one storage object, not `service_role`.
+The five are `playback_claim_job()`, `playback_progress()`, `playback_finish()`,
+`playback_reconcile_jobs()` and `playback_report_credentials()`; the object is the capture of the
+job it is running, and only while that job is `RUNNING`.
 Its MQTT identity is a separate matter entirely: the worker authenticates to the broker **as the
 target gateway**, so the database says what it may do and the broker ACL says what it may publish.
 See [Machine identities](#machine-identities) for why the two never collapse into one credential.
@@ -600,6 +603,17 @@ counters into one shared sequence and the daemon correctly concludes messages we
 the nameplate, and a self-check fails if a shadow ever gains one: `device_nameplate` (`0011`) is
 IDTA Nameplate and holds a serial number, so a copy would make the AAS Part 5 export emit two shells
 asserting the same asset identity.
+
+**`0107` makes a stopped playback say it was stopped.** `request_playback_stop()` has two arms: a
+`PENDING` job no worker has claimed becomes `CANCELLED` immediately, while a `RUNNING` one can only
+be flagged — the worker is mid-publish, so it observes `stop_requested` on its next progress call,
+stops, and reports the count it reached. Nothing then read the flag again. `playback_finish()`
+decided on the error alone, and an interrupted playback carries none, so it was recorded
+`COMPLETED`: indistinguishable from a capture published in full, with a lower `messages_sent` as
+the only clue and nothing saying the difference was deliberate. The Capture page's failure banner
+selects `FAILED` and `CANCELLED`, so a stopped job left no trace there either. The status now reads
+the flag, and **an error outranks it** — a job asked to stop that then failed is a failure, because
+the error is the half an operator can act on.
 
 ### What is stale, and what is merely quiet (`0029`, `0061`)
 

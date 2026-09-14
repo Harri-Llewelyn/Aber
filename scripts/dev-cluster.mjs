@@ -576,6 +576,9 @@ function testEnvironment () {
     // Skips would otherwise read as passes: here the seed and both stores are guaranteed.
     REQUIRE_SEEDED_ACCOUNTS: '1',
     REQUIRE_LOG_PIPELINE: '1',
+    // values-dev.yaml runs the playback worker, so the replay suite has no reason to skip here
+    // and every reason not to: a fully-skipped suite reports OK and exits 0.
+    REQUIRE_PLAYBACK_REPLAY: '1',
   }
 }
 
