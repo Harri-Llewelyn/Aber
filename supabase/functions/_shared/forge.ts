@@ -114,8 +114,25 @@ export const APPLIANCE_BRANCH = "appliance";
  */
 const CATCH_ALL_RULE = "**";
 
-/** The pushes the hook delivers: the two branches forge-events records, nothing else. */
-const WEBHOOK_BRANCH_FILTER = `{main,${APPLIANCE_BRANCH}}`;
+/**
+ * The pushes the hook delivers: every branch. `main` and `appliance` are recorded on the gateway
+ * row; every other branch is a proposal, and forge-events checks the shape of its `flows.json` and
+ * posts the status `main` requires. Gitea ignores what it is not asked about, so the cost of the
+ * wider filter is one call per proposal push.
+ *
+ * `*`, NOT `**`, and this glob is not the branch rules'. A webhook filter's `*` matches across a
+ * slash, so `feature/x` is delivered; a branch rule's does not, which is why CATCH_ALL_RULE above
+ * has to be `**`. Both measured against gitea/gitea:1.27.3.
+ */
+const WEBHOOK_BRANCH_FILTER = "*";
+
+/**
+ * The commit status `main` requires before a merge. Posted by forge-events, which reads the
+ * pushed `flows.json` and applies the shape checks the appliance's puller applies -- so a file
+ * uploaded through the forge's own UI meets a check before it is merged rather than being refused
+ * on the appliance afterwards, which is late.
+ */
+export const FLOW_SHAPE_CONTEXT = "acs/flow-shape";
 
 /**
  * The platform playbook's own organisation and repository: one repository the whole fleet reads,
@@ -399,12 +416,16 @@ async function dropCopiedManifest(cfg: ForgeConfig, name: string): Promise<void>
  * `enable_push: false` is what makes "deploy only what is committed" mean "deploy only what was
  * reviewed"; merging stays allowed to anyone with write once approvals are met, so a manager can
  * merge after an administrator approves. `dismiss_stale_approvals` means a change pushed after
- * approval needs approving again. An existing protection is left as an administrator may have
- * tuned it, except for the two fields that keep a deploy key off `main`: `enable_push` and
- * `push_whitelist_deploy_keys` are closed again if either is found open, because the appliance's
- * key is writable and this rule is what makes it a reporting key. Returns whether anything was
- * changed. `seedTemplate` is for a gateway's repository; a playbook made by hand is protected the
- * same way and is not a gateway's incident log.
+ * approval needs approving again. `main` also requires the `acs/flow-shape` status, so a
+ * `flows.json` that the appliance would refuse cannot be merged in the first place.
+ *
+ * An existing protection is left as an administrator may have tuned it, except for the three
+ * things this rule is for: `enable_push` and `push_whitelist_deploy_keys` are closed again if
+ * either is found open, because the appliance's key is writable and this rule is what makes it a
+ * reporting key; and the shape check is added back to the required contexts, keeping whatever
+ * else is required beside it. Returns whether anything was changed. `seedTemplate` is for a
+ * gateway's repository; a playbook made by hand is protected the same way and is not a gateway's
+ * incident log.
  */
 export async function ensureBranchProtection(
   cfg: ForgeConfig,
@@ -413,14 +434,27 @@ export async function ensureBranchProtection(
 ): Promise<boolean> {
   const existing = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`);
   if (existing.ok) {
-    const rule = await existing.json() as { enable_push?: boolean; push_whitelist_deploy_keys?: boolean };
-    if (!rule.enable_push && !rule.push_whitelist_deploy_keys) return false;
+    const rule = await existing.json() as {
+      enable_push?: boolean;
+      push_whitelist_deploy_keys?: boolean;
+      enable_status_check?: boolean;
+      status_check_contexts?: string[];
+    };
+    const open = rule.enable_push || rule.push_whitelist_deploy_keys;
+    const unchecked = !rule.enable_status_check || !(rule.status_check_contexts ?? []).includes(FLOW_SHAPE_CONTEXT);
+    if (!open && !unchecked) return false;
+    // The contexts already required are kept: an administrator may have added one, and this is
+    // about `acs/flow-shape` being among them rather than about it being the only one.
+    const contexts = [...new Set([...(rule.status_check_contexts ?? []), FLOW_SHAPE_CONTEXT])];
     const closed = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`, {
       enable_push: false,
       push_whitelist_deploy_keys: false,
+      enable_status_check: true,
+      status_check_contexts: contexts,
     });
     if (!closed.ok) throw await refused(`could not close 'main' on '${name}' to pushes`, closed);
-    console.warn(`forge: 'main' on '${name}' admitted pushes; closed again`);
+    if (open) console.warn(`forge: 'main' on '${name}' admitted pushes; closed again`);
+    if (unchecked) console.log(`forge: 'main' on '${name}' now requires ${FLOW_SHAPE_CONTEXT}`);
     return true;
   }
   if (existing.status !== 404) {
@@ -442,9 +476,40 @@ export async function ensureBranchProtection(
     required_approvals: 1,
     block_on_rejected_reviews: true,
     dismiss_stale_approvals: true,
+    // The shape check forge-events posts. Measured against gitea/gitea:1.27.3: a merge is refused
+    // 405 "Not all required status checks successful" both when no such status exists and when it
+    // is `failure`, and succeeds on `success`. The pull request's own `mergeable` field stays true
+    // throughout -- it reports conflicts, not checks -- so the merge endpoint is the enforcement.
+    enable_status_check: true,
+    status_check_contexts: [FLOW_SHAPE_CONTEXT],
   });
   if (!created.ok) throw await refused(`could not protect 'main' on '${name}'`, created);
-  console.log(`forge: 'main' on '${name}' is protected`);
+  console.log(`forge: 'main' on '${name}' is protected and requires ${FLOW_SHAPE_CONTEXT}`);
+  return true;
+}
+
+/**
+ * Post a commit status. `sha` must be a COMMIT: Gitea answers 500 to a blob's sha (measured), which
+ * is easy to reach because a contents-API response carries both. Never fatal -- a status that
+ * cannot be posted leaves the merge blocked, which is the safe direction, and the caller says so.
+ */
+export async function postCommitStatus(
+  cfg: ForgeConfig,
+  repository: string,
+  sha: string,
+  state: "success" | "failure" | "error" | "pending",
+  description: string,
+): Promise<boolean> {
+  const posted = await forgeApi(cfg, "POST", `/repos/${FORGE_ORGANISATION}/${repository}/statuses/${sha}`, {
+    context: FLOW_SHAPE_CONTEXT,
+    state,
+    // Gitea truncates a long description in its own UI; keep it to one readable line.
+    description: description.slice(0, 255),
+  });
+  if (!posted.ok) {
+    console.warn(`forge: could not post ${FLOW_SHAPE_CONTEXT}=${state} on '${repository}' at ${sha.slice(0, 12)} (${posted.status})`);
+    return false;
+  }
   return true;
 }
 

@@ -545,9 +545,36 @@ every other gateway's flow in the same file. The mechanical reason agrees: repos
 when an appliance enrols with a deploy key, and a host-run gateway never enrols.
 
 **`flows_cred.json` is never committed.** It is encrypted with a secret that exists only in the
-appliance's `.env`, so a copy on the platform would be either useless or dangerous. Nothing between
-the forge's web editor and the appliance checks its shape yet — the puller's refusal above is the
-last line, and a required status check in the forge is the next one (docs/roadmap.md, "The appliance itself").
+appliance's `.env`, so a copy on the platform would be either useless or dangerous. Proposing it
+by mistake is now caught in the forge rather than on the appliance, below.
+
+### The forge checks the shape before you can merge it
+
+`main` on every gateway repository requires the status **`acs/flow-shape`**. The platform posts it:
+every push to a proposal branch is delivered to `forge-events`, which reads the `flows.json` at
+that commit and applies the same two checks the appliance's puller applies. A red check means the
+merge button is refused, with *"Not all required status checks successful"*.
+
+| The check says | What happened |
+| :--- | :--- |
+| ✅ `flows.json is a Node-RED flow array` | it will deploy |
+| ✅ `no flows.json in this commit` | the proposal changes something else, which is not a flow change |
+| ❌ `a Node-RED flow export is a JSON array of nodes, and this file is not one` | usually `flows_cred.json`, which is a map rather than an array |
+| ❌ `this looks like flows_cred.json rather than flows.json` | an array of entries that carry no node `type` |
+| ❌ `flows.json is not valid JSON` | a truncated or hand-edited export |
+| ⚠️ `could not read flows.json` | the forge could not be asked. **Not** a pass: "not known" must not merge |
+
+**It runs where the mistake is made.** Uploading a file through the forge's own web UI met no check
+at all until the appliance refused it — which is after an administrator had reviewed and approved
+it, and which surfaces as a gateway that silently stops converging. The puller's refusal is still
+there and is still the last word; this one is just early enough to be useful.
+
+**It is not a build.** No Actions runner is enabled on the forge and none is needed: the platform
+holds the machine account, and posting a commit status is one API call. The two copies of the check
+are held together by `scripts/lib/flow-shape.test.mjs`, which runs the same files through both.
+
+**If a check is missing on an older repository**, the fifteen-minute sweep adds the requirement to
+`main` and leaves whatever else is required beside it.
 
 
 ---

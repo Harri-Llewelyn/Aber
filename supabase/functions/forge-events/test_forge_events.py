@@ -214,11 +214,19 @@ class TestWhatIsRecorded(ForgeEventsBase):
         self.assertIsNone(row["forge_appliance_platform_outcome"])
         self.assertIsNone(row["forge_appliance_custom_outcome"])
 
-    def test_a_push_to_another_branch_is_ignored(self):
+    def test_a_push_to_another_branch_is_checked_and_records_nothing(self):
+        """
+        A proposal branch is no longer ignored: its flows.json is checked and the status main
+        requires is posted (TestAProposal covers what the check answers, against a real
+        repository). What must still hold here is that NOTHING on the gateway row moves for it --
+        main and appliance are the two branches it records.
+        """
         status, body = deliver(push(self.sparkplug_id, ref="refs/heads/tighten-poll"))
         self.assertEqual(status, 200, body)
-        self.assertIn("ignored", body)
+        self.assertIn("checked", body)
+        self.assertEqual(body["checked"]["context"], "acs/flow-shape", body)
         self.assertIsNone(self.head()["forge_head_sha"])
+        self.assertIsNone(self.head()["forge_appliance_sha"])
 
     def test_a_deleted_branch_is_ignored(self):
         status, body = deliver(push(self.sparkplug_id, sha="0" * 40))
@@ -322,6 +330,124 @@ class TestTheForgeItself(ForgeEventsBase):
         self.assertIsNone(row["forge_head_flow_sha256"])
 
 
+class TestAProposal(ForgeEventsBase):
+    """
+    THE CHECK THAT RUNS BEFORE A MERGE. A flows.json uploaded through the forge's own UI met no
+    check until the appliance refused it, which is after an administrator had approved it. Now a
+    push to any branch but main and appliance is delivered here, the file at that commit is read,
+    and the `acs/flow-shape` status main requires is posted -- so a credential file or a mangled
+    export cannot be merged in the first place.
+
+    THE REPOSITORY IS MADE BY HAND AND NOT ENROLLED, which is what makes the proposals possible.
+    An enrolled repository's `**` rule admits the two dashboard teams and nobody else, so neither
+    the machine account nor a deploy key can push a proposal branch -- a proposal is a person's
+    act, through the forge's door, and that policy is asserted where it belongs, in
+    TestTheApplianceItself. Here the commits are made directly and the push is delivered signed,
+    which exercises the one thing this class is about: read the file, decide, post the status.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        status, _ = forge_as_machine("/api/v1/version")
+        if status != 200:
+            raise unittest.SkipTest(f"no forge reachable at {FORGE_URL} ({status})")
+        cls.repo = f"gateway-{cls.sparkplug_id}"
+        forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
+        status, made = forge_as_machine(f"/api/v1/orgs/{ORGANISATION}/repos", method="POST", body={
+            "name": cls.repo, "private": True, "auto_init": True, "default_branch": "main",
+        })
+        if status != 201:
+            raise unittest.SkipTest(f"could not create a repository to propose against: {made}")
+
+    @classmethod
+    def tearDownClass(cls):
+        forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
+        super().tearDownClass()
+
+    def propose(self, branch, content):
+        """A commit on a new branch, as a person uploading a file in the forge would make."""
+        status, made = forge_as_machine(
+            f"/api/v1/repos/{ORGANISATION}/{self.repo}/contents/flows.json", method="POST", body={
+                "content": base64.b64encode(content.encode()).decode(),
+                "message": f"propose {branch}", "branch": "main", "new_branch": branch,
+            })
+        self.assertEqual(status, 201, f"the proposal commit was not made: {made}")
+        # THE COMMIT's sha, never the blob's: the contents response carries both, and Gitea answers
+        # 500 to a status posted against a blob (measured against gitea/gitea:1.27.3).
+        status, head = forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{self.repo}/branches/{branch}")
+        self.assertEqual(status, 200, head)
+        sha = head["commit"]["id"]
+        # Signed, as the hook delivers it. The hook itself is registered by enrolment and its
+        # filter is asserted in test_forge_sweep; what is exercised here is the handler.
+        status, body = deliver(push(self.sparkplug_id, ref=f"refs/heads/{branch}", sha=sha))
+        self.assertEqual(status, 200, body)
+        return sha, body
+
+    def flow_shape(self, sha):
+        """The acs/flow-shape status on a commit, or None if none was posted."""
+        status, listed = forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{self.repo}/statuses/{sha}")
+        self.assertEqual(status, 200, listed)
+        ours = [st for st in listed if st.get("context") == "acs/flow-shape"]
+        return ours[0] if ours else None
+
+    def test_a_well_formed_flow_is_marked_successful(self):
+        sha, body = self.propose("tighten-poll", '[{"id":"acs-broker","type":"mqtt-broker"}]')
+        self.assertEqual(body["checked"]["state"], "success", body)
+        self.assertEqual(body["checked"]["context"], "acs/flow-shape", body)
+        state = self.flow_shape(sha)
+        self.assertIsNotNone(state, "no acs/flow-shape status reached the forge")
+        self.assertEqual(state["status"], "success", state)
+        # A proposal is not what the appliance deploys, so the row does not move for it.
+        self.assertIsNone(self.head()["forge_head_sha"], "a proposal branch moved the gateway row")
+
+    def test_a_credential_file_proposed_as_a_flow_is_refused(self):
+        """
+        THE ONE THIS EXISTS FOR. flows_cred.json is a map of node id to encrypted credential;
+        deployed as a flow it hands the broker node an empty username, the gateway is refused with
+        CONNACK 5 with nothing said about why, and the next deploy prunes the ciphertext the
+        appliance still holds. The appliance refuses it; now so does the forge, before the merge.
+        """
+        # The file as Node-RED writes it is a MAP of node id to ciphertext, so it fails the first
+        # check: a flow export is an array and this is not one.
+        sha, body = self.propose("paste-the-wrong-file", '{"acs-broker":{"user":"x","password":"y"}}')
+        self.assertEqual(body["checked"]["state"], "failure", body)
+        state = self.flow_shape(sha)
+        self.assertIsNotNone(state, "no acs/flow-shape status reached the forge")
+        self.assertEqual(state["status"], "failure", state)
+        self.assertIn("array", state["description"], state)
+
+        # And the shape that reaches the SECOND check: an array whose every entry is an object
+        # with no `type`, which is what a credential file looks like once somebody has wrapped it.
+        sha, body = self.propose("wrapped-credentials", '[{"user":"x"},{"user":"y"}]')
+        self.assertEqual(body["checked"]["state"], "failure", body)
+        self.assertIn("flows_cred", self.flow_shape(sha)["description"])
+
+    def test_a_flow_that_is_not_json_is_refused(self):
+        sha, body = self.propose("half-an-export", '[{"id":"a",')
+        self.assertEqual(body["checked"]["state"], "failure", body)
+        self.assertEqual(self.flow_shape(sha)["status"], "failure")
+
+    def test_a_proposal_that_adds_no_flow_passes(self):
+        """
+        A repository whose main carries no flows.json yet is the ordinary state of one enrolment
+        just created, and a proposal touching something else is not a flow change. Refusing those
+        would block every first pull request a gateway ever gets.
+        """
+        status, _ = forge_as_machine(
+            f"/api/v1/repos/{ORGANISATION}/{self.repo}/contents/NOTES.md", method="POST", body={
+                "content": base64.b64encode(b"notes").decode(), "message": "notes",
+                "branch": "main", "new_branch": "just-notes",
+            })
+        self.assertEqual(status, 201)
+        _, head = forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{self.repo}/branches/just-notes")
+        sha = head["commit"]["id"]
+        status, body = deliver(push(self.sparkplug_id, ref="refs/heads/just-notes", sha=sha))
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["checked"]["state"], "success", body)
+        self.assertEqual(self.flow_shape(sha)["status"], "success")
+
+
 @unittest.skipIf(not FORGE_SSH, "GITEA_TEST_SSH must name the forge's SSH address as reachable from this host")
 class TestTheApplianceItself(ForgeEventsBase):
     """
@@ -400,6 +526,15 @@ class TestTheApplianceItself(ForgeEventsBase):
         self.assertFalse(by_name["appliance"]["enable_force_push"])
         self.assertFalse(by_name["**"]["push_whitelist_deploy_keys"])
         self.assertLess(by_name["appliance"]["priority"], by_name["**"]["priority"], "the catch-all must come after the named rule")
+        # A PROPOSAL IS A PERSON'S ACT. The catch-all admits the two dashboard teams and nobody
+        # else, so neither a deploy key nor the machine account can push a proposal branch.
+        self.assertEqual(sorted(by_name["**"]["push_whitelist_teams"]),
+                         ["administrators", "managers"], by_name["**"])
+        # And main requires the shape check forge-events posts, so a flows.json the appliance
+        # would refuse cannot be merged. Measured: a merge is refused 405 with no such status and
+        # with a failing one, and succeeds on success.
+        self.assertTrue(by_name["main"]["enable_status_check"], by_name["main"])
+        self.assertIn("acs/flow-shape", by_name["main"]["status_check_contexts"], by_name["main"])
 
         # The clone URL names the forge's own address (scp-like when SSH is on 22); from this host
         # the forward answers, for the same repository.
