@@ -10,6 +10,7 @@
  *   POST /credentials   issue (or re-issue) one gateway's account: its role, the client, a password
  *   POST /revocations   disable one gateway's account, which disconnects its live session
  *   GET  /clients       the broker's own list of clients and roles, for the Access Control page
+ *   GET  /ca            the root the broker presents, its dates, and its public key's pin
  *
  * It holds no database credential and is not published outside the container network. The admin
  * account it authenticates as reaches `$CONTROL/dynamic-security/#` and no other topic
@@ -28,7 +29,7 @@
  */
 import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { timingSafeEqual } from 'node:crypto';
+import { X509Certificate, createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import {
@@ -280,6 +281,46 @@ function inventory() {
   return { ...summariseInventory(clients, roles), read_at: new Date().toISOString() };
 }
 
+/**
+ * The root the broker presents, read from the same file `/credentials` hands to an enrolling
+ * appliance. Returned as the certificate, the window it is valid for, and the pin of its public
+ * key -- the SHA-256 of the SubjectPublicKeyInfo in base64, which is what
+ * `supabase/functions/_shared/caPin.ts` computes and what an appliance's `openssl` prints.
+ *
+ * THE KEY OUTLIVES THE CERTIFICATE. `deploy/k8s/internal-ca.yaml` re-issues the root with
+ * `rotationPolicy: Never`, so a re-issue moves `not_after` and leaves `spki_sha256` where it was;
+ * a changed pin is a new key, which is the case a fleet has to be walked through.
+ *
+ * NOT A SECRET: a root certificate carries no private key, and `ca.key` beside it is not read.
+ * Authenticated all the same, because this port is the credential service's and holds one door.
+ */
+function certificateAuthority() {
+  let pem;
+  try {
+    pem = readFileSync(CA_FILE, 'utf8');
+  } catch {
+    throw new CredentialError(
+      `no CA at ${CA_FILE}; this deployment presents no root for an appliance to trust`,
+      'no_ca',
+    );
+  }
+  let certificate;
+  try {
+    certificate = new X509Certificate(pem);
+  } catch (err) {
+    throw new CredentialError(`${CA_FILE} is not a certificate: ${err.message}`, 'no_ca');
+  }
+  return {
+    ca_cert: pem,
+    not_before: new Date(certificate.validFrom).toISOString(),
+    not_after: new Date(certificate.validTo).toISOString(),
+    spki_sha256: createHash('sha256')
+      .update(certificate.publicKey.export({ type: 'spki', format: 'der' }))
+      .digest('base64'),
+    read_at: new Date().toISOString(),
+  };
+}
+
 // -------------------------------------------------------------------------------------------------
 // HTTP
 // -------------------------------------------------------------------------------------------------
@@ -340,7 +381,7 @@ const server = createServer(async (req, res) => {
     return send(res, 200, { status: 'ok' });
   }
 
-  const routes = new Set(['/credentials', '/revocations', '/clients']);
+  const routes = new Set(['/credentials', '/revocations', '/clients', '/ca']);
   if (!routes.has(pathname)) return send(res, 404, { error: 'not found' });
 
   if (!authorised(req)) {
@@ -353,6 +394,21 @@ const server = createServer(async (req, res) => {
     if (pathname === '/clients') {
       if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
       return send(res, 200, inventory());
+    }
+
+    // 404 AND NOT 502 when there is no CA: a plaintext-only stack is a deployment that has none,
+    // not a broker that could not be reached, and the caller publishing a trust bundle has to be
+    // able to tell those apart before it writes one.
+    if (pathname === '/ca') {
+      if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
+      try {
+        return send(res, 200, certificateAuthority());
+      } catch (err) {
+        if (err instanceof CredentialError && err.code === 'no_ca') {
+          return send(res, 404, { error: err.message, code: err.code });
+        }
+        throw err;
+      }
     }
 
     if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });

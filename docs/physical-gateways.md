@@ -294,8 +294,8 @@ are two, they have nothing in common but a name, and only one of them is your pr
 | Lifetime | **10 years** (`duration: 87600h`) | **90 days** (`duration: 2160h`) |
 | Renewed | a year early (`renewBefore: 8760h`) | 30 days early (`renewBefore: 720h`) |
 | Who holds a copy | every gateway, every browser, and three in-cluster clients | only the broker |
-| How it is distributed | **by hand, one machine at a time** | it is not distributed at all |
-| Automated? | no | completely |
+| How it is distributed | at enrolment, then from `trust/` on the platform repository | it is not distributed at all |
+| Automated? | yes, on appliances at a tag that carries the mechanism | completely |
 
 **You distribute the root and you rotate the leaf, and that asymmetry is the entire reason a
 certificate hierarchy exists.** A gateway never verifies the leaf against a copy it holds — it
@@ -322,9 +322,43 @@ A check against the broker's own certificate would tell you what the **server** 
 you what each **client** will accept, and the fleet-wide outage happens on the day those two stop
 agreeing — so this is the version worth alerting on.
 
-**The reported date is fixed at enrolment.** Replacing `/data/certs/ca.crt` by hand without
-re-enrolling leaves the appliance reporting the old date forever. Until the platform playbook owns
-the CA (docs/roadmap.md, "The appliance itself"), re-enrolment is the only path that updates both the file and the number.
+**The reported date follows the file.** `bootstrap.mjs` writes `/data/certs/ca.json` beside the
+root at enrolment, and `acs-gateway-converge` rewrites both whenever the platform publishes a root
+this appliance does not already hold. The flow reads that file every minute, so the number on the
+page is the root the appliance is holding now and not the one it was given once.
+
+**The Gateways page says who is behind.** The drawer's `CA Expires` row reads *holds an older
+root* when the appliance's reported expiry is more than a day earlier than the root the platform
+publishes. That is the signal step 3 below waits on.
+
+### How the root reaches an appliance
+
+`forge-sweep` reads the root the broker is presenting from the credential service — the one
+component that sits beside the broker and can read the file it actually loads — and writes
+`trust/ca-bundle.pem` and `trust/manifest.json` onto **`main`** of the platform repository. Within
+fifteen minutes of a re-issue, that is what `main` holds.
+
+**On `main`, not in the tag.** Everything else an appliance reads from that repository is the tag
+its own `platform.yml` names, so a fleet spread across three platform versions reads three
+different trees. A re-issued root has to reach all of them, including the appliances nobody is
+upgrading. The published tree neither ships `trust/` nor deletes it.
+
+**The bundle is a union, not a replacement.** It carries the current root plus every root
+previously published that has not yet expired, so a broker presenting either verifies. That is what
+makes steps 3 and 4 below independent of each other.
+
+**The appliance refuses a bundle that would cut it off.** On each hourly pass the converge script
+fetches the bundle, offers each root in it to the live broker with `openssl s_client
+-verify_return_error`, and installs nothing unless one of them verifies. Then it writes
+`/data/certs/ca.crt` and `ca.json` and restarts Node-RED — once, only when the bytes changed, and
+the MQTT session drops for a few seconds. The restart is what makes the new root take effect:
+Node-RED's `tls-config` node reads the file in its constructor, so a running container holds the
+bytes it read at start. A refused bundle is recorded in `converged.json` on the appliance branch
+and the appliance keeps the root it has.
+
+The operating system's own trust store is **not** updated by the bundle. Nothing on the appliance
+makes an HTTPS call after enrolment, and re-running the install command re-fetches the root by pin
+over the trusted channel.
 
 ### Rotating the root, in the order that matters
 
@@ -332,21 +366,29 @@ Re-minting the root does not fail loudly. It succeeds, and every gateway in the 
 together — which looks exactly like a broker outage and gets diagnosed as one. **The overlap is the
 whole design; there is never a moment when one answer is the only correct one.**
 
-1. **Issue the new root alongside the old.** Both valid. The overlap window opens here.
-2. **Distribute the new root *in addition to* the old.** A trust store holds many roots — this is an
-   addition, never a swap. On an appliance that means a second file in
-   `/usr/local/share/ca-certificates/` and `update-ca-certificates`.
-3. **Wait until the fleet reports it.** This is what the health telemetry is for. Do not proceed on
-   the assumption that a distribution step reached every machine.
+1. **Re-issue the root.** cert-manager does this on its own a year before expiry, keeping the same
+   private key. A compromised key means a new key, which also changes the pin the dashboard mints
+   into the install command — re-issue the bundles for any appliance you have not yet enrolled.
+2. **The sweep publishes it, within fifteen minutes.** Nothing to do. `trust/ca-bundle.pem` on
+   `main` now carries both roots.
+3. **Wait until no gateway *holds an older root*.** Each appliance installs it at its next hourly
+   convergence. Do not proceed on the assumption that a distribution step reached every machine —
+   an appliance that was powered off has not converged and the page says so.
 4. **Only now switch the broker's leaf** to be issued by the new root.
-5. **Remove the old root** once nothing reports it.
+5. **Nothing to remove.** The old root leaves the bundle on the first sweep after it expires.
 
 Doing 4 before 3 is a flag day, and a flag day is the fleet going dark.
 
-**The overlap window has to be longer than your longest expected outage.** An appliance powered down
-across the rotation comes back holding only the old root and cannot be told anything, because it
-cannot connect. A year is generous for a plant that runs continuously and is not obviously enough for
-seasonal or mothballed lines — that is a question about the site, not about this platform.
+**An appliance that was off across the rotation recovers by itself, and takes up to an hour.** It
+comes back holding only the old root, so if step 4 has already happened its broker connection
+fails. The path back does not go through the broker: the forge is reached over SSH on a pinned host
+key, which a root re-issue does not touch, so the next convergence fetches the bundle, installs it
+and restarts Node-RED. Until that pass it is OFFLINE on the page for the ordinary reason.
+
+**What that path needs is the forge.** An appliance that can reach neither the broker nor the forge
+— a site cut off, a repository archived, a deploy key revoked — is one a person has to visit, and
+re-running the install command is how. This is also why step 3 waits: it is much cheaper to find
+out that four appliances have not converged than to find out afterwards.
 
 > **A note on why this is gentler than it looks.** `internal-ca.yaml` sets `rotationPolicy: Never`,
 > so when cert-manager re-issues the root it keeps the **same private key**. A chain signed by the

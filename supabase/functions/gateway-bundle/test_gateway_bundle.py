@@ -23,6 +23,7 @@ import json
 import os
 import re
 import unittest
+from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 import zipfile
@@ -183,6 +184,29 @@ class TestReadiness(BundleBase):
                 for address in body["addresses"]:
                     self.assertIsNone(address["problem"], address)
                     self.assertTrue(address["value"], address)
+
+    def test_the_platform_root_is_reported_with_its_expiry_and_pin(self):
+        """
+        What the Gateways page puts beside each appliance's own reported expiry. Together the two
+        say whether a re-issued root has reached that gateway yet, which is the question between
+        re-issuing the root and switching the broker's leaf to it.
+        """
+        status, body = probe(self.tokens["Administrator"])
+        self.assertEqual(status, 200, body)
+        self.assertIsNotNone(body["ca"], "the stack presents a root; the probe reported none")
+        self.assertEqual(set(body["ca"]), {"not_after", "spki_sha256"})
+        # A date, and one that has not passed: a platform publishing an expired root would have
+        # every appliance reading as ahead of it.
+        self.assertGreater(body["ca"]["not_after"], datetime.now(timezone.utc).isoformat())
+        # Base64 of a SHA-256, which is 44 characters ending in '='.
+        self.assertRegex(body["ca"]["spki_sha256"], r"^[A-Za-z0-9+/]{43}=$")
+
+    def test_the_root_carries_no_private_key(self):
+        # The probe is open to any signed-in user. It reports when the root expires and what its
+        # public key hashes to, and never the certificate, let alone the key beside it.
+        _, body = probe(self.tokens["Operator"])
+        self.assertNotIn("ca_cert", body["ca"])
+        self.assertNotIn("PRIVATE KEY", json.dumps(body))
 
     def test_probe_needs_a_signed_in_user(self):
         status, _ = probe()

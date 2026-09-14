@@ -21,6 +21,7 @@ it) and FORGE_SWEEP_SECRET, the value the edge runtime holds (read it from .env)
       python supabase/functions/forge-sweep/test_forge_sweep.py
 """
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -31,6 +32,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "enroll-gateway"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "forge-membership"))
@@ -40,6 +42,14 @@ from test_enroll_gateway import (  # noqa: E402
 from test_forge_membership import (  # noqa: E402
     FORGE_URL, MACHINE_PASSWORD, MACHINE_USER, ORGANISATION, PERSONAS, members_of, request, through_the_door,
 )
+
+try:
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+except ImportError:  # the two merge tests skip; everything else here stands
+    x509 = None
 
 SWEEP_SECRET = os.getenv("FORGE_SWEEP_SECRET", "")
 # Must agree with _shared/forge.ts.
@@ -473,6 +483,184 @@ class TestThePlatform(ForgeSweepBase):
         status, body = sweep()
         self.assertEqual(status, 200, body)
         self.assertEqual(body["published"], [], body)
+
+
+class TestTheTrustBundle(ForgeSweepBase):
+    """
+    THE ROOTS EVERY APPLIANCE READS. `trust/` sits on main of the platform repository, written by
+    the sweep from the root the broker presents, and is the one thing in that repository an
+    appliance reads off a branch rather than off the tag it is pinned to -- because a re-issued
+    root has to reach a fleet spread across several platform versions.
+    """
+
+    @staticmethod
+    def _a_root(days):
+        """
+        A throwaway self-signed root, valid for `days`. Injected into the published bundle so the
+        merge is exercised against more than the one root this stack actually has. EC because it
+        is generated per test and nothing here verifies a chain with it.
+        """
+        key = ec.generate_private_key(ec.SECP256R1())
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"trust-merge-{days}d")])
+        not_after = datetime.now(timezone.utc) + timedelta(days=days)
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(name).issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.now(timezone.utc) - timedelta(days=abs(days) + 1))
+            .not_valid_after(not_after)
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(key, hashes.SHA256())
+        )
+        pem = certificate.public_bytes(serialization.Encoding.PEM).decode()
+        spki = certificate.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        return pem, base64.b64encode(hashlib.sha256(spki).digest()).decode(), not_after
+
+    def _publish(self, path, text):
+        """Write one file of trust/ on main as the machine account, replacing what is there."""
+        full = f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/trust/{path}"
+        status, existing = forge(full)
+        body = {
+            "content": base64.b64encode(text.encode()).decode(),
+            "message": f"Doctor {path} for a merge test",
+            "branch": "main",
+        }
+        if status == 200:
+            body["sha"] = existing["sha"]
+        status, answer = forge(full, method="PUT" if status == 200 else "POST", body=body)
+        self.assertIn(status, (200, 201), answer)
+
+    def _trust(self, path):
+        status, body = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/trust/{path}")
+        return status, (base64.b64decode(body["content"]).decode() if status == 200 else None)
+
+    def test_the_sweep_publishes_the_root_the_broker_presents(self):
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["errors"], [], body)
+
+        status, bundle = self._trust("ca-bundle.pem")
+        self.assertEqual(status, 200, "main carries no trust/ca-bundle.pem after a sweep")
+        self.assertIn("BEGIN CERTIFICATE", bundle)
+
+        status, manifest = self._trust("manifest.json")
+        self.assertEqual(status, 200, "a bundle with no manifest cannot be dated, so none of it expires")
+        published = json.loads(manifest)
+        self.assertEqual(set(published), {"current", "roots", "published_at"})
+        self.assertEqual(len(published["roots"]), bundle.count("BEGIN CERTIFICATE"))
+        # The manifest's current root is the first block in the bundle, and it is the one the
+        # credential service reports: an appliance verifies against the file, not against this.
+        self.assertEqual(published["roots"][0]["spki_sha256"], published["current"])
+        self.assertGreater(published["roots"][0]["not_after"], published["published_at"])
+
+    def test_a_second_sweep_publishes_nothing(self):
+        # The ordinary pass. The bundle is compared by its bytes rather than by the set of keys,
+        # so a root re-issued with the same key still publishes -- and an unchanged one does not.
+        sweep()
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertEqual(
+            [entry for entry in body["published"] if "trust/" in entry], [],
+            f"the bundle was republished with nothing to change: {body['published']}",
+        )
+
+    def test_publishing_the_playbook_does_not_delete_the_bundle(self):
+        """
+        THE ONE THING THAT WOULD BREAK THIS QUIETLY. publishToForge() deletes every file on main
+        that this build does not ship, and the bundle is written from the broker rather than from
+        the tree. Without the exclusion the two would take turns removing each other's work, and
+        an appliance would find trust/ absent on some passes and present on others.
+        """
+        sweep()
+        # Force a republication of the playbook by making main's manifest disagree with the build.
+        path = f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.acs/manifest.json"
+        status, manifest = forge(path)
+        self.assertEqual(status, 200, manifest)
+        forge(path, method="PUT", body={
+            "content": base64.b64encode(json.dumps({"digest": "0" * 64}).encode()).decode(),
+            "sha": manifest["sha"],
+            "message": "Force a republication",
+            "branch": "main",
+        })
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["errors"], [], body)
+        self.assertTrue(
+            any(PLATFORM_REPOSITORY in entry and "trust/" not in entry for entry in body["published"]),
+            f"the playbook was not republished, so the exclusion was not exercised: {body}",
+        )
+        status, bundle = self._trust("ca-bundle.pem")
+        self.assertEqual(status, 200, "publishing the playbook deleted the trust bundle")
+        self.assertIn("BEGIN CERTIFICATE", bundle)
+
+
+    @unittest.skipIf(x509 is None, "the `cryptography` package is not installed")
+    def test_a_previously_published_root_is_carried_forward(self):
+        """
+        THE OVERLAP THE WHOLE ROTATION RESTS ON. A bundle carrying only the current root would cut
+        off every appliance that has not converged yet the moment the broker's leaf is re-issued.
+        One that carries both verifies a broker presenting either, which is what makes publishing
+        the new root and switching the leaf to it two independent steps.
+        """
+        sweep()
+        status, current = self._trust("ca-bundle.pem")
+        self.assertEqual(status, 200)
+        pem, spki, not_after = self._a_root(days=400)
+
+        self._publish("ca-bundle.pem", current + pem)
+        self._publish("manifest.json", json.dumps({
+            "current": json.loads(self._trust("manifest.json")[1])["current"],
+            "roots": json.loads(self._trust("manifest.json")[1])["roots"]
+                + [{"spki_sha256": spki, "not_before": "2020-01-01T00:00:00.000Z",
+                    "not_after": not_after.isoformat()}],
+            "published_at": datetime.now(timezone.utc).isoformat(),
+        }, indent=2) + "\n")
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["errors"], [], body)
+
+        _, bundle = self._trust("ca-bundle.pem")
+        self.assertIn(pem.strip(), bundle, "the previously published root was dropped while valid")
+        _, manifest = self._trust("manifest.json")
+        published = json.loads(manifest)
+        self.assertIn(spki, [r["spki_sha256"] for r in published["roots"]])
+        # The broker's own root stays first and stays `current`: the injected one is history.
+        self.assertNotEqual(published["current"], spki)
+        self.assertEqual(published["roots"][0]["spki_sha256"], published["current"])
+
+    @unittest.skipIf(x509 is None, "the `cryptography` package is not installed")
+    def test_a_root_that_has_expired_leaves_the_bundle(self):
+        # The other half: the bundle is bounded. An expired root verifies nothing, so carrying it
+        # forever would only make every appliance's trust store grow without limit.
+        sweep()
+        _, current = self._trust("ca-bundle.pem")
+        pem, spki, _ = self._a_root(days=400)
+        base = json.loads(self._trust("manifest.json")[1])
+
+        self._publish("ca-bundle.pem", current + pem)
+        self._publish("manifest.json", json.dumps({
+            "current": base["current"],
+            "roots": base["roots"] + [{
+                "spki_sha256": spki,
+                "not_before": "2020-01-01T00:00:00.000Z",
+                # Dated as already gone, which is what the sweep acts on: the certificate's own
+                # validity is never parsed here, only what the manifest beside it recorded.
+                "not_after": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+            }],
+            "published_at": datetime.now(timezone.utc).isoformat(),
+        }, indent=2) + "\n")
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        _, bundle = self._trust("ca-bundle.pem")
+        self.assertNotIn(pem.strip(), bundle, "an expired root was kept in the bundle")
+        _, manifest = self._trust("manifest.json")
+        self.assertNotIn(spki, [r["spki_sha256"] for r in json.loads(manifest)["roots"]])
 
 
 class TestTheSchedule(ForgeSweepBase):

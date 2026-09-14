@@ -568,8 +568,10 @@ immediate (archiving a gateway disables its account and drops its session); the 
 pod, and never reaches an appliance, which receives `ca.crt` alone; for a fleet of this size a CRL
 would add a reload-dependent mechanism nothing here consumes.
 
-**Revisit if** the root is ever exported, if client certificates replace password authentication on
-the broker, or if the fleet grows past what a re-walk can cover in a shift.
+**Revisit if** the root is ever exported, or if client certificates replace password authentication
+on the broker. The re-walk itself is no longer a visit: the sweep publishes the current root to
+`trust/` on the platform repository and every appliance installs it at its next hourly convergence,
+which is what the compromised-key case needs (`docs/physical-gateways.md` §8).
 
 #### An appliance's deploy key can write its repository's wiki
 

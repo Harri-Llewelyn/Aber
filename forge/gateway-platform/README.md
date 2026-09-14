@@ -64,21 +64,38 @@ enrolment. The runbook is in `docs/physical-gateways.md`.
 2. runs `ansible-pull` against this repository at that tag, over SSH with the appliance's own
    deploy key and the forge's pinned host key, the same identity and the same verification the
    puller uses; the key is read-only here and read-write on the gateway's own repository;
-3. runs `custom.yml` from that same checkout, when the repository carries one;
-4. records what it did in `/var/lib/acs-gateway/data/gitops/converged.json`, which the puller
-   pushes to the gateway's `appliance` branch, so the forge shows which tag each appliance ran
-   and what its own playbook did:
+3. installs the roots published in `trust/` on **this repository's `main`**, if any root in the
+   bundle verifies the broker this appliance actually dials;
+4. runs `custom.yml` from that same checkout, when the repository carries one;
+5. records what it did in `/var/lib/acs-gateway/data/gitops/converged.json`, which the puller
+   pushes to the gateway's `appliance` branch, so the forge shows which tag each appliance ran,
+   which root it holds, and what its own playbook did:
 
 ```json
 {
   "outcome": "converged", "tag": "v0.1.0", "detail": "ansible-pull succeeded",
   "converged_at": "2026-09-14T11:00:07Z",
-  "custom": { "outcome": "failed", "revision": "…", "detail": "custom.yml exited 2", "ran_at": "…" }
+  "custom": { "outcome": "failed", "revision": "…", "detail": "custom.yml exited 2", "ran_at": "…" },
+  "trust": { "outcome": "installed", "spki_sha256": "…", "not_after": "…", "changed": false, "detail": "…", "checked_at": "…" }
 }
 ```
 
-`custom` is `null` when the repository carries no playbook of its own, and when the platform run
-failed before one could be attempted.
+`custom` is `null` when the repository carries no playbook of its own, and `trust` is `null` when
+the platform run failed before either could be attempted.
+
+**`trust/` is the one thing an appliance reads off a branch rather than off its tag**, and that is
+deliberate. Everything else here is pinned: a fleet spread across three platform versions reads
+three different trees. A re-issued root has to reach all of them, including the appliances nobody
+is upgrading, so `forge-sweep` writes it to `main` from the root the broker is presenting and the
+published tree neither ships nor deletes it. The bundle carries the current root plus every
+previously published root that has not expired, so a broker presenting either verifies — which is
+what lets the fleet converge onto the new root before the broker's leaf is switched to it.
+
+**Step 3 refuses rather than risks.** Each root in the bundle is offered to the live broker with
+`openssl s_client -verify_return_error` before anything is written; if none verifies, nothing is
+installed and the refusal is recorded. Installing a bundle that verifies nothing takes an appliance
+off the air at its next restart, and the path back is a visit. Node-RED is restarted only when the
+installed bytes actually changed.
 
 A fleet bump is one pull request per gateway, or a scripted batch; a canary is one gateway. The
 checkout step 3 runs from is at the head of the tracked branch whatever the puller decided about
@@ -101,6 +118,11 @@ is what was approved either way.
 - **The compose volume is a bind mount** under `/var/lib/acs-gateway/data`, so the host's
   converge script can reach the deploy key, the host key and the repository checkout that
   `bootstrap.mjs` wrote inside the container.
+- **The broker's root follows a bundle on `main`; the operating system's trust store does not.**
+  `/usr/local/share/ca-certificates` is written once, by the install command, and left alone:
+  after enrolment the appliance makes no HTTPS call, and re-running that command re-fetches the
+  root by pin over the trusted channel. What the bundle owns is `/data/certs/ca.crt`, which is the
+  file Node-RED's `tls-config` node reads.
 
 ## Running it by hand
 

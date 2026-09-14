@@ -52,6 +52,9 @@ import {
   platformVersion,
   type PublishSpec,
   publishToForge,
+  publishTrust,
+  TRUST_PREFIX,
+  type TrustRoot,
 } from "../_shared/forge.ts";
 import { GATEWAY_CUSTOM_EXAMPLE_DIGEST, GATEWAY_CUSTOM_EXAMPLE_FILES } from "../_shared/gatewayCustomExample.generated.ts";
 import { GATEWAY_PLATFORM_DIGEST, GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
@@ -62,6 +65,8 @@ const PLATFORM_REF = { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY }
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const SWEEP_SECRET = Deno.env.get("FORGE_SWEEP_SECRET") ?? "";
+const CREDENTIAL_URL = Deno.env.get("MQTT_CREDENTIAL_SERVICE_URL") ?? "";
+const CREDENTIAL_TOKEN = Deno.env.get("MQTT_CREDENTIAL_SERVICE_TOKEN") ?? "";
 
 /**
  * A login forge-membership placed is the user's id, verbatim. Anything else in a team was seated
@@ -300,6 +305,50 @@ async function sweepRepositories(
   }
 }
 
+let saidNoRoot = false;
+
+/**
+ * The root the broker presents, from the credential service, which is the one component that reads
+ * the file the broker actually loads. Null rather than an error on every failure: a stack with no
+ * root, or a credential service that is down for a pass, must not stop the sweep placing people or
+ * protecting branches, and the bundle already on `main` is still valid while this is unknown.
+ */
+async function brokerRoot(summary: Summary): Promise<TrustRoot | null> {
+  if (!CREDENTIAL_URL || !CREDENTIAL_TOKEN) {
+    if (!saidNoRoot) {
+      console.log("forge-sweep: no credential service configured, so no trust bundle is published");
+      saidNoRoot = true;
+    }
+    return null;
+  }
+  try {
+    const response = await fetch(`${CREDENTIAL_URL.replace(/\/+$/, "")}/ca`, {
+      headers: { Authorization: `Bearer ${CREDENTIAL_TOKEN}` },
+    });
+    // 404 is a deployment with no root at all -- a plaintext-only stack -- and is not an error.
+    if (response.status === 404) {
+      if (!saidNoRoot) {
+        console.log("forge-sweep: this deployment presents no root, so no trust bundle is published");
+        saidNoRoot = true;
+      }
+      return null;
+    }
+    if (!response.ok) {
+      summary.errors.push(`could not read the broker's root (${response.status})`);
+      return null;
+    }
+    const root = await response.json() as TrustRoot;
+    if (!root.ca_cert || !root.spki_sha256) {
+      summary.errors.push("the credential service returned a root with no certificate or no pin");
+      return null;
+    }
+    return root;
+  } catch (err) {
+    summary.errors.push(`the credential service is unreachable: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
+
 let saidNoVersion = false;
 
 /**
@@ -307,6 +356,12 @@ let saidNoVersion = false;
  * to, tagged per platform version, and the example custom repository a person copies when a
  * gateway needs code of its own. The example is untagged and marked as a template, because it is
  * copied once rather than converged to, and it is never handed to an appliance.
+ *
+ * Then the trust bundle onto `main` of the playbook repository. It is published here rather than
+ * shipped in the playbook's tree because it is not this repository's to state: the root is what
+ * the broker presents today, and it changes without a release. An appliance fetches `trust/` from
+ * `main` whatever tag it is converged to, which is why the tree that carries the tags must neither
+ * manage nor delete it.
  */
 async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolean> {
   const version = platformVersion();
@@ -325,6 +380,7 @@ async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolea
       files: GATEWAY_PLATFORM_FILES,
       digest: GATEWAY_PLATFORM_DIGEST,
       version,
+      unmanaged: [TRUST_PREFIX],
     },
     {
       name: CUSTOM_EXAMPLE_REPOSITORY,
@@ -345,6 +401,23 @@ async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolea
       );
     }
     if (publication.warning) summary.errors.push(publication.warning);
+  }
+
+  // AFTER the playbook, so the first pass on a new forge creates the repository before the bundle
+  // is written into it. A failure here leaves the fleet on the bundle it already has.
+  const root = await brokerRoot(summary);
+  if (root) {
+    try {
+      const trust = await publishTrust(cfg, PLATFORM_REPOSITORY, root);
+      if (trust.published) {
+        summary.published.push(
+          `${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY} ${TRUST_PREFIX} `
+            + `(${trust.roots.length} root(s), current ${root.spki_sha256.slice(0, 12)})`,
+        );
+      }
+    } catch (err) {
+      summary.errors.push(`could not publish ${TRUST_PREFIX}: ${err instanceof Error ? err.message : err}`);
+    }
   }
   return true;
 }

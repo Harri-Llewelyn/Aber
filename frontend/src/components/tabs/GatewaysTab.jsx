@@ -6,7 +6,7 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
   gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat,
-  formatCertExpiry, isCertExpiring, formatBytes, CERT_EXPIRY_WARN_DAYS
+  formatCertExpiry, isCertExpiring, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
 import {
@@ -837,13 +837,27 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               title: 'Age of the last heartbeat that carried appliance health. Separate from Last '
                 + 'Heartbeat on purpose: a gateway can keep beating while its collector has stopped.'
             },
+            /**
+             * The root this appliance holds, beside the one the platform publishes. Behind means
+             * it has not converged since the root was re-issued; the broker's leaf must not be
+             * switched to the new root until nothing is behind.
+             */
             {
               label: 'CA Expires',
-              value: formatCertExpiry(selected.cert_expires_at),
-              danger: isCertExpiring(selected.cert_expires_at),
-              title: 'When the broker CA THIS appliance trusts expires, as it reported. The CA is '
-                + 'distributed by hand into every trust store, so re-issuing it is a fleet '
-                + `operation -- Grafana alerts at ${CERT_EXPIRY_WARN_DAYS} days.`
+              value: [
+                formatCertExpiry(selected.cert_expires_at),
+                holdsOlderRoot(selected.cert_expires_at, enrolment?.ca?.not_after)
+                  ? 'holds an older root' : null,
+              ].filter(Boolean).join(' — ') || null,
+              danger: isCertExpiring(selected.cert_expires_at)
+                || holdsOlderRoot(selected.cert_expires_at, enrolment?.ca?.not_after),
+              title: 'When the broker root THIS appliance trusts expires, as it reported. The '
+                + 'platform publishes the current root to every appliance and each installs it at '
+                + 'its next hourly convergence, so a gateway can be behind for an hour by design'
+                + (enrolment?.ca?.not_after
+                  ? `. The platform's root expires ${new Date(enrolment.ca.not_after).toISOString().slice(0, 10)}`
+                  : '')
+                + `. Grafana alerts at ${CERT_EXPIRY_WARN_DAYS} days.`
             },
             {
               label: 'Disk Free',

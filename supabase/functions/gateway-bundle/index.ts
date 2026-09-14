@@ -96,10 +96,37 @@ async function installerAvailability(): Promise<{ available: boolean; reason: st
 }
 
 /**
+ * When the root the BROKER presents expires, and its pin. A different root from the one the
+ * one-liner pins, which signs the API's certificate and is allowed to differ.
+ *
+ * WHY THE DASHBOARD WANTS IT. Every appliance reports the expiry of the root it holds. On its own
+ * that says when a gateway will drop off; beside the platform's own it also says whether a
+ * re-issued root has reached that gateway yet, which is the question between re-issuing the root
+ * and switching the broker's leaf to it.
+ *
+ * Null on anything that fails, including a deployment with no root: the readiness answer is about
+ * whether an appliance can be enrolled, and this does not bear on that.
+ */
+async function brokerRoot(): Promise<{ not_after: string; spki_sha256: string } | null> {
+  const url = (Deno.env.get("MQTT_CREDENTIAL_SERVICE_URL") ?? "").replace(/\/+$/, "");
+  const token = Deno.env.get("MQTT_CREDENTIAL_SERVICE_TOKEN") ?? "";
+  if (!url || !token) return null;
+  try {
+    const response = await fetch(`${url}/ca`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) return null;
+    const { not_after, spki_sha256 } = await response.json() as { not_after?: string; spki_sha256?: string };
+    return not_after && spki_sha256 ? { not_after, spki_sha256 } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The readiness answer. `ready` is true only when both addresses would be accepted by the two
  * functions that check them; `addresses` names each one and the problem, so the dashboard can
  * say which variable to set rather than that something is wrong. `installer` says whether the
- * one-liner can be minted, so the dashboard offers it or the bundle.
+ * one-liner can be minted, so the dashboard offers it or the bundle; `ca` is the broker's root,
+ * which the Gateways page shows beside each appliance's own.
  */
 async function readiness(authHeader: string): Promise<Response> {
   const supabaseUser = createClient(Deno.env.get("SUPABASE_URL") ?? "", gatewayKey(), {
@@ -115,6 +142,7 @@ async function readiness(authHeader: string): Promise<Response> {
     ready: addresses.every((a) => !a.problem),
     addresses,
     installer: { available: installer.available, reason: installer.reason },
+    ca: await brokerRoot(),
   });
 }
 
