@@ -49,7 +49,7 @@ import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
 import {
-  IconShieldCheck,
+  IconInbox,
   IconCpu,
   IconFileText,
   IconTag,
@@ -1585,7 +1585,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             label: openForSelected.length === 1
               ? '1 change awaiting decision'
               : `${openForSelected.length} changes awaiting decision`,
-            icon: <IconShieldCheck size={13} />,
+            icon: <IconInbox size={13} />,
             onClick: () => onViewApprovals?.(selectedDevice),
             title: 'Open the approvals queue, filtered to this device'
           },

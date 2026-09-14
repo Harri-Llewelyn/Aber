@@ -360,6 +360,16 @@ export const IconShieldCheck = ({ size = 14, className = "", style = {} }) => (
   </svg>
 )
 
+/* The Approvals page: its own doc comment calls it "one inbox for every change somebody proposed",
+   and an inbox is what a work queue looks like. Not a shield -- the top bar's alert badge wears a
+   shield when the plant is healthy, and two different things in one chrome cannot share a glyph. */
+export const IconInbox = ({ size = 14, className = "", style = {} }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
+    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+    <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+  </svg>
+)
+
 export const IconTag = ({ size = 14, className = "", style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
     <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />

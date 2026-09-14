@@ -16,7 +16,7 @@ import {
   IconHardDrive,
   IconLock,
   IconSettings,
-  IconShieldCheck
+  IconInbox
 } from './components/common/Icons'
 
 /*
@@ -57,7 +57,7 @@ export const TABS = [
   { id: 'site-map',       label: 'Site Map',       group: 'home',    icon: <IconMap size={16} /> },
   // Gated on `proposal:create`: an Auditor holds neither it nor a decision gate, and RLS would
   // return them their own proposals, of which they can have none.
-  { id: 'approvals',      label: 'Approvals',      group: 'work',    icon: <IconShieldCheck size={16} />, permission: PERMISSION_UUIDS.PROPOSAL_CREATE },
+  { id: 'approvals',      label: 'Approvals',      group: 'work',    icon: <IconInbox size={16} />, permission: PERMISSION_UUIDS.PROPOSAL_CREATE },
 
   // The ISA-95 order, top down: an area holds cells, a cell holds gateways and devices. The
   // glyphs read the same way: the map is the site, the factory an area, the grid its cells. The

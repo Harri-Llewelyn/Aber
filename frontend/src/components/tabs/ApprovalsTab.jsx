@@ -4,7 +4,7 @@ import { POLL_INTERVAL_MS, PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconShieldCheck } from '../common/Icons'
+import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconInbox } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { PageHeading } from '../common/PageHeading'
 
@@ -293,7 +293,14 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
  */
 function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
   if (rows.length === 0) {
-    return <div className="empty-state"><div className="empty-text">{emptyText}</div></div>
+    /* With the glyph every other page's empty state carries: words alone in a card that usually
+       holds a table read as a load that failed rather than a queue that is clear. */
+    return (
+      <div className="empty-state">
+        <div className="empty-icon"><IconInbox size={36} /></div>
+        <div className="empty-text">{emptyText}</div>
+      </div>
+    )
   }
   return (
     <div className="table-wrap">
@@ -566,7 +573,7 @@ export function ApprovalsTab({
       <div className="page-main">
 
         {/* No Propose a Change card: the act starts on the asset's own page. */}
-        <PageHeading icon={<IconShieldCheck size={15} />} title="Approvals">
+        <PageHeading icon={<IconInbox size={15} />} title="Approvals">
           A proposal is a request, not a change: nothing is written until somebody who may make
           it approves. {canPropose
             ? 'To ask for one, open the asset on its own page and use Propose a Change — the same dialog that edits it.'
