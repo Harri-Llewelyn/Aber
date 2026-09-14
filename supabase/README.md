@@ -2727,6 +2727,58 @@ this and closes `main` again if a rule was found admitting pushes. `test_forge_e
 the appliance push; `test_forge_sweep.py` covers the rules, a key downgraded by hand, and an
 archived gateway's key.
 
+### The platform playbook is published by the sweep
+
+[`gateway-platform/`](../gateway-platform) is the playbook every appliance converges to
+(its README says what it decides). The sweep publishes it into the forge as
+`platform/gateway-platform`, in its own organisation so the `gateways` organisation's rules do
+not apply, and tags it `v<version>` once per platform version. No migration: nothing about it is
+a row.
+
+**The playbook reaches the edge runtime as a module.** An edge worker has no filesystem, and the
+bundle's route (one environment variable per file, each named in `main/index.ts`) does not fit a
+directory tree, so [`scripts/sync-gateway-platform.mjs`](../scripts/sync-gateway-platform.mjs)
+writes every file of `gateway-platform/`, and `gateway-bundle-template/` as `appliance/`, into
+[`_shared/gatewayPlatform.generated.ts`](functions/_shared/gatewayPlatform.generated.ts) with a
+digest over the lot. The copy is committed, like the chart mirrors, and CI fails when it is
+stale.
+
+**Publishing is one read on the ordinary pass.** `publishPlatform()` in
+[`_shared/forge.ts`](functions/_shared/forge.ts) creates the organisation, a `readers` team with
+read on every repository in it (both dashboard teams are seated there by `forge-membership` at the
+door and by the sweep), and the repository with `main` admitting pushes from the machine account
+and nobody else, deploy keys not whitelisted. It reads `.acs/manifest.json` at `main`; when the
+digest there is not this build's it reads the tree and makes one commit through the contents API
+that creates, updates and deletes whatever differs. The tag comes from `ACS_PLATFORM_VERSION`,
+which the chart sets to its `appVersion`, so the playbook an appliance converges to and the images
+it reports to ship from one tag. **A tag is created once and never moved:** a tag found at other
+content than this build ships is reported in the sweep's `errors` and left where it is, because a
+released version's playbook is immutable. Bump the version, or on a development forge delete the
+tag (`DELETE /repos/platform/gateway-platform/tags/v0.1.0` as the machine account) and let the
+next sweep recreate it.
+
+**What enrolment adds.** Before `main` is protected it seeds `platform.yml` beside the incident
+template, pointing at the tag current at enrolment; afterwards the pointer changes by pull request
+through the lane the forge already has, which is the staged rollout. The same key the appliance
+generated is registered read-only on the platform repository (one key, two repositories, two
+modes; measured), and the enrolment response carries `platform_ssh_url` and `platform_tag`, which
+`bootstrap.mjs` records in `repository.json` for the converge script on the host. The sweep keeps
+both links per gateway and removes the platform one when the gateway is archived or gone.
+
+**What the appliance does with it** is the converge role's: `acs-gateway-converge`, on an hourly
+timer, reads the tag from the puller's checkout of the gateway's `main`, runs `ansible-pull`
+against the platform repository at that tag with the deploy key and the pinned host key, and
+records the outcome in `/data/gitops/converged.json`, which the puller adds to the `appliance`
+branch. The playbook installs the timer that runs it, so the first run is the installer's (or a
+person's) and every later one is the appliance's own. Nothing on the platform side connects to an
+appliance. `test_forge_sweep.py` asserts one sweep leaves the repository published, tagged and
+protected and a second publishes nothing; `test_forge_events.py`'s appliance class clones the
+platform repository with its key and is refused when it pushes.
+
+**Not built here:** the CA bundle the playbook was to carry for a root rotation. The credential
+service hands the root out only inside an enrolment, so the publisher has nothing to put in the
+repository yet; [`docs/roadmap.md`](../docs/roadmap.md) keeps the rotation design.
+
 ## A replay lane is minted, not assigned (`0083`)
 
 The Playback gateway's devices are **replay lanes**. Each stands in for one real machine, records

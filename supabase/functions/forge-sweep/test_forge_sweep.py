@@ -42,6 +42,9 @@ from test_forge_membership import (  # noqa: E402
 )
 
 SWEEP_SECRET = os.getenv("FORGE_SWEEP_SECRET", "")
+# Must agree with _shared/forge.ts.
+PLATFORM_ORGANISATION = "platform"
+PLATFORM_REPOSITORY = "gateway-platform"
 
 # Differs from every other suite's fixture id in its FIRST block: sparkplug_id is the first 21 hex
 # characters of the uuid, so ids that differ only at the end collide on the generated id.
@@ -323,6 +326,35 @@ class TestRepositories(ForgeSweepBase):
         finally:
             rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": False})
 
+    def test_an_enrolled_gateway_reads_the_platform_repository_and_points_at_its_tag(self):
+        """
+        THE SECOND LINK. Enrolment registers the same key read-only on platform/gateway-platform
+        and seeds platform.yml on the gateway's main; archiving the gateway removes that key too.
+        """
+        self.enrol()
+        (own,) = self.keys()
+        status, platform_keys = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/keys?limit=50")
+        self.assertEqual(status, 200, platform_keys)
+        ours = [k for k in platform_keys if k["key"].split()[:2] == own["key"].split()[:2]]
+        self.assertEqual(len(ours), 1, "the gateway's key is not on the platform repository exactly once")
+        self.assertTrue(ours[0]["read_only"], "the platform repository must admit the key read-only")
+
+        status, pointer = forge(f"/repos/{ORGANISATION}/{self.repo}/contents/platform.yml")
+        self.assertEqual(status, 200, "platform.yml was not seeded on the gateway's main")
+        text = base64.b64decode(pointer["content"]).decode()
+        self.assertRegex(text, r"tag: v\d+\.\d+\.\d+")
+
+        status, _ = rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
+        self.assertIn(status, (200, 204))
+        try:
+            status, body = sweep()
+            self.assertEqual(status, 200, body)
+            self.assertTrue(any(entry.startswith(f"{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}") for entry in body["revoked"]), body)
+            _, platform_keys = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/keys?limit=50")
+            self.assertEqual([k for k in platform_keys if k["title"] == own["title"]], [])
+        finally:
+            rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": False})
+
     def test_a_hand_made_repository_has_main_protected(self):
         status, created = forge(f"/orgs/{ORGANISATION}/repos", method="POST",
                                 body={"name": HAND_MADE_REPOSITORY, "private": True, "auto_init": True, "default_branch": "main"})
@@ -346,6 +378,60 @@ class TestRepositories(ForgeSweepBase):
         status, hooks = forge(f"/repos/{ORGANISATION}/{HAND_MADE_REPOSITORY}/hooks")
         self.assertEqual(status, 200, hooks)
         self.assertEqual(hooks, [])
+
+
+class TestThePlatform(ForgeSweepBase):
+    """
+    THE PLATFORM PLAYBOOK, PUBLISHED. One sweep leaves platform/gateway-platform holding what this
+    build ships, tagged at the platform's version, with main admitting the machine account alone,
+    and a readers team the admitted roles are seated in. A second sweep publishes nothing.
+    """
+
+    def test_one_sweep_publishes_the_playbook_and_tags_it(self):
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["errors"], [], body)
+
+        status, repo = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}")
+        self.assertEqual(status, 200, "the platform repository does not exist after a sweep")
+        self.assertTrue(repo["private"])
+
+        status, manifest = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.acs/manifest.json")
+        self.assertEqual(status, 200, "main carries no manifest")
+        published = json.loads(base64.b64decode(manifest["content"]).decode())
+        self.assertRegex(published["digest"], r"^[0-9a-f]{64}$")
+        for path in ("site.yml", "roles/converge/files/acs-gateway-converge", "appliance/flow-sync.mjs", "appliance/bootstrap.mjs"):
+            status, _ = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/{path}")
+            self.assertEqual(status, 200, f"{path} is not published")
+
+        status, tags = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/tags?limit=50")
+        self.assertEqual(status, 200, tags)
+        tag = next((t for t in tags if t["name"] == f"v{published['version']}"), None)
+        self.assertIsNotNone(tag, f"no tag v{published['version']}: {[t['name'] for t in tags]}")
+        status, at_tag = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.acs/manifest.json?ref={tag['name']}")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(base64.b64decode(at_tag["content"]).decode())["digest"], published["digest"])
+
+        status, rule = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/branch_protections/main")
+        self.assertEqual(status, 200, rule)
+        self.assertEqual(rule["push_whitelist_usernames"], [MACHINE_USER], rule)
+        self.assertFalse(rule["push_whitelist_deploy_keys"], rule)
+
+        status, teams = forge(f"/orgs/{PLATFORM_ORGANISATION}/teams?limit=50")
+        self.assertEqual(status, 200, teams)
+        readers = next((t for t in teams if t["name"] == "readers"), None)
+        self.assertIsNotNone(readers, teams)
+        # Gitea 1.27 reports a team created with per-unit access as permission 'none' and carries
+        # the real answer per unit (measured); every unit it holds must be read and none more.
+        self.assertTrue(readers["units_map"], readers)
+        self.assertEqual(set(readers["units_map"].values()), {"read"}, readers)
+        self.assertFalse(readers["can_create_org_repo"], readers)
+
+        # A second pass: the digest matches, so nothing is published again.
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["published"], [], body)
+        self.assertEqual(body["errors"], [], body)
 
 
 class TestTheSchedule(ForgeSweepBase):

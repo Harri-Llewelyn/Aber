@@ -256,17 +256,24 @@ export default async function handler(req: Request): Promise<Response> {
   // 4. The forge. Non-fatal by construction; see the header and forge.ts.
   const forge = forgeConfig();
   let repository:
-    | { ssh_url: string; branch: string; known_hosts: string | null }
+    | {
+      ssh_url: string;
+      branch: string;
+      known_hosts: string | null;
+      platform_ssh_url: string | null;
+      platform_tag: string | null;
+    }
     | null = null;
 
   if (forge && sshPublicKey) {
-    const repo = await provisionGatewayRepository(
+    const provisioned = await provisionGatewayRepository(
       forge,
       identity.sparkplug_id,
       identity.gateway_name,
       sshPublicKey,
     );
-    if (repo) {
+    if (provisioned) {
+      const repo = provisioned.repository;
       // The host key travels with the clone URL, in this response, because this is the one moment
       // the appliance is provably itself; learning the forge's identity any other way would be
       // trust on first use. Null is a real answer: a forge that has not published a host key gives
@@ -276,6 +283,11 @@ export default async function handler(req: Request): Promise<Response> {
         ssh_url: repo.ssh_url,
         branch: repo.default_branch || "main",
         known_hosts: knownHosts,
+        // The platform repository the same key reads, and the tag current at enrolment, which the
+        // gateway's own platform.yml carries from here on. Null on a deployment that names no
+        // version: the appliance then runs the bundle alone and nothing converges its host.
+        platform_ssh_url: provisioned.platform?.ssh_url ?? null,
+        platform_tag: provisioned.platform?.tag ?? null,
       };
       if (!knownHosts) {
         console.warn(

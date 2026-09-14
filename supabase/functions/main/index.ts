@@ -70,6 +70,9 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     // and the secret it signs with. Both optional -- unset means no hook, and enrolment says so.
     "GITEA_WEBHOOK_URL",
     "GITEA_WEBHOOK_SECRET",
+    // The platform's version: the tag a new gateway's platform.yml points at, and the platform
+    // repository the same key is registered read-only on. Unset means no platform repository.
+    "ACS_PLATFORM_VERSION",
   ],
 
   // Disables a decommissioned gateway's broker account, dropping its live session, which is how
@@ -161,7 +164,8 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   ],
   // The forge reconciled on a timer (0099): pg_cron asks through the gateway with
   // FORGE_SWEEP_SECRET, and the function walks the teams and repositories through the machine
-  // account. The webhook pair is what lets it re-register a hook a repository lost.
+  // account. The webhook pair is what lets it re-register a hook a repository lost. The version
+  // is what it publishes the platform playbook under; the playbook itself is a module import.
   "forge-sweep": [
     "SUPABASE_SERVICE_ROLE_KEY",
     "FORGE_SWEEP_SECRET",
@@ -170,6 +174,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_MACHINE_PASSWORD",
     "GITEA_WEBHOOK_URL",
     "GITEA_WEBHOOK_SECRET",
+    "ACS_PLATFORM_VERSION",
   ],
 
   // Factory+ Directory adapter. No service-role key: it authenticates the caller and queries as

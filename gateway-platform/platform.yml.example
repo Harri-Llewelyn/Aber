@@ -1,0 +1,11 @@
+# platform.yml -- one per gateway repository, beside flows.json, seeded at enrolment.
+#
+# The tag of platform/gateway-platform this appliance converges to. "Latest" gives no staged
+# rollout, so the pointer is a file in the gateway's own repository, changed by pull request: a
+# fleet bump is one pull request per gateway or a scripted batch, and a canary is one gateway.
+platform:
+  tag: v0.1.0
+  # Variables the platform playbook accepts, applied to this appliance alone. Optional.
+  vars:
+    chrony_servers:
+      - "server ntp.plant.example iburst"

@@ -138,8 +138,10 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # unseated by one sweep and seated again when it returns; a member seated by hand is left alone; a
 # deleted push webhook comes back; a repository made by hand gets main protected; a gateway
 # repository gets its appliance and catch-all rules back and main closed again; a key downgraded
-# to read-only is re-registered read-write; an archived gateway's key is removed; and the
-# database's own sweep_forge() answers true. FORGE_SWEEP_SECRET is the release Secret's value. Skips without it.
+# to read-only is re-registered read-write; an archived gateway's key is removed from both
+# repositories; one sweep publishes the platform playbook, tags it and protects it, and a second
+# publishes nothing; and the database's own sweep_forge() answers true. FORGE_SWEEP_SECRET is the
+# release Secret's value. Skips without it.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
 

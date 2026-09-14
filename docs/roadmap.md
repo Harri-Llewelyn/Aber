@@ -103,7 +103,8 @@ retention prune removes exactly the directory the row named and nothing beside i
 alert · the forge, the puller and the appliance branch
 ([`docs/physical-gateways.md`](physical-gateways.md), [The appliance reports on a branch of its
 own](../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-0104)), which this
-reuses · the three revocation handles (`disableClient` in the credential service,
+reuses · the platform playbook ([`gateway-platform/`](../gateway-platform),
+[published by the sweep](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep)) · the three revocation handles (`disableClient` in the credential service,
 `withdraw_gateway_enrollment_tokens()`, and the deploy key reconcile in `forge-sweep`) · arrives
 from a request to run custom data-gathering software on gateways, for legacy machinery
 
@@ -147,28 +148,23 @@ zero-circularity answer for a plant that images its own appliances. Since the `a
 
 ### The operating system
 
-`unattended-upgrades` without automatic reboot. **`ansible-pull`**, not Ansible: outbound only,
-no inventory, self-healing on a timer, idempotent by construction. Two playbooks and the split is
-the security boundary: a **platform** playbook (Node-RED, `node_exporter`, the CA bundle, the
-upgrade configuration, the time source, the pusher) in one repository the whole fleet reads, in
-its own `platform` organisation so the `gateways` organisation's rules (both teams may create
-repositories; the sweep protects whatever it finds) do not apply to it; and an optional **custom**
-playbook in the gateway's own repository beside its flow. Every gateway runs the platform
-playbook; "custom" is a gateway whose repository also carries a playbook, not a choice between two.
-When it lands, scheduling and platform convergence become Ansible's; everything below
-`flow-sync.mjs`'s `deployFlow()` stays Node-RED knowledge, which is why `--once` exists.
+**Built**, as [`gateway-platform/`](../gateway-platform) and
+[The platform playbook is published by the sweep](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep):
+`unattended-upgrades` without automatic reboot, Docker's packages held out of it; **`ansible-pull`**,
+not Ansible, on an hourly timer the playbook itself installs; the **platform** playbook in one
+repository the whole fleet reads, in its own `platform` organisation with `main` admitting the
+machine account alone; `platform.yml` in each gateway's repository as the per-gateway pointer,
+seeded at enrolment and changed by pull request; `chrony` in the package set, pointed at what
+`platform.yml` names; and the compose project deployed from the tagged copy of the bundle
+template. Scheduling and platform convergence are Ansible's; everything below `flow-sync.mjs`'s
+`deployFlow()` stays Node-RED knowledge, which is why `--once` exists.
 
-**The fleet tracks a tag, and the pointer is per gateway.** "Latest tag" gives no staged rollout,
-so the tag an appliance converges to is a small file in its own repository (`platform.yml`),
-changed by pull request through the lane the forge already has. A fleet bump is one pull request per
-gateway or a scripted batch; a canary is one gateway. Nothing tracks `main` of the platform
-repository.
+**Not yet:** the optional **custom** playbook in a gateway's own repository beside its flow (every
+gateway runs the platform playbook; "custom" is a gateway whose repository also carries a
+playbook, not a choice between two), which the converge script does not look for yet; and the CA
+bundle, which is under *Revocation and rotation*.
 
-**The time source belongs here.** Nothing in the repository sets an appliance's clock. TLS tolerates
-the skew the telemetry path does not: a gateway three minutes fast verifies every certificate and
-writes every sample three minutes into the future, silently, forever. The platform now measures the
-offset per gateway and alerts on it; the fix is `chrony` in the package set, pointed at something
-the plant can reach. Decide, with the measurement in hand: whether an appliance with a bad clock
+**The time source: decide, with the measurement in hand,** whether an appliance with a bad clock
 should publish at all (today it is fail-open inside five minutes and fail-closed outside); whether
 the platform is itself a time source for the air-gapped case; whether an RTC module is a hardware
 requirement for single-board appliances; and whether `TELEMETRY_MAX_FUTURE_SECONDS` is right. Do not
@@ -176,17 +172,15 @@ correct device timestamps at ingest.
 
 ### The forge, as the appliance sees it
 
-**Deploy keys, not gateway users.** One SSH key per appliance, generated on it as now, registered
-twice: read-write on its own repository (built, `0104`), read-only on the platform repository.
-`main` on both admits no deploy key; `appliance` on the gateway repository admits them and blocks
-force-push, and a `**` rule closes every other branch (built). That is the whole policy: pull and
-push its own repository, pull the platform's, reach nothing else. A Gitea user per gateway would
-express the same policy through teams, at the cost of a third kind of principal the membership
-sweep would have to exempt, and a user can open issues and create repositories in the
-organisation, which a deploy key cannot. **The sweep reconciles keys** the way it reconciles
-webhooks and membership: an active gateway holds its own repository's key read-write and, once the
-platform repository exists, its key there read-only; an archived one holds none. The own-repository
-half is built; the platform half lands with the repository.
+**Built.** One SSH key per appliance, generated on it, registered twice: read-write on its own
+repository, read-only on the platform repository. `main` on both admits no deploy key;
+`appliance` on the gateway repository admits them and blocks force-push, and a `**` rule closes
+every other branch. That is the whole policy: pull and push its own repository, pull the
+platform's, reach nothing else, and the sweep reconciles both links per gateway (an archived one
+holds none). A Gitea user per gateway would have expressed the same policy through teams, at the
+cost of a third kind of principal the membership sweep would have to exempt, and a user can open
+issues and create repositories in the organisation, which a deploy key cannot. Both dashboard
+teams read the platform repository through its `readers` team.
 
 **Measured** (gitea/gitea:1.27.3): one public key is accepted as a deploy key on two repositories
 with a different mode on each (`key_id` shared, `read_only` per repository), so the appliance
@@ -240,7 +234,10 @@ already give: identity, confinement, and a revocation that disconnects.
 
 **The root rotates through the platform playbook.** The playbook ships a CA bundle holding the
 old and new roots for an overlap window, delivered over SSH whose host key does not depend on the
-X.509 chain. Rotation becomes a tagged release, not a visit to every cabinet. The heartbeat already
+X.509 chain. Not built with the playbook: the credential service hands the root out only inside
+an enrolment, so the publisher has nothing to put in the repository; it needs a `GET` for the
+root on that service, and a decision on whether the bundle rides under the version tag (a
+rotation is then a release) or on a branch of its own that the playbook reads beside the tag. Rotation becomes a tagged release, not a visit to every cabinet. The heartbeat already
 reports the expiry each appliance holds; reporting the `notAfter` of the root the platform is
 currently issuing from, beside it, makes a rotation in progress visible. Read it from the
 credential service's `ca.crt`, never from the Kubernetes API.

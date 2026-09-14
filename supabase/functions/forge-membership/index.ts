@@ -30,11 +30,13 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import {
   ensureOrganisation,
+  ensurePlatformOrganisation,
   FORGE_TEAMS,
   type ForgeConfig,
   type ForgeTeamRole,
   forgeApi,
   forgeConfig,
+  PLATFORM_READERS_TEAM,
 } from "../_shared/forge.ts";
 
 /**
@@ -52,6 +54,8 @@ interface Placement {
 // Per-worker, so a cold worker simply re-places. Nothing here is authoritative.
 const placed = new Map<string, Placement>();
 let teamIds: Record<ForgeTeamRole, number> | null = null;
+/** The platform organisation's readers team, which every admitted role is seated in. */
+let readersId: number | null = null;
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -73,27 +77,35 @@ async function forgeUserExists(cfg: ForgeConfig, username: string): Promise<bool
 }
 
 /**
- * Exactly one team, or none. The removal runs even when the addition does, so a role that moved
- * from one team to the other leaves the first.
+ * Exactly one gateway team, or none, and the platform readers team with either. The removal runs
+ * even when the addition does, so a role that moved from one team to the other leaves the first.
  */
 async function placeInTeams(
   cfg: ForgeConfig,
   ids: Record<ForgeTeamRole, number>,
+  readers: number,
   username: string,
   role: ForgeTeamRole | null,
 ): Promise<void> {
-  for (const candidate of Object.keys(FORGE_TEAMS) as ForgeTeamRole[]) {
-    const id = ids[candidate];
-    if (candidate === role) {
+  const seats: { id: number; team: string; wanted: boolean }[] = [
+    ...(Object.keys(FORGE_TEAMS) as ForgeTeamRole[]).map((candidate) => ({
+      id: ids[candidate],
+      team: FORGE_TEAMS[candidate],
+      wanted: candidate === role,
+    })),
+    { id: readers, team: PLATFORM_READERS_TEAM, wanted: role !== null },
+  ];
+  for (const { id, team, wanted } of seats) {
+    if (wanted) {
       const added = await forgeApi(cfg, "PUT", `/teams/${id}/members/${username}`);
       if (!added.ok) {
-        throw new Error(`could not place '${username}' in '${FORGE_TEAMS[candidate]}' (${added.status})`);
+        throw new Error(`could not place '${username}' in '${team}' (${added.status})`);
       }
     } else {
       const removed = await forgeApi(cfg, "DELETE", `/teams/${id}/members/${username}`);
       // 404 is "was not a member", which is what almost every request answers.
       if (!removed.ok && removed.status !== 404) {
-        throw new Error(`could not remove '${username}' from '${FORGE_TEAMS[candidate]}' (${removed.status})`);
+        throw new Error(`could not remove '${username}' from '${team}' (${removed.status})`);
       }
     }
   }
@@ -159,6 +171,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     if (!teamIds) teamIds = await ensureOrganisation(cfg);
+    if (readersId === null) readersId = await ensurePlatformOrganisation(cfg);
 
     if (!(await forgeUserExists(cfg, username))) {
       // The first request through the door: Gitea has not created the user yet. The next request
@@ -170,7 +183,7 @@ export default async function handler(req: Request): Promise<Response> {
       return json({ sub: username, role, team: FORGE_TEAMS[role], placed: false, reason: "not yet registered" }, 200);
     }
 
-    await placeInTeams(cfg, teamIds, username, admitted ? role : null);
+    await placeInTeams(cfg, teamIds, readersId, username, admitted ? role : null);
 
     if (!admitted) {
       placed.delete(username);
@@ -187,6 +200,7 @@ export default async function handler(req: Request): Promise<Response> {
     // A 5xx lets the request through (failure_mode_allow) and says why here; the person sees the
     // forge with whatever membership they already had.
     teamIds = null;
+    readersId = null;
     placed.delete(username);
     console.error(`forge-membership: placement FAILED for ${user.email} (${username}): ${err instanceof Error ? err.message : err}`);
     return json({ error: "Could not place the caller in a forge team", details: err instanceof Error ? err.message : String(err) }, 502);

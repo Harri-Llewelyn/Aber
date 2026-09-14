@@ -1,0 +1,62 @@
+---
+# Packages the appliance needs before anything else, the upgrade policy, and the clock.
+
+- name: Refuse an operating system this playbook was not written for
+  ansible.builtin.assert:
+    that: ansible_facts['distribution'] == 'Ubuntu'
+    fail_msg: >-
+      This playbook is for Ubuntu and Ubuntu Server; another operating system is a feature request
+      (docs/roadmap.md, "The appliance itself"). Found {{ ansible_facts['distribution'] }}.
+
+- name: Base packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - chrony
+      - curl
+      - git
+      - jq
+      - openssh-client
+      - python3-yaml
+      - unattended-upgrades
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Security updates apply themselves; nothing reboots on its own. A gateway in a cabinet that
+# rebooted at 06:00 because a kernel landed would drop the plant's telemetry for a minute with no
+# person near it; the platform reports the appliance's uptime, and a reboot is a visit.
+- name: Unattended upgrades, without automatic reboot and with Docker held
+  ansible.builtin.template:
+    src: 52-acs-gateway.j2
+    dest: /etc/apt/apt.conf.d/52-acs-gateway
+    mode: "0644"
+
+- name: Unattended upgrades enabled
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+# The time source. TLS tolerates the skew the telemetry path does not: a gateway three minutes
+# fast verifies every certificate and writes every sample three minutes into the future. The
+# platform measures the offset per appliance and alerts; this is the fix.
+- name: Chrony sources
+  ansible.builtin.copy:
+    dest: /etc/chrony/sources.d/acs-gateway.sources
+    mode: "0644"
+    content: |
+      # Managed by the ACS-Cymru platform playbook. Per-gateway sources come from platform.yml.
+      {% for line in chrony_servers %}
+      {{ line }}
+      {% endfor %}
+  notify: Reload chrony sources
+
+- name: Chrony running and enabled
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+  when: acs_systemd

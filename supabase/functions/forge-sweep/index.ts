@@ -30,10 +30,12 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 import {
   deleteDeployKey,
+  DEPLOY_KEY_TITLE,
   ensureApplianceProtection,
   ensureBranchProtection,
   ensureDeployKey,
   ensureOrganisation,
+  ensurePlatformOrganisation,
   ensureWebhook,
   FORGE_ORGANISATION,
   FORGE_TEAMS,
@@ -43,7 +45,16 @@ import {
   forgeConfig,
   GATEWAY_REPOSITORY,
   listDeployKeys,
+  PLATFORM_ORGANISATION,
+  PLATFORM_READERS_TEAM,
+  PLATFORM_REPOSITORY,
+  platformVersion,
+  publishPlatform,
 } from "../_shared/forge.ts";
+import { GATEWAY_PLATFORM_DIGEST, GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
+
+/** The platform repository, as the key functions address it. */
+const PLATFORM_REF = { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -67,6 +78,8 @@ interface Summary {
   rekeyed: string[];
   /** Keys removed from an archived or deleted gateway's repository. */
   revoked: string[];
+  /** The platform playbook committed or tagged. */
+  published: string[];
   errors: string[];
 }
 
@@ -112,6 +125,7 @@ async function sweepMembership(
   cfg: ForgeConfig,
   admin: ReturnType<typeof serviceRoleClient>,
   teamIds: Record<ForgeTeamRole, number>,
+  readersId: number,
   summary: Summary,
 ): Promise<void> {
   const { data, error } = await admin.from("user_roles").select("user_id, roles(name)");
@@ -147,8 +161,24 @@ async function sweepMembership(
     }
   }
 
+  // The platform readers team: every admitted role, whichever gateway team it maps to.
+  const reading = new Set<string>();
+  for (const { login } of await listAll<{ login: string }>(cfg, `/teams/${readersId}/members`, `members of '${PLATFORM_READERS_TEAM}'`)) {
+    if (!DASHBOARD_IDENTITY.test(login)) continue;
+    if (wanted.has(login)) {
+      reading.add(login);
+      continue;
+    }
+    const removed = await forgeApi(cfg, "DELETE", `/teams/${readersId}/members/${login}`);
+    if (!removed.ok && removed.status !== 404) {
+      summary.errors.push(`could not remove ${login} from '${PLATFORM_READERS_TEAM}' (${removed.status})`);
+      continue;
+    }
+    summary.removed.push(`${login} from '${PLATFORM_READERS_TEAM}'`);
+  }
+
   for (const [login, role] of wanted) {
-    if (seated.get(login) === role) continue;
+    if (seated.get(login) === role && reading.has(login)) continue;
     // A person who has never passed the door has no forge login to place, and the door places
     // them when they do. 404 is that, and is the ordinary answer for most of user_roles.
     const exists = await forgeApi(cfg, "GET", `/users/${login}`);
@@ -157,13 +187,18 @@ async function sweepMembership(
       summary.errors.push(`could not look up ${login} in the forge (${exists.status})`);
       continue;
     }
-    const team = FORGE_TEAMS[role];
-    const added = await forgeApi(cfg, "PUT", `/teams/${teamIds[role]}/members/${login}`);
-    if (!added.ok) {
-      summary.errors.push(`could not place ${login} in '${team}' (${added.status})`);
-      continue;
+    const seatsWanted = [
+      ...(seated.get(login) === role ? [] : [{ id: teamIds[role], team: FORGE_TEAMS[role] }]),
+      ...(reading.has(login) ? [] : [{ id: readersId, team: PLATFORM_READERS_TEAM }]),
+    ];
+    for (const { id, team } of seatsWanted) {
+      const added = await forgeApi(cfg, "PUT", `/teams/${id}/members/${login}`);
+      if (!added.ok) {
+        summary.errors.push(`could not place ${login} in '${team}' (${added.status})`);
+        continue;
+      }
+      summary.placed.push(`${login} in '${team}'`);
     }
-    summary.placed.push(`${login} in '${team}'`);
   }
 }
 
@@ -179,20 +214,45 @@ async function sweepDeployKeys(
   name: string,
   sparkplugId: string,
   gateway: { is_archived: boolean } | undefined,
+  platform: boolean,
   summary: Summary,
 ): Promise<void> {
-  const keys = await listDeployKeys(cfg, name);
+  const keys = await listDeployKeys(cfg, { name });
   if (!gateway || gateway.is_archived) {
     for (const key of keys) {
-      await deleteDeployKey(cfg, name, key);
+      await deleteDeployKey(cfg, { name }, key);
       summary.revoked.push(`${name}: '${key.title}'`);
     }
     return;
   }
   for (const key of keys) {
-    if (!key.read_only) continue;
-    await ensureDeployKey(cfg, name, sparkplugId, key.key, false);
-    summary.rekeyed.push(`${name}: '${key.title}'`);
+    if (key.read_only) {
+      await ensureDeployKey(cfg, { name }, sparkplugId, key.key, false);
+      summary.rekeyed.push(`${name}: '${key.title}'`);
+    }
+    // The second link an active gateway holds: the same key, read-only, on the platform repository.
+    if (platform && await ensureDeployKey(cfg, PLATFORM_REF, sparkplugId, key.key, true) !== "kept") {
+      summary.rekeyed.push(`${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}: '${key.title}' (read-only)`);
+    }
+  }
+}
+
+/**
+ * The platform repository's keys against the gateway rows: a key titled for a gateway that is
+ * archived or gone is removed. A key somebody titled by hand is left alone.
+ */
+async function sweepPlatformKeys(
+  cfg: ForgeConfig,
+  gateways: Map<string, { is_archived: boolean }>,
+  summary: Summary,
+): Promise<void> {
+  for (const key of await listDeployKeys(cfg, PLATFORM_REF)) {
+    const named = DEPLOY_KEY_TITLE.exec(key.title);
+    if (!named) continue;
+    const gateway = gateways.get(named[1]);
+    if (gateway && !gateway.is_archived) continue;
+    await deleteDeployKey(cfg, PLATFORM_REF, key);
+    summary.revoked.push(`${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}: '${key.title}'`);
   }
 }
 
@@ -204,6 +264,7 @@ async function sweepDeployKeys(
 async function sweepRepositories(
   cfg: ForgeConfig,
   admin: ReturnType<typeof serviceRoleClient>,
+  platform: boolean,
   summary: Summary,
 ): Promise<void> {
   const { data, error } = await admin.from("gateways").select("sparkplug_id, is_archived");
@@ -222,11 +283,41 @@ async function sweepRepositories(
       if (!named) continue;
       if (await ensureApplianceProtection(cfg, name)) summary.protected.push(`${name} (appliance)`);
       if (await ensureWebhook(cfg, name)) summary.hooked.push(name);
-      await sweepDeployKeys(cfg, name, named[1], gateways.get(named[1]), summary);
+      await sweepDeployKeys(cfg, name, named[1], gateways.get(named[1]), platform, summary);
     } catch (err) {
       summary.errors.push(`${name}: ${err instanceof Error ? err.message : err}`);
     }
   }
+  if (platform) {
+    try {
+      await sweepPlatformKeys(cfg, gateways, summary);
+    } catch (err) {
+      summary.errors.push(`${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+}
+
+let saidNoVersion = false;
+
+/**
+ * The platform playbook, published under this build's version. Nothing on a deployment that
+ * names no version, said once.
+ */
+async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolean> {
+  const version = platformVersion();
+  if (!version) {
+    if (!saidNoVersion) {
+      console.warn("forge-sweep: ACS_PLATFORM_VERSION is unset, so the platform playbook is not published");
+      saidNoVersion = true;
+    }
+    return false;
+  }
+  const publication = await publishPlatform(cfg, version, GATEWAY_PLATFORM_FILES, GATEWAY_PLATFORM_DIGEST);
+  if (publication.published) {
+    summary.published.push(`${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY} at ${GATEWAY_PLATFORM_DIGEST.slice(0, 12)} (${publication.tag})`);
+  }
+  if (publication.warning) summary.errors.push(publication.warning);
+  return true;
 }
 
 let saidNoForge = false;
@@ -255,12 +346,15 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "This deployment has no forge configured" }, 503);
   }
 
-  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], errors: [] };
+  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], published: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
+    const readersId = await ensurePlatformOrganisation(cfg);
     const admin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-    await sweepMembership(cfg, admin, teamIds, summary);
-    await sweepRepositories(cfg, admin, summary);
+    await sweepMembership(cfg, admin, teamIds, readersId, summary);
+    // The platform repository before the gateway repositories, so the keys have somewhere to go.
+    const platform = await sweepPlatform(cfg, summary);
+    await sweepRepositories(cfg, admin, platform, summary);
   } catch (err) {
     const details = err instanceof Error ? err.message : String(err);
     console.error(`forge-sweep: the sweep could not complete: ${details}`);
@@ -268,13 +362,13 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length +
-    summary.rekeyed.length + summary.revoked.length;
+    summary.rekeyed.length + summary.revoked.length + summary.published.length;
   if (changed || summary.errors.length) {
     console.log(
       `forge-sweep: placed ${summary.placed.length}, removed ${summary.removed.length}, ` +
         `hooked ${summary.hooked.length}, protected ${summary.protected.length}, ` +
         `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
-        `errors ${summary.errors.length}` +
+        `published ${summary.published.length}, errors ${summary.errors.length}` +
         (summary.errors.length ? `: ${summary.errors.join("; ")}` : ""),
     );
   }

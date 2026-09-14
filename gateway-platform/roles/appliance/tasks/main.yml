@@ -1,0 +1,80 @@
+---
+# The compose project: the bundle template as this platform version ships it, under
+# /opt/acs-gateway, with its volume bound to the state directory. `.env` is never written here: it
+# carries the enrolment token and the credential secret, and the installer (or a person copying
+# the bundle's .env) puts it in place. Without it, compose is not started.
+
+- name: State directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0750"
+  loop:
+    - "{{ acs_state_dir }}"
+    - "{{ acs_data_dir }}"
+    - "{{ acs_compose_dir }}"
+
+- name: The compose project files, from this tag
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/appliance/{{ item }}"
+    dest: "{{ acs_compose_dir }}/{{ item }}"
+    mode: "0644"
+  loop:
+    - docker-compose.yml
+    - Dockerfile
+    - bootstrap.mjs
+    - flow-sync.mjs
+    - flows.template.json
+    - README.md
+  register: appliance_files
+
+# The bind mount. Compose merges top-level `volumes` from an override file, so the template's
+# named volume stays as it is and the data lands where the host's converge script can read the
+# deploy key, the host key and the repository checkout bootstrap.mjs writes under /data/gitops.
+- name: The volume bound to the state directory
+  ansible.builtin.copy:
+    dest: "{{ acs_compose_dir }}/docker-compose.override.yml"
+    mode: "0644"
+    content: |
+      # Managed by the ACS-Cymru platform playbook (roles/appliance).
+      volumes:
+        nodered_data:
+          driver: local
+          driver_opts:
+            type: none
+            o: bind
+            device: {{ acs_data_dir }}
+  register: appliance_override
+
+- name: Whether this appliance holds its .env
+  ansible.builtin.stat:
+    path: "{{ acs_compose_dir }}/.env"
+  register: appliance_env
+
+- name: Say so when it does not
+  ansible.builtin.debug:
+    msg: >-
+      {{ acs_compose_dir }}/.env is absent, so the compose project is not started. The installer
+      writes it; by hand, copy the bundle's .env there and run this again.
+  when: not appliance_env.stat.exists
+
+# Built and started only when something changed or nothing is running: `up -d --build` on an
+# unchanged project is a no-op for compose, but the build step alone costs a minute on a Pi.
+- name: Whether the project is running
+  ansible.builtin.command:
+    cmd: docker compose ps --status running --quiet
+    chdir: "{{ acs_compose_dir }}"
+  register: appliance_running
+  changed_when: false
+  failed_when: false
+  when: appliance_env.stat.exists and acs_systemd
+
+- name: Build and start the project
+  ansible.builtin.command:
+    cmd: docker compose up -d --build
+    chdir: "{{ acs_compose_dir }}"
+  when:
+    - appliance_env.stat.exists
+    - acs_systemd
+    - appliance_files.changed or appliance_override.changed or (appliance_running.stdout | default('')) == ''
+  changed_when: true

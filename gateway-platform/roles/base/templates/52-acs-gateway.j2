@@ -1,0 +1,11 @@
+// Managed by the ACS-Cymru platform playbook (roles/base). Later than 50unattended-upgrades, so
+// these override it.
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+// Docker's packages move when the platform tag moves, never under a running convergence.
+Unattended-Upgrade::Package-Blacklist {
+    "docker.io";
+    "docker-compose-v2";
+    "containerd";
+    "runc";
+};

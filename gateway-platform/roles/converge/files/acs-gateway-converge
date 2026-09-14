@@ -1,0 +1,74 @@
+#!/bin/bash
+# Converge this appliance to the platform tag its own repository names.
+#
+# Reads platform.yml from the puller's checkout of the gateway's main, runs ansible-pull against
+# the platform repository at that tag with the appliance's own deploy key and the forge's pinned
+# host key, and records the result where the puller will push it to the appliance branch. Every
+# path here is what bootstrap.mjs wrote under /data, reached through the bind mount the appliance
+# role sets up. Outbound only, verified, no inventory.
+set -u
+
+STATE_DIR=${ACS_STATE_DIR:-/var/lib/acs-gateway}
+DATA_DIR=${ACS_DATA_DIR:-$STATE_DIR/data}
+GITOPS="$DATA_DIR/gitops"
+KEY="$GITOPS/id_ed25519"
+KNOWN_HOSTS="$GITOPS/known_hosts"
+REPOSITORY="$GITOPS/repository.json"
+POINTER="$GITOPS/repo/platform.yml"
+CONVERGED="$GITOPS/converged.json"
+CHECKOUT="$STATE_DIR/platform"
+
+log() { echo "[acs-gateway-converge] $*"; }
+
+record() {
+  # $1 outcome, $2 tag, $3 detail. Read by nothing on this box; pushed by flow-sync.mjs.
+  jq -n --arg outcome "$1" --arg tag "$2" --arg detail "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{outcome: $outcome, tag: $tag, detail: $detail, converged_at: $at}' > "$CONVERGED.tmp" \
+    && mv "$CONVERGED.tmp" "$CONVERGED"
+}
+
+for f in "$KEY" "$KNOWN_HOSTS" "$REPOSITORY"; do
+  if [ ! -f "$f" ]; then
+    log "REFUSING: $f does not exist; this appliance is not enrolled, or its data is not under $DATA_DIR"
+    exit 1
+  fi
+done
+
+PLATFORM_URL=$(jq -r '.platform_ssh_url // empty' "$REPOSITORY")
+if [ -z "$PLATFORM_URL" ]; then
+  log "REFUSING: $REPOSITORY names no platform_ssh_url; the platform had no platform repository when this appliance enrolled. Re-enrol, or add it by hand."
+  exit 1
+fi
+
+# The tag: platform.yml on main, which the puller keeps current; the tag enrolment recorded until
+# the first pull. Extra variables ride on the same file.
+TAG=""
+EXTRA="{}"
+if [ -f "$POINTER" ]; then
+  TAG=$(python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])) or {}; print((d.get("platform") or {}).get("tag") or "")' "$POINTER" 2>/dev/null)
+  EXTRA=$(python3 -c 'import sys, json, yaml; d = yaml.safe_load(open(sys.argv[1])) or {}; print(json.dumps((d.get("platform") or {}).get("vars") or {}))' "$POINTER" 2>/dev/null)
+fi
+if [ -z "$TAG" ]; then
+  TAG=$(jq -r '.platform_tag // empty' "$REPOSITORY")
+fi
+if [ -z "$TAG" ]; then
+  log "REFUSING: no platform tag: $POINTER names none and $REPOSITORY holds none"
+  record refused "" "no platform tag named"
+  exit 1
+fi
+
+export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$KNOWN_HOSTS -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=10"
+export GIT_TERMINAL_PROMPT=0
+export ANSIBLE_LOCALHOST_WARNING=false
+
+log "converging to $TAG from $PLATFORM_URL"
+if ansible-pull --url "$PLATFORM_URL" --checkout "$TAG" --directory "$CHECKOUT" --purge \
+     --inventory localhost, --extra-vars "$EXTRA" site.yml; then
+  record converged "$TAG" "ansible-pull succeeded"
+  log "converged to $TAG"
+else
+  rc=$?
+  record failed "$TAG" "ansible-pull exited $rc"
+  log "ansible-pull exited $rc; recorded, and the timer will try again"
+  exit $rc
+fi
