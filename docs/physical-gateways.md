@@ -8,10 +8,11 @@ does, and it needs nothing installed. A **physical** gateway runs on its own mac
 Pi, an industrial PC, a spare server in a cabinet — and has to be given an identity, a credential and
 a way to verify the broker before it can publish anything. This document is about the second kind.
 
-> **The short version.** Create the gateway in the dashboard with *Virtual* left unchecked, download
-> its bundle, copy the folder to the machine, run `docker compose up -d --build`, then
-> `docker compose logs bootstrap` to read the editor password. The gateway goes **AWAITING SETUP →
-> ENROLLED — NO DATA YET → ONLINE** on its own.
+> **The short version.** Create the gateway in the dashboard with *Virtual* left unchecked and
+> paste the command it shows on a fresh Ubuntu machine; it installs everything, enrols, and prints
+> the editor password once. Or download the bundle, copy the folder to a machine with Docker, run
+> `docker compose up -d --build`, then `docker compose logs bootstrap`. Either way the gateway goes
+> **AWAITING SETUP → ENROLLED — NO DATA YET → ONLINE** on its own.
 
 ---
 
@@ -47,23 +48,62 @@ that file would have no revocation story at all.
 1. **Gateways → New Gateway.** Name it after the machine or the cell it serves.
 2. **Leave “Mark as Virtual Gateway” unchecked.** The form says which way it is going before you
    save: *“Runs on its own hardware. On save you will be given a bundle to copy to that machine.”*
-3. **Save.** The bundle modal opens and **the download starts immediately** — the gateway is
-   seconds old, so there is no earlier bundle for this one to invalidate. It is now **AWAITING
-   SETUP** (`PENDING_ENROLLMENT`).
-4. **Copy the three commands** shown, or use the **Copy Commands** button beside them, and note the
+3. **Save.** The setup modal opens and **mints immediately** — the gateway is seconds old, so
+   there is no earlier token for this one to invalidate. It is now **AWAITING SETUP**
+   (`PENDING_ENROLLMENT`). On a deployment with TLS on its API the modal shows **one command to
+   paste**; otherwise it downloads the **bundle** (a folder to copy), and either can be swapped
+   for the other from the modal, which re-mints and asks first.
+4. **Copy the command**, or the three bundle commands, with the button beside them, and note the
    countdown: the token is good for 30 minutes.
 
 Coming back later — **Gateways → the gateway → Download Setup Bundle** — behaves differently on
-purpose. That gateway may already hold a bundle somebody downloaded, so the modal **asks first and
-makes you type the gateway's name** before it mints anything. See §6.
+purpose. That gateway may already hold a command or bundle somebody is carrying to a machine, so
+the modal **asks first and makes you type the gateway's name** before it mints anything. See §6.
 
 Requires **Administrator** or **Shopfloor_Manager** (`gateway:manage`). Operator and Auditor never
 see the action, and `gateway-bundle` answers `403` if it is called anyway — no token is minted by
 the refusal.
 
-### On the appliance
+### On the appliance: the command
 
-Copy the whole unpacked folder to the machine, then:
+A fresh **Ubuntu** or **Ubuntu Server** machine (amd64 or arm64) with a user who can `sudo` and a
+route to the platform. Paste the command. It is two stages in one line:
+
+- **Stage 0 carries no secret.** It fetches the platform's root certificate over plain HTTP from
+  the dashboard's host (`/.well-known/acs-cymru/ca.pem`, inert bytes), computes the SHA-256 of
+  the root's public key, compares it with the **pin** the dashboard minted beside the token over
+  your authenticated session (the trusted channel), and installs the root only when they match.
+  A mismatch stops there and nothing has been sent. The public key rather than the certificate is
+  pinned, because the root's certificate is re-issued a year before it expires while its key
+  stays (`deploy/k8s/internal-ca.yaml`).
+- **Stage 1 runs over TLS that pin has verified.** It fetches the installer with the token in a
+  header and runs it as root with the token and the pin in its environment. The installer puts
+  the packages the playbook needs in place, fetches the platform playbook and runs it (packages,
+  upgrades, chrony, Docker, the compose project; §12), writes the appliance's `.env` from a
+  token-gated fetch, and **enrols last** by starting the compose project. Every step before
+  enrolment is idempotent and the same command can be pasted again; only enrolment spends the
+  token, and the installer refuses to run on an appliance that has enrolled.
+
+It ends by printing the Node-RED editor password **once**, and within about a minute the dashboard
+shows the gateway **ONLINE**. The installer then runs the appliance's first convergence from the
+forge; the timer the playbook installed does the rest.
+
+**Why the command is not `curl | bash` alone.** A fresh appliance does not trust the platform's
+internal root, and a one-liner that ends in `curl -k` would be worse than the bundle. The pin is
+what lets the appliance trust the root it fetched without trusting the network it fetched it
+over. A plant that images its own appliances can plant the root with cloud-init instead and skip
+stage 0.
+
+**On a deployment without TLS on its API**, the command is not offered: the installer route
+carries the token and the credential secret, and `gateway-install` refuses to serve them over
+plain HTTP. The readiness answer says so and the modal offers the bundle. (The development values
+set `allowPlaintextInstaller`, which mints an unpinned command over HTTP on a laptop cluster and
+nowhere else; the modal says when a command is unpinned.)
+
+### On the appliance: the bundle
+
+The bundle is for a machine that already has Docker, or one set up by hand. Copy the whole
+unpacked folder to the machine, then:
 
 ```bash
 cd acs-gateway-<name>-<sparkplug_id>
@@ -71,11 +111,13 @@ docker compose up -d --build          # ~1 minute; builds on the appliance, see 
 docker compose logs bootstrap         # prints the Node-RED editor password, ONCE
 ```
 
-Within about a minute the dashboard shows the gateway **ONLINE**.
+Within about a minute the dashboard shows the gateway **ONLINE**. Nothing converges the host of a
+bundle-installed appliance until somebody runs the platform playbook on it once (§12).
 
 ### Prerequisites on the appliance
 
-* Docker and the Compose plugin.
+* For the command: Ubuntu, `curl` and `openssl` (both in a default install), and `sudo`.
+* For the bundle: Docker and the Compose plugin.
 * A route to the platform's API — the address in `ACS_SUPABASE_URL`, which the server refuses to set
   to anything in-stack (§7).
 * A route to the broker on **8883**. Physical gateways use MQTTS exclusively; 1883 is published only

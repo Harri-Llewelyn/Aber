@@ -2779,6 +2779,49 @@ platform repository with its key and is refused when it pushes.
 service hands the root out only inside an enrolment, so the publisher has nothing to put in the
 repository yet; [`docs/roadmap.md`](../docs/roadmap.md) keeps the rotation design.
 
+### The one-liner (`0105`)
+
+Commissioning as a pasted command
+([`docs/physical-gateways.md`](../docs/physical-gateways.md#on-the-appliance-the-command)).
+`gateway-bundle` mints the token as before and, asked for `format: "command"`, answers JSON
+instead of a ZIP: the token, its expiry, the command, and the pin. `gateway-install` is what the
+command and the installer fetch from, three things against the token in `X-Enrolment-Token`: the
+installer (`gateway-platform/install.sh` with the public values substituted; the token is in the
+environment the command sets, never in the script's text), the platform playbook as a zip, and
+the appliance's `.env` (rendered by [`_shared/gatewayEnv.ts`](functions/_shared/gatewayEnv.ts),
+which the ZIP bundle now shares). Nothing on that route is cacheable.
+
+**A token can be checked without being spent.** `peek_gateway_enrollment_token()` is the
+read-only twin of `consume_gateway_enrollment_token()`: the same shape check, the same four
+refusals (unknown, expired, consumed, archived gateway) answered identically with no rows, and no
+UPDATE. `service_role` alone, like the consumer, because a signed-in user who could call it could
+enumerate which token values exist. Only enrolment spends the token, and the credential secret in
+the `.env` is generated per fetch: the installer writes the file once, so a retry before enrolment
+costs nothing and a fetch after changes nothing. `test_gateway_enrollment.py` proves the check
+leaves the token live and refuses what redemption refuses.
+
+**The pin.** [`_shared/caPin.ts`](functions/_shared/caPin.ts) walks the root's DER to its
+SubjectPublicKeyInfo and hashes it, which is what `openssl x509 -pubkey | openssl pkey -outform
+DER | openssl dgst -sha256` prints on the appliance (measured equal on the dev cluster's root).
+The root reaches the functions as `ACS_CA_PEM`, read at start by the image's entrypoint from the
+ingress TLS Secret's `ca.crt`, which the chart mounts as one projected key when ingress TLS is on:
+that is the root that signs the API's own certificate, the one an appliance must trust to reach
+the installer, and not the broker's, which is allowed to differ. The same key is served over plain
+HTTP by the frontend at `/.well-known/acs-cymru/ca.pem` (`nginx.conf`, `frontend.yaml`), which is
+where stage 0 fetches it; the chart hands the functions that address as `ACS_CA_URL`. The mount is
+optional so the pods start before cert-manager has issued; a functions pod that started before
+the issue offers no command until it is restarted, and the readiness answer says so.
+
+**HTTPS or nothing.** [`_shared/installer.ts`](functions/_shared/installer.ts) refuses a
+plain-HTTP public URL for the whole route, in both functions, so a command is never minted for a
+route that would refuse it; `supabaseFunctions.gatewayEnrolment.allowPlaintextInstaller` lifts
+that on the development values alone, and the command it mints then has no stage 0 and says so.
+The readiness answer (`GET gateway-bundle`) carries `installer.available` and the reason, and the
+setup modal mints the command when it can and the bundle otherwise; switching between the two
+re-mints and asks first, because both spend the one token. `test_gateway_install.py` drives the
+mint by role, the three fetches, the identical refusals, and the token surviving every fetch to
+be redeemed by enrolment.
+
 ## A replay lane is minted, not assigned (`0083`)
 
 The Playback gateway's devices are **replay lanes**. Each stands in for one real machine, records

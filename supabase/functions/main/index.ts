@@ -100,6 +100,22 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GW_BUNDLE_FLOWS",
     "GW_BUNDLE_FLOW_SYNC",
     "GW_BUNDLE_README",
+    // The one-liner: the platform's root (the pin is computed from it), where an appliance fetches
+    // that root over plain HTTP, and the development-only switch that lets the command be minted
+    // for a plain-HTTP platform.
+    "ACS_CA_PEM",
+    "ACS_CA_URL",
+    "ACS_INSTALLER_ALLOW_HTTP",
+  ],
+
+  // What the one-liner fetches with the enrolment token in a header: the installer, the platform
+  // playbook and the appliance's .env. The service-role key is for peek_gateway_enrollment_token(),
+  // which validates without consuming; the token table is reachable by nothing else. The playbook
+  // itself is a module import, not an environment variable.
+  "gateway-install": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_PUBLIC_URL",
+    "ACS_INSTALLER_ALLOW_HTTP",
   ],
 
   // Composes an AAS shell. Needs the service-role key to read across the tables a shell

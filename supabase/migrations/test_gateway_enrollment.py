@@ -422,6 +422,46 @@ class TestRedeeming(GatewayEnrollmentBase):
         self.cur.execute("SELECT count(*) FROM public.consume_gateway_enrollment_token(NULL);")
         self.assertEqual(self.cur.fetchone()[0], 0)
 
+    def test_a_token_can_be_checked_without_being_spent(self):
+        """
+        0105: the installer, the playbook and the .env are fetched against the token before the
+        appliance enrols, so the check must leave the token live. Same identity as redemption
+        answers, plus the expiry; then redemption still succeeds exactly once.
+        """
+        token, expires_at = self.issue()
+        self.cur.execute(
+            "SELECT gateway_id, sparkplug_id, gateway_name, expires_at "
+            "  FROM public.peek_gateway_enrollment_token(%s);",
+            (token,),
+        )
+        row = self.cur.fetchone()
+        self.assertIsNotNone(row, "a live token was refused by the check")
+        self.assertEqual(str(row[0]), PHYSICAL_GW)
+        self.assertRegex(row[1], r"^gwy[0-9a-f]{21}$")
+        self.assertEqual(row[2], "Test_Remote_Gateway")
+        self.assertEqual(row[3], expires_at)
+        for _ in range(3):
+            self.cur.execute("SELECT count(*) FROM public.peek_gateway_enrollment_token(%s);", (token,))
+            self.assertEqual(self.cur.fetchone()[0], 1, "checking a token consumed it")
+        self.cur.execute("SELECT count(*) FROM public.consume_gateway_enrollment_token(%s);", (token,))
+        self.assertEqual(self.cur.fetchone()[0], 1)
+        self.cur.execute("SELECT count(*) FROM public.peek_gateway_enrollment_token(%s);", (token,))
+        self.assertEqual(self.cur.fetchone()[0], 0, "a spent token still reads as live")
+
+    def test_the_check_refuses_what_redemption_refuses(self):
+        for value in ("", "not-a-token", "0" * 63, "g" * 64, "A" * 64):
+            self.cur.execute("SELECT count(*) FROM public.peek_gateway_enrollment_token(%s);", (value,))
+            self.assertEqual(self.cur.fetchone()[0], 0, f"{value!r} was read as live")
+        self.cur.execute("SELECT count(*) FROM public.peek_gateway_enrollment_token(NULL);")
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_authenticated_cannot_check_either(self):
+        """The check would let a signed-in user learn which token values exist."""
+        token, _ = self.issue()
+        as_role(self.cur, ADMIN_USER, "Administrator")
+        with self.assertRaises(pg_errors.InsufficientPrivilege):
+            self.cur.execute("SELECT * FROM public.peek_gateway_enrollment_token(%s);", (token,))
+
     def test_authenticated_cannot_redeem(self):
         """
         Redemption is an appliance's act, performed through enroll-gateway with the service-role

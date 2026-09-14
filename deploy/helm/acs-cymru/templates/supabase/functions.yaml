@@ -120,6 +120,18 @@ spec:
             */}}
             - name: SUPABASE_PUBLIC_URL
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.supabasePublicUrl | default (include "acs-cymru.supabaseUrl" .) | quote }}
+            {{- /* THE ONE-LINER (docs/physical-gateways.md). Where a fresh appliance fetches the
+                   platform's root over plain HTTP before it trusts anything: the dashboard's host,
+                   which serves the ingress TLS Secret's ca.crt at this path (frontend.yaml). The
+                   pin the command carries is computed from the same Secret, mounted below. */}}
+            {{- if .Values.ingress.tls.enabled }}
+            - name: ACS_CA_URL
+              value: {{ printf "http://%s/.well-known/acs-cymru/ca.pem" (include "acs-cymru.hostOf" (dict "ctx" . "name" "frontend")) | quote }}
+            {{- end }}
+            {{- if .Values.supabaseFunctions.gatewayEnrolment.allowPlaintextInstaller }}
+            - name: ACS_INSTALLER_ALLOW_HTTP
+              value: "true"
+            {{- end }}
             {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
                    already derives for the external broker route, which is the address the
                    certificate's SAN carries -- see mosquitto.tls in values.yaml. */}}
@@ -199,4 +211,26 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.supabaseFunctions.resources | nindent 12 }}
+          {{- if .Values.ingress.tls.enabled }}
+          volumeMounts:
+            {{- /* The platform's root, for the one-liner's pin: the CA that signs the API's own
+                   certificate, which is the one an appliance must trust to reach this function.
+                   One projected key, never the Secret whole (it also holds tls.key). Optional so
+                   the pod starts before cert-manager has issued; the entrypoint reads the file at
+                   start, so a pod that started before the issue offers no one-liner until it is
+                   restarted, and the dashboard says so. */}}
+            - name: platform-root
+              mountPath: /home/deno/ca
+              readOnly: true
+          {{- end }}
+      {{- if .Values.ingress.tls.enabled }}
+      volumes:
+        - name: platform-root
+          secret:
+            secretName: {{ .Values.ingress.tls.secretName }}
+            optional: true
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
 {{- end }}

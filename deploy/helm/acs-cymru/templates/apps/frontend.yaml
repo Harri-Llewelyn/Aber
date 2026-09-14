@@ -195,8 +195,28 @@ spec:
               mountPath: /usr/share/nginx/html/config.js
               subPath: config.js
               readOnly: true
+            {{- if .Values.ingress.tls.enabled }}
+            {{- /* THE PLATFORM'S ROOT, served over plain HTTP at a static path for the one-liner's
+                   stage 0 (docs/physical-gateways.md): a fresh appliance fetches it as inert bytes,
+                   checks it against the pin the dashboard minted, and only then trusts TLS to the
+                   API. A directory mount holding ONE projected key -- never the Secret whole, which
+                   also holds tls.key. Optional, so the pod starts before cert-manager has issued;
+                   the kubelet fills the directory when the Secret appears. */}}
+            - name: platform-root
+              mountPath: /usr/share/nginx/html/.well-known/acs-cymru
+              readOnly: true
+            {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ printf "%s-frontend-config" $fullname }}
+        {{- if .Values.ingress.tls.enabled }}
+        - name: platform-root
+          secret:
+            secretName: {{ .Values.ingress.tls.secretName }}
+            optional: true
+            items:
+              - key: ca.crt
+                path: ca.pem
+        {{- end }}
 {{- end }}

@@ -587,6 +587,41 @@ const apiMethods = {
    * may ask. The Gateways page asks before offering a remote gateway, so the answer arrives
    * before a row exists rather than as a refusal after.
    */
+  /**
+   * The one-liner: mints the enrolment token the way downloadGatewayBundle does and answers
+   * JSON naming the command to paste, its expiry, the pin and the installer's address. A 503
+   * names why this deployment cannot serve it (plain HTTP, no root mounted), and the caller
+   * falls back to the bundle.
+   */
+  installCommand: async (gatewayId, { ttlMinutes } = {}) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-bundle`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ gateway_id: gatewayId, format: 'command', ...(ttlMinutes ? { ttl_minutes: ttlMinutes } : {}) })
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const error = new Error(body?.error || `The install command could not be minted (${res.status})`);
+      error.status = res.status;
+      error.details = body?.details || null;
+      throw error;
+    }
+    return {
+      command: body.command,
+      expiresAt: body.expires_at,
+      sparkplugId: body.sparkplug_id,
+      bundleVersion: body.bundle_version,
+      caPin: body.ca_pin || null,
+      caUrl: body.ca_url || null,
+      installUrl: body.install_url
+    };
+  },
+
   enrolmentReadiness: async () => {
     const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-bundle`, {

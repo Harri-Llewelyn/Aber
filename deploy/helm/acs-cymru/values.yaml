@@ -429,6 +429,11 @@ supabaseFunctions:
     # The API an appliance dials, embedded in its bundle. Empty = the browser-facing Supabase
     # URL; set it where that is a loopback domain, which gateway-bundle refuses to embed.
     supabasePublicUrl: ""
+    # DEVELOPMENT ONLY. The one-liner's installer carries the enrolment token and the credential
+    # secret, so gateway-install serves it over TLS alone and refuses a plain-HTTP public URL.
+    # True lets a laptop cluster with no ingress TLS mint and serve the command over plain HTTP,
+    # which values-dev.yaml sets and nothing else should.
+    allowPlaintextInstaller: false
 
   # AAS export. Declared on this service because an edge worker sees only the variables
   # main/index.ts forwards. Outbound references must name addresses the recipient of a shell
