@@ -592,6 +592,28 @@ That expects an enrolled `/data` under `/var/lib/acs-gateway/data` and the bundl
 `/opt/acs-gateway/.env`; without the `.env` the playbook sets the host up and says the compose
 project was not started.
 
+### A playbook of the gateway's own
+
+A gateway whose repository carries a **`custom.yml`** at its root runs that too, from the same
+checkout, straight after the platform playbook. Every gateway runs the platform playbook; this is
+an addition to it and never an alternative, and it arrives the way a flow does — a pull request on
+`main` that an administrator approves. It is what a bespoke adapter for legacy machinery is
+installed by.
+
+It is given that gateway's `platform.yml` variables and then the paths the platform owns
+(`acs_state_dir`, `acs_data_dir`, `acs_compose_dir`, `acs_repo_dir`, `acs_platform_tag`), in that
+order, so it can find what the platform put where and cannot move it.
+
+**A broken one is never mistaken for a broken platform.** Its outcome is a separate field in
+`converged.json`, which the puller pushes to the `appliance` branch, and it is not attempted at all
+when the platform run failed. It does fail the convergence's exit status, so
+`systemctl status acs-gateway-converge` and the unit's journal show it on the appliance:
+
+```bash
+journalctl -u acs-gateway-converge -n 50        # what the last convergence did
+jq .custom /var/lib/acs-gateway/data/gitops/converged.json
+```
+
 ## 13. Troubleshooting
 
 **The Gateways page says remote gateways cannot be enrolled on this deployment.**

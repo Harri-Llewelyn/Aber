@@ -16,7 +16,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -26,7 +26,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPT = join(REPO, 'forge', 'gateway-platform', 'roles', 'converge', 'files', 'acs-gateway-converge');
 
 /** Every tool the script itself invokes. A missing one is a skipped suite, never a failure. */
-const MISSING = ['bash', 'jq', 'python3'].filter(
+const MISSING = ['bash', 'jq', 'python3', 'git'].filter(
   (tool) => spawnSync(tool, ['--version'], { stdio: 'ignore' }).status !== 0,
 );
 const SKIP = MISSING.length
@@ -41,7 +41,7 @@ const posix = (p) => p.replace(/\\/g, '/');
  * puller's checkout carries; null means a repository that has none yet. Anything set to null is
  * left out, which is how the absent-file refusals are reached.
  */
-function appliance({ key = 'PRIVATE KEY', knownHosts = 'forge ssh-ed25519 AAAA', repository, pointer } = {}) {
+function appliance({ key = 'PRIVATE KEY', knownHosts = 'forge ssh-ed25519 AAAA', repository, pointer, custom } = {}) {
   const state = posix(mkdtempSync(join(tmpdir(), 'acs-converge-')));
   const gitops = `${state}/data/gitops`;
   mkdirSync(gitops, { recursive: true });
@@ -57,9 +57,15 @@ function appliance({ key = 'PRIVATE KEY', knownHosts = 'forge ssh-ed25519 AAAA',
       ...repository,
     }, null, 2));
   }
-  if (pointer) {
-    mkdirSync(`${gitops}/repo`, { recursive: true });
-    writeFileSync(`${gitops}/repo/platform.yml`, pointer);
+  if (pointer || custom) mkdirSync(`${gitops}/repo`, { recursive: true });
+  if (pointer) writeFileSync(`${gitops}/repo/platform.yml`, pointer);
+  if (custom) {
+    writeFileSync(`${gitops}/repo/custom.yml`, custom);
+    // A real repository, because the script records the revision it ran the playbook from and
+    // `rev-parse` in a directory that is not one would report nothing.
+    const git = (...args) => execFileSync('git', args, { cwd: `${gitops}/repo`, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main');
+    git('-c', 'user.email=t@example.invalid', '-c', 'user.name=Test', 'commit', '-q', '--allow-empty', '-m', 'seed');
   }
   return { state, gitops };
 }
@@ -69,15 +75,21 @@ function appliance({ key = 'PRIVATE KEY', knownHosts = 'forge ssh-ed25519 AAAA',
  * argument per line, so an argument carrying a space is still one line's worth of value, and exits
  * with `exit`.
  */
-function converge({ state, gitops }, { exit = 0 } = {}) {
+function converge({ state, gitops }, { exit = 0, customExit = 0 } = {}) {
   const bin = `${state}/bin`;
   mkdirSync(bin, { recursive: true });
-  const argv = `${state}/ansible-pull.argv`;
-  writeFileSync(
-    `${bin}/ansible-pull`,
-    `#!/bin/sh\n: > '${argv}'\nfor a in "$@"; do printf '%s\\n' "$a" >> '${argv}'; done\nexit ${exit}\n`,
-    { mode: 0o755 },
-  );
+
+  /** A stub recording its working directory and its argv, one argument per line, then exiting. */
+  const stub = (name, code) => {
+    writeFileSync(
+      `${bin}/${name}`,
+      `#!/bin/sh\npwd > '${state}/${name}.cwd'\n: > '${state}/${name}.argv'\n`
+        + `for a in "$@"; do printf '%s\\n' "$a" >> '${state}/${name}.argv'; done\nexit ${code}\n`,
+      { mode: 0o755 },
+    );
+  };
+  stub('ansible-pull', exit);
+  stub('ansible-playbook', customExit);
 
   const run = spawnSync('bash', [posix(SCRIPT)], {
     encoding: 'utf8',
@@ -86,20 +98,28 @@ function converge({ state, gitops }, { exit = 0 } = {}) {
       PATH: `${bin}:${process.env.PATH}`,
       ACS_STATE_DIR: state,
       ACS_DATA_DIR: `${state}/data`,
+      ACS_COMPOSE_DIR: `${state}/opt`,
     },
   });
 
+  const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : null);
+  const lines = (p) => { const t = read(p); return t === null ? null : t.trimEnd().split('\n'); };
   const converged = `${gitops}/converged.json`;
   return {
     status: run.status,
     output: `${run.stdout ?? ''}${run.stderr ?? ''}`,
-    argv: existsSync(argv) ? readFileSync(argv, 'utf8').trimEnd().split('\n') : null,
+    argv: lines(`${state}/ansible-pull.argv`),
+    customArgv: lines(`${state}/ansible-playbook.argv`),
+    customCwd: read(`${state}/ansible-playbook.cwd`)?.trim() ?? null,
     record: existsSync(converged) ? JSON.parse(readFileSync(converged, 'utf8')) : null,
   };
 }
 
-/** The value `ansible-pull` was given for a named flag. */
+/** The value a stub was given for a named flag. */
 const flag = (argv, name) => argv[argv.indexOf(name) + 1];
+
+/** Every value for a flag that is passed more than once, in order. */
+const flags = (argv, name) => argv.flatMap((a, i) => (a === name ? [argv[i + 1]] : []));
 
 test('refuses when the deploy key is absent, naming the file', { skip: SKIP }, () => {
   const result = converge(appliance({ key: null }));
@@ -190,6 +210,79 @@ test('a malformed platform.yml falls back rather than aborting', { skip: SKIP },
   assert.equal(flag(result.argv, '--checkout'), 'v0.0.9');
   // The declared default, not the empty string a failed read leaves behind.
   assert.deepEqual(JSON.parse(flag(result.argv, '--extra-vars')), {});
+});
+
+// This gateway's own playbook, beside its flow on main
+
+test("records no custom run when the repository carries no playbook of its own", { skip: SKIP }, () => {
+  const result = converge(appliance({ pointer: 'platform:\n  tag: v1.2.3\n' }));
+  assert.equal(result.status, 0);
+  assert.equal(result.customArgv, null, 'nothing of the gateway\'s own should have been run');
+  // `null`, not an absent key: the platform reads this field to say "none" rather than "unknown".
+  assert.equal(result.record.custom, null);
+  assert.match(result.output, /no custom\.yml/);
+});
+
+test("runs the gateway's own custom.yml from the checkout, recording the revision", { skip: SKIP }, () => {
+  const state = appliance({ pointer: 'platform:\n  tag: v1.2.3\n', custom: '- hosts: localhost\n' });
+  const result = converge(state);
+
+  assert.equal(result.status, 0);
+  assert.ok(result.customArgv.includes('custom.yml'));
+  // From the checkout, so roles/ and files/ beside custom.yml resolve.
+  assert.equal(result.customCwd, `${state.gitops}/repo`);
+
+  assert.equal(result.record.outcome, 'converged', 'the platform outcome is its own');
+  assert.equal(result.record.custom.outcome, 'converged');
+  assert.match(result.record.custom.revision, /^[0-9a-f]{40}$/);
+  assert.match(result.record.custom.ran_at, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("hands custom.yml the platform's paths, after the gateway's own vars", { skip: SKIP }, () => {
+  const state = appliance({
+    pointer: 'platform:\n  tag: v1.2.3\n  vars:\n    chrony_servers:\n      - "server ntp.plant.example iburst"\n',
+    custom: '- hosts: localhost\n',
+  });
+  const result = converge(state);
+
+  const given = flags(result.customArgv, '--extra-vars').map((v) => JSON.parse(v));
+  assert.equal(given.length, 2, 'the gateway\'s vars and the platform\'s paths, in that order');
+  assert.deepEqual(given[0], { chrony_servers: ['server ntp.plant.example iburst'] });
+  // LAST, so a custom.yml cannot move the directories the platform owns by declaring them itself.
+  assert.deepEqual(given[1], {
+    acs_state_dir: state.state,
+    acs_data_dir: `${state.state}/data`,
+    acs_compose_dir: `${state.state}/opt`,
+    acs_repo_dir: `${state.gitops}/repo`,
+    acs_platform_tag: 'v1.2.3',
+  });
+});
+
+test('a failing custom.yml leaves the platform converged and still fails the unit', { skip: SKIP }, () => {
+  const result = converge(
+    appliance({ pointer: 'platform:\n  tag: v1.2.3\n', custom: '- hosts: localhost\n' }),
+    { customExit: 2 },
+  );
+  // THE EXIT STATUS IS THE CUSTOM RUN'S. Recorded in the forge and visible in the unit's status:
+  // a field nobody is watching is not where the failure this lane most often produces should live.
+  assert.equal(result.status, 2);
+  assert.equal(result.record.outcome, 'converged');
+  assert.equal(result.record.tag, 'v1.2.3');
+  assert.equal(result.record.custom.outcome, 'failed');
+  assert.match(result.record.custom.detail, /exited 2/);
+});
+
+test('custom.yml is not attempted when the platform run failed', { skip: SKIP }, () => {
+  const result = converge(
+    appliance({ pointer: 'platform:\n  tag: v1.2.3\n', custom: '- hosts: localhost\n' }),
+    { exit: 3 },
+  );
+  assert.equal(result.status, 3);
+  assert.equal(result.record.outcome, 'failed');
+  // The platform is what puts Docker and the directories in place; a custom playbook run without
+  // it would fail for the platform's reason and report the failure as its own.
+  assert.equal(result.customArgv, null);
+  assert.equal(result.record.custom, null);
 });
 
 test('the script is the one the playbook installs', { skip: SKIP }, () => {
