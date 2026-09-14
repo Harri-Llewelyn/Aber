@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.classify.outputs.code }}
+      playbook: ${{ steps.classify.outputs.playbook }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -64,25 +65,40 @@ jobs:
           echo "$FILES"
 
           CODE=false
+          PLAYBOOK=false
           for f in $FILES; do
             case "$f" in
+              # The platform playbook. Its own documentation is prose: a README that moved has not
+              # changed what converges on an appliance. `*` crosses slashes in a case pattern, so
+              # this one clause covers every depth under the directory.
+              forge/gateway-platform/*.md) ;;
+              forge/gateway-platform/*) PLAYBOOK=true; CODE=true ;;
               # Documentation only. `.md` anywhere, plus everything under docs/ -- which holds the
               # images those pages embed as well as the pages themselves.
               *.md|docs/*) ;;
-              *) CODE=true; break ;;
+              *) CODE=true ;;
             esac
+            # Both decided: nothing later in the list can change either answer.
+            if [ "$CODE" = "true" ] && [ "$PLAYBOOK" = "true" ]; then break; fi
           done
 
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "playbook=$PLAYBOOK" >> "$GITHUB_OUTPUT"
           if [ "$CODE" = "true" ]; then
             echo "non-documentation files changed: the end-to-end stack will run"
           else
             echo "documentation only: skipping the end-to-end stack"
           fi
+          if [ "$PLAYBOOK" = "true" ]; then
+            echo "the platform playbook changed: it will be converged twice in a container"
+          fi
 
   frontend-build:
     name: Frontend Build & Test
     runs-on: ubuntu-latest
+    # Ordering only -- there is no job-level `if`, so this job runs whatever the diff holds. One
+    # step inside it reads `playbook`, and a step cannot see an output the job did not ask for.
+    needs: changes
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -260,6 +276,38 @@ jobs:
           python3 -m pip install --quiet ansible-core
           cd forge/gateway-platform
           ansible-playbook --syntax-check site.yml
+
+      # An appliance runs this playbook against itself every hour, for years. A task that reports
+      # `changed` on an unchanged box restarts what it touches on every tick, and the one task here
+      # that acts on `changed` rebuilds the compose project -- so a drift in idempotency is a
+      # gateway that rebuilds its image hourly, which nothing would report.
+      #
+      # In a container, so the second run meets the state the first left. `--skip-tags docker`
+      # because Docker's engine does not install under one; the OS assert needs an Ubuntu image;
+      # and the service and timer tasks gate themselves on `acs_systemd`, which is false where PID
+      # 1 is a shell. Gated on the playbook having changed (the `changes` job): roughly three
+      # minutes, nearly all of it apt, on a directory that changes rarely.
+      - name: Verify The Platform Playbook Converges Twice To The Same State
+        if: needs.changes.outputs.playbook == 'true'
+        run: |
+          docker run --rm -v "$PWD/forge/gateway-platform:/pb:ro" ubuntu:24.04 bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive ANSIBLE_LOCALHOST_WARNING=false
+            apt-get update -qq >/dev/null
+            apt-get install -y -qq ansible-core python3-yaml >/dev/null
+            # Copied out of the read-only mount: the appliance role writes beside the playbook.
+            cp -r /pb /work && cd /work
+            ansible-playbook -i localhost, --skip-tags docker site.yml > /run1.log 2>&1 || {
+              echo "::error::the platform playbook did not converge on a clean container"; cat /run1.log; exit 1; }
+            ansible-playbook -i localhost, --skip-tags docker site.yml > /run2.log 2>&1 || {
+              echo "::error::the platform playbook failed on its second run"; cat /run2.log; exit 1; }
+            tail -3 /run2.log
+            # The recap, not the task lines: `changed=0` is the whole assertion.
+            grep -qE "changed=0 " /run2.log || {
+              echo "::error::the second convergence reported a change; a task here is not idempotent"
+              echo "--- second run ---"; cat /run2.log; exit 1; }
+            echo "the second convergence changed nothing"
+          '
 
       # vite.config.js fails fast if these are unset. Docker passes them as build args; a bare
       # `npm run build` has to supply them. Local-dev demo values, baked into a throwaway bundle.
@@ -1213,8 +1261,10 @@ jobs:
       - name: Run Python Unit Suites
         run: node scripts/run-python-suites.mjs --lane unit
 
-      # The three suites under `scripts/lib/`: the mosquitto credential merge, the orphan sweep's
-      # filter and the service JWT. Explicit file paths, not the directory (see `npm run test:lib`).
+      # The suites under `scripts/lib/`: the appliance's converge script, the mosquitto credential
+      # merge, the orphan sweep's filter and the service JWT. Explicit file paths, not the
+      # directory (see `npm run test:lib`). The converge suite needs `jq` on PATH, which this
+      # runner has and a Windows development box does not; it skips loudly rather than silently.
       - name: Run Node Library Suites
         run: npm run test:lib
 
