@@ -113,38 +113,29 @@ a managed artefact, the forge as the appliance sees it, and a lane for bespoke a
 should not be started as one piece of work. Ubuntu and Ubuntu Server are the operating system,
 amd64 and arm64 alike; another OS is a feature request.
 
-### The one-liner
+### The one-liner and the CA
 
-A Manager or Administrator creates the gateway in the dashboard and is shown a command to paste
-on the appliance: `curl -fsSL -H "X-Enrolment-Token: <token>" https://api.<domain>/... | bash`,
-with the dashboard minting (role-gated) and the appliance fetching (token-gated), which is
-`enroll-gateway`'s model rather than `gateway-bundle`'s. The token travels in a header, never the
-query string. Fetching validates the token; only enrolling consumes it. The installer is static,
-tagged in the forge, and **served by the platform**, because a fresh appliance has no key and the
-forge refuses anonymous reads; the edge function reads the tagged file with the machine account.
-The per-gateway secrets (`NODERED_CREDENTIAL_SECRET`) come from a token-gated fetch and are never
-cacheable. The script wraps its body in a function invoked on the last line so a truncated download
-runs nothing.
+**Built** (`0105`, `gateway-install`, `gateway-platform/install.sh`;
+[The one-liner](../supabase/README.md#the-one-liner-0105) and
+[`docs/physical-gateways.md`](physical-gateways.md#on-the-appliance-the-command)): the dashboard
+mints the token and an SPKI pin of the platform's root beside it over the authenticated session;
+stage 0 fetches the root as inert bytes over plain HTTP from the dashboard's host, checks the pin,
+installs it; stage 1 fetches the installer over verified TLS with the token in a header, never the
+query string, and runs it with the token in its environment; the installer, the playbook and the
+per-gateway `.env` are token-gated fetches that validate without consuming
+(`peek_gateway_enrollment_token()`), never cacheable, with the credential secret generated per
+fetch and written once; install first, enrol last, the same command re-runnable until enrolment;
+the body a function invoked on the last line. The installer is served from the platform's own copy
+of the playbook, which is the content the tag in the forge carries, rather than read from the
+forge at the tag: same bytes, no forge dependency on the commissioning path. The route refuses a
+plain-HTTP public URL, which decided the *worth deciding early* question; the development values
+alone override it. The appliance checks the root it enrols with against the pin and notes a
+difference rather than refusing, since that root arrived over TLS the pin verified.
 
-**Install first, enrol last.** Packages, Docker and Ansible take minutes and can fail; every step
-before enrolment is idempotent and retryable with the same command, and the token is spent only by
-the enrolment that also writes the credential. The script refuses to run twice on an enrolled
-appliance, as `bootstrap.mjs` does.
-
-### The CA
-
-**The CA is the gating question.** A fresh appliance does not trust the internal root, and a
-one-liner that ends in `curl -k` is worse than the ZIP. Decided: **the pin rides in the command
-and the script checks it** (RFC 7030 §4.1.1). The dashboard mints an SPKI fingerprint of the live
-root beside the token, over the authenticated browser session, which is the trusted channel; stage
-0 fetches the PEM as inert bytes over plain HTTP from a static ingress path, hashes it, refuses on
-mismatch, installs it, and everything after is verified TLS. **Stage 0 carries no secret**: the
-token rides only over TLS the pin has already verified. Pin the public key, not the certificate
-(`renewBefore: 8760h` re-issues the root a year early; `rotationPolicy: Never` keeps the key).
-The appliance must also check the CA it enrols with against the pin, because the broker root and
-the ingress root are allowed to differ. A cloud-init seed that plants the root is the
-zero-circularity answer for a plant that images its own appliances. Since the `apikey` gate is on
-`/functions/v1/`, serving the PEM from the ingress costs no fifth exemption.
+**Still open:** a cloud-init seed that plants the root, the zero-circularity answer for a plant
+that images its own appliances (the command works there too, with stage 0 finding the root
+already trusted). A deployment that redirects plain HTTP to HTTPS on the dashboard's host breaks
+stage 0 closed (curl stops, nothing is sent); the chart adds no such redirect.
 
 ### The operating system
 

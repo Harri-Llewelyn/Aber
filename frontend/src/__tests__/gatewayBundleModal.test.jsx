@@ -7,7 +7,7 @@ import { StatusBadge } from '../components/common/StatusBadge'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
-  api: { downloadGatewayBundle: vi.fn() }
+  api: { downloadGatewayBundle: vi.fn(), installCommand: vi.fn() }
 }))
 
 const GATEWAY = {
@@ -444,6 +444,72 @@ describe('GatewayBundleModal — failure on open', () => {
     await ready()
     expect(screen.queryByText(/temporarily unavailable/)).toBeNull()
     expect(clicked).toContain(FILENAME)
+  })
+})
+
+describe('GatewayBundleModal — the install command', () => {
+  const TOKEN = 'ab'.repeat(32)
+  const PIN = '4QWPm3Uecer26J9fhP3nas82cSZFdFpBn8uRIAwrYCM='
+  const COMMAND = `curl -fsSL http://app.plant/.well-known/acs-cymru/ca.pem -o /tmp/acs-cymru-ca.pem && [ "$(openssl x509 -in /tmp/acs-cymru-ca.pem -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64)" = "${PIN}" ] && sudo install -m 644 /tmp/acs-cymru-ca.pem /usr/local/share/ca-certificates/acs-cymru.crt && sudo update-ca-certificates >/dev/null && curl -fsSL -H "apikey: sb_publishable_x" -H "X-Enrolment-Token: ${TOKEN}" https://api.plant/functions/v1/gateway-install | sudo env ACS_ENROLMENT_TOKEN=${TOKEN} ACS_CA_PIN=${PIN} bash`
+  const commandResponse = (overrides = {}) => ({
+    command: COMMAND,
+    expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+    sparkplugId: GATEWAY.sparkplug_id,
+    bundleVersion: '1.2.0',
+    caPin: PIN,
+    caUrl: 'http://app.plant/.well-known/acs-cymru/ca.pem',
+    installUrl: 'https://api.plant/functions/v1/gateway-install',
+    ...overrides
+  })
+
+  it('mints the command rather than a download when the deployment offers it', async () => {
+    api.installCommand.mockResolvedValue(commandResponse())
+    renderModal({ installer: { available: true, reason: null } })
+    await waitFor(() => expect(api.installCommand).toHaveBeenCalledTimes(1))
+    expect(api.downloadGatewayBundle).not.toHaveBeenCalled()
+    expect(clicked).toEqual([])
+    // Shown verbatim: the token, the pin and the addresses are the server's to compose.
+    expect(screen.getByText(COMMAND)).toBeInTheDocument()
+    expect(screen.getByText(/paste on the appliance, as a user with sudo/i)).toBeInTheDocument()
+    // The pin is named in the explanation as well as inside the command itself.
+    expect(screen.getByText(`${PIN.slice(0, 12)}…`, { selector: 'span' })).toBeInTheDocument()
+  })
+
+  it('copies the command verbatim', async () => {
+    api.installCommand.mockResolvedValue(commandResponse())
+    renderModal({ installer: { available: true, reason: null } })
+    await waitFor(() => expect(screen.getByText(COMMAND)).toBeInTheDocument())
+    fireEvent.click(screen.getByTitle(/copy the command/i))
+    await waitFor(() => expect(written).toEqual([COMMAND]))
+  })
+
+  it('says when the command is unpinned, which only a development deployment allows', async () => {
+    api.installCommand.mockResolvedValue(commandResponse({ caPin: null, caUrl: null, command: 'curl ... | sudo env ACS_ENROLMENT_TOKEN=x bash' }))
+    renderModal({ installer: { available: true, reason: null } })
+    await waitFor(() => expect(api.installCommand).toHaveBeenCalledTimes(1))
+    expect(screen.getByText(/served over plain HTTP, which only a development deployment allows/i)).toBeInTheDocument()
+  })
+
+  it('falls back to the bundle when the deployment cannot serve the installer', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderModal({ installer: { available: false, reason: 'SUPABASE_PUBLIC_URL is plain HTTP' } })
+    await waitFor(() => expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1))
+    expect(api.installCommand).not.toHaveBeenCalled()
+    expect(screen.queryByText(/use the install command instead/i)).toBeNull()
+  })
+
+  it('offers the bundle instead, and asks first because that spends the shown token', async () => {
+    api.installCommand.mockResolvedValue(commandResponse())
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderModal({ installer: { available: true, reason: null } })
+    await waitFor(() => expect(screen.getByText(COMMAND)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/download the bundle instead/i))
+    expect(screen.getByText(/issue a new bundle for this gateway\?/i)).toBeInTheDocument()
+    expect(api.downloadGatewayBundle).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText(/type .* to confirm/i), { target: { value: GATEWAY.gateway_name } })
+    fireEvent.click(screen.getByText(/issue & download/i))
+    await waitFor(() => expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1))
+    expect(clicked).toEqual([FILENAME])
   })
 })
 

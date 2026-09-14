@@ -9,6 +9,7 @@ the lane the forge already has. Nothing tracks `main` of this repository.
 
 ```
 site.yml            the playbook: hosts localhost, four roles, in this order
+install.sh          the one-liner's installer, served by the platform to a fresh appliance
 roles/base          packages, unattended-upgrades without reboot, chrony
 roles/docker        Ubuntu's docker.io and the Compose plugin, held out of unattended upgrades
 roles/appliance     the compose project under /opt/acs-gateway, from appliance/ (the bundle template)
@@ -27,6 +28,17 @@ nobody else, because its content comes from the platform's own repository, where
 An optional **custom** playbook lives in a gateway's own repository beside its flow, and runs
 after this one. Every gateway runs the platform playbook; "custom" is a gateway whose repository
 also carries a playbook, not a choice between two.
+
+## How an appliance gets here
+
+The dashboard shows a command to paste on a fresh Ubuntu machine. It fetches the platform's root
+over plain HTTP, checks its public key against the pin minted beside the token, installs it, and
+then fetches `install.sh` from the platform over TLS with the token in a header. The installer
+puts the packages the playbook needs in place, fetches this playbook (as a zip, from the platform:
+the forge refuses anonymous reads and the appliance has no key yet), runs it, writes the
+appliance's `.env`, and enrols by starting the compose project. Install first, enrol last: every
+step before enrolment can be re-run with the same command, and the token is spent only by the
+enrolment. The runbook is in `docs/physical-gateways.md`.
 
 ## How an appliance runs it
 

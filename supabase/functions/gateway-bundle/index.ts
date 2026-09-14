@@ -6,28 +6,33 @@ import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { brokerPublicHost, platformPublicUrl } from "../_shared/publicAddresses.ts";
+import { BUNDLE_VERSION, newCredentialSecret, renderGatewayEnv } from "../_shared/gatewayEnv.ts";
+import { platformRootPem, spkiPin } from "../_shared/caPin.ts";
+import { installerTransport } from "../_shared/installer.ts";
 
 /**
- * Package the physical gateway bootstrap bundle as a ZIP, with a freshly minted enrolment token.
- * The mirror image of enroll-gateway: no token, authorised by role (Administrator or
- * Shopfloor_Manager). The token is minted through `issue_gateway_enrollment_token()`, SECURITY
- * DEFINER and checking `public.has_role()` itself, as the caller and not with the service-role key,
- * so the role check below exists only so a refusal answers 403 with a usable message. This function
- * holds no service-role key; its ceiling is what the caller could already do through PostgREST.
+ * Package the physical gateway bootstrap bundle as a ZIP, with a freshly minted enrolment token,
+ * or mint the token and hand back the one-liner an operator pastes on the appliance instead
+ * (`format: "command"`). The mirror image of enroll-gateway: no token, authorised by role
+ * (Administrator or Shopfloor_Manager). The token is minted through
+ * `issue_gateway_enrollment_token()`, SECURITY DEFINER and checking `public.has_role()` itself, as
+ * the caller and not with the service-role key, so the role check below exists only so a refusal
+ * answers 403 with a usable message. This function holds no service-role key; its ceiling is what
+ * the caller could already do through PostgREST.
  *
  * The bundle carries a claim, never a credential: there is no broker password in the archive, and
  * the appliance obtains one at first boot. `NODERED_CREDENTIAL_SECRET` is generated per bundle, so
  * one appliance's credential file cannot be decrypted with another bundle's .env.
+ *
+ * The command is two stages in one line (docs/physical-gateways.md). Stage 0 carries no secret:
+ * it fetches the platform's root over plain HTTP from the dashboard's host, checks its public
+ * key against the pin minted here beside the token over the authenticated browser session, which
+ * is the trusted channel, and installs it. Stage 1 fetches the installer from gateway-install over
+ * TLS that pin has verified, with the token in a header, and runs it with the token and the pin
+ * in its environment.
  */
 
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
-
-/**
- * The bundle's own version, stamped into .env, sent back in a header, and recorded on the gateway
- * at enrolment, so the dashboard can say which vintage an appliance runs. Bump when the template
- * changes in a way a deployed appliance would care about.
- */
-const BUNDLE_VERSION = "1.2.0";
 
 /**
  * The template files, delivered through the environment: an edge-runtime user worker has no
@@ -65,9 +70,35 @@ function slug(name: string): string {
 }
 
 /**
+ * Whether this deployment can mint the one-liner, and why not: the installer route must be served
+ * over TLS (or the development switch set), and the pin needs the root. Without the root the
+ * command is still minted on a deployment whose public URL is plain HTTP under the switch, with
+ * no stage 0, which is what a laptop cluster gets and nothing else should.
+ */
+async function installerAvailability(): Promise<{ available: boolean; reason: string | null; pin: string | null; caUrl: string | null }> {
+  const transport = installerTransport();
+  if (!transport.ok) return { available: false, reason: transport.reason, pin: null, caUrl: null };
+  const caUrl = (Deno.env.get("ACS_CA_URL") ?? "").trim() || null;
+  const pem = platformRootPem();
+  const pin = pem ? await spkiPin(pem) : null;
+  if (transport.publicUrl.startsWith("https://") && (!pin || !caUrl)) {
+    return {
+      available: false,
+      reason: !pin
+        ? "the platform's root is not mounted into the functions (ingress TLS issued after the pod started: restart supabase-functions)"
+        : "ACS_CA_URL is unset, so an appliance has nowhere to fetch the root from",
+      pin,
+      caUrl,
+    };
+  }
+  return { available: true, reason: null, pin, caUrl };
+}
+
+/**
  * The readiness answer. `ready` is true only when both addresses would be accepted by the two
  * functions that check them; `addresses` names each one and the problem, so the dashboard can
- * say which variable to set rather than that something is wrong.
+ * say which variable to set rather than that something is wrong. `installer` says whether the
+ * one-liner can be minted, so the dashboard offers it or the bundle.
  */
 async function readiness(authHeader: string): Promise<Response> {
   const supabaseUser = createClient(Deno.env.get("SUPABASE_URL") ?? "", gatewayKey(), {
@@ -78,10 +109,36 @@ async function readiness(authHeader: string): Promise<Response> {
     return json(401, { error: "Invalid user token", details: error?.message });
   }
   const addresses = [platformPublicUrl(), brokerPublicHost()];
+  const installer = await installerAvailability();
   return json(200, {
     ready: addresses.every((a) => !a.problem),
     addresses,
+    installer: { available: installer.available, reason: installer.reason },
   });
+}
+
+/**
+ * The pasted command. Stage 0 only when there is a root to pin, which is every deployment the
+ * installer is served over TLS on. The token appears twice, in the header that authorises the
+ * fetch and in the environment the script reads it from; the command travelled over the
+ * authenticated browser session and is pasted, never stored.
+ */
+export function installCommand(input: {
+  publicUrl: string;
+  publishableKey: string;
+  token: string;
+  pin: string | null;
+  caUrl: string | null;
+}): string {
+  const stage0 = input.pin && input.caUrl
+    ? `curl -fsSL ${input.caUrl} -o /tmp/acs-cymru-ca.pem && ` +
+      `[ "$(openssl x509 -in /tmp/acs-cymru-ca.pem -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64)" = "${input.pin}" ] && ` +
+      "sudo install -m 644 /tmp/acs-cymru-ca.pem /usr/local/share/ca-certificates/acs-cymru.crt && sudo update-ca-certificates >/dev/null && "
+    : "";
+  const stage1 = `curl -fsSL -H "apikey: ${input.publishableKey}" -H "X-Enrolment-Token: ${input.token}" ` +
+    `${input.publicUrl}/functions/v1/gateway-install | sudo env ACS_ENROLMENT_TOKEN=${input.token}` +
+    (input.pin ? ` ACS_CA_PIN=${input.pin}` : "") + " bash";
+  return stage0 + stage1;
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -135,6 +192,8 @@ export default async function handler(req: Request): Promise<Response> {
     const body = await req.json().catch(() => ({}));
     const gatewayId = typeof body?.gateway_id === "string" ? body.gateway_id : "";
     const ttlMinutes = Number.isInteger(body?.ttl_minutes) ? body.ttl_minutes : 30;
+    // "zip" (the default) downloads the bundle; "command" answers JSON with the one-liner.
+    const format = body?.format === "command" ? "command" : "zip";
 
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(gatewayId)) {
       return json(400, {
@@ -183,11 +242,24 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
+    // Whether the one-liner can be served, checked BEFORE minting for the same reason as the
+    // address above: a refusal must not cost the gateway its live token.
+    const installer = format === "command" ? await installerAvailability() : null;
+    if (installer && !installer.available) {
+      console.error(`the install command cannot be minted: ${installer.reason}`);
+      return json(503, {
+        error: "The install command is not available on this deployment",
+        details: `${installer.reason}. Download the bundle instead. No enrolment token was minted.`,
+      });
+    }
+
     // Check the templates are present BEFORE minting, for the third time and the same reason: a
     // deployment missing its templates must not spend a gateway's live token discovering it.
-    const missing = Object.entries(TEMPLATE_ENV)
-      .filter(([, envVar]) => !Deno.env.get(envVar))
-      .map(([name, envVar]) => `${name} (${envVar})`);
+    const missing = format === "zip"
+      ? Object.entries(TEMPLATE_ENV)
+        .filter(([, envVar]) => !Deno.env.get(envVar))
+        .map(([name, envVar]) => `${name} (${envVar})`)
+      : [];
 
     if (missing.length) {
       console.error(`gateway-bundle is missing template file(s): ${missing.join(", ")}`);
@@ -221,16 +293,37 @@ export default async function handler(req: Request): Promise<Response> {
       return json(500, { error: "The enrolment token could not be minted" });
     }
 
+    if (installer) {
+      const command = installCommand({
+        publicUrl,
+        publishableKey: Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "",
+        token: record.token,
+        pin: installer.pin,
+        caUrl: installer.caUrl,
+      });
+      console.log(
+        `issued an install command for ${gateway.name} (${gateway.sparkplug_id}) to ${user.id} ` +
+        `[${userRole}]; token expires ${record.expires_at}; ${installer.pin ? "pinned" : "UNPINNED (plain HTTP, development)"}`,
+      );
+      return new Response(JSON.stringify({
+        token: record.token,
+        expires_at: record.expires_at,
+        sparkplug_id: gateway.sparkplug_id,
+        gateway_name: gateway.name,
+        bundle_version: BUNDLE_VERSION,
+        command,
+        install_url: `${publicUrl}/functions/v1/gateway-install`,
+        ca_url: installer.caUrl,
+        ca_pin: installer.pin,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
+    }
+
     // Assemble the archive. One top-level folder named for the gateway, so four downloads in one
     // place stay distinguishable and do not overwrite each other on unpacking.
     const folder = `acs-gateway-${slug(gateway.name)}-${gateway.sparkplug_id}`;
-
-    // 32 bytes of hex. Encrypts the appliance's flows_cred.json; generated per bundle so no two
-    // appliances share one, and never transmitted anywhere else.
-    const credentialSecret = Array.from(
-      crypto.getRandomValues(new Uint8Array(32)),
-      (b) => b.toString(16).padStart(2, "0"),
-    ).join("");
 
     const files: Record<string, Uint8Array> = {};
     for (const [name, envVar] of Object.entries(TEMPLATE_ENV)) {
@@ -238,48 +331,18 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     // The .env is generated, not templated: it is the only file that differs per gateway and the
-    // only one carrying the token. Written as a real .env so `docker compose up` works with no
-    // editing. Every name here is read by bootstrap.mjs: ACS_SUPABASE_URL,
-    // ACS_SUPABASE_PUBLISHABLE_KEY, ACS_ENROLLMENT_TOKEN, ACS_AGENT_VERSION, ACS_GATEWAY_NAME and
-    // NODERED_CREDENTIAL_SECRET.
-    files[`${folder}/.env`] = strToU8(`# =============================================================================
-# ACS-Cymru physical gateway -- ${gateway.name}
-#
-# GENERATED ${new Date().toISOString()} FOR ONE GATEWAY. Not reusable: the token below is
-# single-use and bound to ${gateway.sparkplug_id}.
-#
-# THE TOKEN EXPIRES ${record.expires_at}. After that, generate a new bundle from the
-# gateway's page in the dashboard -- regenerating invalidates this one.
-# =============================================================================
-
-# The platform, as reached FROM THIS APPLIANCE.
-ACS_SUPABASE_URL=${publicUrl}
-
-# Public by construction -- the same key every browser running the dashboard holds. It gets the
-# enrolment request past the gateway's key check; the token below is what actually authorises it.
-ACS_SUPABASE_PUBLISHABLE_KEY=${Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? ""}
-
-# SINGLE USE. Redeemed by bootstrap.mjs on first boot and spent thereafter, whether or not that boot
-# succeeded. If bootstrap reports the token was RELEASED (a transient broker outage), this same
-# value works again -- just start the container.
-#
-# THERE IS NO BROKER PASSWORD IN THIS FILE, and there must never be one. The appliance obtains its
-# own at first boot, which is the whole reason this is a short-lived claim instead of a credential.
-ACS_ENROLLMENT_TOKEN=${record.token}
-
-# Encrypts /data/flows_cred.json on the appliance, where the broker password ends up. GENERATED FOR
-# THIS BUNDLE ALONE: a shared value would let one appliance's credential file be decrypted with
-# another's .env. Losing it means re-enrolling -- the broker stores only a hash, so the password
-# cannot be recovered from either side.
-NODERED_CREDENTIAL_SECRET=${credentialSecret}
-
-# Recorded on the gateway at enrolment, so the fleet's vintage is visible from the dashboard.
-ACS_AGENT_VERSION=${BUNDLE_VERSION}
-
-# Display name only -- used in the Node-RED editor's title and in bootstrap's output. The gateway's
-# real identity is its sparkplug_id, which arrives from enrolment and cannot be set here.
-ACS_GATEWAY_NAME=${gateway.name}
-`);
+    // only one carrying the token. Rendered by _shared/gatewayEnv.ts, which the installer's
+    // token-gated fetch shares.
+    files[`${folder}/.env`] = strToU8(renderGatewayEnv({
+      gatewayName: gateway.name,
+      sparkplugId: gateway.sparkplug_id,
+      publicUrl,
+      publishableKey: Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "",
+      token: record.token,
+      expiresAt: record.expires_at,
+      credentialSecret: newCredentialSecret(),
+      via: "bundle",
+    }));
 
     // A per-gateway note at the top of the folder, so an unpacked bundle is self-identifying. The
     // bundle for the wrong gateway is otherwise indistinguishable from the right one until booted.

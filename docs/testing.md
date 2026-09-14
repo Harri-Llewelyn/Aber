@@ -124,6 +124,14 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/forge-membership/test_forge_membership.py
 
+# The one-liner (0105): the install command is minted by role and names the token, the pin and the
+# installer; gateway-install serves the installer, the platform playbook and the .env against the
+# token in a header and refuses without it; none of those fetches consumes the token, and
+# enrolment then redeems it. Skips when the deployment cannot mint the command (plain HTTP without
+# the dev switch) and says why.
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/gateway-install/test_gateway_install.py
+
 # The forge's push webhook (0095, 0104): signature refusals, what a push to main or to appliance
 # records on the gateway row, what is ignored, one delivery sent by the forge itself for a freshly
 # enrolled gateway, and one class that acts as the appliance: it pushes with the key it enrolled

@@ -152,3 +152,9 @@ supabaseDb:
 postgresTls:
   extraDnsSans:
     - localhost
+
+# The one-liner over plain HTTP, on this laptop cluster alone: it has no ingress TLS to pin, and
+# the installer would otherwise refuse to be minted or served (values.yaml says why).
+supabaseFunctions:
+  gatewayEnrolment:
+    allowPlaintextInstaller: true

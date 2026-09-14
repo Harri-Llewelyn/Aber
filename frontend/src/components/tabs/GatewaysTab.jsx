@@ -1137,6 +1137,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           confirmFirst={bundleForGw.confirmFirst}
           onClose={() => { setBundleForGw(null); load() }}
           showToast={showToast}
+          // Whether this deployment can mint the one-liner, from the same readiness answer that
+          // says whether it can enrol at all. Null until asked; the modal then offers the bundle.
+          installer={enrolment?.installer || null}
         />
       )}
     </div>

@@ -673,6 +673,14 @@ export const SUITES = {
       'minted), ZIP integrity, and that the embedded token is the one the database will accept. ' +
       'SKIPS ALL FIFTEEN CHECKS without a stack.',
   },
+  'supabase/functions/gateway-install/test_gateway_install.py': {
+    lanes: ['stack'],
+    why:
+      'The one-liner -- the command is minted by role and names the token, the pin and the ' +
+      'installer; the installer, the playbook and the .env are served against the token in a ' +
+      'header and refused without it; and none of those fetches consumes the token, which ' +
+      'enrolment then redeems. Skips without a stack.',
+  },
   'gateway-credential/test_gateway_credential.py': {
     // BRIEFLY `manual`, AND THE REASON STOPPED BEING TRUE. It skipped all thirteen checks in e2e
     // because the demonstration credentials once left MQTT_CREDENTIAL_SERVICE_TOKEN

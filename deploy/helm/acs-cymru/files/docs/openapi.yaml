@@ -2561,6 +2561,63 @@ paths:
             Enrolment is unconfigured, or the broker credential service could not be reached. Check
             `retryable`: when true the token was released and the same bundle can be retried.
 
+  /functions/v1/gateway-install:
+    get:
+      tags: [Edge Functions]
+      summary: The one-liner's installer, playbook and .env, against the enrolment token
+      description: |
+        What the command the dashboard shows fetches, and what the installer it starts fetches
+        after it: the installer script (no `file`), the platform playbook as a zip
+        (`file=platform.zip`), and the appliance's `.env` (`file=env`). Each is authorised by the
+        enrolment token in `X-Enrolment-Token`, checked with `peek_gateway_enrollment_token()`
+        (0105), which validates without consuming: only enrolment spends the token. The token
+        rides in a header, never the query string, so it lands in no access log; nothing here is
+        cacheable; and the `.env`'s credential secret is generated per fetch, which the installer
+        writes once.
+
+        The apikey passes the gateway's key check as on every function; the token is what
+        authorises. Refused identically (401) for a missing header, a malformed token, an unknown,
+        expired or spent one, and an archived gateway. Refused outright (503) on a deployment whose
+        public URL is plain HTTP, unless the development values allow it: the route carries a
+        token and a secret.
+      parameters:
+        - in: header
+          name: X-Enrolment-Token
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+          description: The single-use enrolment token the dashboard minted with the command.
+        - in: query
+          name: file
+          required: false
+          schema:
+            type: string
+            enum: [env, platform.zip]
+          description: Absent for the installer script.
+      responses:
+        '200':
+          description: "The installer, the playbook or the .env. `Cache-Control: no-store` on all three."
+          content:
+            text/x-shellscript:
+              schema:
+                type: string
+              example: "#!/bin/bash\n# ACS-Cymru gateway appliance installer.\n..."
+            text/plain:
+              schema:
+                type: string
+              example: "ACS_SUPABASE_URL=https://api.plant.example\nACS_ENROLLMENT_TOKEN=...\n"
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: The token is not valid. Unknown, expired, spent and archived are indistinguishable.
+        '404':
+          description: A `file` this route does not serve.
+        '503':
+          description: The installer is not available on this deployment; `details` says why.
+
   /functions/v1/aas-export:
     post:
       tags: [Edge Functions]

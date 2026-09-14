@@ -23,11 +23,18 @@ const normalise = (value) => (value || '').trim().replace(/\s+/g, ' ').toLowerCa
  * Re-issue routes) asks for the gateway's name; the default route, straight after creating the
  * gateway, downloads immediately because there is nothing to destroy. The first download fires once
  * per mount, guarded by a ref against a double-invoked effect.
+ *
+ * Two shapes of the same mint. When the deployment can serve the one-liner (`installer.available`,
+ * from gateway-bundle's readiness answer), the modal mints the command to paste on the appliance
+ * and shows it; otherwise, and on request, it downloads the ZIP bundle. Both spend the same
+ * single-use token, so switching from one to the other is a re-issue and asks first.
  */
-export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst = false }) {
+export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst = false, installer = null }) {
   const [step, setStep] = useState(confirmFirst ? 'confirm' : 'ready')
   const [typed, setTyped] = useState('')
   const [bundle, setBundle] = useState(null)
+  // 'command' or 'bundle': what the next mint produces. The command when the deployment offers it.
+  const [mode, setMode] = useState(installer?.available ? 'command' : 'bundle')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(!confirmFirst)
   const [copied, setCopied] = useState(null)
@@ -53,6 +60,16 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
     setBusy(true)
     setError(null)
     try {
+      if (mode === 'command') {
+        const result = await api.installCommand(gateway.gateway_id)
+        setBundle({ ...result, kind: 'command' })
+        setNow(Date.now())
+        setTyped('')
+        setStep('ready')
+        showToast?.(`Install command issued for '${gateway.gateway_name}'`, 'success')
+        return
+      }
+
       const result = await api.downloadGatewayBundle(gateway.gateway_id)
 
       // Saved through an object URL rather than a data: URL, which some browsers cap silently.
@@ -65,7 +82,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
       link.remove()
       URL.revokeObjectURL(url)
 
-      setBundle(result)
+      setBundle({ ...result, kind: 'bundle' })
       setNow(Date.now())
       setTyped('')
       setStep('ready')
@@ -79,7 +96,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
     } finally {
       setBusy(false)
     }
-  }, [gateway, showToast])
+  }, [gateway, mode, showToast])
 
   useEffect(() => {
     if (confirmFirst || requested.current) return
@@ -91,14 +108,18 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
   const folder = bundle?.filename
     ? bundle.filename.replace(/\.zip$/, '')
     : `acs-gateway-${sparkplugId || 'bundle'}`
+  const isCommand = bundle?.kind === 'command'
 
   // ONE SOURCE for the block and the button. Two literals would drift, and the failure is an
-  // operator pasting commands that do not match the folder shown a line above them.
-  const commands = [
-    `cd ${folder}`,
-    'docker compose up -d --build',
-    'docker compose logs bootstrap',
-  ].join('\n')
+  // operator pasting commands that do not match the folder shown a line above them. The one-liner
+  // is the server's text verbatim: the token, the pin and the addresses are its to compose.
+  const commands = isCommand
+    ? bundle.command
+    : [
+      `cd ${folder}`,
+      'docker compose up -d --build',
+      'docker compose logs bootstrap',
+    ].join('\n')
 
   const copyCommands = useCallback(async () => {
     const ok = await copyText(commands)
@@ -109,6 +130,8 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
   }, [commands, showToast])
 
   const askToReissue = useCallback(() => { setTyped(''); setError(null); setStep('confirm') }, [])
+  // The other shape of the mint. It spends the token the shown one carries, so it asks first.
+  const switchTo = useCallback((next) => { setMode(next); askToReissue() }, [askToReissue])
 
   /**
    * Escape backs out of the confirm step when there is a bundle behind it, rather than closing:
@@ -136,11 +159,11 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
           <>
             <div className="form-group" style={{ fontSize: '13px' }}>
               <strong style={{ color: 'var(--warning-text)' }}>
-                <IconShieldAlert size={13} /> Issue a new bundle for this gateway?
+                <IconShieldAlert size={13} /> Issue a new {mode === 'command' ? 'install command' : 'bundle'} for this gateway?
               </strong>
               <div style={{ color: 'var(--text-muted)', marginTop: '6px' }}>
-                Only one bundle works at a time. Issuing this one <strong>invalidates any bundle
-                already downloaded</strong> for this gateway — an appliance started with the old one
+                Only one token works at a time. Issuing this <strong>invalidates any bundle or
+                command already issued</strong> for this gateway — an appliance started with the old one
                 is refused at enrolment, with an error that cannot say why.
                 {gateway.status === 'AWAITING_BIRTH' && (
                   <> This gateway has already enrolled, so this also revokes the broker credential
@@ -188,10 +211,12 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                 className={`btn btn-primary${confirmed ? '' : ' btn-disabled'}`}
                 onClick={generate}
                 title={confirmed
-                  ? 'Mint a new token and download a fresh bundle'
+                  ? (mode === 'command' ? 'Mint a new token and show a fresh install command' : 'Mint a new token and download a fresh bundle')
                   : 'Type the gateway name to enable this'}
               >
-                <IconDownload size={14} /> Issue &amp; Download
+                {mode === 'command'
+                  ? <><IconCopy size={14} /> Issue Command</>
+                  : <><IconDownload size={14} /> Issue &amp; Download</>}
               </ActionButton>
             </div>
           </>
@@ -203,7 +228,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                 place so the dialog does not shift under the operator when it resolves. */}
             {busy && !bundle && (
               <div className="form-group" style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                Generating a bundle and starting the download…
+                {mode === 'command' ? 'Minting the install command…' : 'Generating a bundle and starting the download…'}
               </div>
             )}
 
@@ -247,10 +272,10 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                 >
                   {expired ? (
                     <>
-                      <strong style={{ color: 'var(--danger)' }}>This bundle has expired.</strong>
+                      <strong style={{ color: 'var(--danger)' }}>This {isCommand ? 'command' : 'bundle'} has expired.</strong>
                       <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
                         An appliance using it will be refused. Re-issue below — that invalidates the
-                        expired download too, so delete the old folder rather than keeping both.
+                        expired one too{isCommand ? '.' : ', so delete the old folder rather than keeping both.'}
                       </div>
                     </>
                   ) : (
@@ -259,8 +284,9 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                         Valid for {formatCountdown(remaining)}
                       </strong>
                       <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        Start the appliance before the timer runs out. This is now the only bundle
-                        that works for this gateway — any earlier download has stopped working.
+                        {isCommand
+                          ? 'Paste it before the timer runs out. This is now the only command or bundle that works for this gateway — any earlier one has stopped working.'
+                          : 'Start the appliance before the timer runs out. This is now the only bundle that works for this gateway — any earlier download has stopped working.'}
                       </div>
                     </>
                   )}
@@ -268,28 +294,39 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
 
                 <div className="form-group">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                    <div className="form-label" style={{ margin: 0 }}>On the appliance</div>
+                    <div className="form-label" style={{ margin: 0 }}>
+                      {isCommand ? 'Paste on the appliance, as a user with sudo' : 'On the appliance'}
+                    </div>
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={copyCommands}
-                      title="Copy all three commands"
+                      title={isCommand ? 'Copy the command' : 'Copy all three commands'}
                     >
                       {copied === 'copied'
                         ? <><IconCheck size={12} /> Copied</>
                         : copied === 'failed'
                           ? <><IconShieldAlert size={12} /> Copy failed</>
-                          : <><IconCopy size={12} /> Copy Commands</>}
+                          : <><IconCopy size={12} /> {isCommand ? 'Copy Command' : 'Copy Commands'}</>}
                     </button>
                   </div>
                   <pre
                     className="mono"
                     style={{
                       fontSize: '12px', background: 'var(--bg-glass)', border: '1px solid var(--border)',
-                      borderRadius: '6px', padding: '10px', overflowX: 'auto', margin: '6px 0 0'
+                      borderRadius: '6px', padding: '10px', overflowX: 'auto', margin: '6px 0 0',
+                      whiteSpace: isCommand ? 'pre-wrap' : 'pre', wordBreak: 'break-all'
                     }}
                   >{commands}</pre>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                    The last command prints the Node-RED editor password. It is shown <strong>once</strong>.
+                    {isCommand
+                      ? <>
+                        On a fresh Ubuntu machine with a route to the platform. It {bundle.caPin
+                          ? <>fetches the platform's root certificate, checks it against the pin <span className="mono">{bundle.caPin.slice(0, 12)}…</span> and installs it, then </>
+                          : 'is served over plain HTTP, which only a development deployment allows; it then '}
+                        installs Docker and the platform playbook, enrols, and prints the Node-RED editor
+                        password <strong>once</strong>. Safe to run again until it has enrolled.
+                      </>
+                      : <>The last command prints the Node-RED editor password. It is shown <strong>once</strong>.</>}
                   </div>
                 </div>
 
@@ -300,12 +337,33 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
 
                 <div className="modal-actions">
                   <button className="btn btn-ghost" onClick={onClose}>Done</button>
+                  {isCommand
+                    ? (
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => switchTo('bundle')}
+                        title="For a machine that already has Docker, or one you set up by hand: mint a new token and download the bundle instead. This invalidates the command above."
+                      >
+                        <IconDownload size={14} /> Download the bundle instead
+                      </button>
+                    )
+                    : installer?.available && (
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => switchTo('command')}
+                        title="Mint a new token and show the one-line install command instead. This invalidates the bundle you already have."
+                      >
+                        <IconCopy size={14} /> Use the install command instead
+                      </button>
+                    )}
                   <button
                     className="btn btn-primary"
                     onClick={askToReissue}
-                    title="Mint a new token and download a fresh bundle. This invalidates the one you already have."
+                    title={isCommand
+                      ? 'Mint a new token and show a fresh command. This invalidates the one you already have.'
+                      : 'Mint a new token and download a fresh bundle. This invalidates the one you already have.'}
                   >
-                    <IconRefreshCw size={14} /> Re-issue Bundle
+                    <IconRefreshCw size={14} /> {isCommand ? 'Re-issue Command' : 'Re-issue Bundle'}
                   </button>
                 </div>
               </>
