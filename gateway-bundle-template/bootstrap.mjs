@@ -341,8 +341,9 @@ if (!/^[0-9a-f]{64}$/.test(TOKEN)) {
 
 /**
  * This appliance's deploy key, generated here. The private half never leaves the plant; the public
- * half goes up with the enrolment request and is registered read-only against the gateway's
- * repository. ed25519 for the low-power hardware. Reused if it exists, so a --force re-enrolment
+ * half goes up with the enrolment request and is registered against the gateway's own repository,
+ * where it can pull `main` and push `appliance` and nothing else (the branch rules the platform
+ * sets there decide that, not the key). ed25519 for the low-power hardware. Reused if it exists, so a --force re-enrolment
  * sends the same public half. Not fatal if it fails: the appliance still enrols and publishes; it
  * cannot converge to a reviewed flow.
  */

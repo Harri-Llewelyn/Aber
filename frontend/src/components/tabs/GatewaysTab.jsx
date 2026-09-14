@@ -17,7 +17,7 @@ import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceD
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { isShadowGateway } from '../../utils/fleetCounts'
-import { flowDriftState, flowDriftLabel, isFlowDrift, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
+import { flowDriftState, flowDriftLabel, isFlowDrift, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
@@ -918,6 +918,28 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + (selected.forge_head_by ? ` by ${selected.forge_head_by}` : '')
                 + '. The appliance deploys it on its next tick. Empty until the first push after '
                 + 'the repository got its webhook.'
+            },
+            /**
+             * What the appliance says it is running, from the head of its own branch: forge-events
+             * records it on every push there, and only the appliance's key can push there. The
+             * flows.json on that branch is the one Node-RED is running, so a digest that differs
+             * from the heartbeat's is an edit made in the appliance's editor since the last deploy.
+             */
+            {
+              label: 'Reported',
+              value: selected.forge_appliance_sha
+                ? [
+                  `${selected.forge_appliance_sha.slice(0, 12)} · ${formatHeartbeat(selected.forge_appliance_at)}`,
+                  flowEditedOnAppliance(selected) ? 'edited on the appliance' : null,
+                ].filter(Boolean).join(' · ')
+                : null,
+              danger: flowEditedOnAppliance(selected) === true,
+              title: 'The head of the appliance branch in this gateway\'s repository: the flow and '
+                + 'the deploy record the appliance last pushed, which only its own key can do. '
+                + '"edited on the appliance" means the running flow differs from the one the puller '
+                + 'last deployed: somebody changed it in the appliance\'s editor, and the next '
+                + 'approved deploy overwrites that. The repository panel links the forge\'s diff '
+                + 'between the two branches. Empty until the appliance has reported once.'
             },
           ] : []),
           {

@@ -9,7 +9,8 @@ import {
   FLOW_DRIFT_DRIFT,
   flowDriftState,
   flowDriftLabel,
-  isFlowDrift
+  isFlowDrift,
+  flowEditedOnAppliance
 } from '../utils/flowDrift';
 
 const NOW = Date.parse('2026-09-11T12:00:00Z');
@@ -69,5 +70,18 @@ describe('flowDriftLabel and isFlowDrift', () => {
     expect(isFlowDrift(FLOW_DRIFT_DRIFT)).toBe(true);
     expect(isFlowDrift(FLOW_DRIFT_DEPLOYING)).toBe(false);
     expect(isFlowDrift(FLOW_DRIFT_CONVERGED)).toBe(false);
+  });
+});
+
+describe('flowEditedOnAppliance', () => {
+  it('is unknown until both the heartbeat and the appliance branch have reported', () => {
+    expect(flowEditedOnAppliance({ flow_hash: A })).toBeNull();
+    expect(flowEditedOnAppliance({ forge_appliance_flow_sha256: A })).toBeNull();
+    expect(flowEditedOnAppliance(null)).toBeNull();
+  });
+
+  it('reads a running flow that differs from the deployed one as an edit on the box', () => {
+    expect(flowEditedOnAppliance({ flow_hash: A, forge_appliance_flow_sha256: A })).toBe(false);
+    expect(flowEditedOnAppliance({ flow_hash: A, forge_appliance_flow_sha256: B })).toBe(true);
   });
 });

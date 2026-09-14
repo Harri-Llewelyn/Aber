@@ -7,7 +7,7 @@ vi.mock('../constants', () => ({
   FORGE_ORGANISATION: 'gateways'
 }))
 
-const { GatewayRepositoryPanel, gatewayRepositoryUrl } = await import('../components/common/GatewayRepositoryPanel')
+const { GatewayRepositoryPanel, gatewayRepositoryUrl, gatewayCompareUrl } = await import('../components/common/GatewayRepositoryPanel')
 
 const GATEWAY = {
   gateway_id: '2a000000-0000-4000-8000-000000000001',
@@ -49,6 +49,22 @@ describe('GatewayRepositoryPanel — who sees it', () => {
 
   it('derives the address from the sparkplug id and nothing stored', () => {
     expect(gatewayRepositoryUrl({ sparkplug_id: 'gwyabc' })).toBe('http://forge.plant.local/gateways/gateway-gwyabc')
+  })
+})
+
+describe('GatewayRepositoryPanel — what the appliance reports', () => {
+  it('offers the compare view only once the appliance has pushed its branch', () => {
+    // Before the first push the branch does not exist and the forge would answer 404.
+    render(<GatewayRepositoryPanel gateway={GATEWAY} canOpenForge />)
+    expect(screen.queryByTitle(/against what was approved/i)).toBeNull()
+  })
+
+  it('links the direct diff between main and the appliance branch, two dots not three', () => {
+    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, forge_appliance_sha: 'b'.repeat(40) }} canOpenForge />)
+    const link = screen.getByTitle(/against what was approved/i)
+    expect(link.getAttribute('href')).toBe('http://forge.plant.local/gateways/gateway-gwy2a0000000000400080000/compare/main..appliance')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(gatewayCompareUrl({ sparkplug_id: 'gwyabc' })).toBe('http://forge.plant.local/gateways/gateway-gwyabc/compare/main..appliance')
   })
 })
 

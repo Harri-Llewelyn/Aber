@@ -54,8 +54,8 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // by nothing else, and the credential service's bearer token to mint the broker account.
   // MQTT_PUBLIC_HOST is the address an appliance connects to, which cannot be derived from the
   // in-network SUPABASE_URL. The forge credential authenticates as a machine account that is not a
-  // Gitea administrator: it can create a gateway repository and attach a read-only deploy key, and
-  // nothing else. All three forge variables or none; a variable omitted here looks to the function
+  // Gitea administrator: it can create a gateway repository, attach a deploy key and the branch
+  // rules that confine it, and nothing else. All three forge variables or none; a variable omitted here looks to the function
   // like a deployment that chose not to run a forge.
   "enroll-gateway": [
     "SUPABASE_SERVICE_ROLE_KEY",

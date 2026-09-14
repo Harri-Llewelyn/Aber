@@ -68,13 +68,14 @@ services:
   # ===============================================================================================
   # flow-sync -- this appliance converges its own flow to what somebody approved.
   #
-  # Outbound only: it fetches this gateway's repository from the forge over SSH and calls Node-RED
-  # on this compose network. A separate service, not a node in the flow, because the thing it
-  # deploys is the flow. Runs as 1000, not root, so Node-RED can rewrite what it writes. Holds the
-  # deploy key (read-only at the forge) and NODERED_CREDENTIAL_SECRET, used only to check that a
-  # committed flow's broker node ids still match the stored credentials (flow-sync.mjs refuses to
-  # converge otherwise). Deleting this service costs exactly one thing: approved flows stop
-  # arriving.
+  # Outbound only: it fetches this gateway's repository from the forge over SSH, pushes what is
+  # running to the `appliance` branch there, and calls Node-RED on this compose network. A
+  # separate service, not a node in the flow, because the thing it deploys is the flow. Runs as
+  # 1000, not root, so Node-RED can rewrite what it writes. Holds the deploy key (which the forge
+  # admits on `appliance` and refuses everywhere else) and NODERED_CREDENTIAL_SECRET, used only to
+  # check that a committed flow's broker node ids still match the stored credentials
+  # (flow-sync.mjs refuses to converge otherwise). Deleting this service costs two things:
+  # approved flows stop arriving, and the forge stops hearing what is running.
   # ===============================================================================================
   flow-sync:
     build: .

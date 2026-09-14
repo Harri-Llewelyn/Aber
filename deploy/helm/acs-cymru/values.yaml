@@ -839,7 +839,7 @@ grafana:
 
 # =================================================================================================
 # GITEA -- the forge. One private repository per enrolled gateway, cloned over SSH with a
-# per-gateway read-only deploy key. Self-hosted, and not an identity store: roles stay in
+# per-gateway deploy key that may pull `main` and push `appliance` and nothing else. Self-hosted, and not an identity store: roles stay in
 # Postgres, the platform reaches it through one machine account, and only Administrator and
 # Shopfloor_Manager hold a login (through the gateway's `forge` listener).
 # =================================================================================================
@@ -855,7 +855,7 @@ gitea:
   adminUser: gitea_admin
   adminEmail: gitea-admin@acs-cymru.invalid
   # The one account the platform authenticates as. Not an admin: it owns the per-gateway
-  # repositories and may attach a read-only deploy key. The password is
+  # repositories and may attach a deploy key and branch rules. The password is
   # `secrets.giteaMachinePassword`; empty means no forge integration.
   machineUser: acs_platform
   machineEmail: acs-platform@acs-cymru.invalid
@@ -1087,7 +1087,8 @@ networkPolicy:
   # ServiceLB, so the source seen is the node's.
   mqttAllowedCidrs:
     - 0.0.0.0/0
-  # Where appliances clone from. Defence in depth behind a per-gateway read-only deploy key.
+  # Where appliances clone from. Defence in depth behind a per-gateway deploy key and the branch
+  # rules that confine it.
   giteaSshAllowedCidrs:
     - 0.0.0.0/0
   # For Alloy (pod discovery and log tailing go through the API server) and the e2e-aas-export

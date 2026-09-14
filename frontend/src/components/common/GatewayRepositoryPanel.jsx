@@ -1,6 +1,6 @@
 import React from 'react'
 import { FORGE_ORGANISATION, GITEA_URL } from '../../constants'
-import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch } from './Icons'
+import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch, IconGitCompare } from './Icons'
 
 /**
  * Where a gateway's flow lives and where a change to it is proposed: its own repository in the
@@ -11,6 +11,16 @@ import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch } from '
  */
 export function gatewayRepositoryUrl(gateway) {
   return `${GITEA_URL}/${FORGE_ORGANISATION}/gateway-${gateway.sparkplug_id}`
+}
+
+/**
+ * The forge's diff between what was approved and what the appliance reports it is running: `main`
+ * against `appliance`, the branch only the appliance's deploy key writes (APPLIANCE_BRANCH in
+ * _shared/forge.ts). Two dots, not three: the direct diff between the two heads, not the changes
+ * since their common ancestor, which would list every file on the branch as added.
+ */
+export function gatewayCompareUrl(gateway) {
+  return `${gatewayRepositoryUrl(gateway)}/compare/main..appliance`
 }
 
 export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
@@ -45,14 +55,28 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
         This gateway's flow lives in its own repository in the forge. To change what the appliance
         runs, open a pull request there with the <span className="mono">flows.json</span> exported
         from its Node-RED editor. Nothing is deployed until an administrator has approved it and it
-        is merged to <span className="mono">main</span>, which the appliance then pulls. Its
-        issues are the gateway's incident log, and its wiki is for what a person needs to know
+        is merged to <span className="mono">main</span>, which the appliance then pulls. The
+        appliance reports what it is running on its own <span className="mono">appliance</span> branch.
+        Its issues are the gateway's incident log, and its wiki is for what a person needs to know
         and the appliance never reads.
       </div>
       {/* Real links, so middle-click and copy-link work. Three because the repository, its issues
           and its wiki are three different acts: change the flow, record an incident, write down
-          what is known. */}
+          what is known. A fourth, the compare view, once the appliance has reported: before its
+          first push the branch does not exist and the forge would answer with a 404. */}
       <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        {gateway.forge_appliance_sha && (
+          <a
+            className="btn btn-ghost"
+            href={gatewayCompareUrl(gateway)}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="What the appliance reports it is running, against what was approved on main"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+          >
+            <IconGitCompare size={13} /> Running vs approved <IconExternalLink size={10} />
+          </a>
+        )}
         <a
           className="btn btn-ghost"
           href={url}

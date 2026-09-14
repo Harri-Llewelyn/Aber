@@ -35,14 +35,26 @@ Then open `http://<this-appliance>:1880` and sign in as `admin`.
 4. wrote the broker password into `flows_cred.json`, **encrypted** with the secret in `.env`;
 5. generated the editor password and wrote its bcrypt hash into `settings.js`;
 6. generated this appliance's **own SSH keypair** and registered the public half against this
-   gateway's repository in the forge, **read-only** — so the appliance can read the flow it is meant
-   to run and can never author one;
+   gateway's repository in the forge. The key can pull `main`, which is what was approved, and push
+   `appliance`, which is what is running; `main` and every other branch refuse it, so the appliance
+   can report and can never author what it will be asked to deploy;
 7. wrote the **forge's SSH host key** to `/data/gitops/known_hosts`, which arrived in the enrolment
    response. That is what lets `flow-sync` *verify* the forge rather than trusting whatever answers
    on the SSH port — the same decision as the broker CA in step 2, one credential plane along.
 
 `node-red` then started against that configuration, and `flow-sync` began watching for approved
 flows. Within about a minute the gateway shows **ONLINE** in the dashboard.
+
+## What this appliance reports to the forge
+
+Every five minutes `flow-sync` also pushes what is running to the `appliance` branch of this
+gateway's repository: `flows.json` exactly as Node-RED is running it, and `deployed.json`, the
+record of what was last deployed and from which commit. Nothing else is ever committed, and
+`flows_cred.json` never will be. The branch is append-only and only this appliance's key can write
+it, so it is the record that survives a decommission; the forge's compare view between `main` and
+`appliance` is the diff between what was approved and what is running, and the dashboard links it
+from the gateway's drawer. An edit made in this appliance's editor shows there as **edited on the
+appliance** until the next approved deploy overwrites it.
 
 ## The sample flow
 

@@ -30,7 +30,7 @@
 #
 # The MACHINE ACCOUNT is what the platform authenticates as -- the platform's one machine account --
 # and it is deliberately NOT an admin. It owns the per-gateway repositories, which is all the
-# authority it needs to create one and attach a read-only deploy key to it. An admin token here
+# authority it needs to create one and attach a deploy key and branch rules to it. An admin token here
 # would be able to read and rewrite every repository in the forge, including the platform playbook
 # the whole fleet converges to, and it would be held by an edge function reachable from the network.
 #

@@ -11,11 +11,15 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  *
  * One pass: every member of either team whose `user_roles` row no longer maps to that team is
  * removed; every login the forge knows that holds an admitted role is placed in its team; every
- * gateway repository has its push webhook and its branch protection; and every other repository in
- * the organisation -- a playbook somebody made by hand -- has `main` protected the same way,
- * without the incident template, because a flow a gateway may later adopt should have been
- * reviewed from the start. Nothing is created that enrolment would not create, and nothing is
- * deleted. A member who is not a dashboard identity was put there by hand and is left alone.
+ * gateway repository has its push webhook, `main` closed to pushes, the `appliance` rule that
+ * admits deploy keys alone and the `**` rule that admits none, and its deploy keys reconciled
+ * with the gateway row (an active gateway's keys are read-write on its own repository, an archived
+ * or deleted gateway's are removed, which is the third revocation handle beside `disableClient`
+ * and the enrolment token); and every other repository in the organisation -- a playbook somebody
+ * made by hand -- has `main` protected the same way, without the incident template, because a
+ * flow a gateway may later adopt should have been reviewed from the start. Nothing is created that
+ * enrolment would not create; the only deletion is a key. A member who is not a dashboard identity
+ * was put there by hand and is left alone.
  *
  * Authorised by FORGE_SWEEP_SECRET in `x-sweep-secret`, not by the anon key: the edge runtime boots
  * with VERIFY_JWT=false, and the gateway's key check proves only that the caller holds a key that
@@ -25,7 +29,10 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  */
 
 import {
+  deleteDeployKey,
+  ensureApplianceProtection,
   ensureBranchProtection,
+  ensureDeployKey,
   ensureOrganisation,
   ensureWebhook,
   FORGE_ORGANISATION,
@@ -35,6 +42,7 @@ import {
   forgeApi,
   forgeConfig,
   GATEWAY_REPOSITORY,
+  listDeployKeys,
 } from "../_shared/forge.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -55,6 +63,10 @@ interface Summary {
   removed: string[];
   hooked: string[];
   protected: string[];
+  /** Keys re-registered read-write on an active gateway's repository. */
+  rekeyed: string[];
+  /** Keys removed from an archived or deleted gateway's repository. */
+  revoked: string[];
   errors: string[];
 }
 
@@ -156,20 +168,61 @@ async function sweepMembership(
 }
 
 /**
- * The repository half. A gateway's repository gets what enrolment gives one; any other repository
- * in the organisation gets `main` protected. A repository that already has both costs two reads.
+ * The keys on a gateway's repository, against its row. An active gateway holds its key read-write
+ * (an enrolment from before the appliance branch registered it read-only, and Gitea has no edit,
+ * so it is re-registered from the material the forge lists). An archived gateway, or one whose row
+ * is gone, holds none: the appliance is decommissioned and the key it still carries must open
+ * nothing.
  */
-async function sweepRepositories(cfg: ForgeConfig, summary: Summary): Promise<void> {
+async function sweepDeployKeys(
+  cfg: ForgeConfig,
+  name: string,
+  sparkplugId: string,
+  gateway: { is_archived: boolean } | undefined,
+  summary: Summary,
+): Promise<void> {
+  const keys = await listDeployKeys(cfg, name);
+  if (!gateway || gateway.is_archived) {
+    for (const key of keys) {
+      await deleteDeployKey(cfg, name, key);
+      summary.revoked.push(`${name}: '${key.title}'`);
+    }
+    return;
+  }
+  for (const key of keys) {
+    if (!key.read_only) continue;
+    await ensureDeployKey(cfg, name, sparkplugId, key.key, false);
+    summary.rekeyed.push(`${name}: '${key.title}'`);
+  }
+}
+
+/**
+ * The repository half. A gateway's repository gets what enrolment gives one; any other repository
+ * in the organisation gets `main` protected. A repository that already has everything costs a
+ * handful of reads.
+ */
+async function sweepRepositories(
+  cfg: ForgeConfig,
+  admin: ReturnType<typeof serviceRoleClient>,
+  summary: Summary,
+): Promise<void> {
+  const { data, error } = await admin.from("gateways").select("sparkplug_id, is_archived");
+  if (error) throw new Error(`could not read gateways: ${error.message}`);
+  const gateways = new Map((data ?? []).map((g: { sparkplug_id: string; is_archived: boolean }) => [g.sparkplug_id, g]));
+
   const repositories = await listAll<{ name: string }>(
     cfg,
     `/orgs/${FORGE_ORGANISATION}/repos`,
     `the repositories of '${FORGE_ORGANISATION}'`,
   );
   for (const { name } of repositories) {
-    const gateway = GATEWAY_REPOSITORY.test(name);
+    const named = GATEWAY_REPOSITORY.exec(name);
     try {
-      if (await ensureBranchProtection(cfg, name, { seedTemplate: gateway })) summary.protected.push(name);
-      if (gateway && await ensureWebhook(cfg, name)) summary.hooked.push(name);
+      if (await ensureBranchProtection(cfg, name, { seedTemplate: !!named })) summary.protected.push(name);
+      if (!named) continue;
+      if (await ensureApplianceProtection(cfg, name)) summary.protected.push(`${name} (appliance)`);
+      if (await ensureWebhook(cfg, name)) summary.hooked.push(name);
+      await sweepDeployKeys(cfg, name, named[1], gateways.get(named[1]), summary);
     } catch (err) {
       summary.errors.push(`${name}: ${err instanceof Error ? err.message : err}`);
     }
@@ -202,23 +255,25 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "This deployment has no forge configured" }, 503);
   }
 
-  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], errors: [] };
+  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
     const admin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     await sweepMembership(cfg, admin, teamIds, summary);
-    await sweepRepositories(cfg, summary);
+    await sweepRepositories(cfg, admin, summary);
   } catch (err) {
     const details = err instanceof Error ? err.message : String(err);
     console.error(`forge-sweep: the sweep could not complete: ${details}`);
     return json({ error: "The sweep could not complete", details, ...summary }, 502);
   }
 
-  const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length;
+  const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length +
+    summary.rekeyed.length + summary.revoked.length;
   if (changed || summary.errors.length) {
     console.log(
       `forge-sweep: placed ${summary.placed.length}, removed ${summary.removed.length}, ` +
         `hooked ${summary.hooked.length}, protected ${summary.protected.length}, ` +
+        `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
         `errors ${summary.errors.length}` +
         (summary.errors.length ? `: ${summary.errors.join("; ")}` : ""),
     );

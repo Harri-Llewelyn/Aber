@@ -27,7 +27,7 @@ const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
  * at enrolment, so the dashboard can say which vintage an appliance runs. Bump when the template
  * changes in a way a deployed appliance would care about.
  */
-const BUNDLE_VERSION = "1.1.0";
+const BUNDLE_VERSION = "1.2.0";
 
 /**
  * The template files, delivered through the environment: an edge-runtime user worker has no

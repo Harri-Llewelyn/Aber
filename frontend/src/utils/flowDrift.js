@@ -53,3 +53,15 @@ export function flowDriftLabel(state) {
 export function isFlowDrift(state) {
   return state === FLOW_DRIFT_DRIFT;
 }
+
+/**
+ * Whether the flow was edited in the appliance's own editor since the last deploy. The appliance
+ * reports the flows.json Node-RED is running on its `appliance` branch, and forge-events records
+ * that file's digest as `forge_appliance_flow_sha256`; `flow_hash` is the digest of the flow the
+ * puller last wrote. Equal means the running flow is the deployed one; different means somebody
+ * changed it on the box, which the next approved deploy overwrites. Null until both are known.
+ */
+export function flowEditedOnAppliance(gateway) {
+  if (!gateway?.flow_hash || !gateway.forge_appliance_flow_sha256) return null;
+  return gateway.flow_hash !== gateway.forge_appliance_flow_sha256;
+}

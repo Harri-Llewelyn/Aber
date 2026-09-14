@@ -118,9 +118,9 @@ GITEA -- the forge: one private repository per enrolled gateway, cloned by the a
 THE ARGUMENT FOR IT IS IN supabase/README.md AND IS NOT REPEATED HERE. What this file adds is the
 three things the Kubernetes shape has to answer.
 
-ONE: SSH IS NOT AN INGRESS CONCERN. Every appliance holds a per-gateway READ-ONLY deploy
-key, and a Gitea deploy key is an SSH key -- there is no per-repository read-only HTTP token to use
-instead. An HTTP Ingress cannot carry SSH at all, so the same split mosquitto already makes applies:
+ONE: SSH IS NOT AN INGRESS CONCERN. Every appliance holds a per-gateway deploy key confined by
+branch rules to pulling `main` and pushing `appliance`, and a Gitea deploy key is an SSH key --
+there is no per-repository HTTP token to use instead. An HTTP Ingress cannot carry SSH at all, so the same split mosquitto already makes applies:
 a plain ClusterIP for in-cluster resolution, and a SECOND Service for the fleet. Getting this wrong
 is quiet -- the web UI works perfectly, and appliances simply cannot clone.
 
@@ -198,8 +198,8 @@ in-cluster name must stay a plain ClusterIP so `gitea:3000` resolves the same wa
 and mixing the two would tie internal service discovery to an external IP allocation.
 
 WHY SSH RATHER THAN AN HTTP TOKEN, restated here because this Service is what pays for it: a Gitea
-deploy key is per-repository and read-only, which is the credential model enrolment issues
-(docs/physical-gateways.md). An
+deploy key is per-repository, and branch rules confine it to one branch it may write, which is the
+credential model enrolment issues (docs/physical-gateways.md). An
 HTTP token is per-USER and carries that user's access to EVERY repository, so using one would hand
 each appliance the whole fleet's flows in order to save a port.
 */}}
@@ -287,8 +287,8 @@ spec:
               value: {{ .Values.gitea.adminEmail | quote }}
             {{- include "acs-cymru.secretEnv" (dict "name" "GITEA_ADMIN_PASSWORD" "secretName" $secretName "key" "GITEA_ADMIN_PASSWORD") | nindent 12 }}
             {{/* THE ACCOUNT THE PLATFORM AUTHENTICATES AS, and deliberately not an admin: it owns
-                 the per-gateway repositories and can attach a read-only deploy key to one, which is
-                 all the authority enroll-gateway needs. An admin credential here would be able to
+                 the per-gateway repositories and can attach a deploy key and branch rules to one,
+                 which is all the authority enroll-gateway needs. An admin credential here would be able to
                  rewrite every repository in the forge -- including the playbook the whole fleet
                  converges to -- and it would be held by a function reachable from the network.
 
