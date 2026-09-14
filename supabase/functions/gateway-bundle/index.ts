@@ -9,6 +9,7 @@ import { brokerPublicHost, platformPublicUrl } from "../_shared/publicAddresses.
 import { BUNDLE_VERSION, newCredentialSecret, renderGatewayEnv } from "../_shared/gatewayEnv.ts";
 import { platformRootPem, spkiPin } from "../_shared/caPin.ts";
 import { installerTransport } from "../_shared/installer.ts";
+import { GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
 
 /**
  * Package the physical gateway bootstrap bundle as a ZIP, with a freshly minted enrolment token,
@@ -35,21 +36,21 @@ import { installerTransport } from "../_shared/installer.ts";
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
 
 /**
- * The template files, delivered through the environment: an edge-runtime user worker has no
- * filesystem access to the mounted volumes, so the entrypoint reads them once at start-up and the
- * router forwards them. Module imports are unaffected (see _shared/roles.ts).
+ * The appliance's files, from the platform playbook's `appliance/` (forge/gateway-platform),
+ * which reaches this worker as a generated module because an edge worker has no filesystem. The
+ * same files the installer's playbook lays down, so a bundle-installed appliance runs what a
+ * command-installed one does. Every name the compose file relies on must be here: a service whose
+ * script is not in the archive fails at `docker compose up`.
  */
-const TEMPLATE_ENV: Record<string, string> = {
-  "docker-compose.yml": "GW_BUNDLE_COMPOSE",
-  "Dockerfile": "GW_BUNDLE_DOCKERFILE",
-  "bootstrap.mjs": "GW_BUNDLE_BOOTSTRAP",
-  "flows.template.json": "GW_BUNDLE_FLOWS",
-  // The puller (flow-sync.mjs). Without it in this map the appliance's compose file names a service
-  // whose script is not in the archive, so this entry, the entrypoint that exports it and main's
-  // allowlist move together.
-  "flow-sync.mjs": "GW_BUNDLE_FLOW_SYNC",
-  "README.md": "GW_BUNDLE_README",
-};
+const APPLIANCE_PREFIX = "appliance/";
+const APPLIANCE_FILES = [
+  "docker-compose.yml",
+  "Dockerfile",
+  "bootstrap.mjs",
+  "flows.template.json",
+  "flow-sync.mjs",
+  "README.md",
+];
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -253,21 +254,19 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    // Check the templates are present BEFORE minting, for the third time and the same reason: a
-    // deployment missing its templates must not spend a gateway's live token discovering it.
+    // Check the appliance's files are present BEFORE minting, for the third time and the same
+    // reason: a build missing them must not spend a gateway's live token discovering it.
     const missing = format === "zip"
-      ? Object.entries(TEMPLATE_ENV)
-        .filter(([, envVar]) => !Deno.env.get(envVar))
-        .map(([name, envVar]) => `${name} (${envVar})`)
+      ? APPLIANCE_FILES.filter((name) => !(`${APPLIANCE_PREFIX}${name}` in GATEWAY_PLATFORM_FILES))
       : [];
 
     if (missing.length) {
-      console.error(`gateway-bundle is missing template file(s): ${missing.join(", ")}`);
+      console.error(`gateway-bundle is missing appliance file(s): ${missing.join(", ")}`);
       return json(503, {
         error: "The bundle template is not available on this deployment",
         details:
-          `Missing: ${missing.join(", ")}. The supabase-functions entrypoint populates these from ` +
-          "gateway-bundle-template/. No enrolment token was minted.",
+          `Missing: ${missing.join(", ")}. scripts/sync-gateway-platform.mjs writes them into the ` +
+          "platform module from forge/gateway-platform/appliance/. No enrolment token was minted.",
       });
     }
 
@@ -326,8 +325,8 @@ export default async function handler(req: Request): Promise<Response> {
     const folder = `acs-gateway-${slug(gateway.name)}-${gateway.sparkplug_id}`;
 
     const files: Record<string, Uint8Array> = {};
-    for (const [name, envVar] of Object.entries(TEMPLATE_ENV)) {
-      files[`${folder}/${name}`] = strToU8(Deno.env.get(envVar)!);
+    for (const name of APPLIANCE_FILES) {
+      files[`${folder}/${name}`] = strToU8(GATEWAY_PLATFORM_FILES[`${APPLIANCE_PREFIX}${name}`]);
     }
 
     // The .env is generated, not templated: it is the only file that differs per gateway and the

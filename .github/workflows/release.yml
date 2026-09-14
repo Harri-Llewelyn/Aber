@@ -119,8 +119,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Context is the REPOSITORY ROOT: gateway-bundle-template is not reachable
-          # from a narrower context.
+          # Context is the REPOSITORY ROOT by convention, shared with the dev loop; the image
+          # copies nothing outside supabase/functions/ any more.
           - name: edge-runtime
             dockerfile: supabase/functions/Dockerfile
             context: .

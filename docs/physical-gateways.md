@@ -140,7 +140,7 @@ acs-gateway-<name>-<sparkplug_id>/
 ```
 
 Everything except `.env` and `GATEWAY.txt` is mirrored verbatim from
-[`gateway-bundle-template/`](../gateway-bundle-template/).
+[`forge/gateway-platform/appliance/`](../forge/gateway-platform/appliance/).
 
 `.env` carries exactly six values, all read by `bootstrap.mjs`:
 
@@ -556,7 +556,7 @@ last line, and a required status check in the forge is the next one (docs/roadma
 
 The bundle covers what runs *in* Docker. What runs *under* it — the packages, the upgrade
 policy, the clock, Docker itself, and the timer that keeps all of that converged — is the
-**platform playbook**, [`gateway-platform/`](../gateway-platform), published into the forge as
+**platform playbook**, [`forge/gateway-platform/`](../forge/gateway-platform), published into the forge as
 `platform/gateway-platform` and tagged `v<version>` once per platform version.
 
 **The fleet tracks a tag, and the pointer is per gateway.** Enrolment seeds `platform.yml` on
@@ -629,7 +629,7 @@ They are in the quarantine queue awaiting approval (§10). That is the design, n
 
 ## Related
 
-* [`gateway-bundle-template/README.md`](../gateway-bundle-template/README.md) — the copy that
+* [`forge/gateway-platform/appliance/README.md`](../forge/gateway-platform/appliance/README.md) — the copy that
   ships in the bundle
 * [`docs/openapi.yaml`](openapi.yaml) — `enroll-gateway` and `gateway-bundle` contracts
 * [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) — the Kubernetes CA

@@ -11,10 +11,11 @@
 # THE COMPOSE PATH IS UNCHANGED and keeps bind-mounting. Both run identical code; only the
 # delivery differs. See docs/kubernetes-architecture.md §2.2.
 #
-# BUILD CONTEXT IS THE REPOSITORY ROOT, not this directory:
+# BUILD CONTEXT IS THE REPOSITORY ROOT, as the release workflow and the dev loop build it:
 #   docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:<tag> .
-# The physical-gateway bundle template is COPYed from outside this directory and has to be
-# reachable from the context. Building from supabase/functions/ instead fails on that COPY.
+# Nothing outside supabase/functions/ is copied any more (the appliance's files reach the functions
+# as a generated module under _shared/), so the context is a convention the two build sites share
+# rather than a requirement.
 #
 # PINNED to the tag docker-compose.yml runs. The runtime and the functions are versioned together
 # on purpose -- main/index.ts is an allow-list against a specific edge-runtime API.
@@ -28,28 +29,17 @@ COPY supabase/functions /home/deno/functions
 # root is exactly the sort of thing a future runtime's directory scan trips over.
 RUN rm -f /home/deno/functions/Dockerfile
 
-# The canonical Node-RED flow WAS COPIED HERE -- the "git" side of the GitOps sync that
-# deploy-nodered pushed to the running Node-RED. Both are retired with the demonstrator: the flow
-# was the demonstration floor's, and the function could deploy nothing else.
+# The appliance's files (the compose project gateway-bundle zips up and the installer lays down)
+# are NOT copied here: they are part of forge/gateway-platform/, which reaches the functions as the
+# generated module _shared/gatewayPlatform.generated.ts, baked in with the rest of the code. A
+# user worker has no filesystem access to anything in this image, and a module import is the one
+# delivery that needs no entry in main/index.ts's allow-list.
 #
-# The physical gateway bundle template -- the files gateway-bundle zips up and hands to an operator.
-# Same delivery reasoning as the flow above: baked in, so which revision of the appliance template a
-# release ships is a property of the artefact rather than of whatever is on a cluster node's disk.
-COPY gateway-bundle-template /home/deno/gateway-bundle-template
-
 # A user worker has NO FILESYSTEM ACCESS to anything in this image -- edge-runtime sandboxes it,
-# and main/index.ts forwards only environment variables to each worker it spawns. So the bundle
-# templates are read here, in the plain container shell before edge-runtime starts, and
-# handed on through the environment. This is the same arrangement docker-compose.yml's entrypoint
-# uses, moved into the image so the Kubernetes Deployment needs no command override at all.
-#
-# ONE VARIABLE PER FILE, with static names, because main/index.ts's FUNCTION_REGISTRY is an
-# allow-list of variable NAMES -- a dynamically-built set could not be declared there, and that
-# declaration is the one place "what may this code reach" is stated.
-#
-# Exec form with a literal script, so the nested quoting survives.
-#
-# ACS_CA_PEM is the platform's root, read from the ingress TLS Secret the chart mounts at
-# /home/deno/ca when ingress TLS is on: gateway-bundle computes the one-liner's pin from it. Absent
-# on a deployment without ingress TLS, and the dashboard then offers the ZIP bundle alone.
-ENTRYPOINT ["/bin/sh", "-e", "-c", "T=/home/deno/gateway-bundle-template; export GW_BUNDLE_COMPOSE=\"$(cat $T/docker-compose.yml)\"; export GW_BUNDLE_DOCKERFILE=\"$(cat $T/Dockerfile)\"; export GW_BUNDLE_BOOTSTRAP=\"$(cat $T/bootstrap.mjs)\"; export GW_BUNDLE_FLOWS=\"$(cat $T/flows.template.json)\"; export GW_BUNDLE_FLOW_SYNC=\"$(cat $T/flow-sync.mjs)\"; export GW_BUNDLE_README=\"$(cat $T/README.md)\"; export ACS_CA_PEM=\"$(cat /home/deno/ca/ca.crt 2>/dev/null || true)\"; exec edge-runtime start --main-service /home/deno/functions/main"]
+# and main/index.ts forwards only environment variables to each worker it spawns. ACS_CA_PEM is
+# the platform's root, read here in the plain container shell before edge-runtime starts, from the
+# ingress TLS Secret the chart mounts at /home/deno/ca when ingress TLS is on: gateway-bundle
+# computes the one-liner's pin from it. Absent on a deployment without ingress TLS, and the
+# dashboard then offers the ZIP bundle alone. Exec form with a literal script, so the quoting
+# survives.
+ENTRYPOINT ["/bin/sh", "-e", "-c", "export ACS_CA_PEM=\"$(cat /home/deno/ca/ca.crt 2>/dev/null || true)\"; exec edge-runtime start --main-service /home/deno/functions/main"]

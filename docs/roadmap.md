@@ -95,7 +95,7 @@ retention prune removes exactly the directory the row named and nothing beside i
 ## 2 · The appliance itself, and the code somebody wants to run on it
 
 **Builds on:** [`gateway-bundle`](../supabase/functions/gateway-bundle/index.ts) ·
-[`gateway-bundle-template/`](../gateway-bundle-template) · `bootstrap.mjs`'s once-only guard ·
+[`forge/gateway-platform/appliance/`](../forge/gateway-platform/appliance) · `bootstrap.mjs`'s once-only guard ·
 [`docs/physical-gateways.md`](physical-gateways.md) · the `apikey` gate and its four exemptions ·
 [`check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) and
@@ -103,7 +103,7 @@ retention prune removes exactly the directory the row named and nothing beside i
 alert · the forge, the puller and the appliance branch
 ([`docs/physical-gateways.md`](physical-gateways.md), [The appliance reports on a branch of its
 own](../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-0104)), which this
-reuses · the platform playbook ([`gateway-platform/`](../gateway-platform),
+reuses · the platform playbook ([`forge/gateway-platform/`](../forge/gateway-platform),
 [published by the sweep](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep)) · the three revocation handles (`disableClient` in the credential service,
 `withdraw_gateway_enrollment_tokens()`, and the deploy key reconcile in `forge-sweep`) · arrives
 from a request to run custom data-gathering software on gateways, for legacy machinery
@@ -115,7 +115,7 @@ amd64 and arm64 alike; another OS is a feature request.
 
 ### The one-liner and the CA
 
-**Built** (`0105`, `gateway-install`, `gateway-platform/install.sh`;
+**Built** (`0105`, `gateway-install`, `forge/gateway-platform/install.sh`;
 [The one-liner](../supabase/README.md#the-one-liner-0105) and
 [`docs/physical-gateways.md`](physical-gateways.md#on-the-appliance-the-command)): the dashboard
 mints the token and an SPKI pin of the platform's root beside it over the authenticated session;
@@ -139,7 +139,7 @@ stage 0 closed (curl stops, nothing is sent); the chart adds no such redirect.
 
 ### The operating system
 
-**Built**, as [`gateway-platform/`](../gateway-platform) and
+**Built**, as [`forge/gateway-platform/`](../forge/gateway-platform) and
 [The platform playbook is published by the sweep](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep):
 `unattended-upgrades` without automatic reboot, Docker's packages held out of it; **`ansible-pull`**,
 not Ansible, on an hourly timer the playbook itself installs; the **platform** playbook in one

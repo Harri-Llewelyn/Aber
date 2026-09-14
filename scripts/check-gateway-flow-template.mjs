@@ -28,8 +28,8 @@ const ok = [];
 const fail = (m) => problems.push(m);
 const pass = (m) => ok.push(m);
 
-const TEMPLATE = 'gateway-bundle-template/flows.template.json';
-const BOOTSTRAP = 'gateway-bundle-template/bootstrap.mjs';
+const TEMPLATE = 'forge/gateway-platform/appliance/flows.template.json';
+const BOOTSTRAP = 'forge/gateway-platform/appliance/bootstrap.mjs';
 
 const raw = read(TEMPLATE);
 let flow;
@@ -195,7 +195,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
 // The heartbeat reports the hash out of it, and the platform compares that with the head of main;
 // a branch reading some other file would report a hash that matches nothing, forever.
 {
-  const FLOW_SYNC = 'gateway-bundle-template/flow-sync.mjs';
+  const FLOW_SYNC = 'forge/gateway-platform/appliance/flow-sync.mjs';
   const reader = flow.find((n) => n.type === 'file in');
   const placeholder = '__DEPLOYED_FILE__';
   if (!reader) {

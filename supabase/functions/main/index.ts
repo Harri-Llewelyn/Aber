@@ -85,21 +85,15 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GATEWAY_REVOKE_SECRET",
   ],
 
-  // Packages the physical gateway bootstrap bundle as a ZIP. No service-role key: it reads the
-  // gateway and mints the enrolment token as the caller, through a SECURITY DEFINER function that
-  // checks has_role() itself. The template files arrive through the environment because an edge
-  // worker cannot read the image's filesystem; SUPABASE_PUBLIC_URL is the address the appliance
-  // will dial. MQTT_PUBLIC_HOST is enroll-gateway's, forwarded here too so the readiness probe
-  // (GET) can report both addresses.
+  // Packages the physical gateway bootstrap bundle as a ZIP, or mints the one-liner. No
+  // service-role key: it reads the gateway and mints the enrolment token as the caller, through a
+  // SECURITY DEFINER function that checks has_role() itself. The appliance's files are a module
+  // import (an edge worker cannot read the image's filesystem); SUPABASE_PUBLIC_URL is the address
+  // the appliance will dial. MQTT_PUBLIC_HOST is enroll-gateway's, forwarded here too so the
+  // readiness probe (GET) can report both addresses.
   "gateway-bundle": [
     "SUPABASE_PUBLIC_URL",
     "MQTT_PUBLIC_HOST",
-    "GW_BUNDLE_COMPOSE",
-    "GW_BUNDLE_DOCKERFILE",
-    "GW_BUNDLE_BOOTSTRAP",
-    "GW_BUNDLE_FLOWS",
-    "GW_BUNDLE_FLOW_SYNC",
-    "GW_BUNDLE_README",
     // The one-liner: the platform's root (the pin is computed from it), where an appliance fetches
     // that root over plain HTTP, and the development-only switch that lets the command be minted
     // for a plain-HTTP platform.

@@ -102,7 +102,7 @@ export const GATEWAY_REPOSITORY = /^gateway-(gwy[0-9a-f]{21})$/;
 
 /**
  * The branch the appliance writes and nobody else does: what is running, beside `main`, which is
- * what was approved. Must agree with REPORT_BRANCH in gateway-bundle-template/flow-sync.mjs and
+ * what was approved. Must agree with REPORT_BRANCH in forge/gateway-platform/appliance/flow-sync.mjs and
  * with the compare link in frontend/src/components/common/GatewayRepositoryPanel.jsx.
  */
 export const APPLIANCE_BRANCH = "appliance";
@@ -121,8 +121,8 @@ const WEBHOOK_BRANCH_FILTER = `{main,${APPLIANCE_BRANCH}}`;
  * The platform playbook's own organisation and repository: one repository the whole fleet reads,
  * outside `gateways` so that organisation's rules (both teams may create repositories; the sweep
  * protects whatever it finds) do not apply. Its `main` admits pushes from the machine account
- * alone, because its content is this repository's gateway-platform/, published by forge-sweep.
- * Named here and in gateway-platform/README.md.
+ * alone, because its content is this repository's forge/gateway-platform/, published by forge-sweep.
+ * Named here and in forge/gateway-platform/README.md.
  */
 export const PLATFORM_ORGANISATION = "platform";
 export const PLATFORM_REPOSITORY = "gateway-platform";
@@ -755,7 +755,7 @@ async function seedPlatformPointer(cfg: ForgeConfig, name: string, tag: string):
   const content = [
     "# The tag of platform/gateway-platform this appliance converges to. Changed by pull request:",
     "# a fleet bump is one pull request per gateway, and a canary is one gateway. `vars` are",
-    "# applied to this appliance alone; gateway-platform/README.md in the platform repository",
+    "# applied to this appliance alone; forge/gateway-platform/README.md in the platform repository",
     "# says which the playbook accepts.",
     "platform:",
     `  tag: ${tag}`,

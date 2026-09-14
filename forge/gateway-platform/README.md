@@ -1,7 +1,8 @@
 # The platform playbook
 
 What every appliance converges to, as an Ansible playbook the appliance pulls and runs on itself.
-The platform publishes this directory into the forge as `platform/gateway-platform`, commits it to
+The platform publishes this directory into the forge as `platform/gateway-platform` (the
+`appliance/` files also reach an appliance by the ZIP bundle and the installer), commits it to
 `main` whenever the running platform's copy differs, and tags it `v<version>` once per platform
 version. **The fleet tracks a tag, and the pointer is per gateway:** `platform.yml` in each
 gateway's own repository names the tag that appliance converges to, changed by pull request through
@@ -14,7 +15,7 @@ roles/base          packages, unattended-upgrades without reboot, chrony
 roles/docker        Ubuntu's docker.io and the Compose plugin, held out of unattended upgrades
 roles/appliance     the compose project under /opt/acs-gateway, from appliance/ (the bundle template)
 roles/converge      the acs-gateway-converge script and its systemd timer
-appliance/          gateway-bundle-template/, mirrored in by scripts/sync-gateway-platform.mjs
+appliance/          the compose project the appliance runs; also what the ZIP bundle ships
 platform.yml.example  what a gateway repository's platform.yml looks like
 ```
 
@@ -82,6 +83,6 @@ sudo ansible-pull -U ssh://git@<forge>/platform/gateway-platform.git -C v0.1.0 s
 Elsewhere, to check the playbook parses (what CI runs):
 
 ```bash
-docker run --rm -v "$PWD/gateway-platform:/pb:ro" python:3.12-slim \
+docker run --rm -v "$PWD/forge/gateway-platform:/pb:ro" python:3.12-slim \
   sh -c 'pip -q install ansible-core && cd /pb && ansible-playbook --syntax-check site.yml'
 ```

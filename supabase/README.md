@@ -2451,8 +2451,8 @@ routing and authentication surface against a reviewed inventory, because `valida
 401s that should happen and nothing can assert the absence of a route nobody wrote.
 
 **The edge functions are baked into an image** (`functions/Dockerfile`, built from the repository
-root because `gateway-bundle` copies `gateway-bundle-template/`), so a rollback rolls the functions
-back with it.
+root by convention; the appliance's files reach the functions as a generated module under
+`_shared/`), so a rollback rolls the functions back with it.
 
 ### The second listener, which is Studio's login (`0081`)
 
@@ -2729,7 +2729,7 @@ archived gateway's key.
 
 ### The platform playbook is published by the sweep
 
-[`gateway-platform/`](../gateway-platform) is the playbook every appliance converges to
+[`forge/gateway-platform/`](../forge/gateway-platform) is the playbook every appliance converges to
 (its README says what it decides). The sweep publishes it into the forge as
 `platform/gateway-platform`, in its own organisation so the `gateways` organisation's rules do
 not apply, and tags it `v<version>` once per platform version. No migration: nothing about it is
@@ -2738,7 +2738,7 @@ a row.
 **The playbook reaches the edge runtime as a module.** An edge worker has no filesystem, and the
 bundle's route (one environment variable per file, each named in `main/index.ts`) does not fit a
 directory tree, so [`scripts/sync-gateway-platform.mjs`](../scripts/sync-gateway-platform.mjs)
-writes every file of `gateway-platform/`, and `gateway-bundle-template/` as `appliance/`, into
+writes every file of `forge/gateway-platform/`, the compose project under its `appliance/` included, into
 [`_shared/gatewayPlatform.generated.ts`](functions/_shared/gatewayPlatform.generated.ts) with a
 digest over the lot. The copy is committed, like the chart mirrors, and CI fails when it is
 stale.
@@ -2786,7 +2786,7 @@ Commissioning as a pasted command
 `gateway-bundle` mints the token as before and, asked for `format: "command"`, answers JSON
 instead of a ZIP: the token, its expiry, the command, and the pin. `gateway-install` is what the
 command and the installer fetch from, three things against the token in `X-Enrolment-Token`: the
-installer (`gateway-platform/install.sh` with the public values substituted; the token is in the
+installer (`forge/gateway-platform/install.sh` with the public values substituted; the token is in the
 environment the command sets, never in the script's text), the platform playbook as a zip, and
 the appliance's `.env` (rendered by [`_shared/gatewayEnv.ts`](functions/_shared/gatewayEnv.ts),
 which the ZIP bundle now shares). Nothing on that route is cacheable.
