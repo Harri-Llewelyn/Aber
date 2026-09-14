@@ -48,12 +48,12 @@ describe('the nav and the router agree', () => {
   })
 
   it('leaves an ungated tab visible to everyone', () => {
-    // Overview is where App sends a user whose current tab became invisible, so it must never be
+    // The Site Map is where App sends a user whose current tab became invisible, so it must never be
     // gated -- a redirect target that can itself be hidden is a redirect loop.
-    const overview = TABS.find(t => t.id === 'overview')
-    expect(overview.role).toBeUndefined()
-    expect(overview.permission).toBeUndefined()
-    expect(tabIsVisible(overview, () => false, null)).toBe(true)
+    const siteMap = TABS.find(t => t.id === 'site-map')
+    expect(siteMap.role).toBeUndefined()
+    expect(siteMap.permission).toBeUndefined()
+    expect(tabIsVisible(siteMap, () => false, null)).toBe(true)
   })
 
   it('still honours a permission-gated tab, which was dead code until Settings was added', () => {

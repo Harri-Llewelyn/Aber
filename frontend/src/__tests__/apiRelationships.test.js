@@ -296,7 +296,7 @@ describe('telemetry queries', () => {
     const call = callFor('telemetry_latest');
     expect(call).toBeTruthy();
     // Still bounded: dropping the window would let a machine that last reported in March show a
-    // March reading as its current state on the Overview map.
+    // March reading as its current state on the Site Map.
     expect(call.filters.some(([op, col]) => op === 'gte' && col === 'time')).toBe(true);
     expect(rows).toHaveLength(2);
     expect(rows.find(r => r.metric_name === 'temperature').val_double).toBe(42);

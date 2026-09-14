@@ -767,16 +767,9 @@ html, body, #root {
 
 .page-heading p {
   margin: 6px 0 0;
-  max-width: 88ch;
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-muted);
-}
-
-/* A callout that qualifies a whole page rather than the card it sits in: `.callout` insets itself
-   by `--inset` to line up with a card's contents, which indents it against nothing out here. */
-.callout-page {
-  margin: 0 0 var(--stack);
 }
 
 /* ===== Cards & Containers ===== */
@@ -1023,6 +1016,14 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .callout-warning .callout-icon { color: var(--warning); }
 .callout strong { color: var(--text-primary); }
+
+/* A callout that qualifies a whole page rather than the card it sits in. AFTER `.callout`, not
+   before: the two selectors have equal specificity, so the one declared later is the one that wins
+   the margin. `.callout` insets itself by `--inset` to line up with a card's contents and leaves no
+   gap beneath, both of which are wrong out on the page. */
+.callout-page {
+  margin: 0 0 var(--stack);
+}
 
 /* Group header row: a collapsible category inside a table body. `--bg-card` mixed toward the text
    colour, separated from both the row background and the `--bg-glass` hover colour, so a category

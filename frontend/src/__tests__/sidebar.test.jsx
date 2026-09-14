@@ -13,7 +13,7 @@ const isExpanded = () => rail().classList.contains('sidebar-expanded')
 
 const renderRail = (props = {}) => {
   const onNavigate = props.onNavigate || vi.fn()
-  render(<Sidebar tabs={adminTabs()} currentTab="overview" onNavigate={onNavigate} {...props} />)
+  render(<Sidebar tabs={adminTabs()} currentTab="site-map" onNavigate={onNavigate} {...props} />)
   return onNavigate
 }
 

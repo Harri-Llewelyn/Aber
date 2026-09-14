@@ -3,7 +3,7 @@ import { VALID_TABS } from '../constants'
 
 const getTabFromPath = () => {
   const cleanPath = window.location.pathname.replace(/^\/+|\/+$/g, '')
-  return VALID_TABS.includes(cleanPath) ? cleanPath : 'overview'
+  return VALID_TABS.includes(cleanPath) ? cleanPath : 'site-map'
 }
 
 /**

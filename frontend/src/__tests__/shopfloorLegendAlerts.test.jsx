@@ -1,11 +1,11 @@
 import React from 'react'
 import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { OverviewTab } from '../components/tabs/OverviewTab'
+import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
 
 /**
- * The Overview legend and its alert category. A cell's pin on the Site Map turns red when Grafana
+ * The Site Map legend and its alert category. A cell's pin turns red when Grafana
  * has an alert firing against a device in it, and the device's chip in the details panel does the
  * same; the legend must name that colour, and a red chip must still be legible without it.
  */
@@ -59,7 +59,7 @@ const routeGet = (devices = []) => (path) => {
 const renderMap = ({ devices = [], activeAlerts = [] } = {}) => {
   api.get.mockImplementation(routeGet(devices))
   return render(
-    <OverviewTab
+    <SiteMapTab
       onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} onSelectCell={vi.fn()}
       showToast={vi.fn()} hasPermission={() => true} onNavigateTab={vi.fn()}
       activeAlerts={activeAlerts}

@@ -108,7 +108,7 @@ describe('Merged navigation shell', () => {
     // reads as the rail being clipped at the top.
     expect(dividers).toHaveLength(groups.length - 1)
 
-    // Overview leads and is in a group of its own: it is the landing page, and a group of one
+    // The Site Map leads and is in a group of its own: it is the landing page, and a group of one
     // would be a heading that names nothing.
     expect(groups[0].querySelector('.sidebar-group-label')).toBeNull()
     expect(groups[0].querySelectorAll('.sidebar-item')).toHaveLength(1)
@@ -179,12 +179,12 @@ describe('Merged navigation shell', () => {
     expect(brand.tagName).toBe('BUTTON')
     expect(brand.getAttribute('aria-label')).toMatch(/site map/i)
 
-    // Leave Overview, then click the mark to come back.
+    // Leave the Site Map, then click the mark to come back.
     fireEvent.click(screen.getByRole('button', { name: /^Devices$/ }))
     await waitFor(() => expect(window.location.pathname).toBe('/devices'))
 
     fireEvent.click(brand)
-    await waitFor(() => expect(window.location.pathname).toBe('/overview'))
+    await waitFor(() => expect(window.location.pathname).toBe('/site-map'))
   })
 
   /**
@@ -560,7 +560,7 @@ describe('sidebar warning tone', () => {
  * single-class lane rules tie at 0-1-0 and lose to source order, and every rendering assertion
  * still passes.
  */
-describe('Overview lane hues', () => {
+describe('Site Map lane hues', () => {
   // Each lane is one button with its own hue: blue for Site-Wide, grey for Simulated, amber for
   // Unassigned. The hue is a border colour plus a tint; themeContrast.test.js measures --text-muted
   // over these exact tints, so they are quoted here to keep that measurement honest.
@@ -609,7 +609,7 @@ describe('Page headings', () => {
   it('does not restate the page name below the bar that already shows it', async () => {
     await renderShell()
 
-    // Overview is the landing tab. Its h2 and the paragraph under it were the largest single
+    // The Site Map is the landing tab. Its h2 and the paragraph under it were the largest single
     // block of standing text in the app and said nothing the map below did not.
     await waitFor(() => {
       expect(screen.queryByRole('heading', { name: /^System Overview$/ })).toBeNull()

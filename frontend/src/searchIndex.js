@@ -12,7 +12,7 @@
  * the UI.
  */
 export const PAGE_KEYWORDS = {
-  'overview':       ['dashboard', 'home', 'shopfloor', 'map', 'site map', 'overview', 'floor plan', 'status'],
+  'site-map':       ['dashboard', 'home', 'shopfloor', 'map', 'site map', 'overview', 'floor plan', 'status'],
   // Every word somebody would reach for while holding the thing rather than its name: an
   // operator searches "request" or "ask", an approver searches "approve" or "pending".
   'approvals':      ['proposal', 'proposals', 'approve', 'reject', 'pending', 'queue', 'request',
@@ -38,9 +38,9 @@ export const PAGE_KEYWORDS = {
  * type; the Site Map's lanes have no heading and no anchor, so it is not listed.
  */
 export const CARDS = [
-  { id: 'site-map',             label: 'Site Map',             tab: 'overview',       keywords: ['floor plan', 'floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
-  { id: 'site-wide-lane',       label: 'Site-Wide',            tab: 'overview',       keywords: ['no cell', 'bms', 'agv', 'unassigned lane'] },
-  { id: 'unassigned-lane',      label: 'Unassigned',           tab: 'overview',       keywords: ['no cell', 'orphan', 'unplaced'] },
+  { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floor plan', 'floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
+  { id: 'site-wide-lane',       label: 'Site-Wide',            tab: 'site-map',       keywords: ['no cell', 'bms', 'agv', 'unassigned lane'] },
+  { id: 'unassigned-lane',      label: 'Unassigned',           tab: 'site-map',       keywords: ['no cell', 'orphan', 'unplaced'] },
 
   { id: 'area-list',            label: 'Areas',                tab: 'areas',          keywords: ['buildings', 'unfiled cells', 'area list'] },
   { id: 'shopfloor-cells',      label: 'Shopfloor Cells',      tab: 'cells',          keywords: ['cell list', 'zones'] },

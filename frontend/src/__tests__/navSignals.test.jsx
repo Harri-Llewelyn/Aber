@@ -41,7 +41,7 @@ describe('Sidebar shows a signal', () => {
   const item = (label) => screen.getAllByRole('button').find(b => b.getAttribute('aria-label')?.startsWith(label))
 
   it('colours the flagged page and carries the reason on its title and label', () => {
-    render(<Sidebar tabs={TABS} currentTab="overview" onNavigate={vi.fn()}
+    render(<Sidebar tabs={TABS} currentTab="site-map" onNavigate={vi.fn()}
       signals={{ devices: { tone: 'warning', note: '2 devices awaiting zero-touch onboarding approval' } }} />)
     const devices = item('Devices')
     expect(devices.className).toMatch(/sidebar-item-warning/)

@@ -83,7 +83,7 @@ const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
 export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewThread, onPropose, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
   /**
-   * Which devices have an alert firing on them, via utils/deviceAlerts.js so Overview, Cells and
+   * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
    * Gateways resolve alerts the same way.
    */
   const alertsByDevice = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
