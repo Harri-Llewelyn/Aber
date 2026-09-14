@@ -771,7 +771,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             title: 'Open the immutable audit trace for this cell'
           },
           {
-            label: 'Manage Links', icon: <IconBookOpen size={13} />,
+            label: 'Attached Links', icon: <IconBookOpen size={13} />,
             onClick: () => setDocsForCell(selectedCell),
             title: 'Attach or edit links for this cell — documents, an asset register, a file repository, any URL'
           },

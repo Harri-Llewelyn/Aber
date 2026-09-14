@@ -17,12 +17,14 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { HelpTip } from '../common/HelpTip'
 import { AreaFloorsPanel } from '../common/AreaFloorsPanel'
 import { ConfirmModal } from '../modals/ConfirmModal'
+import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
   IconFactory,
   IconPlus,
   IconPencil,
   IconTrash,
   IconHistory,
+  IconBookOpen,
   IconShieldAlert,
   IconRadio,
   IconCpu,
@@ -47,6 +49,10 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const [showForm, setShowForm] = useState(false)
   useEscapeKey(() => setShowForm(false), showForm)
   const [editing, setEditing]   = useState(null)
+  /* The area whose links are open. `links.entity_type` is the singular noun and carries no CHECK,
+     so an area's links need no migration -- the same RLS and the same `link:manage` serve them. */
+  const [docsForArea, setDocsForArea] = useState(null)
+
   const blank = { area_name: '', description: '', icon: DEFAULT_AREA_ICON }
   const [formVal, setFormVal]   = useState(blank)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -379,6 +385,17 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           onCancel={() => setDeleteTarget(null)}
         />
       )}
+
+      {docsForArea && (
+        <EntityLinksModal
+          entityType="area"
+          entityId={docsForArea.area_id}
+          entityName={docsForArea.area_name}
+          onClose={() => setDocsForArea(null)}
+          showToast={showToast}
+          hasPermission={hasPermission}
+        />
+      )}
       </div>
 
       <ContextPanel
@@ -445,6 +462,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             label: 'View Digital Thread', icon: <IconHistory size={13} />,
             onClick: () => onViewThread?.(selectedArea),
             title: 'Open the immutable audit trace for this area'
+          },
+          {
+            // An area's own documents: a site plan, a fire strategy, the register for the building.
+            // Attached directly, like every other asset's -- there is no proposal lane for a link.
+            label: 'Attached Links', icon: <IconBookOpen size={13} />,
+            onClick: () => setDocsForArea(selectedArea),
+            title: 'Attach or edit links for this area — documents, a site plan, any URL'
           },
           {
             label: 'Delete Area', icon: <IconTrash size={13} />,

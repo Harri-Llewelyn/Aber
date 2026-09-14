@@ -370,6 +370,25 @@ describe('AreasTab files cells into areas', () => {
     expect(within(rowFor('Building B')).getByText('No floor set')).toBeInTheDocument()
   })
 
+  it('attaches links to an area, the way every other asset carries them', async () => {
+    /* `links.entity_type` is free text with no CHECK, and the links policies gate on the role
+       rather than on the kind of thing, so an area needed no migration to hold them -- only the
+       way in. The modal is the same one Cells, Gateways and Devices open. */
+    await renderAreas()
+    fireEvent.click(screen.getByText('Building A'))
+
+    fireEvent.click(screen.getByRole('button', { name: /Attached Links/ }))
+
+    const modal = document.querySelector('.modal')
+    expect(within(modal).getByText(/^Attached Links —/)).toBeInTheDocument()
+    expect(within(modal).getByText('Building A')).toBeInTheDocument()
+
+    // The singular noun, and the area's own id: what the modal reads back with.
+    expect(api.get).toHaveBeenCalledWith(
+      expect.stringContaining('entity_type=area')
+    )
+  })
+
   it('deletes an area only once its name has been typed', async () => {
     api.delete.mockResolvedValue(true)
     await renderAreas()

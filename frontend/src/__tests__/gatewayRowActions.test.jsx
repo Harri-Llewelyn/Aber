@@ -93,7 +93,7 @@ describe('gateway row actions', () => {
     const panel = openPanel()
 
     expect(panel.getByText(/View Digital Thread/i)).toBeTruthy()
-    expect(panel.getByText(/Manage Links/i)).toBeTruthy()
+    expect(panel.getByText(/Attached Links/i)).toBeTruthy()
     // Exact, matching the other assertions about this action in this file: a loose regex broke when
     // another component in the drawer mentioned the control by name.
     expect(panel.getByText('Edit Details')).toBeTruthy()
@@ -127,14 +127,14 @@ describe('gateway row actions', () => {
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {
-    // The accordion is gone from the row and the drawer; Manage Links opens the full editor.
+    // The accordion is gone from the row and the drawer; Attached Links opens the full editor.
     await show([gateway()])
 
     expect(inRow().queryByText('Attached Document Links')).toBeNull()
 
     const panel = openPanel()
     expect(panel.queryByText('Attached Document Links')).toBeNull()
-    expect(panel.getByText('Manage Links')).toBeInTheDocument()
+    expect(panel.getByText('Attached Links')).toBeInTheDocument()
   })
 })
 
@@ -213,13 +213,13 @@ describe('gateway document links', () => {
   })
 
   it('still reaches documents through the drawer', async () => {
-    // Removing the count must not remove the way in. Manage Links opens the modal that does
+    // Removing the count must not remove the way in. Attached Links opens the modal that does
     // its own read -- see EntityLinksModal.
     api.get.mockImplementation(withDocs([gateway()], []))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
-    expect(openPanel().getByText('Manage Links')).toBeInTheDocument()
+    expect(openPanel().getByText('Attached Links')).toBeInTheDocument()
   })
 })
 
