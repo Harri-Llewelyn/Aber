@@ -553,6 +553,10 @@ function edgeFunctionNames() {
     // 0107 reads `stop_requested` so a playback the operator interrupted is CANCELLED rather than
     // COMPLETED; the baseline decides on the error alone and cannot tell the two apart.
     'public.playback_finish': '0107 reads stop_requested and records an interrupted playback as CANCELLED; the baseline holds the error-only form',
+    // 0108 withdraws the three *_links proposal lanes 0090 opened: no page ever filed one, and a
+    // link is attached directly through link:manage. Each of these is the prior body with the link
+    // arms removed, so the last declaration wins and the lanes stay shut.
+    'public.proposal_is_already_true': '0108 drops the link branch; every remaining lane is an UPDATE, so containment is the whole test again',
     // 0088 adds the queue's second lane and the functions that admit it in the same file; 0090
     // replaces the withdrawn schema lane with the asset and link lanes.
     'public.may_decide_proposal': '0090 replaces the withdrawn schema lane with cells, gateways and the three *_links lanes, all resolving authority rather than role names; 0088 holds the form that introduced it',

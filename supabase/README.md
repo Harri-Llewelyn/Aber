@@ -2242,14 +2242,18 @@ branch refuses a new one, and *names* the reason) and by `may_decide_proposal()`
 Anything still open was withdrawn with a reason, because a row in a lane nobody can decide is worse
 than either keeping the lane or deleting the row.
 
-**Five lanes in two shapes.** `cells` and `gateways` take the same shape as `devices`: a patch of
-allowlisted columns over an existing row. `cell_links`, `gateway_links` and `device_links` take a
-**new** shape — the patch is a row to *create* in `links`, so `display_name` and `url` are
-**required** rather than optional, which is the opposite of every lane before them, where an absent
-key means *leave this alone*. They are three lanes rather than one because `entity_id` is a bare
-uuid whose table is decided by `entity_type`, and the validator has to know which table to look the
-target up in; one `links` lane would have had to carry the asset kind inside the patch, where the
-`CHECK` cannot see it and the per-asset unique index cannot scope it.
+**Four lanes, one shape.** `cells` and `gateways` take the same shape as `devices`: a patch of
+allowlisted columns over an existing row, where an absent key means *leave this alone*.
+
+`0108` withdrew a second shape that `0090` had introduced. `cell_links`, `gateway_links` and
+`device_links` made the patch a row to *create* in `links`, with `display_name` and `url` required
+rather than optional. No page ever filed one: the modal that attaches a link writes to `links`
+directly, through `link:manage`, which is how every link that exists got there, and the helper that
+would have filed a proposal was exported, unit-tested and called by nothing. The withdrawal goes
+further than the one `schemas` got — the CHECK constraint no longer admits the strings at all — and
+every row in those lanes was deleted. `link:manage` is untouched: it gates the direct edit.
+`audit_domain_for()` keeps its three link arms, so `digital_thread` rows written before `0108`
+stay in the asset domain instead of silently becoming security-domain history.
 
 **The new lanes resolve authority, not role names**, and `0087` is why: it found two predicates
 deciding one question and disagreeing silently, with the wider one winning. A lane gated on
@@ -2282,13 +2286,13 @@ between a form's string and a typed column makes containment false — so the fa
 "approval proceeds", never "a real change is refused as a no-op". The function is granted to
 `authenticated` so the queue can *warn* before somebody clicks rather than only refusing afterwards.
 
-**`proposable_link_tags()` is mirrored by `TAG_LABELS`** in
-`frontend/src/components/modals/EntityLinksModal.jsx`, and `scripts/check-mirror-drift.mjs` compares
-them. A tag added to the form and not to the function is a dropdown option that every proposal
-naming it is refused for, which reads as the form being broken rather than as the value being
-unknown. `links.link_tag` itself still carries no `CHECK`; retro-fitting one to a table with rows in
-it is a different migration with a different risk, and what `0090` does is refuse to create new junk
-through the path it opens.
+**`proposable_link_tags()` was dropped by `0108`**, along with the mirror check in
+`scripts/check-mirror-drift.mjs` that compared it against `TAG_LABELS` in
+`frontend/src/components/modals/EntityLinksModal.jsx`. `validate_change_proposal()` was its only
+caller, and it validated for lanes that no longer exist. The tag vocabulary now has one home, the
+modal; `links.link_tag` carries no `CHECK` and never did, so nothing in the database has an opinion
+about the value — retro-fitting one to a table with rows in it is a different migration with a
+different risk.
 
 ### A draft can be discarded (`0091`)
 

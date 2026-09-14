@@ -6,8 +6,6 @@ import {
   nonProposableFields,
   isProposable,
   submitProposal,
-  submitLinkProposal,
-  LINK_LANES
 } from '../utils/proposeFromForm'
 import { api } from '../api'
 
@@ -160,24 +158,7 @@ describe('filing it', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 
-  it('files a document against the right lane for each asset kind', async () => {
-    for (const [kind, lane] of Object.entries(LINK_LANES)) {
-      await submitLinkProposal({
-        kind, entityId: 'x-1',
-        link: { display_name: 'RAMS', url: 'https://docs.example/rams.pdf', link_tag: 'schematic' }
-      })
-      expect(api.post).toHaveBeenLastCalledWith('/api/v1/proposals',
-        expect.objectContaining({ entity_type: lane }))
-    }
-  })
-
-  it('defaults a document with no tag to other, as the column does', async () => {
-    await submitLinkProposal({
-      kind: 'device', entityId: 'd-1',
-      link: { display_name: 'RAMS', url: 'https://docs.example/rams.pdf' }
-    })
-    expect(api.post).toHaveBeenCalledWith('/api/v1/proposals', expect.objectContaining({
-      patch: expect.objectContaining({ link_tag: 'other' })
-    }))
-  })
+  /* The two link-lane tests are gone with 0108. They proved submitLinkProposal() addressed the
+     right lane -- a helper no page ever called, against lanes the database no longer admits. A
+     link is attached through EntityLinksModal, whose own suite is entityLinks.test.jsx. */
 })
