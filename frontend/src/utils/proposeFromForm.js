@@ -168,24 +168,3 @@ export async function submitProposal({ kind, entityId, patch, rationale, proposa
   if (proposalId) return api.put(`/api/v1/proposals/${proposalId}`, body)
   return api.post('/api/v1/proposals', body)
 }
-
-/**
- * Propose a document link against any of the three asset kinds. The patch is a row to create in
- * `links`, so its fields are required and there is no current row to diff against.
- */
-export const LINK_LANES = { cell: 'cell_links', gateway: 'gateway_links', device: 'device_links' }
-
-export async function submitLinkProposal({ kind, entityId, link, rationale }) {
-  const lane = LINK_LANES[kind]
-  if (!lane) throw new Error(`No document lane for "${kind}"`)
-  return api.post('/api/v1/proposals', {
-    entity_type: lane,
-    entity_id: entityId,
-    patch: {
-      display_name: link.display_name,
-      url: link.url,
-      link_tag: link.link_tag || 'other'
-    },
-    rationale: rationale || null
-  })
-}

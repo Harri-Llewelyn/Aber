@@ -160,14 +160,14 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <IconBookOpen size={18} style={{ color: 'var(--accent)' }} />
-            <span>Links — <strong style={{ color: 'var(--accent)' }}>{entityName}</strong></span>
+            <span>Attached Links — <strong style={{ color: 'var(--accent)' }}>{entityName}</strong></span>
           </div>
           <button className="btn btn-ghost btn-sm" onClick={onClose} title="Close modal"><IconX size={14} /></button>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            Attached Links ({links.length})
+            {links.length} attached
           </div>
 
           <button className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`} disabled={!canManage} onClick={openNew} title="Attach a new link to this asset">

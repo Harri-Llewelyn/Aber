@@ -94,8 +94,8 @@ describe('device row actions', () => {
       expect(labels).toMatch(expected)
     }
     // Documents are BOTH here: the accordion below lists the links, and this opens the editor
-    // that attaches one. The accordion's own "Manage Links" pill was removed as the duplicate.
-    expect(labels).toMatch(/Manage Links/i)
+    // that attaches one. The accordion's own "Attached Links" pill was removed as the duplicate.
+    expect(labels).toMatch(/Attached Links/i)
   })
 
   it('replaces Edit with Restore on an archived device', async () => {
@@ -132,14 +132,14 @@ describe('device row actions', () => {
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {
-    // The accordion is gone from the row and the drawer; Manage Links opens the full editor.
+    // The accordion is gone from the row and the drawer; Attached Links opens the full editor.
     await show([device()])
 
     expect(inRow().queryByText('Attached Document Links')).toBeNull()
 
     const panel = openPanel()
     expect(panel.queryByText('Attached Document Links')).toBeNull()
-    expect(panel.getByText('Manage Links')).toBeInTheDocument()
+    expect(panel.getByText('Attached Links')).toBeInTheDocument()
   })
 })
 

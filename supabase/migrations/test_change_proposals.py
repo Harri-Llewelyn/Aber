@@ -739,9 +739,12 @@ class TestTheSchemaLaneIsWithdrawn(ProposalCase):
         definition = self.cur.fetchone()[0]
         self.assertIn("'schemas'", definition)
         # And the live lanes are in it too, or nothing could be filed at all.
-        for lane in ('devices', 'device_nameplate', 'cells', 'gateways',
-                     'cell_links', 'gateway_links', 'device_links'):
+        for lane in ('devices', 'device_nameplate', 'cells', 'gateways'):
             self.assertIn(f"'{lane}'", definition)
+        # 0108 took the three link lanes OUT of it, which is a stronger withdrawal than the one
+        # 'schemas' got: that string is still admitted here and closed by an empty allowlist.
+        for lane in ('cell_links', 'gateway_links', 'device_links'):
+            self.assertNotIn(f"'{lane}'", definition)
 
     def test_0087_is_not_reverted(self):
         # The RPC narrowing stands entirely on its own: it closed a live hole through which a
@@ -855,12 +858,15 @@ class TestTheGatewayLane(ProposalCase):
             self.conn.rollback()
 
 
-class TestTheDocumentLanes(ProposalCase):
+class TestTheWithdrawnDocumentLanes(ProposalCase):
     """
-    0090's new SHAPE: the patch is a row to create, not columns to change.
+    0108. `cell_links`, `gateway_links` and `device_links` were 0090's one lane shape where the
+    patch was a row to CREATE rather than columns to change. No page ever filed one -- the modal
+    that attaches a link has always written to `links` directly, through `link:manage` -- so the
+    lanes were reachable only by hand-crafting the insert these tests do.
 
-    Every lane before this one is a patch, where an absent key means "leave this alone". A new
-    `links` row has no "as it was" to fall back on, so its identifying fields are required.
+    They are shut two ways: the allowlist is empty, and the CHECK constraint no longer admits the
+    string at all. The permission is NOT withdrawn with them; it still gates the direct edit.
     """
 
     def a_document(self, **overrides):
@@ -869,98 +875,68 @@ class TestTheDocumentLanes(ProposalCase):
         patch.update(overrides)
         return patch
 
-    def test_an_operator_may_propose_a_document_on_a_device(self):
-        proposal = self.propose(self.a_document(), entity_type="device_links", entity_id=DEVICE)
-        self.assertIsNotNone(proposal)
+    def test_no_link_lane_can_be_filed_in(self):
+        for lane, entity in (("device_links", DEVICE), ("cell_links", CELL),
+                             ("gateway_links", GATEWAY)):
+            as_user(self.cur, OPERATOR)
+            # Either error is the lane being shut: the trigger runs before the constraint, so which
+            # one speaks first is an ordering detail, not the behaviour under test.
+            with self.assertRaises((psycopg2.errors.InvalidParameterValue,
+                                    psycopg2.errors.CheckViolation)):
+                self.cur.execute(
+                    "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                    "VALUES (%s, %s, %s::jsonb);",
+                    (lane, entity, json.dumps(self.a_document())))
+            self.cur.execute("ROLLBACK;")
 
-    def test_approving_creates_the_link_row(self):
-        proposal = self.propose(self.a_document(), entity_type="device_links", entity_id=DEVICE)
+    def test_nothing_is_proposable_on_a_link_lane(self):
+        as_owner(self.cur)
+        for lane in ("cell_links", "gateway_links", "device_links"):
+            self.cur.execute("SELECT public.proposable_columns(%s);", (lane,))
+            self.assertEqual(self.cur.fetchone()[0], [], f"{lane} still has an allowlist")
+
+    def test_nobody_may_decide_one(self):
         as_user(self.cur, MANAGER)
-        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        for lane in ("cell_links", "gateway_links", "device_links"):
+            self.cur.execute("SELECT public.may_decide_proposal(%s);", (lane,))
+            self.assertFalse(self.cur.fetchone()[0], f"{lane} is still decidable")
+
+    def test_the_tag_function_the_lanes_validated_against_is_gone(self):
         as_owner(self.cur)
         self.cur.execute(
-            "SELECT entity_type, display_name, url, link_tag FROM public.links "
-            " WHERE entity_id = %s;", (DEVICE,))
-        row = self.cur.fetchone()
-        # `links.entity_type` is the SINGULAR noun the rest of the app writes, derived from the
-        # lane rather than copied across.
-        self.assertEqual(row[0], "device")
-        self.assertEqual(row[1], "RAMS")
-        self.assertEqual(row[2], "https://docs.example/rams.pdf")
-        self.assertEqual(row[3], "health_and_safety")
+            "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            " WHERE n.nspname = 'public' AND p.proname = 'proposable_link_tags';")
+        self.assertEqual(self.cur.fetchone()[0], 0)
 
-    def test_each_lane_writes_its_own_singular_noun(self):
-        for lane, entity, noun in (("cell_links", CELL, "cell"),
-                                   ("gateway_links", GATEWAY, "gateway")):
-            proposal = self.propose(self.a_document(url=f"https://docs.example/{noun}.pdf"),
-                                    entity_type=lane, entity_id=entity)
-            as_user(self.cur, MANAGER)
-            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
-            as_owner(self.cur)
-            self.cur.execute("SELECT entity_type FROM public.links WHERE entity_id = %s;", (entity,))
-            self.assertEqual(self.cur.fetchone()[0], noun)
-
-    def test_a_document_with_no_url_is_refused(self):
-        as_user(self.cur, OPERATOR)
-        with self.assertRaises(psycopg2.errors.InvalidParameterValue) as caught:
-            self.cur.execute(
-                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
-                "VALUES ('device_links', %s, %s::jsonb);",
-                (DEVICE, json.dumps({"display_name": "RAMS"})))
-        self.assertIn("needs a url", str(caught.exception))
-
-    def test_a_document_with_no_name_is_refused(self):
-        as_user(self.cur, OPERATOR)
-        with self.assertRaises(psycopg2.errors.InvalidParameterValue):
-            self.cur.execute(
-                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
-                "VALUES ('device_links', %s, %s::jsonb);",
-                (DEVICE, json.dumps({"url": "https://docs.example/x.pdf"})))
-
-    def test_a_relative_url_is_refused(self):
-        # It would resolve against this app's own origin and become a link into the platform that
-        # goes nowhere -- silently, which is what makes it worth a constraint.
-        as_user(self.cur, OPERATOR)
-        with self.assertRaises(psycopg2.errors.InvalidParameterValue) as caught:
-            self.cur.execute(
-                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
-                "VALUES ('device_links', %s, %s::jsonb);",
-                (DEVICE, json.dumps({"display_name": "RAMS", "url": "documents/rams.pdf"})))
-        self.assertIn("must be absolute", str(caught.exception))
-
-    def test_a_tag_nobody_offers_is_refused(self):
-        as_user(self.cur, OPERATOR)
-        with self.assertRaises(psycopg2.errors.InvalidParameterValue):
-            self.cur.execute(
-                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
-                "VALUES ('device_links', %s, %s::jsonb);",
-                (DEVICE, json.dumps(self.a_document(link_tag="banana"))))
-
-    def test_a_document_with_no_tag_lands_as_other(self):
-        patch = {"display_name": "RAMS", "url": "https://docs.example/rams.pdf"}
-        proposal = self.propose(patch, entity_type="device_links", entity_id=DEVICE)
-        as_user(self.cur, MANAGER)
-        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+    def test_the_audit_domain_still_reads_asset_for_the_old_lanes(self):
+        # Kept deliberately. A deployment that approved a link proposal before 0108 holds
+        # digital_thread rows carrying these entity_types; dropping the arms would move that
+        # history into the fail-closed security domain and narrow who may read it.
         as_owner(self.cur)
-        self.cur.execute("SELECT link_tag FROM public.links WHERE entity_id = %s;", (DEVICE,))
-        self.assertEqual(self.cur.fetchone()[0], "other")
+        for lane in ("cell_links", "gateway_links", "device_links"):
+            self.cur.execute("SELECT public.audit_domain_for(%s, 'PROPOSAL_APPLIED');", (lane,))
+            self.assertEqual(self.cur.fetchone()[0], "asset")
 
     def test_an_operator_still_cannot_write_a_link_directly(self):
+        # Unchanged by 0108, and the reason the lanes existed: an Operator holds no `link:manage`.
+        # With the lanes gone this is simply the whole story for that role.
         as_user(self.cur, OPERATOR)
         with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
             self.cur.execute(
                 "INSERT INTO public.links (entity_type, entity_id, display_name, url) "
                 "VALUES ('device', %s, 'RAMS', 'https://docs.example/rams.pdf');", (DEVICE,))
 
-    def test_a_proposal_against_an_archived_device_is_refused(self):
+    def test_a_manager_still_attaches_one_directly(self):
+        # The route that was always the real one, asserted here so the withdrawal above cannot be
+        # mistaken for links themselves being withdrawn.
+        as_user(self.cur, MANAGER)
+        self.cur.execute(
+            "INSERT INTO public.links (entity_type, entity_id, display_name, url, link_tag) "
+            "VALUES ('device', %s, 'RAMS', 'https://docs.example/rams.pdf', 'health_and_safety');",
+            (DEVICE,))
         as_owner(self.cur)
-        self.cur.execute("UPDATE public.devices SET is_archived = true WHERE id = %s;", (DEVICE_TWO,))
-        as_user(self.cur, OPERATOR)
-        with self.assertRaises(psycopg2.errors.ForeignKeyViolation):
-            self.cur.execute(
-                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
-                "VALUES ('device_links', %s, %s::jsonb);",
-                (DEVICE_TWO, json.dumps(self.a_document())))
+        self.cur.execute("SELECT display_name FROM public.links WHERE entity_id = %s;", (DEVICE,))
+        self.assertEqual(self.cur.fetchone()[0], "RAMS")
 
 
 class TestAProposalThatCameTrueOnItsOwn(ProposalCase):
@@ -1025,23 +1001,6 @@ class TestAProposalThatCameTrueOnItsOwn(ProposalCase):
         as_user(self.cur, MANAGER)
         self.cur.execute("SELECT public.proposal_is_already_true(%s);", (proposal,))
         self.assertFalse(self.cur.fetchone()[0])
-
-    def test_a_document_already_at_that_address_is_a_no_op(self):
-        # A link has no row to contain the patch, so "already true" is: does this asset already
-        # carry a document at that URL? The address is the identity of a link.
-        as_owner(self.cur)
-        self.cur.execute(
-            "INSERT INTO public.links (entity_type, entity_id, display_name, url) "
-            "VALUES ('device', %s, 'RAMS (already here)', 'https://docs.example/rams.pdf');",
-            (DEVICE,))
-        proposal = self.propose(
-            {"display_name": "RAMS", "url": "https://docs.example/rams.pdf"},
-            entity_type="device_links", entity_id=DEVICE)
-        as_user(self.cur, MANAGER)
-        with self.assertRaises(psycopg2.errors.CheckViolation):
-            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
-
-
 
 
 class TestTheTimer(ProposalCase):

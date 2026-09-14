@@ -600,9 +600,9 @@ describe('the actions a shadow device does not offer', () => {
     expect(panel.queryByText(/Digital Nameplate/)).toBeNull()
   })
 
-  it('offers no Manage Links', async () => {
+  it('offers no Attached Links', async () => {
     const panel = await openShadowPanel()
-    expect(panel.queryByText('Manage Links')).toBeNull()
+    expect(panel.queryByText('Attached Links')).toBeNull()
   })
 
   it('still offers the AAS exports, which 0060 designed for', async () => {
@@ -618,7 +618,7 @@ describe('the actions a shadow device does not offer', () => {
     fireEvent.click(within(document.querySelector('.page-main')).getByText('CNC_01'))
     const panel = within(document.querySelector('.context-panel'))
     expect(panel.queryByText(/Digital Nameplate/)).not.toBeNull()
-    expect(panel.queryByText('Manage Links')).not.toBeNull()
+    expect(panel.queryByText('Attached Links')).not.toBeNull()
     expect(panel.queryByText(/Export AAS JSON/)).not.toBeNull()
   })
 })

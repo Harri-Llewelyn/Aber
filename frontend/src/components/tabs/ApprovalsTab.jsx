@@ -49,21 +49,9 @@ export const LANES = [
     blurb: 'Name, description, access URL and where the gateway sits. Not what it IS, and not what '
       + 'the platform observed about its health.'
   },
-  {
-    id: 'device_links',
-    label: 'Device document',
-    blurb: 'A document to attach to a machine — a risk assessment, a schematic, an asset register.'
-  },
-  {
-    id: 'cell_links',
-    label: 'Cell document',
-    blurb: 'A document to attach to a cell.'
-  },
-  {
-    id: 'gateway_links',
-    label: 'Gateway document',
-    blurb: 'A document to attach to a gateway.'
-  }
+  /* No link lanes. 0108 withdrew `cell_links`, `gateway_links` and `device_links`: no UI ever filed
+     one, and a link is attached directly through `link:manage`. LANE_BY_ID falls back rather than
+     filtering, so a decided row left over from before still renders under its raw lane name. */
 ]
 
 const LANE_BY_ID = new Map(LANES.map(l => [l.id, l]))

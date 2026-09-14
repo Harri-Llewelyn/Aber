@@ -1633,7 +1633,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           !selectedDevice.shadow_of && {
             // The accordion below lists the links; this is how a new one gets attached. Both are
             // needed now that the accordion no longer carries its own Manage button.
-            label: 'Manage Links', icon: <IconBookOpen size={13} />,
+            label: 'Attached Links', icon: <IconBookOpen size={13} />,
             onClick: () => setDocsForDevice(selectedDevice),
             title: 'Attach or edit links for this device — documents, an asset register, a file repository, any URL'
           },

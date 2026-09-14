@@ -49,14 +49,16 @@ beforeEach(() => { vi.clearAllMocks() })
 // The vocabulary
 
 describe('the link vocabulary', () => {
-  it('calls them Links, not Document Links', async () => {
+  it('calls them Attached Links, not Document Links and not Manage Links', async () => {
     await show()
 
-    // The name was the thing blocking the feature's general use: someone with an EZOfficeInventory
-    // URL could always have pasted it here, and would never have thought to look.
-    expect(modal().getByText(/^Links —/)).toBeTruthy()
-    expect(modal().getByText(/Attached Links \(1\)/)).toBeTruthy()
+    /* Two renames, and the reason for each. "Document Links" was blocking the feature's general
+       use: someone with an EZOfficeInventory URL could always have pasted it here and would never
+       have thought to look. "Manage Links" then named a UI rather than the thing -- every other
+       action in that drawer says what it opens, and the modal's own title now agrees with it. */
+    expect(modal().getByText(/^Attached Links —/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/Document Links/)
+    expect(document.body.textContent).not.toMatch(/Manage Links/)
   })
 
   it('offers Asset Register and File Repository alongside the original tags', async () => {

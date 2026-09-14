@@ -331,29 +331,10 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
-// 5. The tags a proposed document may carry. `proposable_link_tags()` is what
-// validate_change_proposal() refuses an unknown tag against; `TAG_LABELS` is what the form offers.
-// A tag in one and not the other is a refused dropdown option or a stored value with no label.
-// Order is not compared.
-{
-  const js = read('frontend/src/components/modals/EntityLinksModal.jsx');
-  const fn = lastDefinition(
-    'CREATE OR REPLACE FUNCTION public.proposable_link_tags()',
-    '$$;',
-    'public.proposable_link_tags()'
-  );
-
-  if (fn) {
-    const sqlBlock = need(fn.body, /SELECT ARRAY\[([\s\S]*?)\]/, 'the array in proposable_link_tags()');
-    const jsBlock = need(js, /const TAG_LABELS = \{([\s\S]*?)\}/, 'TAG_LABELS in EntityLinksModal.jsx');
-
-    if (sqlBlock && jsBlock) {
-      const sqlTags = [...sqlBlock[1].matchAll(/'([a-z_]+)'/g)].map(m => m[1]).sort();
-      const jsTags = [...jsBlock[1].matchAll(/^\s*([a-z_]+)\s*:/gm)].map(m => m[1]).sort();
-      compare('linkTags', 'the tags a document may carry', jsTags.join(','), sqlTags.join(','));
-    }
-  }
-}
+// 5. RETIRED BY 0108. `proposable_link_tags()` was dropped with the three link proposal lanes it
+// validated for; a link has only ever been attached by the direct edit, which stores `link_tag`
+// against no CHECK. The tag vocabulary now lives in EntityLinksModal alone, so there is no second
+// copy here to drift from.
 
 // 6. The Directory's local-namespace qualification, TypeScript to Python. `schemas.id` and
 // `directory_services.id` are locally minted, and the edge function and `directory_publish.py` both

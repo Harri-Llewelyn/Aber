@@ -1122,7 +1122,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             title: 'Open the immutable audit trace for this gateway'
           },
           {
-            label: 'Manage Links', icon: <IconBookOpen size={13} />,
+            label: 'Attached Links', icon: <IconBookOpen size={13} />,
             onClick: () => setDocsForGw(selected),
             title: 'Attach or edit links for this gateway — documents, an asset register, a file repository, any URL'
           },
