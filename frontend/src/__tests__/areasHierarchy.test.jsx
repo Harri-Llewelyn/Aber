@@ -119,8 +119,8 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await renderSiteMap()
     expect(thumbs().map(t => within(t).getByText(/Building/).textContent)).toEqual(['Building A', 'Building B'])
     // Cells, gateways and devices in the header; Area-Wide assets count, so Building A's BMS does.
-    expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('2 cells · GW 1 · Dev 2')).toBeInTheDocument()
-    expect(within(thumbs()[1].querySelector('.area-thumb-header')).getByText('1 cell · GW 0 · Dev 0')).toBeInTheDocument()
+    expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
+    expect(within(thumbs()[1].querySelector('.area-thumb-header')).getByText('1 Cell · 0 Gateways · 0 Devices')).toBeInTheDocument()
     expect(screen.queryByText(/\d floors?$/)).toBeNull()
     // The ground floor's placed cell is a small pin on the thumbnail, named; the first-floor cell is not.
     expect(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' })).toBeInTheDocument()
@@ -136,7 +136,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     // Site-Wide, Simulated and Unassigned belong to no area. Area-Wide is not among them: it
     // belongs to an area and is listed beside that area's plan.
     await renderSiteMap()
-    expect(lanes().map(l => l.textContent.replace(/GW.*$/, '').trim())).toEqual(['Site-Wide', 'Simulated', 'Unassigned'])
+    expect(lanes().map(l => l.textContent.replace(/\d+ Gateways?.*$/, '').trim())).toEqual(['Site-Wide', 'Simulated', 'Unassigned'])
     expect(lanes().map(l => l.className)).toEqual([
       expect.stringContaining('site-lane-site'),
       expect.stringContaining('site-lane-simulated'),

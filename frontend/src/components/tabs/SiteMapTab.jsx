@@ -45,6 +45,14 @@ import {
 } from '../common/Icons'
 
 /**
+ * `0 Cells`, `1 Gateway`, `2 Devices`. The lane and area counts read as words in the order a
+ * person says them, rather than as an abbreviation before a bare number: `GW 1` invites reading
+ * the 1 as an identifier, and mixing `cells` with `GW`/`Dev` made one line say the same kind of
+ * thing three different ways. The title attributes beside each already spelled the nouns out.
+ */
+const counted = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`
+
+/**
  * The Site Map, one card: the ISA-95 ladder and the legend, the three lanes that belong to no
  * area, then the areas — every area as one of its floors in a thumbnail, or one area's floor plan
  * with its cells pinned on it. Read only: assets are filed on their own pages, and cells are placed
@@ -393,7 +401,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
           <AreaGlyph size={14} style={{ flexShrink: 0 }} />
           <span className="zone-name">{ar.area_name}</span>
           <span className="area-thumb-counts mono" title={`${areaCells.length} cell(s), ${gateways.length} gateway(s), ${devices.length} device(s), Area-Wide included`}>
-            {areaCells.length} cell{areaCells.length === 1 ? '' : 's'} · GW {gateways.length} · Dev {devices.length}
+            {counted(areaCells.length, 'Cell')} · {counted(gateways.length, 'Gateway')} · {counted(devices.length, 'Device')}
           </span>
         </div>
         <FloorPlan floor={shown} compact title={shown ? `${shown.name} of ${ar.area_name}` : `${ar.area_name} has no floors`}>
@@ -722,7 +730,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
                     <LaneIcon size={13} style={{ flexShrink: 0 }} />
                     <span className="site-lane-name">{lane.title}</span>
                     <span className="site-lane-counts mono" title={`${laneGateways.length} gateway(s), ${laneAssets.length} device(s)`}>
-                      GW {laneGateways.length} · Dev {laneAssets.length}
+                      {counted(laneGateways.length, 'Gateway')} · {counted(laneAssets.length, 'Device')}
                     </span>
                   </button>
                 )
