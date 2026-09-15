@@ -1368,9 +1368,21 @@ def verify_results():
                       "asked once per message.")
                 passed = False
         else:
+            # THE THROTTLE 9b ASSERTS IS ALSO THE COMMONEST REASON 9 FAILS, and the two are
+            # indistinguishable from here: a suppressed request and an absent one both look like
+            # an empty capture. Named first, because the alternative reading is alarming and the
+            # daemon's log settles it in one line.
+            interval = os.getenv("REBIRTH_REQUEST_INTERVAL_SECONDS", "300")
             print("❌ 9. REBIRTH REQUEST FAIL: DDATA carrying an undeclared alias produced no "
-                  f"NCMD on {expected_topic}. Without it, an ingestion restart silently stops "
-                  "recording every alias-optimised device until its gateway is power-cycled.")
+                  f"NCMD on {expected_topic}.")
+            print(f"      -> RULE OUT THE THROTTLE FIRST: a rebirth is asked once per edge node "
+                  f"per {interval}s, so a run started inside that window of a previous one fails "
+                  "here against a daemon that is working perfectly. The daemon's log states the "
+                  "deadline -- grep it for 'REBIRTH REQUESTED' and compare the timestamp with "
+                  "this run, then wait the window out rather than re-running.")
+            print("      -> If the window was clear, this is the real fault: an ingestion restart "
+                  "silently stops recording every alias-optimised device until its gateway is "
+                  "power-cycled.")
             passed = False
     except Exception as e:
         print(f"❌ 9. REBIRTH REQUEST ERROR: {e}")

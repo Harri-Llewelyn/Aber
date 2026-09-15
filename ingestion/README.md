@@ -970,6 +970,11 @@ On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
   That split is the point: this credential cannot forge telemetry for a device that is correctly
   bound to its gateway — the one forgery `verify_gateway_binding()` cannot detect, because such a
   message satisfies it by construction.
+- **`validate.py` check 9 fails on any run started within the window of a previous one.** The
+  suppressed request and an absent one are the same empty capture from the checker's side, so a
+  healthy daemon reports a failure whose text describes a serious fault. Check 9b exists to assert
+  the very throttle that causes it. Space runs by more than `REBIRTH_REQUEST_INTERVAL_SECONDS`, and
+  when in doubt grep the daemon's log for `REBIRTH REQUESTED`: the line states the deadline.
 - **The demo Node-RED simulator does not answer a rebirth** — it publishes on a timer and
   subscribes to no command topic. That is a simulator limitation, not a daemon one.
 
