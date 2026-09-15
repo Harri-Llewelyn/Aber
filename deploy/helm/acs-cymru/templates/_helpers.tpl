@@ -1442,3 +1442,30 @@ from a broken chart.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/* The ingress rule for git over SSH on the Gitea pod, shared by the always-on forge policy and
+     the M4 layer's `-ingress-gitea-ssh` so the two cannot disagree about who may clone.
+
+     AT THE DEFAULT IT EMITS NO `from` AT ALL rather than `ipBlock: 0.0.0.0/0`. A rule with no peers
+     matches every source by definition, in every CNI; an ipBlock is matched against an address,
+     which a CNI resolving node traffic by identity need not do, and covers no IPv6. Appliance
+     traffic arrives SNAT'd by ServiceLB, so it is node-sourced. A list carrying 0.0.0.0/0 alongside
+     other entries is open regardless and takes the same path.
+     (deploy/k8s/README.md -> "NetworkPolicies (M4)") */}}
+{{- define "acs-cymru.giteaSshIngressRule" -}}
+{{- $cidrs := .Values.networkPolicy.giteaSshAllowedCidrs | default list -}}
+{{- if or (empty $cidrs) (has "0.0.0.0/0" $cidrs) -}}
+- ports:
+    - protocol: TCP
+      port: 22
+{{- else -}}
+- from:
+    {{- range $cidrs }}
+    - ipBlock:
+        cidr: {{ . | quote }}
+    {{- end }}
+  ports:
+    - protocol: TCP
+      port: 22
+{{- end -}}
+{{- end -}}

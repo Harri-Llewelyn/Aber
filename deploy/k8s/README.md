@@ -842,6 +842,31 @@ it *selects*, not for the ports it names: once this object selects the Gitea pod
 not listed is denied. Measured on k3d — a draft naming only 3000 took an appliance's clone from an
 SSH banner to `ECONNREFUSED`. The same trap applies to any policy you add here.
 
+**`giteaSshAllowedCidrs` is load-bearing with the layer off.** Both policies take their port 22
+peers from it, so the two cannot disagree about who may clone — which also means narrowing it while
+`networkPolicy.enabled` is `false` narrows how appliances reach the forge. That failure is invisible
+in the usual way: a gateway that cannot reach `gitea:22` does not converge, and nothing in the stack
+reports it as a policy decision.
+
+**At the default the rule names no peer at all, deliberately.** `acs-cymru.giteaSshIngressRule`
+renders `- ports: [22]` with no `from` when the list is empty or contains `0.0.0.0/0`, and an
+`ipBlock` list only when it has been narrowed. The two are not the same object even though both read
+as "anything":
+
+| | |
+| :--- | :--- |
+| No `from` | matches **every** source, by definition, in every CNI — `NetworkPolicyIngressRule.from`: "If this field is empty or missing, this rule matches all sources" |
+| `ipBlock: 0.0.0.0/0` | matches an IPv4 **address**. kube-router (k3s) and Calico match a node or pod source address, so ServiceLB-SNAT'd appliance traffic is admitted. Cilium resolves node and in-cluster traffic by *identity*, and documents its CIDR rules as applying to traffic entering or leaving the cluster — a node-sourced packet carries a `host`/`remote-node` identity that a CIDR rule need not match (`policy-cidr-match-mode: nodes` exists to change that). It also covers no IPv6 |
+
+On a CNI in the second column, `0.0.0.0/0` on port 22 would not be the "open to anything" it reads
+as, and selecting the Gitea pod would close git-over-SSH — the fleet-stopping failure the explicit
+port 22 rule exists to prevent, arriving by a different route. The chart takes the shape with no
+question in it rather than depending on the answer. Not measured on Cilium; the CIDR-vs-identity
+reasoning is from Cilium's documented semantics (#235).
+
+`mqttAllowedCidrs` has the same shape and the same SNAT, and has **not** been changed: that rule is
+opt-in, and the broker's exposure is a posture an operator chooses per site.
+
 ### PDBs and HPAs
 
 ```bash
