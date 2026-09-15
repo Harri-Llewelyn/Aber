@@ -765,9 +765,17 @@ and not an error, so nothing travelled back, and the job was recorded `COMPLETED
 
 | the plan | | |
 | :--- | :--- | :--- |
-| every message out of window | refused, `FAILED` | a total no-op is never what anyone wanted, and the reason names the first offending timestamp |
+| every reading out of window | refused, `FAILED` | a total no-op is never what anyone wanted, and the reason names the first offending timestamp |
 | some of them | published, `COMPLETED` | with the count on `playback_jobs.messages_out_of_window`, and a notice on the page saying what was lost |
 | none | published, `COMPLETED` | the overwhelmingly common case, and it says nothing |
+
+**The refusal is decided per metric, and the count is per message**, because that is
+`process_ddata()`'s rule: a metric is judged on its own timestamp and falls back to the payload's
+only when it has none — where none means absent *or* zero, which is the `HasField` plus `> 0` test
+the daemon applies. So an edge node with a skewed clock stamping payloads whose metrics each carry
+the device's own time loses nothing, and a capture whose every message loses one reading and keeps
+another is a capture that writes. Reading the payload clock as a verdict of its own would refuse
+both, from a page that has no `--allow-unsane`.
 
 `capture.py play` still refuses **both** cases unless `--allow-unsane` is passed, and that
 difference from the worker is deliberate: the CLI has an escape hatch to pass and a person at a

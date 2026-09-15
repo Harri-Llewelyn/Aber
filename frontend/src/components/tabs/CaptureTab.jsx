@@ -1157,8 +1157,8 @@ function RecentFailures({ jobs, kind = 'capture' }) {
  *
  * WHY THIS IS NOT A FAILURE AND NOT NOTHING. The ingestion daemon discards a metric stamped outside
  * its sanity window by COUNTING it, not by refusing it, and nothing travels back to the publisher.
- * So the worker computes, from the plan it is about to publish, how many messages will be dropped,
- * and records it on the job (0109). The job genuinely completed and some readings genuinely
+ * So the worker computes, from the plan it is about to publish, how many messages will lose a
+ * reading to it, and records that on the job (0109). The job genuinely completed and some readings genuinely
  * arrived — reporting it red would be wrong, and reporting it as an unqualified success is what
  * issue #216 was about. A playback that would have written NOTHING never reaches here: the worker
  * refuses it, and it shows in RecentFailures above with the reason.
@@ -1198,7 +1198,8 @@ function RecentDiscards({ jobs }) {
               <strong>{job.gateways?.name || job.target_edge_node_id}</strong>
               {' — '}
               {lost} of {total} published message{total === 1 ? '' : 's'} carried timestamps too old
-              for the historian and were discarded on ingest. The playback itself succeeded.
+              for the historian, and those readings were discarded on ingest. The playback itself
+              succeeded.
               {' '}
               <HelpTip label="Why readings were discarded" text={
                 'Playback rebases every timestamp onto the moment it is sent, but preserves how far '

@@ -336,33 +336,39 @@ def _run_job(supabase, storage, credentials, job):
     #
     # REFUSED ONLY WHEN IT CAN WRITE NOTHING AT ALL (#216). The split is the point:
     #
-    #   * every message out of window -- a total no-op, which is never what anyone wanted. Refused
+    #   * nothing survives the window -- a total no-op, which is never what anyone wanted. Refused
     #     here, which makes it FAILED with this reason, which the Capture page already shows.
-    #   * some of them -- run it. A capture carrying one stale device clock is still worth
+    #   * something does -- run it. A capture carrying one stale device clock is still worth
     #     replaying, and only the operator can say whether this one is. The count goes onto the job
     #     row so the page says what was lost instead of reporting an unqualified success.
+    #
+    # COUNTED PER MESSAGE, DECIDED PER METRIC, AND THE TWO ARE DIFFERENT QUESTIONS. The daemon
+    # judges each metric on its own timestamp and falls back to the payload's only when it has none,
+    # so a capture whose every message loses one reading and keeps another writes plenty. Refusing
+    # on `len(lossy) >= len(plan)` would report that one as having written nothing.
     #
     # `capture.py play` refuses BOTH cases unless --allow-unsane is passed, and that difference is
     # deliberate rather than an oversight: the CLI has an escape hatch to pass and a person at a
     # terminal to read the message, and the page has neither.
-    unsane = capture.unsane_timestamps(plan, play_epoch_ms)
-    out_of_window = len(unsane)
-    if unsane and out_of_window >= len(plan):
-        topic, ts, at = unsane[0]
+    lossy, metrics_kept, metrics_dropped = capture.window_outcome(plan, play_epoch_ms)
+    out_of_window = len(lossy)
+    if metrics_dropped and not metrics_kept:
+        topic, ts, at = lossy[0]
         return 0, out_of_window, (
-            "every one of the %d planned message(s) carries a timestamp the ingestion daemon will "
-            "discard as outside its sanity window, so this playback would publish the whole capture "
-            "and write nothing to the historian (first: %s, stamped %s, would be sent at %s). "
+            "every one of the %d reading(s) in this capture carries a timestamp the ingestion "
+            "daemon will discard as outside its sanity window, so this playback would publish the "
+            "whole capture and write nothing to the historian (first: %s, stamped %s, would be "
+            "sent at %s). "
             "Rebasing preserves how far a timestamp sits from the capture's own epoch, so this is a "
             "reading that was already old when it was recorded, a device clock skewed against the "
             "recorder's, or a hand edit. --speed cannot cause it: the scheduler and the rebasing "
             "divide by it alike." % (
-                len(plan), topic,
+                metrics_dropped, topic,
                 datetime.fromtimestamp(ts / 1000.0, timezone.utc).isoformat(),
                 datetime.fromtimestamp(at / 1000.0, timezone.utc).isoformat(),
             )
         )
-    if unsane:
+    if lossy:
         logger.warning(
             "Playback %s: %d of %d message(s) carry timestamps the daemon will drop as outside its "
             "sanity window. They will be published and silently discarded on ingest.",

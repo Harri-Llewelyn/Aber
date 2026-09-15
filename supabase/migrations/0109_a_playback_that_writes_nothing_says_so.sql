@@ -40,7 +40,7 @@ ALTER TABLE public.playback_jobs
     ADD COLUMN IF NOT EXISTS messages_out_of_window integer DEFAULT 0 NOT NULL;
 
 COMMENT ON COLUMN public.playback_jobs.messages_out_of_window IS
-    'How many of this job''s planned messages carried timestamps the ingestion daemon will discard as outside its sanity window -- computed by the worker from the plan before publishing, never reported back by the daemon, whose answer to an out-of-window metric is a counter and not an error. Compare with messages_sent: equal means the playback wrote nothing, and the worker refuses that case as FAILED rather than recording it COMPLETED. Zero on every job written before 0109.';
+    'How many of this job''s planned messages carried timestamps the ingestion daemon will discard as outside its sanity window -- computed by the worker from the plan before publishing, never reported back by the daemon, whose answer to an out-of-window metric is a counter and not an error. COUNTED PER MESSAGE WHILE THE REFUSAL IS DECIDED PER METRIC: process_ddata() judges each metric on its own timestamp and falls back to the payload''s only when it has none, so a job carrying a count on every one of its messages may still have written a reading from each. The worker refuses, as FAILED, only a playback the window would discard entirely. Zero on every job written before 0109.';
 
 DO $$
 BEGIN

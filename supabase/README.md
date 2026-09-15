@@ -620,10 +620,14 @@ ingestion daemon answers a metric stamped outside its sanity window with a **cou
 error, so nothing travels back to the publisher. A capture whose rebased timestamps all fell outside
 that window was therefore published in full, recorded `COMPLETED` with its complete `messages_sent`,
 and wrote nothing — indistinguishable on the Capture page from a replay that worked (#216). The
-worker now computes the count from the plan *before* publishing and splits the case: **every**
-message out of window is refused as `FAILED`, naming the first offending timestamp, because a total
-no-op is never what anyone wanted; **some** of them runs, and the count lands on
-`playback_jobs.messages_out_of_window` for the page to report. That column is what the worker
+worker now computes the count from the plan *before* publishing and splits the case: a plan the
+window would discard **entirely** is refused as `FAILED`, naming the first offending timestamp,
+because a total no-op is never what anyone wanted; anything that would write something runs, and the
+count lands on `playback_jobs.messages_out_of_window` for the page to report. **That refusal is
+decided per metric and the count is per message**, because the daemon judges each metric on its own
+timestamp and falls back to the payload's only when it has none — so a capture whose every message
+loses a reading and keeps another is a capture that writes, and refusing it would fail a replay the
+historian would have taken in full. That column is what the worker
 *predicted* would be dropped, never what the daemon dropped — nothing reports that — and it reads
 zero on every job written before this migration, where it means "nobody counted".
 
