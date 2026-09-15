@@ -414,6 +414,65 @@ class SanityWindowTests(unittest.TestCase):
         plan = capture.plan_playback(edited, GW, DEFAULT_MAP, NOW)
         self.assertEqual(len(capture.unsane_timestamps(plan, NOW)), 1)
 
+    # -----------------------------------------------------------------------------------------
+    # WHOSE CLOCK IS JUDGED, which is process_ddata()'s rule and not an obvious one. A metric is
+    # judged on its own timestamp and falls back to the payload's only when it has none -- so
+    # reading the payload clock as a verdict of its own over-reports, and now that the worker
+    # refuses a total loss, over-reporting refuses a capture the daemon would have written.
+    # -----------------------------------------------------------------------------------------
+    def test_a_metric_with_its_own_timestamp_is_not_judged_by_the_payloads(self):
+        # THE CASE THE DAEMON'S PER-METRIC RULE EXISTS FOR: an edge node with a skewed clock
+        # stamping the payload, each metric carrying the device's own time. Nothing is lost, and a
+        # check that read the payload clock would have called this a total no-op.
+        skewed = capture_file([message(0, "DDATA", timestamp=EPOCH - 25 * 3600 * 1000, metrics=[
+            {"name": "Systems/TEMPERATURE", "timestamp": EPOCH, "double_value": 20.0},
+        ])])
+        plan = capture.plan_playback(skewed, GW, DEFAULT_MAP, NOW)
+        self.assertEqual(capture.unsane_timestamps(plan, NOW), [])
+        self.assertEqual(capture.window_outcome(plan, NOW)[1:], (1, 0))
+
+    def test_a_metric_without_a_timestamp_takes_the_payloads(self):
+        # The other half of the same rule: the fallback is real, so a skewed payload clock DOES
+        # cost every metric that has none of its own.
+        skewed = capture_file([message(0, "DDATA", timestamp=EPOCH - 25 * 3600 * 1000, metrics=[
+            {"name": "Systems/TEMPERATURE", "double_value": 20.0},
+        ])])
+        plan = capture.plan_playback(skewed, GW, DEFAULT_MAP, NOW)
+        self.assertEqual(len(capture.unsane_timestamps(plan, NOW)), 1)
+
+    def test_a_zero_timestamp_is_no_timestamp(self):
+        # `HasField` plus `> 0` is the daemon's test, so a zero already means "use the payload's".
+        # Rebasing it would manufacture one -- NOW minus the capture epoch, decades adrift -- and
+        # turn a reading the daemon files under the payload clock into one it drops.
+        zeroed = capture_file([message(0, "DDATA", metrics=[
+            {"name": "Systems/TEMPERATURE", "timestamp": 0, "double_value": 20.0},
+        ])])
+        plan = capture.plan_playback(zeroed, GW, DEFAULT_MAP, NOW)
+        self.assertEqual(plan[0][3]["metrics"][0]["timestamp"], 0, "rebasing moved a zero")
+        self.assertEqual(capture.unsane_timestamps(plan, NOW), [])
+
+    def test_a_payload_without_a_clock_is_stamped_on_arrival(self):
+        # payload_ts falls back to the receive time in the daemon, which is in window by
+        # construction. Nothing here is out of range, and nothing may be reported as though it is.
+        unstamped = capture_file([message(0, "DDATA", timestamp=None, metrics=[
+            {"name": "Systems/TEMPERATURE", "double_value": 20.0},
+        ])])
+        plan = capture.plan_playback(unstamped, GW, DEFAULT_MAP, NOW)
+        self.assertIsNone(plan[0][3]["timestamp"], "rebasing materialised a payload clock")
+        self.assertEqual(capture.unsane_timestamps(plan, NOW), [])
+
+    def test_a_message_that_loses_one_metric_keeps_the_other(self):
+        # WHY THE COUNTS ARE METRICS AND THE LIST IS MESSAGES. This message is lossy AND writes a
+        # reading. A refusal keyed on "every message is lossy" would call it a no-op.
+        mixed = capture_file([message(0, "DDATA", metrics=[
+            {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 25 * 3600 * 1000,
+             "double_value": 20.0},
+            {"name": "Systems/PRESSURE", "timestamp": EPOCH, "double_value": 3.0},
+        ])])
+        plan = capture.plan_playback(mixed, GW, DEFAULT_MAP, NOW)
+        lossy, kept, dropped = capture.window_outcome(plan, NOW)
+        self.assertEqual((len(lossy), kept, dropped), (1, 1, 1))
+
     def test_the_window_matches_the_daemons(self):
         # Restated rather than imported, so it is pinned against drift from ingestion.py.
         self.assertEqual(capture.TELEMETRY_MAX_AGE_SECONDS, 24 * 60 * 60)
@@ -486,6 +545,157 @@ class CaptureFileShapeTests(unittest.TestCase):
         decoded = sparkplug_b_pb2.Payload()
         decoded.ParseFromString(payload_bytes)
         self.assertEqual(decoded.metrics[0].double_value, 999.9)
+
+
+# =============================================================================================
+# WHAT THE WORKER DOES WITH THE COUNT unsane_timestamps() RETURNS (#216).
+#
+# The tests above assert that the count is RIGHT. These assert what is done with it, which is a
+# separate decision and the one that was wrong: the daemon answers an out-of-window metric with a
+# counter rather than an error, nothing travels back to the publisher, and so a playback every one
+# of whose timestamps would be discarded published its whole capture, was recorded COMPLETED with
+# the full `messages_sent`, and wrote nothing to the historian.
+#
+# NO BROKER AND NO SUPABASE HERE, WHICH IS WHY THESE LIVE IN THE UNIT LANE. The refusal is reached
+# before `_connect`, from the plan alone -- so a stub storage client and a capture with stale
+# timestamps are the whole fixture. The replay suite (test_playback_replay.py, stack lane) covers
+# the path where a real worker publishes to a real broker; it cannot cheaply build a capture the
+# daemon will reject in full, and would not prove the decision if it could.
+# =============================================================================================
+class WorkerOutOfWindowTests(unittest.TestCase):
+
+    def setUp(self):
+        # NO BROKER MAY BE REACHED FROM THESE TESTS, and leaving that to chance is not enough. Two
+        # of them deliberately get past the refusal and on to `_connect`, and on a host where
+        # `mosquitto` resolves -- in-cluster, or a developer with an /etc/hosts entry -- that would
+        # publish a fixture capture into a real stack. Pointed at a name reserved by RFC 2606 to
+        # resolve nowhere, so the connection fails everywhere for the same reason.
+        worker = self._worker()
+        self._host = worker.MQTT_HOST
+        worker.MQTT_HOST = "broker.invalid"
+
+    def tearDown(self):
+        self._worker().MQTT_HOST = self._host
+
+    @staticmethod
+    def _worker():
+        import playback_worker
+        return playback_worker
+
+    @staticmethod
+    def _job():
+        """A claimed job, as `playback_claim_job()` hands one over."""
+        return {
+            "id": "00000000-0000-4000-8000-0000000000aa",
+            "target_edge_node_id": GW,
+            "capture_storage_path": "captures/fixture.json",
+            "device_map": DEFAULT_MAP,
+            "speed": 1.0,
+            "sparkplug_group": None,
+        }
+
+    class _Storage:
+        """Enough of the storage client for `_run_job` to read one capture."""
+
+        def __init__(self, document):
+            self._body = json.dumps(document).encode("utf-8")
+
+        def from_(self, _bucket):
+            return self
+
+        def download(self, _path):
+            return self._body
+
+    def _run(self, document):
+        worker = self._worker()
+        return worker._run_job(
+            supabase=None, storage=self._Storage(document),
+            credentials={GW: "a-password"}, job=self._job(),
+        )
+
+    @staticmethod
+    def _stale(offset_ms, count=1):
+        """`count` messages, every metric stamped a day and an hour before the capture epoch."""
+        return capture_file([
+            message(offset_ms * i, "DDATA", metrics=[
+                {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 25 * 3600 * 1000,
+                 "double_value": 20.0},
+            ])
+            for i in range(count)
+        ])
+
+    def test_a_playback_that_would_write_nothing_is_refused(self):
+        # THE BUG. Every message out of window is a total no-op, and the worker used to publish it
+        # and report success. Refused before the broker is contacted, so `sent` is zero and the
+        # error is what the Capture page shows.
+        sent, out_of_window, error = self._run(self._stale(1_000, count=3))
+        self.assertEqual(sent, 0)
+        self.assertEqual(out_of_window, 3)
+        self.assertIsNotNone(error, "a playback that can write nothing was not refused")
+        self.assertIn("write nothing to the historian", error)
+
+    def test_the_refusal_names_the_first_offending_message(self):
+        # An operator's next move is to look at a timestamp, so the message names one rather than
+        # reporting a count they would then have to go and find the cause of.
+        _, _, error = self._run(self._stale(1_000, count=2))
+        self.assertIn("spBv1.0/", error, "the refusal does not name a topic")
+        self.assertIn("--speed cannot cause it", error,
+                      "the refusal does not rule out the explanation an operator reaches for first")
+
+    def test_a_partly_stale_capture_is_not_refused(self):
+        # THE OTHER HALF OF THE DECISION, and the reason this is not simply the CLI's refusal moved
+        # over: a capture carrying ONE stale device clock is still worth replaying, and the page has
+        # no equivalent of `--allow-unsane` for an operator to reach for. It gets as far as the
+        # broker, which is absent here -- so the error is a connection failure, NOT a refusal, and
+        # the count travels with it.
+        mixed = capture_file([
+            message(0, "DDATA", metrics=[
+                {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 25 * 3600 * 1000,
+                 "double_value": 20.0},
+            ]),
+            message(1_000, "DDATA", metrics=[
+                {"name": "Systems/TEMPERATURE", "timestamp": EPOCH, "double_value": 21.0},
+            ]),
+        ])
+        sent, out_of_window, error = self._run(mixed)
+        self.assertEqual(sent, 0)
+        self.assertEqual(out_of_window, 1)
+        self.assertNotIn("write nothing to the historian", error or "",
+                         "a capture with one good message was refused as a total no-op")
+
+    def test_a_capture_the_daemon_would_write_in_full_is_not_refused(self):
+        # THE REFUSAL MUST NOT BE STRICTER THAN THE DAEMON IT MODELS. Every payload here carries a
+        # skewed edge-node clock and every metric its own good one, so the daemon writes all of it
+        # -- and refusing on the payload clock would fail the job saying it would write nothing,
+        # from a page with no `--allow-unsane`. It gets as far as the absent broker instead.
+        skewed = capture_file([
+            message(offset, "DDATA", timestamp=EPOCH - 25 * 3600 * 1000, metrics=[
+                {"name": "Systems/TEMPERATURE", "timestamp": EPOCH + offset,
+                 "double_value": 20.0},
+            ])
+            for offset in (0, 1_000, 2_000)
+        ])
+        sent, out_of_window, error = self._run(skewed)
+        self.assertEqual((sent, out_of_window), (0, 0))
+        self.assertNotIn("write nothing to the historian", error or "",
+                         "a capture the daemon would write in full was refused as a total no-op")
+
+    def test_a_healthy_capture_counts_nothing_out_of_window(self):
+        # The control. Without it every assertion above would also pass against a worker that
+        # reported a discard for every job.
+        _, out_of_window, _ = self._run(capture_file([message(0, "DDATA"), message(50, "DDATA")]))
+        self.assertEqual(out_of_window, 0)
+
+    def test_the_count_is_reported_even_when_the_job_fails_early(self):
+        # `playback_finish` records it on every outcome, so the count has to survive a failure
+        # rather than only a success: on a FAILED job it is the diagnosis.
+        worker = self._worker()
+        sent, out_of_window, error = worker._run_job(
+            supabase=None, storage=self._Storage(capture_file()),
+            credentials={}, job=self._job(),
+        )
+        self.assertEqual((sent, out_of_window), (0, 0))
+        self.assertIn("holds no broker credential", error)
 
 
 if __name__ == "__main__":

@@ -615,6 +615,29 @@ selects `FAILED` and `CANCELLED`, so a stopped job left no trace there either. T
 the flag, and **an error outranks it** — a job asked to stop that then failed is a failure, because
 the error is the half an operator can act on.
 
+**`0109` makes a playback say what the historian refused.** The same shape one layer down: the
+ingestion daemon answers a metric stamped outside its sanity window with a **counter**, not an
+error, so nothing travels back to the publisher. A capture whose rebased timestamps all fell outside
+that window was therefore published in full, recorded `COMPLETED` with its complete `messages_sent`,
+and wrote nothing — indistinguishable on the Capture page from a replay that worked (#216). The
+worker now computes the count from the plan *before* publishing and splits the case: a plan the
+window would discard **entirely** is refused as `FAILED`, naming the first offending timestamp,
+because a total no-op is never what anyone wanted; anything that would write something runs, and the
+count lands on `playback_jobs.messages_out_of_window` for the page to report. **That refusal is
+decided per metric and the count is per message**, because the daemon judges each metric on its own
+timestamp and falls back to the payload's only when it has none — so a capture whose every message
+loses a reading and keeps another is a capture that writes, and refusing it would fail a replay the
+historian would have taken in full. That column is what the worker
+*predicted* would be dropped, never what the daemon dropped — nothing reports that — and it reads
+zero on every job written before this migration, where it means "nobody counted".
+
+`playback_finish()` is dropped and recreated rather than overloaded, for the reason `0075` gives: a
+defaulted fourth argument beside the three-argument form makes a three-argument call ambiguous. The
+new argument is **recorded and not judged** — the worker holds the plan and decides there, and a
+function that could turn a job the worker had already reported as sent into a failure would be a
+second opinion about an event that is over. `0107`'s three arms are unchanged, and a self-check
+fails if either its `stop_requested` arm or the new column goes missing from the body.
+
 ### What is stale, and what is merely quiet (`0029`, `0061`)
 
 `platform_health` is the one view Grafana's platform rules read, and its `gateway_stale` arm is the

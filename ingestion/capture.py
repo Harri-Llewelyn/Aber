@@ -379,6 +379,11 @@ def rebase_payload(payload_dict, capture_epoch_ms, play_epoch_ms, speed=1.0):
     the payload's for exactly that case, so the fallback keeps working -- whereas materialising
     one here would write a timestamp the original publisher never sent, into a historian, which
     is the same class of corruption `_timestamp_is_sane()` refuses to commit by clamping.
+
+    A ZERO IS NOT A TIMESTAMP EITHER, and is left alone for the same reason. The daemon's test is
+    `HasField` plus `> 0`, so a zero already means "use the payload's" -- and it is the payload's
+    clock that is rebased. Moving it would turn a reading the daemon files under the payload clock
+    into one carrying a manufactured time, far enough from now to be dropped.
     """
     if speed <= 0:
         raise CaptureError("speed must be greater than zero, got %r" % (speed,))
@@ -387,13 +392,13 @@ def rebase_payload(payload_dict, capture_epoch_ms, play_epoch_ms, speed=1.0):
         return int(play_epoch_ms + (int(ts) - capture_epoch_ms) / speed)
 
     out = dict(payload_dict)
-    if out.get("timestamp") is not None:
+    if out.get("timestamp"):
         out["timestamp"] = move(out["timestamp"])
 
     metrics = []
     for m in payload_dict.get("metrics", []):
         entry = dict(m)
-        if entry.get("timestamp") is not None:
+        if entry.get("timestamp"):
             entry["timestamp"] = move(entry["timestamp"])
         metrics.append(entry)
     out["metrics"] = metrics
@@ -464,9 +469,23 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
     return plan
 
 
-def unsane_timestamps(plan, now_ms):
+def window_outcome(plan, now_ms):
     """
-    Which planned metrics would be dropped by the daemon's sanity window.
+    How the daemon's sanity window will treat a plan: (lossy, metrics_kept, metrics_dropped).
+
+    `lossy` holds one (topic, timestamp, at_send_ms) per message that would lose at least one
+    metric, naming the first offending stamp. The two counts are METRICS, and they are what decides
+    whether a playback can write anything at all: a plan every message of which loses a metric is
+    not the same claim as a plan that writes nothing, and reading it as one refuses a playback the
+    daemon would have filed in full.
+
+    THE RULE IS process_ddata()'S, RESTATED HERE SO A CAPTURE CAN BE CHECKED BEFORE IT IS
+    PUBLISHED. A metric is judged on ITS OWN timestamp and falls back to the payload's only when it
+    has none -- where none means absent OR zero, because `HasField` plus `> 0` is the test the
+    daemon applies. The payload's clock is a verdict on NOTHING by itself: an absent or zero
+    payload timestamp becomes the arrival time there, which is in window by construction. So an
+    edge node with a skewed clock stamping payloads whose metrics each carry the device's own time
+    costs nothing, which is the case the daemon's per-metric rule exists for.
 
     Reported BEFORE publishing rather than discovered afterwards, because the daemon's answer to
     an out-of-window metric is a counter and not an error -- so without this a playback reports
@@ -489,17 +508,39 @@ def unsane_timestamps(plan, now_ms):
         the capture is rebased onto a different absolute time;
       * a hand-edited timestamp, which is a case this tool invites by design.
     """
-    bad = []
+    lossy = []
+    kept = dropped = 0
     for delay_ms, topic, _, payload in plan:
         # The clock at the moment this message is actually published, not at planning time.
         at_send_ms = now_ms + delay_ms
-        stamps = [payload.get("timestamp")]
-        stamps += [m.get("timestamp") for m in payload.get("metrics", [])]
-        for ts in stamps:
-            if ts is not None and not timestamp_is_sane(ts, at_send_ms):
-                bad.append((topic, ts, at_send_ms))
-                break
-    return bad
+        payload_ts = payload.get("timestamp")
+        if payload_ts is None or payload_ts <= 0:
+            payload_ts = at_send_ms
+        first_bad = None
+        for metric in payload.get("metrics", []):
+            ts = metric.get("timestamp")
+            if ts is None or ts <= 0:
+                ts = payload_ts
+            if timestamp_is_sane(ts, at_send_ms):
+                kept += 1
+            else:
+                dropped += 1
+                if first_bad is None:
+                    first_bad = ts
+        if first_bad is not None:
+            lossy.append((topic, first_bad, at_send_ms))
+    return lossy, kept, dropped
+
+
+def unsane_timestamps(plan, now_ms):
+    """
+    Which planned messages would lose a metric to the daemon's sanity window.
+
+    `capture.py play` refuses on any of them, which the worker does not: the CLI has an escape
+    hatch to pass and a person at a terminal to read the message. The worker reads
+    window_outcome()'s counts instead and refuses only a playback that would write nothing.
+    """
+    return window_outcome(plan, now_ms)[0]
 
 
 def parse_device_map(pairs):

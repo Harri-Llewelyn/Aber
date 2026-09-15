@@ -4414,6 +4414,18 @@ components:
         status: { type: string, enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED] }
         messages_total: { type: integer }
         messages_sent: { type: integer }
+        messages_out_of_window:
+          type: integer
+          description: |
+            How many of the planned messages carried timestamps the ingestion daemon will discard
+            as outside its sanity window — computed by the worker from the plan BEFORE publishing,
+            never reported back by the daemon, whose answer to an out-of-window metric is a counter
+            and not an error. Greater than zero on a COMPLETED job means some readings were
+            published and lost; a job that would lose EVERY reading is refused by the worker and
+            arrives FAILED. Counted per message, while that refusal is decided per metric: the
+            daemon judges each metric on its own timestamp and falls back to the payload's only
+            when it has none, so a job can carry a count on every message and still have written. Zero on every job written before migration 0109, which means
+            "nobody counted" rather than "none were discarded".
         elapsed_seconds: { type: integer }
         stop_requested:
           type: boolean

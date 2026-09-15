@@ -49,6 +49,7 @@ Related: supabase/migrations/archive/0056_playback_orchestration.sql (every gate
 import json
 import os
 import time
+from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
@@ -279,7 +280,7 @@ def _connect(edge_node_id, password):
 
 
 def _run_job(supabase, storage, credentials, job):
-    """Publish one capture. Returns (messages_sent, error or None)."""
+    """Publish one capture. Returns (messages_sent, messages_out_of_window, error or None)."""
     job_id = job["id"]
     edge_node = job["target_edge_node_id"]
     password = credentials.get(edge_node)
@@ -289,7 +290,7 @@ def _run_job(supabase, storage, credentials, job):
         # error that names neither the gateway nor the missing secret, and at QoS 0 a publish that
         # the ACL refuses is dropped with no PUBACK -- so a wrong-credential playback would
         # otherwise report success and move nothing.
-        return 0, (
+        return 0, 0, (
             "this worker holds no broker credential for %s, so it cannot authenticate as that "
             "gateway. Add it to MQTT_PLAYBACK_CREDENTIALS." % edge_node
         )
@@ -303,12 +304,12 @@ def _run_job(supabase, storage, credentials, job):
         # 42501 here is the read gate: `Service_Playback` holds telemetry:read alone (0080), and the bucket's SELECT
         # policy admits it only for the object of a RUNNING job. If this fails on a job that IS
         # running, the policy arm is missing rather than the file.
-        return 0, "could not read %s: %s" % (job["capture_storage_path"], err)
+        return 0, 0, "could not read %s: %s" % (job["capture_storage_path"], err)
 
     try:
         document = json.loads(body.decode("utf-8") if isinstance(body, bytes) else body)
     except ValueError as err:
-        return 0, "%s is not valid JSON: %s" % (job["capture_storage_path"], err)
+        return 0, 0, "%s is not valid JSON: %s" % (job["capture_storage_path"], err)
 
     # ------------------------------------------------------------------------------------------
     # The plan
@@ -326,18 +327,52 @@ def _run_job(supabase, storage, credentials, job):
             group=job.get("sparkplug_group"),
         )
     except capture.CaptureError as err:
-        return 0, str(err)
+        return 0, 0, str(err)
 
-    # REPORTED BEFORE PUBLISHING, not discovered after. The daemon's answer to an out-of-window
-    # metric is a counter, not an error -- so without this a playback reports success and writes
-    # nothing to the historian. Warned rather than refused: a capture carrying one stale device
-    # clock is still worth replaying, and the operator is the one who can tell.
-    unsane = capture.unsane_timestamps(plan, play_epoch_ms)
-    if unsane:
+    # DECIDED BEFORE PUBLISHING, not discovered after. The daemon's answer to an out-of-window
+    # metric is a counter, not an error, and nothing travels back to the publisher -- so a playback
+    # every one of whose timestamps the daemon will discard would otherwise publish its whole
+    # capture, be recorded COMPLETED with the full `messages_sent`, and write nothing.
+    #
+    # REFUSED ONLY WHEN IT CAN WRITE NOTHING AT ALL (#216). The split is the point:
+    #
+    #   * nothing survives the window -- a total no-op, which is never what anyone wanted. Refused
+    #     here, which makes it FAILED with this reason, which the Capture page already shows.
+    #   * something does -- run it. A capture carrying one stale device clock is still worth
+    #     replaying, and only the operator can say whether this one is. The count goes onto the job
+    #     row so the page says what was lost instead of reporting an unqualified success.
+    #
+    # COUNTED PER MESSAGE, DECIDED PER METRIC, AND THE TWO ARE DIFFERENT QUESTIONS. The daemon
+    # judges each metric on its own timestamp and falls back to the payload's only when it has none,
+    # so a capture whose every message loses one reading and keeps another writes plenty. Refusing
+    # on `len(lossy) >= len(plan)` would report that one as having written nothing.
+    #
+    # `capture.py play` refuses BOTH cases unless --allow-unsane is passed, and that difference is
+    # deliberate rather than an oversight: the CLI has an escape hatch to pass and a person at a
+    # terminal to read the message, and the page has neither.
+    lossy, metrics_kept, metrics_dropped = capture.window_outcome(plan, play_epoch_ms)
+    out_of_window = len(lossy)
+    if metrics_dropped and not metrics_kept:
+        topic, ts, at = lossy[0]
+        return 0, out_of_window, (
+            "every one of the %d reading(s) in this capture carries a timestamp the ingestion "
+            "daemon will discard as outside its sanity window, so this playback would publish the "
+            "whole capture and write nothing to the historian (first: %s, stamped %s, would be "
+            "sent at %s). "
+            "Rebasing preserves how far a timestamp sits from the capture's own epoch, so this is a "
+            "reading that was already old when it was recorded, a device clock skewed against the "
+            "recorder's, or a hand edit. --speed cannot cause it: the scheduler and the rebasing "
+            "divide by it alike." % (
+                metrics_dropped, topic,
+                datetime.fromtimestamp(ts / 1000.0, timezone.utc).isoformat(),
+                datetime.fromtimestamp(at / 1000.0, timezone.utc).isoformat(),
+            )
+        )
+    if lossy:
         logger.warning(
             "Playback %s: %d of %d message(s) carry timestamps the daemon will drop as outside its "
             "sanity window. They will be published and silently discarded on ingest.",
-            job_id, len(unsane), len(plan),
+            job_id, out_of_window, len(plan),
         )
 
     # ------------------------------------------------------------------------------------------
@@ -346,7 +381,7 @@ def _run_job(supabase, storage, credentials, job):
     try:
         client = _connect(edge_node, password)
     except Exception as err:
-        return 0, "could not connect to the broker as %s: %s" % (edge_node, err)
+        return 0, out_of_window, "could not connect to the broker as %s: %s" % (edge_node, err)
 
     client.loop_start()
 
@@ -371,7 +406,7 @@ def _run_job(supabase, storage, credentials, job):
 
     if not client.acs_connack:
         client.loop_stop()
-        return 0, (
+        return 0, out_of_window, (
             "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
             "or this would have failed above, so it accepted the socket and said nothing."
             % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
@@ -384,7 +419,7 @@ def _run_job(supabase, storage, credentials, job):
             4: "the broker rejected the username or password",
             5: "the broker refused this connection as not authorised",
         }.get(rc, "the broker refused the connection")
-        return 0, (
+        return 0, out_of_window, (
             "%s for %s (CONNACK rc=%s). If this gateway's credential was re-minted, the worker is "
             "still holding the previous one: update MQTT_PLAYBACK_CREDENTIALS and recreate the "
             "playback container." % (detail, edge_node, rc)
@@ -439,7 +474,7 @@ def _run_job(supabase, storage, credentials, job):
         except Exception:
             pass
 
-    return sent, error
+    return sent, out_of_window, error
 
 
 def main():
@@ -584,14 +619,17 @@ def main():
             job.get("speed"), len(job.get("device_map") or {}),
         )
         try:
-            sent, error = _run_job(supabase, storage, credentials, job)
+            sent, out_of_window, error = _run_job(supabase, storage, credentials, job)
         except Exception as err:
             logger.error("Playback %s: unhandled error: %s", job["id"], err, exc_info=True)
-            sent, error = 0, "unhandled error: %s" % err
+            sent, out_of_window, error = 0, 0, "unhandled error: %s" % err
 
         try:
             supabase.rpc("playback_finish", {
                 "p_job_id": job["id"], "p_messages_sent": sent, "p_error": error,
+                # 0109. Named, so the argument lands whatever order the function declares it in;
+                # recorded on every outcome, because a FAILED job's count is the diagnosis.
+                "p_messages_out_of_window": out_of_window,
             }).execute()
         except Exception as err:
             # The job stays RUNNING, and the next restart's reconciliation is what clears it. Said
