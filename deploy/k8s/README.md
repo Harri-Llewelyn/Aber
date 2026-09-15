@@ -20,6 +20,39 @@ operational half.
   not kind, which would test a different ingress controller and a different storage provisioner
   than production uses. Testing the wrong thing carefully is worse than not testing it.
 
+### Hardware
+
+One node, and these are for the whole stack with every hardening feature off — the defaults.
+
+| | CPU | Memory | Disk |
+| :--- | :--- | :--- | :--- |
+| **Minimum** | 4 vCPU | 8 GiB | 100 GiB |
+| **Recommended** | 8 vCPU | 16 GiB | 250 GiB |
+
+The minimum is measured, not estimated: on a node capped at 8 GiB and 4 CPUs the stack installs,
+`helm test` passes, all 24 pods reach Ready with no restarts, and no container records a single
+cgroup reclaim event. Peak was 6.8 GiB during install, settling to pods holding 3.3 GiB with the
+rest page cache.
+
+**Below the minimum the failure is scheduling, not slowness.** The chart requests
+**1.6 vCPU and 3.7 GiB** across its workloads, and a request is a reservation the scheduler
+must satisfy before it will place a pod. A node that cannot cover it leaves pods `Pending`
+indefinitely with no error in any container log — `kubectl describe pod` names it, nothing else
+does. This is also why a 2 vCPU node cannot run the stack at all, however much memory it has.
+
+Disk is the one that fails at install time rather than later: the chart provisions **85 GiB of
+PersistentVolumeClaims** on default values (20 GiB each for the two databases, 10 GiB each for
+Gitea, Loki, Prometheus and Storage, the rest smaller). With `local-path` these are directories on
+the node, so the node's disk must hold all of them plus images. `values-dev.yaml` drops the two
+databases to 5 GiB each, which is why a development cluster fits in far less.
+
+Expect the install itself to saturate four cores — it is the most CPU-hungry moment, and it
+finishes rather than fails. Steady-state CPU on an idle stack is under half a core.
+
+These figures are an **idle stack with no gateways connected**. Ingestion throughput moves CPU,
+and the two databases, Prometheus and Loki grow against their retention settings — `observability`
+keeps 30 days or 8 GB of metrics, whichever comes first. Size for the retention you configure.
+
 ### Local cluster with k3d
 
 ```bash

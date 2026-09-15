@@ -95,6 +95,20 @@ body:
         of these.
       render: text
 
+  - type: input
+    id: node-size
+    attributes:
+      label: Cluster size
+      description: >
+        vCPU, memory and disk per node, and how many nodes. The documented minimum is 4 vCPU and
+        8 GiB on one node (`deploy/k8s/README.md`, *Prerequisites → Hardware*). This is asked
+        because slowness, restarts and pods stuck `Pending` are usually a node below that floor
+        rather than a defect, and the two are indistinguishable from a log alone. Put `n/a` if the
+        report is not about a running cluster.
+      placeholder: "1 node, 8 vCPU / 16 GiB / 250 GiB"
+    validations:
+      required: true
+
   - type: textarea
     id: environment
     attributes:
