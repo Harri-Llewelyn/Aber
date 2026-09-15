@@ -41,8 +41,8 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // Bumped whenever the body of the generated settings.js changes in a way an existing volume
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
-// NODERED_ADMIN_TOKEN comparison.
-const SETTINGS_VERSION = 4;
+// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off.
+const SETTINGS_VERSION = 5;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -455,6 +455,14 @@ module.exports = {
 
   flowFile: ${JSON.stringify(FLOW_FILE)},
   credentialSecret: ${JSON.stringify(credentialSecret)},
+
+  editorTheme: {
+    // OFF, because it is shown per BROWSER rather than per user: Node-RED records that the tour
+    // was seen in localStorage, and this editor is reached through the platform's own sign-in, so
+    // a shared workstation or a cleared profile replays it at somebody who has seen it already.
+    // It is also a tour of stock Node-RED, which is not what a flow author is here to learn.
+    tours: false
+  },
 
   adminAuth: {
     type: 'strategy',
