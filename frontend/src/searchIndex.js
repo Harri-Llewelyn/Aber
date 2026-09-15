@@ -24,7 +24,10 @@ export const PAGE_KEYWORDS = {
   // 'archives' is still the page id and the route, so the old name has to stay findable here:
   // the label moved to "Archived Entities" but nobody's habits did.
   'archives':       ['archives', 'archived', 'decommissioned', 'restore', 'retired', 'purge', 'out of commission'],
-  'schemas':        ['contract', 'metric', 'catalog', 'catalogue', 'registry', 'model', 'version'],
+  'schemas':        ['contract', 'registry', 'model', 'version', 'draft', 'fork', 'publish'],
+  // Keeps catalog/catalogue: the catalogue was part of the Schemas page and is searched for by
+  // that name as often as by its own.
+  'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
   'directory':      ['services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness'],
   'digital-thread': ['audit', 'history', 'trace', 'provenance', 'events', 'changes', 'who changed'],
@@ -52,8 +55,8 @@ export const CARDS = [
      verbatim scores identically and renders as the same row twice. */
 
   { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'fork'] },
-  // The entry the request was raised about.
-  { id: 'metric-catalog',       label: 'Metric Catalog',       tab: 'schemas',        keywords: ['metrics', 'data points', 'catalogue', 'units', 'semantic id'] },
+  /* No "Metric Catalog" card: the catalogue is the Metrics page now, and its page entry answers
+     every query this card did. */
   { id: 'vocab-mtconnect',      label: 'MTConnect',            tab: 'vocabulary',     keywords: ['machine tool', 'data items', 'components'] },
   { id: 'vocab-iso22400',       label: 'ISO 22400',            tab: 'vocabulary',     keywords: ['kpi', 'oee', 'availability', 'mtbf'] },
   { id: 'vocab-opcua',          label: 'OPC UA',               tab: 'vocabulary',     keywords: ['companion', 'machinery', 'robotics'] },

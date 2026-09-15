@@ -16,7 +16,8 @@ import {
   IconHardDrive,
   IconLock,
   IconSettings,
-  IconInbox
+  IconInbox,
+  IconTag
 } from './components/common/Icons'
 
 /*
@@ -70,8 +71,15 @@ export const TABS = [
   { id: 'devices',        label: 'Devices',        group: 'assets',  icon: <IconCpu size={16} /> },
 
   { id: 'schemas',        label: 'Schemas',        group: 'model',   icon: <IconClipboardList size={16} /> },
-  // Split out of Schemas: the registry and the catalogue are state you edit, the vocabularies are
-  // reference you read, and the reference half grows with every standard adopted.
+  /* Split out of Schemas, which held the registry and the catalogue in one page. They grow on
+     different clocks -- the registry a row per publish, the catalogue a row per metric anyone
+     models, for as long as standards keep being adopted -- so each was capping its own height to
+     leave the other room and neither had a viewport. Vocabulary left the same page earlier for
+     the same reason. */
+  // IconTag, not IconGauge (which already means a metrology cell) and not IconActivity (which
+  // means live telemetry): this page is the definitions, never the readings.
+  { id: 'metrics',        label: 'Metrics',        group: 'model',   icon: <IconTag size={16} /> },
+  // Reference you read, where the two above are state you edit.
   { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} /> },
 
   /* Gated on the permission, not on role names: the `digital_thread` SELECT policies resolve

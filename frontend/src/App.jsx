@@ -62,6 +62,7 @@ const DigitalThreadTab = lazy(() => import('./components/tabs/DigitalThreadTab')
 // Reached only via GoTrue's OAuth redirect, so it is never in the main bundle's critical path.
 const OAuthConsent     = lazy(() => import('./pages/OAuthConsent').then(m => ({ default: m.OAuthConsent })))
 const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(m => ({ default: m.SchemasTab })))
+const MetricsTab       = lazy(() => import('./components/tabs/MetricsTab').then(m => ({ default: m.MetricsTab })))
 const VocabularyTab    = lazy(() => import('./components/tabs/VocabularyTab').then(m => ({ default: m.VocabularyTab })))
 const DirectoryTab     = lazy(() => import('./components/tabs/DirectoryTab').then(m => ({ default: m.DirectoryTab })))
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
@@ -355,7 +356,7 @@ function Dashboard({ session, onSignOut }) {
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
   // Set by a "Digital Thread" action on an asset row; consumed by DigitalThreadTab as { id, type }.
   const [selectedThreadEntity, setSelectedThreadEntity] = useState(null)
-  // Set by Use on the Vocabulary page; consumed by SchemasTab, which resolves it against the
+  // Set by Use on the Vocabulary page; consumed by MetricsTab, which resolves it against the
   // vocabularies it already holds and opens its Add Metric form.
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
   const [showBugReport, setShowBugReport] = useState(false)
@@ -580,8 +581,9 @@ function Dashboard({ session, onSignOut }) {
                 showToast={showToast}
               />
             )}
-            {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
-            {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('schemas') }} />}
+            {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} />}
+            {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
+            {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
             {tab === 'directory'      && <DirectoryTab showToast={showToast} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
                 proposer's own rows. The transition guard and RLS re-derive the proposer from

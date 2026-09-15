@@ -1,5 +1,5 @@
 /**
- * Metric Catalog: the Data Point picker is scoped to the selected group. Independent selects let
+ * Metrics page: the Data Point picker is scoped to the selected group. Independent selects let
  * any group be paired with any point, and `opcuaPrefill()` then re-derived the group from the point
  * and silently overwrote the selection. The filter keys on `suggestedGroup()`, the same function
  * the prefill writes from, so a visible point can never overwrite the group it was listed under;
@@ -10,7 +10,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { SchemasTab } from '../components/tabs/SchemasTab'
+import { MetricsTab } from '../components/tabs/MetricsTab'
 import { suggestedGroup } from '../utils/opcua'
 import { api } from '../api'
 
@@ -69,7 +69,7 @@ const selectByLabel = (label) => {
 
 /** Open Add Metric and switch the form to the OPC UA vocabulary. */
 const openOpcuaForm = async () => {
-  render(<SchemasTab showToast={vi.fn()} hasPermission={() => true} onSelectSchema={vi.fn()} />)
+  render(<MetricsTab showToast={vi.fn()} hasPermission={() => true} />)
   await waitFor(() => expect(screen.getByRole('button', { name: /Add Metric/ })).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
   fireEvent.change(selectByLabel('Standard'), { target: { value: 'OPC UA' } })
