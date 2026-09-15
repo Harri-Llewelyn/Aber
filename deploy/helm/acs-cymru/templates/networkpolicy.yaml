@@ -401,9 +401,12 @@ the always-on forge policy). A rule with no peers means every source in every CN
 0.0.0.0/0 is matched against an address, which a CNI resolving node traffic by identity need not do,
 and covers no IPv6.
 
-THE PORT IS THE SERVICE'S, NOT THE CONTAINER'S, because a NodePort deployment moves it into the
-30000+ range. Reading it from the same value the Service takes means a policy that cannot describe
-a port nothing is listening on.
+THE PORT IS THE CONTAINER'S, NOT THE SERVICE'S. An ingress `ports` entry matches the destination
+port on the pod the policy selects, and kube-proxy has already translated the Service's port by the
+time the packet gets there. `targetPort` here is the named port `ssh`, which is `containerPort: 22`
+whatever the external Service publishes -- so a NodePort deployment changes the port a gateway
+dials, not the port this rule names. A rule naming the 30000+ port would match nothing, and since
+the policy selects the Gitea pod, every inbound port it does not match is denied.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
