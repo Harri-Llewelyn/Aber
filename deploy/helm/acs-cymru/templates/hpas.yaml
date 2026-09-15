@@ -52,10 +52,15 @@ reverse is quieter still: a name here and not there is unreachable code.
 Values lookups cannot be derived from a list of names -- `.Values.supabaseRest.enabled` is not
 spelled like its component -- so the mapping is written out and then ASSERTED, rather than being
 generated or trusted.
+
+THE ASSERTION COMPARES NAMES AND CANNOT SEE A DEAD VALUES PATH. `supabase-kong` sat here until
+b7989a0 deleted Kong and its values block with it; both sides still agreed, so the check passed
+and the render died one line earlier on a nil pointer -- and only under `autoscaling.enabled`,
+which is true in values-prod.yaml.example alone. A name removed from one side belongs removed
+from the other AND checked against a production render, which is the one that reaches this file.
 */}}
 {{- $enabledOf := dict
       "supabase-rest" .Values.supabaseRest.enabled
-      "supabase-kong" .Values.supabaseKong.enabled
       "supabase-envoy" .Values.supabaseEnvoy.enabled
       "supabase-functions" .Values.supabaseFunctions.enabled
       "frontend" .Values.frontend.enabled
