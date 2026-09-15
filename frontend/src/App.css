@@ -782,6 +782,20 @@ html, body, #root {
   transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
+/* A card holding work that is waiting rather than a record of what exists: the quarantine queue is
+   the only one so far. It takes the warning border the inline banners on Areas, Cells and Gateways
+   use, so a queue and a banner about a queue read as the same kind of thing; the tint is on the
+   header alone, because a full-height wash over a table makes every row look flagged. */
+.card-attention {
+  border-color: var(--warning);
+}
+
+.card-attention > .card-header {
+  background: rgba(255, 179, 0, 0.08);
+  border-bottom-color: var(--warning);
+  color: var(--warning-text);
+}
+
 /* A section header inside a card. `.card` carries no padding so tables can run edge to edge; this
    inset variant gives the title and its action their breathing room and rules itself off from the
    table below. */

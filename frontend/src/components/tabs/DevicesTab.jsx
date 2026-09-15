@@ -560,7 +560,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   // component re-renders on any of thirty pieces of state. The dependency list is the contract:
   // miss a value the predicate reads and that filter stops responding.
   const filteredAssets = useMemo(() => assets.filter(a => {
-    // Quarantined devices belong to the queue above and nowhere else. The two lists come from
+    // Quarantined devices belong to the queue card below and nowhere else. The two lists come from
     // different sources, so this is the only place the separation is enforced.
     if (a.is_quarantined) return false
 
@@ -664,8 +664,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     <div className="page-layout">
       <div className="page-main">
 
-      {/* One card: title, primary action, filters, table. The onboarding queue stays inside the
-          body: the devices waiting to be let in, then the ones that are in. */}
+      {/* The roster: title, primary action, filters, table. The onboarding queue is a card of its
+          own below -- the devices that are in, then the ones waiting to be let in. */}
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">
@@ -756,7 +756,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         <button
           className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setAttentionOnly(v => !v)}
-          title="Show only devices that are overdue their first birth, still matched by legacy name, publishing metrics their schema does not model, or needing a cell — unassigned, filed in a cell their gateway does not serve, or pointing at an archived cell. Quarantined devices are listed separately in the onboarding queue above."
+          title="Show only devices that are overdue their first birth, still matched by legacy name, publishing metrics their schema does not model, or needing a cell — unassigned, filed in a cell their gateway does not serve, or pointing at an archived cell. Quarantined devices are listed separately in the onboarding queue below."
         >
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
@@ -787,81 +787,6 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         </div>
       )}
 
-      {quarantine.length > 0 && (
-        <div style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px var(--inset)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--warning-text)', fontWeight: 600 }}>
-              <IconShieldAlert size={20} />
-              <span>Zero-Touch Onboarding Quarantine Queue</span>
-            </div>
-            {!canApprove && (
-              <span style={{ fontSize: '11px', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                <IconLock size={11} /> Requires Admin permissions
-              </span>
-            )}
-          </div>
-          
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th title="Reported device name">Reported Name</th><th title="Sparkplug B id the device published under">Published ID</th><th title="Source gateway">Gateway</th><th title="Discovery timestamp">Discovered At</th><th title="Sparkplug B birth payload">Payload</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-              <tbody>
-                {quarantine.map(q => {
-                  const [suggestion] = suggestMatches(q, assets, schemas)
-                  return (
-                  <tr key={q.quarantine_id}>
-                    {/* Constrained like the payload cell: a MALFORMED_IDENTITY reason is a full
-                        sentence and would push the actions off the edge. It wraps rather than
-                        truncates. */}
-                    <td style={{ maxWidth: '280px' }}>
-                      <strong>{q.asset_name}</strong>
-                      {q.quarantine_reason && (
-                        <div style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '3px', display: 'flex', alignItems: 'flex-start', gap: '3px' }}>
-                          <IconAlertTriangle size={10} style={{ flexShrink: 0, marginTop: '1px' }} />
-                          <span style={{ minWidth: 0 }}>{q.quarantine_reason}</span>
-                        </div>
-                      )}
-                      {suggestion && (
-                        <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title={suggestion.evidence}>
-                          <IconAlertTriangle size={10} /> Possible match: {suggestion.candidateName}
-                        </div>
-                      )}
-                    </td>
-                    <td><CopyableId value={q.reported_identity} label="published device id" onNotify={showToast} /></td>
-                    <td>{q.gateway_name || <span className="mono">—</span>}</td>
-                    <td style={{ fontSize: '11px' }}>{new Date(q.discovered_at).toLocaleString()}</td>
-                    <QuarantinePayloadCell metrics={q.reported_metrics} fallbackJson={q.birth_payload} />
-                    <td style={{ textAlign: 'right' }}>
-                      <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
-                        <button
-                          className={`btn btn-primary btn-sm ${!canApprove ? 'btn-disabled' : ''}`}
-                          disabled={!canApprove}
-                          onClick={() => canApprove && setApproveItem(q)}
-                          title={!canApprove ? 'Requires Admin permissions' : 'Approve and assign to cell zone'}
-                        >
-                          Approve & Assign
-                        </button>
-                        {/* Keyed on the row: one boolean would spin every Reject button. */}
-                        <ActionButton
-                          className={`btn btn-danger btn-sm ${!canReject ? 'btn-disabled' : ''}`}
-                          disabled={!canReject}
-                          pending={rowBusyId === q.asset_id}
-                          pendingLabel="Rejecting…"
-                          onClick={() => canReject && runRowAction(q.asset_id, () => rejectQuarantine(q))}
-                          title={!canReject ? 'Requires Admin permissions' : 'Reject quarantine payload'}
-                        >
-                          Reject
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
         </div>{/* .card-body */}
 
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading devices…</div> :
@@ -871,7 +796,12 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
              <div className="empty-text">No devices match the selected filter.</div>
            </div>
          ) : (
-          <div className="table-wrap">
+          /* Capped ONLY while something is held below, which is the whole reason for capping: a
+             fleet of any size would push the queue off the screen, and the queue is the half of
+             this page with work waiting on it. The rest of the time the roster is the page and
+             runs its full length -- a permanent 420px window on the main table would spend most
+             of a screen on nothing, to protect a card that is usually not rendered at all. */
+          <div className={`table-wrap${quarantine.length > 0 ? ' table-scroll' : ''}`}>
             <table>
               <thead><tr><th title="Human-readable device name">Name</th><th title="The device's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug id is derived from this, so nothing is lost by showing it here.">Device UUID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
               <tbody>
@@ -1055,6 +985,95 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           </div>
         )}
       </div>
+
+      {/* Its own card, under the roster rather than wedged between the roster's filters and the
+          roster itself: a queue that appears and disappears was moving the table down the page by
+          a variable amount every time a device arrived. Below, not above, because "what is on this
+          floor" is the page's job and the queue is usually empty -- and the rail already carries
+          the flag that brings anyone here (useNavSignals). */}
+      {quarantine.length > 0 && (
+        <div className="card card-attention" style={{ marginTop: 'var(--stack)' }}>
+          <div className="card-header">
+            <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <IconShieldAlert size={18} />
+              Zero-Touch Onboarding Quarantine Queue
+              <HelpTip
+                label="About the quarantine queue"
+                text="A gateway published a birth for a device this platform does not know, so the reading was held rather than recorded against a guess. Approve & Assign admits it as a new device; if it is one already registered under another name, the queue offers the match to accept instead. Reject discards the payload. Nothing here is recorded as plant history until it is approved."
+              />
+              <span
+                className="section-count"
+                title={`${quarantine.length} device${quarantine.length === 1 ? '' : 's'} held for a decision`}
+              >
+                {quarantine.length}
+              </span>
+            </h3>
+            {!canApprove && (
+              <span style={{ fontSize: '11px', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <IconLock size={11} /> Requires Admin permissions
+              </span>
+            )}
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th title="Reported device name">Reported Name</th><th title="Sparkplug B id the device published under">Published ID</th><th title="Source gateway">Gateway</th><th title="Discovery timestamp">Discovered At</th><th title="Sparkplug B birth payload">Payload</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              <tbody>
+                {quarantine.map(q => {
+                  const [suggestion] = suggestMatches(q, assets, schemas)
+                  return (
+                  <tr key={q.quarantine_id}>
+                    {/* Constrained like the payload cell: a MALFORMED_IDENTITY reason is a full
+                        sentence and would push the actions off the edge. It wraps rather than
+                        truncates. */}
+                    <td style={{ maxWidth: '280px' }}>
+                      <strong>{q.asset_name}</strong>
+                      {q.quarantine_reason && (
+                        <div style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '3px', display: 'flex', alignItems: 'flex-start', gap: '3px' }}>
+                          <IconAlertTriangle size={10} style={{ flexShrink: 0, marginTop: '1px' }} />
+                          <span style={{ minWidth: 0 }}>{q.quarantine_reason}</span>
+                        </div>
+                      )}
+                      {suggestion && (
+                        <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title={suggestion.evidence}>
+                          <IconAlertTriangle size={10} /> Possible match: {suggestion.candidateName}
+                        </div>
+                      )}
+                    </td>
+                    <td><CopyableId value={q.reported_identity} label="published device id" onNotify={showToast} /></td>
+                    <td>{q.gateway_name || <span className="mono">—</span>}</td>
+                    <td style={{ fontSize: '11px' }}>{new Date(q.discovered_at).toLocaleString()}</td>
+                    <QuarantinePayloadCell metrics={q.reported_metrics} fallbackJson={q.birth_payload} />
+                    <td style={{ textAlign: 'right' }}>
+                      <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
+                        <button
+                          className={`btn btn-primary btn-sm ${!canApprove ? 'btn-disabled' : ''}`}
+                          disabled={!canApprove}
+                          onClick={() => canApprove && setApproveItem(q)}
+                          title={!canApprove ? 'Requires Admin permissions' : 'Approve and assign to cell zone'}
+                        >
+                          Approve & Assign
+                        </button>
+                        {/* Keyed on the row: one boolean would spin every Reject button. */}
+                        <ActionButton
+                          className={`btn btn-danger btn-sm ${!canReject ? 'btn-disabled' : ''}`}
+                          disabled={!canReject}
+                          pending={rowBusyId === q.asset_id}
+                          pendingLabel="Rejecting…"
+                          onClick={() => canReject && runRowAction(q.asset_id, () => rejectQuarantine(q))}
+                          title={!canReject ? 'Requires Admin permissions' : 'Reject quarantine payload'}
+                        >
+                          Reject
+                        </ActionButton>
+                      </div>
+                    </td>
+                  </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div className="modal-overlay">

@@ -48,9 +48,9 @@ describe('what the index holds', () => {
   })
 
   it('tells a card which page it is on, because that is the answer being looked for', () => {
-    const catalog = targets().find(t => t.label === 'Metric Catalog')
-    expect(catalog.kind).toBe('card')
-    expect(catalog.page).toBe('Schemas')
+    const credentials = targets().find(t => t.label === 'Broker credentials')
+    expect(credentials.kind).toBe('card')
+    expect(credentials.page).toBe('Access Control')
   })
 })
 
@@ -58,16 +58,17 @@ describe('what the index holds', () => {
 describe('ranking', () => {
 
   /**
-   * The case the feature was asked for: "Metric Catalog" is a card on the Schemas page, and nothing
-   * about the word "Schemas" says so.
+   * The case the feature was asked for: "Playback" is a card on the Capture page, and nothing about
+   * the word "Capture" says so. It was "Metric Catalog" on Schemas until the catalogue became the
+   * Metrics page, at which point it stopped being a card at all.
    */
   it('finds a card by its own name, from a prefix', () => {
-    expect(labels('metric')[0]).toBe('Metric Catalog')
-    expect(labels('metric cat')[0]).toBe('Metric Catalog')
+    expect(labels('playb')[0]).toBe('Playback')
+    expect(labels('broker cred')[0]).toBe('Broker credentials')
   })
 
   it('finds it by initials, which is what a second visit types', () => {
-    expect(labels('mc')).toContain('Metric Catalog')
+    expect(labels('bc')).toContain('Broker credentials')
   })
 
   it('puts an exact name first, above anything that merely contains it', () => {
@@ -75,12 +76,12 @@ describe('ranking', () => {
   })
 
   /**
-   * A word-start beats a mid-word substring: "cat" must offer Metric Catalog above Access Control.
+   * A word-start beats a mid-word substring: "back" must offer Backups above Playback.
    */
   it('prefers a word boundary to a match buried inside a word', () => {
-    const catalog = targets().find(t => t.label === 'Metric Catalog')
-    const access = targets().find(t => t.label === 'Access Control')
-    expect(scoreTarget(catalog, 'cat')).toBeGreaterThan(scoreTarget(access, 'cat'))
+    const backups = targets().find(t => t.label === 'Backups' && t.kind === 'page')
+    const playback = targets().find(t => t.label === 'Playback')
+    expect(scoreTarget(backups, 'back')).toBeGreaterThan(scoreTarget(playback, 'back'))
   })
 
   it('prefers a name to a keyword, because a keyword is somebody else guessing what you meant', () => {
@@ -163,10 +164,10 @@ describe('the palette', () => {
   it('navigates to a card by opening the page that holds it', async () => {
     const p = props()
     render(<GlobalSearch {...p} />)
-    type('metric catalog')
+    type('playback')
 
-    fireEvent.click(await screen.findByText('Metric Catalog'))
-    expect(p.onNavigate).toHaveBeenCalledWith('schemas')
+    fireEvent.click(await screen.findByText('Playback'))
+    expect(p.onNavigate).toHaveBeenCalledWith('capture')
   })
 
   it('opens the highlighted row on Enter', async () => {
@@ -376,10 +377,12 @@ describe('the card index', () => {
    * heading still exists. What can be asserted is that the index points at real pages and has no
    * duplicates. The page-agreement half lives in navigation.test.js.
    */
-  it('carries the card the feature was requested for', () => {
-    const catalog = CARDS.find(c => c.label === 'Metric Catalog')
-    expect(catalog, 'the Metric Catalog entry is the motivating case').toBeTruthy()
-    expect(catalog.tab).toBe('schemas')
+  it('carries a card whose name its page does not say', () => {
+    // The motivating case, now that the metric catalogue is a page rather than a card on Schemas:
+    // nothing about the word "Capture" tells you Playback is on it.
+    const playback = CARDS.find(c => c.label === 'Playback')
+    expect(playback, 'the Playback entry is the motivating case').toBeTruthy()
+    expect(playback.tab).toBe('capture')
   })
 
   it('gives every card a label somebody could plausibly type', () => {

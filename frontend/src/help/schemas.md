@@ -4,10 +4,10 @@ A schema says what a class of device is expected to publish: which metrics, of w
 
 ## What the controls do
 
-- **The schema builder** defines the metrics. **Data Point**, **Sparkplug Datatype**, **Group** and **Description** are the fields a metric needs to be usable by something that did not write it.
-- **Semantic ID** and **Reference Type** are where a metric stops being local to this stack and starts being a term somebody else also uses. The Vocabulary page is where those values come from -- it hands an entry straight to this builder rather than expecting the URI to be typed.
-- **The Metric Catalog** is every metric defined across every schema, searchable. It is the fastest way to find out whether the thing you are about to define already exists under another name.
+- **Build Schema from Catalog** is the only way to create a schema. Building from the catalog is what guarantees every metric carries a standard and a semantic id, which the device tags, the unmodelled-metric detection and the tag filters all read.
+- **The Metrics page** holds the catalog a schema is built from -- every metric this deployment has adopted, searchable. Check there first whether the thing you are about to define already exists under another name.
 - **Publishing a version** takes a **Change Description**. Schemas version themselves; an edit does not silently redefine what past readings were validated against.
+- **Fork** cuts the next version as an editable draft. A lineage holds at most one open draft, so it must be published or discarded before another can be cut.
 - **Devices** on a schema is the reverse lookup: what currently claims to implement it.
 
 ## What the states mean

@@ -16,6 +16,6 @@ Telemetry that has aged out of the live historian and been written to object sto
 
 ## What this page is not
 
-**It is not Archives**, which is two groups up the rail and holds decommissioned **assets** -- cells, gateways and devices -- with a Restore button and a purge timer. This page holds **readings**, and it has neither.
+**It is not Archived Entities**, which now sits directly below it in the rail and holds decommissioned **entities** -- cells, gateways and devices -- with a Restore button and a purge timer. This page holds **readings**, and it has neither.
 
 **There is no restore button, and that is deliberate.** Charting an archived range would mean recovering a resolution nothing currently plots, at the cost of another container, another gateway route and another authenticated surface over raw plant history. Retrieval is a deliberate act taken outside the dashboard, not a click.

@@ -45,17 +45,31 @@ describe('the groups', () => {
   })
 
   /**
-   * The two placements pinned so they are not re-litigated by accident. Archives is filed with the
-   * assets it archives, not the admin pages, because grouping by who may see a page would make the
-   * group mean "restricted". Digital Thread traces cells, gateways and devices equally, so it is
-   * filed by tense with Capture and Cold Storage.
+   * The placements pinned so they are not re-litigated by accident. Digital Thread traces cells,
+   * gateways and devices equally, so it is filed by tense with Capture rather than beside Devices.
    */
-  it('files Archives with the assets it archives, not with the admin pages', () => {
-    expect(TABS.find(t => t.id === 'archives').group).toBe('assets')
-  })
-
   it('files Digital Thread by tense rather than by subject', () => {
     expect(TABS.find(t => t.id === 'digital-thread').group).toBe('history')
+  })
+
+  /**
+   * The retention group is a subject, not a permission level: each page runs a retention timer
+   * over something and offers a way back from it. Asserted as the whole membership, because the
+   * group only means that while all three are in it -- drop one and what is left reads as
+   * "the Administrator pages", which is the grouping this replaced.
+   */
+  it('groups the three pages that keep something against a timer', () => {
+    const retention = TABS.filter(t => t.group === 'retention').map(t => t.id)
+    expect(retention).toEqual(['cold-storage', 'backups', 'archives'])
+  })
+
+  /**
+   * Archived Entities and Cold Storage are neighbours, and before that they were three groups
+   * apart with a comment explaining that the distance was what told them apart. The label is now
+   * carrying that job, so a rename back to the bare "Archives" would silently undo it.
+   */
+  it('keeps Archived Entities named for what it holds, beside Cold Storage', () => {
+    expect(TABS.find(t => t.id === 'archives').label).toBe('Archived Entities')
   })
 })
 
@@ -76,15 +90,27 @@ describe('groupedNav', () => {
   })
 
   /**
-   * The case the function exists for: an Operator sees neither administration page, and a separator
-   * with nothing under it reads as a page that failed to load.
+   * The case the function exists for: an Operator holds none of the three retention pages -- Cold
+   * Storage admits three roles and not theirs, Backups is Administrator, Archived Entities needs
+   * `archive:manage` -- so the whole group goes, and a separator with nothing under it never
+   * renders. `admin` is no longer the example: Directory is ungated and keeps it alive.
    */
   it('drops a group whose every page this session is refused', () => {
     const groups = groupedNav(operator())
-    expect(groups.map(g => g.id)).not.toContain('admin')
+    expect(groups.map(g => g.id)).not.toContain('retention')
     for (const group of groups) {
       expect(group.tabs.length).toBeGreaterThan(0)
     }
+  })
+
+  /**
+   * The other half of the same move: a group with one visible page still renders. Directory tells
+   * anyone where Grafana and Node-RED are, so filing it with the two Administrator pages must not
+   * gate it by association.
+   */
+  it('keeps a group alive for its one ungated page', () => {
+    const admin = groupedNav(operator()).find(g => g.id === 'admin')
+    expect(admin?.tabs.map(t => t.id)).toEqual(['directory'])
   })
 
   it('returns nothing at all rather than a row of empty headings', () => {

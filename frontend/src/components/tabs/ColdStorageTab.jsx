@@ -15,7 +15,7 @@ import {
 
 /**
  * Cold Storage: telemetry that has been tiered out of the hypertable as Parquet objects. Not
- * "Archives", which is entity archives with a Restore button and a purge timer; there is no restore
+ * "Archived Entities", its neighbour in the rail, which has a Restore button and a purge timer; there is no restore
  * here. The page leads with the span the manifest covers and what is outstanding, since the
  * hypertable can no longer answer how far back the data goes. Read-only: exporting and dropping are
  * done by `python -m cold_archive`.

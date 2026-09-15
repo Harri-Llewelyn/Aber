@@ -9,6 +9,7 @@ Devices are what the gateways publish. Most are not created here: they appear be
 - **Device Name** is yours to set. **Reported Name** and **Published ID** are what the device says about itself, and they are kept separate deliberately -- a self-declared name is a claim, not evidence, and letting it overwrite yours would lose the distinction.
 - **The notes field** holds what no column can: "spindle rebuilt 2026-03; runs warmer than its twin".
 - **The filters** -- cell, gateway, schema, status, type -- all narrow the same list, and the search box takes a name, a UUID or a Sparkplug ID.
+- **The quarantine queue** is a card of its own below the roster, and appears only when something is in it. A gateway published a birth for a device the platform does not know, so the reading was held rather than recorded against a guess. **Approve & Assign** admits it as a new device; where it is one already registered under another name, the queue offers that match to accept instead. **Reject** discards the payload. Nothing in the queue counts as plant history until it is approved.
 
 ## What the states mean
 

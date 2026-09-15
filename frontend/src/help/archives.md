@@ -10,6 +10,6 @@ Entities taken out of commission -- cells, gateways and devices that were archiv
 
 ## What this page is not
 
-**It is not Cold Storage**, which sits two groups down the rail and means something else entirely. This page holds archived **entities**: assets and their records, with a Restore button and a timer. Cold Storage holds archived **telemetry**: readings tiered to object storage, with no restore and no timer. The two share only the English word.
+**It is not Cold Storage**, which now sits directly above it in the rail. The two are named apart because they can no longer be told apart by distance. This page holds archived **entities**: cells, gateways and devices, with a Restore button and a timer. Cold Storage holds archived **telemetry**: readings tiered to object storage, with no restore and no timer. The two share only the English word.
 
 **It is not a delete queue.** Nothing here is removed by looking at it, and "No decommissioned entities currently in archives" means exactly what it says.
