@@ -264,6 +264,40 @@ class TestRepositories(ForgeSweepBase):
         self.assertNotIn(self.repo, body["hooked"], body)
         self.assertNotIn(self.repo, body["protected"], body)
 
+    def gateway_row(self):
+        _, rows = rest(f"/gateways?id=eq.{TEST_GW_ID}&select=enrolled_at,forge_repository_at")
+        return rows[0]
+
+    def test_a_repository_the_row_does_not_know_about_is_recorded(self):
+        """
+        The self-healing half of `forge_repository_at` (0110). enrolment writes it; this covers the
+        two cases enrolment cannot -- a fleet enrolled before the column existed, and an enrolment
+        whose own write failed after the repository was created. Seeing the repository is the proof,
+        and nothing else on the row distinguishes "no repository" from "no forge on this deployment".
+        """
+        self.enrol()
+        self.assertIsNotNone(self.gateway_row()["forge_repository_at"])
+
+        # The state a database enrolled before 0110 is in: a repository, and a row that says nothing.
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"forge_repository_at": None})
+        self.assertIsNone(self.gateway_row()["forge_repository_at"])
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertIn(self.repo, body["recorded"], body)
+        self.assertIsNotNone(
+            self.gateway_row()["forge_repository_at"],
+            "the sweep saw the repository and the row still does not say so",
+        )
+
+        # NEVER TWICE, and never moved. A sweep that rewrote the timestamp would walk it forward on
+        # every pass, and the enrolment's own -- the accurate one -- would never survive a sweep.
+        recorded = self.gateway_row()["forge_repository_at"]
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertNotIn(self.repo, body["recorded"], body)
+        self.assertEqual(self.gateway_row()["forge_repository_at"], recorded)
+
     def keys(self):
         status, keys = forge(f"/repos/{ORGANISATION}/{self.repo}/keys")
         self.assertEqual(status, 200, keys)
