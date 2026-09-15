@@ -70,10 +70,14 @@ describe('tokenStatus with a denylist', () => {
 })
 
 describe('ServiceTokenInventoryModal', () => {
+  // THE SAME CLOCK THE STATUS WAS COMPUTED AT. Without it the fixtures are a time bomb: every
+  // expiry here is relative to NOW, so once the real date passed it the dialog read every row as
+  // expired and offered no Revoke, and four tests began failing on a date rather than on a change.
   const openWith = (mints, revoked = new Set(), props = {}) => render(
     <ServiceTokenInventoryModal
       principalName="MCP read-only client"
       status={tokenStatus(mints, NOW, revoked)}
+      now={NOW}
       onClose={vi.fn()}
       onChanged={vi.fn()}
       showToast={vi.fn()}
