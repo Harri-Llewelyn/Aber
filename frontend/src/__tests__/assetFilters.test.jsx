@@ -102,11 +102,16 @@ const routeGet = (overrides = {}) => (path) => {
 const allowAll = () => true
 const noop = () => {}
 
-/** The devices table is the last table on the page; the quarantine queue renders above it. */
+/**
+ * The devices table, found by a column only it has. Was "the last table on the page", which was
+ * true only while the quarantine queue rendered above it -- the queue is now a card of its own
+ * below, and position silently selected the wrong table rather than failing.
+ */
 const deviceTableRows = () => {
-  const tables = document.querySelectorAll('table')
-  const body = tables[tables.length - 1].querySelector('tbody')
-  return within(body).queryAllByRole('row')
+  const table = [...document.querySelectorAll('table')]
+    .find(t => within(t).queryByText('Device UUID'))
+  if (!table) throw new Error('no table on the page carries a Device UUID column')
+  return within(table.querySelector('tbody')).queryAllByRole('row')
 }
 
 beforeEach(() => {
