@@ -11,8 +11,13 @@ import { IconShieldAlert, IconX } from '../common/Icons'
  * deleted one: `auth_pre_request()` is a PostgREST hook, so a withdrawn jti still works at storage,
  * realtime, the edge runtime and Studio until its own expiry, which is why the scope is stated at
  * the top and the expiry stays visible on every withdrawn row. No type-to-confirm, and no undo.
+ *
+ * `now` is a prop, as it is on `tokenStatus()` and `tokenStatusDetail()`: the status handed in
+ * was computed at a clock the caller chose, and a dialog that re-read the real one could
+ * disagree with the badge that opened it about which rows are expired.
  */
-export function ServiceTokenInventoryModal({ principalName, status, onClose, onChanged, showToast }) {
+export function ServiceTokenInventoryModal({ principalName, status, onClose, onChanged, showToast,
+  now = Date.now() }) {
   // The jtis this dialog has withdrawn during its own lifetime, so a row updates the moment it is
   // acted on. The server is still the authority: `onChanged` reloads on close.
   const [justRevoked, setJustRevoked] = useState(() => new Set())
@@ -50,8 +55,6 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
     () => [...(status?.rows || [])].sort((a, b) => b.expiresAtMs - a.expiresAtMs),
     [status]
   )
-
-  const now = Date.now()
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Service principal tokens">

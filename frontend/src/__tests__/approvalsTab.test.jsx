@@ -10,7 +10,8 @@ import {
   absoluteTime,
   keyLabel,
   LANES,
-  filterProposals
+  filterProposals,
+  locationNameMap
 } from '../components/tabs/ApprovalsTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
@@ -73,7 +74,6 @@ function mockLoad(proposals) {
   api.get.mockImplementation((path) => {
     if (path === '/api/v1/proposals') return Promise.resolve(proposals)
     if (path === '/api/v1/assets') return Promise.resolve([{ id: 'dev-1', name: 'Lathe_01' }])
-    if (path === '/api/v1/proposals/publishable-schemas') return Promise.resolve([])
     if (path.startsWith('/api/v1/proposals/allowed-keys/')) return Promise.resolve(['name', 'description'])
     return Promise.resolve([])
   })
@@ -659,5 +659,113 @@ describe('ageLabel', () => {
     expect(ageLabel('2026-09-07T11:30:00Z', base)).toBe('30m ago')
     expect(ageLabel('2026-09-07T09:00:00Z', base)).toBe('3h ago')
     expect(ageLabel('2026-09-04T12:00:00Z', base)).toBe('3d ago')
+  })
+})
+
+describe('the page finishes loading what it asks for', () => {
+  /**
+   * THE REGRESSION IS SILENT BY CONSTRUCTION. `loadAll` sets several pieces of state in sequence
+   * and `usePolling` swallows what it throws, so a ReferenceError partway down left the queue
+   * rendered, every later `setState` skipped, and the poll backing off to its 30s ceiling --
+   * which is exactly what a dead `setDrafts()` call did here from 2026-09-08. Asserting the LAST
+   * thing the load does is what makes the middle of it observable.
+   */
+  it('asks for nothing it no longer reads, and reaches the end of the load', async () => {
+    api.get.mockImplementation((path) => {
+      if (path === '/api/v1/proposals') return Promise.resolve([deviceProposal({
+        patch: { cell_id: 'cell-weld' }, current: { cell_id: null }
+      })])
+      if (path === '/api/v1/cells') return Promise.resolve([{ cell_id: 'cell-weld', cell_name: 'Weld Bay' }])
+      return Promise.resolve([])
+    })
+    renderTab()
+    await selectRow()
+    // The name only appears if the load ran to completion.
+    await waitFor(() => expect(screen.getByText('Weld Bay')).toBeTruthy())
+    const asked = api.get.mock.calls.map(c => c[0])
+    expect(asked).toContain('/api/v1/cells')
+    expect(asked.some(p => p.includes('publishable-schemas'))).toBe(false)
+  })
+})
+
+describe('locationNameMap', () => {
+  const cells = [
+    { cell_id: 'cell-unfiled', cell_name: 'Goods In' },
+    { cell_id: 'cell-weld', cell_name: 'Weld Bay' }
+  ]
+  const areas = [{
+    area_id: 'area-north',
+    area_name: 'North Shop',
+    cells: [{ cell_id: 'cell-weld', cell_name: 'Weld Bay' }],
+    floors: [{ floor_id: 'floor-g', name: 'Ground' }]
+  }]
+
+  it('names a cell, an area and a floor', () => {
+    const names = locationNameMap(cells, areas)
+    expect(names.get('cell-weld')).toBe('Weld Bay')
+    expect(names.get('area-north')).toBe('North Shop')
+  })
+
+  /* Neither list is complete on its own: an area embeds only the cells filed under it. */
+  it('keeps a cell that is filed under no area', () => {
+    expect(locationNameMap(cells, areas).get('cell-unfiled')).toBe('Goods In')
+    expect(locationNameMap([], areas).get('cell-unfiled')).toBeUndefined()
+  })
+
+  /* "Ground" is unique within an area and nowhere else, and the reviewer is deciding WHICH one. */
+  it('qualifies a floor with its area', () => {
+    expect(locationNameMap(cells, areas).get('floor-g')).toBe('Ground — North Shop')
+  })
+
+  it('survives either list being absent', () => {
+    expect(locationNameMap(undefined, undefined).size).toBe(0)
+    expect(locationNameMap(cells, undefined).size).toBe(2)
+  })
+})
+
+describe('a relocation names the cells rather than their uuids', () => {
+  const relocation = deviceProposal({
+    id: 'p-move',
+    patch: { cell_id: 'cell-weld' },
+    current: { cell_id: 'cell-paint' }
+  })
+
+  const mockWithCells = () => api.get.mockImplementation((path) => {
+    if (path === '/api/v1/proposals') return Promise.resolve([relocation])
+    if (path === '/api/v1/assets') return Promise.resolve([{ id: 'dev-1', name: 'Lathe_01' }])
+    if (path === '/api/v1/cells') return Promise.resolve([
+      { cell_id: 'cell-weld', cell_name: 'Weld Bay' },
+      { cell_id: 'cell-paint', cell_name: 'Paint Line' }
+    ])
+    return Promise.resolve([])
+  })
+
+  it('shows both sides of the move by name', async () => {
+    mockWithCells()
+    renderTab()
+    await selectRow()
+    await waitFor(() => expect(screen.getByText('Weld Bay')).toBeTruthy())
+    expect(screen.getByText('Paint Line')).toBeTruthy()
+    expect(screen.queryByText('cell-weld')).toBeNull()
+  })
+
+  /* The uuid is what the digital thread and the filter speak, so it is kept where it costs nothing. */
+  it('keeps the uuid in the tooltip', async () => {
+    mockWithCells()
+    renderTab()
+    await selectRow()
+    await waitFor(() => expect(screen.getByText('Weld Bay').getAttribute('title')).toBe('cell-weld'))
+  })
+
+  /* Falls back rather than hides: an archived or deleted cell is a real state, and a reviewer
+     reading a uuid is better served than one reading a blank. */
+  it('falls back to the uuid when nothing resolves it', async () => {
+    api.get.mockImplementation((path) => {
+      if (path === '/api/v1/proposals') return Promise.resolve([relocation])
+      return Promise.resolve([])
+    })
+    renderTab()
+    await selectRow()
+    await waitFor(() => expect(screen.getByText('cell-weld')).toBeTruthy())
   })
 })

@@ -163,7 +163,7 @@ secrets:
   # stops the gitea-init container rather than creating one with a blank password.
   giteaAdminPassword: ""
   # The machine account enroll-gateway authenticates as to create a gateway repository and attach
-  # its read-only deploy key. Empty leaves the forge integration off.
+  # its deploy key. Empty leaves the forge integration off.
   giteaMachinePassword: ""
   # The forge's door (0094). NEEDED, unlike Studio's pair: the gitea route is on by default and
   # publishes the gateway's forge listener, which is the only web login the forge has. Empty is a
