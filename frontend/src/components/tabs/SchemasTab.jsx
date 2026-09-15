@@ -18,7 +18,6 @@ import {
   IconCheck, IconClipboardList, IconCpu, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
-import { PageHeading } from '../common/PageHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 /**
@@ -296,12 +295,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     <div className="page-layout">
       <div className="page-main">
 
-      <PageHeading icon={<IconClipboardList size={15} />} title="Schemas">
-        A schema is the contract a device is modelled to publish against, built from the metrics on
-        the Metrics page. It is never edited in place: a published version forks into a draft, and
-        publishing that draft archives its predecessor and moves every device across at once.
-      </PageHeading>
-
+      {/* No PageHeading: one card, whose header is already the page's title, as on every other
+          single-card page. It carried one while the metric catalogue shared the page and neither
+          card could speak for both. */}
       <div className="card" style={{ marginBottom: 'var(--stack)' }}>
         <div className="card-header">
           {/* FILTERED OF TOTAL, not a bare count. A narrowed registry would otherwise read as a
@@ -310,7 +306,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             Schemas
             <HelpTip
               label="About schemas"
-              text="A schema declares what a device is modelled to publish. A published schema is read-only: changes are made by creating the next version, which forks it into an editable draft. Publishing a draft activates it, archives its predecessor and moves every device across in one transaction. Version numbers are assigned by the database."
+              text="A schema is the contract a device is modelled to publish against, built from the metrics on the Metrics page. A published schema is read-only: changes are made by creating the next version, which forks it into an editable draft. Publishing a draft activates it, archives its predecessor and moves every device across in one transaction. Version numbers are assigned by the database."
             />
             {visibleSchemas.length !== schemas.length && (
               <span

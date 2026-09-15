@@ -21,10 +21,9 @@ import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '..
 import { conceptByName, ashrae223Prefill } from '../../utils/ashrae223'
 import CopyableId from '../common/CopyableId'
 import {
-  IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconX, IconFileCode
+  IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconX
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
-import { PageHeading } from '../common/PageHeading'
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
 // the CHECK constraint on metric_groups.name rejects anything containing the separator.
@@ -432,13 +431,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
   return (
     <>
-      <PageHeading icon={<IconFileCode size={15} />} title="Metrics">
-        The catalog of metrics every schema is built from. A metric's name is what a device
-        publishes, so it reaches MQTT, TimescaleDB and Grafana and cannot be changed afterwards —
-        one no longer wanted is deprecated rather than removed. Start a new one from a standard's
-        entry with Use on the Vocabulary page, or add it here.
-      </PageHeading>
-
+      {/* No PageHeading: one card, whose header is already the page's title, as on every other
+          single-card page. */}
       <div className="card" style={{ marginBottom: 'var(--stack)' }}>
         {/* `.card-header`, not `.section-header`: the card has no padding of its own, so a plain
             section header would sit flush against its borders. */}
@@ -447,7 +441,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             Metric Catalog
             <HelpTip
               label="About the metric catalog"
-              text="The metrics a schema can be built from, grouped by the first segment of their name — Axes/C/ANGLE and Axes/X/POSITION both belong to Axes, and a name with no / is listed under Ungrouped. The group is part of the name a device publishes, so it reaches MQTT, TimescaleDB and Grafana, and cannot be changed afterwards. Search reaches a known metric without opening every group; Use on the Vocabulary page starts a new one from a standard's entry."
+              text="The catalog of metrics every schema is built from, grouped by the first segment of their name — Axes/C/ANGLE and Axes/X/POSITION both belong to Axes, and a name with no / is listed under Ungrouped. A metric's name is what a device publishes, so it reaches MQTT, TimescaleDB and Grafana, and cannot be changed afterwards: one no longer wanted is deprecated rather than removed. Search reaches a known metric without opening every group; Use on the Vocabulary page starts a new one from a standard's entry."
             />
           </h3>
           {/* The label follows the form's state rather than naming a fixed action, so the control

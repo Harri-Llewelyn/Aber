@@ -796,10 +796,12 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
              <div className="empty-text">No devices match the selected filter.</div>
            </div>
          ) : (
-          /* `.table-scroll` caps the height and pins the header row, the way the schema registry
-             does: without it a fleet of any size pushes the quarantine queue below it clean off
-             the screen, and the queue is the half of this page with work waiting on it. */
-          <div className="table-wrap table-scroll">
+          /* Capped ONLY while something is held below, which is the whole reason for capping: a
+             fleet of any size would push the queue off the screen, and the queue is the half of
+             this page with work waiting on it. The rest of the time the roster is the page and
+             runs its full length -- a permanent 420px window on the main table would spend most
+             of a screen on nothing, to protect a card that is usually not rendered at all. */
+          <div className={`table-wrap${quarantine.length > 0 ? ' table-scroll' : ''}`}>
             <table>
               <thead><tr><th title="Human-readable device name">Name</th><th title="The device's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug id is derived from this, so nothing is lost by showing it here.">Device UUID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
               <tbody>
