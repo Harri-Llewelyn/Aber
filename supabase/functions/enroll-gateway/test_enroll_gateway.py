@@ -31,6 +31,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -435,14 +436,15 @@ class TestAuthContract(EnrollGatewayBase):
 
 class TestForgeProvisioning(EnrollGatewayBase):
     """
-    The third credential plane: the gateway's own repository, and the READ-ONLY deploy key
-    it reads that repository with.
+    The third credential plane: the gateway's own repository, and the WRITABLE deploy key it reads
+    that repository with and reports to.
 
     WHAT MAKES THIS WORTH TESTING RATHER THAN EYEBALLING. Three of its properties fail silently:
 
-      * a deploy key registered WRITABLE lets an appliance author the flow it will later be asked to
-        deploy, which empties the review step of its meaning -- and nothing about a working clone
-        would reveal it;
+      * an appliance able to author the flow it will later be asked to deploy empties the review
+        step of its meaning -- and nothing about a working clone would reveal it. `0104` made the
+        key writable so the appliance can report what it is running on `appliance`, so the boundary
+        is no longer the key's mode: it is the three branch rules that confine it;
       * a repository created PUBLIC exposes the plant's edge topology, and reads identically to a
         private one from the appliance's side;
       * a forge failure that is treated as fatal would refuse an enrolment whose token is already
@@ -523,7 +525,23 @@ class TestForgeProvisioning(EnrollGatewayBase):
     def tearDown(self):
         shutil.rmtree(self.key_dir, ignore_errors=True)
 
-    def test_enrolment_creates_a_private_repository_and_a_read_only_key(self):
+    def rule(self, name):
+        """One branch protection rule by name. `**` is a rule name, not a glob, in this path."""
+        quoted = urllib.parse.quote(name, safe="")
+        return self.forge(
+            f"/api/v1/repos/{self.organisation}/{self.repo_name()}/branch_protections/{quoted}"
+        )
+
+    def test_enrolment_creates_a_private_repository_and_confines_a_writable_key(self):
+        """
+        THE KEY IS WRITABLE AND THE BRANCH RULES ARE WHAT CONTAIN IT. `0104` made it so
+        deliberately: the appliance pushes what it is actually running to `appliance`, which is
+        the only report that cannot be forged by the thing being reported on. The property that
+        matters is unchanged -- an appliance must not be able to author the flow it is later asked
+        to deploy -- so it is asserted where it now lives, across all three rules at once. Any one
+        of them alone is a key that can write somewhere it should not, and a clone looks identical
+        either way.
+        """
         token = self.issue_token()
         status, payload = enroll(token, ssh_public_key=self.public_key)
 
@@ -543,10 +561,33 @@ class TestForgeProvisioning(EnrollGatewayBase):
 
         keys = self.forge(f"/api/v1/repos/{self.organisation}/{self.repo_name()}/keys")
         self.assertEqual(len(keys), 1, keys)
-        self.assertTrue(
+        self.assertFalse(
             keys[0]["read_only"],
-            "the deploy key is WRITABLE -- an appliance could author the flow it is later asked "
+            "the deploy key is READ-ONLY -- the appliance cannot report what it is running, and "
+            "the `appliance` branch would stay empty while everything else looked healthy",
+        )
+
+        self.assertFalse(
+            self.rule("main")["push_whitelist_deploy_keys"],
+            "`main` admits deploy keys -- the appliance could author the flow it is later asked "
             "to deploy, and an approved commit would stop being evidence that anyone approved it",
+        )
+
+        appliance = self.rule("appliance")
+        self.assertTrue(
+            appliance["push_whitelist_deploy_keys"],
+            "the `appliance` rule refuses deploy keys -- the appliance cannot report at all",
+        )
+        self.assertFalse(
+            appliance["enable_force_push"],
+            "the `appliance` branch admits a force-push -- an appliance could rewrite what it "
+            "previously reported, and the branch stops being a record",
+        )
+
+        self.assertFalse(
+            self.rule("**")["push_whitelist_deploy_keys"],
+            "the catch-all rule admits deploy keys -- a writable key would reach every branch "
+            "except the two that are named, which is wider than anything it was granted for",
         )
 
     def test_the_wiki_is_seeded_with_the_gateway_and_never_overwritten(self):
