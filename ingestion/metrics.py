@@ -1,23 +1,18 @@
 """
-Prometheus exposition for the ingestion daemon's existing counters.
+What the ingestion daemon publishes, and why each series is allowed to exist.
 
-WHY THIS IS A RENDERER AND NOT AN INSTRUMENTATION LIBRARY.
+WHAT THIS MODULE IS. The declaration: which flat counter name is published as which Prometheus
+metric (`COUNTER_MAP`), what each metric means (`HELP`), which are gauges (`TYPES`), and the HTTP
+endpoint that serves them. `registry.py` builds the metric objects from these tables and
+`prometheus_client` owns the registry, the exposition format and the histogram arithmetic.
 
-`ingestion.py` already keeps a monotonic registry -- `count()` into a dict behind a lock -- and
-every increment sits at the site that already made the decision, one-to-one with an existing
-`logger.warning`. That is the property worth protecting: the counters and the log cannot disagree
-about what happened. Re-instrumenting those nineteen sites with a metrics library would put the
-two out of step at exactly the moments that matter.
-
-So this module TRANSLATES rather than replaces. It takes a snapshot of the flat registry and maps
-it onto Prometheus names and labels. `count("dropped_gateway_binding")` stays exactly where it is;
-what a scraper sees is `acs_ingestion_messages_dropped_total{reason="gateway_binding"}`.
-
-NO NEW DEPENDENCY, and that is deliberate rather than stubborn. `requirements.txt` is four lines
-and each is annotated; `prometheus_client` would bring a registry the daemon does not use, process
-collectors it does not want, and a second place for a counter to live. The exposition format is a
-documented text protocol -- name, labels, value, newline -- and rendering it is the smaller and
-more auditable half of what the library would do.
+THE TRANSLATION IS THE POINT AND IT STAYS. `ingestion.py` counts under flat names at the site that
+already made the decision -- `count("dropped_gateway_binding")`, one-to-one with the
+`logger.warning` beside it -- so the counters and the log cannot disagree about what happened.
+Re-instrumenting those sites with metric objects would put the two out of step at exactly the
+moments that matter. What a scraper sees is
+`acs_ingestion_messages_dropped_total{reason="gateway_binding"}`, and COUNTER_MAP is where that is
+decided. Adding a metric is a line here, not a change on the hot path.
 
 WHAT THIS ENDPOINT MUST NOT BECOME, and the line has moved once -- deliberately, and this records
 where it now sits.
@@ -66,10 +61,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 # ---------------------------------------------------------------------------------------------
 # The translation table: flat registry name -> (prometheus metric, labels)
 #
-# EVERY DROP PATH IS HERE, cross-checked against the `count("dropped_*")` sites in ingestion.py.
-# A counter missing from this table is invisible to a scraper, which is the failure mode this
-# file exists to avoid -- so `render_exposition` reports unmapped names under a catch-all rather
-# than discarding them silently.
+# EVERY DROP PATH IS HERE, cross-checked against the `count("dropped_*")` sites in ingestion.py
+# by test_metrics_endpoint.py, which reads the sites out of the source. A counter missing from this
+# table is invisible to a scraper, which is the failure mode this file exists to avoid -- so an
+# unmapped name lands under `acs_ingestion_unmapped_counter_total` rather than being discarded.
 # ---------------------------------------------------------------------------------------------
 COUNTER_MAP = {
     # Throughput.
@@ -141,21 +136,27 @@ COUNTER_MAP = {
     "uns_skipped_publish_error": ("acs_ingestion_uns_skipped_total", {"reason": "publish_error"}),
 }
 
-# FLAT COUNTERS THAT ARE DELIBERATELY NOT EXPORTED FROM THIS TABLE, each because the same event
-# already leaves through a LABELLED series and a scraper summing both would count it twice.
+# FLAT COUNTERS THAT ARE DELIBERATELY NOT EXPORTED UNDER A NAME OF THEIR OWN, each because the
+# same event already leaves through a LABELLED series and a scraper summing both would count it
+# twice. `flat name -> (the series it is summed back from, why)`.
 #
-# THIS IS A STATEMENT ABOUT THE EXPOSITION AND NOT ABOUT THE COUNTER. Every name here is still kept
-# in ingestion.py's flat registry, which is what holds each counter one-to-one with the log line
-# beside it -- the property this module's header exists to protect. Removing a name from the
-# registry to stop it being exported would break that; leaving it unmapped would surface it under
-# the `acs_ingestion_unmapped_counter_total` catch-all, which means the opposite of what is meant
-# here. So the third answer is to say so explicitly, with the reason attached to the name.
+# THIS IS A STATEMENT ABOUT THE EXPOSITION AND NOT ABOUT THE COUNTER. Every name here is still
+# reported by the STATS log line, which is the property this module's header exists to protect:
+# each counter reads back under the flat name the call site uses. `registry.counter_snapshot()`
+# sums the named series to get it, which is exact because both call sites are adjacent and take
+# the same increment -- `count("messages_total")` sits on the line above
+# `count(f"messages_{msg_type}")`, and the rejected-timestamp pair likewise.
+#
+# Leaving a name unmapped instead would surface it under the
+# `acs_ingestion_unmapped_counter_total` catch-all, which means the opposite of what is meant here.
 EXPORTED_LABELLED_INSTEAD = {
-    "messages_total":
-        "the sum of acs_ingestion_messages_total{msg_type=...}; sum() those instead",
-    "metrics_rejected_timestamp":
+    "messages_total": (
+        "acs_ingestion_messages_total",
+        "the sum of acs_ingestion_messages_total{msg_type=...}; sum() those instead"),
+    "metrics_rejected_timestamp": (
+        "acs_ingestion_timestamps_rejected_total",
         "exported as acs_ingestion_timestamps_rejected_total{edge_node=...}, so a rejected "
-        "timestamp names the appliance whose clock caused it",
+        "timestamp names the appliance whose clock caused it"),
 }
 
 HELP = {
@@ -320,133 +321,6 @@ TYPES = {
 }
 
 
-def _escape(value: str) -> str:
-    """Label values are quoted, so a backslash, quote or newline in one would break the line."""
-    return (
-        str(value)
-        .replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-    )
-
-
-def _line(name, labels, value):
-    if labels:
-        rendered = ",".join(f'{k}="{_escape(v)}"' for k, v in sorted(labels.items()))
-        return f"{name}{{{rendered}}} {value}"
-    return f"{name} {value}"
-
-
-def _format_le(value) -> str:
-    """
-    A bucket boundary as Prometheus expects to read it back.
-
-    `repr` is what makes this correct rather than `str(round(...))`: the boundary in the `le`
-    label is compared textually by anything joining series across scrapes, so 0.0025 must render
-    as "0.0025" and never as "0.003" or "2.5e-03".
-    """
-    if value == float("inf"):
-        return "+Inf"
-    return repr(float(value))
-
-
-def _render_histogram(out, metric, state):
-    """
-    One histogram family: cumulative `_bucket` series, then `_sum` and `_count`.
-
-    BUCKETS ARE EMITTED IN EXPLICIT NUMERIC ORDER AND NEVER THROUGH THE SHARED SORT. The generic
-    path below orders a metric's samples by their label items, which is a LEXICAL comparison --
-    and lexically "10.0" < "2.5" and "+Inf" sorts before every digit. Routing buckets through it
-    would emit a monotonically increasing sequence in the wrong order, which histogram_quantile()
-    reads as a malformed histogram and answers with silently wrong quantiles. This function exists
-    for that one reason.
-
-    THE COUNTS ARRIVE PER BUCKET AND LEAVE CUMULATIVE. Prometheus defines `le` as "observations
-    less than or equal to", so each bucket must include every bucket below it; ingestion.py stores
-    the un-accumulated counts because that is one increment per observation on the callback thread
-    instead of thirteen.
-    """
-    help_text = HELP.get(metric)
-    if help_text:
-        out.append(f"# HELP {metric} {help_text}")
-    out.append(f"# TYPE {metric} histogram")
-
-    running = 0
-    for upper, n in state["buckets"]:
-        running += n
-        out.append(_line(f"{metric}_bucket", {"le": _format_le(upper)}, running))
-
-    # +Inf IS THE TOTAL, NOT THE LAST FINITE BUCKET REPEATED. An observation above the top
-    # boundary increments no bucket in ingestion.py, so taking it from `count` is what keeps it
-    # present -- and Prometheus requires _bucket{le="+Inf"} to equal _count exactly.
-    out.append(_line(f"{metric}_bucket", {"le": "+Inf"}, state["count"]))
-    out.append(_line(f"{metric}_sum", {}, state["sum"]))
-    out.append(_line(f"{metric}_count", {}, state["count"]))
-
-
-def render_exposition(counters, labelled=None, gauges=None, histograms=None):
-    """
-    The text exposition format, built from a counter snapshot.
-
-    @param counters  flat name -> int, from ingestion.counter_snapshot()
-    @param labelled  (metric, ((k, v), ...)) -> int, for series the flat registry cannot express.
-                     NOT COUNTERS ONLY: a series' TYPE comes from `TYPES` by metric name, so a
-                     labelled GAUGE belongs here too -- `gauges` below takes no label dimension.
-    @param gauges    metric -> value
-    @param histograms  metric -> {"buckets": ((upper, count), ...), "sum": float, "count": int},
-                     from ingestion.histogram_snapshot(). Rendered by _render_histogram, which
-                     does NOT share the sorting path -- see the note there.
-
-    SERIES ARE GROUPED UNDER ONE HELP/TYPE PAIR. Prometheus requires that a metric name's HELP and
-    TYPE appear once, before its samples; repeating them for each label combination is a parse
-    error in strict scrapers and silently drops series in lenient ones.
-    """
-    series = {}
-
-    def add(metric, labels, value):
-        series.setdefault(metric, []).append((labels, value))
-
-    for flat, total in (counters or {}).items():
-        # `messages_<type>` is written per message type by ingestion.py already, so the msg_type
-        # dimension costs nothing at the call site -- it is derived from a convention that was
-        # there first.
-        if flat.startswith("messages_") and flat != "messages_total":
-            add("acs_ingestion_messages_total", {"msg_type": flat[len("messages_"):]}, total)
-            continue
-        if flat in EXPORTED_LABELLED_INSTEAD:
-            # Not exported here because it is exported labelled elsewhere; see the table for the
-            # per-name reason. NOT the same as being unmapped, which is reported below.
-            continue
-        mapped = COUNTER_MAP.get(flat)
-        if mapped:
-            metric, labels = mapped
-            add(metric, dict(labels), total)
-        else:
-            # NAMED, NOT DISCARDED. A counter added to ingestion.py without a mapping here would
-            # otherwise vanish from monitoring with nothing to indicate it ever existed.
-            add("acs_ingestion_unmapped_counter_total", {"counter": flat}, total)
-
-    for (metric, label_items), total in (labelled or {}).items():
-        add(metric, dict(label_items), total)
-
-    for metric, value in (gauges or {}).items():
-        add(metric, {}, value)
-
-    out = []
-    for metric in sorted(series):
-        help_text = HELP.get(metric)
-        if help_text:
-            out.append(f"# HELP {metric} {help_text}")
-        out.append(f"# TYPE {metric} {TYPES.get(metric, 'counter')}")
-        for labels, value in sorted(series[metric], key=lambda s: sorted(s[0].items())):
-            out.append(_line(metric, labels, value))
-
-    for metric in sorted(histograms or {}):
-        _render_histogram(out, metric, histograms[metric])
-
-    return "\n".join(out) + "\n"
-
-
 class _Handler(BaseHTTPRequestHandler):
     """`collect` is attached by start_metrics_server; it returns the rendered body."""
 
@@ -480,6 +354,12 @@ def start_metrics_server(port, collect, logger=None):
     A THREAD IN THE EXISTING PROCESS, matching the watchdog, heartbeat and stats reporter that are
     already there. A separate exporter process would need its own copy of the counters, which is
     the thing there must only be one of.
+
+    NOT `prometheus_client.start_http_server`, though the body it serves is prometheus_client's.
+    That helper answers every path with the metrics, so a typo in a scrape config would look like a
+    working target; and it raises on a port it cannot bind, which here has to be survivable. Both
+    behaviours below are this daemon's policy rather than the format, which is the line this module
+    keeps: upstream renders, we decide what is served and what happens when it cannot be.
 
     FAILURE HERE MUST NOT STOP INGESTION. A port already in use is a monitoring problem; refusing
     to start the daemon over it would turn a missing graph into an outage.

@@ -54,6 +54,7 @@ _stub("paho.mqtt")
 _stub("paho.mqtt.client", Client=object)
 
 import ingestion  # noqa: E402  (must follow the stubs above)
+import registry  # noqa: E402
 
 GROUP = "ACS-Cymru"
 NODE = "gwy110000000000400080000"
@@ -335,15 +336,14 @@ class GatewayHealthGaugeTests(unittest.TestCase):
 
     def test_they_render_as_labelled_gauges(self):
         self._record({'disk_free_bytes': 52428288000})
-        labelled = {
-            (metric, (("edge_node", NODE),)): value
-            for node, values in ingestion.gateway_health_gauge_snapshot().items()
-            for metric, value in values.items()
-        }
-        text = ingestion.metrics.render_exposition(counters={}, labelled=labelled)
+        registry.reset()
+        # Through the daemon's own scrape-time source, so this covers the path a scrape takes and
+        # not a shape restated in the test.
+        registry.set_scrape_time_source(ingestion.scrape_time_series)
+        text = registry.render()
         self.assertIn('# TYPE acs_ingestion_gateway_disk_free_bytes gauge', text)
         self.assertIn(
-            'acs_ingestion_gateway_disk_free_bytes{edge_node="%s"} 52428288000' % NODE, text)
+            'acs_ingestion_gateway_disk_free_bytes{edge_node="%s"} 5.2428288e+10' % NODE, text)
         # A metric with no TYPES entry renders as a counter, which for a disk figure would be
         # wrong in a way only a rate() query would reveal.
         self.assertNotIn('# TYPE acs_ingestion_gateway_disk_free_bytes counter', text)
@@ -352,10 +352,13 @@ class GatewayHealthGaugeTests(unittest.TestCase):
         # An unmapped counter still reaches a scraper, but as
         # acs_ingestion_unmapped_counter_total{counter="..."} -- which no dashboard or alert would
         # be written against. This is the assertion that it was named properly.
-        text = ingestion.metrics.render_exposition(
-            counters={'gateway_health_metrics_rejected': 3})
-        self.assertIn('acs_ingestion_gateway_health_rejected_total 3', text)
-        self.assertNotIn('unmapped', text)
+        registry.reset()
+        registry.count('gateway_health_metrics_rejected', 3)
+        text = registry.render()
+        self.assertIn('acs_ingestion_gateway_health_rejected_total 3.0', text)
+        for line in text.split('\n'):
+            if line and not line.startswith('#'):
+                self.assertFalse(line.startswith('acs_ingestion_unmapped_counter_total'), line)
 
 
 if __name__ == "__main__":

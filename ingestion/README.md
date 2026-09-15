@@ -10,7 +10,7 @@ allowed to be heard at all.
 | :--- | :--- |
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
-| [`registry.py`](registry.py) | The counter and histogram registry that `metrics.py` renders |
+| [`registry.py`](registry.py) | The Prometheus metric objects, built from the declarations in `metrics.py` |
 | [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 44 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
@@ -1287,14 +1287,32 @@ it. Issues #22 and #24.
 route; the endpoint carries no credential, so who can reach the port is the whole of the control.
 Prometheus scrapes it in-cluster. From a laptop, `npm run dev:forward` puts it on `localhost:9108`.
 
-**It renders the counter registry the daemon already kept** — it is not a second instrumentation.
-Every `count()` sits at the site that already made the decision, one-to-one with an existing
-`logger.warning`, and [`metrics.py`](metrics.py) translates those flat names onto Prometheus names
-and labels at scrape time. That is why the counters and the log cannot disagree about what
-happened, and why adding a metric here is a mapping rather than a code change on the hot path.
+**It is not a second instrumentation.** Every `count()` sits at the site that already made the
+decision, one-to-one with an existing `logger.warning` — `count("dropped_gateway_binding")`, not a
+metric object reached for at the same place. [`metrics.py`](metrics.py) declares what each flat name
+is published as (`COUNTER_MAP`), what it means (`HELP`) and which are gauges (`TYPES`);
+[`registry.py`](registry.py) builds the `prometheus_client` objects from those declarations. That is
+why the counters and the log cannot disagree about what happened, and why adding a metric is a line
+in a table rather than a change on the hot path.
 
-The `STATS` log line remains. The two answer different questions: this endpoint is for a
+`prometheus_client` owns the registry, the exposition format and the histogram arithmetic —
+cumulative `le` buckets, `+Inf` equal to `_count`, escaping, one `HELP`/`TYPE` pair per family. The
+HTTP handler stays ours: it answers **only** `/metrics` and `/`, so a typo in a scrape config looks
+like a 404 rather than a working target, and a port it cannot bind is logged and survived rather
+than raised.
+
+**Every series `COUNTER_MAP` declares is present at zero from startup**, not from its first event —
+labelled ones included. A counter whose series springs into existence at 1 has no previous sample
+for `rate()` to compare against, so the step from no drops to some would be invisible for one scrape
+interval. `acs_ingestion_messages_total{msg_type=…}` is the exception: its label values are whatever
+the fleet publishes, so they cannot be declared in advance.
+
+The `STATS` log line remains, and still reports by the **flat** names the call sites use
+(`dropped_gateway_binding=+3(12)`). The two answer different questions: this endpoint is for a
 Prometheus, the log line is for whoever is reading `docker logs` at 3am with no Prometheus to hand.
+`registry.counter_snapshot()` reverses the declaration to produce it, rather than keeping a second
+tally — so there is still exactly one place a counter lives. Counters reading zero are omitted from
+the line, so a drop counter appearing there at all is still the signal.
 
 ### What each metric means, and what a non-zero value tells you
 

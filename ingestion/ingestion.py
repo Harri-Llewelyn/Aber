@@ -14,11 +14,10 @@ import paho.mqtt.client as mqtt
 import sparkplug_b_pb2
 from datetime import datetime, timezone
 from logging_config import get_logger
-import metrics
 from metrics import start_metrics_server
+import registry
 from registry import (
-    count, count_labelled, counter_snapshot,
-    labelled_snapshot, histogram_snapshot, observe_uns_seconds, observe_write_seconds,
+    count, count_labelled, counter_snapshot, observe_uns_seconds, observe_write_seconds,
     WRITE_SECONDS_BUCKETS,
 )
 from conformance import (
@@ -2119,7 +2118,7 @@ def _write_batch(cur, batch):
 def _after_commit(item):
     """What one message owes once its rows are durable."""
     count("metrics_written", len(item.rows))
-    # Not `messages_written`: metrics.py reads every `messages_<x>` flat name as a message
+    # Not `messages_written`: registry.count() reads every `messages_<x>` flat name as a message
     # type, and this is a count of commits, not of arrivals.
     count("written_messages")
 
@@ -2500,8 +2499,9 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     # after the commit.
     count("metrics_rejected_timestamp", rejected_timestamps)
     # The same event labelled by edge node, which is what makes it actionable; this is the series
-    # metrics.py exports. `metrics_rejected_timestamp` stays in the flat registry beside its
-    # warning and is not exported twice.
+    # that is exported. `metrics_rejected_timestamp` stays beside its warning and reads back under
+    # that flat name in the STATS line, summed from this series rather than exported twice
+    # (metrics.py, EXPORTED_LABELLED_INSTEAD).
     count_labelled(
         "acs_ingestion_timestamps_rejected_total",
         {"edge_node": gateway_wire_id}, rejected_timestamps
@@ -3077,56 +3077,53 @@ def start_startup_healer(supabase=None, check_privileges=False, reconcile_captur
         ", deferred capture reconciliation" if reconcile_capture else "",
     )
 
-def start_metrics_endpoint():
+def scrape_time_series():
     """
-    Serve the counter registry in Prometheus exposition format.
+    The series read when a scrape arrives, as {(metric, ((label, value), ...)): value}.
 
-    `db_connected` is read at scrape time because it is a state, not an event. `_ts_conn.closed`
-    cannot see a server-side drop, so this answers "did the daemon believe it had a connection";
-    `acs_ingestion_db_connect_failures_total` rising while it reads 1 is a server-side drop.
+    STATES, NOT EVENTS, which is the whole reason they are read here rather than incremented at a
+    site. `db_connected` is the clearest case: `_ts_conn.closed` cannot see a server-side drop, so
+    this answers "did the daemon believe it had a connection", and
+    `acs_ingestion_db_connect_failures_total` rising while it reads 1 is exactly that drop.
     """
+    series = {
+        ("acs_ingestion_up", ()): 1,
+        ("acs_ingestion_db_connected", ()):
+            1 if (_ts_conn is not None and not _ts_conn.closed) else 0,
+        # The subscription, not the connection. See the note above on_connect().
+        ("acs_ingestion_mqtt_connected", ()): 1 if _mqtt_subscribed else 0,
+        ("acs_ingestion_write_queue_depth", ()): _writer.depth(),
+    }
+
+    # Cache occupancy. The evictions counter is the one worth an alert: non-zero means
+    # MAX_ENTITIES_PER_CACHE is being reached.
+    for cache in (_device_cache, _gateway_cache, _schema_cache):
+        series[("acs_ingestion_cache_entries", (("cache", cache.name),))] = len(cache)
+        series[("acs_ingestion_cache_evictions_total", (("cache", cache.name),))] = cache.evictions
+
+    # Appliance health. The reported-at timestamp says how old the readings are; a gauge holds its
+    # last value indefinitely.
+    for edge_node, values in gateway_health_gauge_snapshot().items():
+        for metric, value in values.items():
+            series[(metric, (("edge_node", edge_node),))] = value
+
+    # The appliance clock, beside its measured-at gauge for the same reason.
+    for edge_node, values in gateway_clock_gauge_snapshot().items():
+        for metric, value in values.items():
+            series[(metric, (("edge_node", edge_node),))] = value
+
+    return series
+
+def start_metrics_endpoint():
+    """Serve the registry in Prometheus exposition format."""
     if INGESTION_METRICS_PORT <= 0:
         # The policy decision lives here rather than in metrics.py, where port 0 means "ask the OS
         # for a free one" as it does everywhere else in the socket API.
         logger.info("Metrics endpoint disabled (INGESTION_METRICS_PORT=%s).", INGESTION_METRICS_PORT)
         return None
 
-    def collect():
-        # Cache occupancy is a state, read at scrape time. The evictions counter is the one worth an
-        # alert: non-zero means MAX_ENTITIES_PER_CACHE is being reached.
-        labelled = dict(labelled_snapshot())
-        for cache in (_device_cache, _gateway_cache, _schema_cache):
-            labelled[("acs_ingestion_cache_entries", (("cache", cache.name),))] = len(cache)
-            labelled[("acs_ingestion_cache_evictions_total", (("cache", cache.name),))] = (
-                cache.evictions
-            )
-
-        # Appliance health, read at scrape time. The reported-at timestamp says how old the readings
-        # are; a gauge holds its last value indefinitely.
-        for edge_node, values in gateway_health_gauge_snapshot().items():
-            for metric, value in values.items():
-                labelled[(metric, (("edge_node", edge_node),))] = value
-
-        # The appliance clock, beside its measured-at gauge for the same reason.
-        for edge_node, values in gateway_clock_gauge_snapshot().items():
-            for metric, value in values.items():
-                labelled[(metric, (("edge_node", edge_node),))] = value
-
-        return metrics.render_exposition(
-            counters=counter_snapshot(),
-            labelled=labelled,
-            histograms=histogram_snapshot(),
-            gauges={
-                "acs_ingestion_up": 1,
-                "acs_ingestion_db_connected":
-                    1 if (_ts_conn is not None and not _ts_conn.closed) else 0,
-                # The subscription, not the connection. See the note above on_connect().
-                "acs_ingestion_mqtt_connected": 1 if _mqtt_subscribed else 0,
-                "acs_ingestion_write_queue_depth": _writer.depth(),
-            },
-        )
-
-    start_metrics_server(INGESTION_METRICS_PORT, collect, logger)
+    registry.set_scrape_time_source(scrape_time_series)
+    start_metrics_server(INGESTION_METRICS_PORT, registry.render, logger)
 
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")

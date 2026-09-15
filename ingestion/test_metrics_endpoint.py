@@ -6,10 +6,15 @@ works", and its whole risk is that the counter is exported under a name nothing 
 fires on one of the two legitimate non-gaps. Both of those are questions about the exposition, so
 testing the increment without testing what a scraper sees would leave the interesting half unproven.
 
-NO STACK AND NO BROKER. `render_exposition` is a pure function over a counter snapshot, and the
-sequence tests stub protobuf/MQTT/psycopg2 before importing ingestion.py -- the same shape as
-test_declared_metrics.py and test_payload_conformance.py, and the reason those run in the unit job
-rather than in e2e.
+WHAT IS TESTED HERE AND WHAT IS NOT. The exposition FORMAT is prometheus_client's -- cumulative
+buckets, escaping, one HELP/TYPE pair per family -- and is not restated here. What is ours is the
+translation: which flat counter name is published as which metric and label, which series are
+deliberately absent, and which are gauges. Those are what these assert, driven through the real
+registry rather than through a shape a test restates.
+
+NO STACK AND NO BROKER. The registry is in-process, and the sequence tests stub
+protobuf/MQTT/psycopg2 before importing ingestion.py -- the same shape as test_declared_metrics.py
+and test_payload_conformance.py, and the reason those run in the unit job rather than in e2e.
 
     python ingestion/test_metrics_endpoint.py
 """
@@ -29,12 +34,41 @@ import registry  # noqa: E402
 # The exposition format
 # =================================================================================================
 class ExpositionTestCase(unittest.TestCase):
-    def lines(self, text):
+    def setUp(self):
+        # A prometheus_client counter cannot be decremented, so a fresh registry is the only way
+        # back to zero between tests.
+        registry.reset()
+
+    def lines(self, text=None):
+        """
+        Sample lines only.
+
+        A DECLARED FAMILY CARRIES ITS HELP/TYPE PAIR BEFORE IT HAS ANY SAMPLES, so an assertion
+        about what is NOT exported has to be made about samples and never about the whole body.
+        """
+        text = registry.render() if text is None else text
         return [l for l in text.splitlines() if l and not l.startswith("#")]
 
+    def counted(self, **flat):
+        for name, value in flat.items():
+            registry.count(name, value)
+        return self.lines()
+
     def test_a_flat_counter_becomes_its_mapped_name(self):
-        out = metrics.render_exposition({"metrics_written": 42})
-        self.assertIn("acs_ingestion_metrics_written_total 42", self.lines(out))
+        self.assertIn("acs_ingestion_metrics_written_total 42.0",
+                      self.counted(metrics_written=42))
+
+    def test_every_declared_counter_starts_at_zero_rather_than_at_its_first_event(self):
+        """
+        A counter whose series springs into existence at 1 has no previous sample for `rate()` to
+        compare against, so the step from no drops to some is invisible for one scrape interval
+        and a dashboard shows "No data" where the honest answer is zero. Every series COUNTER_MAP
+        declares is therefore present from startup, labelled ones included -- prometheus_client
+        initialises only the unlabelled half on its own.
+        """
+        exported = self.lines()
+        self.assertIn('acs_ingestion_messages_dropped_total{reason="db_unavailable"} 0.0', exported)
+        self.assertIn("acs_ingestion_write_failures_total 0.0", exported)
 
     def test_every_drop_reason_lands_on_one_metric_with_a_reason_label(self):
         """
@@ -42,20 +76,18 @@ class ExpositionTestCase(unittest.TestCase):
         `sum by (reason) (...)` is a query rather than four hand-maintained panels -- and a drop
         reason added later appears in that sum without anything else changing.
         """
-        out = metrics.render_exposition({
-            "dropped_gateway_binding": 1,
-            "dropped_quarantined_or_unregistered": 2,
-            "dropped_directory_unavailable": 3,
-            "dropped_db_unavailable": 4,
-        })
+        exported = self.counted(
+            dropped_gateway_binding=1,
+            dropped_quarantined_or_unregistered=2,
+            dropped_directory_unavailable=3,
+            dropped_db_unavailable=4,
+        )
         for reason, value in [
             ("gateway_binding", 1), ("quarantined_or_unregistered", 2),
             ("directory_unavailable", 3), ("db_unavailable", 4),
         ]:
             self.assertIn(
-                f'acs_ingestion_messages_dropped_total{{reason="{reason}"}} {value}',
-                self.lines(out),
-            )
+                f'acs_ingestion_messages_dropped_total{{reason="{reason}"}} {value}.0', exported)
 
     def test_every_drop_counter_in_ingestion_is_mapped(self):
         """
@@ -148,39 +180,36 @@ class ExpositionTestCase(unittest.TestCase):
         until the next rebirth. Summed into one `directory_unavailable` series those are
         indistinguishable, and the alert on the birth rate could not be written.
         """
-        out = metrics.render_exposition({
-            "dropped_directory_unavailable": 1,
-            "dropped_dbirth_directory_unavailable": 2,
-            "dropped_ddeath_directory_unavailable": 3,
-            "dropped_node_message_directory_unavailable": 4,
-        })
+        exported = self.counted(
+            dropped_directory_unavailable=1,
+            dropped_dbirth_directory_unavailable=2,
+            dropped_ddeath_directory_unavailable=3,
+            dropped_node_message_directory_unavailable=4,
+        )
         for reason, value in [
             ("directory_unavailable", 1), ("dbirth_directory_unavailable", 2),
             ("ddeath_directory_unavailable", 3), ("node_message_directory_unavailable", 4),
         ]:
             self.assertIn(
-                f'acs_ingestion_messages_dropped_total{{reason="{reason}"}} {value}',
-                self.lines(out),
-            )
-        # Still one metric family, so `sum by (reason)` -- which the drop alert uses -- picks the
+                f'acs_ingestion_messages_dropped_total{{reason="{reason}"}} {value}.0', exported)
+        # Still ONE metric family, so `sum by (reason)` -- which the drop alert uses -- picks the
         # three new reasons up with no change to the rule.
-        self.assertEqual(1, out.count("# HELP acs_ingestion_messages_dropped_total"))
+        self.assertEqual(
+            1, registry.render().count("# TYPE acs_ingestion_messages_dropped_total"))
 
     def test_an_unmapped_counter_is_surfaced_rather_than_dropped(self):
         """
         A counter with no mapping still appears, under a name that says the mapping is missing.
         Silently discarding it would make a monitoring gap invisible to monitoring.
         """
-        out = metrics.render_exposition({"something_new": 7})
-        self.assertIn(
-            'acs_ingestion_unmapped_counter_total{counter="something_new"} 7', self.lines(out)
-        )
+        self.assertIn('acs_ingestion_unmapped_counter_total{counter="something_new"} 7.0',
+                      self.counted(something_new=7))
 
     def test_msg_type_is_derived_from_the_existing_per_type_counters(self):
         # ingestion.py already writes `messages_<type>`; the dimension costs nothing at the site.
-        out = metrics.render_exposition({"messages_ddata": 10, "messages_nbirth": 2})
-        self.assertIn('acs_ingestion_messages_total{msg_type="ddata"} 10', self.lines(out))
-        self.assertIn('acs_ingestion_messages_total{msg_type="nbirth"} 2', self.lines(out))
+        exported = self.counted(messages_ddata=10, messages_nbirth=2)
+        self.assertIn('acs_ingestion_messages_total{msg_type="ddata"} 10.0', exported)
+        self.assertIn('acs_ingestion_messages_total{msg_type="nbirth"} 2.0', exported)
 
     def test_the_flat_total_is_not_exported_beside_the_labelled_series(self):
         """
@@ -188,83 +217,67 @@ class ExpositionTestCase(unittest.TestCase):
         two ways to count the same message, and `sum(acs_ingestion_messages_total)` -- the obvious
         query -- would silently double.
         """
-        out = metrics.render_exposition({"messages_total": 12, "messages_ddata": 12})
-        self.assertNotIn("acs_ingestion_messages_total 12", self.lines(out))
+        exported = self.counted(messages_total=12, messages_ddata=12)
+        self.assertNotIn("acs_ingestion_messages_total 12.0", exported)
         self.assertEqual(
-            1, len([l for l in self.lines(out) if l.startswith("acs_ingestion_messages_total")])
-        )
+            1, len([l for l in exported if l.startswith("acs_ingestion_messages_total")]))
+        # And it still reads back under its flat name, which is what the STATS log line reports.
+        self.assertEqual(12, registry.counter_snapshot()["messages_total"])
 
-    def test_help_and_type_appear_once_per_metric(self):
-        """
-        A HARD REQUIREMENT OF THE FORMAT, not a nicety: repeating HELP for a metric is a parse
-        error in strict scrapers and silently drops series in lenient ones. Four series of one
-        metric must still carry one header pair.
-        """
-        out = metrics.render_exposition({
-            "dropped_gateway_binding": 1, "dropped_db_unavailable": 1,
-            "dropped_directory_unavailable": 1, "dropped_quarantined_or_unregistered": 1,
-        })
-        self.assertEqual(1, out.count("# HELP acs_ingestion_messages_dropped_total"))
-        self.assertEqual(1, out.count("# TYPE acs_ingestion_messages_dropped_total"))
+    def scraped(self, series):
+        """The exposition with `series` as what the daemon holds when the scrape arrives."""
+        registry.set_scrape_time_source(lambda: series)
+        return registry.render()
 
     def test_gauges_are_typed_as_gauges(self):
-        out = metrics.render_exposition({}, gauges={"acs_ingestion_db_connected": 0})
-        self.assertIn("# TYPE acs_ingestion_db_connected gauge", out)
-        self.assertIn("acs_ingestion_db_connected 0", self.lines(out))
+        body = self.scraped({("acs_ingestion_db_connected", ()): 0})
+        self.assertIn("# TYPE acs_ingestion_db_connected gauge", body)
+        self.assertIn("acs_ingestion_db_connected 0.0", self.lines(body))
 
     def test_a_label_value_cannot_break_the_line(self):
         """
-        Edge node ids come off the wire. A quote or backslash in one would otherwise produce a
-        line no scraper can parse -- and it would take the whole scrape with it, not just that
-        series.
+        KEPT THOUGH THE ESCAPING IS UPSTREAM'S, because the INPUT is not: edge node ids come off
+        the wire, and a quote or backslash in one that reached the body unescaped would take the
+        whole scrape with it rather than just that series.
         """
-        out = metrics.render_exposition(
-            {}, labelled={("acs_ingestion_sequence_gaps_total", (("edge_node", 'a"b\\c'),)): 1}
-        )
-        self.assertIn(
-            'acs_ingestion_sequence_gaps_total{edge_node="a\\"b\\\\c"} 1', self.lines(out)
-        )
+        registry.count_labelled("acs_ingestion_sequence_gaps_total", {"edge_node": 'a"b\\c'}, 1)
+        self.assertIn('acs_ingestion_sequence_gaps_total{edge_node="a\\"b\\\\c"} 1.0',
+                      self.lines())
 
     def test_a_labelled_gauge_is_typed_as_a_gauge(self):
         """
-        THE TYPE COMES FROM THE NAME, NOT FROM WHICH ARGUMENT THE SERIES ARRIVED ON. `gauges` takes
-        no label dimension, so the cache occupancy series has to come in through `labelled` -- and
-        it would silently export as a counter if TYPES were consulted only for `gauges` entries.
-        A counter that goes down is a scraper reporting a reset, so the wrong type here would turn
-        an ordinary eviction into a fabricated spike on every rate() over it.
+        THE TYPE COMES FROM THE NAME. Cache occupancy is read at scrape time beside the eviction
+        COUNTER for the same cache, so the collector cannot infer the type from where a series
+        arrived -- it asks TYPES. A counter that goes down is a scraper reporting a reset, so the
+        wrong type here would turn an ordinary eviction into a fabricated spike on every rate().
         """
-        out = metrics.render_exposition(
-            {}, labelled={("acs_ingestion_cache_entries", (("cache", "device"),)): 17}
-        )
-        self.assertIn("# TYPE acs_ingestion_cache_entries gauge", out)
-        self.assertIn('acs_ingestion_cache_entries{cache="device"} 17', self.lines(out))
+        body = self.scraped({("acs_ingestion_cache_entries", (("cache", "device"),)): 17})
+        self.assertIn("# TYPE acs_ingestion_cache_entries gauge", body)
+        self.assertIn('acs_ingestion_cache_entries{cache="device"} 17.0', self.lines(body))
 
     def test_the_eviction_counter_stays_a_counter(self):
         # It only ever rises, and "the cap was hit N times" is exactly a rate() question.
-        out = metrics.render_exposition(
-            {}, labelled={("acs_ingestion_cache_evictions_total", (("cache", "device"),)): 3}
-        )
-        self.assertIn("# TYPE acs_ingestion_cache_evictions_total counter", out)
+        body = self.scraped({("acs_ingestion_cache_evictions_total", (("cache", "device"),)): 3})
+        self.assertIn("# TYPE acs_ingestion_cache_evictions_total counter", body)
 
     def test_every_exported_metric_carries_help(self):
-        # An unhelped metric renders, but a reader meeting it in Grafana has nothing to go on.
-        out = metrics.render_exposition(
-            {name: 1 for name in metrics.COUNTER_MAP},
-            gauges={"acs_ingestion_up": 1, "acs_ingestion_db_connected": 1},
-        )
-        for line in out.splitlines():
-            if line.startswith("# TYPE "):
-                metric = line.split()[2]
-                self.assertIn(metric, metrics.HELP, f"{metric} has no HELP text")
+        """
+        An unhelped metric renders, but a reader meeting it in Grafana has nothing to go on.
 
-    def test_output_ends_with_a_newline(self):
-        # Required by the format; some scrapers discard the final sample without it.
-        self.assertTrue(metrics.render_exposition({"metrics_written": 1}).endswith("\n"))
+        The declared metrics are covered by registry.reset(), which REFUSES to build one with no
+        HELP -- so this is the scrape-time half, where a missing entry cannot be a startup failure
+        without a new gauge being able to 500 a live scrape.
+        """
+        ing = _load_ingestion()
+        for metric, _labels in ing.scrape_time_series():
+            self.assertIn(metric, metrics.HELP, f"{metric} has no HELP text")
 
     def test_an_empty_registry_still_renders(self):
         # A daemon that has seen nothing must still answer 200 with a parseable body, or a healthy
         # quiet stack is indistinguishable from a broken exporter.
-        self.assertEqual("\n", metrics.render_exposition({}))
+        body = registry.render()
+        self.assertTrue(body.endswith("\n"))
+        self.assertEqual([], [l for l in self.lines(body) if not l.endswith(" 0.0")])
 
 
 # =================================================================================================
@@ -273,9 +286,9 @@ class ExpositionTestCase(unittest.TestCase):
 class EndpointTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server = metrics.start_metrics_server(
-            0, lambda: metrics.render_exposition({"metrics_written": 5})
-        )
+        registry.reset()
+        registry.count("metrics_written", 5)
+        cls.server = metrics.start_metrics_server(0, registry.render)
         # Port 0 asks the OS for a free one, so parallel runs cannot collide.
         cls.port = cls.server.server_address[1]
 
@@ -292,7 +305,7 @@ class EndpointTestCase(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertIn("text/plain", ctype)
         self.assertIn("version=0.0.4", ctype)
-        self.assertIn("acs_ingestion_metrics_written_total 5", body)
+        self.assertIn("acs_ingestion_metrics_written_total 5.0", body)
 
     def test_it_needs_no_credential(self):
         # Asserted rather than assumed, because it decides what may ever appear on this endpoint.
@@ -406,18 +419,18 @@ class SequenceGapTestCase(unittest.TestCase):
 
     def setUp(self):
         self.ing._last_seq.clear()
-        registry._labelled.clear()
+        registry.reset()
         # request_node_rebirth needs a broker client; None is the documented "no client" path and
         # is what keeps this test off the network.
         self.node = "TestNode"
 
     def gaps(self, node=None):
         key = ("acs_ingestion_sequence_gaps_total", (("edge_node", node or self.node),))
-        return self.ing.labelled_snapshot().get(key, 0)
+        return registry.labelled_snapshot().get(key, 0)
 
     def missed(self, node=None):
         key = ("acs_ingestion_sequence_messages_missed_total", (("edge_node", node or self.node),))
-        return self.ing.labelled_snapshot().get(key, 0)
+        return registry.labelled_snapshot().get(key, 0)
 
     def send(self, seq, msg_type="DDATA"):
         return self.ing.check_message_sequence("G", self.node, msg_type, _Payload(seq), None)
@@ -494,141 +507,21 @@ class SequenceGapTestCase(unittest.TestCase):
     def test_the_counters_render_under_the_names_the_alert_rules_use(self):
         self.send(1)
         self.send(5)
-        out = metrics.render_exposition({}, labelled=self.ing.labelled_snapshot())
-        self.assertIn(f'acs_ingestion_sequence_gaps_total{{edge_node="{self.node}"}} 1', out)
+        out = registry.render()
+        self.assertIn(f'acs_ingestion_sequence_gaps_total{{edge_node="{self.node}"}} 1.0', out)
         self.assertIn(
-            f'acs_ingestion_sequence_messages_missed_total{{edge_node="{self.node}"}} 3', out
+            f'acs_ingestion_sequence_messages_missed_total{{edge_node="{self.node}"}} 3.0', out
         )
 
 
 # =================================================================================================
-# The historian write latency histogram
+# The write-latency histogram
 #
-# WHY THIS IS TESTED HARDER THAN THE COUNTERS. A counter that renders wrongly is obviously wrong --
-# a wrong number in a place a human reads. A histogram that renders wrongly still LOOKS like a
-# histogram: Prometheus ingests it, the panels draw, and histogram_quantile() returns a number that
-# is simply not the quantile. There is no error anywhere in that chain, so the only place the
-# mistake can be caught is here.
+# THE BUCKETS ARE OURS; THE FORMAT IS NOT. prometheus_client renders cumulative `le` series, +Inf
+# equal to _count, and boundaries that do not drift into scientific notation -- none of which is
+# restated here. What these assert is that WRITE_SECONDS_BUCKETS reaches the histogram intact and
+# that the boundaries still separate the three regimes this write path actually has.
 # =================================================================================================
-class HistogramRenderingTestCase(unittest.TestCase):
-    METRIC = "acs_ingestion_write_seconds"
-
-    def render(self, buckets, total, total_sum=1.0):
-        return metrics.render_exposition(
-            {}, histograms={self.METRIC: {"buckets": buckets, "sum": total_sum, "count": total}}
-        )
-
-    def bucket_labels(self, out):
-        """The `le` values in the order they were EMITTED, which is the property under test."""
-        found = []
-        for line in out.splitlines():
-            if line.startswith(f"{self.METRIC}_bucket{{le="):
-                found.append(line.split('"')[1])
-        return found
-
-    def sample(self, out, suffix, le=None):
-        want = (
-            f'{self.METRIC}_{suffix}{{le="{le}"}} ' if le is not None
-            else f"{self.METRIC}_{suffix} "
-        )
-        for line in out.splitlines():
-            if line.startswith(want):
-                return line[len(want):]
-        self.fail(f"no {want.strip()} sample in:\n{out}")
-
-    # ---------------------------------------------------------------------------------------
-    # The ordering trap
-    # ---------------------------------------------------------------------------------------
-    def test_emitted_bucket_order_is_numeric_not_lexical(self):
-        """
-        THE ONE THAT WOULD CATCH THE REGRESSION. render_exposition orders a normal metric's
-        samples by their label items, which compares STRINGS: lexically "10.0" sorts before "2.5"
-        and "+Inf" sorts before every digit, because '+' is 0x2B and '0' is 0x30. Routing buckets
-        through that path yields a histogram Prometheus accepts and answers wrong quantiles from.
-
-        So this asserts two things at once: that the emitted order is numerically increasing, and
-        that it is NOT the lexical order -- the second half is what makes the first half a real
-        test rather than one that would pass under the bug.
-        """
-        buckets = tuple((b, 1) for b in (0.001, 0.0025, 2.5, 10.0))
-        emitted = self.bucket_labels(self.render(buckets, 4))
-
-        self.assertEqual(["0.001", "0.0025", "2.5", "10.0", "+Inf"], emitted)
-
-        numeric = [float("inf") if v == "+Inf" else float(v) for v in emitted]
-        self.assertEqual(sorted(numeric), numeric, "buckets are not in increasing `le` order")
-        self.assertNotEqual(
-            sorted(emitted), emitted,
-            "this fixture no longer distinguishes lexical from numeric order, so it would pass "
-            "even if buckets were routed back through the shared sorting path"
-        )
-
-    def test_the_real_bucket_boundaries_also_defeat_a_lexical_sort(self):
-        """
-        The test above proves the renderer; this proves the CONFIGURATION is one the renderer's
-        guarantee matters for. WRITE_SECONDS_BUCKETS spans 0.001 to 10.0, and a set whose lexical
-        and numeric orders happened to agree would make the property untested in practice.
-        """
-        ing = _load_ingestion()
-        labels = [repr(float(b)) for b in ing.WRITE_SECONDS_BUCKETS] + ["+Inf"]
-        self.assertNotEqual(sorted(labels), labels)
-
-    # ---------------------------------------------------------------------------------------
-    # Cumulativeness
-    # ---------------------------------------------------------------------------------------
-    def test_buckets_accumulate(self):
-        # Per-bucket 1,2,3 is cumulative 1,3,6 -- `le` means "less than or equal to", so a bucket
-        # that reported only its own count would understate every quantile.
-        out = self.render(((0.001, 1), (0.01, 2), (0.1, 3)), 6)
-        self.assertEqual("1", self.sample(out, "bucket", "0.001"))
-        self.assertEqual("3", self.sample(out, "bucket", "0.01"))
-        self.assertEqual("6", self.sample(out, "bucket", "0.1"))
-
-    def test_inf_equals_count(self):
-        # Prometheus requires this exactly; a mismatch is a malformed histogram.
-        out = self.render(((0.001, 1), (0.01, 2)), 3)
-        self.assertEqual(self.sample(out, "count"), self.sample(out, "bucket", "+Inf"))
-
-    def test_an_observation_above_the_top_boundary_is_only_in_inf(self):
-        """
-        An 11-second write increments no finite bucket. It must still appear, or the series that
-        exists to expose stalls would hide the worst one it ever saw.
-        """
-        out = self.render(((0.001, 1), (10.0, 0)), 2, total_sum=11.5)
-        self.assertEqual("1", self.sample(out, "bucket", "10.0"))
-        self.assertEqual("2", self.sample(out, "bucket", "+Inf"))
-        self.assertEqual("11.5", self.sample(out, "sum"))
-
-    # ---------------------------------------------------------------------------------------
-    # Format
-    # ---------------------------------------------------------------------------------------
-    def test_boundaries_render_exactly_and_never_in_scientific_notation(self):
-        # "2.5e-03" is a different label value from "0.0025", so a scrape that changed format
-        # mid-life would silently start a NEW series and break every rate() across the boundary.
-        self.assertEqual("0.0025", metrics._format_le(0.0025))
-        self.assertEqual("+Inf", metrics._format_le(float("inf")))
-        for boundary in _load_ingestion().WRITE_SECONDS_BUCKETS:
-            self.assertNotIn("e", metrics._format_le(boundary))
-
-    def test_type_is_histogram_and_help_is_present(self):
-        out = self.render(((0.001, 1),), 1)
-        self.assertIn(f"# TYPE {self.METRIC} histogram", out)
-        self.assertIn(f"# HELP {self.METRIC} ", out)
-        self.assertIn(self.METRIC, metrics.HELP)
-
-    def test_the_help_and_type_pair_appears_once_for_the_whole_family(self):
-        # _bucket, _sum and _count are one metric family. A HELP line before each suffix is a
-        # parse error in strict scrapers -- the same rule the counter path already observes.
-        out = self.render(((0.001, 1), (0.01, 1)), 2)
-        self.assertEqual(1, out.count(f"# TYPE {self.METRIC} "))
-        self.assertEqual(1, out.count(f"# HELP {self.METRIC} "))
-
-    def test_absent_histograms_change_nothing(self):
-        # The parameter is optional, so every existing caller and every existing test keeps its
-        # exact output.
-        self.assertEqual("\n", metrics.render_exposition({}))
-        self.assertEqual("\n", metrics.render_exposition({}, histograms={}))
-
 
 class WriteLatencyRegistryTestCase(unittest.TestCase):
     """observe_write_seconds itself, against the real module."""
@@ -637,24 +530,32 @@ class WriteLatencyRegistryTestCase(unittest.TestCase):
         self.ing = _load_ingestion()
         # Module-level state, so each test starts from a known point rather than from whatever
         # the previous one left.
-        with registry._counters_lock:
-            registry._write_seconds_buckets[:] = [0] * len(registry.WRITE_SECONDS_BUCKETS)
-            registry._write_seconds_sum = 0.0
-            registry._write_seconds_count = 0
+        registry.reset()
 
     def snapshot(self):
-        return self.ing.histogram_snapshot()["acs_ingestion_write_seconds"]
+        """
+        Buckets are CUMULATIVE here, as they are on the wire: `le` means "less than or equal to",
+        so each count includes every bucket below it. The lowest boundary whose count first
+        reaches n is the bucket an observation landed in.
+        """
+        return registry.histogram_snapshot()["acs_ingestion_write_seconds"]
+
+    def landed_in(self, nth=1):
+        """The boundary at which the cumulative count first reaches `nth`."""
+        for boundary, total in self.snapshot()["buckets"]:
+            if total >= nth:
+                return boundary
+        self.fail(f"nothing reached a count of {nth}")
 
     def test_an_observation_lands_in_the_lowest_bucket_that_contains_it(self):
         self.ing.observe_write_seconds(0.003)
-        landed = [b for b, n in self.snapshot()["buckets"] if n]
         # 0.003 is above 0.0025 and at or below 0.005.
-        self.assertEqual([0.005], landed)
+        self.assertEqual(0.005, self.landed_in())
 
     def test_a_boundary_value_lands_in_its_own_bucket_not_the_next(self):
         # `le` is inclusive. An observation of exactly 0.01 belongs to le="0.01".
         self.ing.observe_write_seconds(0.01)
-        self.assertEqual([0.01], [b for b, n in self.snapshot()["buckets"] if n])
+        self.assertEqual(0.01, self.landed_in())
 
     def test_sum_and_count_track_every_observation_including_outliers(self):
         for v in (0.001, 0.5, 99.0):
@@ -662,8 +563,11 @@ class WriteLatencyRegistryTestCase(unittest.TestCase):
         snap = self.snapshot()
         self.assertEqual(3, snap["count"])
         self.assertAlmostEqual(99.501, snap["sum"], places=6)
-        # 99.0 exceeds every boundary, so the finite buckets hold only two of the three.
-        self.assertEqual(2, sum(n for _, n in snap["buckets"]))
+        # 99.0 exceeds every finite boundary, so the top finite bucket holds two of the three and
+        # only +Inf holds all three -- which is what keeps an outlier counted rather than dropped.
+        finite = [(b, n) for b, n in snap["buckets"] if b != float("inf")]
+        self.assertEqual(2, finite[-1][1])
+        self.assertEqual(3, dict(snap["buckets"])[float("inf")])
 
     def test_the_reconnect_stall_is_readable_off_the_top_buckets(self):
         """
@@ -675,16 +579,23 @@ class WriteLatencyRegistryTestCase(unittest.TestCase):
         self.assertGreaterEqual(worst, 0.25, "backoff no longer reaches the bucket it was sized for")
         self.ing.observe_write_seconds(0.002)          # healthy
         self.ing.observe_write_seconds(worst)          # a full reconnect
-        landed = [b for b, n in self.snapshot()["buckets"] if n]
-        self.assertEqual(2, len(landed))
-        self.assertLess(landed[0], 0.25)
-        self.assertGreaterEqual(landed[1], 0.25)
+        # The healthy write is already counted below 0.25; the reconnect is not counted until a
+        # boundary at or above it. That gap is the separation the boundaries were chosen for.
+        self.assertLess(self.landed_in(1), 0.25)
+        self.assertGreaterEqual(self.landed_in(2), 0.25)
 
-    def test_it_renders_through_the_endpoint_path(self):
+    def test_the_declared_buckets_are_the_ones_exported(self):
+        """
+        The `buckets=` argument reaching the histogram intact, end to end. Inheriting
+        prometheus_client's defaults instead would put every healthy write of this daemon in the
+        first bucket and answer every quantile with the same number.
+        """
         self.ing.observe_write_seconds(0.004)
-        out = metrics.render_exposition({}, histograms=self.ing.histogram_snapshot())
-        self.assertIn('acs_ingestion_write_seconds_bucket{le="0.005"} 1', out)
-        self.assertIn("acs_ingestion_write_seconds_count 1", out)
+        body = registry.render()
+        for boundary in self.ing.WRITE_SECONDS_BUCKETS:
+            self.assertIn(f'acs_ingestion_write_seconds_bucket{{le="{float(boundary)}"}} ', body)
+        self.assertIn('acs_ingestion_write_seconds_bucket{le="0.005"} 1.0', body)
+        self.assertIn("acs_ingestion_write_seconds_count 1.0", body)
 
 
 # =================================================================================================
@@ -701,7 +612,7 @@ class DirectoryUnavailableDropTestCase(unittest.TestCase):
         cls.ing = _load_ingestion()
 
     def setUp(self):
-        registry._counters.clear()
+        registry.reset()
         self.ing._unknown_gateway_warned.clear()
         # The daemon returns early on every one of these paths when there is no client, so a
         # falsy one would make all four tests pass against code that never ran.
@@ -768,9 +679,9 @@ class DirectoryUnavailableDropTestCase(unittest.TestCase):
         """
         self.ing.resolve_device = self.unavailable
         self.ing.process_dbirth("dev-1", "node-a", _Payload(None))
-        out = metrics.render_exposition(self.ing.counter_snapshot())
+        out = registry.render()
         self.assertIn(
-            'acs_ingestion_messages_dropped_total{reason="dbirth_directory_unavailable"} 1',
+            'acs_ingestion_messages_dropped_total{reason="dbirth_directory_unavailable"} 1.0',
             [l for l in out.splitlines() if l and not l.startswith("#")],
         )
 

@@ -177,7 +177,7 @@ spec:
           rather than be hidden from.
         */}}
         {{- if .Values.ingestion.enabled }}
-        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-ingestion" "command" "wget -q -O - http://ingestion-metrics:9108/metrics 2>/dev/null | grep -q '^acs_ingestion_mqtt_connected 1'" "describe" "the ingestion daemon to be subscribed to spBv1.0/# (every check that asserts on consumed telemetry)") | nindent 8 }}
+        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-ingestion" "command" "wget -q -O - http://ingestion-metrics:9108/metrics 2>/dev/null | awk '/^acs_ingestion_mqtt_connected /{found=($2==1)} END{exit found?0:1}'" "describe" "the ingestion daemon to be subscribed to spBv1.0/# (every check that asserts on consumed telemetry)") | nindent 8 }}
         {{- end }}
       containers:
         - name: validate

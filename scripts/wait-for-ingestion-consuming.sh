@@ -103,8 +103,11 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
 
   if [ -n "$body" ]; then
     # `$2` on the bare gauge line; the sum of the last field across every labelled counter series.
-    last_up="$(printf '%s\n' "$body" | awk '/^acs_ingestion_up /{print $2; found=1} END{if(!found) print "absent"}')"
-    last_sub="$(printf '%s\n' "$body" | awk '/^acs_ingestion_mqtt_connected /{print $2; found=1} END{if(!found) print "absent"}')"
+    # NORMALISED THROUGH %d, because a gauge's value is a float in the exposition format: the
+    # same 1 is spelled `1` by one exporter and `1.0` by another, and comparing the text made this
+    # wait depend on which.
+    last_up="$(printf '%s\n' "$body" | awk '/^acs_ingestion_up /{v=$2; found=1} END{if(found) printf "%d", v; else print "absent"}')"
+    last_sub="$(printf '%s\n' "$body" | awk '/^acs_ingestion_mqtt_connected /{v=$2; found=1} END{if(found) printf "%d", v; else print "absent"}')"
     last_msgs="$(printf '%s\n' "$body" | awk '/^acs_ingestion_messages_total\{/{s+=$NF} END{printf "%d", s+0}')"
 
     if [ "$last_up" = "1" ] && [ "$last_sub" = "1" ]; then

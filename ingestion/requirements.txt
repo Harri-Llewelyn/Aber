@@ -49,3 +49,20 @@ duckdb==1.1.3
 # making the CSV output stringly-typed for every future consumer. Two hundred kilobytes is the
 # cheaper side of that trade.
 pytz==2024.2
+
+# Prometheus counters, histograms and the exposition format, for the /metrics endpoint.
+#
+# WHAT IT REPLACED. This daemon rendered the exposition itself -- a counter registry behind a lock,
+# thirteen histogram buckets accumulated at render time, and the text format written by hand --
+# on the argument that the format is a documented text protocol and rendering it was the smaller
+# and more auditable half of what a library would do. The half that was not smaller was getting it
+# right: cumulative `le` buckets in numeric and never lexical order, `+Inf` equal to `_count`,
+# boundaries that render as 0.0025 and never 2.5e-03, one HELP/TYPE pair per family. Each of those
+# is a silent wrongness rather than an error -- histogram_quantile() answers a malformed histogram
+# with a plausible number -- and each had its own test. They are upstream's now.
+#
+# IT COSTS LESS THAN ANYTHING ALREADY HERE: pure Python, no transitive dependencies, ~150 KB. The
+# `count("dropped_x")` call sites did not move and metrics.py still declares what each is published
+# as, so the property that argument was protecting -- a counter beside the log line that explains
+# it -- is untouched.
+prometheus_client==0.26.0

@@ -119,7 +119,7 @@ class DBirthDedupTestCase(unittest.TestCase):
         ingestion._gateway_cache.clear()
         ingestion._device_seen.clear()
         ingestion._alias_map.clear()
-        registry._counters.clear()
+        registry.reset()
 
         self.device = registered_device()
 
@@ -346,7 +346,7 @@ class TestHeartbeatStillWritesEveryTime(unittest.TestCase):
 
         ingestion._gateway_cache.clear()
         ingestion._unknown_gateway_warned.clear()
-        registry._counters.clear()
+        registry.reset()
 
         self.gateway = {
             "id": "gateway-uuid",
@@ -418,7 +418,7 @@ class TestHeartbeatStillWritesEveryTime(unittest.TestCase):
 
         snapshot = ingestion.counter_snapshot()
         self.assertEqual(snapshot.get("gateway_heartbeats"), 3)
-        self.assertIsNone(snapshot.get("gateway_status_transitions"))
+        self.assertEqual(0, snapshot["gateway_status_transitions"])
 
     def test_cached_status_tracks_the_write(self):
         """

@@ -107,7 +107,7 @@ class BatchingTestCase(unittest.TestCase):
         ingestion._alias_map.clear()
         ingestion._device_seen.clear()
         ingestion._last_seq.clear()
-        registry._counters.clear()
+        registry.reset()
 
         self.device = {
             "id": "20000000-0000-4000-8000-000000000002",
@@ -466,7 +466,7 @@ class SchemaEnforcementTestCase(BatchingTestCase):
         """
         self.ingest(Payload([Metric("Systems/TEMPERATURE", double=999.0)]))
         self.assertEqual(self.names(), ["Systems/TEMPERATURE"])
-        self.assertIsNone(ingestion.counter_snapshot().get("metrics_rejected_schema"))
+        self.assertEqual(0, ingestion.counter_snapshot()["metrics_rejected_schema"])
 
     def test_a_device_with_no_policy_field_at_all_is_not_enforced(self):
         """A row cached before 0050 added the column. Absent must read as 'audit', not as enforce."""
@@ -492,7 +492,7 @@ class SchemaEnforcementTestCase(BatchingTestCase):
         self.enforce()
         self.ingest(Payload([Metric("Systems/TEMPERATURE", double=50.0)]))
         self.assertEqual(self.names(), ["Systems/TEMPERATURE"])
-        self.assertIsNone(ingestion.counter_snapshot().get("metrics_rejected_schema"))
+        self.assertEqual(0, ingestion.counter_snapshot()["metrics_rejected_schema"])
 
     def test_a_boundary_value_is_written(self):
         """`minimum` is inclusive. The setpoint a machine sits at is the value it reports most."""
@@ -521,7 +521,7 @@ class SchemaEnforcementTestCase(BatchingTestCase):
         self.enforce()
         self.ingest(Payload([Metric("Newly/Added", double=1.0)]))
         self.assertEqual(self.names(), ["Newly/Added"])
-        self.assertIsNone(ingestion.counter_snapshot().get("metrics_rejected_schema"))
+        self.assertEqual(0, ingestion.counter_snapshot()["metrics_rejected_schema"])
 
     def test_an_unmodelled_metric_is_dropped_once_the_schema_closes_the_set(self):
         self.enforce()
@@ -550,7 +550,7 @@ class SchemaEnforcementTestCase(BatchingTestCase):
         }, closed=True)
         self.ingest(Payload([Metric("Batch/ID", string="B1234")]))
         self.assertEqual(self.names(), ["Batch/ID"])
-        self.assertIsNone(ingestion.counter_snapshot().get("metrics_rejected_schema"))
+        self.assertEqual(0, ingestion.counter_snapshot()["metrics_rejected_schema"])
 
     def test_a_dropped_metric_is_still_reported_as_a_violation(self):
         """
