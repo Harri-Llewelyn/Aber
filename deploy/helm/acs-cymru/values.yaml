@@ -838,9 +838,13 @@ grafana:
   podSecurityContext:
     fsGroup: 472
     fsGroupChangePolicy: OnRootMismatch
+  # 1Gi: 13.2 runs its own apiserver, Zanzana and unified storage in-process, and installs a
+  # bundled plugin on every boot. Under 512Mi the container sits against its ceiling, reclaim
+  # stalls /api/health past the liveness probe's 5s timeout, and the kill lands mid-session as
+  # exit 137 with reason Error -- no OOM kill is recorded, so nothing names memory as the cause.
   resources:
     requests: { cpu: 100m, memory: 128Mi }
-    limits: { memory: 512Mi }
+    limits: { memory: 1Gi }
 
 # =================================================================================================
 # GITEA -- the forge. One private repository per enrolled gateway, cloned over SSH with a
@@ -1037,9 +1041,12 @@ observability:
     kubeletMetrics: true
     # 15s matches the interval every dashboard and rule assumes for rate() windows.
     scrapeInterval: 15s
+    # 768Mi: hostMetrics and kubeletMetrics together hold enough of a WAL to sit against a 512Mi
+    # ceiling, where reclaim stalls /-/ready past the liveness probe and the container is killed
+    # as exit 137 with reason Error. Same shape as the Grafana limit above.
     resources:
       requests: { cpu: 50m, memory: 128Mi }
-      limits: { memory: 512Mi }
+      limits: { memory: 768Mi }
 
 # ---------------------------------------------------------------------------------------------
 # ServiceMonitors for a cluster that runs the Prometheus Operator instead of the chart's own
