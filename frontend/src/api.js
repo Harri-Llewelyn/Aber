@@ -83,6 +83,11 @@ const DEVICE_EMBED =
   'is_archived, gateway_id, cell_id, area_id, location_scope, created_at, model_3d_path, shadow_of';
 const GATEWAY_EMBED =
   `id, name, description, sparkplug_id, cell_id, area_id, location_scope, access_url, status, last_heartbeat, ` +
+  // `enrolled_at` and `forge_repository_at` decide what GatewayRepositoryPanel renders: whether the
+  // gateway has enrolled, and whether enrolment got as far as creating its repository. The gateways
+  // query selects `*` and carries them either way; an embed names its columns, so a gateway read
+  // through one would otherwise arrive with both undefined and read as never enrolled.
+  `enrolled_at, forge_repository_at, ` +
   `deployment, is_simulated, is_shadow, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**

@@ -15,8 +15,10 @@ const GATEWAY = {
   sparkplug_id: 'gwy2a0000000000400080000',
   deployment: 'remote',
   // The repository is created when the appliance redeems its bundle, so every test that expects
-  // links needs a gateway that has done so.
-  enrolled_at: '2026-08-01T09:00:00Z'
+  // links needs a gateway that has done so -- and one whose enrolment got as far as step 4, which
+  // is a second column because step 4 is non-fatal and skipped on a deployment with no forge.
+  enrolled_at: '2026-08-01T09:00:00Z',
+  forge_repository_at: '2026-08-01T09:00:01Z'
 }
 
 /**
@@ -88,6 +90,49 @@ describe('GatewayRepositoryPanel — before enrolment', () => {
   it("shows a role the forge would refuse nothing at all, enrolled or not", () => {
     const { container } = render(
       <GatewayRepositoryPanel gateway={{ ...GATEWAY, enrolled_at: null }} canOpenForge={false} />
+    )
+    expect(container).toBeEmptyDOMElement()
+  })
+})
+
+describe('GatewayRepositoryPanel — enrolled, with no repository', () => {
+  /**
+   * enroll-gateway sets `enrolled_at` in step 3 and creates the repository in step 4. Step 4 is
+   * skipped on a deployment with no forge, skipped when the appliance sent no usable key, and
+   * non-fatal when it fails -- so `enrolled_at` alone would offer four links that answer 404.
+   */
+  it('offers no link where enrolment never reached the forge', () => {
+    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, forge_repository_at: null }} canOpenForge />)
+    expect(screen.getByText(/enrolled but has no repository/i)).toBeInTheDocument()
+    expect(screen.queryAllByRole('link')).toHaveLength(0)
+  })
+
+  it('does not tell an enrolled gateway it has never enrolled', () => {
+    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, forge_repository_at: null }} canOpenForge />)
+    expect(screen.queryByText(/has not enrolled yet/i)).toBeNull()
+  })
+
+  it('withholds the compare view too, even where the appliance branch was once reported', () => {
+    render(
+      <GatewayRepositoryPanel
+        gateway={{ ...GATEWAY, forge_repository_at: null, forge_appliance_sha: 'b'.repeat(40) }}
+        canOpenForge
+      />
+    )
+    expect(screen.queryByTitle(/against what was approved/i)).toBeNull()
+  })
+
+  // A gateway read through an embed rather than the gateways query: `undefined`, not `null`. The
+  // embed names its columns, so a missing one is a query bug that must not read as a data one.
+  it('treats a column the query never selected the same as an absent repository', () => {
+    const { forge_repository_at: _omitted, ...withoutTheColumn } = GATEWAY
+    render(<GatewayRepositoryPanel gateway={withoutTheColumn} canOpenForge />)
+    expect(screen.queryAllByRole('link')).toHaveLength(0)
+  })
+
+  it('shows a role the forge would refuse nothing at all', () => {
+    const { container } = render(
+      <GatewayRepositoryPanel gateway={{ ...GATEWAY, forge_repository_at: null }} canOpenForge={false} />
     )
     expect(container).toBeEmptyDOMElement()
   })

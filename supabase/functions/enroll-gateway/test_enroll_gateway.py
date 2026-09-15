@@ -221,14 +221,19 @@ class EnrollGatewayBase(unittest.TestCase):
         return rows[0]["token"]
 
     def gateway(self):
-        _, rows = rest(f"/gateways?id=eq.{TEST_GW_ID}&select=status,enrolled_at,agent_version")
+        _, rows = rest(
+            f"/gateways?id=eq.{TEST_GW_ID}"
+            "&select=status,enrolled_at,agent_version,forge_repository_at"
+        )
         return rows[0]
 
     def setUp(self):
         # Every test starts from PENDING_ENROLLMENT with no live token, so one test's leftovers
-        # cannot make the next one pass.
+        # cannot make the next one pass. `forge_repository_at` is cleared with the rest: it is what
+        # separates "enrolled" from "has a repository", so a leftover would prove nothing.
         rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH",
-             body={"status": "OFFLINE", "enrolled_at": None, "agent_version": None})
+             body={"status": "OFFLINE", "enrolled_at": None, "agent_version": None,
+                   "forge_repository_at": None})
 
 
 class TestSuccessfulEnrolment(EnrollGatewayBase):
@@ -273,6 +278,10 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         self.assertEqual(row["status"], "AWAITING_BIRTH")
         self.assertIsNotNone(row["enrolled_at"])
         self.assertEqual(row["agent_version"], "1.4.2")
+        # `enrolled_at` is step 3 and is set on every path through the function, including the ones
+        # that reach no forge. This enrolment sent no key, so step 4 did nothing and the column that
+        # records it stays null -- which is the whole reason it is a separate column (#237).
+        self.assertIsNone(row["forge_repository_at"])
 
     def test_the_issued_credential_works_against_the_broker(self):
         """
@@ -573,6 +582,16 @@ class TestForgeProvisioning(EnrollGatewayBase):
         self.assertTrue(payload["repository"]["ssh_url"].endswith(f"{self.repo_name()}.git"))
         self.assertEqual(payload["repository"]["branch"], "main")
 
+        # THE ROW RECORDS STEP 4, not just step 3. Step 4 is non-fatal, so its own write failing
+        # would leave the dashboard withholding links to a repository that exists -- which is the
+        # safe direction, and the direction nothing else would report. Asserted here so the write
+        # cannot quietly stop happening.
+        self.assertIsNotNone(
+            self.gateway()["forge_repository_at"],
+            "the repository was created and the gateway row does not say so, so the dashboard will "
+            "offer no links to it",
+        )
+
         repo = self.forge(f"/api/v1/repos/{self.organisation}/{self.repo_name()}")
         self.assertTrue(
             repo["private"],
@@ -739,7 +758,11 @@ class TestForgeProvisioning(EnrollGatewayBase):
         self.assertEqual(status, 200, payload)
         self.assertIsNone(payload.get("repository"))
         self.assertTrue(payload.get("mqtt_password"), "the broker credential was not issued")
-        self.assertEqual(self.gateway()["status"], "AWAITING_BIRTH")
+        row = self.gateway()
+        self.assertEqual(row["status"], "AWAITING_BIRTH")
+        # Enrolled, and no repository. The dashboard reads this column rather than `enrolled_at`,
+        # so that it withholds links which would answer 404 instead of offering them.
+        self.assertIsNone(row["forge_repository_at"])
 
     def test_a_malformed_key_is_refused_without_failing_the_enrolment(self):
         """

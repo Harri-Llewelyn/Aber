@@ -64,6 +64,27 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
     )
   }
 
+  /**
+   * Enrolled is not the same as having a repository. enroll-gateway sets `enrolled_at` in step 3
+   * and creates the repository in step 4, and step 4 is non-fatal: it is skipped on a deployment
+   * with no forge, skipped when the appliance sent no usable SSH key, and survives its own failure.
+   * `forge_repository_at` records step 4 (0110), so this branch is the difference between a link
+   * that works and four that answer 404 — or, with no forge deployed, four that point at whatever
+   * address the frontend fell back to.
+   */
+  if (!gateway.forge_repository_at) {
+    return (
+      <div>
+        <div className="form-label" style={{ margin: 0 }}>Repository</div>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+          This gateway enrolled but has no repository in the forge. Either this deployment has no
+          forge, or the appliance sent no key to read one with. Its flow is whatever was on the
+          appliance when it enrolled, and nothing here can propose a change to it.
+        </div>
+      </div>
+    )
+  }
+
   const url = gatewayRepositoryUrl(gateway)
 
   return (
