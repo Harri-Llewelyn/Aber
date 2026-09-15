@@ -21,7 +21,9 @@ export const PAGE_KEYWORDS = {
   'cells':          ['zone', 'work center', 'work centre', 'shopfloor', 'location'],
   'gateways':       ['edge', 'node', 'edge node', 'mqtt', 'sparkplug', 'broker', 'bundle', 'enrolment', 'enrollment'],
   'devices':        ['asset', 'machine', 'equipment', 'work unit', 'sensor', 'robot', 'quarantine', 'nameplate'],
-  'archives':       ['archived', 'decommissioned', 'restore', 'retired', 'out of commission'],
+  // 'archives' is still the page id and the route, so the old name has to stay findable here:
+  // the label moved to "Archived Entities" but nobody's habits did.
+  'archives':       ['archives', 'archived', 'decommissioned', 'restore', 'retired', 'purge', 'out of commission'],
   'schemas':        ['contract', 'metric', 'catalog', 'catalogue', 'registry', 'model', 'version'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
   'directory':      ['services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness'],
@@ -46,7 +48,8 @@ export const CARDS = [
   { id: 'shopfloor-cells',      label: 'Shopfloor Cells',      tab: 'cells',          keywords: ['cell list', 'zones'] },
   { id: 'edge-gateways',        label: 'Edge Gateways',        tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
   { id: 'device-list',          label: 'Devices',              tab: 'devices',        keywords: ['device list', 'assets'] },
-  { id: 'archived-entities',    label: 'Archived Entities',    tab: 'archives',       keywords: ['out of commission', 'restore', 'purge'] },
+  /* No 'Archived Entities' card: the page took that name, and a card repeating its page's label
+     verbatim scores identically and renders as the same row twice. */
 
   { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'fork'] },
   // The entry the request was raised about.
