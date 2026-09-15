@@ -396,6 +396,11 @@ READ-ONLY, and SSH authenticates the server to the client by host key. Traffic a
 by ServiceLB, so the address seen here is the node's rather than the gateway's -- which is why a
 narrowed CIDR is defence in depth behind the key and never the control itself.
 
+AT THE DEFAULT LIST THE RULE CARRIES NO `from` AT ALL (`acs-cymru.giteaSshIngressRule`, shared with
+the always-on forge policy). A rule with no peers means every source in every CNI; an ipBlock of
+0.0.0.0/0 is matched against an address, which a CNI resolving node traffic by identity need not do,
+and covers no IPv6.
+
 THE PORT IS THE SERVICE'S, NOT THE CONTAINER'S, because a NodePort deployment moves it into the
 30000+ range. Reading it from the same value the Service takes means a policy that cannot describe
 a port nothing is listening on.
@@ -413,14 +418,7 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    - from:
-        {{- range .Values.networkPolicy.giteaSshAllowedCidrs }}
-        - ipBlock:
-            cidr: {{ . | quote }}
-        {{- end }}
-      ports:
-        - protocol: TCP
-          port: 22
+    {{- include "acs-cymru.giteaSshIngressRule" . | nindent 4 }}
 {{- end }}
 {{- $apiClients := list -}}
 {{- if .Values.e2e.enabled }}{{- $apiClients = append $apiClients "e2e-aas-export" -}}{{- end -}}
@@ -593,12 +591,17 @@ the pod it SELECTS, not for the ports it names: the moment this object selects t
 inbound port not listed is denied, port 22 included. Measured on k3d -- with an earlier draft that
 named only 3000, an appliance's clone went from an SSH banner to ECONNREFUSED. Every gateway
 converges over that port, so omitting it would have stopped the fleet in exchange for closing a
-hole on a different port. It is deliberately the same CIDR list the `-ingress-gitea-ssh` policy
-uses, so the two cannot disagree about who may clone, and what authenticates there is the
+hole on a different port. The rule comes from `acs-cymru.giteaSshIngressRule`, shared with the
+`-ingress-gitea-ssh` policy so the two cannot disagree about who may clone; at the default list it
+renders with no `from`, which is every source in every CNI. What authenticates there is the
 per-gateway deploy key rather than the network.
 
-AND IT IS ONLY AS GOOD AS THE CNI. A cluster that does not enforce NetworkPolicy accepts this and
-ignores it. Nothing in a chart can detect that, which is why values.yaml says it in prose.
+AND IT IS ONLY AS GOOD AS THE CNI, IN BOTH DIRECTIONS. A cluster that does not enforce
+NetworkPolicy accepts this object and ignores it. A cluster that enforces it differently reads a
+CIDR peer more narrowly than intended -- Cilium resolves node and in-cluster traffic by identity
+rather than address -- which would close git-over-SSH on the one policy an operator does not opt
+into. That is why port 22 names no peer at the default. Nothing in a chart can detect either, which
+is why values.yaml says it in prose.
 =================================================================================================
 */}}
 apiVersion: networking.k8s.io/v1
@@ -634,12 +637,5 @@ spec:
           port: 3000
     # <- anywhere on 22 — git over SSH, how every appliance converges. NOT a widening: without this
     # line selecting the pod at all would close it. See the note above.
-    - from:
-        {{- range .Values.networkPolicy.giteaSshAllowedCidrs }}
-        - ipBlock:
-            cidr: {{ . | quote }}
-        {{- end }}
-      ports:
-        - protocol: TCP
-          port: 22
+    {{- include "acs-cymru.giteaSshIngressRule" . | nindent 4 }}
 {{- end }}

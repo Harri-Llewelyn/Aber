@@ -1118,13 +1118,15 @@ networkPolicy:
   # gateway's flow.
   #
   # Ingress-only, on port 3000, from the two components that are meant to reach it. Gitea's egress
-  # is untouched, SSH is left open to anything (the key authenticates there, and narrowing it is
-  # what `enabled` is for), and turning `enabled` on replaces this with the generated pair.
+  # is untouched, SSH is allowed on port 22 from `giteaSshAllowedCidrs` below -- open to anything at
+  # its default -- and turning `enabled` on replaces this with the generated pair.
   #
-  # A NETWORKPOLICY IS ONLY AS GOOD AS THE CNI. A cluster whose CNI does not enforce them accepts
-  # this object and ignores it -- so on one of those, put the forge somewhere else or do not enable
-  # it. That is true of every policy in this chart; it is said here because this is the one a
-  # deployment gets without asking. See issue #172.
+  # A NETWORKPOLICY IS ONLY AS GOOD AS THE CNI, IN BOTH DIRECTIONS. A cluster whose CNI does not
+  # enforce them accepts this object and ignores it -- so on one of those, put the forge somewhere
+  # else or do not enable it. A cluster that enforces them differently can read a CIDR peer more
+  # narrowly than intended, which is why port 22 names no peer while the list is open. That is true
+  # of every policy in this chart; it is said here because this is the one a deployment gets without
+  # asking. See issue #172.
   protectForge: true
   # Where CoreDNS/kube-dns runs. Without DNS egress nothing resolves ("could not translate host name").
   dnsNamespace: kube-system
@@ -1137,6 +1139,12 @@ networkPolicy:
     - 0.0.0.0/0
   # Where appliances clone from. Defence in depth behind a per-gateway deploy key and the branch
   # rules that confine it.
+  #
+  # APPLIES WHETHER OR NOT `enabled` IS ON: `protectForge` above takes its port 22 peers from this
+  # same list, so the two policies cannot disagree about who may clone. Narrowing it with the layer
+  # off still narrows how appliances reach the forge, and a gateway that cannot reach gitea:22 does
+  # not converge and nothing reports that as a policy decision. Left open (or emptied) the rule is
+  # rendered with no peer at all, which is every source in every CNI.
   giteaSshAllowedCidrs:
     - 0.0.0.0/0
   # For Alloy (pod discovery and log tailing go through the API server) and the e2e-aas-export

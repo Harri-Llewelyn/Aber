@@ -713,27 +713,48 @@ jobs:
         run: |
           helm template acs-cymru deploy/helm/acs-cymru \
             -f deploy/helm/acs-cymru/values-dev.yaml > /tmp/netpol-off.yaml
+          # A SECOND RENDER WITH THE SSH LIST NARROWED. At the default that rule carries no peers at
+          # all, so the default render alone cannot distinguish a correct reading of a peer list from
+          # one that drops peers on the floor -- and a peer list is the thing this step exists to pin.
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml \
+            --set 'networkPolicy.giteaSshAllowedCidrs={10.0.0.0/8}' > /tmp/netpol-off-narrowed.yaml
           python3 - <<'PY'
           import sys, yaml
-          docs = [d for d in yaml.safe_load_all(open('/tmp/netpol-off.yaml', encoding='utf-8'))
-                  if d and d.get('kind') == 'NetworkPolicy']
           COMP = 'app.kubernetes.io/component'
+          ANY = '*'
           errors = []
-          forge = [d for d in docs
-                   if (d['spec'].get('podSelector') or {}).get('matchLabels', {}).get(COMP) == 'gitea']
-          if len(forge) != 1:
-              print(f"::error::expected exactly one Gitea policy with networkPolicy.enabled off, got {len(forge)}")
-              sys.exit(1)
-          spec = forge[0]['spec']
+
+          def forge_policy(path):
+              docs = [d for d in yaml.safe_load_all(open(path, encoding='utf-8'))
+                      if d and d.get('kind') == 'NetworkPolicy']
+              forge = [d for d in docs
+                       if (d['spec'].get('podSelector') or {}).get('matchLabels', {}).get(COMP) == 'gitea']
+              if len(forge) != 1:
+                  print(f"::error::expected exactly one Gitea policy with networkPolicy.enabled off, got {len(forge)}")
+                  sys.exit(1)
+              return docs, forge[0]['spec']
+
+          def peers_by_port(spec):
+              # A RULE WITH NO `from` MATCHES EVERY SOURCE. That is the widest reading a rule can
+              # have and the opposite of the "no peers" a naive walk records -- and it is the shape
+              # port 22 takes whenever the CIDR list is open, so reading it as closed would fail a
+              # configuration that is open to everything (#233).
+              allowed = {}
+              for rule in spec.get('ingress') or []:
+                  peers = rule.get('from')
+                  who = {ANY} if not peers else {
+                      ((p.get('podSelector') or {}).get('matchLabels', {}).get(COMP)
+                       or (p.get('ipBlock') or {}).get('cidr'))
+                      for p in peers}
+                  for p in rule.get('ports') or []:
+                      allowed.setdefault(p['port'], set()).update(who)
+              return allowed
+
+          docs, spec = forge_policy('/tmp/netpol-off.yaml')
+          allowed = peers_by_port(spec)
           if spec.get('policyTypes') != ['Ingress']:
               errors.append(f"the forge policy must be Ingress-only; got {spec.get('policyTypes')}")
-          allowed = {}
-          for rule in spec.get('ingress') or []:
-              for peer in rule.get('from') or []:
-                  who = ((peer.get('podSelector') or {}).get('matchLabels', {}).get(COMP)
-                         or (peer.get('ipBlock') or {}).get('cidr'))
-                  for p in rule.get('ports') or []:
-                      allowed.setdefault(p['port'], set()).add(who)
           gw = 'supabase-envoy' if any('supabase-envoy' in v for v in allowed.values()) else 'supabase-kong'
           # The door and the API, and NOTHING else on 3000: every other pod that reaches it is a user.
           if allowed.get(3000) != {gw, 'supabase-functions'}:
@@ -742,9 +763,14 @@ jobs:
           # SELECTS, not the ports it names -- so selecting the Gitea pod closes 22 unless 22 is
           # listed. A draft that named only 3000 took an appliance's clone from an SSH banner to
           # ECONNREFUSED, measured on k3d. Every gateway converges over that port.
-          if not allowed.get(22):
-              errors.append("port 22 is not allowed, so selecting the pod has closed git-over-SSH "
-                            "and no appliance can converge")
+          #
+          # AND AT THE DEFAULT IT MUST NAME NO PEER. An ipBlock is matched against an address, which
+          # a CNI resolving node traffic by identity need not do, and covers no IPv6; a rule with no
+          # peers is every source in every CNI. The fleet's only way in does not depend on which
+          # answer a CNI gives (#235).
+          if allowed.get(22) != {ANY}:
+              errors.append(f"port 22 must be open to every source at the default, as a rule with no "
+                            f"peers rather than an ipBlock; got {allowed.get(22)}")
           # Egress must be untouched, or the push webhook to forge-events stops leaving.
           if spec.get('egress'):
               errors.append("the forge policy declares egress; it must constrain ingress only")
@@ -752,12 +778,20 @@ jobs:
           if len(docs) != 1:
               errors.append(f"only the forge policy may render with the layer off; got "
                             f"{[d['metadata']['name'] for d in docs]}")
+
+          # A narrowed list must reach the rule intact, and must not be read as open.
+          _, narrowed = forge_policy('/tmp/netpol-off-narrowed.yaml')
+          narrowed_22 = peers_by_port(narrowed).get(22)
+          if narrowed_22 != {'10.0.0.0/8'}:
+              errors.append(f"a narrowed giteaSshAllowedCidrs must render as its ipBlocks and nothing "
+                            f"else; got {narrowed_22}")
+
           if errors:
               for e in errors:
                   print(f"::error::{e}")
               sys.exit(1)
           print(f"  ok  one Ingress-only policy on the Gitea pod: 3000 from {sorted(allowed[3000])},"
-                f" 22 from {sorted(allowed[22])}")
+                f" 22 from every source; narrowed to {sorted(narrowed_22)} when the list is set")
           print("The forge is not reachable by an arbitrary pod on a default install.")
           PY
 
