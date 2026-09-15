@@ -88,6 +88,8 @@ interface Summary {
   revoked: string[];
   /** A repository the platform publishes -- the playbook, the custom example -- committed or tagged. */
   published: string[];
+  /** A gateway row taught that its repository exists (`forge_repository_at`). */
+  recorded: string[];
   errors: string[];
 }
 
@@ -265,6 +267,36 @@ async function sweepPlatformKeys(
 }
 
 /**
+ * `forge_repository_at` for a gateway whose row does not carry it. enroll-gateway sets it in step 4,
+ * so this is for the two cases that function cannot cover: a fleet enrolled before the column
+ * existed, and an enrolment whose own write failed after the repository was created. Seeing the
+ * repository in the organisation is the proof -- nothing else on the row distinguishes a gateway
+ * with no repository from one on a deployment with no forge, which is why the dashboard needs the
+ * column at all (#237).
+ *
+ * NEVER CLEARED HERE. A sweep that could not reach the forge, or one racing a repository's creation,
+ * would otherwise read as "the repository is gone" and withhold links that work.
+ */
+async function recordRepository(
+  admin: ReturnType<typeof serviceRoleClient>,
+  repository: string,
+  sparkplugId: string,
+  gateway: { forge_repository_at: string | null } | undefined,
+  summary: Summary,
+): Promise<void> {
+  if (!gateway || gateway.forge_repository_at) return;
+  const { error } = await admin
+    .from("gateways")
+    .update({ forge_repository_at: new Date().toISOString() })
+    .eq("sparkplug_id", sparkplugId)
+    // Guards an enrolment landing between the read above and this write: the row keeps the
+    // enrolment's own timestamp, which is the accurate one.
+    .is("forge_repository_at", null);
+  if (error) throw new Error(`could not record its repository: ${error.message}`);
+  summary.recorded.push(repository);
+}
+
+/**
  * The repository half. A gateway's repository gets what enrolment gives one; any other repository
  * in the organisation gets `main` protected. A repository that already has everything costs a
  * handful of reads.
@@ -275,9 +307,13 @@ async function sweepRepositories(
   platform: boolean,
   summary: Summary,
 ): Promise<void> {
-  const { data, error } = await admin.from("gateways").select("sparkplug_id, is_archived");
+  const { data, error } = await admin.from("gateways").select("sparkplug_id, is_archived, forge_repository_at");
   if (error) throw new Error(`could not read gateways: ${error.message}`);
-  const gateways = new Map((data ?? []).map((g: { sparkplug_id: string; is_archived: boolean }) => [g.sparkplug_id, g]));
+  const gateways = new Map(
+    (data ?? []).map((g: { sparkplug_id: string; is_archived: boolean; forge_repository_at: string | null }) =>
+      [g.sparkplug_id, g]
+    ),
+  );
 
   const repositories = await listAll<{ name: string }>(
     cfg,
@@ -292,6 +328,7 @@ async function sweepRepositories(
       if (await ensureApplianceProtection(cfg, name)) summary.protected.push(`${name} (appliance)`);
       if (await ensureWebhook(cfg, name)) summary.hooked.push(name);
       await sweepDeployKeys(cfg, name, named[1], gateways.get(named[1]), platform, summary);
+      await recordRepository(admin, name, named[1], gateways.get(named[1]), summary);
     } catch (err) {
       summary.errors.push(`${name}: ${err instanceof Error ? err.message : err}`);
     }
@@ -448,7 +485,7 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "This deployment has no forge configured" }, 503);
   }
 
-  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], published: [], errors: [] };
+  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], published: [], recorded: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
     const readersId = await ensurePlatformOrganisation(cfg);
@@ -464,13 +501,14 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length +
-    summary.rekeyed.length + summary.revoked.length + summary.published.length;
+    summary.rekeyed.length + summary.revoked.length + summary.published.length + summary.recorded.length;
   if (changed || summary.errors.length) {
     console.log(
       `forge-sweep: placed ${summary.placed.length}, removed ${summary.removed.length}, ` +
         `hooked ${summary.hooked.length}, protected ${summary.protected.length}, ` +
         `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
-        `published ${summary.published.length}, errors ${summary.errors.length}` +
+        `published ${summary.published.length}, recorded ${summary.recorded.length}, ` +
+        `errors ${summary.errors.length}` +
         (summary.errors.length ? `: ${summary.errors.join("; ")}` : ""),
     );
   }

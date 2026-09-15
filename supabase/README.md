@@ -2768,6 +2768,18 @@ this and closes `main` again if a rule was found admitting pushes. `test_forge_e
 the appliance push; `test_forge_sweep.py` covers the rules, a key downgraded by hand, and an
 archived gateway's key.
 
+**`0110` records that the repository exists, because enrolment's own timestamp does not.**
+`enroll-gateway` sets `enrolled_at` in step 3 and creates the repository in step 4, and step 4 is
+non-fatal by construction: it is skipped on a deployment with no forge, skipped when the appliance
+sent no usable public key, and survives its own failure. So `enrolled_at IS NOT NULL` is necessary
+for a repository to exist and not sufficient, and a page reading it offered four links that answer
+404 — on a stack with no forge, four links to whatever address the frontend falls back to.
+`forge_repository_at` is written by step 4 itself, and by the sweep for a repository it finds whose
+row carries none, so a fleet enrolled before the column existed settles on the next pass rather than
+needing a backfill nothing can compute. The migration backfills only rows with a push recorded
+against them (`forge_head_sha` or `forge_appliance_sha`), which proves a repository. Nothing clears
+it: a sweep that could not reach the forge must not read as *the repository is gone*.
+
 ### The platform playbook is published by the sweep
 
 [`forge/gateway-platform/`](../forge/gateway-platform) is the playbook every appliance converges to

@@ -70,6 +70,20 @@ describe('cell -> gateway -> device relationships', () => {
     expect(callFor('cells').select).toMatch(/gateways\(.*devices\(.*\).*\)/s);
   });
 
+  /**
+   * The two ways a gateway row reaches the frontend must agree about what a gateway is. The
+   * gateways query selects `*`; the embed names its columns, so a column load-bearing for what a
+   * page claims has to be named there too or it arrives `undefined` -- which reads as absent rather
+   * than as unselected, and fails quiet in the direction that looks like a data problem.
+   */
+  it('names in the gateway embed every column a page decides what to render from', async () => {
+    await api.get('/api/v1/cells');
+    const embed = callFor('cells').select;
+    for (const column of ['enrolled_at', 'forge_repository_at']) {
+      expect(embed).toContain(column);
+    }
+  });
+
   it('flattens each cell to its gateways, and does not fetch devices to do it', async () => {
     state.responses.cells = {
       data: [{

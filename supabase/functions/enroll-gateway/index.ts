@@ -295,6 +295,20 @@ export default async function handler(req: Request): Promise<Response> {
             "so it will not converge. Restart the forge to publish one.",
         );
       }
+      // The record that step 4 happened. `enrolled_at` is step 3 and is set on every path through
+      // here, including the ones that reach no forge -- so a page that reads it offers links to a
+      // repository that does not exist (#237). Non-fatal like the rest of step 4: the sweep writes
+      // it for a repository it finds whose row has none.
+      const { error: repoError } = await admin
+        .from("gateways")
+        .update({ forge_repository_at: new Date().toISOString() })
+        .eq("id", identity.gateway_id);
+      if (repoError) {
+        console.error(
+          `${identity.sparkplug_id} has a repository but the row could not record it: ` +
+            `${repoError.message}. forge-sweep will set it on its next pass.`,
+        );
+      }
     }
   } else if (forge && !sshPublicKey) {
     // An appliance old enough not to send a key, or a malformed one. Neither fails an enrolment;
