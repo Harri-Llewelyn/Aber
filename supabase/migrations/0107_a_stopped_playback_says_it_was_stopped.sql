@@ -26,7 +26,11 @@
 -- `playback_jobs_status_valid` admits.
 -- =================================================================================================
 
-CREATE OR REPLACE FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text DEFAULT NULL::text) RETURNS void
+-- p_messages_out_of_window IS DECLARED HERE AND IGNORED HERE, for the reason 0001 gives at its own
+-- declaration: 0109 rewrites this function around that argument, and this file replays before it on
+-- every boot. A three-argument declaration here would sit beside 0109's four-argument one from here
+-- until 0109's DROP, and a three-argument call would match both and raise "function is not unique".
+CREATE OR REPLACE FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text DEFAULT NULL::text, p_messages_out_of_window integer DEFAULT 0) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
@@ -46,12 +50,12 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) IS
+COMMENT ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) IS
     'The playback worker recording the end of a job. Three outcomes, in this order: an error is FAILED; a job whose stop_requested flag was raised while it ran is CANCELLED; anything else is COMPLETED. The error outranks the flag because it is the half an operator can act on. Only a PENDING or RUNNING row is touched, so a job already cancelled before it was claimed keeps the status request_playback_stop() gave it.';
 
-REVOKE ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) FROM PUBLIC, anon;
-GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) TO service_role;
-GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) TO authenticated;
+REVOKE ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) FROM PUBLIC, anon;
+GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) TO service_role;
+GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) TO authenticated;
 
 -- -------------------------------------------------------------------------------------------------
 -- Self-check
@@ -64,9 +68,22 @@ DECLARE
     v_src      text;
     v_problems text[] := ARRAY[]::text[];
 BEGIN
+    -- EXACTLY ONE DECLARATION, ASSERTED HERE AND NOT ONLY IN 0109. 0109 drops the three-argument
+    -- form and asserts the count AFTER the drop, so it cannot see a second declaration recreated
+    -- earlier in the same run. This file is the last one to declare the function before 0109, so it
+    -- is where that window closes. Two would make a three-argument call -- an older worker image --
+    -- fail as "function is not unique", leaving its job RUNNING and blocking its gateway.
+    IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public' AND p.proname = 'playback_finish') > 1 THEN
+        v_problems := v_problems
+            || 'playback_finish() is declared more than once, so a call naming three arguments is '
+               'ambiguous for the rest of this boot';
+    END IF;
+
     SELECT prosrc INTO v_src
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname = 'public' AND p.proname = 'playback_finish';
+     WHERE n.nspname = 'public' AND p.proname = 'playback_finish'
+     LIMIT 1;
 
     IF v_src IS NULL THEN
         RAISE EXCEPTION '0107: playback_finish() is missing.';

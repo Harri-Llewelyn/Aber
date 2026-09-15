@@ -62,6 +62,12 @@ END $$;
 -- beside the three-argument form makes a three-argument call ambiguous, and PostgreSQL raises
 -- "function is not unique" rather than choosing. The worker calls this with named arguments.
 --
+-- THE DROP IS FOR A DATABASE UPGRADED FROM BEFORE THIS FILE, and nothing else. 0001 and 0107 both
+-- declare the four-argument signature, so on a boot of this chain no three-argument form is ever
+-- created; on a database whose last boot predated that, one exists and this removes it. Keeping it
+-- is not belt and braces for the replay: a DROP here could not close that window anyway, because
+-- 0001 runs first on every boot. 0107 asserts the single declaration at the point it would reopen.
+--
 -- THE THREE OUTCOMES ARE 0107'S, UNCHANGED, AND THE ORDER STILL MATTERS: an error is FAILED,
 -- otherwise a raised stop flag is CANCELLED, otherwise COMPLETED. The new argument is recorded, not
 -- judged -- the worker decides what a total discard means, because only the worker holds the plan.

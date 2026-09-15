@@ -2940,10 +2940,16 @@ $$;
 
 --
 
--- playback_finish(uuid, integer, text) :: FUNCTION
+-- playback_finish(uuid, integer, text, integer) :: FUNCTION
+--
+-- p_messages_out_of_window IS DECLARED HERE AND IGNORED HERE. 0109 rewrites this function around
+-- it; this file only has to agree about the SIGNATURE. It replays before 0109 on every boot, so a
+-- three-argument declaration here would sit beside 0109's four-argument one for most of the run,
+-- and a three-argument call -- a worker image older than 0109, which is the case its default
+-- exists for -- would match both and raise "function is not unique".
 --
 
-CREATE OR REPLACE FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text DEFAULT NULL::text) RETURNS void
+CREATE OR REPLACE FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text DEFAULT NULL::text, p_messages_out_of_window integer DEFAULT 0) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
@@ -9201,12 +9207,12 @@ GRANT ALL ON FUNCTION public.playback_claim_job() TO authenticated;
 
 --
 
--- FUNCTION playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) :: ACL
+-- FUNCTION playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) :: ACL
 --
 
-REVOKE ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) TO service_role;
-GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text) TO authenticated;
+REVOKE ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) TO service_role;
+GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) TO authenticated;
 
 --
 
