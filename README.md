@@ -99,6 +99,11 @@ it ([`forge/gateway-platform/appliance/`](forge/gateway-platform/appliance)).
 
 Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short version:
 
+> **One node with 4 vCPU, 8 GiB and 100 GiB of disk is the measured minimum**; 8 vCPU and 16 GiB is
+> comfortable. Under it the stack does not run slowly, it fails to schedule — the chart reserves
+> 1.6 vCPU and 3.7 GiB, and pods below that sit `Pending`. Sizing and what grows:
+> [`deploy/k8s/README.md`](deploy/k8s/README.md), *Prerequisites → Hardware*.
+
 ```bash
 # Everything below in one command, plus the waits and helm test: npm run dev:up
 #   (deploy/k8s/README.md, "The development loop"). Step by step:

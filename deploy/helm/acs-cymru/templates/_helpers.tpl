@@ -658,6 +658,7 @@ The URL is judged, not global.scheme: a publicUrls.* override carries its own sc
 {{- include "acs-cymru.validateSecureCookieRoutes" . -}}
 {{- include "acs-cymru.validateBrokerTls" . -}}
 {{- include "acs-cymru.validateAutoscaling" . -}}
+{{- include "acs-cymru.validateCapacity" . -}}
 {{- end -}}
 
 {{/*
@@ -1276,5 +1277,168 @@ side by side, the NetworkPolicy follows Envoy because that is the one being prov
 supabase-envoy
 {{- else -}}
 supabase-kong
+{{- end -}}
+{{- end -}}
+
+{{/*
+Kubernetes quantity parsers. Helm has none, and the capacity guard below compares numbers that
+arrive as strings from two unrelated places: `.Values` (written by hand, "100m", "256Mi") and the
+node's `status.allocatable` (written by the kubelet, "16" or "15890m", almost always "…Ki").
+
+Returned as integers -- millicores and bytes -- so the comparison never touches floating point.
+*/}}
+{{- define "acs-cymru.cpuMillis" -}}
+{{- $v := . | toString -}}
+{{- if hasSuffix "m" $v -}}
+{{- trimSuffix "m" $v | float64 | int64 -}}
+{{- else -}}
+{{- mulf ($v | float64) 1000.0 | int64 -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "acs-cymru.memBytes" -}}
+{{- $v := . | toString -}}
+{{- $n := 0.0 -}}
+{{- if hasSuffix "Ki" $v -}}{{- $n = mulf (trimSuffix "Ki" $v | float64) 1024.0 -}}
+{{- else if hasSuffix "Mi" $v -}}{{- $n = mulf (trimSuffix "Mi" $v | float64) 1048576.0 -}}
+{{- else if hasSuffix "Gi" $v -}}{{- $n = mulf (trimSuffix "Gi" $v | float64) 1073741824.0 -}}
+{{- else if hasSuffix "Ti" $v -}}{{- $n = mulf (trimSuffix "Ti" $v | float64) 1099511627776.0 -}}
+{{- else if hasSuffix "k" $v -}}{{- $n = mulf (trimSuffix "k" $v | float64) 1000.0 -}}
+{{- else if hasSuffix "M" $v -}}{{- $n = mulf (trimSuffix "M" $v | float64) 1000000.0 -}}
+{{- else if hasSuffix "G" $v -}}{{- $n = mulf (trimSuffix "G" $v | float64) 1000000000.0 -}}
+{{- else -}}{{- $n = $v | float64 -}}
+{{- end -}}
+{{- $n | int64 -}}
+{{- end -}}
+
+{{/*
+The chart's own scheduling floor: the sum of the `requests` it will ask for, as
+"<millicores> <bytes>".
+
+DERIVED FROM .Values RATHER THAN WRITTEN DOWN, for the reason validateAutoscaling derives its
+allow-list: a floor that has to be edited in a second place when a component's requests change is
+a floor that will be wrong, and wrong HIGH here refuses an install that would have worked.
+
+Counted: every component that runs continuously and is enabled. NOT counted, deliberately --
+  * e2e, backup, coldArchive: Jobs and CronJobs. They are transient, so including them would
+    raise the floor above what the stack actually holds and refuse a node that can run it.
+  * init containers: a pod's effective request is max(init, sum(containers)), and every init
+    container here asks for less than the containers it precedes, so they never set the floor.
+Each entry is `path.to.component` paired with its replica count, because the scheduler multiplies.
+*/}}
+{{- define "acs-cymru.requestFloor" -}}
+{{- $cpu := 0 -}}
+{{- $mem := 0 -}}
+{{- $v := .Values -}}
+{{- $units := list
+  (dict "r" $v.timescaledb.resources "n" 1 "on" true)
+  (dict "r" $v.supabaseDb.resources "n" 1 "on" true)
+  (dict "r" $v.realtime.resources "n" (int $v.realtime.replicas) "on" $v.realtime.enabled)
+  (dict "r" $v.supabaseAuth.resources "n" (int $v.supabaseAuth.replicas) "on" $v.supabaseAuth.enabled)
+  (dict "r" $v.supabaseRest.resources "n" (int $v.supabaseRest.replicas) "on" $v.supabaseRest.enabled)
+  (dict "r" $v.supabaseFunctions.resources "n" (int $v.supabaseFunctions.replicas) "on" $v.supabaseFunctions.enabled)
+  (dict "r" $v.supabaseStorage.resources "n" (int $v.supabaseStorage.replicas) "on" $v.supabaseStorage.enabled)
+  (dict "r" $v.supabaseMeta.resources "n" (int $v.supabaseMeta.replicas) "on" $v.supabaseMeta.enabled)
+  (dict "r" $v.supabaseStudio.resources "n" (int $v.supabaseStudio.replicas) "on" $v.supabaseStudio.enabled)
+  (dict "r" $v.swaggerUi.resources "n" (int $v.swaggerUi.replicas) "on" $v.swaggerUi.enabled)
+  (dict "r" $v.mosquitto.resources "n" (int $v.mosquitto.replicas) "on" $v.mosquitto.enabled)
+  (dict "r" $v.mosquitto.metrics.resources "n" (int $v.mosquitto.replicas) "on" $v.mosquitto.metrics.enabled)
+  (dict "r" $v.gatewayCredential.resources "n" (int $v.mosquitto.replicas) "on" $v.gatewayCredential.enabled)
+  (dict "r" $v.playback.resources "n" 1 "on" $v.playback.enabled)
+  (dict "r" $v.ingestion.resources "n" 1 "on" $v.ingestion.enabled)
+  (dict "r" $v.i3xService.resources "n" 1 "on" $v.i3xService.enabled)
+  (dict "r" $v.nodeRed.resources "n" (int $v.nodeRed.replicas) "on" $v.nodeRed.enabled)
+  (dict "r" $v.frontend.resources "n" (int $v.frontend.replicas) "on" $v.frontend.enabled)
+  (dict "r" $v.grafana.resources "n" 1 "on" $v.grafana.enabled)
+  (dict "r" $v.gitea.resources "n" 1 "on" $v.gitea.enabled)
+  (dict "r" $v.backupService.resources "n" 1 "on" $v.backupService.enabled)
+  (dict "r" $v.observability.prometheus.resources "n" 1 "on" $v.observability.enabled)
+  (dict "r" $v.observability.loki.resources "n" 1 "on" $v.observability.enabled)
+  (dict "r" $v.observability.alloy.resources "n" 1 "on" $v.observability.enabled)
+-}}
+{{- range $units -}}
+{{- if .on -}}
+{{- $req := (.r).requests | default dict -}}
+{{- $n := .n | default 1 -}}
+{{- if $req.cpu -}}
+{{- $cpu = add $cpu (mul (include "acs-cymru.cpuMillis" $req.cpu | int64) $n) -}}
+{{- end -}}
+{{- if $req.memory -}}
+{{- $mem = add $mem (mul (include "acs-cymru.memBytes" $req.memory | int64) $n) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- printf "%d %d" $cpu $mem -}}
+{{- end -}}
+
+{{/*
+Refuses an install onto a cluster that cannot schedule the stack.
+
+The failure this prevents is SILENT, which is why it is a refusal and not a note: when the
+requests do not fit, `helm install` reports success, every workload is created, and the pods sit
+Pending forever. Nothing appears in any container log, because no container ever starts. Only
+`kubectl describe pod` names it, and only if you already suspect capacity.
+
+FOUR THINGS IT DELIBERATELY DOES NOT DO:
+
+  * It does not run on upgrade (`.Release.IsInstall`). A stack that is already running has already
+    proved it fits; refusing its upgrade because a node is momentarily drained would be a
+    self-inflicted outage.
+  * It does not run when `lookup` returns nothing. That is the case under `helm template`, under
+    `--dry-run`, and when the installing credential may not list nodes -- all three are legitimate,
+    and none is evidence about capacity. `lookup` answers an empty map rather than failing, so this
+    reads as "no opinion" and says nothing.
+  * It does not exclude tainted nodes. Excluding them would be more accurate on a managed cluster
+    whose control plane carries NoSchedule, but supabaseDb and timescaledb accept `tolerations`, so
+    a tainted node may well be exactly where they are meant to land. Counting them over-states
+    capacity, which errs towards letting an install proceed -- the same direction as every other
+    choice here.
+  * It does not multiply the DaemonSet by the node count. On a multi-node cluster the collector
+    runs per node and the true floor is higher, but the allocatable being summed grows faster than
+    the floor does, so the single-node figure is the conservative one.
+
+Every one of those errs towards allowing an install that might be tight rather than refusing one
+that would have worked. A false refusal is the expensive mistake here: the operator cannot tell it
+from a broken chart.
+*/}}
+{{- define "acs-cymru.validateCapacity" -}}
+{{/*
+  `.Release.IsInstall` IS TESTED FIRST, AND `preflight` IS READ THROUGH A `default dict`, because
+  `helm upgrade --reuse-values` replays the values stored with the PREVIOUS revision -- which, for
+  every release installed before this guard existed, has no `preflight` key at all. Reading
+  `.Values.preflight.capacityCheck` directly there is a nil-pointer panic that fails the upgrade at
+  NOTES.txt with a message about interface{} and nothing about capacity. A new key in values.yaml
+  is not present in an old release's stored values, and a guard is the worst place to learn it.
+*/}}
+{{- if .Release.IsInstall -}}
+{{- if (.Values.preflight | default dict).capacityCheck -}}
+{{- $nodes := (lookup "v1" "Node" "" "").items -}}
+{{- if $nodes -}}
+{{- $cpu := 0 -}}
+{{- $mem := 0 -}}
+{{- $counted := 0 -}}
+{{- range $nodes -}}
+{{- if not .spec.unschedulable -}}
+{{- $counted = add1 $counted -}}
+{{- $alloc := .status.allocatable -}}
+{{- $cpu = add $cpu (include "acs-cymru.cpuMillis" $alloc.cpu | int64) -}}
+{{- $mem = add $mem (include "acs-cymru.memBytes" $alloc.memory | int64) -}}
+{{- end -}}
+{{- end -}}
+{{- $floor := splitList " " (include "acs-cymru.requestFloor" $) -}}
+{{- $needCpu := index $floor 0 | int64 -}}
+{{- $needMem := index $floor 1 | int64 -}}
+{{- if or (lt $cpu $needCpu) (lt $mem $needMem) -}}
+{{- $short := list -}}
+{{- if lt $cpu $needCpu -}}
+{{- $short = append $short (printf "CPU:    %dm allocatable, %dm requested" (int $cpu) (int $needCpu)) -}}
+{{- end -}}
+{{- if lt $mem $needMem -}}
+{{- $short = append $short (printf "memory: %dMi allocatable, %dMi requested" (div (int $mem) 1048576) (div (int $needMem) 1048576)) -}}
+{{- end -}}
+{{- fail (printf "\n\nacs-cymru: this cluster cannot schedule the stack.\n\nAcross %d schedulable node(s):\n\n  %s\n\nThese are REQUESTS, not usage. A request is a reservation the scheduler must satisfy before it\nwill place a pod at all, so the shortfall does not make the stack slow -- it leaves pods Pending\nindefinitely, with nothing in any container log to say why, because no container starts. Refused\nhere rather than discovered there.\n\nThe documented minimum is 4 vCPU and 8 GiB on one node, measured rather than estimated:\ndeploy/k8s/README.md, Prerequisites -> Hardware.\n\nEither give the cluster more room, or lower what the chart asks for -- every component's\n`resources.requests` is a value, and this floor is derived from them, so reducing them reduces\nthis number too. Turning components off (grafana.enabled, gitea.enabled, observability.enabled)\nlowers it as well.\n\nTo install anyway and accept Pending pods:  --set preflight.capacityCheck=false\n" $counted (join "\n  " $short)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
