@@ -1964,17 +1964,6 @@ const apiMethods = {
       return data || [];
     }
 
-    /** The draft schemas a publication can be proposed for. Drafts only -- nothing else is publishable. */
-    if (path === '/api/v1/proposals/publishable-schemas') {
-      const { data, error } = await supabase
-        .from('schemas')
-        .select('id,schema_name,version,status,parent_schema_id')
-        .eq('status', 'draft')
-        .order('schema_name');
-      if (error) throw error;
-      return data || [];
-    }
-
     throw new Error('Unhandled API path: ' + path);
   },
 

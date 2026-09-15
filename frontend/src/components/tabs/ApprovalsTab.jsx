@@ -66,8 +66,15 @@ const KEY_LABELS = {
   asset_type: 'Asset type',
   connection_method: 'Connection method',
   cell_id: 'Cell',
+  area_id: 'Area',
+  floor_id: 'Floor',
+  plan_x: 'Place on the floor plan (x)',
+  plan_y: 'Place on the floor plan (y)',
   location_scope: 'Location scope',
   model_3d_path: '3D model path',
+  grafana_url: 'Grafana dashboard',
+  access_url: 'Access URL',
+  icon: 'Icon',
   manufacturer_name: 'Manufacturer',
   manufacturer_product_designation: 'Product designation',
   manufacturer_product_type: 'Product type',
@@ -115,6 +122,42 @@ function displayValue(v) {
   if (v === true) return 'yes'
   if (v === false) return 'no'
   return String(v)
+}
+
+/**
+ * Every id a proposal can name, against the name a person would recognise. `cell_id`, `area_id`
+ * and `floor_id` are proposable columns, so the before/after table renders uuids unless something
+ * resolves them, and "move this device to 6f2a…" does not say what the change would do.
+ *
+ * Built from both lists because neither is complete on its own: `/api/v1/areas` embeds an area's
+ * cells and floors, and a cell filed under no area appears only in `/api/v1/cells`.
+ */
+export function locationNameMap(cells, areas) {
+  const names = new Map()
+  const addCell = c => { if (c?.cell_id) names.set(c.cell_id, c.cell_name || c.name) }
+  for (const c of cells || []) addCell(c)
+  for (const a of areas || []) {
+    if (a?.area_id) names.set(a.area_id, a.area_name || a.name)
+    for (const c of a.cells || []) addCell(c)
+    // A floor's name is unique only within its area, so it carries the area's: two areas may both
+    // have a "Ground floor" and a reviewer needs to know which one a cell is being moved to.
+    for (const f of a.floors || []) {
+      if (f?.floor_id) names.set(f.floor_id, a.area_name ? `${f.name} — ${a.area_name}` : f.name)
+    }
+  }
+  return names
+}
+
+/**
+ * One before/after value. A resolved id shows its name and keeps the uuid in the tooltip; an id
+ * nothing resolves falls back to the uuid rather than being hidden, which is the same rule the
+ * lane and key labels follow -- an archived or deleted cell is a real state, and a reviewer
+ * seeing a raw uuid is better served than one seeing a blank.
+ */
+function ValueCell({ value, names }) {
+  const named = typeof value === 'string' ? names?.get(value) : undefined
+  if (named) return <span title={value}>{named}</span>
+  return <>{displayValue(value)}</>
 }
 
 /**
@@ -194,7 +237,7 @@ export function absoluteTime(iso) {
 }
 
 /** The before/after table, shared by the drawer and by nothing else -- see `diffRows`. */
-function DiffTable({ proposal }) {
+function DiffTable({ proposal, names }) {
   const rows = diffRows(proposal)
   if (proposal.entity_type === 'schemas') {
     return (
@@ -214,9 +257,9 @@ function DiffTable({ proposal }) {
         {rows.map(r => (
           <tr key={r.key}>
             <td>{keyLabel(r.key)}</td>
-            <td className="text-muted">{displayValue(r.from)}</td>
+            <td className="text-muted"><ValueCell value={r.from} names={names} /></td>
             <td>
-              <strong>{displayValue(r.to)}</strong>
+              <strong><ValueCell value={r.to} names={names} /></strong>
               {r.unchanged && <span className="badge badge-neutral"> unchanged</span>}
             </td>
           </tr>
@@ -408,6 +451,9 @@ export function ApprovalsTab({
 }) {
   const [proposals, setProposals] = useState([])
   const [devices, setDevices]     = useState([])
+  // Ids the before/after table resolves to names. Empty is a working state: every value falls back
+  // to its uuid, which is what the page did before.
+  const [locationNames, setLocationNames] = useState(() => new Map())
 
   const [loading, setLoading]     = useState(true)
 
@@ -423,14 +469,19 @@ export function ApprovalsTab({
 
   const loadAll = useCallback(async (signal) => {
     try {
-      const [rows, deviceRows, draftRows] = await Promise.all([
+      const [rows, deviceRows, cellRows, areaRows] = await Promise.all([
         api.get('/api/v1/proposals', { signal }),
         api.get('/api/v1/assets', { signal }).catch(() => []),
-        api.get('/api/v1/proposals/publishable-schemas', { signal }).catch(() => [])
+        // Names only, and tolerated failures: a reviewer who cannot read the cell list still gets
+        // the queue, with ids where names would have been.
+        api.get('/api/v1/cells', { signal }).catch(() => []),
+        api.get('/api/v1/areas', { signal }).catch(() => [])
       ])
       setProposals(rows)
       setDevices((deviceRows || []).filter(d => !d.is_archived))
-      setDrafts(draftRows || [])
+      // Archived cells included: a proposal filed before one was archived still names it, and the
+      // reviewer deciding it needs to see which cell that was.
+      setLocationNames(locationNameMap(cellRows, areaRows))
       setLoading(false)
     } catch (e) {
       if (e.name !== 'AbortError') setLoading(false)
@@ -684,7 +735,7 @@ export function ApprovalsTab({
         beforeActions={selected && (
           <div>
             <div className="context-panel-section-label">What would change</div>
-            <DiffTable proposal={selected} />
+            <DiffTable proposal={selected} names={locationNames} />
           </div>
         )}
         actions={panelActions}
