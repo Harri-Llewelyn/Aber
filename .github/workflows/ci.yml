@@ -513,10 +513,14 @@ jobs:
               -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
           done
 
-          # Permitted but not deployed is also a refusal: `supabase-kong` stays on the allow-list for a
-          # side-by-side migration, and autoscaling a disabled workload rendered no HPA and no error.
+          # Permitted but not deployed is also a refusal: autoscaling a disabled workload rendered no
+          # HPA and no error, which is issue #31's third door. This used `supabase-kong`, permitted
+          # and never deployed -- a free example until Kong was deleted, after which the name became
+          # UNKNOWN and this case quietly became a duplicate of the one above. A component that IS
+          # deployed, turned off here, reaches the same door and cannot go stale the same way.
           expect_failure "autoscaling a permitted but disabled component" "workload is DISABLED" \
-            -f "$DEV" --set autoscaling.enabled=true --set autoscaling.components[0]=supabase-kong
+            -f "$DEV" --set autoscaling.enabled=true --set autoscaling.components[0]=frontend \
+            --set frontend.enabled=false
 
           # THE ALLOW-LIST MUST STILL LET THE FOUR THROUGH, asserted here because every case above
           # is a refusal -- a guard that refused EVERYTHING would satisfy all of them and break the
