@@ -42,6 +42,25 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
+# THE FLAG THAT TURNS AN UNREACHABLE FORGE INTO A FAILURE, and why the forge suites need one.
+#
+# The forge is optional at both ends, so skipping where none is configured is right for a person
+# running this by hand. Where the caller INSTALLED the forge it is wrong, and expensively so: the
+# skip is taken in setUpClass, which removes the whole class, and a run that is nothing but skips
+# reports `OK (skipped=N)` and exits 0. #222 is what that cost -- seven tests silently absent from
+# every green Windows dev-loop run, hiding a stale assertion (#207) that was red on main for days.
+#
+# This is the same flag REQUIRE_SEEDED_ACCOUNTS, REQUIRE_LOG_PIPELINE and REQUIRE_PLAYBACK_REPLAY
+# already are, on the suites those cover.
+REQUIRE_FORGE = os.getenv("REQUIRE_FORGE") == "1"
+
+
+def skip_or_fail(message):
+    """Skip when a person runs this ad hoc; fail where the forge is guaranteed to be there."""
+    if REQUIRE_FORGE:
+        raise AssertionError(f"REQUIRE_FORGE=1, so this cannot be skipped: {message}")
+    raise unittest.SkipTest(message)
+
 
 def delete_broker_account(username):
     """
@@ -452,7 +471,8 @@ class TestForgeProvisioning(EnrollGatewayBase):
         re-issue per appliance.
 
     SKIPPED, NOT FAILED, where no forge is configured. The integration is optional at both ends by
-    design -- an install predating the forge enrols exactly as it did before.
+    design -- an install predating the forge enrols exactly as it did before. `REQUIRE_FORGE=1`
+    reverses that where the caller installed the forge itself, because there the skip is the fault.
     """
 
     @classmethod
@@ -469,7 +489,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
         try:
             cls.forge("/api/v1/version")
         except Exception as err:  # noqa: BLE001 -- any failure here means "no forge"
-            raise unittest.SkipTest(f"no forge reachable at {cls.forge_url}: {err}")
+            skip_or_fail(f"no forge reachable at {cls.forge_url}: {err}")
 
     @classmethod
     def forge(cls, path, method="GET", body=None):

@@ -334,6 +334,41 @@ sh scripts/wait-for-ingestion-consuming.sh
 npm run dev:test
 ```
 
+### The URLs that are names, not forwards
+
+Most of the lane reaches the cluster through a port-forward on `127.0.0.1`. Two variables do not:
+`GITEA_TEST_URL` and `NODERED_BASE_URL` name an **Ingress host**, because the flows behind them are
+OAuth flows whose registered callback is that host — `test_forge_membership.py` asserts the callback
+it is redirected to, and `validate.py` check 7 signs in to the editor.
+
+A name is not an address. Browsers resolve `*.localhost` themselves, and so does systemd-resolved;
+**Python's `getaddrinfo` and Node's do not**, which is why these work when a person opens them and
+fail when a suite does.
+
+`dev-cluster test` resolves **every host the cluster's Ingress objects declare** before it opens a
+single forward, and refuses to run when any of them fails. Not just those two variables: the door's
+flow leaves them. The gateway redirects to the authorize endpoint it is *registered* with, which is
+`api.<domain>` — a host no variable mentions, so checking only the variables would clear a machine
+`test_forge_membership.py` still cannot run on. It is all-or-nothing in practice anyway: a resolver
+either answers the wildcard or it does not.
+
+| | |
+| :--- | :--- |
+| `dev-cluster up --domain=127.0.0.1.nip.io` | resolves everywhere, no privileges needed; the login pages then need TLS |
+| a `hosts` entry per Ingress host against `127.0.0.1` | what CI does, from the cluster's own Ingress objects |
+| `--no-dns-check` with `GITEA_TEST_URL=http://127.0.0.1:3003` | run a subset anyway; the forward covers every forge suite **except** the door, which follows the registered callback and fails whatever that is set to. Pair it with `--filter` |
+
+The refusal prints the `hosts` line to paste, filled in from the cluster. `--no-dns-check` only lets
+the failures through — it does not make them quiet, because the flag below still stands.
+
+**A forge that cannot be reached is a failure here, not a skip.** The integration is optional, so
+skipping is right for a person running one suite by hand — but `dev-cluster test` installed the
+forge itself, so it sets `REQUIRE_FORGE=1` and the suites fail instead. The flag exists because the
+skip is taken in `setUpClass`, which removes the whole class, and a run of nothing but skips reports
+`OK (skipped=N)` and exits 0. That cost seven silently-absent tests per green Windows run (#222) and
+hid a stale assertion that was red on `main` for days (#207). `REQUIRE_SEEDED_ACCOUNTS`,
+`REQUIRE_LOG_PIPELINE` and `REQUIRE_PLAYBACK_REPLAY` are the same flag on the suites they cover.
+
 ## Why the database suites get their own Postgres
 
 **The default was production.** Every suite under `supabase/migrations/` resolves its port as

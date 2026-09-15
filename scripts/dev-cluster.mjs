@@ -19,12 +19,20 @@
  *           --e2e               also run the in-cluster conformance Jobs (`up`, `test`)
  *           --no-validate       skip validate.py, run the lane only (`test`)
  *           --filter=<text>     only suites whose path contains the text (`test`)
+ *           --no-dns-check      run the lane on a machine where the Ingress hosts do not resolve;
+ *                               every suite that follows one FAILS rather than skips, so pair it
+ *                               with --filter and an override (`test`)
  *           --domain=<base>     the base domain of every host, default localhost: browsers treat
  *                               *.localhost as a secure context, which the Studio and forge
  *                               logins need over plain HTTP. Give <LAN address>.nip.io to reach
  *                               the stack from other machines, where the resolver answers nip.io
  *                               names with private addresses (many home routers refuse to, as
- *                               DNS-rebind protection); those two logins then need TLS (`up`)
+ *                               DNS-rebind protection); those two logins then need TLS (`up`).
+ *                               Note that *.localhost is resolved by browsers and by
+ *                               systemd-resolved, and by neither Python nor Node -- so the two
+ *                               suites that follow an Ingress host need a hosts entry, an
+ *                               override, or 127.0.0.1.nip.io (`test` says which, and refuses
+ *                               to run rather than let them fail on DNS)
  *
  * It is the sequence CI's k8s-validation job runs, made repeatable on a laptop: the stack lane
  * reaches the cluster through port-forwards, and the suites that reach into containers use kubectl.
@@ -36,6 +44,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import dgram from 'node:dgram'
+import dns from 'node:dns/promises'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
@@ -563,11 +572,11 @@ function testEnvironment () {
     MQTT_TEST_HOST: '127.0.0.1', MQTT_TEST_PORT: '1883',
     MQTT_USER: secrets.MQTT_VALIDATOR_USER, MQTT_PASSWORD: secrets.MQTT_VALIDATOR_PASSWORD,
     // validate.py signs in to the editor through its OAuth client, whose callback is the Ingress host.
-    NODERED_BASE_URL: `http://nodered.${domain}`,
+    NODERED_BASE_URL: process.env.NODERED_BASE_URL || `http://nodered.${domain}`,
     // What the exporter embeds, so the suite's loopback judgement is made on the real value.
     AAS_MODEL_PUBLIC_BASE: modelBase,
     // The forge's door is an OAuth flow whose registered callback is the Ingress host.
-    GITEA_TEST_URL: `http://git.${domain}`,
+    GITEA_TEST_URL: process.env.GITEA_TEST_URL || `http://git.${domain}`,
     // Where a suite that acts as an appliance clones and pushes from this host; the clone URL
     // enrolment hands out names the forge's own address, which only the cluster network reaches.
     GITEA_TEST_SSH: 'ssh://git@127.0.0.1:2222',
@@ -579,7 +588,59 @@ function testEnvironment () {
     // values-dev.yaml runs the playback worker, so the replay suite has no reason to skip here
     // and every reason not to: a fully-skipped suite reports OK and exits 0.
     REQUIRE_PLAYBACK_REPLAY: '1',
+    // The chart installs the forge, so an unreachable one here is a fault and not a configuration.
+    // Without this the three forge suites skip as a class -- `OK (skipped=3)`, exit 0 -- and the
+    // lane reports every suite passed while none of their assertions ran.
+    REQUIRE_FORGE: '1',
   }
+}
+
+// A NAME IS NOT AN ADDRESS, and two of the variables above are names: the flows behind them are
+// OAuth flows whose registered callback is the Ingress host, so a forward cannot stand in.
+// `*.localhost` is resolved by browsers themselves and by systemd-resolved, and by neither Python's
+// `getaddrinfo` nor Node's -- which is exactly why this stayed hidden, since a person opening the
+// same URL sees it work. Without a resolver for those names the suites behind them fail on DNS, or,
+// before #222, SKIPPED on it as a class in a run that still reported OK.
+//
+// EVERY INGRESS HOST, NOT JUST THE TWO NAMED ABOVE. The door's flow leaves those two: the gateway
+// redirects to the OAuth authorize endpoint it is REGISTERED with, which is `api.<domain>`, a host
+// no variable mentions. Checking only the variables would clear a machine the door still cannot run
+// on. It is all-or-nothing anyway -- a resolver either answers the wildcard or it does not -- and
+// the fix is one action either way. Taken from the cluster's own Ingress objects, as CI's hosts
+// entry is, so neither can drift from the chart.
+async function assertIngressHostsResolve () {
+  const r = kubectl('get', 'ingress', '-o',
+    'jsonpath={range .items[*]}{range .spec.rules[*]}{.host} {end}{end}')
+  const hosts = [...new Set((r.out || '').split(/\s+/).filter(Boolean))]
+  if (!hosts.length) return  // no Ingress: nothing follows a name, so nothing to check
+  const unresolved = []
+  for (const host of hosts) {
+    try { await dns.lookup(host) } catch { unresolved.push(host) }
+  }
+  if (!unresolved.length) return
+  const diagnosis =
+    `the stack's own hostnames do not resolve from this process:\n` +
+    unresolved.map(h => `  ${h}`).join('\n') + '\n\n' +
+    'Browsers resolve *.localhost themselves; Python and Node do not, so the suites that follow\n' +
+    'a browser-facing URL would fail on DNS rather than on anything they assert. Either:\n' +
+    '  * bring the stack up with --domain=127.0.0.1.nip.io, which resolves everywhere and needs\n' +
+    '    no privileges (the Studio and forge logins then need TLS -- see --domain above); or\n' +
+    `  * add them to ${process.platform === 'win32'
+        ? 'C:\\Windows\\System32\\drivers\\etc\\hosts' : '/etc/hosts'} against 127.0.0.1, which is what CI does:\n` +
+    `      127.0.0.1 ${hosts.join(' ')}\n`
+  // THE ESCAPE IS A FLAG, NOT AN ABSENCE. A subset of the lane is worth running on a machine where
+  // neither fix is available -- overriding GITEA_TEST_URL to the forward covers every forge suite
+  // except the door -- but it has to be asked for, and it has to say what is being given up.
+  // `--no-dns-check` only lets the failures through; it does not make them quiet, because
+  // REQUIRE_FORGE still stands and #222 is what quiet cost.
+  if (!flag('no-dns-check')) {
+    die(diagnosis + '\nOr pass --no-dns-check to run anyway, with:\n' +
+        '  GITEA_TEST_URL=http://127.0.0.1:3003, which reaches the forge through the forward and\n' +
+        '  covers every forge suite EXCEPT the door -- forge-membership follows the registered\n' +
+        '  OAuth callback, so it needs the names whatever that is set to, and will fail here.')
+  }
+  console.warn(`\n${c.red('WARNING')} --no-dns-check: ${diagnosis}\n` +
+               'Every suite that follows one of those names will FAIL, not skip. Use --filter.')
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -632,10 +693,13 @@ async function waitForE2e () {
 async function test () {
   preflight(['kubectl', 'helm'])
   const tls = tlsEnabled()
+  // The preflight before the forwards, so a machine that cannot run the lane says so without first
+  // opening seventeen tunnels `die` would leave behind.
+  await assertIngressHostsResolve()
+  const env = testEnvironment()
   step('port-forwards')
   const forwards = await openForwards({ tls })
   printForwards(forwards.opened)
-  const env = testEnvironment()
   const python = process.env.PYTHON || 'python'
   let failed = false
   try {
