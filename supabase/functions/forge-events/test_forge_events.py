@@ -38,7 +38,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "enroll-gateway"))
 from test_enroll_gateway import (  # noqa: E402
-    PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
+    PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest,
+    sign_in, skip_or_fail,
 )
 
 WEBHOOK_SECRET = os.getenv("GITEA_WEBHOOK_SECRET", "")
@@ -266,11 +267,11 @@ class TestTheForgeItself(ForgeEventsBase):
         super().setUpClass()
         status, _ = forge_as_machine("/api/v1/version")
         if status != 200:
-            raise unittest.SkipTest(f"no forge reachable at {FORGE_URL} ({status})")
+            skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")
         try:
             cls.admin_token = sign_in()
         except Exception as err:  # noqa: BLE001
-            raise unittest.SkipTest(f"could not sign in as the seeded administrator ({err})")
+            skip_or_fail(f"could not sign in as the seeded administrator ({err})")
         cls.repo = f"gateway-{cls.sparkplug_id}"
         cls.delete_repo()
 
@@ -351,14 +352,14 @@ class TestAProposal(ForgeEventsBase):
         super().setUpClass()
         status, _ = forge_as_machine("/api/v1/version")
         if status != 200:
-            raise unittest.SkipTest(f"no forge reachable at {FORGE_URL} ({status})")
+            skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")
         cls.repo = f"gateway-{cls.sparkplug_id}"
         forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
         status, made = forge_as_machine(f"/api/v1/orgs/{ORGANISATION}/repos", method="POST", body={
             "name": cls.repo, "private": True, "auto_init": True, "default_branch": "main",
         })
         if status != 201:
-            raise unittest.SkipTest(f"could not create a repository to propose against: {made}")
+            skip_or_fail(f"could not create a repository to propose against: {made}")
 
     @classmethod
     def tearDownClass(cls):
@@ -463,11 +464,11 @@ class TestTheApplianceItself(ForgeEventsBase):
         super().setUpClass()
         status, _ = forge_as_machine("/api/v1/version")
         if status != 200:
-            raise unittest.SkipTest(f"no forge reachable at {FORGE_URL} ({status})")
+            skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")
         try:
             cls.admin_token = sign_in()
         except Exception as err:  # noqa: BLE001
-            raise unittest.SkipTest(f"could not sign in as the seeded administrator ({err})")
+            skip_or_fail(f"could not sign in as the seeded administrator ({err})")
         cls.repo = f"gateway-{cls.sparkplug_id}"
         cls.delete_repo()
         cls.work = tempfile.mkdtemp(prefix="acs-appliance-")

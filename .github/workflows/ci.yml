@@ -1417,6 +1417,23 @@ jobs:
       # release Secret, and runs the lane; --no-validate because validate.py has just run
       # in-cluster, where it needs no host or port overrides at all.
       # =========================================================================================
+
+      # A handful of those suites follow a browser-facing URL, so their environment names an
+      # Ingress host rather than a forward: the flows behind them are OAuth flows whose registered
+      # callback IS that host. Browsers resolve *.localhost themselves, and neither Python's
+      # getaddrinfo nor Node's does -- so without an entry here the forge suites fail on DNS, and
+      # before #222 they SKIPPED on it, as a class, in a run that still reported OK. Taken from the
+      # cluster's own Ingress objects so the list cannot drift from the chart.
+      - name: Resolve The Ingress Hosts To The Cluster
+        run: |
+          set -eu
+          HOSTS=$(kubectl -n $NS get ingress -o jsonpath='{range .items[*]}{range .spec.rules[*]}{.host} {end}{end}')
+          test -n "$HOSTS"
+          echo "127.0.0.1 $HOSTS" | sudo tee -a /etc/hosts
+          # Proves the entry took, rather than trusting that it did: the suites' failure mode
+          # without it is a DNS error seven layers down, which reads as a code failure.
+          getent hosts git.localhost
+
       - name: Run The Stack Lane Through Port-Forwards (dev-cluster test)
         run: node scripts/dev-cluster.mjs test --no-validate
 

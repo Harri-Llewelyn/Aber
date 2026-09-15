@@ -30,6 +30,18 @@ MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "acs-platform-machine-acc
 ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
 PASSWORD = os.getenv("ACS_SEED_PASSWORD", "acscymru123")
 
+# See test_enroll_gateway.py, which carries the reasoning: where the caller installed the forge, an
+# unreachable one is a fault, and a setUpClass skip removes the class from a run that still reports
+# `OK` and exits 0.
+REQUIRE_FORGE = os.getenv("REQUIRE_FORGE") == "1"
+
+
+def skip_or_fail(message):
+    """Skip when a person runs this ad hoc; fail where the forge is guaranteed to be there."""
+    if REQUIRE_FORGE:
+        raise AssertionError(f"REQUIRE_FORGE=1, so this cannot be skipped: {message}")
+    raise unittest.SkipTest(message)
+
 PERSONAS = {
     "Administrator": ("admin@acs-cymru.local", "a0000000-0000-0000-0000-000000000001", "administrators"),
     "Shopfloor_Manager": ("manager@acs-cymru.local", "a0000000-0000-0000-0000-000000000002", "managers"),
@@ -155,7 +167,11 @@ class TestTheDoor(unittest.TestCase):
             raise unittest.SkipTest("SUPABASE_PUBLISHABLE_KEY and SUPABASE_SERVICE_ROLE_KEY must be set")
         status, _ = forge_as_machine("/api/v1/version")
         if status != 200:
-            raise unittest.SkipTest(f"no forge reachable at {FORGE_URL} ({status})")
+            skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")
+        # NOT gated by REQUIRE_FORGE, unlike the guard above. A forge that is up but holds no
+        # gateway organisation is a stack with no gateways enrolled yet, which a fresh install is
+        # and which no amount of forge availability changes; the lane does not order the suites,
+        # so gating this would make the door's result depend on which suite ran first.
         status, _ = forge_as_machine(f"/api/v1/orgs/{ORGANISATION}")
         if status != 200:
             raise unittest.SkipTest(
