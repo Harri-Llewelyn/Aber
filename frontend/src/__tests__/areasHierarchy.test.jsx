@@ -119,8 +119,8 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await renderSiteMap()
     expect(thumbs().map(t => within(t).getByText(/Building/).textContent)).toEqual(['Building A', 'Building B'])
     // Cells, gateways and devices in the header; Area-Wide assets count, so Building A's BMS does.
-    expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('2 cells · GW 1 · Dev 2')).toBeInTheDocument()
-    expect(within(thumbs()[1].querySelector('.area-thumb-header')).getByText('1 cell · GW 0 · Dev 0')).toBeInTheDocument()
+    expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
+    expect(within(thumbs()[1].querySelector('.area-thumb-header')).getByText('1 Cell · 0 Gateways · 0 Devices')).toBeInTheDocument()
     expect(screen.queryByText(/\d floors?$/)).toBeNull()
     // The ground floor's placed cell is a small pin on the thumbnail, named; the first-floor cell is not.
     expect(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' })).toBeInTheDocument()
@@ -136,7 +136,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     // Site-Wide, Simulated and Unassigned belong to no area. Area-Wide is not among them: it
     // belongs to an area and is listed beside that area's plan.
     await renderSiteMap()
-    expect(lanes().map(l => l.textContent.replace(/GW.*$/, '').trim())).toEqual(['Site-Wide', 'Simulated', 'Unassigned'])
+    expect(lanes().map(l => l.textContent.replace(/\d+ Gateways?.*$/, '').trim())).toEqual(['Site-Wide', 'Simulated', 'Unassigned'])
     expect(lanes().map(l => l.className)).toEqual([
       expect.stringContaining('site-lane-site'),
       expect.stringContaining('site-lane-simulated'),
@@ -151,6 +151,40 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     // No drag-and-drop: nothing on the page is draggable and nothing offers to rearrange.
     expect(document.querySelectorAll('[draggable="true"]')).toHaveLength(0)
     expect(screen.queryByRole('button', { name: /Rearrang/ })).toBeNull()
+  })
+
+  /**
+   * A WIDE SCOPE IS AN ANSWER, NOT AN ABSENCE. Area-Wide and Site-Wide gateways both store no
+   * `cell_id` -- the CHECK constraints require it -- so an Unassigned lane that asks only whether a
+   * cell is set claims a filed gateway is unfiled, and lists it in the queue as well as under its
+   * own area. The queue is a work list, so a row nobody can clear is the whole cost.
+   */
+  it('files an Area-Wide gateway under its area and keeps it out of the Unassigned queue', async () => {
+    const areaWideGw = {
+      gateway_id: 'gw-aw', gateway_name: 'Test_Remote', cell_id: null, area_id: 'area-a',
+      location_scope: 'area_wide', sparkplug_group: 'ACS-Cymru', status: 'ONLINE',
+      deployment: 'remote', is_archived: false, last_heartbeat: new Date(NOW - 20_000).toISOString(),
+      device_count: 0, devices: []
+    }
+    api.get.mockImplementation(routeGet({ gateways: [areaWideGw], cells: [], devices: [] }))
+    await renderSiteMap()
+    const unassigned = lanes()[2]
+    expect(unassigned.textContent).toContain('Unassigned')
+    expect(unassigned.querySelector('.site-lane-counts').textContent.trim()).toBe('0 Gateways · 0 Devices')
+    // Counted once, under the area that owns it.
+    expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('0 Cells · 1 Gateway · 0 Devices'))
+      .toBeInTheDocument()
+  })
+
+  it('still queues a gateway that is scoped to a cell and has none', async () => {
+    const looseGw = {
+      gateway_id: 'gw-loose', gateway_name: 'Loose_Gateway', cell_id: null, area_id: null,
+      location_scope: 'cell', sparkplug_group: 'ACS-Cymru', status: 'ONLINE', deployment: 'remote',
+      is_archived: false, last_heartbeat: new Date(NOW - 20_000).toISOString(), device_count: 0, devices: []
+    }
+    api.get.mockImplementation(routeGet({ gateways: [looseGw], cells: [], devices: [] }))
+    await renderSiteMap()
+    expect(lanes()[2].querySelector('.site-lane-counts').textContent.trim()).toBe('1 Gateway · 0 Devices')
   })
 
   it('opens a lane into the details panel listing its assets, one lane at a time', async () => {

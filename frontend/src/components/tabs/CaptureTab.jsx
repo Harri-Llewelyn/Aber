@@ -75,10 +75,15 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       api.get('/api/v1/schemas').catch(() => [])
     ])
     setSchemas(schemaList || [])
-    // Archived subjects are left out: `start_capture_job()` refuses them, since an archived gateway
-    // publishes nothing.
-    setGateways((gws || []).filter(g => !g.is_archived))
-    setDevices((devs || []).filter(d => !d.is_archived && d.gateway_id))
+    // WHAT IS NOT A CAPTURE SUBJECT, decided once here rather than per consumer -- the tab counts,
+    // the gateway filter and the upload dialog all read these two lists and must agree with the
+    // table. Archived: `start_capture_job()` refuses them, since an archived gateway publishes
+    // nothing. The playback lane: a shadow gateway publishes only while a playback runs, and its
+    // shadow devices exist to receive a replay, so recording one records a recording.
+    // `playbackTargets()` is a different query for a different question, and the RPC does not
+    // refuse a shadow subject -- this is the only thing that keeps one off the page.
+    setGateways((gws || []).filter(g => !g.is_archived && !g.is_shadow))
+    setDevices((devs || []).filter(d => !d.is_archived && d.gateway_id && !d.shadow_of))
   }, [])
 
   const loadJobs = useCallback(async () => {
@@ -164,11 +169,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }, [gateways])
 
   const allRows = useMemo(() => {
-    // The playback lane is not a capture subject in either tab: a shadow gateway publishes only
-    // while a playback runs, and its shadow devices exist to receive a replay. `playbackTargets()`
-    // is a different query for a different question.
-    const source = (subjectKind === 'gateway' ? gateways : devices)
-      .filter(s => subjectKind === 'gateway' ? !s.is_shadow : !s.shadow_of)
+    const source = subjectKind === 'gateway' ? gateways : devices
     return source.map(subject => ({
       id: subject.id,
       kind: subjectKind,

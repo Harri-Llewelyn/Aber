@@ -12,8 +12,8 @@ import { HelpTip } from '../common/HelpTip'
 import { ContextPanel } from '../common/ContextPanel'
 import { FloorPlan, FloorPin } from '../common/FloorPlan'
 import {
-  SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE,
-  SOURCE_SIMULATED, groupDevicesByCell
+  SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, WIDE_SCOPES, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE,
+  SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell
 } from '../../utils/cellResolution'
 import { groundFloor, sortFloors, isPlaced, formatPlace } from '../../utils/floorPlans'
 import { cellIconComponent } from '../../utils/cellIcon'
@@ -43,6 +43,14 @@ import {
   IconCpu,
   IconImage
 } from '../common/Icons'
+
+/**
+ * `0 Cells`, `1 Gateway`, `2 Devices`. The lane and area counts read as words in the order a
+ * person says them, rather than as an abbreviation before a bare number: `GW 1` invites reading
+ * the 1 as an identifier, and mixing `cells` with `GW`/`Dev` made one line say the same kind of
+ * thing three different ways. The title attributes beside each already spelled the nouns out.
+ */
+const counted = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`
 
 /**
  * The Site Map, one card: the ISA-95 ladder and the legend, the three lanes that belong to no
@@ -305,7 +313,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
       icon: IconShieldAlert,
       className: 'site-lane-queue',
       // Synthetic gateways are excluded: `gateways_synthetic_has_no_cell` refuses every fix.
-      matchGateway: (g) => !g.is_simulated && !g.is_shadow && g.location_scope !== SCOPE_SITE_WIDE && !g.cell_id,
+      // A WIDE SCOPE IS AN ANSWER, NOT AN ABSENCE. Area-Wide and Site-Wide both store no cell --
+      // `gateways_area_wide_has_no_cell` and `gateways_site_wide_has_no_cell` require it -- so a
+      // bare `!g.cell_id` reads a filed gateway as an unfiled one. An Area-Wide gateway is already
+      // listed under its own area by `areaWideOf()`, and this lane's own hint offers Area-Wide as a
+      // way OUT of the queue, so counting it here put it in two places and made the queue unclearable.
+      matchGateway: (g) => !g.is_simulated && !g.is_shadow && !WIDE_SCOPES.has(g.location_scope) && !g.cell_id,
       empty: 'No Unassigned Assets',
       hint: 'A work queue, not a location: nobody has said where these are. File each on the Devices or Gateways page, or mark it Site-Wide or Area-Wide.',
       queue: true
@@ -393,7 +406,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
           <AreaGlyph size={14} style={{ flexShrink: 0 }} />
           <span className="zone-name">{ar.area_name}</span>
           <span className="area-thumb-counts mono" title={`${areaCells.length} cell(s), ${gateways.length} gateway(s), ${devices.length} device(s), Area-Wide included`}>
-            {areaCells.length} cell{areaCells.length === 1 ? '' : 's'} · GW {gateways.length} · Dev {devices.length}
+            {counted(areaCells.length, 'Cell')} · {counted(gateways.length, 'Gateway')} · {counted(devices.length, 'Device')}
           </span>
         </div>
         <FloorPlan floor={shown} compact title={shown ? `${shown.name} of ${ar.area_name}` : `${ar.area_name} has no floors`}>
@@ -722,7 +735,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
                     <LaneIcon size={13} style={{ flexShrink: 0 }} />
                     <span className="site-lane-name">{lane.title}</span>
                     <span className="site-lane-counts mono" title={`${laneGateways.length} gateway(s), ${laneAssets.length} device(s)`}>
-                      GW {laneGateways.length} · Dev {laneAssets.length}
+                      {counted(laneGateways.length, 'Gateway')} · {counted(laneAssets.length, 'Device')}
                     </span>
                   </button>
                 )

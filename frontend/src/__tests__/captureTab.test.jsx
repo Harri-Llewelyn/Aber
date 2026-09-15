@@ -198,6 +198,54 @@ describe('the playback lane', () => {
     expect(await screen.findByText('CNC Spindle')).toBeInTheDocument()
     expect(within(document.querySelector('table')).queryByText('Shadow Spindle')).toBeNull()
   })
+
+  /**
+   * THE TABLE IS NOT THE ONLY READER. Four things answer "what can be captured" from the same two
+   * lists, and each one that disagrees with the table is a lie an operator acts on: a badge that
+   * counts a row it will not find, a filter naming a gateway whose devices are never listed, and an
+   * upload dialog offering to file a real recording against a replay lane.
+   */
+  const bothLanes = () => api.get.mockImplementation(path => Promise.resolve(
+    path.includes('gateways') ? [GATEWAY, SHADOW_GATEWAY] : [DEVICE, SHADOW_DEVICE]
+  ))
+
+  it('counts capture subjects on the tabs, not everything the stack registered', async () => {
+    bothLanes()
+    renderTab()
+    expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
+    expect(within(screen.getByRole('tab', { name: /gateways/i })).getByText('1')).toBeInTheDocument()
+    expect(within(screen.getByRole('tab', { name: /devices/i })).getByText('1')).toBeInTheDocument()
+  })
+
+  it('offers no playback gateway in the device tab gateway filter', async () => {
+    bothLanes()
+    renderTab()
+    expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /devices/i }))
+    const filter = await screen.findByLabelText('Gateway filter')
+    // Its own count is the same question one level down: the shadow device does not belong to a
+    // gateway that can be captured, so it is not in anybody's total.
+    expect([...filter.options].map(o => o.textContent.trim()))
+      .toEqual(['All gateways', 'Line 1 Gateway (1)'])
+  })
+
+  it('will not file an uploaded capture against the playback lane', async () => {
+    bothLanes()
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    const doc = {
+      acs_capture_version: 1,
+      messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
+      identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
+    }
+    fireEvent.drop(screen.getByLabelText('Publish a capture file'), {
+      dataTransfer: { files: [new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' })] }
+    })
+    const values = [...(await screen.findByLabelText('File it against')).options].map(o => o.value)
+    expect(values).toContain('gateway:gw-1')
+    expect(values).not.toContain('gateway:gw-shadow')
+    expect(values).not.toContain('device:dev-shadow')
+  })
 })
 
 describe('a stored capture', () => {
