@@ -170,9 +170,9 @@ class TestAuthentication(CredentialServiceBase):
         body = stack_exec.output("credential", "wget", "-qO-", "http://127.0.0.1:9010/healthz")
         payload = json.loads(body)
         self.assertEqual(payload["status"], "ok")
-        # Liveness and the configured target ONLY. A health endpoint that leaked the account list
-        # would be an unauthenticated read of exactly what the authenticated endpoint protects.
-        self.assertEqual(set(payload), {"status", "target"})
+        # Liveness ONLY. A health endpoint that leaked the account list would be an
+        # unauthenticated read of exactly what the authenticated endpoint protects.
+        self.assertEqual(set(payload), {"status"})
 
     def test_missing_token_is_refused(self):
         status, _ = call({"sparkplug_id": TEST_GW}, token=None)
@@ -323,7 +323,7 @@ class TestInventory(CredentialServiceBase):
         text = json.dumps(payload)
         for leaked in ("salt", "iterations", '"password"'):
             self.assertNotIn(leaked, text, f"the inventory leaked {leaked}")
-        self.assertEqual(set(payload), {"clients", "roles", "read_at", "target"})
+        self.assertEqual(set(payload), {"clients", "roles", "read_at"})
         # The platform principals and the policy's roles are there, with their rules.
         self.assertIn("factoryplus_ingestion", [c["username"] for c in payload["clients"]])
         gateway_role = next(r for r in payload["roles"] if r["rolename"] == "gateway")
