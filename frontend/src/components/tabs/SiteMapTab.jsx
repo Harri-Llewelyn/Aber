@@ -12,8 +12,8 @@ import { HelpTip } from '../common/HelpTip'
 import { ContextPanel } from '../common/ContextPanel'
 import { FloorPlan, FloorPin } from '../common/FloorPlan'
 import {
-  SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE,
-  SOURCE_SIMULATED, groupDevicesByCell
+  SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, WIDE_SCOPES, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE,
+  SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell
 } from '../../utils/cellResolution'
 import { groundFloor, sortFloors, isPlaced, formatPlace } from '../../utils/floorPlans'
 import { cellIconComponent } from '../../utils/cellIcon'
@@ -313,7 +313,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
       icon: IconShieldAlert,
       className: 'site-lane-queue',
       // Synthetic gateways are excluded: `gateways_synthetic_has_no_cell` refuses every fix.
-      matchGateway: (g) => !g.is_simulated && !g.is_shadow && g.location_scope !== SCOPE_SITE_WIDE && !g.cell_id,
+      // A WIDE SCOPE IS AN ANSWER, NOT AN ABSENCE. Area-Wide and Site-Wide both store no cell --
+      // `gateways_area_wide_has_no_cell` and `gateways_site_wide_has_no_cell` require it -- so a
+      // bare `!g.cell_id` reads a filed gateway as an unfiled one. An Area-Wide gateway is already
+      // listed under its own area by `areaWideOf()`, and this lane's own hint offers Area-Wide as a
+      // way OUT of the queue, so counting it here put it in two places and made the queue unclearable.
+      matchGateway: (g) => !g.is_simulated && !g.is_shadow && !WIDE_SCOPES.has(g.location_scope) && !g.cell_id,
       empty: 'No Unassigned Assets',
       hint: 'A work queue, not a location: nobody has said where these are. File each on the Devices or Gateways page, or mark it Site-Wide or Area-Wide.',
       queue: true

@@ -153,6 +153,40 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(screen.queryByRole('button', { name: /Rearrang/ })).toBeNull()
   })
 
+  /**
+   * A WIDE SCOPE IS AN ANSWER, NOT AN ABSENCE. Area-Wide and Site-Wide gateways both store no
+   * `cell_id` -- the CHECK constraints require it -- so an Unassigned lane that asks only whether a
+   * cell is set claims a filed gateway is unfiled, and lists it in the queue as well as under its
+   * own area. The queue is a work list, so a row nobody can clear is the whole cost.
+   */
+  it('files an Area-Wide gateway under its area and keeps it out of the Unassigned queue', async () => {
+    const areaWideGw = {
+      gateway_id: 'gw-aw', gateway_name: 'Test_Remote', cell_id: null, area_id: 'area-a',
+      location_scope: 'area_wide', sparkplug_group: 'ACS-Cymru', status: 'ONLINE',
+      deployment: 'remote', is_archived: false, last_heartbeat: new Date(NOW - 20_000).toISOString(),
+      device_count: 0, devices: []
+    }
+    api.get.mockImplementation(routeGet({ gateways: [areaWideGw], cells: [], devices: [] }))
+    await renderSiteMap()
+    const unassigned = lanes()[2]
+    expect(unassigned.textContent).toContain('Unassigned')
+    expect(unassigned.querySelector('.site-lane-counts').textContent.trim()).toBe('0 Gateways · 0 Devices')
+    // Counted once, under the area that owns it.
+    expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('0 Cells · 1 Gateway · 0 Devices'))
+      .toBeInTheDocument()
+  })
+
+  it('still queues a gateway that is scoped to a cell and has none', async () => {
+    const looseGw = {
+      gateway_id: 'gw-loose', gateway_name: 'Loose_Gateway', cell_id: null, area_id: null,
+      location_scope: 'cell', sparkplug_group: 'ACS-Cymru', status: 'ONLINE', deployment: 'remote',
+      is_archived: false, last_heartbeat: new Date(NOW - 20_000).toISOString(), device_count: 0, devices: []
+    }
+    api.get.mockImplementation(routeGet({ gateways: [looseGw], cells: [], devices: [] }))
+    await renderSiteMap()
+    expect(lanes()[2].querySelector('.site-lane-counts').textContent.trim()).toBe('1 Gateway · 0 Devices')
+  })
+
   it('opens a lane into the details panel listing its assets, one lane at a time', async () => {
     api.get.mockImplementation(routeGet({ devices: [device, bms, { ...device, asset_id: 'dev-2', asset_name: 'Loose_Device', effective_cell_id: null, gateway_cell_id: null, location_source: 'unassigned', effective_area_id: null }] }))
     await renderSiteMap()
