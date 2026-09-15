@@ -90,6 +90,13 @@ interface Summary {
   published: string[];
   /** A gateway row taught that its repository exists (`forge_repository_at`). */
   recorded: string[];
+  /**
+   * Something the sweep declined to do and was right to decline, so no retry clears it and nothing
+   * failed: a released tag found at other content than this build ships. Separate from `errors`
+   * because an operator watching `errors` is watching for a forge it could not reach or a key it
+   * could not re-register, and this is neither.
+   */
+  warnings: string[];
   errors: string[];
 }
 
@@ -437,7 +444,7 @@ async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolea
           + (publication.tag ? ` (${publication.tag})` : ""),
       );
     }
-    if (publication.warning) summary.errors.push(publication.warning);
+    if (publication.warning) summary.warnings.push(publication.warning);
   }
 
   // AFTER the playbook, so the first pass on a new forge creates the repository before the bundle
@@ -485,7 +492,7 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "This deployment has no forge configured" }, 503);
   }
 
-  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], published: [], recorded: [], errors: [] };
+  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], published: [], recorded: [], warnings: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
     const readersId = await ensurePlatformOrganisation(cfg);
@@ -500,6 +507,10 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "The sweep could not complete", details, ...summary }, 502);
   }
 
+  // A warning is not a change, so it does not make a quiet sweep speak: nothing was done, and the
+  // one thing declined already said so through console.warn where it was decided. It is counted
+  // rather than repeated here for the same reason -- unlike an `errors` entry, which is raised in a
+  // catch block that logs nothing of its own and would otherwise reach only the response body.
   const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length +
     summary.rekeyed.length + summary.revoked.length + summary.published.length + summary.recorded.length;
   if (changed || summary.errors.length) {
@@ -508,7 +519,7 @@ export default async function handler(req: Request): Promise<Response> {
         `hooked ${summary.hooked.length}, protected ${summary.protected.length}, ` +
         `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
         `published ${summary.published.length}, recorded ${summary.recorded.length}, ` +
-        `errors ${summary.errors.length}` +
+        `warnings ${summary.warnings.length}, errors ${summary.errors.length}` +
         (summary.errors.length ? `: ${summary.errors.join("; ")}` : ""),
     );
   }

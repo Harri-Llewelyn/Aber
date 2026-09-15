@@ -2805,8 +2805,11 @@ digest there is not this build's it reads the tree and makes one commit through 
 that creates, updates and deletes whatever differs. The tag comes from `ACS_PLATFORM_VERSION`,
 which the chart sets to its `appVersion`, so the playbook an appliance converges to and the images
 it reports to ship from one tag. **A tag is created once and never moved:** a tag found at other
-content than this build ships is reported in the sweep's `errors` and left where it is, because a
-released version's playbook is immutable. Bump the version, or on a development forge delete the
+content than this build ships is reported in the sweep's `warnings` and left where it is, because a
+released version's playbook is immutable. It is a warning and not an error because nothing failed
+and no retry clears it: the sweep did what it was asked and declined only the one thing a released
+tag forbids, so `errors` stays what an operator watches for a forge that could not be reached or a
+key that could not be re-registered. Bump the version, or on a development forge delete the
 tag (`DELETE /repos/platform/gateway-platform/tags/v0.1.0` as the machine account) and let the
 next sweep recreate it.
 
