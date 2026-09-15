@@ -48,8 +48,8 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
 
   /**
    * A remote gateway that has never enrolled has no repository either: enroll-gateway creates it
-   * in step 4, from the deploy key the appliance sends when it redeems its bundle, so before that
-   * every address here answers 404. `enrolled_at` is the column that records the redemption.
+   * from the deploy key the appliance sends when it redeems its bundle, so before that every
+   * address here answers 404. `enrolled_at` is the column that records the redemption.
    */
   if (!gateway?.enrolled_at) {
     return (
