@@ -13,7 +13,10 @@ const GATEWAY = {
   gateway_id: '2a000000-0000-4000-8000-000000000001',
   gateway_name: 'Cell 4 Press Line',
   sparkplug_id: 'gwy2a0000000000400080000',
-  deployment: 'remote'
+  deployment: 'remote',
+  // The repository is created when the appliance redeems its bundle, so every test that expects
+  // links needs a gateway that has done so.
+  enrolled_at: '2026-08-01T09:00:00Z'
 }
 
 /**
@@ -65,6 +68,28 @@ describe('GatewayRepositoryPanel — what the appliance reports', () => {
     expect(link.getAttribute('href')).toBe('http://forge.plant.local/gateways/gateway-gwy2a0000000000400080000/compare/main..appliance')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(gatewayCompareUrl({ sparkplug_id: 'gwyabc' })).toBe('http://forge.plant.local/gateways/gateway-gwyabc/compare/main..appliance')
+  })
+})
+
+describe('GatewayRepositoryPanel — before enrolment', () => {
+  it("offers no link for a remote gateway that has never enrolled", () => {
+    // enroll-gateway creates the repository from the key the appliance sends; until then every
+    // address the panel derives answers 404.
+    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, enrolled_at: null, status: 'PENDING_ENROLLMENT' }} canOpenForge />)
+    expect(screen.getByText(/has not enrolled yet/i)).toBeInTheDocument()
+    expect(screen.queryAllByRole("link")).toHaveLength(0)
+  })
+
+  it("withholds the compare view too, even where the appliance branch was once reported", () => {
+    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, enrolled_at: null, forge_appliance_sha: 'b'.repeat(40) }} canOpenForge />)
+    expect(screen.queryByTitle(/against what was approved/i)).toBeNull()
+  })
+
+  it("shows a role the forge would refuse nothing at all, enrolled or not", () => {
+    const { container } = render(
+      <GatewayRepositoryPanel gateway={{ ...GATEWAY, enrolled_at: null }} canOpenForge={false} />
+    )
+    expect(container).toBeEmptyDOMElement()
   })
 })
 
