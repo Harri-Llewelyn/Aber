@@ -39,6 +39,19 @@ global:
   commonAnnotations: {}
 
 # ---------------------------------------------------------------------------------------------
+# Refusals made before anything is created
+# ---------------------------------------------------------------------------------------------
+preflight:
+  # Refuse `helm install` onto a cluster whose schedulable nodes cannot cover the requests this
+  # chart makes (`acs-cymru.validateCapacity`). The floor is derived from the `resources.requests`
+  # further down, so lowering those or disabling components lowers it too.
+  #
+  # Checked on install only, and skipped whenever `lookup` returns nothing -- under `helm template`,
+  # under `--dry-run`, and when the installing credential may not list nodes. Set false to install
+  # onto a node that cannot fit the stack and accept pods that stay Pending.
+  capacityCheck: true
+
+# ---------------------------------------------------------------------------------------------
 # Credentials
 #
 # The Supabase values are a SET: `anonKey`, `serviceRoleKey`, `ingestionKey` and `playbackKey`

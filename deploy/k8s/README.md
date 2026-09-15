@@ -40,6 +40,13 @@ must satisfy before it will place a pod. A node that cannot cover it leaves pods
 indefinitely with no error in any container log — `kubectl describe pod` names it, nothing else
 does. This is also why a 2 vCPU node cannot run the stack at all, however much memory it has.
 
+`helm install` refuses that cluster rather than letting you find it later
+(`acs-cymru.validateCapacity`). The floor it compares against is summed from the
+`resources.requests` in your own values, so lowering them or turning components off lowers it
+too — the refusal names both numbers. It runs on install only, never on upgrade, and says nothing
+when it cannot list nodes, so `helm template`, `--dry-run` and a restricted credential are
+unaffected. `preflight.capacityCheck: false` installs anyway and accepts the Pending pods.
+
 Disk is the one that fails at install time rather than later: the chart provisions **85 GiB of
 PersistentVolumeClaims** on default values (20 GiB each for the two databases, 10 GiB each for
 Gitea, Loki, Prometheus and Storage, the rest smaller). With `local-path` these are directories on
