@@ -3419,7 +3419,12 @@ paths:
               description: Ignored; the sweep takes no parameters.
       responses:
         '200':
-          description: The pass completed. `placed`, `removed`, `hooked` and `protected` list what changed; `errors` lists what the forge refused, per item.
+          description: >-
+            The pass completed. `placed`, `removed`, `hooked`, `protected`, `rekeyed`, `revoked`,
+            `published` and `recorded` list what changed; `errors` lists what the forge refused, per
+            item; `warnings` lists what the sweep declined and was right to decline -- a released tag
+            found at other content than this build ships, which no retry clears and only a version
+            bump resolves.
         '401':
           description: The secret is missing or wrong.
         '502':

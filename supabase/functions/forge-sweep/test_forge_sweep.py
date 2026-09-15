@@ -121,8 +121,12 @@ class TestTheSecret(ForgeSweepBase):
     def test_a_call_with_the_secret_answers_a_summary(self):
         status, body = sweep()
         self.assertEqual(status, 200, body)
-        for key in ("placed", "removed", "hooked", "protected", "errors"):
+        for key in ("placed", "removed", "hooked", "protected", "rekeyed", "revoked", "published",
+                    "recorded", "warnings", "errors"):
             self.assertIsInstance(body.get(key), list, body)
+        # `errors` is what failed. A released tag this build cannot move is not a failure and has no
+        # retry that clears it, so it answers in `warnings` and this assertion stays meaningful on a
+        # development forge whose playbook has moved on from its tag.
         self.assertEqual(body["errors"], [], body)
 
 
@@ -455,7 +459,18 @@ class TestThePlatform(ForgeSweepBase):
         self.assertIsNotNone(tag, f"no tag v{published['version']}: {[t['name'] for t in tags]}")
         status, at_tag = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.acs/manifest.json?ref={tag['name']}")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(base64.b64decode(at_tag["content"]).decode())["digest"], published["digest"])
+        at_tag_digest = json.loads(base64.b64decode(at_tag["content"]).decode())["digest"]
+        # A TAG IS CREATED ONCE AND NEVER MOVED, so there are exactly two states the sweep promises
+        # and this asserts whichever one holds. Either the tag was cut from this build and carries
+        # its digest, which is every fresh forge; or the playbook moved on after the tag was cut
+        # without the version being bumped, which is every development forge, and then the tag keeps
+        # its content and the sweep SAYS SO. Asserting only the first makes the suite red on a forge
+        # the sweep handled correctly; dropping the assertion would stop it noticing a moved tag.
+        if at_tag_digest == published["digest"]:
+            self.assertEqual(body["warnings"], [], "the tag is at this build's content, so nothing was declined")
+        else:
+            self.assertEqual(len(body["warnings"]), 1, body["warnings"])
+            self.assertIn(f"{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY} is tagged {tag['name']}", body["warnings"][0])
 
         status, rule = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/branch_protections/main")
         self.assertEqual(status, 200, rule)
