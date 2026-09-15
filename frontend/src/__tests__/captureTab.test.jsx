@@ -914,6 +914,67 @@ describe('the playback card', () => {
     renderTab()
     expect(await screen.findByText(/holds no broker credential/)).toBeInTheDocument()
   })
+
+  // ==========================================================================================
+  // A COMPLETED playback that lost readings on ingest (#216). The ingestion daemon discards an
+  // out-of-window metric by counting it, so nothing travels back to the publisher and the job is
+  // recorded COMPLETED with its full messages_sent. Before 0109 the page could not tell that
+  // apart from a playback that worked.
+  // ==========================================================================================
+  const lossy = (overrides = {}) => ({
+    id: 'play-ooo', status: 'COMPLETED', target_edge_node_id: 'gwy130000000000400080000',
+    gateways: { name: 'Playback Target' }, messages_sent: 412, messages_total: 412,
+    messages_out_of_window: 3, finished_at: new Date().toISOString(), ...overrides,
+  })
+
+  it('says how many readings a completed playback lost to the sanity window', async () => {
+    api.recentPlaybackJobs.mockResolvedValue([lossy()])
+    renderTab()
+    expect(await screen.findByText(/3 of 412 published messages carried timestamps too old/i))
+      .toBeInTheDocument()
+  })
+
+  it('says nothing about a completed playback that lost none', async () => {
+    // The overwhelmingly common case. A notice here would be noise on every successful run, and
+    // noise is what makes the real one unreadable.
+    api.recentPlaybackJobs.mockResolvedValue([lossy({ messages_out_of_window: 0 })])
+    renderTab()
+    await screen.findByText(/Nothing is publishing/i)
+    expect(screen.queryByText(/timestamps too old/i)).toBeNull()
+  })
+
+  it('says nothing for a job written before the column existed', async () => {
+    // Every row predating 0109 reads 0, which means "nobody counted" and not "none were
+    // discarded". Undefined arrives the same way through a worker too old to send the argument.
+    api.recentPlaybackJobs.mockResolvedValue([lossy({ messages_out_of_window: undefined })])
+    renderTab()
+    await screen.findByText(/Nothing is publishing/i)
+    expect(screen.queryByText(/timestamps too old/i)).toBeNull()
+  })
+
+  it('does not call a lossy playback a failure', async () => {
+    // It is a success that lost something, and the distinction is the whole design: the job ran,
+    // some readings landed, and reporting it red would be as wrong as reporting it silent. A
+    // playback that would have written NOTHING never reaches here -- the worker refuses it.
+    api.recentPlaybackJobs.mockResolvedValue([lossy()])
+    renderTab()
+    await screen.findByText(/timestamps too old/i)
+    expect(screen.queryByText(/playback failed/i)).toBeNull()
+    expect(screen.queryByText(/playback cancelled/i)).toBeNull()
+  })
+
+  it('dismisses the notice, and does not bring it back', async () => {
+    api.recentPlaybackJobs.mockResolvedValue([lossy()])
+    const { unmount } = renderTab()
+    await screen.findByText(/timestamps too old/i)
+    fireEvent.click(screen.getByRole('button', { name: /Dismiss the discarded-readings notice/i }))
+    expect(screen.queryByText(/timestamps too old/i)).toBeNull()
+
+    unmount()
+    renderTab()
+    await screen.findByText(/Nothing is publishing/i)
+    expect(screen.queryByText(/timestamps too old/i)).toBeNull()
+  })
 })
 
 // =============================================================================================

@@ -756,12 +756,31 @@ wrong: `plan_playback()` rewrites every one onto the edge node the worker authen
 `test_playback_replay.py` replays a fixture on a live stack and asserts the rows arrived under the
 replay lane and under no other asset. That check is the observation the protocol will not give.
 
-**The gap that remains is the sanity window.** A capture carrying timestamps the daemon will drop —
-a stale reading, a device clock skewed against the recorder's, a hand edit — is refused by
-`capture.py play` unless `--allow-unsane` is passed, but the worker only logs a warning and
-publishes anyway. Those metrics are counted by the daemon and discarded, so the job reports success
-and the historian stays empty, which is the one failure shape a reader of this page cannot
-distinguish from a working replay.
+**The sanity window is reported, and a total loss is refused** (`0109`). A capture carrying
+timestamps the daemon will drop — a stale reading, a device clock skewed against the recorder's, a
+hand edit — used to be published anyway with a warning in the worker's log, which an operator on
+the Capture page has no reason to read. The daemon's answer to an out-of-window metric is a counter
+and not an error, so nothing travelled back, and the job was recorded `COMPLETED` with its full
+`messages_sent` having written nothing (#216). The worker now splits the case:
+
+| the plan | | |
+| :--- | :--- | :--- |
+| every message out of window | refused, `FAILED` | a total no-op is never what anyone wanted, and the reason names the first offending timestamp |
+| some of them | published, `COMPLETED` | with the count on `playback_jobs.messages_out_of_window`, and a notice on the page saying what was lost |
+| none | published, `COMPLETED` | the overwhelmingly common case, and it says nothing |
+
+`capture.py play` still refuses **both** cases unless `--allow-unsane` is passed, and that
+difference from the worker is deliberate: the CLI has an escape hatch to pass and a person at a
+terminal to read the message, and the page has neither — while a capture with one stale device clock
+would become unplayable from the page if it refused as bluntly.
+
+The count is what the worker **computed** would be dropped, from the same plan it published. It is
+not what the daemon actually dropped; nothing reports that back, which is the whole problem. It is
+zero on every job written before `0109`, where it means "nobody counted".
+
+**What this still does not do** is say so *before* the click. The estimate needs the plan, and the
+plan is built by the worker after it claims the job — the page would have to download and parse the
+capture itself to show it in the dialog.
 
 ### What the page adds that the CLI cannot, and two things neither does
 

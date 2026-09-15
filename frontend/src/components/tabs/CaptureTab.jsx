@@ -401,6 +401,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               canManage={canManage}
             />
             <RecentFailures jobs={recentPlaybacks} kind="playback" />
+            <RecentDiscards jobs={recentPlaybacks} />
 
             {/* Publish a file straight from disk, chaining the two dialogs: file in, subject
                 confirmed, then the playback dialog with the new capture selected. It cannot skip
@@ -1147,6 +1148,77 @@ function RecentFailures({ jobs, kind = 'capture' }) {
           </button>
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * A playback that succeeded and lost some of its readings on the way in.
+ *
+ * WHY THIS IS NOT A FAILURE AND NOT NOTHING. The ingestion daemon discards a metric stamped outside
+ * its sanity window by COUNTING it, not by refusing it, and nothing travels back to the publisher.
+ * So the worker computes, from the plan it is about to publish, how many messages will be dropped,
+ * and records it on the job (0109). The job genuinely completed and some readings genuinely
+ * arrived — reporting it red would be wrong, and reporting it as an unqualified success is what
+ * issue #216 was about. A playback that would have written NOTHING never reaches here: the worker
+ * refuses it, and it shows in RecentFailures above with the reason.
+ *
+ * Shares the dismissal store with RecentFailures, so one notice per job however it is categorised.
+ */
+function RecentDiscards({ jobs }) {
+  const [dismissed, setDismissed] = useState(readDismissed)
+
+  const dismiss = (id) => setDismissed(prev => {
+    const next = new Set(prev)
+    next.add(id)
+    writeDismissed(next)
+    return next
+  })
+
+  const cutoff = Date.now() - FAILURE_VISIBLE_MS
+  const lossy = (jobs || []).filter(j => {
+    if (j.status !== 'COMPLETED') return false
+    if (!(j.messages_out_of_window > 0)) return false
+    if (dismissed.has(j.id)) return false
+    if (!j.finished_at) return true
+    const at = new Date(j.finished_at).getTime()
+    return Number.isNaN(at) || at >= cutoff
+  })
+  if (lossy.length === 0) return null
+
+  return (
+    <div style={{ marginBottom: '12px' }}>
+      {lossy.map(job => {
+        const lost = job.messages_out_of_window
+        const total = job.messages_sent || job.messages_total || 0
+        return (
+          <div key={job.id} className="callout" style={{ borderColor: 'var(--warning)', marginTop: '6px' }}>
+            <IconShieldAlert size={14} className="callout-icon" />
+            <div style={{ fontSize: '12px', flex: 1 }}>
+              <strong>{job.gateways?.name || job.target_edge_node_id}</strong>
+              {' — '}
+              {lost} of {total} published message{total === 1 ? '' : 's'} carried timestamps too old
+              for the historian and were discarded on ingest. The playback itself succeeded.
+              {' '}
+              <HelpTip label="Why readings were discarded" text={
+                'Playback rebases every timestamp onto the moment it is sent, but preserves how far '
+                + 'each one sat from the capture\'s own epoch — so a reading that was already old '
+                + 'when recorded, or a device whose clock is skewed against the recorder\'s, stays '
+                + 'out of range. Speed cannot cause this. Correct the timestamps in the capture, or '
+                + 'accept that these readings will not appear.'
+              } />
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => dismiss(job.id)}
+              title="Dismiss this notice. It will not come back, on this browser."
+              aria-label="Dismiss the discarded-readings notice"
+            >
+              <IconX size={13} />
+            </button>
+          </div>
+        )
+      })}
     </div>
   )
 }

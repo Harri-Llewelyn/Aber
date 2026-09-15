@@ -551,8 +551,11 @@ function edgeFunctionNames() {
     'public.ingest_record_gateway_health': '0100 adds the FLOW_DEPLOYED row on a changed flow hash; the baseline holds the health writes alone',
     'public.publish_schema_version': '0087 narrows the gate to schema:manage; the baseline holds the pair',
     // 0107 reads `stop_requested` so a playback the operator interrupted is CANCELLED rather than
-    // COMPLETED; the baseline decides on the error alone and cannot tell the two apart.
-    'public.playback_finish': '0107 reads stop_requested and records an interrupted playback as CANCELLED; the baseline holds the error-only form',
+    // COMPLETED; the baseline decides on the error alone and cannot tell the two apart. 0109 then
+    // drops that three-argument form outright and redeclares it with the out-of-window count --
+    // an overload would make every three-argument call ambiguous, so this is the one declaration
+    // that has to REPLACE 0107's rather than layer on it.
+    'public.playback_finish': '0109 drops the three-argument form and adds p_messages_out_of_window, keeping 0107\'s three arms; 0107 read stop_requested; the baseline holds the error-only form',
     // 0108 withdraws the three *_links proposal lanes 0090 opened: no page ever filed one, and a
     // link is attached directly through link:manage. Each of these is the prior body with the link
     // arms removed, so the last declaration wins and the lanes stay shut.
