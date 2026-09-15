@@ -66,6 +66,7 @@ _stub("paho.mqtt.client", Client=object)
 
 import ingestion  # noqa: E402  (must follow the stubs above)
 import metrics  # noqa: E402
+import registry  # noqa: E402
 
 GROUP = "ACS-Cymru"
 NODE = "gwy110000000000400080000"
@@ -246,16 +247,21 @@ class ProcessNodeMessageClockTests(unittest.TestCase):
 
 
 class ClockGaugeExpositionTests(unittest.TestCase):
-    """What a scraper actually sees."""
+    """What a scraper actually sees, rendered through the real registry."""
+
+    def setUp(self):
+        registry.reset()
+
+    def render(self, series):
+        """The exposition with `series` as what the daemon holds when the scrape arrives."""
+        registry.set_scrape_time_source(lambda: series)
+        return registry.render()
 
     def test_both_gauges_render_labelled_by_edge_node(self):
-        body = metrics.render_exposition(
-            counters={},
-            labelled={
-                (ingestion.GATEWAY_CLOCK_OFFSET_GAUGE, (("edge_node", NODE),)): -12.5,
-                (ingestion.GATEWAY_CLOCK_MEASURED_GAUGE, (("edge_node", NODE),)): 1757332800.0,
-            },
-        )
+        body = self.render({
+            (ingestion.GATEWAY_CLOCK_OFFSET_GAUGE, (("edge_node", NODE),)): -12.5,
+            (ingestion.GATEWAY_CLOCK_MEASURED_GAUGE, (("edge_node", NODE),)): 1757332800.0,
+        })
         self.assertIn(
             'acs_ingestion_gateway_clock_offset_seconds{edge_node="%s"} -12.5' % NODE, body)
         self.assertIn(
@@ -264,10 +270,7 @@ class ClockGaugeExpositionTests(unittest.TestCase):
     def test_they_are_typed_as_gauges(self):
         # A counter by default. Typed wrongly, `rate()` on a clock being corrected would produce
         # a number, and it would be meaningless rather than absent.
-        body = metrics.render_exposition(
-            counters={},
-            labelled={(ingestion.GATEWAY_CLOCK_OFFSET_GAUGE, (("edge_node", NODE),)): 1.0},
-        )
+        body = self.render({(ingestion.GATEWAY_CLOCK_OFFSET_GAUGE, (("edge_node", NODE),)): 1.0})
         self.assertIn("# TYPE acs_ingestion_gateway_clock_offset_seconds gauge", body)
 
     def test_both_gauges_are_documented(self):
@@ -285,35 +288,59 @@ class TimestampRejectionLabelTests(unittest.TestCase):
     that named it went to a log nothing keeps.
     """
 
+    def setUp(self):
+        registry.reset()
+
+    def samples(self, body):
+        """Sample lines only. A declared family carries a HELP/TYPE pair before it has any."""
+        return [line for line in body.split("\n") if line and not line.startswith("#")]
+
     def test_the_flat_counter_is_not_exported_unlabelled(self):
-        # It is still kept in the flat registry, which is what holds it in step with the warning
-        # beside it. Exporting it here as well would double-count against the labelled series.
-        body = metrics.render_exposition(counters={"metrics_rejected_timestamp": 7})
-        self.assertNotIn("acs_ingestion_timestamps_rejected_total 7", body)
+        # Both call sites, as ingestion.py has them: the flat count beside the labelled one, with
+        # the same increment. Exporting both would give a scraper two ways to count one rejection.
+        registry.count("metrics_rejected_timestamp", 7)
+        registry.count_labelled(
+            "acs_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 7)
+        samples = self.samples(registry.render())
+        self.assertNotIn("acs_ingestion_timestamps_rejected_total 7.0", samples)
+        self.assertIn(
+            'acs_ingestion_timestamps_rejected_total{edge_node="%s"} 7.0' % NODE, samples)
 
     def test_it_is_not_reported_as_an_unmapped_counter(self):
         # The catch-all means "metrics.py has fallen behind ingestion.py". Letting this fall into
         # it would say the exact opposite of what its absence from COUNTER_MAP is there to say.
-        body = metrics.render_exposition(counters={"metrics_rejected_timestamp": 7})
-        self.assertNotIn("acs_ingestion_unmapped_counter_total", body)
+        registry.count("metrics_rejected_timestamp", 7)
+        for line in self.samples(registry.render()):
+            self.assertFalse(line.startswith("acs_ingestion_unmapped_counter_total"), line)
+
+    def test_it_still_reads_back_under_its_flat_name(self):
+        # The other half of the omission: the STATS log line reports by flat name, so a counter
+        # not exported under one of its own must still be summed back from the series that carries
+        # it. Dropping that is how the omission would quietly become a loss.
+        registry.count("metrics_rejected_timestamp", 7)
+        registry.count_labelled(
+            "acs_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 7)
+        self.assertEqual(7, registry.counter_snapshot()["metrics_rejected_timestamp"])
 
     def test_the_reason_for_the_omission_is_recorded_beside_the_name(self):
         self.assertIn("metrics_rejected_timestamp", metrics.EXPORTED_LABELLED_INSTEAD)
 
     def test_the_labelled_series_names_the_edge_node(self):
-        body = metrics.render_exposition(
-            counters={},
-            labelled={("acs_ingestion_timestamps_rejected_total", (("edge_node", NODE),)): 3},
-        )
+        registry.count_labelled(
+            "acs_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 3)
         self.assertIn(
-            'acs_ingestion_timestamps_rejected_total{edge_node="%s"} 3' % NODE, body)
+            'acs_ingestion_timestamps_rejected_total{edge_node="%s"} 3.0' % NODE,
+            self.samples(registry.render()))
 
     def test_the_message_total_omission_still_holds(self):
         # The pre-existing member of the same table, kept asserted because generalising a single
         # `if` into a lookup is exactly the edit that silently drops the original case.
-        body = metrics.render_exposition(counters={"messages_total": 42, "messages_DDATA": 42})
-        self.assertNotIn("acs_ingestion_messages_total 42", body)
-        self.assertIn('acs_ingestion_messages_total{msg_type="DDATA"} 42', body)
+        registry.count("messages_total", 42)
+        registry.count("messages_DDATA", 42)
+        samples = self.samples(registry.render())
+        self.assertNotIn("acs_ingestion_messages_total 42.0", samples)
+        self.assertIn('acs_ingestion_messages_total{msg_type="DDATA"} 42.0', samples)
+        self.assertEqual(42, registry.counter_snapshot()["messages_total"])
 
 
 if __name__ == "__main__":

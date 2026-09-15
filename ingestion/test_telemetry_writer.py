@@ -79,7 +79,7 @@ DEV_C = "dev" + "c" * 19 + "03"
 class WriterTestCase(unittest.TestCase):
 
     def setUp(self):
-        registry._counters.clear()
+        registry.reset()
         self._real = {
             "get_timescaledb_connection": ingestion.get_timescaledb_connection,
             "execute_values": ingestion.execute_values,
@@ -252,8 +252,11 @@ class TestFailure(WriterTestCase):
         self.writer.flush()
         snapshot = registry.counter_snapshot()
         self.assertEqual(snapshot.get("write_failures"), 1)
-        self.assertIsNone(snapshot.get("write_batch_failures"))
-        self.assertIsNone(snapshot.get("metrics_written"))
+        # Declared, and still zero. Every counter COUNTER_MAP names is present from startup, so
+        # this asserts the value rather than the key's absence -- which would also have passed on
+        # a misspelling.
+        self.assertEqual(0, snapshot["write_batch_failures"])
+        self.assertEqual(0, snapshot["metrics_written"])
 
     def test_an_unavailable_database_drops_every_queued_message(self):
         ingestion.get_timescaledb_connection = lambda: None
@@ -345,20 +348,24 @@ class TestShutdownDefaults(unittest.TestCase):
 
 class TestExposition(unittest.TestCase):
     """
-    The renderer reads every `messages_<x>` flat name as a message TYPE and never consults the
-    table for it, so a writer counter spelled that way would surface as
+    `count()` reads every `messages_<x>` flat name as a message TYPE and never consults the table
+    for it, so a writer counter spelled that way would surface as
     acs_ingestion_messages_total{msg_type="written"}. It did, on the live endpoint, before this
     test existed.
     """
 
+    def setUp(self):
+        registry.reset()
+
     def test_the_commit_counter_is_exported_under_its_own_name(self):
-        out = metrics.render_exposition({"written_messages": 2})
-        self.assertIn("acs_ingestion_messages_written_total 2", out)
+        registry.count("written_messages", 2)
+        out = registry.render()
+        self.assertIn("acs_ingestion_messages_written_total 2.0", out)
         self.assertNotIn('msg_type="written"', out)
 
     def test_no_mapped_counter_is_shadowed_by_the_message_type_convention(self):
         shadowed = [name for name in metrics.COUNTER_MAP if name.startswith("messages_")]
-        self.assertEqual(shadowed, [], "these names never reach COUNTER_MAP in render_exposition")
+        self.assertEqual(shadowed, [], "these names never reach COUNTER_MAP in registry.count()")
 
     def test_the_writer_counters_are_mapped(self):
         for name in ("written_messages", "write_batch_failures", "dropped_write_queue_full"):

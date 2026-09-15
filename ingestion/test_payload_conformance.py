@@ -471,13 +471,13 @@ class RecordViolationsTestCase(unittest.TestCase):
         ingestion.supabase_client = self.client
         ingestion.AUDIT_PAYLOAD_REJECTIONS = True
         ingestion._last_violation_signature.clear()
-        registry._counters.clear()
+        registry.reset()
 
     def tearDown(self):
         ingestion.supabase_client = self._real_client
         ingestion.AUDIT_PAYLOAD_REJECTIONS = self._real_flag
         ingestion._last_violation_signature.clear()
-        registry._counters.clear()
+        registry.reset()
 
     def violation(self, metric="Rogue/Metric", code="unmodelled_metric"):
         return [{"metric": metric, "code": code, "detail": "d", "dropped": False}]
