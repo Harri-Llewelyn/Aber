@@ -820,13 +820,27 @@ over 512 bytes falls back to TCP, so a UDP-only rule fails *intermittently*), an
 `supabase-db → node-red:1880` — the quarantine webhook goes there **directly**, not through Kong, and
 pg_net has no retries or DLQ, so blocking it drops every notification silently.
 
-**The forge depends on this policy for its login, and the policy is off by default.** Gitea runs
-with reverse-proxy authentication and signs in whoever the `X-WEBAUTH-USER` header names, from any
-peer (`REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For` only). The two NetworkPolicy
-edges to `gitea:3000` are what confine it — so with `networkPolicy.enabled: false` **any pod in the
-namespace can reach Gitea's HTTP port and become any user**, Node-RED included, which runs whatever
-JavaScript a flow author writes. Enable the policy on any cluster where the forge holds real flows,
-or keep `gitea.enabled: false` until you do.
+**The forge's login depends on a policy, so it gets one whether or not you enable this layer.** Gitea
+runs with reverse-proxy authentication and signs in whoever the `X-WEBAUTH-USER` header names, from
+any peer (`REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For` only). Access to `gitea:3000` is
+therefore not exposure control but *authentication* control — and on Compose that boundary exists
+without anyone opting in, because the `forge` Docker network is joined only by the gateway and the
+edge runtime.
+
+So `gitea.enabled: true` renders **one** NetworkPolicy even with `networkPolicy.enabled: false`
+(#172): ingress-only on the Gitea pod, port 3000 from the gateway and `supabase-functions`, port 22
+from `giteaSshAllowedCidrs`. Everything else in this section stays opt-in. Turning the layer on
+replaces it with the generated pair.
+
+| | |
+| :--- | :--- |
+| Turn it off | `--set networkPolicy.protectForge=false` — only if something else must reach `gitea:3000`, and know that anything that can becomes any user |
+| It changes nothing on a CNI that does not enforce NetworkPolicy | the object is accepted and ignored; no chart can detect that, so on one of those keep `gitea.enabled: false` |
+
+**Port 22 is listed explicitly, and that line is load-bearing.** A policy is a whitelist for the pod
+it *selects*, not for the ports it names: once this object selects the Gitea pod, every inbound port
+not listed is denied. Measured on k3d — a draft naming only 3000 took an appliance's clone from an
+SSH banner to `ECONNREFUSED`. The same trap applies to any policy you add here.
 
 ### PDBs and HPAs
 

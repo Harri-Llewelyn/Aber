@@ -705,6 +705,62 @@ jobs:
           print("NetworkPolicies are symmetric and cover every load-bearing flow.")
           PY
 
+      # The forge's access control is not opt-in (#172). Gitea signs in whoever X-WEBAUTH-USER names
+      # from ANY peer, so reaching gitea:3000 is authentication and not exposure -- which is why one
+      # policy renders with the M4 layer OFF. A render with the default values is the only place that
+      # property can be checked, and the default is precisely where it would be lost unnoticed.
+      - name: Verify The Forge Is Protected With NetworkPolicies Off
+        run: |
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml > /tmp/netpol-off.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/netpol-off.yaml', encoding='utf-8'))
+                  if d and d.get('kind') == 'NetworkPolicy']
+          COMP = 'app.kubernetes.io/component'
+          errors = []
+          forge = [d for d in docs
+                   if (d['spec'].get('podSelector') or {}).get('matchLabels', {}).get(COMP) == 'gitea']
+          if len(forge) != 1:
+              print(f"::error::expected exactly one Gitea policy with networkPolicy.enabled off, got {len(forge)}")
+              sys.exit(1)
+          spec = forge[0]['spec']
+          if spec.get('policyTypes') != ['Ingress']:
+              errors.append(f"the forge policy must be Ingress-only; got {spec.get('policyTypes')}")
+          allowed = {}
+          for rule in spec.get('ingress') or []:
+              for peer in rule.get('from') or []:
+                  who = ((peer.get('podSelector') or {}).get('matchLabels', {}).get(COMP)
+                         or (peer.get('ipBlock') or {}).get('cidr'))
+                  for p in rule.get('ports') or []:
+                      allowed.setdefault(p['port'], set()).add(who)
+          gw = 'supabase-envoy' if any('supabase-envoy' in v for v in allowed.values()) else 'supabase-kong'
+          # The door and the API, and NOTHING else on 3000: every other pod that reaches it is a user.
+          if allowed.get(3000) != {gw, 'supabase-functions'}:
+              errors.append(f"3000 must be reachable by exactly {{{gw}, supabase-functions}}; got {allowed.get(3000)}")
+          # PORT 22, AND THE REASON THIS ASSERTION EXISTS. A policy is a whitelist for the pod it
+          # SELECTS, not the ports it names -- so selecting the Gitea pod closes 22 unless 22 is
+          # listed. A draft that named only 3000 took an appliance's clone from an SSH banner to
+          # ECONNREFUSED, measured on k3d. Every gateway converges over that port.
+          if not allowed.get(22):
+              errors.append("port 22 is not allowed, so selecting the pod has closed git-over-SSH "
+                            "and no appliance can converge")
+          # Egress must be untouched, or the push webhook to forge-events stops leaving.
+          if spec.get('egress'):
+              errors.append("the forge policy declares egress; it must constrain ingress only")
+          # Nothing else may be policed by default: the M4 layer is a posture, opted into.
+          if len(docs) != 1:
+              errors.append(f"only the forge policy may render with the layer off; got "
+                            f"{[d['metadata']['name'] for d in docs]}")
+          if errors:
+              for e in errors:
+                  print(f"::error::{e}")
+              sys.exit(1)
+          print(f"  ok  one Ingress-only policy on the Gitea pod: 3000 from {sorted(allowed[3000])},"
+                f" 22 from {sorted(allowed[22])}")
+          print("The forge is not reachable by an arbitrary pod on a default install.")
+          PY
+
       # The same property with broker TLS on: `mosquitto.tls.internalClients` moves every in-cluster
       # client to 8883 and must move their edges too. A second render because the port is a
       # render-time choice.

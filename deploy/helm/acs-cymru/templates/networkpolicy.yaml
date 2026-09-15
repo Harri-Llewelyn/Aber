@@ -561,3 +561,85 @@ spec:
   {{- toYaml . | nindent 2 }}
 {{- end }}
 {{- end }}
+{{- if and .Values.gitea.enabled .Values.networkPolicy.protectForge (not .Values.networkPolicy.enabled) }}
+{{- $fullname := include "acs-cymru.fullname" . -}}
+{{- $gw := include "acs-cymru.gatewayComponent" . -}}
+---
+{{/*
+=================================================================================================
+THE ONE POLICY THIS CHART RENDERS WITH `networkPolicy.enabled` OFF (#172).
+
+Everything above is the M4 layer, opt-in because default-deny egress is a posture an operator has
+to choose. This is not that. It is one object closing one hole that is open by DEFAULT, and the
+hole is authentication rather than exposure:
+
+  Gitea runs with ENABLE_REVERSE_PROXY_AUTHENTICATION so the gateway's `forge` listener can hand a
+  verified identity down as a header, and GITEA TRUSTS THAT HEADER FROM ANY PEER --
+  REVERSE_PROXY_TRUSTED_PROXIES was measured and governs X-Forwarded-For only. So without a policy,
+  any pod in this namespace signs in as any user with one HTTP request to gitea:3000. Node-RED is
+  one of those pods, and it runs whatever JavaScript a flow author writes.
+
+ON COMPOSE THE CONTROL IS A DOCKER NETWORK. The `forge` network is joined by the gateway and the
+edge runtime and nothing else, so the boundary exists there without anyone opting in. On Kubernetes
+the equivalent is this object, and an opt-in equivalent of a control that is automatic on the other
+target is not an equivalent -- it is a difference between the two deployments that nothing states.
+
+WHAT IT IS NOT. Ingress-only: Gitea's egress is untouched, so the push webhook to forge-events
+still leaves. Narrowing SSH, closing egress and the other forty edges are what `enabled` is for;
+this is the floor, not the posture.
+
+SO PORT 22 IS ALLOWED HERE EXPLICITLY, AND THAT LINE IS LOAD-BEARING. A policy is a whitelist for
+the pod it SELECTS, not for the ports it names: the moment this object selects the Gitea pod, every
+inbound port not listed is denied, port 22 included. Measured on k3d -- with an earlier draft that
+named only 3000, an appliance's clone went from an SSH banner to ECONNREFUSED. Every gateway
+converges over that port, so omitting it would have stopped the fleet in exchange for closing a
+hole on a different port. It is deliberately the same CIDR list the `-ingress-gitea-ssh` policy
+uses, so the two cannot disagree about who may clone, and what authenticates there is the
+per-gateway deploy key rather than the network.
+
+AND IT IS ONLY AS GOOD AS THE CNI. A cluster that does not enforce NetworkPolicy accepts this and
+ignores it. Nothing in a chart can detect that, which is why values.yaml says it in prose.
+=================================================================================================
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-forge-identity-header" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" "gitea") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" "gitea") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # <- the gateway on 3000 — the forge listener on 8002, THE ONLY BROWSER PATH TO THE FORGE. This
+    # rule is what makes that sentence true rather than aspirational.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $gw) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3000
+    # <- supabase-functions on 3000 — enroll-gateway and forge-sweep reach the forge's API with
+    # basic auth, which IGNORES the identity header, so this is not a second door.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" "supabase-functions") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3000
+    # <- anywhere on 22 — git over SSH, how every appliance converges. NOT a widening: without this
+    # line selecting the pod at all would close it. See the note above.
+    - from:
+        {{- range .Values.networkPolicy.giteaSshAllowedCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 22
+{{- end }}

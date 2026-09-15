@@ -1105,6 +1105,27 @@ gatewayCredential:
 # stack where every pod is healthy and nothing reaches anything.
 networkPolicy:
   enabled: false
+  # ONE POLICY THAT IS RENDERED EVEN WITH `enabled` OFF, and the only one: the forge's web port.
+  #
+  # Gitea runs with reverse-proxy authentication so the gateway's `forge` listener can hand a
+  # verified identity down as a header, and Gitea trusts that header FROM ANY PEER
+  # (REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For only; measured). On Compose the control
+  # is the `forge` Docker network. On Kubernetes the equivalent is a policy -- so with the line
+  # above at its default, ONE HTTP request to gitea:3000 from any pod in the namespace signs in as
+  # any user, Node-RED included, which runs whatever JavaScript a flow author writes. The API path
+  # is unaffected (ENABLE_REVERSE_PROXY_AUTHENTICATION_API is off) and SSH is a separate principal;
+  # the exposure is the web UI, its approve control on `main`, and through `administrators` every
+  # gateway's flow.
+  #
+  # Ingress-only, on port 3000, from the two components that are meant to reach it. Gitea's egress
+  # is untouched, SSH is left open to anything (the key authenticates there, and narrowing it is
+  # what `enabled` is for), and turning `enabled` on replaces this with the generated pair.
+  #
+  # A NETWORKPOLICY IS ONLY AS GOOD AS THE CNI. A cluster whose CNI does not enforce them accepts
+  # this object and ignores it -- so on one of those, put the forge somewhere else or do not enable
+  # it. That is true of every policy in this chart; it is said here because this is the one a
+  # deployment gets without asking. See issue #172.
+  protectForge: true
   # Where CoreDNS/kube-dns runs. Without DNS egress nothing resolves ("could not translate host name").
   dnsNamespace: kube-system
   # Where the ingress controller runs (kube-system on k3s). Wrong means every route 502s.

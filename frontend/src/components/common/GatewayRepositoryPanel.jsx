@@ -46,6 +46,24 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
     )
   }
 
+  /**
+   * A remote gateway that has never enrolled has no repository either: enroll-gateway creates it
+   * in step 4, from the deploy key the appliance sends when it redeems its bundle, so before that
+   * every address here answers 404. `enrolled_at` is the column that records the redemption.
+   */
+  if (!gateway?.enrolled_at) {
+    return (
+      <div>
+        <div className="form-label" style={{ margin: 0 }}>Repository</div>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+          This gateway has not enrolled yet, so it has no repository. One is created in the forge
+          when the appliance redeems its enrolment bundle and sends the key it will read the
+          repository with.
+        </div>
+      </div>
+    )
+  }
+
   const url = gatewayRepositoryUrl(gateway)
 
   return (
