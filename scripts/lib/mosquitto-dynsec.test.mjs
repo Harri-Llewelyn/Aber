@@ -27,9 +27,11 @@ import {
   isGatewayRoleName,
   issueCommands,
   parseControlResponse,
+  primaryHostStateTopic,
   reconcile,
   rolesFor,
   summariseInventory,
+  withPrimaryHostGrant,
 } from './mosquitto-dynsec.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -265,5 +267,70 @@ describe('the control API', () => {
   test('rolesFor names the role or the gateway pair', () => {
     assert.deepEqual(rolesFor('ingestion', 'factoryplus_ingestion'), [{ rolename: 'ingestion' }]);
     assert.deepEqual(rolesFor(null, GW_A).map((r) => r.rolename), gatewayRoleNames(GW_A));
+  });
+});
+
+describe('the primary host STATE grant', () => {
+  // The write half of a promise the shipped policy has always made on its read half: every gateway
+  // is granted `spBv1.0/STATE/#` so it can learn whether its consumer is there, and until this
+  // grant existed nothing was allowed to write it (issue #149).
+  test('the shipped policy grants every gateway READ of the STATE subtree and no write', () => {
+    const gateway = POLICY.roles.find((r) => r.rolename === GATEWAY_SHARED_ROLE);
+    assert.ok(gateway.acls.some(
+      (a) => a.acltype === 'publishClientReceive' && a.topic === 'spBv1.0/STATE/#' && a.allow,
+    ));
+    assert.ok(!gateway.acls.some((a) => a.acltype === 'publishClientSend'));
+  });
+
+  test('the grant is ONE literal topic, not the subtree', () => {
+    // A wildcard grant would let this principal announce the death of a host id belonging to
+    // somebody else, which is the thing the policy's own comment rules out.
+    const granted = withPrimaryHostGrant(POLICY, 'Site-One');
+    const ingestion = granted.roles.find((r) => r.rolename === 'ingestion');
+    const writes = ingestion.acls.filter((a) => a.acltype === 'publishClientSend').map((a) => a.topic);
+    assert.ok(writes.includes('spBv1.0/STATE/Site-One'));
+    assert.ok(!writes.includes('spBv1.0/STATE/#'));
+    assert.ok(!writes.includes('spBv1.0/STATE/+'));
+  });
+
+  test('no other role gains a write on the subtree', () => {
+    const granted = withPrimaryHostGrant(POLICY, 'Site-One');
+    for (const role of granted.roles) {
+      if (role.rolename === 'ingestion') continue;
+      assert.ok(
+        !(role.acls || []).some((a) => a.acltype === 'publishClientSend' && a.topic.startsWith('spBv1.0/STATE/')),
+        `role ${role.rolename} may write the STATE subtree`,
+      );
+    }
+  });
+
+  test('the argument is not mutated, so the document still matches the repository file', () => {
+    const before = JSON.stringify(POLICY);
+    withPrimaryHostGrant(POLICY, 'Site-One');
+    assert.equal(JSON.stringify(POLICY), before);
+  });
+
+  test('applying it twice is a no-op, which is what makes the boot reconcile idempotent', () => {
+    const once = withPrimaryHostGrant(POLICY, 'Site-One');
+    const twice = withPrimaryHostGrant(once, 'Site-One');
+    assert.deepEqual(twice, once);
+  });
+
+  test('a host id that is not one topic level is refused', () => {
+    for (const bad of ['a/b', 'a+', 'a#', 'a b', '', null]) {
+      assert.throws(() => primaryHostStateTopic(bad), (e) => e.code === 'invalid_primary_host_id', `${bad}`);
+    }
+  });
+
+  test('a policy with no ingestion role is refused rather than silently ungranted', () => {
+    const stripped = { ...POLICY, roles: POLICY.roles.filter((r) => r.rolename !== 'ingestion') };
+    assert.throws(() => withPrimaryHostGrant(stripped, 'Site-One'), (e) => e.code === 'invalid_policy');
+  });
+
+  test('reconcile carries the grant through to the written document', () => {
+    const managed = [clientFromPasswordEntry(entry('factoryplus_ingestion'), rolesFor('ingestion', 'factoryplus_ingestion'))];
+    const { config } = reconcile(null, withPrimaryHostGrant(POLICY, 'Site-One'), managed);
+    const ingestion = config.roles.find((r) => r.rolename === 'ingestion');
+    assert.ok(ingestion.acls.some((a) => a.acltype === 'publishClientSend' && a.topic === 'spBv1.0/STATE/Site-One'));
   });
 });

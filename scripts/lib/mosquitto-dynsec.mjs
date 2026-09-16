@@ -38,6 +38,61 @@ export const PLATFORM_PRINCIPALS = [
 /** The role the credential service authenticates under. */
 export const ADMIN_ROLE = 'admin';
 
+/**
+ * The role that publishes the Sparkplug primary-host STATE, and the one topic it may write.
+ *
+ * The daemon holding this role is the site's single primary host application: it publishes a
+ * retained `online: true` when it connects and a Last Will carrying `online: false`, so a
+ * compliant third-party gateway can tell whether its consumer is there (ingestion/primary_host.py).
+ * Every gateway is granted READ of `spBv1.0/STATE/#` by the shared role; this is the write half,
+ * and nothing else on the broker has one.
+ *
+ * NOT A LINE IN dynsec-roles.json, because the host id is named by the deployment rather than by
+ * this repository. The grant is injected at reconcile time from the environment, which is also why
+ * it is one literal topic rather than `spBv1.0/STATE/#`: a wildcard grant would let this principal
+ * announce the death of a host id belonging to someone else, and the ACL's own comment has always
+ * said every gateway reads this subtree and none may write it.
+ */
+export const PRIMARY_HOST_ROLE = 'ingestion';
+
+/** One topic level, so the literal grant below is the whole permission. */
+const PRIMARY_HOST_ID_PATTERN = /^[^/+#\s]+$/;
+
+export function primaryHostStateTopic(hostId) {
+  if (typeof hostId !== 'string' || !PRIMARY_HOST_ID_PATTERN.test(hostId)) {
+    throw new CredentialError(
+      `'${hostId}' is not a usable Sparkplug host id: it must be one topic level, with no '/', `
+      + "'+', '#' or whitespace",
+      'invalid_primary_host_id',
+    );
+  }
+  return `spBv1.0/STATE/${hostId}`;
+}
+
+/**
+ * The policy with the primary host's write grant added to its `ingestion` role.
+ *
+ * Returns a NEW policy; the argument is not mutated, so the document read from disk still matches
+ * the repository's file. Adding the same grant twice is a no-op, which is what makes the boot
+ * reconcile idempotent across restarts.
+ */
+export function withPrimaryHostGrant(policy, hostId) {
+  const topic = primaryHostStateTopic(hostId);
+  const roles = (policy?.roles || []).map((role) => {
+    if (role.rolename !== PRIMARY_HOST_ROLE) return role;
+    const acls = role.acls || [];
+    const already = acls.some((a) => a.acltype === 'publishClientSend' && a.topic === topic);
+    return already ? role : { ...role, acls: [...acls, { acltype: 'publishClientSend', topic, allow: true }] };
+  });
+  if (!roles.some((r) => r.rolename === PRIMARY_HOST_ROLE)) {
+    throw new CredentialError(
+      `the policy declares no '${PRIMARY_HOST_ROLE}' role, so the primary host has nothing to grant`,
+      'invalid_policy',
+    );
+  }
+  return { ...policy, roles };
+}
+
 export function gatewayRoleName(sparkplugId) {
   if (!isGatewayId(sparkplugId)) {
     throw new CredentialError(`'${sparkplugId}' is not a gateway sparkplug_id`, 'invalid_sparkplug_id');

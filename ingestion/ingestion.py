@@ -28,6 +28,7 @@ from conformance import (
 import capture_worker
 # Imported at module level so a syntax error in it is a startup failure.
 import directory_publish
+import primary_host
 import uns_publish
 
 logger = get_logger("ingestion")
@@ -2268,7 +2269,14 @@ class TelemetryWriter:
 _writer = TelemetryWriter(TELEMETRY_QUEUE_MAX_MESSAGES, TELEMETRY_BATCH_MAX_MESSAGES)
 
 def _drain_and_exit(signum, frame):
-    """SIGTERM and SIGINT: write what was accepted, then exit."""
+    """SIGTERM and SIGINT: say this host is going, write what was accepted, then exit."""
+    # FIRST, while the broker connection is still up. A gateway that reacts to the host going away
+    # should hear it at the start of the shutdown, not after a drain that may take
+    # TELEMETRY_SHUTDOWN_DRAIN_SECONDS; and a clean DISCONNECT makes the broker discard the will,
+    # so this publish is the only thing that will ever say it.
+    if _primary_host_client is not None and _primary_host_timestamp_ms is not None:
+        primary_host.announce_offline(_primary_host_client, _primary_host_timestamp_ms)
+
     queued = _writer.depth()
     logger.info("Signal %d: draining %d queued historian write(s) before exit.", signum, queued)
     if not _writer.stop(TELEMETRY_SHUTDOWN_DRAIN_SECONDS):
@@ -2551,6 +2559,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 # See docs/incidents.md -> "CI waited for a message count on a stack with no publisher".
 _mqtt_subscribed = False
 
+# The timestamp the primary host's death certificate was registered with, and the client to
+# publish its birth and death on. Set in main() before connect(); read by on_connect and by the
+# signal handler, neither of which is passed them. None means the will was never registered, which
+# main() does not allow -- primary_host.state_topic() raises there first.
+_primary_host_timestamp_ms = None
+_primary_host_client = None
+
 def on_connect(client, userdata, flags, rc, properties=None):
     """
     Subscribe once the broker has accepted the connection.
@@ -2565,6 +2580,12 @@ def on_connect(client, userdata, flags, rc, properties=None):
         client.subscribe("spBv1.0/#")
         _mqtt_subscribed = True
         logger.info("Subscribed to 'spBv1.0/#'")
+        # AFTER the subscribe, not before: the birth certificate says this host is consuming, and
+        # until the subscription is in place it is not. Re-published on every reconnect because a
+        # retained message survives the session that wrote it but the daemon's absence in between
+        # was real -- the will said so, and this is what withdraws it.
+        if _primary_host_timestamp_ms is not None:
+            primary_host.announce_online(client, _primary_host_timestamp_ms)
     else:
         _mqtt_subscribed = False
         logger.error("Failed to connect to MQTT Broker, return code %s", rc)
@@ -3183,6 +3204,23 @@ def main():
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     client.on_message = on_message
+
+    # BEFORE connect() and before any background thread, so an unusable host id stops the daemon
+    # while it is still doing nothing. paho applies the will when the CONNECT packet is built, so
+    # this is also the last point at which registering one has any effect.
+    #
+    # REFUSING TO START IS THE POINT. The host id is what a third-party gateway is configured to
+    # watch, so a daemon that ran without one would satisfy every health check while leaving the
+    # topic those gateways watch permanently empty -- which is the state this was built to end.
+    # The chart fails the render first (templates/apps/ingestion.yaml), so an operator normally
+    # meets this at `helm upgrade` rather than here.
+    global _primary_host_timestamp_ms, _primary_host_client
+    try:
+        _primary_host_timestamp_ms = primary_host.register_will(client)
+        _primary_host_client = client
+    except primary_host.PrimaryHostIdError as err:
+        logger.critical("CRITICAL CONFIGURATION ERROR: %s", err)
+        raise SystemExit(1)
 
     # Started before the connect loop, not after: the connect loop below retries indefinitely, so
     # a broker that never comes up would otherwise leave the heartbeat unstarted and the file

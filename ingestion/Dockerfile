@@ -53,6 +53,11 @@ COPY ingestion/directory_publish.py .
 # The Unified Namespace bridge, imported at module scope for the same reason: a missing COPY
 # is a crash loop on start, not a bridge that quietly never publishes.
 COPY ingestion/uns_publish.py .
+# The primary host's STATE certificates, imported at module scope for the same reason -- and here
+# the silent failure would be worse than a bridge that never publishes: the daemon would run
+# healthily while every gateway watched the topic it announces itself on and saw nothing, which is
+# the state this module exists to end.
+COPY ingestion/primary_host.py .
 
 # Cold telemetry archival. IN THIS IMAGE RATHER THAN ITS OWN, for the reason the
 # playback worker is: it needs the historian connection, the daemon's storage identity and the

@@ -179,6 +179,14 @@ export const SUITES = {
       'honestly occupies and an incomplete path is skipped and counted rather than filled with a ' +
       'placeholder. A fake query builder and a fake client; no broker, no database.',
   },
+  'ingestion/test_primary_host.py': {
+    lanes: ['unit'],
+    why:
+      'Pure-logic tests of the Sparkplug primary-host STATE certificates: the birth and the death ' +
+      'carry the SAME timestamp (the pairing rule in 3.0.0), the will is retained at QoS 1, a ' +
+      'host id that is not one topic level is refused rather than published where nothing is ' +
+      'granted, and the shutdown publish never raises on the signal path. A fake client; no broker.',
+  },
   'ingestion/test_dockerfile_copies.py': {
     lanes: ['unit'],
     why:

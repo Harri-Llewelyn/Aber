@@ -136,6 +136,31 @@ http://prometheus:9090
 {{- end -}}
 {{- end -}}
 
+{{/*
+The Sparkplug primary host id, validated. Used by the ingestion daemon, which publishes the STATE
+birth and death certificates, and by the broker's reconcile, which grants it write on that one
+topic -- so the two cannot drift.
+
+REQUIRED, WITH NO DEFAULT. Every gateway on the site is configured to watch
+`spBv1.0/STATE/<id>` to learn whether the historian is consuming, which makes the id part of the
+contract with equipment this chart has never seen. A default would put a word nobody chose into
+each of those vendors' configuration screens, and changing it later means revisiting every one.
+
+Failing the render rather than installing without it: the daemon refuses to start without the
+value, so an install that skipped this would come up with ingestion in CrashLoopBackOff and the
+cause named only in a pod log.
+*/}}
+{{- define "acs-cymru.primaryHostId" -}}
+{{- $id := .Values.ingestion.primaryHostId | default "" -}}
+{{- if not $id -}}
+{{- fail "\n\nacs-cymru: ingestion.primaryHostId is not set.\n\nIt names this site's Sparkplug primary host application. The ingestion daemon publishes a retained\n`online: true` on spBv1.0/STATE/<id> and registers `online: false` as its Last Will, which is how a\nthird-party gateway learns whether its consumer is there -- the broker has granted every gateway\nread of that subtree since the beginning, and nothing published it.\n\nThere is deliberately no default. The id goes into the configuration of every gateway on the site,\nincluding equipment this chart never sees, so it is named once by the deployment:\n\n  --set ingestion.primaryHostId=<a name for this site>\n\nOne topic level: no '/', '+', '#' or whitespace.\n" -}}
+{{- end -}}
+{{- if regexMatch "[/+#[:space:]]" $id -}}
+{{- fail (printf "\n\nacs-cymru: ingestion.primaryHostId is %q, which is not one topic level.\n\nThe broker grants the ingestion role write on exactly `spBv1.0/STATE/<id>`, so a value containing\n'/', '+', '#' or whitespace publishes where nothing is granted. The broker refuses it, the daemon\ncarries on, and every gateway goes on watching a topic that is never written.\n" $id) -}}
+{{- end -}}
+{{- $id -}}
+{{- end -}}
+
 {{- define "acs-cymru.lokiUrl" -}}
 {{- if .Values.grafana.lokiUrl -}}
 {{- .Values.grafana.lokiUrl -}}

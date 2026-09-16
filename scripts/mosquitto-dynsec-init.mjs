@@ -11,6 +11,8 @@
  * Environment:
  *   DYNSEC_FILE                  where the document lives (default /mosquitto/data/dynamic-security.json)
  *   DYNSEC_POLICY_FILE           the roles (default /policy/dynsec-roles.json)
+ *   PRIMARY_HOST_ID              the Sparkplug primary host id, required; the ingestion role is
+ *                                granted write on `spBv1.0/STATE/<id>` and nothing wider
  *   LEGACY_PASSWORD_FILE         imported when DYNSEC_FILE does not exist (default none)
  *   DYNSEC_REQUIRED_PRINCIPALS   space-separated env names that must carry a password; MONITOR is
  *                                always required
@@ -31,8 +33,10 @@ import {
   PLATFORM_PRINCIPALS,
   clientFromPasswordEntry,
   importPasswordFile,
+  primaryHostStateTopic,
   reconcile,
   rolesFor,
+  withPrimaryHostGrant,
 } from './lib/mosquitto-dynsec.mjs';
 
 const log = (...args) => console.log('[mosquitto-dynsec-init]', ...args);
@@ -73,6 +77,24 @@ function main() {
   } catch (err) {
     fail(`cannot read the roles at ${POLICY_FILE}: ${err.message}`);
   }
+
+  // The primary host's write grant, which is one literal topic derived from the deployment's host
+  // id rather than a line in the roles file. Required, and the message says why: the ingestion
+  // daemon refuses to start without the same value, so a broker reconciled without it would admit
+  // a daemon that cannot boot.
+  const primaryHostId = (process.env.PRIMARY_HOST_ID || '').trim();
+  if (!primaryHostId) {
+    fail('PRIMARY_HOST_ID is empty. It names the Sparkplug primary host application whose STATE '
+      + 'every gateway watches, and the ingestion daemon refuses to start without it, so a broker '
+      + 'reconciled without the matching write grant would leave that daemon unable to publish. '
+      + 'Set ingestion.primaryHostId in the chart values.');
+  }
+  try {
+    policy = withPrimaryHostGrant(policy, primaryHostId);
+  } catch (err) {
+    fail(`PRIMARY_HOST_ID: ${err.message}`);
+  }
+  log(`primary host '${primaryHostId}': granting the ingestion role write on ${primaryHostStateTopic(primaryHostId)}`);
 
   // The managed clients: the admin, then each platform principal with a password.
   const adminUser = process.env.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin';

@@ -719,6 +719,19 @@ ingestion:
   deviceWatchdogIntervalSeconds: 30
   # Rate limit on NCMD rebirth requests, per edge node.
   rebirthRequestIntervalSeconds: 300
+  # The Sparkplug primary host application id. REQUIRED, and deliberately without a default: this
+  # is the name a third-party gateway is configured to watch on `spBv1.0/STATE/<id>` to learn
+  # whether the historian is consuming, so it belongs to the site rather than to this chart, and a
+  # stack inheriting a word nobody chose would put it in every vendor's configuration screen.
+  # Rendering fails while it is empty.
+  #
+  # NOT AN ON/OFF SWITCH, unlike directoryMqttEnabled and unsMqttEnabled below. Those publish the
+  # address space and every reading, so enabling them is an exposure decision; this publishes two
+  # booleans on a topic the broker already grants every gateway read of. It is always on.
+  #
+  # One topic level: no `/`, `+`, `#` or whitespace. The broker grants the ingestion role write on
+  # exactly this one topic, so a value with a separator in it publishes where nothing is granted.
+  primaryHostId: ""
   # The Directory's MQTT half. Off by default: a topic has no caller, so publishing puts the
   # whole address space behind the broker's roles alone. The prefix MUST stay inside the
   # ingestion role's `ACS-Cymru/Directory/#` publish rule, or publishes are dropped silently at

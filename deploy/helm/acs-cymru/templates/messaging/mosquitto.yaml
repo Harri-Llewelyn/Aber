@@ -406,6 +406,15 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_DYNSEC_ADMIN_PASSWORD" "secretName" $secretName "key" "MQTT_DYNSEC_ADMIN_PASSWORD") | nindent 12 }}
             - name: DYNSEC_POLICY_FILE
               value: /policy/dynsec-roles.json
+            {{/*
+              The primary host's write grant is derived from this rather than written into
+              dynsec-roles.json, because the id belongs to the site. THE SAME HELPER THE INGESTION
+              DAEMON'S ENV USES: a broker granted one host id while the daemon publishes another
+              would deny every STATE publish, and QoS 1 or not, nothing on the daemon's side stops
+              for it.
+            */}}
+            - name: PRIMARY_HOST_ID
+              value: {{ include "acs-cymru.primaryHostId" . | quote }}
             - name: LEGACY_PASSWORD_FILE
               value: /passwd-src/password_file
             # The validator is a fixture: a production install leaves its password empty and gets
