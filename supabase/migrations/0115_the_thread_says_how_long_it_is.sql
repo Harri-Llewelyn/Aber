@@ -17,13 +17,49 @@
 --
 -- THE FIELD LIST IS SHARED WITH `snapshotIdentity()` in
 -- frontend/src/components/tabs/DigitalThreadTab.jsx. A field in one and not the other is a lane
--- you can see and cannot search for, or one you can find and cannot identify.
+-- you can see and cannot search for, or one you can find and cannot identify. The one label that
+-- is NOT in the payload -- the person a role assignment is about -- is matched through
+-- `digital_thread_user_ids_matching()` below, for the same reason.
 --
 -- `is_purged` gains the fourth asset table and no general rule: an entity type whose TABLE has
 -- been retired is still drawn and still cannot be hidden, because "the table is gone" is a
 -- different question from "the row is gone".
 
 SET search_path TO public;
+
+-- -------------------------------------------------------------------------------------------------
+-- The one label the audit payload does not carry
+-- -------------------------------------------------------------------------------------------------
+-- A role-assignment row is keyed by `user_roles.user_id` and its payload names the ROLE, not the
+-- person -- so the search cannot reach a person the way it reaches a device, by reading the
+-- snapshot. The dashboard labels that lane from `auth.users` (0116), and a label the timeline draws
+-- and the search cannot match is exactly the drift this file's field list exists to prevent.
+--
+-- SECURITY DEFINER because `auth.users` is GoTrue's and `authenticated` cannot read it, and it
+-- returns ids for a pattern the caller already supplied rather than anything to enumerate with.
+--
+-- AN UNAUTHORISED CALLER GETS AN EMPTY ARRAY, NOT AN ERROR. This is one disjunct of a search, so
+-- raising would fail the whole page for a reader who cannot see the role-assignment lane anyway --
+-- turning "your search matched nothing here" into "the Digital Thread is broken". The gate is the
+-- pair `digital_thread_select_security` admits, the same as `list_user_accounts()`.
+CREATE OR REPLACE FUNCTION public.digital_thread_user_ids_matching(p_pattern text)
+    RETURNS uuid[]
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+  SELECT coalesce(array_agg(u.id), '{}'::uuid[])
+    FROM auth.users u
+   WHERE p_pattern IS NOT NULL
+     AND public.has_role(ARRAY['Administrator', 'Auditor'])
+     AND u.email ILIKE p_pattern
+$$;
+
+COMMENT ON FUNCTION public.digital_thread_user_ids_matching(text) IS
+  'The ids of people whose email matches a LIKE pattern, for the one disjunct of digital_thread_page()''s search that cannot read its answer out of an audit payload: a role-assignment row names the role, and the dashboard labels that lane with the person (0116). Administrator and Auditor only, and an empty array rather than an error for anybody else, because this is part of a query rather than a request of its own.';
+
+REVOKE ALL ON FUNCTION public.digital_thread_user_ids_matching(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.digital_thread_user_ids_matching(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.digital_thread_user_ids_matching(text) TO service_role;
 
 -- =================================================================================================
 -- DROPPED AND RECREATED, NOT REPLACED, for the reason 0077 gives: CREATE OR REPLACE cannot change
@@ -76,7 +112,7 @@ CREATE OR REPLACE FUNCTION public.digital_thread_page(
     LANGUAGE sql STABLE
     SET search_path TO 'public'
     AS $$
-WITH q AS (
+WITH pattern AS (
     -- The search as a LIKE pattern, built once. THE METACHARACTERS ARE ESCAPED: the box promises
     -- a substring of a name or an id, and an unescaped '%' would silently return the whole thread
     -- to somebody who typed a percentage into it. Backslash is the default LIKE escape, so the
@@ -85,6 +121,15 @@ WITH q AS (
              WHEN p_search IS NULL OR btrim(p_search) = '' THEN NULL
              ELSE '%' || replace(replace(replace(btrim(p_search), '\', '\\'), '%', '\%'), '_', '\_') || '%'
            END AS pattern
+),
+-- MATERIALIZED, AND MEASURED. Without it Postgres inlines this CTE and the helper lands in the
+-- per-row Filter of every partition scan -- a STABLE function is allowed to be called once and is
+-- not promised to be. On 4,065 rows that took a search from 53ms to 583ms, which is the shape of
+-- cost that looks like "the thread got big" rather than like a query doing the wrong thing.
+q AS MATERIALIZED (
+    SELECT p.pattern,
+           public.digital_thread_user_ids_matching(p.pattern) AS user_ids
+      FROM pattern p
 ),
 matching AS (
     SELECT t.*,
@@ -110,6 +155,9 @@ matching AS (
        -- findable under either name, which is what somebody searching for the old one wants.
        AND (q.pattern IS NULL
             OR t.entity_id::text ILIKE q.pattern
+            -- The person a role assignment is about, who is not in the payload. Empty for a caller
+            -- who may not ask, which matches no row.
+            OR t.entity_id = ANY (q.user_ids)
             OR EXISTS (
                  SELECT 1
                    FROM unnest(ARRAY['name', 'sparkplug_id', 'schema_name',
@@ -201,6 +249,33 @@ BEGIN
       '0115 self-check: digital_thread_page is declared % time(s), not once -- calls by argument '
       'name cannot choose a candidate, and the next migration to call one will abort the chain.',
       v_declared;
+  END IF;
+
+  -- 1b. THE HELPER IS SECURITY DEFINER AND NOT PUBLIC. Without the first it reads `auth.users` as
+  --     the caller, which `authenticated` cannot, so it would answer every search with an empty
+  --     array and the role-assignment lane would go back to being unsearchable -- silently, since
+  --     an empty disjunct looks exactly like "no match". Without the second, every anonymous caller
+  --     could probe for email addresses, because the gate inside is a role check rather than a
+  --     grant.
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'digital_thread_user_ids_matching'
+         AND p.prosecdef
+  ) THEN
+    RAISE EXCEPTION
+      '0115 self-check: digital_thread_user_ids_matching() is missing or not SECURITY DEFINER';
+  END IF;
+
+  IF has_function_privilege('public', 'public.digital_thread_user_ids_matching(text)', 'EXECUTE') THEN
+    RAISE EXCEPTION
+      '0115 self-check: PUBLIC may execute digital_thread_user_ids_matching()';
+  END IF;
+
+  -- A NULL pattern matches nobody, which is what an unfiltered page relies on.
+  IF public.digital_thread_user_ids_matching(NULL) <> '{}'::uuid[] THEN
+    RAISE EXCEPTION
+      '0115 self-check: digital_thread_user_ids_matching(NULL) named somebody -- an unfiltered page '
+      'would gain a disjunct that matches rows for no reason';
   END IF;
 
   v_page  := public.digital_thread_page(p_limit => 1, p_include_purged => false);

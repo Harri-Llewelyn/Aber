@@ -489,6 +489,63 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
     def test_the_search_is_not_case_sensitive(self):
         self.assertEqual(self.total(search="ghost press"), 1)
 
+    # -----------------------------------------------------------------------------------------
+    # The one label the audit payload does not carry
+    # -----------------------------------------------------------------------------------------
+    def test_the_person_matcher_is_security_definer_and_not_public(self):
+        """
+        `digital_thread_user_ids_matching()` reads `auth.users`, which `authenticated` cannot --
+        so without SECURITY DEFINER it answers every search with an empty array and the
+        role-assignment lane silently goes back to being unsearchable, an empty disjunct being
+        indistinguishable from no match. And the gate inside it is a role check rather than a
+        grant, so EXECUTE to PUBLIC would let an anonymous caller probe for email addresses.
+        """
+        self.cur.execute(
+            "SELECT p.prosecdef,"
+            "       has_function_privilege('public',"
+            "           'public.digital_thread_user_ids_matching(text)', 'EXECUTE')"
+            "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'public' AND p.proname = 'digital_thread_user_ids_matching'"
+        )
+        row = self.cur.fetchone()
+        self.assertIsNotNone(row, "digital_thread_user_ids_matching() is missing")
+        self.assertTrue(row[0], "it is not SECURITY DEFINER")
+        self.assertFalse(row[1], "PUBLIC may execute it")
+
+    def test_a_caller_who_may_not_ask_gets_an_empty_array_rather_than_an_error(self):
+        """
+        It is one disjunct of a search. Raising would fail the whole page for a reader who cannot
+        see the role-assignment lane anyway -- turning "your search matched nothing here" into
+        "the Digital Thread is broken".
+        """
+        self.cur.execute("SET LOCAL ROLE authenticated;")
+        # cardinality() rather than the array itself: psycopg2 hands back an unparsed uuid[] as
+        # the literal '{}', which compares equal to neither [] nor None.
+        self.cur.execute("SELECT cardinality(public.digital_thread_user_ids_matching('%@%'));")
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_a_null_pattern_names_nobody(self):
+        # What an unfiltered page relies on: the disjunct has to match no row when nothing was
+        # searched for, or every page would gain rows for no reason.
+        self.cur.execute("SELECT cardinality(public.digital_thread_user_ids_matching(NULL));")
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_the_search_resolves_the_person_once_rather_than_per_row(self):
+        """
+        The CTE holding it is MATERIALIZED. Inlined, a STABLE function is ALLOWED to be evaluated
+        once and is not promised to be -- Postgres put this one in the per-row Filter of every
+        partition scan, which took a search from 53ms to 583ms on 4,065 rows. That is the shape of
+        cost that reads as "the thread got big" rather than as a query doing the wrong thing.
+        """
+        self.cur.execute(
+            "SELECT pg_get_functiondef(p.oid) FROM pg_proc p"
+            "  JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'public' AND p.proname = 'digital_thread_page'"
+        )
+        body = self.cur.fetchone()[0]
+        self.assertIn("MATERIALIZED", body,
+                      "the pattern CTE is no longer materialised; the helper will be called per row")
+
     def test_a_like_metacharacter_is_a_character(self):
         """
         The box promises a substring of a name or an id. Unescaped, a typed percentage hands back

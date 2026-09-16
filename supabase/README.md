@@ -1148,11 +1148,28 @@ for, or the reverse.
 id, and an unescaped `%` would hand the whole thread to somebody who typed a percentage into it. A
 self-check asserts a bare `%` does not select every row.
 
+**One label is not in the payload, and it is matched separately.** A role-assignment row is keyed by
+`user_roles.user_id` and names the *role*, so the search cannot read a person out of the snapshot
+the way it reads a device — and the dashboard labels that lane from `auth.users` (`0116`). A lane
+the timeline draws and the search cannot match is exactly the drift the shared field list exists to
+prevent, so `digital_thread_user_ids_matching()` supplies that one disjunct. It is SECURITY DEFINER,
+Administrator and Auditor only, and returns an **empty array rather than an error** for anybody
+else: it is part of a query, and raising would turn "your search matched nothing here" into "the
+Digital Thread is broken" for a reader who cannot see that lane anyway.
+
+**Its CTE is `MATERIALIZED`, and that is measured rather than stylistic.** Inlined, Postgres put the
+helper in the per-row `Filter` of every partition scan — a `STABLE` function is *allowed* to be
+evaluated once and is not promised to be. On the development stack's 4,065 rows that took a search
+from 53 ms to **583 ms**; materialised it is 32 ms. That is the shape of cost that reads as "the
+thread got big" rather than as a query doing the wrong thing, which is why the suite asserts the
+keyword is still there.
+
 **The search is a scan and that is the right shape here.** No index serves `ILIKE`, and a search
 matching nothing reads the whole match before the `LIMIT` discards it — but `matching` is already
 scanned in full on every call, so this adds a predicate to a scan rather than a scan. Measured on
-the development stack, 4,065 rows: a default page 30 ms, a search matching nothing 53 ms. `pg_trgm`
-is the answer if a thread ever outgrows that.
+the development stack, 4,065 rows: a default page 18 ms, a search matching nothing — the worst case,
+a full scan the `LIMIT` then discards — 32 ms. `pg_trgm` is the answer if a thread ever outgrows
+that.
 
 **A migration that adds an argument breaks the one before it, on the second boot.** `0077` named a
 single argument list in its `DROP` and then created its own — correct while it was the last word on
