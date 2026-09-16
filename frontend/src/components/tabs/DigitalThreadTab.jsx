@@ -341,6 +341,35 @@ const SECTIONS = DIGITAL_THREAD_ENTITY_TYPES.map(({ kind, label }) => ({
 
 const SECTION_ICON = Object.fromEntries(SECTIONS.map(s => [s.kind, s.Icon]))
 
+/**
+ * Is only some of what exists being drawn? `total` is null wherever the count is not known — a
+ * server that returns no total (0115) — and not knowing is not a fraction.
+ */
+export const isPartial = (shown, total) => typeof total === 'number' && total > shown
+
+/**
+ * The pair where there is no room for words: "200/467", or "200" when that is all of them. The axis
+ * corner is a 210px lane label and the export button a header control; the phrase below overflows
+ * both. Used for the events against the whole match AND for the lanes against the lane cap, which
+ * are the two numbers in that label and were both being drawn as though they were the whole thing.
+ */
+export const countRatio = (shown, total) =>
+  isPartial(shown, total) ? `${shown}/${total}` : String(shown)
+
+/**
+ * How many events are drawn, and out of how many when that is not all of them: "200 of 467 events".
+ *
+ * The foot of the page used to read "200 events" above a button offering 200 more, which is the
+ * same sentence whether the next page is the last or the third of twelve.
+ *
+ * @param {number}  shown events currently drawn
+ * @param {?number} total events matching the filters, or null if the server did not say
+ */
+export function eventCountLabel (shown, total) {
+  const events = (n) => `${n} ${n === 1 ? 'event' : 'events'}`
+  return isPartial(shown, total) ? `${shown} of ${events(total)}` : events(shown)
+}
+
 /** A UUID shortened to something a person can compare at a glance, when there is no name. */
 export const shortId = (id) => {
   const s = String(id || '')
@@ -668,6 +697,10 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   // From the server, counted over everything the filters select rather than over the page. Null
   // means the server did not say, which must not render as zero.
   const [serverPurgedCount, setServerPurgedCount] = useState(null)
+  // How many events match the current filters in total (0115), so the page can say what fraction
+  // of them it is holding. Null on a server without it, and on a bare-array fixture: the counts
+  // below then fall back to naming the loaded events alone, which is what they said before.
+  const [totalMatching, setTotalMatching] = useState(null)
   // Whether the row limit bit. The page cannot tell otherwise, and "showing the newest 200" is the
   // difference between a quiet view and a quietly incomplete one -- which is how this was missed.
   const [truncated, setTruncated] = useState(false)
@@ -700,6 +733,15 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       ? entityNames.has(e.entity_id)
       : true)
   }, [allEvents, entityNames, showPurged, lookupsLoaded])
+
+  /**
+   * The counts the page renders. Two spellings of one pair of numbers -- the ratio where the space
+   * is a fixed-width label, the phrase where there is room -- derived here so the three places that
+   * draw them cannot end up describing different sets.
+   */
+  const countLabel = eventCountLabel(events.length, totalMatching)
+  const eventRatio = countRatio(events.length, totalMatching)
+  const hasMoreToLoad = isPartial(events.length, totalMatching)
 
   /**
    * A name search resolves to matching ids so the row limit applies in the database, as the action
@@ -762,6 +804,10 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
           : mergeFirstPage(allEventsRef.current, fresh)
         setAllEvents(events)
         setServerPurgedCount(typeof d?.purgedAssets === 'number' ? d.purgedAssets : null)
+        // Outside the `reset` guard below, like the purged count and for the same reason: both are
+        // facts about everything the filters select, so a poll's answer is the current one whether
+        // or not it replaced the list.
+        setTotalMatching(typeof d?.totalMatching === 'number' ? d.totalMatching : null)
         // Only when the list was replaced. After a merge the cursor still points past the oldest
         // row held.
         if (reset) {
@@ -789,7 +835,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         })
         setNextCursor(d?.nextCursor || null)
         setTruncated(Boolean(d?.truncated))
-        // `purgedAssets` is counted over the whole match, so page one's answer already stands.
+        // `purgedAssets` and `totalMatching` are counted over the whole match, so page one's
+        // answer already stands and the poll keeps it current.
         setLoadingMore(false)
       })
       .catch(() => setLoadingMore(false))
@@ -1052,13 +1099,19 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                 text="Every attributed change to a cell, gateway, device, schema or proposal, in order and with its cause. Append-only and unprunable by any application role. Administrators and Auditors also see the security lane: role assignments, service identities and settings."
               />
             </h3>
+            {/* WHAT IS LOADED, not what matches. Export writes the events the page is holding,
+                and the tooltip says so rather than promising the filtered set: at 200 of 467 the
+                difference is two thirds of the answer. */}
             <button
               className="btn btn-ghost btn-sm"
               style={{ marginLeft: 'auto' }}
               onClick={() => downloadCSV(exportRows(), 'digital-thread-export.csv')}
-              title="Download the events matching the current filters as CSV"
+              title={hasMoreToLoad
+                ? `Download the ${events.length} events loaded here as CSV. ${totalMatching} match `
+                  + 'the current filters -- load the rest first to export them all.'
+                : 'Download the events matching the current filters as CSV'}
             >
-              <IconDownload size={13} /> Export CSV ({events.length})
+              <IconDownload size={13} /> Export CSV ({eventRatio})
             </button>
           </div>
 
@@ -1210,8 +1263,27 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
               <div className="dt-scroll">
                 <div className="dt-swimlanes">
                   <div className="dt-lane dt-axis">
-                    <div className="dt-lane-label dt-axis-corner">
-                      {lanes.length} {lanes.length === 1 ? 'asset' : 'assets'} · {events.length} events
+                    {/* ENTITIES, not assets: a lane can be a setting, a role assignment or a
+                        backup job, and `asset` is the shopfloor class.
+
+                        BOTH NUMBERS ARE WHAT IS DRAWN, over what there is. The lane count named
+                        every lane while the cap drew thirty of them, so a reader adding up the
+                        section badges got a different number from the one above them. */}
+                    <div
+                      className="dt-lane-label dt-axis-corner"
+                      title={[
+                        hiddenLaneCount > 0
+                          ? `${visibleLanes.length} of ${lanes.length} entities have a lane drawn; `
+                            + 'the rest are behind Show all lanes.'
+                          : `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
+                        hasMoreToLoad
+                          ? `${events.length} of the ${totalMatching} events matching these filters `
+                            + 'are loaded; the rest are behind Load more, at the foot of the page.'
+                          : 'Every event matching these filters is loaded.'
+                      ].join('\n')}
+                    >
+                      {countRatio(visibleLanes.length, lanes.length)}
+                      {' '}{lanes.length === 1 ? 'entity' : 'entities'} · {eventRatio} events
                     </div>
                     <div className="dt-track dt-axis-track" ref={axisTrackRef}>
                       {ticks.map(t => (
@@ -1343,14 +1415,20 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                 </button>
               )}
 
-              {/* The end of the thread, said out loud. Both numbers when they disagree: `allEvents`
-                  is what was fetched, `events` what survived the purged filter and the description
-                  search. */}
+              {/* How much of the thread this is, and where its end is. `countLabel` is drawn against
+                  the whole match; the parenthetical is the rarer disagreement between what was
+                  FETCHED and what survived the client-side purged filter, which is a no-op against a
+                  server that hides them itself and is not against one that does not. */}
               <div className="dt-pagination">
-                <span className="dt-pagination-count">
-                  {events.length === allEvents.length
-                    ? `${allEvents.length} event${allEvents.length === 1 ? '' : 's'}`
-                    : `${events.length} of ${allEvents.length} loaded event${allEvents.length === 1 ? '' : 's'}`}
+                <span
+                  className="dt-pagination-count"
+                  title={hasMoreToLoad
+                    ? `${totalMatching} events match the current filters; this page holds the `
+                      + `newest ${events.length}.`
+                    : 'Every event matching the current filters is on this page.'}
+                >
+                  {countLabel}
+                  {events.length !== allEvents.length && ` (${allEvents.length} loaded)`}
                 </span>
                 {nextCursor ? (
                   <button
@@ -1366,8 +1444,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                      response, but a database without the paging RPC returns only the first. The
                      view is still incomplete and the reader is told so. */
                   <span className="dt-pagination-end">
-                    Showing the newest {allEvents.length} events — there are older ones this view
-                    cannot reach.
+                    Showing the newest {allEvents.length}
+                    {typeof totalMatching === 'number' && ` of ${totalMatching}`} events — there are
+                    older ones this view cannot reach.
                   </span>
                 ) : (
                   /* Only meaningful once something was paged: a first response holding the whole

@@ -45,7 +45,12 @@ vi.mock('../lib/supabaseClient', () => ({
         data: {
           events: (state.responses.digital_thread || { data: [] }).data || [],
           purged_assets: 0,
-          truncated: false
+          truncated: false,
+          // Only when a test asks for one. A server without 0115 returns no such key at all, and
+          // the attachment has to tell that apart from a total of zero.
+          ...(state.responses.digital_thread?.total_matching !== undefined
+            ? { total_matching: state.responses.digital_thread.total_matching }
+            : {})
         },
         error: null
       });
@@ -448,6 +453,22 @@ describe('digital thread filtering', () => {
 
     const byDescription = await api.get('/api/v1/digital-thread?entity_id=action update');
     expect(byDescription.map(r => r.entity_id)).toEqual(['cell-beta']);
+  });
+
+  it('attaches the match total, and tells a missing one from a total of zero', async () => {
+    // `total_matching` (0115) is how the page says "200 of 467" rather than "200 events". Zero is
+    // a real answer -- a filter that matches nothing -- so the absent case has to be null, or a
+    // server without 0115 renders as a thread with no events in it.
+    const rows = [{ id: 1, entity_type: 'devices', entity_id: 'dev-a', action: 'INSERT', recorded_at: '2026-01-01T00:00:00Z' }];
+
+    state.responses.digital_thread = { data: rows, total_matching: 467 };
+    expect((await api.get('/api/v1/digital-thread')).totalMatching).toBe(467);
+
+    state.responses.digital_thread = { data: [], total_matching: 0 };
+    expect((await api.get('/api/v1/digital-thread')).totalMatching).toBe(0);
+
+    state.responses.digital_thread = { data: rows };
+    expect((await api.get('/api/v1/digital-thread')).totalMatching).toBeNull();
   });
 
   it('returns every event when no filter is supplied', async () => {

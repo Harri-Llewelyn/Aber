@@ -1650,10 +1650,16 @@ const apiMethods = {
         );
       }
 
-      // The array is still the return value, with the two page-level facts attached to it, so
+      // The array is still the return value, with the page-level facts attached to it, so
       // `.length`, `.map`, destructuring and bare-array mocks keep working.
       rows.purgedAssets = Number(payload.purged_assets || 0);
       rows.truncated = Boolean(payload.truncated);
+      // How many rows the filters select in total (0115). NULL rather than 0 when the server did
+      // not say: a database without 0115 must render as "no total", not as "no events" -- and 0 is
+      // a real answer that an empty filter result gives.
+      rows.totalMatching = typeof payload.total_matching === 'number'
+        ? payload.total_matching
+        : null;
       // NULL is the only end-of-data signal, and it comes from the server: `rows` has been through the
       // description search, so its length says nothing about whether the database had more.
       rows.nextCursor = payload.next_cursor || null;
