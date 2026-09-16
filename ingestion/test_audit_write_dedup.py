@@ -127,7 +127,7 @@ class DBirthDedupTestCase(unittest.TestCase):
         # its own suite; re-exercising them here would couple this test to their behaviour.
         self._patched = {}
         for name, replacement in (
-            ("resolve_device", lambda wire_id, use_cache=True: self.device),
+            ("resolve_device", lambda wire_id, use_cache=True, include_archived=False: self.device),
             ("verify_gateway_binding", lambda device, gw, group=None: None),
             ("store_birth_parameters", lambda sparkplug_id, payload: None),
             ("record_declared_metrics", lambda device, payload: None),

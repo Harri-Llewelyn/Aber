@@ -122,7 +122,7 @@ class BatchingTestCase(unittest.TestCase):
             "get_timescaledb_connection": ingestion.get_timescaledb_connection,
             "execute_values": ingestion.execute_values,
         }
-        ingestion.resolve_device = lambda wire_id, use_cache=True: self.device
+        ingestion.resolve_device = lambda wire_id, use_cache=True, include_archived=False: self.device
         ingestion.verify_gateway_binding = lambda *a, **k: None
 
         self.cursor = MagicMock()

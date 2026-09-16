@@ -297,7 +297,7 @@ class TestSparseDdataIngestion(unittest.TestCase):
             "verify_gateway_binding": ingestion.verify_gateway_binding,
             "get_timescaledb_connection": ingestion.get_timescaledb_connection,
         }
-        ingestion.resolve_device = lambda wire_id, use_cache=True: self.device
+        ingestion.resolve_device = lambda wire_id, use_cache=True, include_archived=False: self.device
         ingestion.verify_gateway_binding = lambda *a, **k: None
 
         self.cursor = MagicMock()

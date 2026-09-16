@@ -67,6 +67,13 @@ column derived from the row's UUID primary key, so it cannot drift.
 
 Any failure resolves to `None`, which callers treat as quarantined — the fail-closed answer.
 
+**An archived device resolves to `None` as well, and is counted apart.** Archiving a device
+revokes nothing on the broker — the credential belongs to its gateway, which is still publishing
+for the machines that are in service — so this refusal is the only thing that stops a
+decommissioned machine's readings being written. The three message paths ask for the row with
+`include_archived=True` and refuse it themselves, because `None` on the DBIRTH path means
+*unregistered* and would quarantine a second row for a device this stack already holds archived.
+
 ### The directory refresher
 
 Both resolution caches hold a row for `CACHE_TTL_SECONDS` (5 s), so a change made in the dashboard
@@ -1415,8 +1422,16 @@ the line, so a drop counter appearing there at all is still the signal.
 | `acs_ingestion_unmapped_counter_total` | `counter` | A counter exists in `ingestion.py` with no mapping in `metrics.py`. Not a data fault — a monitoring one. |
 
 `reason` on the drop counter: `gateway_binding` (a device published under a gateway that does not
-own it), `gateway_archived`, `quarantined_or_unregistered`, `db_unavailable`, `write_queue_full` (the
-writer's queue stayed full for the put timeout), and the four directory-unavailable reasons below.
+own it), `gateway_archived`, `device_archived`, `quarantined_or_unregistered`, `db_unavailable`,
+`write_queue_full` (the writer's queue stayed full for the put timeout), and the four
+directory-unavailable reasons below.
+
+**`device_archived` is one reason for all three message kinds**, unlike the directory-unavailable
+family: a birth, a death and a reading are refused for the same cause and at the same cost, and
+the log line beside each says which kind it was. It is the only refusal standing between a
+decommissioned machine and the historian — archiving a device revokes nothing, because the
+credential belongs to its gateway and that gateway is still in service for the devices that are
+not archived.
 
 **The directory being unreachable costs a different amount depending on what was lost**, which is
 why it is four reasons and not one. A brief PostgREST restart, gateway reload or failover produces

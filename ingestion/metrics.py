@@ -76,6 +76,11 @@ COUNTER_MAP = {
         "acs_ingestion_messages_dropped_total", {"reason": "gateway_binding"}),
     "dropped_gateway_archived": (
         "acs_ingestion_messages_dropped_total", {"reason": "gateway_archived"}),
+    # One reason for all three message kinds, unlike the directory-unavailable family below: an
+    # archived device refuses a birth, a death and a reading for the same cause and at the same
+    # cost, and the log line beside each says which kind it was.
+    "dropped_device_archived": (
+        "acs_ingestion_messages_dropped_total", {"reason": "device_archived"}),
     "dropped_quarantined_or_unregistered": (
         "acs_ingestion_messages_dropped_total", {"reason": "quarantined_or_unregistered"}),
     # The four directory-unavailable reasons are split by MESSAGE KIND because the harm differs

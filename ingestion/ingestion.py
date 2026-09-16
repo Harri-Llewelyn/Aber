@@ -520,9 +520,11 @@ _device_seen_lock = threading.Lock()
 # `status` and `identity_source` are read back so process_dbirth() can skip an UPDATE that
 # changes nothing. `devices` is REPLICA IDENTITY FULL and published to Realtime, so every
 # no-op write would broadcast a full-row event; the audit trigger suppresses only the audit row.
+# `is_archived` is fetched rather than filtered for the reason _GATEWAY_COLUMNS gives below:
+# resolve_device() refuses an archived device, and an archived one must not read as absent.
 _DEVICE_COLUMNS = (
     "id,name,sparkplug_id,reported_identity,gateway_id,is_quarantined,first_dbirth_at,"
-    "last_birth_metrics,status,identity_source,conformance_policy"
+    "last_birth_metrics,status,identity_source,conformance_policy,is_archived"
 )
 
 # `status` lets process_node_message() tell a transition from a repeated heartbeat in the log.
@@ -875,7 +877,42 @@ def start_device_watchdog():
         DEVICE_OFFLINE_TIMEOUT_SECONDS, DEVICE_WATCHDOG_INTERVAL_SECONDS
     )
 
-def resolve_device(wire_id: str, use_cache: bool = True):
+# Throttle for traffic refused because the DEVICE is archived, keyed by wire id. A machine that
+# was decommissioned in the dashboard but not unplugged goes on publishing at its own cadence,
+# so the refusal has to be legible without being the whole log.
+_archived_device_warned = {}
+ARCHIVED_DEVICE_WARN_INTERVAL_SECONDS = 300
+
+def resolve_device(wire_id: str, use_cache: bool = True, include_archived: bool = False):
+    """
+    Resolve an id seen on the wire to its `devices` row, refusing one that has been archived.
+
+    `include_archived` is for callers that describe the refusal themselves -- the three message
+    paths, which name the message kind they are dropping and count it once each. They check
+    `is_archived` for themselves. The default refusal is what covers every other caller.
+
+    ARCHIVING A DEVICE REVOKES NOTHING. A gateway's archive rotates its broker credential, so the
+    appliance eventually loses its connection; a device has no account of its own, and its gateway
+    goes on publishing for the machines still in service. Without this, an archived device's
+    readings keep landing in the historian under an asset no page will show.
+    """
+    row = _resolve_device_row(wire_id, use_cache)
+    if row is None or include_archived or not row.get("is_archived"):
+        return row
+
+    # Named apart from "unregistered" for the reason resolve_gateway() names its own refusal: the
+    # two answers send an operator to different fixes -- register the device, or restore it.
+    drop(
+        "device_archived",
+        "Dropping traffic for device '%s' (%s): the device is ARCHIVED. Restore it on the "
+        "Archived Entities page to accept its readings again.",
+        wire_id, row.get("name"),
+        emit_log=_throttled(_archived_device_warned, wire_id, ARCHIVED_DEVICE_WARN_INTERVAL_SECONDS),
+        device=wire_id,
+    )
+    return None
+
+def _resolve_device_row(wire_id: str, use_cache: bool = True):
     """
     Resolve an id seen on the wire to its `devices` row, in order of precedence:
 
@@ -1422,7 +1459,10 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
 
     try:
         try:
-            device = resolve_device(wire_id, use_cache=False)
+            # Unfiltered, so an archived device is not answered as None: that answer quarantines,
+            # and quarantining would mint a SECOND row for a machine this stack already holds
+            # archived -- the identity the operator kept by archiving rather than deleting.
+            device = resolve_device(wire_id, use_cache=False, include_archived=True)
         except DirectoryUnavailable as e:
             # Drop the birth and change nothing: answering "unregistered" here would quarantine a
             # legitimate device. A birth is repeated (the flow rebirths on a timer and the daemon asks
@@ -1435,6 +1475,19 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                 "The device is NOT quarantined -- this is a transport fault, not an identity "
                 "one. The next birth certificate will resolve normally.",
                 wire_id, e,
+                device=wire_id,
+            )
+            return
+
+        if device is not None and device.get("is_archived"):
+            drop(
+                "device_archived",
+                "Dropping DBIRTH for ARCHIVED device '%s' (%s) on edge node '%s'. It is NOT "
+                "quarantined -- the device is known and was retired deliberately. Restore it on "
+                "the Archived Entities page to accept it again.",
+                wire_id, device.get("name"), gateway_wire_id,
+                emit_log=_throttled(
+                    _archived_device_warned, wire_id, ARCHIVED_DEVICE_WARN_INTERVAL_SECONDS),
                 device=wire_id,
             )
             return
@@ -1539,7 +1592,9 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
         return
 
     try:
-        device = resolve_device(wire_id)
+        # Unfiltered, so the refusal below can say ARCHIVED rather than leaving the line under it
+        # to report a retired machine as one this stack never knew.
+        device = resolve_device(wire_id, include_archived=True)
     except DirectoryUnavailable as e:
         # A missed death is a delayed status, not lost telemetry: the watchdog corrects it after
         # DEVICE_OFFLINE_TIMEOUT_SECONDS. Its own counter so it is not summed with lost births.
@@ -1547,6 +1602,20 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
             "ddeath_directory_unavailable",
             "DIRECTORY UNAVAILABLE: dropping DDEATH for '%s' (%s). The watchdog will mark it "
             "OFFLINE if it stays silent.", wire_id, e,
+            device=wire_id,
+        )
+        return
+
+    if device is not None and device.get("is_archived"):
+        # Nothing to update: an archived device's status is not maintained. Counted, because a
+        # message was refused, and under the same reason as the other two paths -- the harm does
+        # not differ by message kind here, and the log line says which kind it was.
+        drop(
+            "device_archived",
+            "Dropping DDEATH for ARCHIVED device '%s' (%s); its status is not maintained.",
+            wire_id, device.get("name"),
+            emit_log=_throttled(
+                _archived_device_warned, wire_id, ARCHIVED_DEVICE_WARN_INTERVAL_SECONDS),
             device=wire_id,
         )
         return
@@ -2298,7 +2367,9 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     is skipped and a rebirth is requested for the node.
     """
     try:
-        device = resolve_device(wire_id)
+        # Unfiltered, so the archived refusal below is counted once and under its own reason
+        # rather than arriving here as None and being reported as unregistered.
+        device = resolve_device(wire_id, include_archived=True)
     except DirectoryUnavailable as e:
         # Telemetry fails closed: an unattributable row is not written. Nothing is written about the
         # device either; the stream resumes on its own.
@@ -2306,6 +2377,23 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
             "directory_unavailable",
             "DIRECTORY UNAVAILABLE: dropping DDATA for '%s' (%s). Not quarantined; the stream "
             "resumes when the directory returns.", wire_id, e,
+            device=wire_id,
+        )
+        return
+
+    # BEFORE the quarantine check, and the case this refusal exists for: a device is archived
+    # while the gateway publishing for it stays in service, so nothing upstream stops its
+    # readings. Without this they go on filling the historian under an asset every page filters
+    # out -- and the row is keyed by sparkplug_id in a database that holds no `devices` table to
+    # tell anyone it was retired.
+    if device is not None and device.get("is_archived"):
+        drop(
+            "device_archived",
+            "Dropping DDATA for ARCHIVED device '%s' (%s) on edge node '%s'. Restore it on the "
+            "Archived Entities page to record its readings again.",
+            wire_id, device.get("name"), gateway_wire_id,
+            emit_log=_throttled(
+                _archived_device_warned, wire_id, ARCHIVED_DEVICE_WARN_INTERVAL_SECONDS),
             device=wire_id,
         )
         return
