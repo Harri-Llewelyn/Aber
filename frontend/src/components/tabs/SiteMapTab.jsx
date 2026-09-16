@@ -328,9 +328,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   }
 
   /**
-   * One area, drawn as its plan with every cell it holds pinned on it. The card is not a control:
-   * its name opens the area's panel and each pin opens its cell's, so nothing is hidden behind a
-   * view you have to enter.
+   * One area, drawn as its plan with every cell it holds pinned on it. The whole card opens the
+   * area's panel and each pin opens its cell's, so nothing is hidden behind a view you have to
+   * enter. The card carries no role of its own: a role="button" around the name button and the
+   * pins would be a lie to a screen reader, so the click is a shortcut to the name below it and
+   * the keyboard still goes through the real controls.
    */
   const areaCard = (ar) => {
     const areaCells = cellsOf(ar)
@@ -346,6 +348,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         key={ar.area_id}
         className={`area-thumb${state.alert ? ' area-thumb-alerting' : ''}${selectedAreaId === ar.area_id ? ' is-selected' : ''}`}
         data-area={ar.area_id}
+        /* A pin stops its own click (FloorPin), so a click that reaches here is the area's. */
+        onClick={() => toggleArea(ar.area_id)}
       >
         <div className="area-thumb-header">
           {/* The one dot that goes red: an alert against a device here outranks the rollup. */}
@@ -354,7 +358,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           <button
             type="button"
             className="zone-name area-thumb-name"
-            onClick={() => toggleArea(ar.area_id)}
+            /* Stopped, or the card behind it toggles the panel straight back shut. */
+            onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
             aria-pressed={selectedAreaId === ar.area_id}
             title={`${ar.area_name} — ${STATUS_WORD[state.pin]}. Click for its assets and its plan.`}
           >
@@ -373,7 +378,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           <button
             type="button"
             className="area-thumb-aside"
-            onClick={() => toggleArea(ar.area_id)}
+            onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
             title={`Open ${ar.area_name} to see what is not on the plan`}
           >
             {unplaced.length > 0 && <span className="area-thumb-aside-warn">{counted(unplaced.length, 'cell')} not placed</span>}

@@ -294,6 +294,26 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(panel()).getByText('The annexe')).toBeInTheDocument()
   })
 
+  /* The name is a control, but nobody aims for it: the plan is the biggest thing on the card and
+     the cursor already says pointer, so the card takes the click as well. */
+  it('opens the area from the card itself, and leaves a pin to its own cell', async () => {
+    await renderSiteMap()
+    fireEvent.click(thumbs()[0].querySelector('.floor-plan'))
+    expect(within(panel()).getByText('2 Cells · 2 Devices')).toBeInTheDocument()
+
+    // A pin stops its own click, so the cell wins over the area behind it.
+    fireEvent.click(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' }))
+    expect(within(panel()).queryByText('2 Cells · 2 Devices')).toBeNull()
+    expect(within(panel()).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
+
+    // And the name still closes what it opened, rather than the card reopening it behind.
+    const name = within(thumbs()[0]).getByRole('button', { name: 'Building A' })
+    fireEvent.click(name)
+    expect(name).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(name)
+    expect(name).toHaveAttribute('aria-pressed', 'false')
+  })
+
   /* An area's card says only what the plan cannot draw, so the line's absence means there is
      nothing outstanding. */
   it('names the unplaced cells and area-wide assets on the card, and nothing when there are none', async () => {
@@ -499,16 +519,27 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(within(planRow()).getByText('2 cells placed on it')).toBeInTheDocument()
   })
 
-  it('offers Upload on an area with no plan, and Replace and Remove on one with', async () => {
+  it('offers a drop zone on an area with no plan, and Replace and Remove on one with', async () => {
     await openArea('Building B')
     expect(planRow().getAttribute('data-plan')).toBe('outline')
-    expect(within(planRow()).getByRole('button', { name: /Upload plan/ })).toBeInTheDocument()
-    expect(within(planRow()).queryByRole('button', { name: /Remove plan/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Upload plan for Building B' })).toBe(planRow())
+    expect(within(planRow()).getByText(/Drop an SVG plan here/)).toBeInTheDocument()
+    expect(within(planRow()).getByText(/Default outline · 0 cells placed on it/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Remove plan/ })).toBeNull()
 
     document.body.innerHTML = ''
     await openArea('Building A')
     expect(within(planRow()).getByRole('button', { name: /Replace plan/ })).toBeInTheDocument()
     expect(within(planRow()).getByRole('button', { name: /Remove plan/ })).toBeInTheDocument()
+  })
+
+  it('takes a plan dropped onto the zone, not only one browsed for', async () => {
+    api.uploadFloorPlan.mockResolvedValue({})
+    await openArea('Building B')
+    const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
+    await act(async () => { fireEvent.drop(planRow(), { dataTransfer: { files: [file] } }) })
+    expect(api.uploadFloorPlan).toHaveBeenCalledTimes(1)
+    expect(api.uploadFloorPlan.mock.calls[0][1]).toBe(file)
   })
 
   it('uploads a plan against the area itself', async () => {
