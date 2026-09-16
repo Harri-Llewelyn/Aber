@@ -432,12 +432,12 @@ BEGIN
 END $$;
 
 -- =============================================================================================
--- floor-plans -- the SVG drawings the Site Map renders, one per floor
+-- floor-plans -- the SVG drawings the Site Map renders, one per area
 -- =============================================================================================
--- Private, read by every signed-in role: the Overview is the page an Operator lives on, and a
+-- Private, read by every signed-in role: the Site Map is the page an Operator lives on, and a
 -- plan with no reader draws nothing. Writes are Administrator and Shopfloor_Manager, the roles
--- that manage areas, and every object must live under `<area_id>/<floor_id>/` naming a floor
--- that exists in that area, so a plan cannot be filed against a floor somebody made up.
+-- that manage areas, and every object must live under `<area_id>/` naming an area that exists,
+-- so a plan cannot be filed against an area somebody made up.
 -- =============================================================================================
 
 DROP POLICY IF EXISTS "floor_plans_read_authenticated" ON storage.objects;
@@ -490,15 +490,15 @@ BEGIN
     RAISE EXCEPTION 'floor-plans has % policy/policies, expected 4 (select, insert, update, delete).', v_policies;
   END IF;
 
-  -- Every write is confined to a real floor's prefix.
+  -- Every write is confined to a real area's prefix.
   SELECT count(*) INTO v_unconfined FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
      AND policyname LIKE 'floor_plans_%'
      AND cmd IN ('INSERT', 'UPDATE')
      AND coalesce(with_check, '') NOT LIKE '%is_floor_plan_path%';
   IF v_unconfined <> 0 THEN
-    RAISE EXCEPTION 'floor-plans: % write policy/policies do not confine the path to an existing floor.', v_unconfined;
+    RAISE EXCEPTION 'floor-plans: % write policy/policies do not confine the path to an existing area.', v_unconfined;
   END IF;
 
-  RAISE NOTICE 'floor-plans policies reconciled (4 policies; writes confined to <area_id>/<floor_id>/).';
+  RAISE NOTICE 'floor-plans policies reconciled (4 policies; writes confined to <area_id>/).';
 END $$;

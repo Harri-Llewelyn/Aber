@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_PLAN_ASPECT,
-  sortFloors,
-  groundFloor,
-  floorsByArea,
   floorAspect,
   isPlaced,
   planDistance,
@@ -14,48 +11,16 @@ import {
   svgAspectFromText,
   readSvgPlan,
   decodeSvgBytes,
-  floorPlanPath,
-  nextLevel
+  floorPlanPath
 } from '../utils/floorPlans';
 
 /**
- * The floor and place arithmetic the Site Map, the Cells form and the Areas panel share. The
+ * The plan and place arithmetic the Site Map, the Cells form and the Areas panel share. The
  * distance rule mirrors public.plan_distance(); the SVG size rule is what stands between a plan
  * and a place that moves with the window.
  */
 
-const floors = [
-  { floor_id: 'g', level: 0, name: 'Ground floor' },
-  { floor_id: 'b', level: -1, name: 'Basement' },
-  { floor_id: 'one', level: 1, name: 'Floor 1' }
-];
-
-describe('floors', () => {
-  it('sorts top-down, as a building reads', () => {
-    expect(sortFloors(floors).map(f => f.floor_id)).toEqual(['one', 'g', 'b']);
-  });
-
-  it('opens on the ground floor, else the lowest floor above ground, else the highest basement', () => {
-    expect(groundFloor(floors).floor_id).toBe('g');
-    expect(groundFloor([{ floor_id: 'two', level: 2 }, { floor_id: 'one', level: 1 }]).floor_id).toBe('one');
-    expect(groundFloor([{ floor_id: 'b2', level: -2 }, { floor_id: 'b1', level: -1 }]).floor_id).toBe('b1');
-    expect(groundFloor([])).toBeNull();
-  });
-
-  it('buckets floors by area, each bucket top-down', () => {
-    const byArea = floorsByArea([
-      { floor_id: 'x', area_id: 'A', level: 0 }, { floor_id: 'y', area_id: 'A', level: 1 }, { floor_id: 'z', area_id: 'B', level: 0 }
-    ]);
-    expect(byArea.get('A').map(f => f.floor_id)).toEqual(['y', 'x']);
-    expect(byArea.get('B').map(f => f.floor_id)).toEqual(['z']);
-  });
-
-  it('suggests the next level up or down for a new floor', () => {
-    expect(nextLevel(floors, 1)).toBe(2);
-    expect(nextLevel(floors, -1)).toBe(-2);
-    expect(nextLevel([], 1)).toBe(0);
-  });
-
+describe('plans', () => {
   it('falls back to the default outline aspect with no plan', () => {
     expect(floorAspect({ plan_aspect: null })).toBe(DEFAULT_PLAN_ASPECT);
     expect(floorAspect({ plan_aspect: '1.5' })).toBe(1.5);
@@ -162,8 +127,8 @@ describe('plan files', () => {
     expect(readSvgPlan(decodeSvgBytes(new TextEncoder().encode(`<svg ${NS} viewBox="0 0 300 600"/>`).buffer))).toEqual({ aspect: 0.5 });
   });
 
-  it('files a plan under its area and floor, with a fresh name per upload', () => {
-    expect(floorPlanPath({ area_id: 'A', floor_id: 'F' }, 123)).toBe('A/F/plan-123.svg');
-    expect(floorPlanPath({ area_id: 'A', id: 'F' }, 123)).toBe('A/F/plan-123.svg');
+  it('files a plan under its area, with a fresh name per upload', () => {
+    expect(floorPlanPath({ area_id: 'A' }, 123)).toBe('A/plan-123.svg');
+    expect(floorPlanPath({ id: 'A' }, 123)).toBe('A/plan-123.svg');
   });
 });

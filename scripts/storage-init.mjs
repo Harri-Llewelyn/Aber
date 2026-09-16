@@ -211,7 +211,7 @@ const BUCKETS = [
     public: false,
     file_size_limit: FLOOR_PLAN_SIZE_LIMIT,
     allowed_mime_types: FLOOR_PLAN_MIME_TYPES,
-    why: 'floor plans drawn by the Site Map, under <area_id>/<floor_id>/, referenced by area_floors.plan_path',
+    why: 'floor plans drawn by the Site Map, under <area_id>/, referenced by areas.plan_path',
   },
 ];
 

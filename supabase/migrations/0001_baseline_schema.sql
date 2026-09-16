@@ -9991,9 +9991,8 @@ END $$;
 DO $$
 DECLARE
   -- Every table this platform intends to publish, in one place. Order is not significant.
-  -- `areas` and `area_floors` are the Site Map's shape; 0098 publishes them where the floors
-  -- are created.
-  intended CONSTANT text[] := ARRAY['cells', 'gateways', 'devices', 'platform_alerts', 'areas', 'area_floors'];
+  -- `areas` is the Site Map's shape; 0098 publishes it where the plan is declared.
+  intended CONSTANT text[] := ARRAY['cells', 'gateways', 'devices', 'platform_alerts', 'areas'];
   members  text;
 BEGIN
   SELECT string_agg(format('public.%I', t), ', ' ORDER BY t)

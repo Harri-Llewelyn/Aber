@@ -106,9 +106,9 @@ CREATE OR REPLACE FUNCTION public.proposable_columns(p_entity_type text) RETURNS
     ]
 
     -- `grafana_url` is a dashboard address and `icon` is one of eight names the CHECK on the table
-    -- admits. `area_id`, `floor_id` and the place are where the cell is; the cells trigger decides
-    -- whether the four agree.
-    WHEN 'cells' THEN ARRAY['name', 'grafana_url', 'icon', 'area_id', 'floor_id', 'plan_x', 'plan_y', 'description']
+    -- admits. `area_id` and the place are where the cell is; the cells trigger decides whether the
+    -- three agree.
+    WHEN 'cells' THEN ARRAY['name', 'grafana_url', 'icon', 'area_id', 'plan_x', 'plan_y', 'description']
 
     WHEN 'gateways' THEN ARRAY['name', 'description', 'cell_id', 'area_id', 'location_scope', 'access_url']
 
@@ -385,15 +385,14 @@ BEGIN
 
         SELECT * INTO v_cell_new FROM jsonb_populate_record(v_cell, v_proposal.patch);
 
-        -- The table's CHECKs, the area foreign key and place_cell_on_its_floor() run on this
-        -- UPDATE, so a patch naming an icon nobody drew, a deleted area, a floor of another area
-        -- or a place too close to a neighbour aborts the approval rather than being stored.
+        -- The table's CHECKs, the area foreign key and place_cell_in_its_area() run on this
+        -- UPDATE, so a patch naming an icon nobody drew, a deleted area or a place too close to a
+        -- neighbour aborts the approval rather than being stored.
         UPDATE public.cells
            SET name        = v_cell_new.name,
                grafana_url = v_cell_new.grafana_url,
                icon        = v_cell_new.icon,
                area_id     = v_cell_new.area_id,
-               floor_id    = v_cell_new.floor_id,
                plan_x      = v_cell_new.plan_x,
                plan_y      = v_cell_new.plan_y,
                description = v_cell_new.description

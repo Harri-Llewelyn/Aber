@@ -5,7 +5,7 @@ import { FloorPlan } from '../components/common/FloorPlan'
 
 /**
  * A stored plan the browser will not draw. The download succeeds, so the only signal is the
- * image's error event; the floor falls back to the outline and says why, rather than showing
+ * image's error event; the area falls back to the outline and says why, rather than showing
  * pins floating over nothing.
  */
 
@@ -14,11 +14,11 @@ vi.mock('../api', async () => {
   return { ...actual, loadFloorPlanUrl: vi.fn().mockResolvedValue('blob:plan-1') }
 })
 
-const floor = { floor_id: 'f', area_id: 'a', level: 0, name: 'Ground floor', plan_path: 'a/f/plan-1.svg', plan_aspect: 1.5 }
+const area = { area_id: 'a', area_name: 'Assembly Hall', plan_path: 'a/plan-1.svg', plan_aspect: 1.5 }
 
 describe('FloorPlan with a plan the browser cannot draw', () => {
   it('shows the outline and the reason once the image errors', async () => {
-    render(<FloorPlan floor={floor} />)
+    render(<FloorPlan area={area} />)
     const plan = document.querySelector('.floor-plan')
     expect(plan.style.getPropertyValue('--plan-aspect')).toBe('1.5')
     await waitFor(() => expect(document.querySelector('.floor-plan-image')).not.toBeNull())

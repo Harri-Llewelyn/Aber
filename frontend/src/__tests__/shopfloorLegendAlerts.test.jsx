@@ -15,12 +15,11 @@ vi.mock('../api', async () => {
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
-const FLOOR = { floor_id: 'floor-g', area_id: 'area-1', level: 0, name: 'Ground floor', plan_path: null, plan_aspect: null }
-const AREA = { area_id: 'area-1', area_name: 'Building A', icon: 'Factory', floors: [FLOOR], floor_count: 1, cells: [] }
+const AREA = { area_id: 'area-1', area_name: 'Building A', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
 
 const CELL = {
   cell_id: 'cell-1', cell_name: 'Assembly Line 1', is_archived: false, area_id: 'area-1',
-  floor_id: 'floor-g', plan_x: 0.5, plan_y: 0.5, gateways: [], gateway_count: 0
+  plan_x: 0.5, plan_y: 0.5, gateways: [], gateway_count: 0
 }
 
 const device = (overrides = {}) => ({
@@ -110,10 +109,10 @@ describe('shopfloor legend categories', () => {
   })
 
   /* The area card is the exception: its dot goes red and its border with it, because an alert
-     against a device in the area is the one thing the zoomed-out view must not hide. */
+     against a device in the area is the one thing the map must not hide. */
   it('turns the area card red while an alert fires against a device in it', async () => {
     renderMap({ devices: [device()], activeAlerts: [alert()] })
-    const card = await screen.findByRole('button', { name: 'Building A' })
+    const card = (await screen.findByRole('button', { name: 'Building A' })).closest('.area-thumb')
     expect(card).toHaveClass('area-thumb-alerting')
     expect(card.querySelector('.area-thumb-header .tile-dot')).toHaveClass('tile-dot-alert')
     expect(card.querySelector('.area-thumb-header .tile-dot')).toHaveAttribute('title', expect.stringMatching(/Alert firing/))
@@ -121,7 +120,7 @@ describe('shopfloor legend categories', () => {
 
   it('keeps the area card in the rollup colour while nothing is firing', async () => {
     renderMap({ devices: [device()] })
-    const card = await screen.findByRole('button', { name: 'Building A' })
+    const card = (await screen.findByRole('button', { name: 'Building A' })).closest('.area-thumb')
     expect(card).not.toHaveClass('area-thumb-alerting')
     expect(card.querySelector('.area-thumb-header .tile-dot')).toHaveClass('tile-dot-normal')
   })

@@ -68,7 +68,6 @@ export const PROPOSAL_FORMS = {
       access_url: 'grafana_url',
       icon: 'icon',
       area_id: 'area_id',
-      floor_id: 'floor_id',
       plan_x: 'plan_x',
       plan_y: 'plan_y',
       description: 'description'

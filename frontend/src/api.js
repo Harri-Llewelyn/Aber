@@ -3,7 +3,7 @@ import { withActivityTracking } from './lib/apiActivity';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
-import { sortFloors, isSvgFile, readSvgPlan, decodeSvgBytes, floorPlanPath, FLOOR_PLAN_MAX_BYTES } from './utils/floorPlans';
+import { isSvgFile, readSvgPlan, decodeSvgBytes, floorPlanPath, FLOOR_PLAN_MAX_BYTES } from './utils/floorPlans';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 import { DIGITAL_THREAD_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
@@ -130,13 +130,6 @@ const planCoordFrom = (v) => {
   if (v === undefined || v === null || String(v).trim() === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : null;
-};
-
-// A floor level is a small integer; the form submits it as text.
-const levelFrom = (v) => {
-  const n = Number(v);
-  if (!Number.isInteger(n)) throw new Error('A floor level is a whole number: 0 for the ground floor, negative for a basement.');
-  return n;
 };
 
 export const TELEMETRY_PAGE_SIZE = 500;
@@ -366,8 +359,8 @@ const CAPTURE_BUCKET = readSetting('VITE_CAPTURE_BUCKET', 'broker-captures');
 
 /**
  * Floor plans. Private, and the name is fixed: scripts/storage-init.mjs and
- * supabase/storage-policies.sql name it too. Objects live under `<area_id>/<floor_id>/`, which the
- * write policy confines to a floor that exists.
+ * supabase/storage-policies.sql name it too. Objects live under `<area_id>/`, which the write
+ * policy confines to an area that exists.
  */
 const FLOOR_PLAN_BUCKET = 'floor-plans';
 
@@ -1413,27 +1406,20 @@ const apiMethods = {
     }
 
     if (path.startsWith('/api/v1/areas')) {
-      // Cells and floors embedded so the Areas page has membership in one round trip. Devices are
-      // not: a device's area is derived through its resolved cell, which is device_locations'
-      // answer. Floors arrive top-down, as the picker lists them.
+      // Cells embedded so the Areas page has membership in one round trip. Devices are not: a
+      // device's area is derived through its resolved cell, which is device_locations' answer.
       const { data, error } = await supabase
         .from('areas')
-        .select('*, cells(id, name, floor_id, plan_x, plan_y, icon, is_archived), area_floors(*)')
+        .select('*, cells(id, name, plan_x, plan_y, icon, is_archived)')
         .order('name', { ascending: true });
       if (error) throw error;
-      return (data || []).map(a => {
-        const floors = sortFloors((a.area_floors || []).map(f => ({ ...f, floor_id: f.id })));
-        const { area_floors: _floors, ...rest } = a;
-        return {
-          ...rest,
-          area_id: a.id,
-          area_name: a.name,
-          cells: (a.cells || []).map(c => ({ ...c, cell_id: c.id, cell_name: c.name })),
-          cell_count: (a.cells || []).length,
-          floors,
-          floor_count: floors.length
-        };
-      });
+      return (data || []).map(a => ({
+        ...a,
+        area_id: a.id,
+        area_name: a.name,
+        cells: (a.cells || []).map(c => ({ ...c, cell_id: c.id, cell_name: c.name })),
+        cell_count: (a.cells || []).length
+      }));
     }
 
     if (path.startsWith('/api/v1/cells')) {
@@ -2124,23 +2110,12 @@ const apiMethods = {
       return data?.[0] || {};
     }
 
-    if (path === '/api/v1/floors') {
-      const { data, error } = await supabase.from('area_floors').insert({
-        area_id: body.area_id,
-        level: levelFrom(body.level),
-        name: String(body.name || '').trim()
-      }).select();
-      if (error) throw error;
-      return data?.[0] ? { ...data[0], floor_id: data[0].id } : {};
-    }
-
     if (path === '/api/v1/cells') {
       const { data, error } = await supabase.from('cells').insert({
         name: body.cell_name,
         grafana_url: body.access_url,
         description: emptyToNull(body.description),
         area_id: emptyToNull(body.area_id),
-        floor_id: emptyToNull(body.floor_id),
         plan_x: planCoordFrom(body.plan_x),
         plan_y: planCoordFrom(body.plan_y),
         // Omitted rather than defaulted here when the caller sends nothing: the column's own
@@ -2488,25 +2463,12 @@ const apiMethods = {
         ...(body.icon ? { icon: body.icon } : {}),
         // Only when sent: the Areas page files a cell with a body naming nothing else.
         ...('area_id' in body ? { area_id: emptyToNull(body.area_id) } : {}),
-        ...('floor_id' in body ? { floor_id: emptyToNull(body.floor_id) } : {}),
         ...('plan_x' in body ? { plan_x: planCoordFrom(body.plan_x) } : {}),
         ...('plan_y' in body ? { plan_y: planCoordFrom(body.plan_y) } : {}),
         ...('description' in body ? { description: emptyToNull(body.description) } : {})
       }).eq('id', id).select();
       if (error) throw error;
       return data[0];
-    }
-
-    if (path.startsWith('/api/v1/floors/')) {
-      // Only what was sent: renaming a floor must not touch its level, and neither touches the
-      // plan, which has its own two calls below.
-      const { data, error } = await supabase.from('area_floors').update({
-        ...('name' in body ? { name: String(body.name || '').trim() } : {}),
-        ...('level' in body ? { level: levelFrom(body.level) } : {})
-      }).eq('id', id).select();
-      if (error) throw error;
-      if (!data?.length) throw new Error('Floor not updated — you may not have permission to edit it.');
-      return { ...data[0], floor_id: data[0].id };
     }
 
     if (path.startsWith('/api/v1/gateways/')) {
@@ -2608,12 +2570,12 @@ const apiMethods = {
    * not saved".
    */
   /**
-   * Attach a floor plan to a floor. The file is read first so an SVG with no stated size is
+   * Attach a floor plan to an area. The file is read first so an SVG with no stated size is
    * refused before anything is uploaded; the object goes up, then the row records its path and
    * aspect; a failed row write removes the object, and a successful one removes the plan it
    * replaced. Each upload takes a new path, so a cached blob URL never shows a stale drawing.
    */
-  uploadFloorPlan: async (floor, file) => {
+  uploadFloorPlan: async (area, file) => {
     if (!isSvgFile(file)) throw new Error('A floor plan is an SVG file.');
     if (file.size > FLOOR_PLAN_MAX_BYTES) {
       throw new Error(`"${file.name}" is larger than the ${Math.round(FLOOR_PLAN_MAX_BYTES / 1048576)} MiB limit for a floor plan.`);
@@ -2621,8 +2583,8 @@ const apiMethods = {
     const { aspect, problem } = readSvgPlan(decodeSvgBytes(await file.arrayBuffer()));
     if (problem) throw new Error(problem);
 
-    const floorId = floor.floor_id ?? floor.id;
-    const path = floorPlanPath({ area_id: floor.area_id, floor_id: floorId });
+    const areaId = area.area_id ?? area.id;
+    const path = floorPlanPath({ area_id: areaId });
     const { error: uploadError } = await supabase.storage
       .from(FLOOR_PLAN_BUCKET)
       .upload(path, file, { upsert: false, contentType: 'image/svg+xml' });
@@ -2634,40 +2596,40 @@ const apiMethods = {
     }
 
     const { data, error } = await supabase
-      .from('area_floors')
+      .from('areas')
       .update({ plan_path: path, plan_aspect: aspect })
-      .eq('id', floorId)
+      .eq('id', areaId)
       .select();
     if (error || !data?.length) {
       await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([path]);
-      throw new Error(error?.message || 'Could not attach the plan to the floor');
+      throw new Error(error?.message || 'Could not attach the plan to the area');
     }
 
-    const previous = floor.plan_path;
+    const previous = area.plan_path;
     if (previous && previous !== path) {
       await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([previous]).catch(() => {});
     }
-    return { ...data[0], floor_id: data[0].id };
+    return { ...data[0], area_id: data[0].id };
   },
 
   /**
-   * Detach a floor's plan. The row is cleared before the object is deleted: the worst case is a
-   * stranded object, never a floor pointing at a drawing that is gone. Cell places on the floor
-   * are kept, since the default outline shares the plan's coordinate space.
+   * Detach an area's plan. The row is cleared before the object is deleted: the worst case is a
+   * stranded object, never an area pointing at a drawing that is gone. Cell places in the area are
+   * kept, since the default outline shares the plan's coordinate space.
    */
-  removeFloorPlan: async (floor) => {
-    const floorId = floor.floor_id ?? floor.id;
+  removeFloorPlan: async (area) => {
+    const areaId = area.area_id ?? area.id;
     const { data, error } = await supabase
-      .from('area_floors')
+      .from('areas')
       .update({ plan_path: null, plan_aspect: null })
-      .eq('id', floorId)
+      .eq('id', areaId)
       .select();
     if (error) throw new Error(error.message || 'Could not detach the plan');
-    if (!data?.length) throw new Error('You do not have permission to change this floor.');
-    if (floor.plan_path) {
-      await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([floor.plan_path]).catch(() => {});
+    if (!data?.length) throw new Error('You do not have permission to change this area.');
+    if (area.plan_path) {
+      await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([area.plan_path]).catch(() => {});
     }
-    return { ...data[0], floor_id: data[0].id };
+    return { ...data[0], area_id: data[0].id };
   },
 
   patchSetting: async (key, value) => {
@@ -2764,31 +2726,20 @@ const apiMethods = {
     const id = parts[parts.length - 1];
 
     if (path.startsWith('/api/v1/areas/')) {
-      // Refused by the database while an area-wide asset names it; its cells are un-filed and its
-      // floors go with it. The floors' plan objects are removed afterwards: the cascade cannot
-      // reach storage, and a stranded object is the tolerable failure.
-      const { data: floors } = await supabase.from('area_floors').select('plan_path').eq('area_id', id);
+      // Refused by the database while an area-wide asset names it; its cells are un-filed. The
+      // plan object is removed afterwards: the delete cannot reach storage, and a stranded object
+      // is the tolerable failure.
+      const { data: rows } = await supabase.from('areas').select('plan_path').eq('id', id);
       const { error } = await supabase.from('areas').delete().eq('id', id);
       if (error) throw error;
-      const planPaths = (floors || []).map(f => f.plan_path).filter(Boolean);
-      if (planPaths.length) await supabase.storage.from(FLOOR_PLAN_BUCKET).remove(planPaths).catch(() => {});
+      const planPath = rows?.[0]?.plan_path;
+      if (planPath) await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([planPath]).catch(() => {});
       return true;
     }
 
     if (path.startsWith('/api/v1/cells/')) {
       const { error } = await supabase.from('cells').delete().eq('id', id);
       if (error) throw error;
-      return true;
-    }
-
-    if (path.startsWith('/api/v1/floors/')) {
-      // Refused by the database while cells sit on it, or while it is the area's last floor. The
-      // plan object, if any, is removed afterwards; a stranded object is the tolerable failure.
-      const { data: rows } = await supabase.from('area_floors').select('plan_path').eq('id', id);
-      const { error } = await supabase.from('area_floors').delete().eq('id', id);
-      if (error) throw error;
-      const planPath = rows?.[0]?.plan_path;
-      if (planPath) await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([planPath]).catch(() => {});
       return true;
     }
 

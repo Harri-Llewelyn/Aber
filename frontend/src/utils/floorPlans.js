@@ -1,15 +1,15 @@
 /**
- * Floors and floor plans: the rows of `area_floors` and the places cells take on them.
+ * Floor plans: the drawing an area carries, and the places cells take on it.
  *
  * A place is two fractions of the plan's viewBox (`plan_x` across, `plan_y` down, 0..1), so it
  * survives the plan being redrawn at any size. Distances are measured in units of the plan's
  * shorter side, so one spacing setting means the same on a wide plan and a tall one. Mirror of
- * `public.plan_distance()` and `place_cell_on_its_floor()` in
- * supabase/migrations/0098_a_floor_is_a_row_and_a_cell_has_a_place_on_it.sql; the trigger is
- * the authority and the checks here only refuse earlier.
+ * `public.plan_distance()` and `place_cell_in_its_area()` in
+ * supabase/migrations/0098_a_cell_has_a_place_on_its_areas_plan.sql; the trigger is the authority
+ * and the checks here only refuse earlier.
  */
 
-/** The outline drawn for a floor with no plan: 4:3, as the default box in the database. */
+/** The outline drawn for an area with no plan: 4:3, as the default box in the database. */
 export const DEFAULT_PLAN_ASPECT = 4 / 3
 
 /** The seeded default of `site_map.min_pin_spacing`, used until the setting has loaded. */
@@ -19,45 +19,13 @@ export const MIN_PIN_SPACING_SETTING = 'site_map.min_pin_spacing'
 /** The bucket's limit, mirrored so an oversized file is refused before the upload. */
 export const FLOOR_PLAN_MAX_BYTES = 5 * 1024 * 1024
 
-/** Top-down, as a building reads: highest level first, ground, then basements. */
-export function sortFloors(floors) {
-  return [...(floors || [])].sort((a, b) => (b.level ?? 0) - (a.level ?? 0))
-}
-
-/**
- * The floor a view opens on: level 0, else the lowest level above ground, else the highest
- * basement. Null with no floors.
- */
-export function groundFloor(floors) {
-  const list = floors || []
-  if (list.length === 0) return null
-  const exact = list.find(f => f.level === 0)
-  if (exact) return exact
-  const above = list.filter(f => f.level > 0).sort((a, b) => a.level - b.level)
-  if (above.length) return above[0]
-  return list.slice().sort((a, b) => b.level - a.level)[0]
-}
-
-/** A Map of area id to that area's floors, top-down, from rows carrying `area_id`. */
-export function floorsByArea(floors) {
-  const byArea = new Map()
-  for (const floor of floors || []) {
-    const areaId = floor?.area_id || null
-    if (!areaId) continue
-    if (!byArea.has(areaId)) byArea.set(areaId, [])
-    byArea.get(areaId).push(floor)
-  }
-  for (const [areaId, list] of byArea) byArea.set(areaId, sortFloors(list))
-  return byArea
-}
-
-/** Width over height of a floor's plan, falling back to the default outline. */
-export function floorAspect(floor) {
-  const aspect = Number(floor?.plan_aspect)
+/** Width over height of an area's plan, falling back to the default outline. */
+export function floorAspect(area) {
+  const aspect = Number(area?.plan_aspect)
   return Number.isFinite(aspect) && aspect > 0 ? aspect : DEFAULT_PLAN_ASPECT
 }
 
-/** True when both fractions are numbers: the cell has a place on its floor's plan. */
+/** True when both fractions are numbers: the cell has a place on its area's plan. */
 export function isPlaced(cell) {
   return Number.isFinite(Number(cell?.plan_x)) && Number.isFinite(Number(cell?.plan_y))
     && cell?.plan_x !== null && cell?.plan_y !== null && cell?.plan_x !== '' && cell?.plan_y !== ''
@@ -73,7 +41,7 @@ export function planDistance(a, b, aspect = DEFAULT_PLAN_ASPECT) {
 
 /**
  * The nearest placed cell closer than `minSpacing` to `place`, or null. `others` are the cells
- * already on the floor; the one being placed is excluded by id, and archived cells do not hold
+ * already in the area; the one being placed is excluded by id, and archived cells do not hold
  * their ground.
  */
 export function nearestConflict(place, others, aspect, minSpacing = DEFAULT_MIN_PIN_SPACING, selfId = null) {
@@ -111,7 +79,7 @@ export function isSvgFile(file) {
   return /\.svg$/i.test(file.name || '') || file.type === 'image/svg+xml'
 }
 
-/** The bounds of `area_floors.plan_aspect`, numeric(8,4); a plan outside them is refused before the upload. */
+/** The bounds of `areas.plan_aspect`, numeric(8,4); a plan outside them is refused before the upload. */
 export const PLAN_ASPECT_MIN = 0.0001
 export const PLAN_ASPECT_MAX = 9999.9999
 
@@ -181,14 +149,7 @@ function parseLength(value) {
   return perUnit === undefined ? null : Number(m[1]) * perUnit
 }
 
-/** Where a floor's plan is stored: one folder per floor, so the policy can name the floor. */
-export function floorPlanPath(floor, stamp = Date.now()) {
-  return `${floor.area_id}/${floor.floor_id ?? floor.id}/plan-${stamp}.svg`
-}
-
-/** The next unused level in a direction, for the Add floor form's default. */
-export function nextLevel(floors, direction = 1) {
-  const levels = (floors || []).map(f => f.level).filter(Number.isInteger)
-  if (levels.length === 0) return 0
-  return direction < 0 ? Math.min(...levels) - 1 : Math.max(...levels) + 1
+/** Where an area's plan is stored: one folder per area, so the policy can name the area. */
+export function floorPlanPath(area, stamp = Date.now()) {
+  return `${area.area_id ?? area.id}/plan-${stamp}.svg`
 }

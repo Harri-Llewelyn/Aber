@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
+import React, { useState, useCallback, useMemo, useEffect } from 'react'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { api } from '../../api'
 import { REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
@@ -15,7 +15,7 @@ import {
   SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, WIDE_SCOPES, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE,
   SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell
 } from '../../utils/cellResolution'
-import { groundFloor, sortFloors, isPlaced, formatPlace } from '../../utils/floorPlans'
+import { isPlaced, formatPlace } from '../../utils/floorPlans'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { areaIconComponent } from '../../utils/areaIcon'
 import {
@@ -30,8 +30,6 @@ import {
   IconMap,
   IconLayoutDashboard,
   IconChevronRight,
-  IconChevronUp,
-  IconChevronDown,
   IconArchive,
   IconExternalLink,
   IconShieldAlert,
@@ -40,8 +38,7 @@ import {
   IconAlertCircle,
   IconZap,
   IconRadio,
-  IconCpu,
-  IconImage
+  IconCpu
 } from '../common/Icons'
 
 /**
@@ -53,13 +50,21 @@ import {
 const counted = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`
 
 /**
- * The Site Map, one card: the ISA-95 ladder and the legend, the three lanes that belong to no
- * area, then the areas — every area as one of its floors in a thumbnail, or one area's floor plan
- * with its cells pinned on it. Read only: assets are filed on their own pages, and cells are placed
- * on the plan from the Cells page. One context panel serves the lanes and the pins: whichever was
- * clicked last.
+ * How wide the grid runs and how big a pin is drawn on it: one area takes the width, two split it,
+ * and three or more settle on thirds. The pin scales with the tile because this is the only view
+ * of the map -- at the narrowest tile a pin is still above the 24px a pointer needs.
  */
-export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, showToast, hasPermission, onNavigateTab, activeAlerts = [] }) {
+const COLUMNS_FOR = (n) => Math.min(3, Math.max(1, n))
+const PIN_SIZE = { 1: 44, 2: 36, 3: 28 }
+const PIN_ICON = { 1: 20, 2: 16, 3: 12 }
+
+/**
+ * The Site Map, one card: the ISA-95 ladder and the legend, the three lanes that belong to no
+ * area, then every area as its own plan with every one of its cells pinned on it. Read only:
+ * assets are filed on their own pages, and cells are placed on the plan from the Cells page. One
+ * context panel serves the lanes, the areas and the pins: whichever was clicked last.
+ */
+export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, showToast, hasPermission, onNavigateTab, activeAlerts = [] }) {
   const [cells, setCells]     = useState([])
   const [areas, setAreas]     = useState([])
   const [gwList, setGwList]   = useState([])
@@ -86,103 +91,42 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
   // Reconciliation loop, not the primary refresh: Realtime carries the updates and this catches
   // whatever a dropped socket missed. Falls back to the poll when Realtime is off.
   usePolling(loadAll, refreshInterval())
-  useRealtimeTable(['cells', 'gateways', 'devices', 'areas', 'area_floors'], loadAll, { enabled: REALTIME_ENABLED })
+  useRealtimeTable(['cells', 'gateways', 'devices', 'areas'], loadAll, { enabled: REALTIME_ENABLED })
   // Renders gatewayLiveStatus() too, so it needs the same wall-clock tick as GatewaysTab.
   useClockTick(STALENESS_TICK_MS)
 
   // The ISA-95 site, one setting. Empty until an administrator names it.
   const siteName = useSetting('site.name', '')
 
-  /** Which area the map shows: '' is every area as thumbnails. */
-  const [areaView, setAreaView] = useState('')
-  // An area deleted underneath the view falls back to every area rather than to an empty map.
-  useEffect(() => {
-    if (areaView && !areas.some(ar => ar.area_id === areaView)) setAreaView('')
-  }, [areas, areaView])
-  const viewedArea = areas.find(ar => ar.area_id === areaView) || null
-
-  /** The floor each thumbnail shows, by area id: the ground floor until stepped. */
-  const [thumbFloors, setThumbFloors] = useState({})
-  // Each selector's track is slid so its pressed floor sits in the middle of the strip. The strip
-  // is clipped rather than scrollable, so this is the only thing that moves it.
-  useEffect(() => {
-    const centre = () => {
-      document.querySelectorAll('.area-thumb-floors-scroll').forEach(strip => {
-        const track = strip.querySelector('.area-thumb-floors-track')
-        const pressed = strip.querySelector('[aria-pressed="true"]')
-        if (!track || !pressed) return
-        const shift = strip.clientWidth / 2 - (pressed.offsetLeft + pressed.offsetWidth / 2)
-        track.style.transform = `translateX(${Math.round(shift)}px)`
-      })
-    }
-    centre()
-    window.addEventListener('resize', centre)
-    return () => window.removeEventListener('resize', centre)
-  }, [thumbFloors, areaView, areas])
-
-  /** The floor shown in an area view: the ground floor until one is chosen. */
-  const [floorChoice, setFloorChoice] = useState({ area: '', floor: '' })
-  const viewedFloors = useMemo(() => sortFloors(viewedArea?.floors || []), [viewedArea])
-  const viewedFloor = (floorChoice.area === areaView && viewedFloors.find(f => f.floor_id === floorChoice.floor))
-    || groundFloor(viewedFloors)
-  const chooseFloor = (floorId) => setFloorChoice({ area: areaView, floor: floorId })
-  const stepFloor = (delta) => {
-    if (!viewedFloor) return
-    const at = viewedFloors.findIndex(f => f.floor_id === viewedFloor.floor_id)
-    const next = viewedFloors[at - delta]
-    if (next) chooseFloor(next.floor_id)
-  }
-
-  /** The plan's magnification in the area view: 1 fits the page. */
-  const [zoom, setZoom] = useState(1)
-  useEffect(() => { setZoom(1) }, [areaView])
-
   /**
-   * The height the plan may take at zoom 1: the room left in the scrolling column below the
-   * stage's top edge, so the whole page fits without scrolling. Measured, not guessed: the
-   * card above it varies with the hierarchy row and the lanes.
-   */
-  const stageRef = useRef(null)
-  const [fitHeight, setFitHeight] = useState(null)
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = stageRef.current
-      if (!el) return
-      const scroller = el.closest('.content')
-      const card = el.closest('.shopfloor-map-card')
-      const rect = el.getBoundingClientRect()
-      const top = scroller
-        ? rect.top - scroller.getBoundingClientRect().top + scroller.scrollTop
-        : rect.top + window.scrollY
-      const tail = (card ? card.getBoundingClientRect().bottom - rect.bottom : 0)
-        + (scroller ? parseFloat(getComputedStyle(scroller).paddingBottom) || 0 : 0)
-      const room = (scroller ? scroller.clientHeight : window.innerHeight) - top - tail
-      setFitHeight(Math.max(240, Math.floor(room)))
-    }
-    measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [areaView, viewedFloor?.floor_id, areas.length])
-
-  /**
-   * What the panel shows: a lane by key, or a cell by id. Ids rather than objects because this
-   * page polls, and an object would go stale. Choosing one clears the other: there is one panel.
+   * What the panel shows: a lane by key, an area by id, or a cell by id. Ids rather than objects
+   * because this page polls, and an object would go stale. Choosing one clears the others: there
+   * is one panel.
    */
   const [openLane, setOpenLane] = useState(null)
   const [selectedCellId, setSelectedCellId] = useState(null)
+  const [selectedAreaId, setSelectedAreaId] = useState(null)
   const selectedCell = cells.find(c => c.cell_id === selectedCellId) || null
+  const selectedArea = areas.find(a => a.area_id === selectedAreaId) || null
   useEffect(() => {
     if (selectedCellId && !selectedCell) setSelectedCellId(null)
   }, [selectedCellId, selectedCell])
+  useEffect(() => {
+    if (selectedAreaId && !selectedArea) setSelectedAreaId(null)
+  }, [selectedAreaId, selectedArea])
   const toggleCell = (cellId) => {
-    setOpenLane(null)
+    setOpenLane(null); setSelectedAreaId(null)
     setSelectedCellId(id => id === cellId ? null : cellId)
   }
+  const toggleArea = (areaId) => {
+    setOpenLane(null); setSelectedCellId(null)
+    setSelectedAreaId(id => id === areaId ? null : areaId)
+  }
   const toggleLane = (key) => {
-    setSelectedCellId(null)
+    setSelectedCellId(null); setSelectedAreaId(null)
     setOpenLane(open => open === key ? null : key)
   }
-  const closePanel = () => { setOpenLane(null); setSelectedCellId(null) }
+  const closePanel = () => { setOpenLane(null); setSelectedCellId(null); setSelectedAreaId(null) }
 
   // Cell membership, resolved from the device list this page already holds.
   const devicesByCell = useMemo(() => groupDevicesByCell(assets), [assets])
@@ -219,6 +163,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
     devices: assets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === area.area_id),
     gateways: gwList.filter(g => !g.is_simulated && !g.is_shadow && g.location_scope === SCOPE_AREA_WIDE && g.area_id === area.area_id)
   })
+  const cellsOf = (area) => cells.filter(c => c.area_id === area.area_id && !c.is_archived)
 
   const deviceChip = (a) => {
     const status = deviceLifecycleStatus(a)
@@ -285,6 +230,25 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
     )
   }
 
+  /** A cell as a chip that selects it, for the cells with no place on the plan. */
+  const cellChip = (c, note) => {
+    const state = stateOf(cellDevicesOf(c))
+    const Icon = cellIconComponent(c.icon)
+    return (
+      <button
+        key={c.cell_id}
+        type="button"
+        className={`chip chip-link${selectedCellId === c.cell_id ? ' is-selected' : ''}`}
+        onClick={() => toggleCell(c.cell_id)}
+        title={`${c.cell_name} — ${STATUS_WORD[state.pin]} — ${note}`}
+      >
+        <span className="badge-dot" style={{ background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
+        <Icon size={11} />
+        <span className="chip-name">{c.cell_name}</span>
+      </button>
+    )
+  }
+
   // Site-Wide first as stable context, Simulated as what not to trust, Unassigned last as the
   // thing to act on. A gateway's lane is read from its own columns: gateways have no inheritance.
   // The class carries each lane's hue; the tints are the stylesheet's.
@@ -339,9 +303,10 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
   const enterprise = [...new Set(gwList.filter(g => !g.is_shadow && g.sparkplug_group).map(g => g.sparkplug_group))].join(' / ')
 
   const unfiledCells = cells.filter(c => !c.area_id && !c.is_archived)
+  const columns = COLUMNS_FOR(areas.length)
 
   /** A cell as a pin, or nothing when it has no place. */
-  const cellPin = (c, { small = false } = {}) => {
+  const cellPin = (c) => {
     if (!isPlaced(c)) return null
     const state = stateOf(cellDevicesOf(c))
     const gateways = cellGatewaysOf(c)
@@ -354,156 +319,74 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
         status={c.is_archived ? 'muted' : state.pin}
         Icon={c.is_archived ? IconArchive : cellIconComponent(c.icon)}
         label={c.cell_name}
-        small={small}
-        selected={!small && selectedCellId === c.cell_id}
-        onClick={small ? undefined : () => toggleCell(c.cell_id)}
-        title={`${c.cell_name} — ${c.is_archived ? 'archived' : STATUS_WORD[state.pin]} — ${gateways.length} gateway(s), ${devices.length} device(s)${small ? '' : ' — click for details'}`}
+        iconSize={PIN_ICON[columns]}
+        selected={selectedCellId === c.cell_id}
+        onClick={() => toggleCell(c.cell_id)}
+        title={`${c.cell_name} — ${c.is_archived ? 'archived' : STATUS_WORD[state.pin]} — ${gateways.length} gateway(s), ${devices.length} device(s) — click for details`}
       />
     )
   }
 
   /**
-   * One area as a thumbnail of one of its floors, the ground floor until stepped, with its counts
-   * and a status dot. Opening the area lands on the floor the thumbnail was showing.
+   * One area, drawn as its plan with every cell it holds pinned on it. The card is not a control:
+   * its name opens the area's panel and each pin opens its cell's, so nothing is hidden behind a
+   * view you have to enter.
    */
-  const areaThumb = (ar) => {
-    const floors = sortFloors(ar.floors || [])
-    const shown = floors.find(f => f.floor_id === thumbFloors[ar.area_id]) || groundFloor(floors)
-    const at = shown ? floors.findIndex(f => f.floor_id === shown.floor_id) : -1
-    const areaCells = cells.filter(c => c.area_id === ar.area_id && !c.is_archived)
-    const shownCells = shown ? areaCells.filter(c => c.floor_id === shown.floor_id) : []
+  const areaCard = (ar) => {
+    const areaCells = cellsOf(ar)
+    const unplaced = areaCells.filter(c => !isPlaced(c))
     const wide = areaWideOf(ar)
     const devices = [...areaCells.flatMap(cellDevicesOf), ...wide.devices]
     const gateways = [...areaCells.flatMap(cellGatewaysOf), ...wide.gateways]
     const state = stateOf(devices)
     const AreaGlyph = areaIconComponent(ar.icon)
-    const open = () => {
-      if (shown) setFloorChoice({ area: ar.area_id, floor: shown.floor_id })
-      setAreaView(ar.area_id)
-    }
-    // The selector's clicks are its own, not the thumbnail's: stopped before they open the area.
-    const show = (e, floor) => {
-      e.stopPropagation()
-      if (floor) setThumbFloors(m => ({ ...m, [ar.area_id]: floor.floor_id }))
-    }
-    // A div with the button role, not a <button>: the small pins and the stepper inside are
-    // buttons themselves, and a button may not contain another.
+    const wideCount = wide.gateways.length + wide.devices.length
     return (
       <div
         key={ar.area_id}
-        role="button"
-        tabIndex={0}
-        className={`area-thumb${state.alert ? ' area-thumb-alerting' : ''}`}
-        onClick={open}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() } }}
-        aria-label={ar.area_name}
-        title={`${ar.area_name} — ${STATUS_WORD[state.pin]} — ${floors.length} floor(s), ${areaCells.length} cell(s). Click to open its floor plans.`}
+        className={`area-thumb${state.alert ? ' area-thumb-alerting' : ''}${selectedAreaId === ar.area_id ? ' is-selected' : ''}`}
         data-area={ar.area_id}
       >
         <div className="area-thumb-header">
           {/* The one dot that goes red: an alert against a device here outranks the rollup. */}
           <span className={`tile-dot tile-dot-${state.pin}`} title={STATUS_LABEL[state.pin]} />
           <AreaGlyph size={14} style={{ flexShrink: 0 }} />
-          <span className="zone-name">{ar.area_name}</span>
+          <button
+            type="button"
+            className="zone-name area-thumb-name"
+            onClick={() => toggleArea(ar.area_id)}
+            aria-pressed={selectedAreaId === ar.area_id}
+            title={`${ar.area_name} — ${STATUS_WORD[state.pin]}. Click for its assets and its plan.`}
+          >
+            {ar.area_name}
+          </button>
           <span className="area-thumb-counts mono" title={`${areaCells.length} cell(s), ${gateways.length} gateway(s), ${devices.length} device(s), Area-Wide included`}>
             {counted(areaCells.length, 'Cell')} · {counted(gateways.length, 'Gateway')} · {counted(devices.length, 'Device')}
           </span>
         </div>
-        <FloorPlan floor={shown} compact title={shown ? `${shown.name} of ${ar.area_name}` : `${ar.area_name} has no floors`}>
-          {shownCells.map(c => cellPin(c, { small: true }))}
+        <FloorPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
+          {areaCells.map(cellPin)}
         </FloorPlan>
-        <div className="area-thumb-footer">
-          {/* The floors left to right from the lowest, so the right arrow goes up a floor. */}
-          {shown ? (
-            <span className="area-thumb-floors" role="group" aria-label={`Floor of ${ar.area_name}`}>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={e => show(e, floors[at + 1])} disabled={at >= floors.length - 1} title="The floor below" aria-label="Floor below">
-                <IconChevronRight size={12} style={{ transform: 'rotate(180deg)' }} />
-              </button>
-              {/* The floors scroll between the arrows when there are more than fit; the pressed one
-                  is kept in view by the effect above. */}
-              <span className="area-thumb-floors-scroll">
-                <span className="area-thumb-floors-track">
-                  {[...floors].reverse().map(f => (
-                    <button
-                      key={f.floor_id}
-                      type="button"
-                      className={`btn btn-sm ${f.floor_id === shown.floor_id ? 'btn-primary' : 'btn-ghost'}`}
-                      onClick={e => show(e, f)}
-                      aria-pressed={f.floor_id === shown.floor_id}
-                      title={`${f.name} (level ${f.level})${f.plan_path ? '' : ' — default outline, no plan uploaded'}`}
-                    >
-                      <span className="floor-rail-level">{f.level}</span> {f.name}
-                      {f.plan_path && <span className="floor-plan-flag" title="A plan is uploaded for this floor" aria-label="plan uploaded"><IconImage size={10} /></span>}
-                    </button>
-                  ))}
-                </span>
-              </span>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={e => show(e, floors[at - 1])} disabled={at <= 0} title="The floor above" aria-label="Floor above">
-                <IconChevronRight size={12} />
-              </button>
-            </span>
-          ) : <span>No floors</span>}
-        </div>
-      </div>
-    )
-  }
-
-  /** The tray under the floor rail: unplaced cells of this floor, cells on no floor, Area-Wide assets. */
-  const areaTray = (ar, floor) => {
-    const areaCells = cells.filter(c => c.area_id === ar.area_id && !c.is_archived)
-    const unplaced = floor ? areaCells.filter(c => c.floor_id === floor.floor_id && !isPlaced(c)) : []
-    const noFloor = areaCells.filter(c => !c.floor_id)
-    const wide = areaWideOf(ar)
-    const cellChip = (c) => {
-      const state = stateOf(cellDevicesOf(c))
-      const Icon = cellIconComponent(c.icon)
-      return (
-        <button
-          key={c.cell_id}
-          type="button"
-          className={`chip chip-link${selectedCellId === c.cell_id ? ' is-selected' : ''}`}
-          onClick={() => toggleCell(c.cell_id)}
-          title={`${c.cell_name} — ${STATUS_WORD[state.pin]} — no place on the plan yet; set one in Edit Details on the Cells page`}
-        >
-          <span className="badge-dot" style={{ background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
-          <Icon size={11} />
-          <span className="chip-name">{c.cell_name}</span>
-        </button>
-      )
-    }
-    return (
-      <div className="site-map-tray">
-        {unplaced.length > 0 && (
-          <div className="site-map-tray-group" data-tray="unplaced">
-            <span className="site-map-tray-title" title="On this floor, but with no place on its plan yet">
-              <IconLayoutDashboard size={12} /> Not placed on {floor.name}
-            </span>
-            <div className="context-device-list">{unplaced.map(cellChip)}</div>
-          </div>
+        {/* Only what the plan cannot show. A card with everything placed and nothing area-wide
+            says nothing here, so the line means there is something to do. */}
+        {(unplaced.length > 0 || wideCount > 0) && (
+          <button
+            type="button"
+            className="area-thumb-aside"
+            onClick={() => toggleArea(ar.area_id)}
+            title={`Open ${ar.area_name} to see what is not on the plan`}
+          >
+            {unplaced.length > 0 && <span className="area-thumb-aside-warn">{counted(unplaced.length, 'cell')} not placed</span>}
+            {unplaced.length > 0 && wideCount > 0 && <span aria-hidden="true"> · </span>}
+            {wideCount > 0 && <span>{counted(wideCount, 'Area-Wide asset')}</span>}
+          </button>
         )}
-        {noFloor.length > 0 && (
-          <div className="site-map-tray-group" data-tray="no-floor">
-            <span className="site-map-tray-title" title="Filed in this area, but on no floor of it">
-              <IconLayoutDashboard size={12} /> On no floor
-            </span>
-            <div className="context-device-list">{noFloor.map(cellChip)}</div>
-          </div>
-        )}
-        <div className="site-map-tray-group" data-tray="area-wide">
-          <span className="site-map-tray-title" title="Assets that serve this whole area rather than one cell in it, such as its building management system. They have no place on a plan.">
-            <IconMap size={12} /> Area-Wide — {ar.area_name}
-          </span>
-          {wide.gateways.length === 0 && wide.devices.length === 0
-            ? <span className="zone-empty">No area-wide assets in {ar.area_name}.</span>
-            : <div className="context-device-list">{wide.gateways.map(gatewayChip)}{wide.devices.map(deviceChip)}</div>}
-        </div>
       </div>
     )
   }
 
   const selectedState = selectedCell ? stateOf(cellDevicesOf(selectedCell)) : null
-  const selectedArea = selectedCell ? areas.find(a => a.area_id === selectedCell.area_id) : null
-  const selectedFloor = selectedArea ? (selectedArea.floors || []).find(f => f.floor_id === selectedCell.floor_id) : null
+  const selectedCellArea = selectedCell ? areas.find(a => a.area_id === selectedCell.area_id) : null
   const selectedAlerts = selectedCell
     ? cellDevicesOf(selectedCell).map(d => ({ device: d, alert: alertForDevice(alerts, d) })).filter(x => x.alert && !x.device.is_archived)
     : []
@@ -548,6 +431,60 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
     }
   })() : null
 
+  /** The panel's contents for the selected area: what it holds that the plan does not show. */
+  const areaPanel = selectedArea ? (() => {
+    const areaCells = cellsOf(selectedArea)
+    const unplaced = areaCells.filter(c => !isPlaced(c))
+    const wide = areaWideOf(selectedArea)
+    const devices = [...areaCells.flatMap(cellDevicesOf), ...wide.devices]
+    const state = stateOf(devices)
+    return {
+      type: 'AREA',
+      title: selectedArea.area_name,
+      subtitle: (
+        <>
+          <span className={`badge ${state.pin === 'alert' ? 'badge-warning' : state.status === 'normal' ? 'badge-online' : 'badge-neutral'}`} style={{ fontSize: '11px' }} title={STATUS_LABEL[state.pin]}>
+            {STATUS_WORD[state.pin]}
+          </span>
+          <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
+            {counted(areaCells.length, 'Cell')} · {counted(devices.length, 'Device')}
+          </span>
+        </>
+      ),
+      fields: [
+        { label: 'Description', value: selectedArea.description || null, full: true },
+        {
+          label: 'Plan',
+          value: selectedArea.plan_path
+            ? 'An SVG plan is uploaded; cells with a place are pinned on it.'
+            : 'No plan uploaded — the Site Map draws the default outline. Upload one from this area on the Areas page.',
+          full: true
+        },
+        unplaced.length > 0 && {
+          label: `Not placed (${unplaced.length})`,
+          value: <div className="context-device-list">{unplaced.map(c => cellChip(c, 'no place on the plan yet; set one in Edit Details on the Cells page'))}</div>,
+          full: true,
+          title: 'Filed in this area, but with no place on its plan, so nothing pins them'
+        },
+        {
+          label: 'Area-Wide assets',
+          value: wide.gateways.length + wide.devices.length
+            ? <div className="context-device-list">{wide.gateways.map(gatewayChip)}{wide.devices.map(deviceChip)}</div>
+            : null,
+          full: true,
+          title: 'Assets that serve this whole area rather than one cell in it, such as its building management system. They have no place on a plan.'
+        }
+      ].filter(Boolean),
+      actions: [
+        {
+          label: 'Open on Areas page', icon: <IconLayoutDashboard size={13} />,
+          onClick: () => onSelectArea ? onSelectArea(selectedArea.area_id) : onNavigateTab?.('areas'),
+          title: 'Edit this area, or upload its plan, on the Areas page'
+        }
+      ]
+    }
+  })() : null
+
   /** The panel's contents for the selected cell: where it is, and what resolves to it. */
   const cellPanel = {
     type: 'CELL',
@@ -570,13 +507,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
     fields: selectedCell ? [
       {
         label: 'Where',
-        value: selectedArea
-          ? `${selectedArea.area_name}${selectedFloor ? ` · ${selectedFloor.name}` : ' · on no floor'}`
-          : 'Unfiled — in no area yet',
+        value: selectedCellArea ? selectedCellArea.area_name : 'Unfiled — in no area yet',
         full: true,
-        title: 'Area and floor, as filed on the Cells page'
+        title: 'The area this cell is filed in, as set on the Cells page'
       },
-      selectedCell.floor_id && {
+      selectedCell.area_id && {
         label: 'Place on plan',
         value: formatPlace(selectedCell) || 'Not placed — set a place in Edit Details on the Cells page',
         full: true
@@ -649,16 +584,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
       {
         label: 'Open on Cells page', icon: <IconLayoutDashboard size={13} />,
         onClick: () => onSelectCell ? onSelectCell(selectedCell.cell_id) : onNavigateTab?.('cells'),
-        title: 'Edit this cell, or place it on its floor plan, on the Cells page'
+        title: 'Edit this cell, or place it on its area plan, on the Cells page'
       }
     ].filter(Boolean) : []
   }
 
-  const allAreasButton = (
-    <button className="btn btn-ghost btn-sm" onClick={() => setAreaView('')} title="Back to every area">
-      <IconChevronRight size={13} style={{ transform: 'rotate(180deg)' }} /> All areas
-    </button>
-  )
+  const panel = openLaneView ? lanePanel : selectedArea ? areaPanel : cellPanel
 
   return (
     <div className="page-layout">
@@ -672,7 +603,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
                 <span>Site Map</span>
                 <HelpTip
                   label="About the site map"
-                  text="The plant from the top: the enterprise and site the Unified Namespace publishes under, the lanes for what belongs to no area — site-wide, simulated, and anything still waiting to be placed — then every area drawn as one of its floors. Open an area to walk its floors; a cell is a pin on its floor's plan, coloured by the state of the devices that resolve to it, and a click opens its details. Cells with no place on the plan and the area's Area-Wide assets are listed beside it. Plans are uploaded per floor on the Areas page; a cell is placed from the Cells page."
+                  text="The plant from the top, all of it at once: the enterprise and site the Unified Namespace publishes under, the lanes for what belongs to no area — site-wide, simulated, and anything still waiting to be placed — then every area drawn as its own plan. A cell is a pin on its area's plan, coloured by the state of the devices that resolve to it, and a click opens its details. An area's name opens what its plan cannot show: the cells with no place on it, and its Area-Wide assets. Plans are uploaded per area on the Areas page; a cell is placed from the Cells page."
                 />
               </div>
               {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
@@ -686,7 +617,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
               </div>
             </div>
 
-            {/* The rungs: enterprise, site, and the area when one is open. */}
+            {/* The rungs: enterprise, then site. */}
             <div className="site-hierarchy" role="group" aria-label="Hierarchy">
               <div className="site-hierarchy-level" title="The ISA-95 enterprise: the Sparkplug group the gateways publish under">
                 <span className="site-hierarchy-label">Enterprise</span>
@@ -701,15 +632,6 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
                   ? <span className="site-hierarchy-value">{siteName}</span>
                   : <span className="site-hierarchy-unset">Not set — name it on the Settings page under Site</span>}
               </div>
-              {viewedArea && (
-                <>
-                  <IconChevronRight size={12} className="site-hierarchy-sep" aria-hidden="true" />
-                  <div className="site-hierarchy-level" title="The ISA-95 area the Site Map is showing">
-                    <span className="site-hierarchy-label">Area</span>
-                    <span className="site-hierarchy-value">{viewedArea.area_name}</span>
-                  </div>
-                </>
-              )}
             </div>
 
             {/* The lanes, three across, sharing the width; each opens into the panel. */}
@@ -747,7 +669,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
                 <div className="empty-icon"><IconMap size={36} /></div>
                 <div className="empty-text">
                   {cells.length > 0
-                    ? 'No areas yet. Add one on the Areas page and file the cells into it; each area is drawn as its floor plans here.'
+                    ? 'No areas yet. Add one on the Areas page and file the cells into it; each area is drawn as its own plan here.'
                     : laneViews.some(v => v.gateways.length > 0 || v.devices.length > 0)
                       ? 'No areas or cells configured — every asset resolves to one of the lanes above.'
                       : gw.shadow > 0
@@ -755,10 +677,10 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
                         : 'No areas or cells configured. Add an area on the Areas page to start the map.'}
                 </div>
               </div>
-            ) : !viewedArea ? (
+            ) : (
               <>
-                <div className="shopfloor-grid">
-                  {areas.map(areaThumb)}
+                <div className="shopfloor-grid" style={{ '--map-columns': columns, '--pin-size': `${PIN_SIZE[columns]}px` }}>
+                  {areas.map(areaCard)}
                 </div>
                 {unfiledCells.length > 0 && (
                   <div className="site-map-tray">
@@ -767,75 +689,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
                         <IconShieldAlert size={12} /> Unfiled — in no area yet
                       </span>
                       <div className="context-device-list">
-                        {unfiledCells.map(c => {
-                          const Icon = cellIconComponent(c.icon)
-                          return (
-                            <button key={c.cell_id} type="button" className="chip chip-link" onClick={() => toggleCell(c.cell_id)} title={`${c.cell_name} — in no area; file it on the Areas page`}>
-                              <Icon size={11} /><span className="chip-name">{c.cell_name}</span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                {viewedFloors.length === 0 ? (
-                  <>
-                    <div className="site-map-toolbar">{allAreasButton}</div>
-                    <div className="empty-state">
-                      <div className="empty-icon"><IconLayoutDashboard size={36} /></div>
-                      <div className="empty-text">{viewedArea.area_name} has no floors. Add one from its details on the Areas page.</div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="site-map-view">
-                    <div className="site-map-side">
-                      {/* The way back and the zoom, above the floors. The area's name is on the
-                          hierarchy row; the floor is the pressed button below. */}
-                      <div className="site-map-toolbar">
-                        {allAreasButton}
-                        <span style={{ display: 'inline-flex', gap: '4px' }} role="group" aria-label="Zoom">
-                          <button className="btn btn-ghost btn-sm" onClick={() => setZoom(z => Math.max(1, Number((z - 0.25).toFixed(2))))} disabled={zoom <= 1} title="Zoom out" aria-label="Zoom out">−</button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => setZoom(1)} disabled={zoom === 1} title="Fit the plan to the page">Fit</button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => setZoom(z => Math.min(4, Number((z + 0.25).toFixed(2))))} disabled={zoom >= 4} title="Zoom in" aria-label="Zoom in">+</button>
-                        </span>
-                      </div>
-                      <div className="floor-rail" role="group" aria-label="Floor">
-                        <button className="btn btn-ghost btn-sm" onClick={() => stepFloor(1)} disabled={viewedFloors[0]?.floor_id === viewedFloor?.floor_id} title="The floor above" aria-label="Floor above">
-                          <IconChevronUp size={13} />
-                        </button>
-                        {viewedFloors.map(f => (
-                          <button
-                            key={f.floor_id}
-                            className={`btn btn-sm ${viewedFloor?.floor_id === f.floor_id ? 'btn-primary' : 'btn-ghost'}`}
-                            onClick={() => chooseFloor(f.floor_id)}
-                            aria-pressed={viewedFloor?.floor_id === f.floor_id}
-                            title={`${f.name} (level ${f.level})${f.plan_path ? '' : ' — default outline, no plan uploaded'}`}
-                          >
-                            <span className="floor-rail-level">{f.level}</span> {f.name}
-                            {f.plan_path && <span className="floor-plan-flag" title="A plan is uploaded for this floor" aria-label="plan uploaded"><IconImage size={10} /></span>}
-                          </button>
-                        ))}
-                        <button className="btn btn-ghost btn-sm" onClick={() => stepFloor(-1)} disabled={viewedFloors[viewedFloors.length - 1]?.floor_id === viewedFloor?.floor_id} title="The floor below" aria-label="Floor below">
-                          <IconChevronDown size={13} />
-                        </button>
-                      </div>
-                      {areaTray(viewedArea, viewedFloor)}
-                    </div>
-                    {/* The plan fits the room below the stage at zoom 1; past that it scrolls. The
-                        variables size the plan from the stylesheet, so the aspect stays the floor's. */}
-                    <div
-                      className="site-map-stage"
-                      ref={stageRef}
-                      style={{ '--map-fit-height': fitHeight ? `${fitHeight}px` : '72vh', '--map-zoom': zoom }}
-                    >
-                      <div className="site-map-stage-inner" style={{ width: `${zoom * 100}%` }}>
-                        <FloorPlan floor={viewedFloor} title={`${viewedFloor.name} of ${viewedArea.area_name}`}>
-                          {cells.filter(c => c.floor_id === viewedFloor.floor_id).map(c => cellPin(c))}
-                        </FloorPlan>
+                        {unfiledCells.map(c => cellChip(c, 'in no area; file it on the Areas page'))}
                       </div>
                     </div>
                   </div>
@@ -847,10 +701,10 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, show
       </div>
 
       <ContextPanel
-        open={!!(openLaneView || selectedCell)}
+        open={!!(openLaneView || selectedArea || selectedCell)}
         onClose={closePanel}
         onCopy={showToast}
-        {...(openLaneView ? lanePanel : cellPanel)}
+        {...panel}
       />
     </div>
   )

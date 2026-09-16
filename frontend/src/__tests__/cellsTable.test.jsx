@@ -69,7 +69,7 @@ describe('the cells table', () => {
     await ready()
 
     expect([...table().querySelectorAll('thead th')].map(h => h.textContent.trim()))
-      .toEqual(['Icon', 'Cell Name', 'Area / Floor', 'Cell UUID', 'Assigned Gateways', 'Assigned Devices'])
+      .toEqual(['Icon', 'Cell Name', 'Area', 'Cell UUID', 'Assigned Gateways', 'Assigned Devices'])
     expect(table().querySelectorAll('tbody tr')).toHaveLength(1)
   })
 
