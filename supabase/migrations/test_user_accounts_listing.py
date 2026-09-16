@@ -261,6 +261,47 @@ class UserAccountsListing(unittest.TestCase):
         listed = [str(u) for u, _ in self.accounts_as(ADMIN_ID)]
         self.assertNotIn(machine, listed)
 
+    # -----------------------------------------------------------------------------------------
+    # The label and the search are the same claim
+    # -----------------------------------------------------------------------------------------
+    def test_the_email_that_labels_a_lane_also_finds_it(self):
+        """
+        THE INVARIANT 0115 STATES AND 0116 NEARLY BROKE. The Digital Thread labels a
+        role-assignment lane with the person, and a lane the timeline draws and the search cannot
+        match is the drift that file's shared field list exists to prevent -- one which would not
+        have raised anything, because a search that matches nothing looks the same as one that
+        matches nothing.
+
+        The fixture makes this checkable for free: granting a role fires `log_role_assignment()`,
+        so every identity in `setUpClass` already has a ROLE_GRANTED row keyed by its user id.
+        """
+        self.as_user(ADMIN_ID)
+        self.cur.execute(
+            "SELECT (public.digital_thread_page(p_limit => 5, p_include_purged => true,"
+            "                                   p_search => %s) ->> 'total_matching')::bigint",
+            ("administrator@0116.test",),
+        )
+        self.assertGreater(
+            self.cur.fetchone()[0], 0,
+            "the email that labels the lane does not find it -- p_search cannot reach the person, "
+            "and a role-assignment payload names the role rather than who it was granted to",
+        )
+
+    def test_the_page_does_not_fail_for_somebody_who_may_not_name_a_person(self):
+        """
+        The matcher returns an empty array rather than raising, and this is why: it is ONE DISJUNCT
+        of a search. Refusing would fail the whole page for an Operator, turning "your search
+        matched nothing here" into "the Digital Thread is broken" -- on a lane they cannot read
+        either way.
+        """
+        self.as_user(OPERATOR_ID)
+        self.cur.execute(
+            "SELECT (public.digital_thread_page(p_limit => 1, p_include_purged => true,"
+            "                                   p_search => %s) ->> 'total_matching')::bigint",
+            ("administrator@0116.test",),
+        )
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
     def test_it_returns_the_id_and_the_email_and_nothing_else(self):
         """
         A read surface over the auth schema returns the least that does the job. A column added
