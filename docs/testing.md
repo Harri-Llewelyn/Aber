@@ -27,6 +27,11 @@ python ingestion/test_gateway_health_metrics.py
 # other check: minutes of skew verify every certificate and corrupt every reading.
 python ingestion/test_gateway_clock_offset.py
 python ingestion/test_archived_gateway.py
+# The same refusal one level down, and the blind spot it closes: a device has no broker account
+# to revoke, so nothing but resolve_device() stops a decommissioned machine writing telemetry
+# through a gateway that is still in service. Pins the DBIRTH case too, where answering None
+# would quarantine a second row for a device the stack already holds archived.
+python ingestion/test_archived_device.py
 python ingestion/test_declared_metrics.py
 python ingestion/test_modelled_metrics_contract.py
 python ingestion/test_device_location.py
@@ -273,6 +278,11 @@ python supabase/migrations/test_relocate_devices.py
 # row still exists; and the spacing between two cells on one plan is refused by the database, not
 # only by the picker, because an approved proposal writes the same columns.
 python supabase/migrations/test_area_floors.py
+# Deleting a cell un-files what was in it (0112). `gateways.cell_id` was the one child of `cells`
+# that cascaded, so a gateway archived with Permanent Retention was deleted by its CELL's timer.
+# The test asserts the catalogue fact over every child of `cells`, not only the one that was
+# wrong, and that the un-filing is recorded against the gateway rather than lost with the cell.
+python supabase/migrations/test_archive_purge_cascade.py
 # A device cannot be posted onto the replay lane by hand (0083, issue 144). The dashboard used to
 # offer the Playback gateway in three device pickers; choosing it produced a shadow device with no
 # `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid

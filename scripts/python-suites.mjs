@@ -474,6 +474,15 @@ export const SUITES = {
       'the spacing between two cells on one plan is refused BY THE DATABASE, because an approved ' +
       'proposal writes the same columns as the picker that refuses the click.',
   },
+  'supabase/migrations/test_archive_purge_cascade.py': {
+    lanes: ['db'],
+    why:
+      '0112, and the reason it is a test rather than a comment: the retention timer is the one ' +
+      'promise this platform makes about destruction, and a FK that cascades breaks it silently ' +
+      '-- a gateway marked Permanent was deleted by its CELL\'s timer, with nothing to read ' +
+      'afterwards but an audit row. Asserts the catalogue fact over every child of cells, not ' +
+      'just the one that was wrong.',
+  },
   'supabase/migrations/test_relocate_devices.py': {
     lanes: ['db'],
     why:

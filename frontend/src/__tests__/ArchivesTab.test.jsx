@@ -371,6 +371,28 @@ describe('ArchivesTab restore asks first', () => {
     expect(confirm.className).toMatch(/btn-primary/)
   })
 
+  it('says a deleted cell un-files what was in it rather than deleting it', async () => {
+    // The dialog used to be silent about it while the database did the opposite: gateways were
+    // ON DELETE CASCADE, so a cell's timer could take a gateway marked Permanent with it. 0112
+    // made every child SET NULL, and this is the sentence that says so where it is decided.
+    await showArchives()
+    fireEvent.click(purgeButton())
+
+    const prompt = await screen.findByText(/Permanently delete the cell/i)
+    expect(prompt.textContent).toMatch(/un-filed rather than deleted/i)
+    expect(prompt.textContent).toMatch(/Unassigned/i)
+  })
+
+  it('does not claim a deleted gateway un-files anything', async () => {
+    // A gateway holds no assets of its own on this page's terms, and a sentence that applied to
+    // every type would be read as boilerplate by the time it mattered.
+    await showArchives(() => true, [ARCHIVED_GATEWAY])
+    fireEvent.click(purgeButton())
+
+    expect((await screen.findByText(/Permanently delete the gateway/i)).textContent)
+      .not.toMatch(/un-filed/i)
+  })
+
   it('still asks for the name back on delete, which stays the rare one', async () => {
     // THE GUARD ON THIS WHOLE CHANGE. Adding a second dialog to this page is exactly how the typed
     // gate gets diluted into ceremony -- so this pins that restore did NOT acquire one.

@@ -2427,8 +2427,18 @@ SELECT public.ensure_cron_job(
 --
 -- `auto_delete_at` is set per row by the Archive dialog; NULL means permanent retention, so the
 -- NOT NULL test is load-bearing. These DELETEs fire log_digital_thread_event() by design.
--- Children go first: a parent whose child is not yet due fails to delete this run and is
--- retried the next, rather than cascading a child out from under its own timer.
+--
+-- EVERY ROW HERE IS DELETED ON ITS OWN TIMER AND NOBODY ELSE'S, which is a property of the FKs
+-- rather than of this order: since 0112 every child of a purged parent is SET NULL, so a gateway
+-- or device that is not yet due survives the cell it was filed into and lands in the Unassigned
+-- lane with its own timer intact. Children still go first, so one that IS due is deleted as
+-- itself -- with its own audit row naming it -- rather than being un-filed a second earlier and
+-- recorded as a row that had already lost its parent.
+--
+-- It used to read that a parent whose child was not due "fails to delete this run and is retried
+-- the next". No FK in this chain restricts, so no delete here has ever failed: gateways.cell_id
+-- was ON DELETE CASCADE and a cell's timer took its gateways with it, Permanent Retention and
+-- all. 0112 is what makes the paragraph above true.
 SELECT public.ensure_cron_job(
   'purge_expired_archives',
   '30 3 * * *',
