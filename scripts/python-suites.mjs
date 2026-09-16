@@ -543,8 +543,10 @@ export const SUITES = {
   'supabase/migrations/test_digital_thread_paging.py': {
     lanes: ['db'],
     why:
-      'Walking the thread to its end (0077). Paging that loses or repeats a row across a page ' +
-      'boundary corrupts an append-only audit read without failing anything.',
+      'Walking the thread to its end (0077), and saying how far the end is (0115). Paging that ' +
+      'loses or repeats a row across a page boundary corrupts an append-only audit read without ' +
+      'failing anything; a total counted over the page instead of the match, or a search that ' +
+      'cannot reach a deleted asset, misreports how much of the record the reader has seen.',
   },
   'supabase/migrations/test_digital_thread_partitioning.py': {
     lanes: ['db'],
