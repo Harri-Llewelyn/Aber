@@ -220,6 +220,47 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeNull())
   })
 
+  /* An action with nothing to act on is a dead end wearing the clothes of a next step. The cell
+     panel already gates Open Dashboard on the cell having one; the lane panel was the outlier. */
+  it('offers a lane only the actions it can honour', async () => {
+    const looseDevice = {
+      ...device, asset_id: 'dev-loose', asset_name: 'Loose_Device', effective_cell_id: null,
+      gateway_cell_id: null, location_source: 'unassigned', effective_area_id: null
+    }
+    const looseGw = {
+      gateway_id: 'gw-loose', gateway_name: 'Loose_Gateway', cell_id: null, area_id: null,
+      location_scope: 'cell', sparkplug_group: 'ACS-Cymru', status: 'ONLINE', deployment: 'remote',
+      is_archived: false, last_heartbeat: new Date(NOW - 20_000).toISOString(), device_count: 0, devices: []
+    }
+    api.get.mockImplementation(routeGet({ devices: [looseDevice], gateways: [gateway, looseGw] }))
+    await renderSiteMap()
+
+    // Devices but no gateways: only the Devices page is offered, and it says how many.
+    fireEvent.click(screen.getByRole('button', { name: /Simulated/ }))
+    expect(within(panel()).queryByRole('button', { name: /Open Devices page/ })).toBeNull()
+    expect(within(panel()).queryByRole('button', { name: /Open Gateways page/ })).toBeNull()
+    expect(within(panel()).getByText('No Simulated Assets.')).toBeInTheDocument()
+
+    // The queue holds one of each, so both are offered.
+    fireEvent.click(screen.getByRole('button', { name: /Unassigned/ }))
+    expect(within(panel()).getByRole('button', { name: /Open Devices page/ })).toBeInTheDocument()
+    expect(within(panel()).getByRole('button', { name: /Open Gateways page/ })).toBeInTheDocument()
+    expect(within(panel()).getByTitle('File these 1 device(s) on the Devices page')).toBeInTheDocument()
+  })
+
+  it('offers the Devices page alone to a lane holding only devices', async () => {
+    const siteWideDevice = {
+      ...device, asset_id: 'dev-sw', asset_name: 'Weather_Station', effective_cell_id: null,
+      gateway_cell_id: null, location_source: 'site_wide', effective_area_id: null
+    }
+    api.get.mockImplementation(routeGet({ devices: [siteWideDevice], gateways: [] }))
+    await renderSiteMap()
+    fireEvent.click(screen.getByRole('button', { name: /Site-Wide/ }))
+    expect(within(panel()).getByText('Weather_Station')).toBeInTheDocument()
+    expect(within(panel()).getByRole('button', { name: /Open Devices page/ })).toBeInTheDocument()
+    expect(within(panel()).queryByRole('button', { name: /Open Gateways page/ })).toBeNull()
+  })
+
   it('gives the panel to whichever of a lane, an area or a pin was clicked last', async () => {
     await renderSiteMap()
     fireEvent.click(await screen.findByRole('button', { name: 'Bay 1' }))

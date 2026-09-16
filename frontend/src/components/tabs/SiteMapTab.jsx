@@ -424,10 +424,14 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           title: 'Click one to open it on the Devices page'
         }
       ].filter(Boolean),
+      // Each action is offered only while the lane holds something to act on, as the cell panel
+      // offers Open Dashboard only to a cell that has one. An empty lane is a state to read, not a
+      // job: sending somebody to the Devices page to file nothing is a dead end wearing the
+      // clothes of a next step.
       actions: onNavigateTab ? [
-        { label: 'Open Devices page', icon: <IconCpu size={13} />, onClick: () => onNavigateTab('devices'), title: 'File devices on the Devices page' },
-        { label: 'Open Gateways page', icon: <IconRadio size={13} />, onClick: () => onNavigateTab('gateways'), title: 'File gateways on the Gateways page' }
-      ] : []
+        laneAssets.length > 0 && { label: 'Open Devices page', icon: <IconCpu size={13} />, onClick: () => onNavigateTab('devices'), title: `File these ${laneAssets.length} device(s) on the Devices page` },
+        laneGateways.length > 0 && { label: 'Open Gateways page', icon: <IconRadio size={13} />, onClick: () => onNavigateTab('gateways'), title: `File these ${laneGateways.length} gateway(s) on the Gateways page` }
+      ].filter(Boolean) : []
     }
   })() : null
 
