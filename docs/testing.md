@@ -272,6 +272,11 @@ python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
+# Naming a person in the audit trail (0116). A read surface over auth.users whose every safety
+# property is in the function body rather than in a grant, so a gate that stops working fails open
+# with the page looking exactly as it should. Both directions per role, and `anon` stopped by the
+# missing grant before it reaches the body.
+python supabase/migrations/test_user_accounts_listing.py
 python supabase/migrations/test_relocate_devices.py
 # Plans and places (0098, 0113). A place belongs to one area's plan, so moving the cell drops it
 # unless the same write names a new one; the spacing between two cells on one plan is refused by

@@ -1283,6 +1283,38 @@ Same name, different columns, and the chain aborts at file one on the *second* b
 has dropped the FDW server with `CASCADE`. `scripts/check-docs-drift.mjs` asserts against exactly
 that and names the remedy.
 
+### A person has a name the dashboard can read (`0116`)
+
+**The audit trail could not say who.** `log_role_assignment()` keys a role-assignment row by
+`user_roles.user_id`, so a lane on the Digital Thread is one *person's* history — and nothing
+served to the browser could turn that id into anybody. `auth.users` is not exposed by PostgREST,
+`public.user_roles` is not published to clients, and `list_machine_principals()` returns only the
+identities that *cannot* sign in. The lane that answers "who was given what, and when" drew a
+shortened uuid, which answers two thirds of the question.
+
+`list_user_accounts()` returns id and email for the other half of `auth.users`. **Membership is
+`NOT is_machine_principal()`**, not a second test of its own: `0048`'s header is explicit that a
+second definition of "is this a service account" would be worse than the bug it fixed, and this is
+where a second one would have gone. The two would agree until the day they did not.
+
+**The gate matches the policy on the rows these names label.** `digital_thread_select_security`
+admits Administrator and Auditor, and a role assignment is stamped into that lane — so anybody who
+can read the lane can read the names in it, and nobody else learns anything.
+Administrator-only, as `list_machine_principals()` is, would leave an Auditor reading a lane of
+uuids beside an Administrator reading people: the same record told two ways, which is the one thing
+an audit trail must not do.
+
+Email and nothing else. It is the only human-readable identifier `auth.users` carries here —
+`raw_user_meta_data` is empty on every account this stack creates — and a read surface over the auth
+schema should return the least that does the job. It may be NULL, and the caller falls back to the
+id rather than being told the account does not exist.
+
+Every property that makes this safe is in the function body rather than in a grant, because
+`authenticated` holds EXECUTE and the function decides. A gate that stops working therefore fails
+**open**, silently, with the page looking exactly as it should — so
+`test_user_accounts_listing.py` asserts both directions per role, and that `anon` is stopped by the
+missing grant before it reaches the body at all.
+
 ### The ingestion daemon does not hold `service_role`
 
 It used to, and that was the one credential on this stack whose compromise no policy written

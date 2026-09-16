@@ -548,6 +548,13 @@ export const SUITES = {
       'failing anything; a total counted over the page instead of the match, or a search that ' +
       'cannot reach a deleted asset, misreports how much of the record the reader has seen.',
   },
+  'supabase/migrations/test_user_accounts_listing.py': {
+    lanes: ['db'],
+    why:
+      'The read surface over auth.users that names a person in the audit trail (0116). Every ' +
+      'property that makes it safe is in the function body rather than in a grant, so a gate ' +
+      'that stops working fails open, silently, with the page looking exactly as it should.',
+  },
   'supabase/migrations/test_digital_thread_partitioning.py': {
     lanes: ['db'],
     why:
