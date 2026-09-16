@@ -1846,6 +1846,19 @@ tbody tr:hover { background: var(--bg-glass); }
 .site-lane-queue:hover,
 .site-lane-queue.is-open { box-shadow: 0 0 14px rgba(255, 179, 0, 0.2); }
 
+/* A lane wears its hue only while it holds something. An empty Unassigned queue is the good state
+   and an amber tile over 0 · 0 was a standing false alarm, so an empty lane keeps its outline and
+   drops the fill. The 4px cap stays 4px, in grey: dropping it would make the empty lanes shorter
+   than the full ones and the strip ragged. Compounded, so it outranks each lane's own hue. */
+.site-lane.is-empty {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.site-lane.is-empty:hover,
+.site-lane.is-empty.is-open { border-color: var(--border-hover); box-shadow: none; }
+
 /* The open lane is the one the panel shows: the same outline the selected pin gets. */
 .site-lane.is-open { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -1890,6 +1903,9 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* The counts sit at the top right, in the header's own line. */
 .area-thumb-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+
+/* The area's own assets, in the same line as the rest. Marked so the breakdown reads as one. */
+.area-thumb-wide { color: var(--text); }
 
 .area-thumb-name {
   flex: 1 1 auto;
