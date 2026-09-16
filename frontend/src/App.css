@@ -1891,124 +1891,63 @@ tbody tr:hover { background: var(--bg-glass); }
 /* The counts sit at the top right, in the header's own line. */
 .area-thumb-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
 
-.area-thumb-footer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-/* The floor selector: one button per floor between two arrows, the lowest floor leftmost, the
-   shown one pressed and always in the middle. It changes what the thumbnail draws without opening
-   the area. The arrows are pinned at the ends; the strip between them is clipped, not scrollable,
-   and the page slides the track so the pressed floor sits centred -- the arrows and the buttons
-   are the only way to move it, so nobody can drag it somewhere and lose their place. */
-.area-thumb-floors { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; }
-
-.area-thumb-floors .btn { padding: 2px 7px; white-space: nowrap; }
-
-.area-thumb-floors-scroll {
+.area-thumb-name {
   flex: 1 1 auto;
   min-width: 0;
-  position: relative;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.area-thumb-floors-track {
-  display: flex;
-  gap: 4px;
-  width: max-content;
-  transition: transform 0.2s ease;
-}
+.area-thumb-name:hover { color: var(--accent); }
+.area-thumb-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
-@media (prefers-reduced-motion: reduce) {
-  .area-thumb-floors-track { transition: none; }
-}
+.area-thumb.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
 
-
-/* The zoomed view: the floor rail and the tray in a side column, the plan beside them. */
-.site-map-view {
-  display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-
-@media (max-width: 720px) {
-  .site-map-view { grid-template-columns: minmax(0, 1fr); }
-}
-
-.site-map-side {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  position: sticky;
-  top: 8px;
-}
-
-/* The way back and the zoom: in the side column above the floor rail, or alone above the
-   empty state of an area with no floors. */
-.site-map-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.site-map-side .site-map-toolbar { margin-bottom: 0; }
-
-.floor-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.floor-rail .btn { justify-content: flex-start; }
-
-/* The glyph on a floor that carries an uploaded plan; a floor without one draws the outline. */
-.floor-plan-flag { display: inline-flex; align-items: center; margin-left: 4px; opacity: 0.75; }
-
-.floor-rail-level {
-  display: inline-block;
-  min-width: 22px;
-  text-align: right;
-  font-family: 'JetBrains Mono', monospace;
+/* Only what the plan cannot draw: cells with no place on it, and the area-wide assets that have
+   no place by definition. Absent when there is nothing to say, so the line means there is. */
+.area-thumb-aside {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
   font-size: 11px;
-  opacity: 0.8;
+  color: var(--text-muted);
+  text-align: center;
+  cursor: pointer;
 }
 
-/* The stage is as tall as the room below it, measured by the page, so the map fits without the
-   page scrolling; past zoom 1 the plan outgrows it and scrolls inside. The plan is as wide as the
-   stage or as wide as its height allows at the floor's aspect, whichever is less, and centred.
-   Neither side is drawn shorter than --plan-min-side: a corridor or a tower section would
-   otherwise be a strip narrower than a pin, so it grows and scrolls instead. `--plan-aspect` is
-   set by FloorPlan on the plan itself. */
-.site-map-stage {
-  --plan-min-side: 240px;
-  overflow: auto;
-  max-height: calc(var(--map-fit-height, 72vh) * var(--map-zoom, 1));
-  overscroll-behavior: contain;
+.area-thumb-aside:hover { color: var(--text); }
+.area-thumb-aside-warn { color: var(--warning-text); }
+
+/* The grid is the map, so it follows the number of areas rather than a fixed minimum width: one
+   area takes the row, two split it, three or more settle on thirds. Below the breakpoint every
+   area takes the row, whatever the count. */
+.shopfloor-grid {
+  grid-template-columns: repeat(var(--map-columns, 3), minmax(0, 1fr));
 }
 
-.site-map-stage-inner { min-width: 100%; }
-
-.site-map-stage .floor-plan {
-  width: max(
-    min(100%, calc(var(--map-fit-height, 72vh) * var(--map-zoom, 1) * var(--plan-aspect, 1.3333))),
-    var(--plan-min-side),
-    calc(var(--plan-min-side) * var(--plan-aspect, 1.3333))
-  );
-  margin: 0 auto;
+@media (max-width: 900px) {
+  .shopfloor-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* A thumbnail is at most --thumb-max-height tall: a tall plan is a narrow column in its card
-   rather than a card the height of the page. */
+/* A plan is at most --thumb-max-height tall: a tall plan is a narrow column in its card rather
+   than a card the height of the page. It grows as the grid narrows, because the pins on it have
+   to stay apart at the spacing the database enforces. */
 .area-thumb {
   --thumb-max-height: 260px;
 }
+
+.shopfloor-grid[style*="--map-columns: 2"] .area-thumb { --thumb-max-height: 340px; }
+.shopfloor-grid[style*="--map-columns: 1"] .area-thumb { --thumb-max-height: 440px; }
 
 .area-thumb .floor-plan {
   width: min(100%, calc(var(--thumb-max-height) * var(--plan-aspect, 1.3333)));

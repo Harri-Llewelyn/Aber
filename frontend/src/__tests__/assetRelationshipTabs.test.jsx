@@ -236,9 +236,8 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 // Site Map -> Cells hand-over: a pin on the Site Map opens the cell's panel, whose action emits
 // the cell id, and Cells consumes it the way Gateways and Devices consume theirs.
 describe('The Site Map hands a cell over to the Cells page', () => {
-  const floor = { floor_id: 'floor-g', area_id: 'area-1', level: 0, name: 'Ground floor', plan_path: null, plan_aspect: null }
-  const area = { area_id: 'area-1', area_name: 'Building A', icon: 'Factory', floors: [floor], floor_count: 1, cells: [] }
-  const placedCell = { ...cell, area_id: 'area-1', floor_id: 'floor-g', plan_x: 0.4, plan_y: 0.6 }
+  const area = { area_id: 'area-1', area_name: 'Building A', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
+  const placedCell = { ...cell, area_id: 'area-1', plan_x: 0.4, plan_y: 0.6 }
   const routes = (path) => {
     if (path.startsWith('/api/v1/areas')) return Promise.resolve([area])
     return routeGet({ cells: [placedCell] })(path)

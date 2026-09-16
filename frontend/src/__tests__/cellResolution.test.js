@@ -5,8 +5,6 @@ import {
   SCOPE_SITE_WIDE,
   SOURCE_AREA_WIDE,
   groupCellsByArea,
-  groupCellsByFloor,
-  floorLabel,
   LOCATION_SCOPES,
   SOURCE_EXPLICIT,
   SOURCE_INHERITED,
@@ -138,37 +136,13 @@ describe('effective area resolution', () => {
   });
 });
 
-describe('grouping cells by area and floor', () => {
+describe('grouping cells by area', () => {
   it('keeps unfiled cells under a null key, because that bucket is the Areas page queue', () => {
     const byArea = groupCellsByArea([{ cell_id: 'c1', area_id: AREA_1 }, { cell_id: 'c2', area_id: null }, { cell_id: 'c3' }]);
     expect(byArea.get(AREA_1).map(c => c.cell_id)).toEqual(['c1']);
     expect(byArea.get(null).map(c => c.cell_id)).toEqual(['c2', 'c3']);
   });
 
-  it('groups by the floor rows top-down, only the floors holding a cell, and cells on no floor last', () => {
-    const floors = [
-      { floor_id: 'f0', level: 0, name: 'Ground floor' },
-      { floor_id: 'f2', level: 2, name: 'Floor 2' },
-      { floor_id: 'f1', level: 1, name: 'Mezzanine' },
-      { floor_id: 'fb', level: -1, name: 'Basement' },
-      { floor_id: 'empty', level: 3, name: 'Roof' }
-    ];
-    const groups = groupCellsByFloor([
-      { cell_id: 'b', floor_id: 'fb' }, { cell_id: 'two', floor_id: 'f2' }, { cell_id: 'g', floor_id: 'f0' },
-      { cell_id: 'none' }, { cell_id: 'one', floor_id: 'f1' }, { cell_id: 'gone', floor_id: 'deleted' }
-    ], floors);
-    expect(groups.map(g => g.floor?.floor_id ?? null)).toEqual(['f2', 'f1', 'f0', 'fb', null]);
-    expect(groups.map(g => g.label)).toEqual(['Floor 2', 'Mezzanine', 'Ground floor', 'Basement', 'No floor set']);
-    // A floor id the area no longer has reads as no floor, not as a crash.
-    expect(groups[4].cells.map(c => c.cell_id)).toEqual(['none', 'gone']);
-  });
-
-  it('labels a floor the way a person on the stairs would', () => {
-    expect(floorLabel(0)).toBe('Ground floor');
-    expect(floorLabel(3)).toBe('Floor 3');
-    expect(floorLabel(-1)).toBe('Basement');
-    expect(floorLabel(undefined)).toBe('No floor set');
-  });
 });
 
 describe('preferring the server-resolved row', () => {

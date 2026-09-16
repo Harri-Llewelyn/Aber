@@ -4,18 +4,18 @@ import { cellIconComponent } from '../../utils/cellIcon'
 import { floorAspect, nearestConflict, isPlaced, formatPlace, DEFAULT_MIN_PIN_SPACING } from '../../utils/floorPlans'
 
 /**
- * Where a cell sits on its floor's plan, chosen by clicking the plan. The other cells on the floor
+ * Where a cell sits on its area's plan, chosen by clicking the plan. The other cells in the area
  * are drawn muted so the operator can see what is already there, and a click closer to one of them
  * than the spacing setting allows is refused here with the neighbour named; the database refuses
  * the same write again.
  *
  * `value` is `{ x, y }` in fractions or null; `onChange` receives the same.
  */
-export function FloorPlacementPicker({ floor, cells, cellId, cellIcon, value, onChange, minSpacing = DEFAULT_MIN_PIN_SPACING, disabled = false }) {
+export function FloorPlacementPicker({ area, cells, cellId, cellIcon, value, onChange, minSpacing = DEFAULT_MIN_PIN_SPACING, disabled = false }) {
   const [refusal, setRefusal] = useState(null)
-  const floorId = floor?.floor_id ?? floor?.id
-  const others = (cells || []).filter(c => c.floor_id === floorId && (c.cell_id ?? c.id) !== cellId)
-  const aspect = floorAspect(floor)
+  const areaId = area?.area_id ?? area?.id
+  const others = (cells || []).filter(c => c.area_id === areaId && (c.cell_id ?? c.id) !== cellId)
+  const aspect = floorAspect(area)
 
   const place = (p) => {
     if (disabled) return
@@ -28,14 +28,14 @@ export function FloorPlacementPicker({ floor, cells, cellId, cellIcon, value, on
     onChange?.(p)
   }
 
-  if (!floor) {
-    return <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Choose a floor to place the cell on its plan.</div>
+  if (!area) {
+    return <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>File the cell into an area to place it on a plan.</div>
   }
 
   return (
     <div className="floor-placement">
       <FloorPlan
-        floor={floor}
+        area={area}
         onPlaceClick={disabled ? undefined : place}
         title={disabled ? undefined : 'Click where the cell is on this plan'}
       >
@@ -48,7 +48,7 @@ export function FloorPlacementPicker({ floor, cells, cellId, cellIcon, value, on
             small
             Icon={cellIconComponent(c.icon)}
             label={c.cell_name ?? c.name}
-            title={`${c.cell_name ?? c.name} — already on this floor`}
+            title={`${c.cell_name ?? c.name} — already in this area`}
           />
         ))}
         {value && (
@@ -60,7 +60,7 @@ export function FloorPlacementPicker({ floor, cells, cellId, cellIcon, value, on
           {refusal || (value ? `Placed ${formatPlace({ plan_x: value.x, plan_y: value.y })}.` : 'Not placed — the cell is listed beside the plan until it is.')}
         </span>
         {value && !disabled && (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setRefusal(null); onChange?.(null) }} title="Take the cell off the plan; it stays on the floor">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setRefusal(null); onChange?.(null) }} title="Take the cell off the plan; it stays in the area">
             Clear place
           </button>
         )}

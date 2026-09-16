@@ -1346,8 +1346,7 @@ between, for the Unified Namespace bridge to name a reading's place
   the migration that promotes it. The bridge publishes nothing while it is empty.
 - **An area is a building**: `public.areas`, with `cells.area_id` nullable and `ON DELETE SET
   NULL`, so deleting a building un-files its cells into the Areas page's queue rather than
-  deleting them. `cells.floor` is a small integer (ground 0, basements negative) for grouping the
-  Overview map; it is deliberately not a level. `cells.description` is free text, shown as a
+  deleting them. `cells.description` is free text, shown as a
   help tip beside the cell's name on the map. `areas.icon` is a closed set of keys
   (`areas_icon_valid`) mirrored by `frontend/src/utils/areaIcon.jsx`, as `cells.icon` is.
 - **`location_scope` gains `area_wide`**: a building's BMS, with no single cell and one area. It
@@ -1361,8 +1360,8 @@ between, for the Unified Namespace bridge to name a reading's place
   REPLACE` can append a column but cannot take one away, so `0001`'s replay after `0097` had
   widened the view would have failed on the second boot. DROP VIEW discards the grants, and both
   files re-apply them, as `ensure_gateway_status_view()` does.
-- **The proposal lanes admit the new columns** (`area_id` on devices and gateways, `area_id` and
-  `floor` on cells), and `approve_proposal()` assigns them; `relocate_devices()` takes `area_id`
+- **The proposal lanes admit the new columns** (`area_id` on devices and gateways, and `area_id`
+  on cells), and `approve_proposal()` assigns them; `relocate_devices()` takes `area_id`
   on a move. `approve_quarantined_device()` is dropped and redeclared with `p_area_id` and
   `p_set_area`, so a quarantined device can be approved straight into Area-Wide; the old
   signature has to go first, or PostgREST would find two. `areas` joins the asset audit domain.
@@ -1372,42 +1371,52 @@ buildings are one ISA-95 site, so such a BMS is already Site-Wide; a join table 
 the view one row per pair, published each reading once per site, and let a per-site ACL leak a
 shared device.
 
-### A floor is a row, and a cell has a place on it (`0098`)
+### A cell has a place on its area's plan (`0098`, `0113`)
 
-`cells.floor` was an integer that grouped the Overview. `0098` makes a floor a row of its area,
-`public.area_floors`, one per (area, level), named, and carrying the SVG plan the Site Map draws.
+An area carries one SVG plan and a cell takes a place on it as two fractions of the plan's viewBox
+(`plan_x` across, `plan_y` down). **A floor is not modelled.** `0098` first made one a row of its
+own (`area_floors`) and the Site Map drew one floor of an area at a time; that hid every cell not
+on the floor being shown while the count beside it named the whole area, so `0113` retires the
+level — each floor above an area's ground floor becomes an area of its own, and a building with two
+floors is two areas. `0098` now describes the database this leaves and `0113` moves one that still
+has floors, which is `0028`'s split: one migration creates, another moves, and neither fights the
+other's replay.
 
-- **Every area has a ground floor** from the moment it exists: an AFTER INSERT trigger on
-  `areas` creates level 0. The old integer column is backfilled into rows, one per (area, level)
-  a cell named, and then dropped; the block is guarded on the column, so the replay does nothing.
-- **A cell files onto a floor of its own area** (`cells.floor_id`) and takes a place on that
-  floor's plan as two fractions of the plan's viewBox (`plan_x`, `plan_y`). `place_cell_on_its_
-  floor()` runs BEFORE INSERT OR UPDATE: a floor of another area is refused; when the area moves
-  under a floor that stayed — an unfiling, an area deletion, a proposal that changed only the
-  area — the floor and the place are cleared rather than refused; a place needs a floor; and two
-  placed cells on one floor keep `site_map.min_pin_spacing` between them, measured by
-  `plan_distance()` in units of the plan's shorter side so one number means the same on a wide
-  plan and a tall one. The picker on the Cells page refuses the click first; the trigger is the
-  authority, because an approved proposal writes the same columns.
-- **A floor holding cells cannot be deleted, nor an area's last floor**, except through the
-  area's own deletion, which cascades. `guard_floor_delete()` tells the two apart by asking
-  whether the area row still exists — inside the cascade it is already gone.
-- **The plan is an object, never markup.** `plan_path` names an object in the private
-  `floor-plans` bucket under `<area_id>/<floor_id>/`; `is_floor_plan_path()` confines the bucket's
-  write policies to a floor that exists. `plan_aspect` is read from the SVG at upload, because a
-  place is a fraction and the aspect is what turns it back into a distance. The dashboard renders
-  a plan through an `<img>` fed a blob URL, where an SVG's scripts, foreign objects and external
+- **A place needs an area**, and `place_cell_in_its_area()` runs BEFORE INSERT OR UPDATE to keep
+  it honest. A place is a point on one area's plan and says nothing on another's, so a cell moved
+  between areas without being given a new place loses the one it had; a move that names a place
+  keeps what it names, which is how the Cells page files and places in a single write. Two placed
+  cells in one area keep `site_map.min_pin_spacing` between them, measured by `plan_distance()` in
+  units of the plan's shorter side so one number means the same on a wide plan and a tall one. The
+  picker on the Cells page refuses the click first; the trigger is the authority, because an
+  approved proposal writes the same columns.
+- **The plan is an object, never markup.** `areas.plan_path` names an object in the private
+  `floor-plans` bucket under `<area_id>/`; `is_floor_plan_path()` confines the bucket's write
+  policies to an area that exists. `plan_aspect` is read from the SVG at upload, because a place is
+  a fraction and the aspect is what turns it back into a distance. The dashboard renders a plan
+  through an `<img>` fed a blob URL, where an SVG's scripts, foreign objects and external
   references cannot run.
-- **The proposal lane** for cells admits `floor_id`, `plan_x` and `plan_y` in place of `floor`,
-  and `approve_proposal()` assigns them. `area_floors` joins the asset audit domain.
-- **`areas` and `area_floors` join the `supabase_realtime` publication**, `REPLICA IDENTITY FULL`
-  like the other published tables, so a floor added on the Areas page reaches an open Overview at
-  once. `0098` adds them where they are created; `0001`'s intended list names them too, because
-  its `SET TABLE` replaces the whole membership on every replay.
+- **The proposal lane** for cells admits `plan_x` and `plan_y`, and `approve_proposal()` assigns
+  them.
+- **`areas` joins the `supabase_realtime` publication**, `REPLICA IDENTITY FULL` like the other
+  published tables, so a plan attached on the Areas page reaches an open Site Map at once. `0098`
+  adds it where the plan is declared; `0001`'s intended list names it too, because its `SET TABLE`
+  replaces the whole membership on every replay.
 
-Unplaced is a state, not an error: a cell filed on a floor with no place is listed beside the
-plan. Filing a cell into an area is what puts its devices under the right Unified Namespace
-topic, and that must never wait on somebody opening a drawing.
+**What `0113` does to a database that still has floors.** Every floor other than the one the Site
+Map used to open on — level 0, else the lowest above ground, else the highest basement — becomes a
+new area named `<area> <floor>`, sanitised of `/ + #` and de-duplicated first by level and then by
+the floor's id. Its cells move to it; the original area keeps its id, its name, its ground floor's
+cells and every Area-Wide asset pointed at it. **Plans do not survive**: an object path names the
+floor it was uploaded for and SQL cannot move a storage object, so every area starts on the default
+outline and a `NOTICE` names the plans to upload again. An open cells proposal naming `floor_id` is
+**rejected with a reason rather than edited**: `approve_proposal()` merges a patch with
+`jsonb_populate_record()`, which ignores a key with no matching column, so a patch left alone would
+approve cleanly having relocated nothing.
+
+Unplaced is a state, not an error: a cell filed in an area with no place is listed beside the plan,
+in the area's own panel on the Site Map. Filing a cell into an area is what puts its devices under
+the right Unified Namespace topic, and that must never wait on somebody opening a drawing.
 
 ### The playback gateway is visible and almost inert (`0067`)
 
@@ -3489,14 +3498,16 @@ storage; `floor-plans` is the odd one out below.
 | | `asset-3d-models` | `broker-captures` | `floor-plans` |
 | :--- | :--- | :--- | :--- |
 | Public read | **yes** | **no** | **no** |
-| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing floor's prefix |
+| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix |
 | Read | anyone, including `anon` | those two plus **Auditor** | every signed-in role |
 | Operator | read | nothing | read |
 | Reached by | a plain public URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
 
-`floor-plans` is readable by every signed-in role because the Overview is the page an Operator
+`floor-plans` is readable by every signed-in role because the Site Map is the page an Operator
 lives on, and private because a plan is a drawing of the plant and SVG is active content: the
-bucket admits `image/svg+xml` only, and the dashboard never inlines it.
+bucket admits `image/svg+xml` only, and the dashboard never inlines it. The name survives the
+retirement of floors as a modelled level: one plan belongs to one area, and the drawing is still
+a floor plan.
 
 ### `asset-3d-models` is public-read, and that is not laziness
 

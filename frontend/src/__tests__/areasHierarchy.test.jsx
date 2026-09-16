@@ -1,7 +1,7 @@
 /**
- * The ISA-95 rung above the cells: the Areas page files cells into areas and manages their floors,
- * and the Site Map draws each area's floors. Both read the same lists every other
- * page reads.
+ * The ISA-95 rung above the cells: the Areas page files cells into areas and carries each area's
+ * plan, and the Site Map draws every area at once with its cells pinned on it. Both read the same
+ * lists every other page reads.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
@@ -14,19 +14,17 @@ vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
   return {
     ...actual,
+    // The plan is downloaded through the authenticated client and handed to an <img>; without a
+    // stub the download rejects and every plan reads as unavailable rather than as a drawing.
+    loadFloorPlanUrl: vi.fn().mockResolvedValue('blob:plan-1'),
     api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), uploadFloorPlan: vi.fn(), removeFloorPlan: vi.fn() }
   }
 })
 
 const NOW = Date.parse('2026-09-11T12:00:00Z')
 
-const groundA = { floor_id: 'floor-a0', area_id: 'area-a', level: 0, name: 'Ground floor', plan_path: null, plan_aspect: null }
-const firstA = { floor_id: 'floor-a1', area_id: 'area-a', level: 1, name: 'Floor 1', plan_path: 'area-a/floor-a1/plan-1.svg', plan_aspect: 1.5 }
-const basementA = { floor_id: 'floor-ab', area_id: 'area-a', level: -1, name: 'Deep basement', plan_path: null, plan_aspect: null }
-const groundB = { floor_id: 'floor-b0', area_id: 'area-b', level: 0, name: 'Ground floor', plan_path: null, plan_aspect: null }
-
-const areaA = { area_id: 'area-a', area_name: 'Building A', description: null, icon: 'Factory', cells: [], cell_count: 0, floors: [firstA, groundA, basementA], floor_count: 3 }
-const areaB = { area_id: 'area-b', area_name: 'Building B', description: 'The annexe', icon: 'Warehouse', cells: [], cell_count: 0, floors: [groundB], floor_count: 1 }
+const areaA = { area_id: 'area-a', area_name: 'Building A', description: null, icon: 'Factory', cells: [], cell_count: 0, plan_path: 'area-a/plan-1.svg', plan_aspect: 1.5 }
+const areaB = { area_id: 'area-b', area_name: 'Building B', description: 'The annexe', icon: 'Warehouse', cells: [], cell_count: 0, plan_path: null, plan_aspect: null }
 
 const gateway = {
   gateway_id: 'gw-1', gateway_name: 'Line_Gateway', cell_id: 'cell-1', location_scope: 'cell', sparkplug_group: 'ACS-Cymru',
@@ -48,14 +46,14 @@ const bms = {
 }
 
 const cells = [
-  // Placed on the ground floor of A.
-  { cell_id: 'cell-1', cell_name: 'Bay 1', area_id: 'area-a', floor_id: 'floor-a0', plan_x: 0.3, plan_y: 0.4, is_archived: false, description: 'Five-axis machining, two shifts', gateways: [gateway], gateway_count: 1 },
-  // On the first floor of A, not yet placed.
-  { cell_id: 'cell-2', cell_name: 'Bay 2', area_id: 'area-a', floor_id: 'floor-a1', plan_x: null, plan_y: null, is_archived: false, gateways: [], gateway_count: 0 },
-  // In B, on no floor.
-  { cell_id: 'cell-3', cell_name: 'Paint Shop', area_id: 'area-b', floor_id: null, plan_x: null, plan_y: null, is_archived: false, gateways: [], gateway_count: 0 },
+  // Placed on A's plan.
+  { cell_id: 'cell-1', cell_name: 'Bay 1', area_id: 'area-a', plan_x: 0.3, plan_y: 0.4, is_archived: false, description: 'Five-axis machining, two shifts', gateways: [gateway], gateway_count: 1 },
+  // Also in A, and placed well clear of Bay 1: BOTH are pins, which is the point of the one view.
+  { cell_id: 'cell-2', cell_name: 'Bay 2', area_id: 'area-a', plan_x: 0.8, plan_y: 0.8, is_archived: false, gateways: [], gateway_count: 0 },
+  // In B, with no place on its plan.
+  { cell_id: 'cell-3', cell_name: 'Paint Shop', area_id: 'area-b', plan_x: null, plan_y: null, is_archived: false, gateways: [], gateway_count: 0 },
   // In no area.
-  { cell_id: 'cell-4', cell_name: 'Loose End', area_id: null, floor_id: null, plan_x: null, plan_y: null, is_archived: false, gateways: [], gateway_count: 0 }
+  { cell_id: 'cell-4', cell_name: 'Loose End', area_id: null, plan_x: null, plan_y: null, is_archived: false, gateways: [], gateway_count: 0 }
 ]
 
 const routeGet = (overrides = {}) => (path) => {
@@ -80,14 +78,12 @@ afterEach(() => {
 })
 
 const thumbs = () => [...document.querySelectorAll('.shopfloor-grid > .area-thumb')]
-const pins = () => [...document.querySelectorAll('.site-map-stage .floor-pin')]
+const pins = () => [...document.querySelectorAll('.area-thumb .floor-pin')]
 const pinNames = () => pins().map(p => p.getAttribute('aria-label'))
 const lanes = () => [...document.querySelectorAll('.site-lanes > .site-lane')]
 const panel = () => document.querySelector('.context-panel')
 const follows = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
-/** The floor the open area shows: the pressed button on the rail. */
-const shownFloor = () => within(screen.getByRole('group', { name: 'Floor' })).getAllByRole('button').find(b => b.getAttribute('aria-pressed') === 'true')?.textContent
-const hierarchy = () => screen.getByRole('group', { name: 'Hierarchy' })
+const grid = () => document.querySelector('.shopfloor-grid')
 
 describe('SiteMapTab draws the areas on the Site Map', () => {
   const renderSiteMap = async () => {
@@ -115,21 +111,37 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(hierarchy).queryByText(/Not set/)).toBeNull()
   })
 
-  it('shows every area as its ground floor with its counts at the top, and the unfiled cells beside them', async () => {
+  it('shows every area at once, with every placed cell pinned and the counts above it', async () => {
     await renderSiteMap()
     expect(thumbs().map(t => within(t).getByText(/Building/).textContent)).toEqual(['Building A', 'Building B'])
     // Cells, gateways and devices in the header; Area-Wide assets count, so Building A's BMS does.
     expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
     expect(within(thumbs()[1].querySelector('.area-thumb-header')).getByText('1 Cell · 0 Gateways · 0 Devices')).toBeInTheDocument()
-    expect(screen.queryByText(/\d floors?$/)).toBeNull()
-    // The ground floor's placed cell is a small pin on the thumbnail, named; the first-floor cell is not.
-    expect(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' })).toBeInTheDocument()
+    // THE POINT OF THE ONE VIEW: both of Building A's cells are pinned, and the header's count
+    // agrees with what is drawn. A floor selector used to show one of them at a time.
+    expect(pinNames()).toEqual(['Bay 1', 'Bay 2'])
     expect(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' }).querySelector('.floor-pin-label')).toHaveTextContent('Bay 1')
-    expect(within(thumbs()[0]).queryByRole('button', { name: 'Bay 2' })).toBeNull()
-    // All areas is the way back from an area, so it is not offered while every area is shown.
+    // Nothing to enter and nothing to come back from.
     expect(screen.queryByRole('button', { name: 'All areas' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Zoom' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Floor' })).toBeNull()
     const unfiled = document.querySelector('[data-tray="unfiled"]')
     expect(within(unfiled).getByText('Loose End')).toBeInTheDocument()
+  })
+
+  /* The grid is the map, so it widens as the plant shrinks, and the pin grows with the tile: at
+     the narrowest a pin is still above the 24px a pointer needs. */
+  it('sizes the grid and its pins from the number of areas', async () => {
+    await renderSiteMap()
+    expect(grid().style.getPropertyValue('--map-columns')).toBe('2')
+    expect(grid().style.getPropertyValue('--pin-size')).toBe('36px')
+
+    api.get.mockImplementation(routeGet({ areas: [areaA] }))
+    render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
+    await waitFor(() => expect(document.querySelectorAll('.shopfloor-grid').length).toBe(2))
+    const single = [...document.querySelectorAll('.shopfloor-grid')][1]
+    expect(single.style.getPropertyValue('--map-columns')).toBe('1')
+    expect(single.style.getPropertyValue('--pin-size')).toBe('44px')
   })
 
   it('keeps the three campus lanes side by side in the Site Map card, each in its own hue, with no area selector', async () => {
@@ -142,7 +154,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
       expect.stringContaining('site-lane-simulated'),
       expect.stringContaining('site-lane-queue')
     ])
-    expect(screen.queryByText(/Area-Wide/)).toBeNull()
+    expect(within(document.querySelector('.site-lanes')).queryByText(/Area-Wide/)).toBeNull()
     // Every lane is empty on this fixture, so none draws a status dot.
     expect(lanes().every(l => !l.querySelector('.tile-dot'))).toBe(true)
     // The thumbnails are the way into an area: no selector, no arrows.
@@ -208,98 +220,65 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeNull())
   })
 
-  it('gives the panel to whichever of a lane or a pin was clicked last', async () => {
+  it('gives the panel to whichever of a lane, an area or a pin was clicked last', async () => {
     await renderSiteMap()
-    fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Bay 1' }))
-    expect(within(panel()).getByText('Building A · Ground floor')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Simulated/ }))
-    expect(within(panel()).queryByText('Building A · Ground floor')).toBeNull()
-    expect(within(panel()).getByText('Simulated')).toBeInTheDocument()
+    expect(within(panel()).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Building A/ }))
+    expect(within(panel()).queryByText('Five-axis machining, two shifts')).toBeNull()
+    expect(within(panel()).getByText(/An SVG plan is uploaded/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Bay 1' })).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(screen.getByRole('button', { name: /Simulated/ }))
+    expect(within(panel()).queryByText(/An SVG plan is uploaded/)).toBeNull()
+    expect(within(panel()).getByText('Simulated')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Building A/ })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('opens an area on its ground floor, with a floor rail, its pins, and the tray beside the plan', async () => {
+  it('opens an area from its name, listing what its plan cannot show', async () => {
     await renderSiteMap()
-    fireEvent.click(within(thumbs()[0]).getByText('Building A'))
+    fireEvent.click(within(thumbs()[0]).getByRole('button', { name: 'Building A' }))
+    expect(within(panel()).getByText('2 Cells · 2 Devices')).toBeInTheDocument()
+    // Area-Wide has no place on any plan, so the panel is where it lives.
+    expect(within(panel()).getByText('BMS_A')).toBeInTheDocument()
+    // Everything in A is placed, so nothing is listed as unplaced.
+    expect(within(panel()).queryByText(/Not placed \(/)).toBeNull()
 
-    await waitFor(() => expect(pins().length).toBe(1))
-    expect(pinNames()).toEqual(['Bay 1'])
-    expect(shownFloor()).toMatch(/Ground floor/)
-    // No heading restates the area: the hierarchy row names it, the rail names the floor.
-    expect(screen.queryByRole('heading', { level: 4 })).toBeNull()
-    // The rail lists the floors top-down, the ground floor pressed.
-    const rail = screen.getByRole('group', { name: 'Floor' })
-    const railButtons = within(rail).getAllByRole('button').filter(b => /floor|basement/i.test(b.textContent))
-    expect(railButtons.map(b => b.textContent.trim())).toEqual(['1 Floor 1', '0 Ground floor', '-1 Deep basement'])
-    expect(within(rail).getByRole('button', { name: /Ground floor/ })).toHaveAttribute('aria-pressed', 'true')
-    // Floor 1 carries a plan and says so; the ground floor draws the outline and does not.
-    expect(within(rail).getByRole('button', { name: /Floor 1/ }).querySelector('.floor-plan-flag')).toBeTruthy()
-    expect(within(rail).getByRole('button', { name: /Ground floor/ }).querySelector('.floor-plan-flag')).toBeNull()
-    // The hierarchy row gains the area.
-    expect(within(screen.getByRole('group', { name: 'Hierarchy' })).getByText('Building A')).toBeInTheDocument()
-    // Area-Wide sits in the tray, with the BMS, and not as a pin.
-    const wide = document.querySelector('[data-tray="area-wide"]')
-    expect(within(wide).getByText('BMS_A')).toBeInTheDocument()
-    expect(document.querySelector('[data-tray="unplaced"]')).toBeNull()
+    // B's cell has no place, so it is named rather than lost.
+    fireEvent.click(within(thumbs()[1]).getByRole('button', { name: 'Building B' }))
+    expect(within(panel()).getByText('Not placed (1)')).toBeInTheDocument()
+    expect(within(panel()).getByText('Paint Shop')).toBeInTheDocument()
+    expect(within(panel()).getByText(/No plan uploaded/)).toBeInTheDocument()
+    expect(within(panel()).getByText('The annexe')).toBeInTheDocument()
   })
 
-  it('walks the floors from the rail and from the arrows, listing an unplaced cell beside the plan', async () => {
+  /* An area's card says only what the plan cannot draw, so the line's absence means there is
+     nothing outstanding. */
+  it('names the unplaced cells and area-wide assets on the card, and nothing when there are none', async () => {
     await renderSiteMap()
-    fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
-    await waitFor(() => expect(pins().length).toBe(1))
+    expect(within(thumbs()[0]).getByText(/Area-Wide asset/)).toBeInTheDocument()
+    expect(within(thumbs()[1]).getByText('1 cell not placed')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /^1 Floor 1/ }))
-    expect(shownFloor()).toMatch(/Floor 1/)
-    expect(pins()).toHaveLength(0)
-    // Bay 2 is on this floor but has no place: it is in the tray, not lost.
-    const tray = document.querySelector('[data-tray="unplaced"]')
-    expect(within(tray).getByText('Bay 2')).toBeInTheDocument()
-    // The plan itself is the uploaded one for this floor.
-    expect(document.querySelector('.site-map-stage .floor-plan').getAttribute('data-plan')).toBe('uploaded')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Floor below' }))
-    expect(shownFloor()).toMatch(/Ground floor/)
-    fireEvent.click(screen.getByRole('button', { name: 'Floor below' }))
-    expect(shownFloor()).toMatch(/Deep basement/)
-    expect(screen.getByRole('button', { name: 'Floor below' })).toBeDisabled()
-    expect(document.querySelector('.site-map-stage .floor-plan').getAttribute('data-plan')).toBe('outline')
+    api.get.mockImplementation(routeGet({ cells: [cells[0]], devices: [device] }))
+    render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
+    await waitFor(() => expect(document.querySelectorAll('.shopfloor-grid').length).toBe(2))
+    const clean = [...document.querySelectorAll('.shopfloor-grid')][1].querySelector('.area-thumb')
+    expect(clean.querySelector('.area-thumb-aside')).toBeNull()
   })
 
-  it('lists a cell on no floor beside the plan, and shows the default outline for a floor with no plan', async () => {
+  it('draws the uploaded plan where there is one, and the default outline where there is not', async () => {
     await renderSiteMap()
-    fireEvent.click(screen.getByRole('button', { name: 'Building B' }))
-    await waitFor(() => expect(within(hierarchy()).getByText('Building B')).toBeInTheDocument())
-    expect(shownFloor()).toMatch(/Ground floor/)
-    const tray = document.querySelector('[data-tray="no-floor"]')
-    expect(within(tray).getByText('Paint Shop')).toBeInTheDocument()
-    expect(document.querySelector('.site-map-stage .floor-plan').getAttribute('data-plan')).toBe('outline')
-    expect(within(document.querySelector('[data-tray="area-wide"]')).queryByText('BMS_A')).toBeNull()
-  })
-
-  it('zooms the plan in and out, and fits it again', async () => {
-    await renderSiteMap()
-    fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
-    await waitFor(() => expect(pins().length).toBe(1))
-    const inner = () => document.querySelector('.site-map-stage-inner')
-    expect(inner().style.width).toBe('100%')
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
-    expect(inner().style.width).toBe('150%')
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }))
-    expect(inner().style.width).toBe('125%')
-    fireEvent.click(screen.getByRole('button', { name: 'Fit' }))
-    expect(inner().style.width).toBe('100%')
-    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled()
+    expect(thumbs()[0].querySelector('.floor-plan').getAttribute('data-plan')).toBe('uploaded')
+    expect(thumbs()[1].querySelector('.floor-plan').getAttribute('data-plan')).toBe('outline')
   })
 
   it('opens a pin into the details panel, naming where the cell is and what it holds', async () => {
     await renderSiteMap()
-    fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Bay 1' }))
     const panel = document.querySelector('.context-panel')
     expect(within(panel).getByText('Bay 1')).toBeInTheDocument()
-    expect(within(panel).getByText('Building A · Ground floor')).toBeInTheDocument()
+    expect(within(panel).getByText('Building A')).toBeInTheDocument()
     expect(within(panel).getByText('30% across, 40% down')).toBeInTheDocument()
     expect(within(panel).getByText('Line_Gateway')).toBeInTheDocument()
     expect(within(panel).getByText('CNC_01')).toBeInTheDocument()
@@ -309,76 +288,13 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeNull())
   })
 
-  it('keeps the tray under the floor rail, and the plan sized from the room the page measured', async () => {
-    await renderSiteMap()
-    fireEvent.click(screen.getByRole('button', { name: 'Building A' }))
-    await waitFor(() => expect(pins().length).toBe(1))
-    const side = document.querySelector('.site-map-side')
-    // The way back and the zoom sit above the rail, the tray below it.
-    expect(within(side).getByRole('button', { name: 'All areas' })).toBeInTheDocument()
-    expect(within(side).getByRole('group', { name: 'Zoom' })).toBeInTheDocument()
-    expect(follows(within(side).getByRole('group', { name: 'Zoom' }), within(side).getByRole('group', { name: 'Floor' }))).toBe(true)
-    expect(within(side).getByRole('group', { name: 'Floor' })).toBeInTheDocument()
-    expect(side.querySelector('[data-tray="area-wide"]')).toBeTruthy()
-    const stage = document.querySelector('.site-map-stage')
-    expect(follows(side, stage)).toBe(true)
-    // jsdom lays nothing out: every rect is at 0, so the room is the whole 768px window.
-    expect(stage.style.getPropertyValue('--map-fit-height')).toBe('768px')
-    // The plan carries its own aspect for the stage's width rule.
-    expect(stage.querySelector('.floor-plan').style.getPropertyValue('--plan-aspect')).toBe(String(4 / 3))
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
-    expect(stage.style.getPropertyValue('--map-zoom')).toBe('1.25')
-  })
-
-  it('steps a thumbnail through its floors without opening the area, and opens on the floor shown', async () => {
-    await renderSiteMap()
-    const stepper = () => within(thumbs()[0]).getByRole('group', { name: 'Floor of Building A' })
-    // One button per floor, the lowest leftmost, the ground floor pressed to start.
-    const floorButtons = () => within(stepper()).getAllByRole('button').filter(b => /floor|basement/i.test(b.textContent))
-    expect(floorButtons().map(b => b.textContent.trim())).toEqual(['-1 Deep basement', '0 Ground floor', '1 Floor 1'])
-    expect(within(stepper()).getByRole('button', { name: /Ground floor/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(stepper()).getByRole('button', { name: 'Floor above' })).not.toBeDisabled()
-    fireEvent.click(within(stepper()).getByRole('button', { name: 'Floor above' }))
-    // Still the thumbnails: the click was the selector's, not the thumbnail's.
-    expect(thumbs()).toHaveLength(2)
-    expect(within(stepper()).getByRole('button', { name: /^1 Floor 1/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(stepper()).getByRole('button', { name: 'Floor above' })).toBeDisabled()
-    expect(within(thumbs()[0]).queryByRole('button', { name: 'Bay 1' })).toBeNull()
-    // The strip is clipped, not scrollable, and the page slides the track to centre the pressed
-    // floor; jsdom measures nothing, so the slide is zero, but it is the page that set it.
-    const strip = stepper().querySelector('.area-thumb-floors-scroll')
-    expect(strip.querySelector('.area-thumb-floors-track').style.transform).toBe('translateX(0px)')
-    // A floor's own button goes straight there.
-    fireEvent.click(within(stepper()).getByRole('button', { name: /Deep basement/ }))
-    expect(within(stepper()).getByRole('button', { name: /Deep basement/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(stepper()).getByRole('button', { name: 'Floor below' })).toBeDisabled()
-    fireEvent.click(within(stepper()).getByRole('button', { name: 'Floor above' }))
-    fireEvent.click(within(stepper()).getByRole('button', { name: 'Floor above' }))
-    // Building B has one floor, so neither arrow does anything there.
-    const other = within(thumbs()[1]).getByRole('group', { name: 'Floor of Building B' })
-    expect(within(other).getByRole('button', { name: 'Floor above' })).toBeDisabled()
-    expect(within(other).getByRole('button', { name: 'Floor below' })).toBeDisabled()
-    // Opening the area lands on the floor the thumbnail was showing.
-    fireEvent.click(within(thumbs()[0]).getByText('Building A'))
-    await waitFor(() => expect(within(hierarchy()).getByText('Building A')).toBeInTheDocument())
-    expect(shownFloor()).toMatch(/Floor 1/)
-  })
-
-  it('returns to every area with All areas', async () => {
-    await renderSiteMap()
-    fireEvent.click(screen.getByRole('button', { name: 'Building B' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'All areas' })).toBeInTheDocument())
-    expect(thumbs()).toHaveLength(0)
-    fireEvent.click(screen.getByRole('button', { name: 'All areas' }))
-    await waitFor(() => expect(thumbs()).toHaveLength(2))
-  })
-
   it('offers no area selector and says what to do on a plant with no areas', async () => {
     api.get.mockImplementation(routeGet({ areas: [], devices: [device] }))
     render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
     await waitFor(() => expect(screen.getByText(/No areas yet/)).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'All areas' })).toBeNull()
     expect(thumbs()).toHaveLength(0)
+    expect(document.querySelector('.shopfloor-grid')).toBeNull()
   })
 })
 
@@ -390,7 +306,7 @@ describe('AreasTab files cells into areas', () => {
 
   const rowFor = (name) => screen.getByText(name).closest('tr')
 
-  it('lists the unfiled cells in a banner above the card, and each area\'s cells by floor', async () => {
+  it('lists the unfiled cells in a banner above the card, and each area\'s cells beside it', async () => {
     await renderAreas()
     const banner = screen.getByText(/1 unfiled cell/).parentElement
     // Above the card, as the Cells and Gateways pages report their unfinished business.
@@ -398,10 +314,9 @@ describe('AreasTab files cells into areas', () => {
     expect(follows(banner, document.querySelector('.card'))).toBe(true)
     expect(screen.getByText('Loose End')).toBeInTheDocument()
     const rowA = rowFor('Building A')
-    expect(within(rowA).getByText('Ground floor')).toBeInTheDocument()
-    expect(within(rowA).getByText('Floor 1')).toBeInTheDocument()
     expect(within(rowA).getByText('Bay 1')).toBeInTheDocument()
-    expect(within(rowFor('Building B')).getByText('No floor set')).toBeInTheDocument()
+    expect(within(rowA).getByText('Bay 2')).toBeInTheDocument()
+    expect(within(rowFor('Building B')).getByText('Paint Shop')).toBeInTheDocument()
   })
 
   it('attaches links to an area, the way every other asset carries them', async () => {
@@ -438,14 +353,14 @@ describe('AreasTab files cells into areas', () => {
     expect(api.delete).toHaveBeenCalledWith('/api/v1/areas/area-b')
   })
 
-  it('counts each area\'s floors and how many carry a plan', async () => {
+  it('says whether an area carries a plan, and how many of its cells sit on it', async () => {
     await renderAreas()
     const rowA = rowFor('Building A')
-    expect(within(rowA).getByText('3 floors')).toBeInTheDocument()
-    expect(within(rowA).getByText('1 with a plan')).toBeInTheDocument()
+    expect(within(rowA).getByText('Plan')).toBeInTheDocument()
+    expect(within(rowA).getByText('2 cells placed')).toBeInTheDocument()
     const rowB = rowFor('Building B')
-    expect(within(rowB).getByText('1 floor')).toBeInTheDocument()
-    expect(within(rowB).getByText('No plans uploaded')).toBeInTheDocument()
+    expect(within(rowB).getByText('Outline')).toBeInTheDocument()
+    expect(within(rowB).getByText('No cells placed')).toBeInTheDocument()
   })
 
   it('shows no banner at all once every cell is filed', async () => {
@@ -525,7 +440,7 @@ describe('AreasTab files cells into areas', () => {
   })
 })
 
-describe('AreasTab manages an area\'s floors from its panel', () => {
+describe('AreasTab manages an area\'s plan from its panel', () => {
   const openArea = async (name = 'Building A') => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument())
@@ -533,86 +448,47 @@ describe('AreasTab manages an area\'s floors from its panel', () => {
     return document.querySelector('.context-panel')
   }
 
-  const floorRows = () => [...document.querySelectorAll('.area-floor-row:not(.area-floor-row-form)')]
+  const planRow = () => document.querySelector('.area-plan-row')
 
-  it('lists the floors top-down with their cell counts and plan state', async () => {
+  it('says whether a plan is attached and how many cells are placed on it', async () => {
     const panel = await openArea()
-    expect(within(panel).getByText('Floors')).toBeInTheDocument()
-    expect(floorRows().map(r => r.getAttribute('data-level'))).toEqual(['1', '0', '-1'])
-    expect(within(floorRows()[0]).getByText(/1 cell · plan attached/)).toBeInTheDocument()
-    expect(within(floorRows()[1]).getByText(/1 cell · default outline/)).toBeInTheDocument()
-    expect(within(floorRows()[2]).getByText(/0 cells · default outline/)).toBeInTheDocument()
+    expect(within(panel).getByText('Floor plan')).toBeInTheDocument()
+    expect(planRow().getAttribute('data-plan')).toBe('uploaded')
+    expect(within(planRow()).getByText('Plan attached')).toBeInTheDocument()
+    expect(within(planRow()).getByText('2 cells placed on it')).toBeInTheDocument()
   })
 
-  it('adds a floor above the top one with the next level and the level\'s name suggested', async () => {
-    api.post.mockResolvedValue({})
-    await openArea()
-    fireEvent.click(screen.getByRole('button', { name: /Floor above/ }))
-    const form = screen.getByRole('group', { name: 'New floor' })
-    expect(within(form).getByLabelText('Level')).toHaveValue(2)
-    expect(within(form).getByLabelText('Floor name')).toHaveValue('Floor 2')
-    fireEvent.change(within(form).getByLabelText('Floor name'), { target: { value: 'Mezzanine' } })
-    await act(async () => { fireEvent.click(within(form).getByRole('button', { name: /Add/ })) })
-    expect(api.post).toHaveBeenCalledWith('/api/v1/floors', { area_id: 'area-a', level: '2', name: 'Mezzanine' })
-  })
-
-  it('adds a basement below the lowest one', async () => {
-    api.post.mockResolvedValue({})
+  it('offers Upload on an area with no plan, and Replace and Remove on one with', async () => {
     await openArea('Building B')
-    fireEvent.click(screen.getByRole('button', { name: /Basement/ }))
-    const form = screen.getByRole('group', { name: 'New floor' })
-    expect(within(form).getByLabelText('Level')).toHaveValue(-1)
-    expect(within(form).getByLabelText('Floor name')).toHaveValue('Basement')
+    expect(planRow().getAttribute('data-plan')).toBe('outline')
+    expect(within(planRow()).getByRole('button', { name: /Upload plan/ })).toBeInTheDocument()
+    expect(within(planRow()).queryByRole('button', { name: /Remove plan/ })).toBeNull()
+
+    document.body.innerHTML = ''
+    await openArea('Building A')
+    expect(within(planRow()).getByRole('button', { name: /Replace plan/ })).toBeInTheDocument()
+    expect(within(planRow()).getByRole('button', { name: /Remove plan/ })).toBeInTheDocument()
   })
 
-  it('renames a floor with one write naming only what changed', async () => {
-    await openArea()
-    fireEvent.click(within(floorRows()[2]).getByTitle(/Rename this floor/))
-    fireEvent.change(screen.getByLabelText('Floor name'), { target: { value: 'Plant room' } })
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save/ })) })
-    expect(api.put).toHaveBeenCalledWith('/api/v1/floors/floor-ab', { level: '-1', name: 'Plant room' })
-  })
-
-  it('says why a floor holding cells cannot be deleted, rather than ignoring the click', async () => {
-    const showToast = vi.fn()
-    render(<AreasTab showToast={showToast} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
-    fireEvent.click(screen.getByText('Building A'))
-    const button = within(floorRows()[0]).getByTitle(/Move its cells to another floor first/)
-    expect(button).not.toBeDisabled()
-    fireEvent.click(button)
-    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/still holds 1 cell/), 'error')
-    expect(document.querySelector('.modal')).toBeNull()
-    expect(api.delete).not.toHaveBeenCalled()
-  })
-
-  it('deletes an empty floor once its name has been typed', async () => {
-    api.delete.mockResolvedValue(true)
-    await openArea()
-    fireEvent.click(within(floorRows()[2]).getByTitle('Delete this floor'))
-    const dialog = document.querySelector('.modal')
-    expect(within(dialog).getByText(/Delete floor 'Deep basement' from Building A/)).toBeInTheDocument()
-    const confirm = within(dialog).getByRole('button', { name: 'Delete floor' })
-    expect(confirm).toBeDisabled()
-    fireEvent.change(within(dialog).getByLabelText(/Type the floor name to confirm/), { target: { value: 'Deep basement' } })
-    expect(confirm).not.toBeDisabled()
-    await act(async () => { fireEvent.click(confirm) })
-    expect(api.delete).toHaveBeenCalledWith('/api/v1/floors/floor-ab')
-  })
-
-  it('uploads a plan for a floor and offers to replace or remove one that is there', async () => {
+  it('uploads a plan against the area itself', async () => {
     api.uploadFloorPlan.mockResolvedValue({})
-    await openArea()
-    expect(within(floorRows()[0]).getByRole('button', { name: /Replace plan/ })).toBeInTheDocument()
-    expect(within(floorRows()[0]).getByRole('button', { name: /Remove plan/ })).toBeInTheDocument()
-    expect(within(floorRows()[1]).getByRole('button', { name: /Upload plan/ })).toBeInTheDocument()
-
-    const file = new File(['<svg viewBox="0 0 4 3"/>'], 'ground.svg', { type: 'image/svg+xml' })
-    const input = within(floorRows()[1]).getByLabelText('Plan file for Ground floor')
+    await openArea('Building B')
+    const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
+    const input = within(planRow()).getByLabelText('Plan file for Building B')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
     expect(api.uploadFloorPlan).toHaveBeenCalledTimes(1)
-    expect(api.uploadFloorPlan.mock.calls[0][0]).toMatchObject({ floor_id: 'floor-a0' })
+    expect(api.uploadFloorPlan.mock.calls[0][0]).toMatchObject({ area_id: 'area-b' })
     expect(api.uploadFloorPlan.mock.calls[0][1]).toBe(file)
+  })
+
+  it('removes a plan once the dialog is confirmed', async () => {
+    api.removeFloorPlan.mockResolvedValue({})
+    await openArea()
+    fireEvent.click(within(planRow()).getByRole('button', { name: /Remove plan/ }))
+    const dialog = document.querySelector('.modal')
+    expect(within(dialog).getByText(/Remove the plan from Building A\?/)).toBeInTheDocument()
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Remove plan' })) })
+    expect(api.removeFloorPlan).toHaveBeenCalledWith(expect.objectContaining({ area_id: 'area-a' }))
   })
 
   it('refuses a file that is not an SVG before anything is uploaded', async () => {
@@ -620,19 +496,18 @@ describe('AreasTab manages an area\'s floors from its panel', () => {
     render(<AreasTab showToast={showToast} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
     fireEvent.click(screen.getByText('Building A'))
-    const file = new File(['png'], 'ground.png', { type: 'image/png' })
-    const input = within(floorRows()[1]).getByLabelText('Plan file for Ground floor')
+    const file = new File(['png'], 'plan.png', { type: 'image/png' })
+    const input = within(planRow()).getByLabelText('Plan file for Building A')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
     expect(api.uploadFloorPlan).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/not an SVG/), 'error')
   })
 
-  it('shows the floors read-only to somebody who may not manage cells', async () => {
+  it('shows the plan read-only to somebody who may not manage cells', async () => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => false} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
     fireEvent.click(screen.getByText('Building A'))
-    expect(floorRows()).toHaveLength(3)
-    expect(screen.queryByRole('button', { name: /Floor above/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: /Upload plan/ })).toBeNull()
+    expect(within(planRow()).getByText('Plan attached')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Upload plan|Replace plan|Remove plan/ })).toBeNull()
   })
 })

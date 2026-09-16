@@ -67,9 +67,8 @@ const KEY_LABELS = {
   connection_method: 'Connection method',
   cell_id: 'Cell',
   area_id: 'Area',
-  floor_id: 'Floor',
-  plan_x: 'Place on the floor plan (x)',
-  plan_y: 'Place on the floor plan (y)',
+  plan_x: 'Place on the plan (x)',
+  plan_y: 'Place on the plan (y)',
   location_scope: 'Location scope',
   model_3d_path: '3D model path',
   grafana_url: 'Grafana dashboard',
@@ -125,12 +124,12 @@ function displayValue(v) {
 }
 
 /**
- * Every id a proposal can name, against the name a person would recognise. `cell_id`, `area_id`
- * and `floor_id` are proposable columns, so the before/after table renders uuids unless something
+ * Every id a proposal can name, against the name a person would recognise. `cell_id` and
+ * `area_id` are proposable columns, so the before/after table renders uuids unless something
  * resolves them, and "move this device to 6f2a…" does not say what the change would do.
  *
  * Built from both lists because neither is complete on its own: `/api/v1/areas` embeds an area's
- * cells and floors, and a cell filed under no area appears only in `/api/v1/cells`.
+ * cells, and a cell filed under no area appears only in `/api/v1/cells`.
  */
 export function locationNameMap(cells, areas) {
   const names = new Map()
@@ -139,11 +138,6 @@ export function locationNameMap(cells, areas) {
   for (const a of areas || []) {
     if (a?.area_id) names.set(a.area_id, a.area_name || a.name)
     for (const c of a.cells || []) addCell(c)
-    // A floor's name is unique only within its area, so it carries the area's: two areas may both
-    // have a "Ground floor" and a reviewer needs to know which one a cell is being moved to.
-    for (const f of a.floors || []) {
-      if (f?.floor_id) names.set(f.floor_id, a.area_name ? `${f.name} — ${a.area_name}` : f.name)
-    }
   }
   return names
 }

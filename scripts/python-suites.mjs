@@ -464,15 +464,16 @@ export const SUITES = {
       "to confine an admin's write landed on top of a table-level UPDATE already held and did " +
       'nothing. The settings page would have worked perfectly while provenance was forgeable.',
   },
-  'supabase/migrations/test_area_floors.py': {
+  'supabase/migrations/test_area_plans.py': {
     lanes: ['db'],
     why:
-      "0098's floors and places. Three properties nothing else would notice losing: an area is " +
-      'born with a ground floor, so a cell can always be filed onto one; a floor holding cells ' +
-      'cannot be deleted except through its area, and the guard tells the two apart by asking ' +
-      'whether the area still exists, which is the kind of trigger a refactor breaks silently; and ' +
-      'the spacing between two cells on one plan is refused BY THE DATABASE, because an approved ' +
-      'proposal writes the same columns as the picker that refuses the click.',
+      "0098's plan and places, and 0113's retirement of the floor. Three properties nothing else " +
+      "would notice losing: a place belongs to ONE area's plan, so moving the cell drops it " +
+      'unless the same write names a new one, which is the half a refactor silently undoes; the ' +
+      'spacing between two cells on one plan is refused BY THE DATABASE, because an approved ' +
+      'proposal writes the same columns as the picker that refuses the click; and the floor table ' +
+      'stays gone, which db-init replaying the whole chain on every boot with no ledger is what ' +
+      'makes worth asserting.',
   },
   'supabase/migrations/test_archive_purge_cascade.py': {
     lanes: ['db'],

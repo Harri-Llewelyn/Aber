@@ -697,10 +697,9 @@ describe('locationNameMap', () => {
     area_id: 'area-north',
     area_name: 'North Shop',
     cells: [{ cell_id: 'cell-weld', cell_name: 'Weld Bay' }],
-    floors: [{ floor_id: 'floor-g', name: 'Ground' }]
   }]
 
-  it('names a cell, an area and a floor', () => {
+  it('names a cell and an area', () => {
     const names = locationNameMap(cells, areas)
     expect(names.get('cell-weld')).toBe('Weld Bay')
     expect(names.get('area-north')).toBe('North Shop')
@@ -710,11 +709,6 @@ describe('locationNameMap', () => {
   it('keeps a cell that is filed under no area', () => {
     expect(locationNameMap(cells, areas).get('cell-unfiled')).toBe('Goods In')
     expect(locationNameMap([], areas).get('cell-unfiled')).toBeUndefined()
-  })
-
-  /* "Ground" is unique within an area and nowhere else, and the reviewer is deciding WHICH one. */
-  it('qualifies a floor with its area', () => {
-    expect(locationNameMap(cells, areas).get('floor-g')).toBe('Ground — North Shop')
   })
 
   it('survives either list being absent', () => {

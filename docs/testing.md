@@ -273,11 +273,11 @@ python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
 python supabase/migrations/test_relocate_devices.py
-# Floors and places (0098). An area is born with a ground floor; a floor holding cells cannot be
-# deleted except through its area, and the guard tells the two apart by asking whether the area
-# row still exists; and the spacing between two cells on one plan is refused by the database, not
-# only by the picker, because an approved proposal writes the same columns.
-python supabase/migrations/test_area_floors.py
+# Plans and places (0098, 0113). A place belongs to one area's plan, so moving the cell drops it
+# unless the same write names a new one; the spacing between two cells on one plan is refused by
+# the database, not only by the picker, because an approved proposal writes the same columns; and
+# the retired floor table stays retired across a replay of the whole chain.
+python supabase/migrations/test_area_plans.py
 # Deleting a cell un-files what was in it (0112). `gateways.cell_id` was the one child of `cells`
 # that cascaded, so a gateway archived with Permanent Retention was deleted by its CELL's timer.
 # The test asserts the catalogue fact over every child of `cells`, not only the one that was

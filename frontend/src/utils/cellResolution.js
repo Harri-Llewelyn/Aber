@@ -15,8 +15,6 @@
  * stored.
  */
 
-import { sortFloors } from './floorPlans'
-
 export const SCOPE_CELL = 'cell'
 export const SCOPE_AREA_WIDE = 'area_wide'
 export const SCOPE_SITE_WIDE = 'site_wide'
@@ -253,39 +251,6 @@ export function groupCellsByArea(cells) {
     byArea.get(areaId).push(cell)
   }
   return byArea
-}
-
-/**
- * Cells of one area grouped by the floor rows they sit on, top-down as the floor picker lists
- * them, with cells on no floor last under a null floor. Only floors holding a cell are returned.
- * Returns [{ floor, label, cells }] so a renderer draws headings in order.
- */
-export function groupCellsByFloor(cells, floors) {
-  const known = sortFloors(floors || [])
-  const idOf = (f) => f?.floor_id ?? f?.id
-  const byFloor = new Map()
-  for (const cell of cells || []) {
-    const id = cell?.floor_id || null
-    const key = id && known.some(f => idOf(f) === id) ? id : null
-    if (!byFloor.has(key)) byFloor.set(key, [])
-    byFloor.get(key).push(cell)
-  }
-  const groups = known
-    .filter(f => byFloor.has(idOf(f)))
-    .map(f => ({ floor: f, label: f.name, cells: byFloor.get(idOf(f)) }))
-  if (byFloor.has(null)) groups.push({ floor: null, label: floorLabel(null), cells: byFloor.get(null) })
-  return groups
-}
-
-/**
- * The word for a floor level: ground is 0, basements negative, none is unspecified. Mirrors
- * public.floor_level_name(); the Add floor form offers it as the default name.
- */
-export function floorLabel(level) {
-  if (!Number.isInteger(level)) return 'No floor set'
-  if (level === 0) return 'Ground floor'
-  if (level < 0) return level === -1 ? 'Basement' : `Basement ${-level}`
-  return `Floor ${level}`
 }
 
 /**
