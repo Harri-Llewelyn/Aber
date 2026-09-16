@@ -569,6 +569,14 @@ session is dropped at once and its next connection is refused. Do it the moment 
 missing rather than as part of a later tidy-up; the Access Control page shows the account as
 *Disabled* once it has landed.
 
+**Archiving takes the forge too.** The same act removes the appliance's deploy key, so the box can
+no longer clone its repository or push to its `appliance` branch, and puts that repository into the
+forge's archive: read-only, badged as archived, with every branch, issue and wiki page kept. Both
+are done by `forge-sweep`, asked for as the archive lands and retried every fifteen minutes, so an
+archive taken while the forge is down still lands. The repository itself is never deleted — its
+wiki is where what you know about that gateway is written down, and deleting it is a decision you
+take in the forge. Restoring the gateway reverses both.
+
 What archiving does **not** do is retrieve the CA copy on that appliance — but that certificate is
 public by nature and worth nothing to whoever has the box.
 

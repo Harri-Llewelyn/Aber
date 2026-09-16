@@ -58,7 +58,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION public.sweep_forge() IS
-    'Ask the forge-sweep edge function for one reconciliation of the forge against user_roles: team members whose role has gone are removed, admitted logins are placed, gateway repositories get their push webhook and branch protection back, and hand-made repositories get main protected. Returns false when the stack holds no sweep secret. ASYNCHRONOUS: net.http_post queues the request, so true means "asked", not "swept". Scheduled every fifteen minutes by pg_cron.';
+    'Ask the forge-sweep edge function for one reconciliation of the forge against user_roles: team members whose role has gone are removed, admitted logins are placed, gateway repositories get their push webhook and branch protection back, an archived gateway''s repository is put into the forge''s archive and a restored one taken out (0114), and hand-made repositories get main protected. Returns false when the stack holds no sweep secret. ASYNCHRONOUS: net.http_post queues the request, so true means "asked", not "swept". Scheduled every fifteen minutes by pg_cron, and asked for by trg_gateways_forge_follows_archive as an archive lands.';
 
 -- The schedule's and, for a test, service_role's. Not a user's: anyone who could call this could
 -- make the platform walk the forge's API as often as they liked.

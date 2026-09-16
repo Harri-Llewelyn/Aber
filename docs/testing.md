@@ -301,6 +301,12 @@ python supabase/migrations/test_credential_recorder.py
 # Rolls back for a second reason: net.http_post queues inside the transaction, so the revocation
 # requests these tests provoke are un-queued rather than sent.
 python supabase/migrations/test_credential_revocation.py
+# The forge following a gateway into the archive (0114). The trigger asks forge-sweep for one pass
+# as the archive lands rather than leaving it to the quarter-hour timer, and the gates on that ask
+# are what this pins -- above all the transition guard, without which every ordinary edit to an
+# archived gateway would walk the whole forge. Asserted on the pg_net queue, which the rollback
+# un-queues; the sweep's own half needs a forge and lives in test_forge_sweep.py.
+python supabase/migrations/test_forge_follows_the_archive.py
 # Service-token revocation (0074): the denylist, and the PostgREST db-pre-request hook that reads
 # it. THE FAIL-OPEN TESTS ARE THE POINT and come first in the file -- auth_pre_request() runs
 # before every request in the caller's role, so a false refusal is not a failing feature, it is the

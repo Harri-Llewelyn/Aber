@@ -18,10 +18,11 @@ moves out, and the table below says where it went.
 `§[0-9]` in this file.
 
 **Ordering.** 1 is the platform's own: the rehearsal that turns the backup into a capability.
-2 audits the documentation, code and comments once the code has stopped moving. 3 recovers the
-headroom the chart has nearly spent, and follows 2 because one of its levers is 2's comment sweep.
-4 is last by rule: it folds the migration chain, so every entry that changes the schema must have
-landed before it.
+2 is the last feature work, and comes before the audit for that reason — it adds a schema, a page
+and a document apiece, and 3 is worth running once against a codebase that has stopped moving.
+3 audits the documentation, code and comments. 4 recovers the headroom the chart has nearly spent,
+and follows 3 because one of its levers is 3's comment sweep. 5 is last by rule: it folds the
+migration chain, so every entry that changes the schema must have landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -51,7 +52,7 @@ landed before it.
 | The transport between services | Built for the broker and both databases: [`deploy/k8s/README.md`](../deploy/k8s/README.md#mqtts-on-8883) (in-cluster clients on 8883 by default, 1883 withdrawing to loopback) and [`deploy/k8s/README.md`](../deploy/k8s/README.md#tls-to-the-databases) (`postgresTls`: `verify-full` everywhere, `hostssl`-only pg_hba, Realtime's tenant link as the one named exception). HTTP between the gateway and its upstreams stays plaintext: none of them terminates TLS itself, so that hop is a TLS sidecar per pod, which is a service mesh, and a service mesh is the complete answer. Answered, not built. Gateways hold no client certificate: the dynsec password and the pinned root already give identity, confinement and a revocation that disconnects |
 | The appliance itself, and the code somebody wants to run on it | Built across five pull requests, and its four subjects went four ways. **The one-liner and the CA:** [`supabase/README.md`](../supabase/README.md#the-one-liner-0105) and [`docs/physical-gateways.md`](physical-gateways.md#on-the-appliance-the-command), which now also carries the cloud-init seed for a plant that images its own appliances. **The operating system and the gateway's own playbook:** [`forge/gateway-platform/README.md`](../forge/gateway-platform/README.md), with the time source answered in four parts there and in [§8](physical-gateways.md#the-clock-is-part-of-certificate-verification); CI runs the playbook twice in a container and the converge script has a suite of its own. **The forge as the appliance sees it, and the required status check:** [`supabase/README.md`](../supabase/README.md#the-forge-checks-a-flow-before-it-is-merged) — built without the Actions runner the entry assumed it needed, because branch protection takes a commit status the platform posts on a webhook it was already receiving. **Custom code:** [`forge/gateway-custom-example/README.md`](../forge/gateway-custom-example/README.md) and [`supabase/README.md`](../supabase/README.md#a-gateway-that-needs-code-of-its-own-0106) for the template repository, the vars a gateway's playbook is handed, and the two drawer rows. **Revocation and rotation:** [`docs/physical-gateways.md` §8](physical-gateways.md#8-certificates-and-the-two-clocks-they-run-on) — the root now rides on `main` of the platform repository rather than under a tag, the appliance refuses a bundle that would cut it off, and the page says which gateways are still holding an older root. The rebuilt-appliance answer is in [§6](physical-gateways.md#a-rebuilt-appliance-is-a-re-issue-and-keeps-its-repository). Three could-haves left as feature requests: a Gitea Actions runner for CI on the platform repository ([#211](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/211)), a time source on the platform for a plant with no route to NTP ([#212](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/212)), and minting the `#cloud-config` seed beside the command ([#213](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/213)) |
 | The playback feature is reviewed end to end | Reviewed against a live stack rather than read. The worker now runs in the k3d loop (`playback.enabled`, `values-dev.yaml`), so the feature is exercised by something other than three unit suites, and [`ingestion/test_playback_replay.py`](../ingestion/test_playback_replay.py) mints the credential, waits out the kubelet's Secret refresh, replays a fixture and asserts the rows arrived **under the replay lane and under no other asset** — the observation QoS 0 will not give, since a publish the broker refuses is dropped with no PUBACK. Playback also gained its NetworkPolicy edges and an entry in the policy's component map, so it is confined rather than merely unmentioned. **Three defects fixed.** A blank delivery file was read as malformed, logging an `ERROR` every three seconds *forever* on any stack with no playback target — the chart creates that Secret key empty, so on Kubernetes "absent" is always blank, which is the one form the code did not handle. A playback the operator stopped was recorded `COMPLETED`, indistinguishable from one published in full (`0107`; [`supabase/README.md`](../supabase/README.md#capture-and-playback-orchestration-0055-0056-0057-0058-0060)). And the confinement claims still described the pre-Dynamic-Security ACL file, where `%u` was substituted and one pattern confined every gateway. **The measured facts** are in [`ingestion/README.md`](../ingestion/README.md#broker-capture-and-playback): a delivered credential takes about a kubelet sync period to reach the worker, a `DBIRTH` announces a device and writes no telemetry of its own, the per-gateway role confines *delivery* rather than subscription, and the page path meets no quarantine because the lanes are minted registered. Two findings left as issues: a capture whose timestamps fall outside the daemon's sanity window replays "successfully" and writes nothing ([#216](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/216)), and nothing can tell an operator when a *re-issued* credential has reached the worker, because the status row carries ids and a rotation does not change them ([#217](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/217)) |
-| Retiring the flow-backup bucket | Removed: the `gateway-backups` bucket, its policies, its chart values and its policy test are gone, and no install had stored anything in it. A gateway's flow lives in its repository in the forge ([`docs/physical-gateways.md`](physical-gateways.md)); the repository pointer stays derived (`gateway-<sparkplug_id>` in the organisation `constants.js` names), a column is earned only if a gateway ever needs re-pointing. Archiving a gateway does not yet archive its repository: a could-have, reopened as [#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197), which also carries the rule that deleting one is a decision, never a cascade |
+| Retiring the flow-backup bucket | Removed: the `gateway-backups` bucket, its policies, its chart values and its policy test are gone, and no install had stored anything in it. A gateway's flow lives in its repository in the forge ([`docs/physical-gateways.md`](physical-gateways.md)); the repository pointer stays derived (`gateway-<sparkplug_id>` in the organisation `constants.js` names), a column is earned only if a gateway ever needs re-pointing. Archiving a gateway now archives its repository too, the one decision this entry held that nothing implemented ([#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197), `0114`): [`supabase/README.md`](../supabase/README.md#archiving-a-gateway-reaches-the-forge-0114) for the archive mark, where the call lives and why deleting a repository stays a decision a person takes in the forge |
 
 ---
 
@@ -93,7 +94,66 @@ retention prune removes exactly the directory the row named and nothing beside i
 
 ---
 
-## 2 · The documentation, code and comments are audited against the codebase
+## 2 · Archiving an asset is a lifecycle rather than a flag
+
+**Builds on:** [`frontend/src/components/tabs/ArchivesTab.jsx`](../frontend/src/components/tabs/ArchivesTab.jsx)
+and [`frontend/src/help/archives.md`](../frontend/src/help/archives.md) ·
+`is_archived` / `archived_at` / `auto_delete_at` on `cells`, `gateways` and `devices` (`0001`) and
+the `purge_expired_archives` job (`0002`) · `public.areas` (`0097`), which has none of them ·
+`log_digital_thread_event()` and the month-partitioned thread (`0079`) ·
+[`timescaledb/cold_archive.sql`](../timescaledb/cold_archive.sql) and
+[`ingestion/cold_archive.py`](../ingestion/cold_archive.py) ·
+[`supabase/functions/aas-export`](../supabase/functions/aas-export) · `devices.shadow_of` (`0060`) ·
+the forge half, built: [`supabase/README.md`](../supabase/README.md#archiving-a-gateway-reaches-the-forge-0114) (`0114`)
+
+Archiving is one flag, a timestamp and a retention timer, and only a gateway's archive means
+anything beyond them: it rotates the broker credential, burns its enrolment tokens, drops its
+deploy key and archives its repository. A cell's archive sets the flag and nothing else. A
+device's archive now stops its readings reaching the historian, and sets the flag and nothing
+else. Underneath, four systems never hear about any of it — telemetry in the historian, which
+is a separate database keyed by `sparkplug_id` with no foreign key to cross; the digital thread,
+by design; the objects in storage; and, until an asset is deleted, nothing states what survives
+it. **An area cannot be archived at all** — it can only be deleted, which is the gap that started
+this.
+
+**What remains.**
+
+- **Areas archive like everything else.** Three columns, the existing dialog, a fourth `DELETE`
+  in the purge job, a row on the page. Cheap, except for the two questions under *Worth deciding
+  early*.
+- **A shadow follows its original.** Archiving a device leaves its replay lane live on the
+  playback gateway; deleting one leaves a lane standing in for nothing (`shadow_of` is
+  `ON DELETE SET NULL`, and `0083` tolerates that state deliberately). One trigger.
+- **The page gains a second card.** Today's archived list is *pending archival* — restorable, its
+  timer running, the row still in the live tables — and beside it a short list of assets that have
+  been through it: the row gone, a tombstone left, with links to what survives. Deleting an asset
+  currently removes it from the page entirely, which is the one act the page cannot account for.
+- **An asset can be taken away before it is taken out of service.** The record, its nameplate,
+  submodels, schema, digital thread and the telemetry still in the live historian, as one file,
+  with a manifest line naming the cold objects that hold the rest.
+
+**Decided.** The export is **not** a row in the cold tier: `telemetry_archive_manifest` is keyed
+`(chunk_schema, chunk_name)`, time-sliced, and exists to make dropping a chunk safe — a per-asset
+bundle has no chunk and is never droppable. It is a sibling that shares the bucket, and it extends
+the AAS export rather than inventing a second format. Cold telemetry keeps its no-read-back rule
+([`cold-storage.md`](../frontend/src/help/cold-storage.md)), so an export states what it could not
+include rather than reaching for it. The tombstone data mostly exists already: the `DELETE` audit
+row carries `old_data`, the whole row, from which the forge address is derived as it is everywhere
+else. And `is_archived` is not a proposable column (`0086` asserts it), so *pending* is a lifecycle
+stage, never a proposal awaiting approval.
+
+**Worth deciding early.** **What an archived area means for the topics beneath it**, because
+`areas.name` is a segment of every `uns/` topic under it: an archived area either goes on
+publishing its name or every cell below it silently moves. And whether the Site Map keeps drawing
+its plan. Settle both before the migration, not after. Then the vocabulary — if today's archive
+becomes *pending archival*, is that a rename in the UI or a column? — and where the tombstone
+lives: derived from `digital_thread`, which is free but is partitioned for eventual `DETACH` and
+would lose its oldest entries the day that job ships, or a small `retired_entities` row written by
+the same trigger that writes the audit.
+
+---
+
+## 3 · The documentation, code and comments are audited against the codebase
 
 **Builds on:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) (the comment rule, and where argument and
 history go) · `scripts/check-docs-drift.mjs` · `scripts/check-mirror-drift.mjs` ·
@@ -138,11 +198,11 @@ method so the next one starts from it.
 
 ---
 
-## 3 · The chart's release Secret is given room to grow
+## 4 · The chart's release Secret is given room to grow
 
 **Builds on:** `.github/workflows/ci.yml` (the *Verify The Release Fits Helm's Secret* step) ·
 [`deploy/helm/acs-cymru/.helmignore`](../deploy/helm/acs-cymru/.helmignore) ·
-`scripts/sync-helm-chart-files.mjs` · entry 2, whose comment sweep is one of the levers here
+`scripts/sync-helm-chart-files.mjs` · entry 3, whose comment sweep is one of the levers here
 
 **Built:** the guard. Helm stores every release as one Secret holding the chart archive *and* the
 rendered manifest, and a Secret may not exceed 1 MiB; the CI step estimates the payload the way
@@ -165,7 +225,7 @@ document is served by `swagger-ui` and by nothing else, and an image is not in t
 of `files/` **needs to be in the chart archive as well as the manifest**: it is mirrored in so Helm
 can template it, and anything templated is already in the manifest, so the archive copy is paid for
 twice. Whether the **template comment blocks**, which render to nothing and ship in the archive
-regardless, come down with entry 2's sweep or are worth a pass of their own. And whether the
+regardless, come down with entry 3's sweep or are worth a pass of their own. And whether the
 estimate's 1.332 multiplier still holds, since the thresholds are set on it.
 
 **Decided.** The guard stays and its thresholds move down as headroom is recovered, or the entry
@@ -183,7 +243,7 @@ has been moved somewhere they cannot reach.
 
 ---
 
-## 4 · The migration chain folds back into the baseline
+## 5 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)

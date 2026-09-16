@@ -87,18 +87,36 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
 
   const url = gatewayRepositoryUrl(gateway)
 
+  /**
+   * Archiving a gateway archives its repository too (#197): forge-sweep marks it read-only in the
+   * forge and records that here. The links stay — the whole point of archiving rather than
+   * deleting is that the flow, the incident log and the wiki are still readable — so this replaces
+   * the paragraph about proposing changes rather than the buttons under it.
+   */
+  const archivedInForge = Boolean(gateway.forge_archived_at)
+
   return (
     <div>
       <div className="form-label" style={{ margin: 0 }}>Repository</div>
-      <div style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-        This gateway's flow lives in its own repository in the forge. To change what the appliance
-        runs, open a pull request there with the <span className="mono">flows.json</span> exported
-        from its Node-RED editor. Nothing is deployed until an administrator has approved it and it
-        is merged to <span className="mono">main</span>, which the appliance then pulls. The
-        appliance reports what it is running on its own <span className="mono">appliance</span> branch.
-        Its issues are the gateway's incident log, and its wiki is for what a person needs to know
-        and the appliance never reads.
-      </div>
+      {archivedInForge ? (
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+          This gateway is archived, and so is its repository: the forge holds it read-only, badged
+          as archived, with every branch, issue and wiki page kept — including{' '}
+          <span className="mono">appliance</span>, the last thing the gateway reported. Nothing can
+          be pushed or proposed until the gateway is restored, which takes the repository back out
+          of the archive. Deleting it is a decision taken in the forge and never from here.
+        </div>
+      ) : (
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+          This gateway's flow lives in its own repository in the forge. To change what the appliance
+          runs, open a pull request there with the <span className="mono">flows.json</span> exported
+          from its Node-RED editor. Nothing is deployed until an administrator has approved it and it
+          is merged to <span className="mono">main</span>, which the appliance then pulls. The
+          appliance reports what it is running on its own <span className="mono">appliance</span> branch.
+          Its issues are the gateway's incident log, and its wiki is for what a person needs to know
+          and the appliance never reads.
+        </div>
+      )}
       {/* Real links, so middle-click and copy-link work. Three because the repository, its issues
           and its wiki are three different acts: change the flow, record an incident, write down
           what is known. A fourth, the compare view, once the appliance has reported: before its

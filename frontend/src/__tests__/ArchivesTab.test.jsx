@@ -350,6 +350,27 @@ describe('ArchivesTab restore asks first', () => {
     expect(prompt.textContent).toMatch(/Access Control/i)
   })
 
+  it('says the repository comes back out of the forge and the deploy key does not', async () => {
+    // Archiving reached the forge too (#197): the repository is read-only until a sweep restores
+    // it, and the appliance's deploy key was deleted. Restoring reverses the first and cannot
+    // reverse the second, which is the same shape of fact as the broker credential above.
+    await showArchives(() => true, [{ ...ARCHIVED_GATEWAY, forge_archived_at: '2026-07-25T10:00:02Z' }])
+    fireEvent.click(restoreButton())
+
+    const prompt = await screen.findByText(/Restore the gateway/i)
+    expect(prompt.textContent).toMatch(/out of the forge’s archive/i)
+    expect(prompt.textContent).toMatch(/re-enrol the appliance/i)
+  })
+
+  it('says nothing about the forge for a gateway whose repository was never archived', async () => {
+    // `forge_archived_at` is the sweep's answer, not an assumption from `is_archived`: a stack
+    // with no forge, or a gateway with no repository, has nothing to bring back.
+    await showArchives(() => true, [ARCHIVED_GATEWAY])
+    fireEvent.click(restoreButton())
+
+    expect((await screen.findByText(/Restore the gateway/i)).textContent).not.toMatch(/forge/i)
+  })
+
   it('does not raise the credential warning for a gateway that never held one', async () => {
     // `credential_revoked_at` is the fact, not the entity type: a gateway archived before it was
     // given an account has nothing to re-mint.

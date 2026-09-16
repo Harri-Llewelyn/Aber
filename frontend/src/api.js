@@ -83,11 +83,13 @@ const DEVICE_EMBED =
   'is_archived, gateway_id, cell_id, area_id, location_scope, created_at, model_3d_path, shadow_of';
 const GATEWAY_EMBED =
   `id, name, description, sparkplug_id, cell_id, area_id, location_scope, access_url, status, last_heartbeat, ` +
-  // `enrolled_at` and `forge_repository_at` decide what GatewayRepositoryPanel renders: whether the
-  // gateway has enrolled, and whether enrolment got as far as creating its repository. The gateways
-  // query selects `*` and carries them either way; an embed names its columns, so a gateway read
-  // through one would otherwise arrive with both undefined and read as never enrolled.
-  `enrolled_at, forge_repository_at, ` +
+  // `enrolled_at`, `forge_repository_at` and `forge_archived_at` decide what
+  // GatewayRepositoryPanel renders: whether the gateway has enrolled, whether enrolment got as far
+  // as creating its repository, and whether the sweep has since put that repository into the
+  // forge's archive. The gateways query selects `*` and carries them either way; an embed names
+  // its columns, so a gateway read through one would otherwise arrive with all three undefined and
+  // read as never enrolled.
+  `enrolled_at, forge_repository_at, forge_archived_at, ` +
   `deployment, is_simulated, is_shadow, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**
@@ -1389,7 +1391,11 @@ const apiMethods = {
         auto_delete_at: g.auto_delete_at,
         // What archiving took, so the restore dialog can say it as a fact: archiving rotates the
         // gateway's broker credential, and restoring flips `is_archived` back and nothing else.
-        credential_revoked_at: g.credential_revoked_at
+        credential_revoked_at: g.credential_revoked_at,
+        // The forge's half of the same sentence (0114). Set means the sweep has archived the
+        // repository, so restoring has something to reverse — and the deploy key it removed on
+        // the way in is not something restoring can give back.
+        forge_archived_at: g.forge_archived_at
       }));
 
       const devices = (devicesRes.data || []).map(d => ({
