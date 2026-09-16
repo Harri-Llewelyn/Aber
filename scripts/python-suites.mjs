@@ -322,6 +322,14 @@ export const SUITES = {
       'The archived-gateway path, which #102 found broken in production. Nothing else looks at ' +
       'it: an archived gateway is by definition one nobody is watching.',
   },
+  'ingestion/test_archived_device.py': {
+    lanes: ['unit'],
+    why:
+      'The same blind spot one level down, and a worse one: a device has no broker account to ' +
+      'revoke, so nothing but this refusal stops a decommissioned machine writing telemetry ' +
+      'through a gateway that is still in service. Pins the DBIRTH case too, where refusing by ' +
+      'answering None would quarantine a second row for a device the stack already holds.',
+  },
   'ingestion/test_directory_publish.py': {
     lanes: ['unit'],
     why:
@@ -465,6 +473,15 @@ export const SUITES = {
       'whether the area still exists, which is the kind of trigger a refactor breaks silently; and ' +
       'the spacing between two cells on one plan is refused BY THE DATABASE, because an approved ' +
       'proposal writes the same columns as the picker that refuses the click.',
+  },
+  'supabase/migrations/test_archive_purge_cascade.py': {
+    lanes: ['db'],
+    why:
+      '0112, and the reason it is a test rather than a comment: the retention timer is the one ' +
+      'promise this platform makes about destruction, and a FK that cascades breaks it silently ' +
+      '-- a gateway marked Permanent was deleted by its CELL\'s timer, with nothing to read ' +
+      'afterwards but an audit row. Asserts the catalogue fact over every child of cells, not ' +
+      'just the one that was wrong.',
   },
   'supabase/migrations/test_relocate_devices.py': {
     lanes: ['db'],

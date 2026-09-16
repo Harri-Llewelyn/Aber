@@ -7816,8 +7816,10 @@ DO $c$ BEGIN
                     AND conrelid = 'public.gateways'::regclass) THEN
     --
     
+    -- SET NULL, as every other child of `cells` is: deleting a cell un-files what was in it.
+    -- 0112 carries the same change to a database that already holds the CASCADE this shipped with.
     ALTER TABLE ONLY public.gateways
-        ADD CONSTRAINT gateways_cell_id_fkey FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE CASCADE;
+        ADD CONSTRAINT gateways_cell_id_fkey FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL;
     
     --
   END IF;

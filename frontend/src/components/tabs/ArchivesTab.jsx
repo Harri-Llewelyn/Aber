@@ -148,7 +148,13 @@ export function ArchivesTab({ showToast, hasPermission }) {
           message={
             `Permanently delete the ${confirmPurge.entity_type} '${confirmPurge.name}'? ` +
             'This removes the record from the database immediately. It cannot be restored, and ' +
-            'it does not wait for the retention timer. Its digital thread history is kept.'
+            'it does not wait for the retention timer. Its digital thread history is kept.' +
+            // What happens to what was inside it, for the one type that holds other assets.
+            // Until 0112 they were deleted with it, on the cell's timer rather than their own.
+            (confirmPurge.entity_type === 'cell'
+              ? ' Anything still filed into it — gateways and devices alike — is un-filed rather' +
+                ' than deleted, and appears as Unassigned.'
+              : '')
           }
           pendingLabel="Deleting…"
           requireTyped={confirmPurge.name}
