@@ -13,7 +13,7 @@ import { api } from '../api'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
+  return { ...actual, api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
 const CELLS = [{ cell_id: 'cell-1', cell_name: 'Assembly Line 1' }]

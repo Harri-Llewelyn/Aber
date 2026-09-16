@@ -3218,11 +3218,16 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* The label is a pill with two jobs: it is sticky, so it needs an opaque background in the card's
    colour or dots show through the name as they pass, and it should read as a container. So the
    element stays opaque and the pill is drawn by `::before` inside it. */
+/* 260px, not 210px. A schema lane is `<name> v<version>`, and a lineage shares the name and differs
+   only in the version -- so at 210px, with the deleted flag beside it, every version of one schema
+   ellipsised to the same string and the lanes became indistinguishable. The track is `flex: 1` and
+   every marker is positioned as a fraction of it, so the width comes off the track harmlessly. The
+   full name is on the label's `title` either way. */
 .dt-lane-label {
   position: sticky;
   left: 0;
   z-index: 2;
-  flex: 0 0 210px;
+  flex: 0 0 260px;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -3272,12 +3277,26 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 /* The entity is gone and the name came out of its final snapshot. */
-.dt-lane-gone {
+/* The part of a label that identifies one row within a lineage -- a schema's version. It sits
+   OUTSIDE `.dt-lane-name` so the ellipsis cannot reach it: appended to the name it was the end of
+   the string, and sixteen versions of one schema drew sixteen lanes reading the same truncation. */
+.dt-lane-qualifier {
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* A flag, not a heading. It was 11px uppercase with half a pixel of tracking, which cost about
+   62px of a 184px label -- two thirds of the room the NAME had, on exactly the lanes whose name is
+   the only thing distinguishing them from their neighbours. */
+.dt-lane-gone {
+  flex-shrink: 0;
+  /* 11px is the type-scale floor themeContrast.test.js holds; the width came back from dropping
+     the uppercasing and the tracking, not from shrinking it below what is readable. */
+  font-size: 11px;
+  font-weight: 600;
   color: var(--danger-text);
   opacity: 0.85;
 }

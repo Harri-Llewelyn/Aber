@@ -696,6 +696,21 @@ const apiMethods = {
   },
 
   /**
+   * The people who can reach this stack, as `{ user_id, email }`.
+   *
+   * Through `list_user_accounts()` (0116) for the reason `listServicePrincipals()` goes through an
+   * RPC: `auth.users` is not served by PostgREST. Administrator and Auditor only, matching the
+   * policy on the digital_thread rows these names label -- so a caller who may not ask is REFUSED
+   * rather than given an empty list, and the caller must treat a rejection as "not allowed to
+   * know" rather than as "nobody is registered".
+   */
+  listUserAccounts: async () => {
+    const { data, error } = await supabase.rpc('list_user_accounts');
+    if (error) throw new Error(error.message || 'Could not list user accounts');
+    return data || [];
+  },
+
+  /**
    * The cold telemetry catalogue: every chunk that has been claimed for archival.
    *
    * Read from the historian over the FDW through a SECURITY DEFINER function. `cold_storage_rows()`
