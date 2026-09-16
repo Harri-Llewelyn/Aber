@@ -1890,10 +1890,14 @@ tbody tr:hover { background: var(--bg-glass); }
   box-shadow: 0 0 14px rgba(255, 77, 109, 0.25);
 }
 
+/* Wraps, so a card too narrow for the name and the counts together gives the counts their own
+   line rather than shrinking the name away to nothing. Four tallies and an open context panel is
+   where that happens: the name is the one thing on the card that must survive. */
 .area-thumb-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   font-weight: 600;
   font-size: 13px;
   min-width: 0;
@@ -1901,8 +1905,8 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .area-thumb-header .zone-name { flex: 1 1 auto; }
 
-/* The counts sit at the top right, in the header's own line. */
-.area-thumb-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+/* The counts keep the right-hand end whether they share the name's line or take one below it. */
+.area-thumb-counts { flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
 
 /* The area's own assets, in the same line as the rest. Marked so the breakdown reads as one. */
 .area-thumb-wide { color: var(--text); }
