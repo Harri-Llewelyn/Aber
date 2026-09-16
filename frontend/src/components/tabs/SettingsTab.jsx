@@ -57,7 +57,7 @@ export function groupByCategory(settings) {
   return groups
 }
 
-function SettingRow({ setting, onSaved, showToast }) {
+function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
   const [draft, setDraft] = useState(() => displayValue(setting.value, setting.value_type))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -97,7 +97,7 @@ function SettingRow({ setting, onSaved, showToast }) {
   const reset = () => { setDraft(stored); setError(null) }
 
   return (
-    <div className="setting-row">
+    <div className={`setting-row${highlighted ? ' setting-row-found' : ''}`} data-setting={setting.key}>
       <div className="setting-meta">
         <div className="setting-label-row">
           <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>
@@ -182,7 +182,7 @@ function SettingRow({ setting, onSaved, showToast }) {
   )
 }
 
-export function SettingsTab({ showToast }) {
+export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) {
   const [settings, setSettings] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -205,6 +205,18 @@ export function SettingsTab({ showToast }) {
   /* Falls back to the first category whenever the held one is not in the current list -- the first
      read, and a category that disappears. Chosen during render rather than in an effect, so the page
      never paints a tablist with nothing selected. */
+  /* A setting arrived from the search bar. Its category is chosen once, when the read that can
+     answer "which category?" lands -- not held, or the operator could never leave the category
+     they were sent to. `onClearSetting` drops the key so a later return to the page starts where
+     the page always starts. */
+  const [foundKey, setFoundKey] = useState('')
+  useEffect(() => {
+    if (!initialSetting || settings.length === 0) return
+    const found = settings.find(s => s.key === initialSetting)
+    if (found) { setCategory(found.category); setFoundKey(found.key) }
+    onClearSetting?.()
+  }, [initialSetting, settings, onClearSetting])
+
   const activeCategory = groups.some(g => g.category === category) ? category : groups[0]?.category
   const activeGroup = groups.find(g => g.category === activeCategory)
 
@@ -265,7 +277,8 @@ export function SettingsTab({ showToast }) {
                 role="tab"
                 aria-selected={group.category === activeCategory}
                 className={`btn btn-sm ${group.category === activeCategory ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => setCategory(group.category)}
+                // Choosing a category by hand ends the search's highlight: it has been seen.
+                onClick={() => { setCategory(group.category); setFoundKey('') }}
                 title={`${group.settings.length} setting${group.settings.length === 1 ? '' : 's'}`}
               >
                 {group.category} <span className="section-count">{group.settings.length}</span>
@@ -276,7 +289,7 @@ export function SettingsTab({ showToast }) {
           {activeGroup && (
             <div className="card settings-group" key={activeGroup.category}>
               {activeGroup.settings.map(s => (
-                <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} />
+                <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} />
               ))}
             </div>
           )}

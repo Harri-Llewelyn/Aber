@@ -13,7 +13,9 @@ import { TABS, tabIsVisible } from '../navigation'
  */
 
 vi.mock('../api', () => ({
-  api: { resolveId: vi.fn(), searchAssets: vi.fn() }
+  // `get` is the settings read the box makes once it is opened; most cases here do not care what
+  // comes back, so it answers with nothing and the suite that does care overrides it.
+  api: { resolveId: vi.fn(), searchAssets: vi.fn(), get: vi.fn().mockResolvedValue([]) }
 }))
 
 import { api } from '../api'
@@ -45,6 +47,16 @@ describe('what the index holds', () => {
     expect(operator.map(t => t.label)).not.toContain('Runtime configuration')
 
     expect(targets().map(t => t.label)).toContain('Runtime configuration')
+  })
+
+  /* THE GATE IS THE TAB, NOT RLS. `system_settings` is SELECT-able by every authenticated session
+     -- the policy that names Administrator is the UPDATE one -- so a setting must be withheld here
+     or the box would send an Operator to a page that will not render for them. */
+  it('offers a setting only to a session that can open the Settings page', () => {
+    const rows = [{ key: 'site.name', label: 'Site name', category: 'Site' }]
+    const operator = buildTargets(TABS.filter(t => tabIsVisible(t, () => false, 'Operator')), rows)
+    expect(operator.map(t => t.label)).not.toContain('Site name')
+    expect(buildTargets(adminTabs(), rows).map(t => t.label)).toContain('Site name')
   })
 
   it('tells a card which page it is on, because that is the answer being looked for', () => {
@@ -139,7 +151,9 @@ describe('the palette', () => {
     onSelectDevice: vi.fn(),
     onSelectGateway: vi.fn(),
     onSelectCell: vi.fn(),
-    onSelectSchema: vi.fn()
+    onSelectArea: vi.fn(),
+    onSelectSchema: vi.fn(),
+    onSelectSetting: vi.fn()
   })
 
   const type = (value) => {
@@ -153,6 +167,7 @@ describe('the palette', () => {
     vi.clearAllMocks()
     api.resolveId.mockResolvedValue([])
     api.searchAssets.mockResolvedValue([])
+    api.get.mockResolvedValue([])
   })
 
   it('shows nothing until something is typed, so the bar is not a permanent dropdown', () => {
@@ -229,6 +244,7 @@ describe('the palette', () => {
       for (const [kind, prop] of [
         ['gateway', 'onSelectGateway'],
         ['cell', 'onSelectCell'],
+        ['area', 'onSelectArea'],
         ['schema', 'onSelectSchema']
       ]) {
         api.resolveId.mockResolvedValue([{ kind, id: UUID, name: `a ${kind}` }])
@@ -318,11 +334,12 @@ describe('the palette', () => {
       api.searchAssets.mockResolvedValue([])
     })
 
-    it('finds all four kinds by name', async () => {
+    it('finds all five kinds by name', async () => {
       api.searchAssets.mockResolvedValue([
         hit('device', 'Haas VF-2', '11111111-1111-4111-8111-111111111111'),
         hit('gateway', 'Haas Cell Gateway', '22222222-2222-4222-8222-222222222222'),
         hit('cell', 'Haas Bay', '33333333-3333-4333-8333-333333333333'),
+        hit('area', 'Haas Hall', '55555555-5555-4555-8555-555555555555'),
         hit('schema', 'Haas Mill Schema', '44444444-4444-4444-8444-444444444444')
       ])
       render(<GlobalSearch {...props()} />)
@@ -331,7 +348,41 @@ describe('the palette', () => {
       await waitFor(() => expect(screen.getByText('Haas VF-2')).toBeInTheDocument())
       expect(screen.getByText('Haas Cell Gateway')).toBeInTheDocument()
       expect(screen.getByText('Haas Bay')).toBeInTheDocument()
+      // An area was the gap somebody found by looking for one: the map is drawn from areas and
+      // nothing in the box could reach one.
+      expect(screen.getByText('Haas Hall')).toBeInTheDocument()
       expect(screen.getByText('Haas Mill Schema')).toBeInTheDocument()
+    })
+
+    /* A setting is a row, not a page or a card, and the page that holds it is an Administrator's
+       and a tablist besides -- so finding one has to land on its category, not on the page. */
+    it('finds a setting by its label and opens the page on its category', async () => {
+      api.get.mockResolvedValue([
+        { key: 'site.name', label: 'Site name', category: 'Site', value: 'AMRC Cymru', value_type: 'string' },
+        { key: 'alerts.retention_days', label: 'Alert history kept for (days)', category: 'Retention', value: 7, value_type: 'number' }
+      ])
+      const p = props()
+      render(<GlobalSearch {...p} />)
+      type('Site name')
+
+      const row = await screen.findByText('Site name')
+      // The category is what the row says underneath, because it is where the page will open.
+      expect(row.closest('[role="option"]').textContent).toContain('Site')
+      fireEvent.click(row)
+      expect(p.onSelectSetting).toHaveBeenCalledWith('site.name')
+      expect(p.onNavigate).not.toHaveBeenCalled()
+    })
+
+    it('finds a setting by the key the code reads, not only by its label', async () => {
+      api.get.mockResolvedValue([
+        { key: 'site_map.min_pin_spacing', label: 'Minimum spacing between cells on an area plan', category: 'Site' }
+      ])
+      const p = props()
+      render(<GlobalSearch {...p} />)
+      type('min_pin_spacing')
+
+      fireEvent.click(await screen.findByText('Minimum spacing between cells on an area plan'))
+      expect(p.onSelectSetting).toHaveBeenCalledWith('site_map.min_pin_spacing')
     })
 
     it('waits for a second character', async () => {

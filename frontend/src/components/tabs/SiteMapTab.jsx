@@ -328,9 +328,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   }
 
   /**
-   * One area, drawn as its plan with every cell it holds pinned on it. The card is not a control:
-   * its name opens the area's panel and each pin opens its cell's, so nothing is hidden behind a
-   * view you have to enter.
+   * One area, drawn as its plan with every cell it holds pinned on it. The whole card opens the
+   * area's panel and each pin opens its cell's, so nothing is hidden behind a view you have to
+   * enter. The card carries no role of its own: a role="button" around the name button and the
+   * pins would be a lie to a screen reader, so the click is a shortcut to the name below it and
+   * the keyboard still goes through the real controls.
    */
   const areaCard = (ar) => {
     const areaCells = cellsOf(ar)
@@ -346,6 +348,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         key={ar.area_id}
         className={`area-thumb${state.alert ? ' area-thumb-alerting' : ''}${selectedAreaId === ar.area_id ? ' is-selected' : ''}`}
         data-area={ar.area_id}
+        /* A pin stops its own click (FloorPin), so a click that reaches here is the area's. */
+        onClick={() => toggleArea(ar.area_id)}
       >
         <div className="area-thumb-header">
           {/* The one dot that goes red: an alert against a device here outranks the rollup. */}
@@ -354,31 +358,39 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           <button
             type="button"
             className="zone-name area-thumb-name"
-            onClick={() => toggleArea(ar.area_id)}
+            /* Stopped, or the card behind it toggles the panel straight back shut. */
+            onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
             aria-pressed={selectedAreaId === ar.area_id}
             title={`${ar.area_name} — ${STATUS_WORD[state.pin]}. Click for its assets and its plan.`}
           >
             {ar.area_name}
           </button>
-          <span className="area-thumb-counts mono" title={`${areaCells.length} cell(s), ${gateways.length} gateway(s), ${devices.length} device(s), Area-Wide included`}>
+          {/* The Area-Wide tally rides with the others rather than taking a line of its own under
+              the plan: it is a count, and the counts live here. It is a breakdown, not an addition
+              -- the gateway and device figures beside it already include these. */}
+          <span
+            className="area-thumb-counts mono"
+            title={`${areaCells.length} cell(s), ${gateways.length} gateway(s), ${devices.length} device(s)`
+              + (wideCount > 0 ? `, of which ${wideCount} belong(s) to the area rather than to a cell in it` : '')}
+          >
             {counted(areaCells.length, 'Cell')} · {counted(gateways.length, 'Gateway')} · {counted(devices.length, 'Device')}
+            {wideCount > 0 && <> · <span className="area-thumb-wide">{wideCount} Area-Wide</span></>}
           </span>
         </div>
         <FloorPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
           {areaCells.map(cellPin)}
         </FloorPlan>
-        {/* Only what the plan cannot show. A card with everything placed and nothing area-wide
-            says nothing here, so the line means there is something to do. */}
-        {(unplaced.length > 0 || wideCount > 0) && (
+        {/* The one thing the counts cannot say: a cell filed here that the plan does not draw.
+            That is a job, not a tally, so it keeps its line -- and a card with everything placed
+            spends no space on it. */}
+        {unplaced.length > 0 && (
           <button
             type="button"
             className="area-thumb-aside"
-            onClick={() => toggleArea(ar.area_id)}
-            title={`Open ${ar.area_name} to see what is not on the plan`}
+            onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
+            title={`Open ${ar.area_name} to see which cells have no place on the plan`}
           >
-            {unplaced.length > 0 && <span className="area-thumb-aside-warn">{counted(unplaced.length, 'cell')} not placed</span>}
-            {unplaced.length > 0 && wideCount > 0 && <span aria-hidden="true"> · </span>}
-            {wideCount > 0 && <span>{counted(wideCount, 'Area-Wide asset')}</span>}
+            <span className="area-thumb-aside-warn">{counted(unplaced.length, 'cell')} not placed</span>
           </button>
         )}
       </div>
@@ -644,20 +656,22 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                 const open = openLane === lane.key
                 const status = stateOf(laneAssets).status
                 const LaneIcon = lane.icon
+                const holds = laneAssets.length + laneGateways.length > 0
                 return (
                   <button
                     key={lane.key}
                     type="button"
-                    className={`site-lane ${lane.className}${open ? ' is-open' : ''}`}
+                    /* A lane wears its hue only while it holds something. An empty Unassigned
+                       queue is the good state, and an amber tile over 0 · 0 was a standing false
+                       alarm; an empty lane keeps its outline and drops the fill. */
+                    className={`site-lane ${lane.className}${holds ? '' : ' is-empty'}${open ? ' is-open' : ''}`}
                     onClick={() => toggleLane(lane.key)}
                     aria-pressed={open}
                     title={`${lane.hint} ${open ? 'Click to close.' : 'Click to list its assets.'}`}
                   >
                     {/* No dot on an empty lane: grey next to zero says nothing, and its absence
                         lets a lane that holds something stand out. */}
-                    {laneAssets.length + laneGateways.length > 0 && (
-                      <span className={`tile-dot tile-dot-${status}`} title={STATUS_LABEL[status]} />
-                    )}
+                    {holds && <span className={`tile-dot tile-dot-${status}`} title={STATUS_LABEL[status]} />}
                     <LaneIcon size={13} style={{ flexShrink: 0 }} />
                     <span className="site-lane-name">{lane.title}</span>
                     <span className="site-lane-counts mono" title={`${laneGateways.length} gateway(s), ${laneAssets.length} device(s)`}>

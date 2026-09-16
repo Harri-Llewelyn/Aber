@@ -81,9 +81,15 @@ export const CARDS = [
 /**
  * Everything this session can reach, as one flat list. Takes the already-filtered pages, so
  * `tabIsVisible` is the only predicate deciding what a session may see. A card inherits its page's
- * visibility.
+ * visibility, and so does a setting.
+ *
+ * `settings` are rows, not a listed constant -- a migration adds one and nothing here would know --
+ * but they are a closed set of a dozen short labels, so they are matched here alongside the pages
+ * rather than probed per keystroke like the estate. The caller passes them only when the Settings
+ * page is this session's to open: `system_settings` is readable by every authenticated session
+ * while the page is an Administrator's, so RLS is not the gate here that it is for an asset.
  */
-export function buildTargets(visibleTabs) {
+export function buildTargets(visibleTabs, settings = []) {
   const pages = visibleTabs.map(t => ({
     kind: 'page',
     key: `page:${t.id}`,
@@ -107,7 +113,22 @@ export function buildTargets(visibleTabs) {
       keywords: c.keywords || []
     }))
 
-  return [...pages, ...cards]
+  /* The key is a keyword rather than the label, so `site.name` finds the row somebody read in a
+     log or a migration as surely as "Site name" does. The category is what the row says beneath
+     its label, because it is the tab the page will open on. */
+  const settingRows = reachable.has('settings')
+    ? settings.filter(s => s && s.key).map(s => ({
+      kind: 'setting',
+      key: `setting:${s.key}`,
+      label: s.label || s.key,
+      tabId: 'settings',
+      settingKey: s.key,
+      page: s.category || 'Settings',
+      keywords: [s.key, s.category].filter(Boolean)
+    }))
+    : []
+
+  return [...pages, ...cards, ...settingRows]
 }
 
 const norm = (s) => String(s || '').toLowerCase().trim()
@@ -143,9 +164,15 @@ export function scoreTarget(target, query) {
   return best
 }
 
+/* Breaks a tie on score, least specific first: a card and a setting both navigate to the page
+   above them, so the page is the row that answers with the fewest assumptions. A rank rather than
+   a chain of conditions, because a comparator that returns 1 for both (a, b) and (b, a) -- which
+   an `a.kind === 'page' ? -1 : 1` chain does for card against setting -- sorts arbitrarily. */
+const KIND_RANK = { page: 0, card: 1, setting: 2 }
+
 /**
- * The ranked results. Pages win ties: a card navigates to the page that holds it, so the two rows
- * go to the same place.
+ * The ranked results. Pages win ties: a card or a setting navigates to the page that holds it, so
+ * the rows go to the same place.
  */
 export function matchTargets(query, targets, limit = 8) {
   return targets
@@ -153,7 +180,7 @@ export function matchTargets(query, targets, limit = 8) {
     .filter(r => r.score > 0)
     .sort((a, b) =>
       b.score - a.score ||
-      (a.target.kind === b.target.kind ? 0 : a.target.kind === 'page' ? -1 : 1) ||
+      (KIND_RANK[a.target.kind] ?? 9) - (KIND_RANK[b.target.kind] ?? 9) ||
       a.target.label.localeCompare(b.target.label))
     .slice(0, limit)
     .map(r => r.target)

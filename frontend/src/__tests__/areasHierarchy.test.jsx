@@ -114,9 +114,10 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
   it('shows every area at once, with every placed cell pinned and the counts above it', async () => {
     await renderSiteMap()
     expect(thumbs().map(t => within(t).getByText(/Building/).textContent)).toEqual(['Building A', 'Building B'])
-    // Cells, gateways and devices in the header; Area-Wide assets count, so Building A's BMS does.
-    expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
-    expect(within(thumbs()[1].querySelector('.area-thumb-header')).getByText('1 Cell · 0 Gateways · 0 Devices')).toBeInTheDocument()
+    // Cells, gateways and devices in the header; Area-Wide assets count, so Building A's BMS does,
+    // and it is broken out in the same line rather than given one under the plan.
+    expect(thumbs()[0].querySelector('.area-thumb-counts').textContent.trim()).toBe('2 Cells · 1 Gateway · 2 Devices · 1 Area-Wide')
+    expect(thumbs()[1].querySelector('.area-thumb-counts').textContent.trim()).toBe('1 Cell · 0 Gateways · 0 Devices')
     // THE POINT OF THE ONE VIEW: both of Building A's cells are pinned, and the header's count
     // agrees with what is drawn. A floor selector used to show one of them at a time.
     expect(pinNames()).toEqual(['Bay 1', 'Bay 2'])
@@ -183,9 +184,9 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     const unassigned = lanes()[2]
     expect(unassigned.textContent).toContain('Unassigned')
     expect(unassigned.querySelector('.site-lane-counts').textContent.trim()).toBe('0 Gateways · 0 Devices')
-    // Counted once, under the area that owns it.
-    expect(within(thumbs()[0].querySelector('.area-thumb-header')).getByText('0 Cells · 1 Gateway · 0 Devices'))
-      .toBeInTheDocument()
+    // Counted once, under the area that owns it, and named as the area's own rather than a cell's.
+    expect(thumbs()[0].querySelector('.area-thumb-counts').textContent.trim())
+      .toBe('0 Cells · 1 Gateway · 0 Devices · 1 Area-Wide')
   })
 
   it('still queues a gateway that is scoped to a cell and has none', async () => {
@@ -222,6 +223,24 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
 
   /* An action with nothing to act on is a dead end wearing the clothes of a next step. The cell
      panel already gates Open Dashboard on the cell having one; the lane panel was the outlier. */
+  /* An empty Unassigned queue is the good state. Amber over 0 · 0 is a standing false alarm, so a
+     lane wears its hue only while it holds something. */
+  it('mutes a lane that holds nothing and fills one that does', async () => {
+    const siteWideDevice = {
+      ...device, asset_id: 'dev-sw', asset_name: 'Weather_Station', effective_cell_id: null,
+      gateway_cell_id: null, location_source: 'site_wide', effective_area_id: null
+    }
+    api.get.mockImplementation(routeGet({ devices: [siteWideDevice], gateways: [] }))
+    await renderSiteMap()
+    const [siteWide, simulated, unassigned] = lanes()
+    expect(siteWide).not.toHaveClass('is-empty')
+    expect(siteWide.querySelector('.tile-dot')).not.toBeNull()
+    expect(simulated).toHaveClass('is-empty')
+    expect(unassigned).toHaveClass('is-empty')
+    // No dot either: grey beside a zero says nothing twice.
+    expect(unassigned.querySelector('.tile-dot')).toBeNull()
+  })
+
   it('offers a lane only the actions it can honour', async () => {
     const looseDevice = {
       ...device, asset_id: 'dev-loose', asset_name: 'Loose_Device', effective_cell_id: null,
@@ -294,11 +313,33 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(panel()).getByText('The annexe')).toBeInTheDocument()
   })
 
-  /* An area's card says only what the plan cannot draw, so the line's absence means there is
-     nothing outstanding. */
-  it('names the unplaced cells and area-wide assets on the card, and nothing when there are none', async () => {
+  /* The name is a control, but nobody aims for it: the plan is the biggest thing on the card and
+     the cursor already says pointer, so the card takes the click as well. */
+  it('opens the area from the card itself, and leaves a pin to its own cell', async () => {
     await renderSiteMap()
-    expect(within(thumbs()[0]).getByText(/Area-Wide asset/)).toBeInTheDocument()
+    fireEvent.click(thumbs()[0].querySelector('.floor-plan'))
+    expect(within(panel()).getByText('2 Cells · 2 Devices')).toBeInTheDocument()
+
+    // A pin stops its own click, so the cell wins over the area behind it.
+    fireEvent.click(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' }))
+    expect(within(panel()).queryByText('2 Cells · 2 Devices')).toBeNull()
+    expect(within(panel()).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
+
+    // And the name still closes what it opened, rather than the card reopening it behind.
+    const name = within(thumbs()[0]).getByRole('button', { name: 'Building A' })
+    fireEvent.click(name)
+    expect(name).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(name)
+    expect(name).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  /* The line under a card carries one thing only -- a cell the plan does not draw -- so its
+     absence means there is nothing outstanding. An Area-Wide asset is a count, not a job, and
+     rides in the header with the others. */
+  it('spends a line under the card on unplaced cells alone, and none when there are none', async () => {
+    await renderSiteMap()
+    expect(within(thumbs()[0]).getByText(/1 Area-Wide/)).toBeInTheDocument()
+    expect(thumbs()[0].querySelector('.area-thumb-aside')).toBeNull()
     expect(within(thumbs()[1]).getByText('1 cell not placed')).toBeInTheDocument()
 
     api.get.mockImplementation(routeGet({ cells: [cells[0]], devices: [device] }))
@@ -499,16 +540,27 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(within(planRow()).getByText('2 cells placed on it')).toBeInTheDocument()
   })
 
-  it('offers Upload on an area with no plan, and Replace and Remove on one with', async () => {
+  it('offers a drop zone on an area with no plan, and Replace and Remove on one with', async () => {
     await openArea('Building B')
     expect(planRow().getAttribute('data-plan')).toBe('outline')
-    expect(within(planRow()).getByRole('button', { name: /Upload plan/ })).toBeInTheDocument()
-    expect(within(planRow()).queryByRole('button', { name: /Remove plan/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Upload plan for Building B' })).toBe(planRow())
+    expect(within(planRow()).getByText(/Drop an SVG plan here/)).toBeInTheDocument()
+    expect(within(planRow()).getByText(/Default outline · 0 cells placed on it/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Remove plan/ })).toBeNull()
 
     document.body.innerHTML = ''
     await openArea('Building A')
     expect(within(planRow()).getByRole('button', { name: /Replace plan/ })).toBeInTheDocument()
     expect(within(planRow()).getByRole('button', { name: /Remove plan/ })).toBeInTheDocument()
+  })
+
+  it('takes a plan dropped onto the zone, not only one browsed for', async () => {
+    api.uploadFloorPlan.mockResolvedValue({})
+    await openArea('Building B')
+    const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
+    await act(async () => { fireEvent.drop(planRow(), { dataTransfer: { files: [file] } }) })
+    expect(api.uploadFloorPlan).toHaveBeenCalledTimes(1)
+    expect(api.uploadFloorPlan.mock.calls[0][1]).toBe(file)
   })
 
   it('uploads a plan against the area itself', async () => {

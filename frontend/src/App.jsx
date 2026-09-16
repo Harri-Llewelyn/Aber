@@ -354,6 +354,8 @@ function Dashboard({ session, onSignOut }) {
   const [selectedCellFilter, setSelectedCellFilter] = useState('')
   // Set by a cell drawer's Area chip; consumed by AreasTab, which opens that area's drawer.
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
+  // Set by the search bar; consumed by SettingsTab, which opens that setting's category on it.
+  const [selectedSettingKey, setSelectedSettingKey] = useState('')
   // Set by a "Digital Thread" action on an asset row; consumed by DigitalThreadTab as { id, type }.
   const [selectedThreadEntity, setSelectedThreadEntity] = useState(null)
   // Set by Use on the Vocabulary page; consumed by MetricsTab, which resolves it against the
@@ -385,6 +387,9 @@ function Dashboard({ session, onSignOut }) {
   const showArea    = (id) => { setSelectedAreaFilter(id);    setTab('areas',    { search: id }) }
   /** Open ONE schema's drawer on the Schemas page -- a device drawer's Schema chip. */
   const showSchema  = (uuid) => { setSelectedSchemaId(uuid);  setTab('schemas',  { search: uuid }) }
+  /* A setting is reached by its key, not a UUID: the key is what the page, the code and every
+     migration call it, and it is what a link to one should carry. */
+  const showSetting = (key) => { setSelectedSettingKey(key); setTab('settings', { search: key }) }
   /** The opposite direction: every device provisioned with a schema. Note the `schema` key. */
   const showDevicesForSchema = (uuid) => {
     setSelectedSchemaFilter(uuid)
@@ -498,7 +503,9 @@ function Dashboard({ session, onSignOut }) {
           onSelectDevice={showDevice}
           onSelectGateway={showGateway}
           onSelectCell={showCell}
+          onSelectArea={showArea}
           onSelectSchema={showSchema}
+          onSelectSetting={showSetting}
         />
 
         {/* The right-hand side holds the one control whose value moves, the alert pill, plus the
@@ -610,7 +617,7 @@ function Dashboard({ session, onSignOut }) {
                 the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
             {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} />}
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
-            {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} />}
+            {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} initialSetting={selectedSettingKey} onClearSetting={() => setSelectedSettingKey('')} />}
           </Suspense>
         </main>
 

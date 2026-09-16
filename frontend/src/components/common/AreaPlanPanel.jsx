@@ -3,24 +3,28 @@ import { api } from '../../api'
 import { FLOOR_PLAN_MAX_BYTES, isSvgFile } from '../../utils/floorPlans'
 import { HelpTip } from './HelpTip'
 import { ConfirmModal } from '../modals/ConfirmModal'
-import { IconUpload, IconImage } from './Icons'
+import { IconUpload, IconImage, IconTrash } from './Icons'
 
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, replace it, or
- * remove it. The write is one call and the panel asks the page to reload rather than patching its
- * own copy.
+ * remove it. An area with no plan shows the drop zone rather than a button, the same gesture a
+ * device's 3D model takes. The write is one call and the panel asks the page to reload rather
+ * than patching its own copy.
  */
 export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) {
   const [busy, setBusy] = useState(false)
+  const [dragging, setDragging] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const fileInput = useRef(null)
 
   const placed = (cells || []).filter(c => c.plan_x !== null && c.plan_x !== undefined && !c.is_archived).length
+  const placedLine = `${placed} cell${placed === 1 ? '' : 's'} placed on it`
+  const limitMiB = Math.round(FLOOR_PLAN_MAX_BYTES / 1048576)
 
   const upload = async (file) => {
     if (!file) return
     if (!isSvgFile(file)) { showToast?.(`"${file.name}" is not an SVG. A floor plan is an SVG drawing.`, 'error'); return }
-    if (file.size > FLOOR_PLAN_MAX_BYTES) { showToast?.(`"${file.name}" is over the ${Math.round(FLOOR_PLAN_MAX_BYTES / 1048576)} MiB limit.`, 'error'); return }
+    if (file.size > FLOOR_PLAN_MAX_BYTES) { showToast?.(`"${file.name}" is over the ${limitMiB} MiB limit.`, 'error'); return }
     setBusy(true)
     try {
       await api.uploadFloorPlan(area, file)
@@ -44,6 +48,36 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
     finally { setBusy(false) }
   }
 
+  const openPicker = () => { if (canManage && !busy) fileInput.current?.click() }
+
+  const onDrop = (event) => {
+    // preventDefault on BOTH dragover and drop, or the browser navigates to the dropped file and
+    // the page is simply gone.
+    event.preventDefault()
+    setDragging(false)
+    if (!canManage || busy) return
+    upload(event.dataTransfer?.files?.[0])
+  }
+
+  const onDragOver = (event) => {
+    event.preventDefault()
+    if (canManage && !busy) setDragging(true)
+  }
+
+  const picker = (
+    <input
+      ref={fileInput}
+      type="file"
+      accept=".svg,image/svg+xml"
+      style={{ display: 'none' }}
+      onChange={e => upload(e.target.files?.[0])}
+      /* The picker sits inside the zone so its label stays with it, which means its own click
+         would bubble back to the zone and open it a second time. */
+      onClick={e => e.stopPropagation()}
+      aria-label={`Plan file for ${area.area_name}`}
+    />
+  )
+
   return (
     <div className="area-plan">
       {confirm && (
@@ -66,40 +100,59 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
         </span>
       </div>
 
-      <div className="area-plan-row" data-plan={area.plan_path ? 'uploaded' : 'outline'}>
-        <span className="area-plan-state">
-          <IconImage size={12} />
-          <strong>{area.plan_path ? 'Plan attached' : 'Default outline'}</strong>
-          <span className="area-plan-meta">
-            {placed} cell{placed === 1 ? '' : 's'} placed on it
+      {area.plan_path ? (
+        <div className="area-plan-row" data-plan="uploaded">
+          <IconImage size={16} className="area-plan-glyph" />
+          <span className="area-plan-state">
+            <strong>Plan attached</strong>
+            <span className="area-plan-meta">{placedLine}</span>
           </span>
-        </span>
-        {canManage && (
-          <span className="area-plan-actions">
-            <input
-              ref={fileInput}
-              type="file"
-              accept=".svg,image/svg+xml"
-              style={{ display: 'none' }}
-              onChange={e => upload(e.target.files?.[0])}
-              aria-label={`Plan file for ${area.area_name}`}
-            />
-            <button
-              className="btn btn-ghost btn-sm"
-              disabled={busy}
-              onClick={() => fileInput.current?.click()}
-              title={area.plan_path ? 'Replace the floor plan (SVG)' : 'Upload a floor plan (SVG)'}
-            >
-              <IconUpload size={12} /> {area.plan_path ? 'Replace plan' : 'Upload plan'}
-            </button>
-            {area.plan_path && (
-              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirm(true)} title="Remove the plan; the area keeps the default outline">
-                <IconImage size={12} /> Remove plan
+          {canManage && (
+            <span className="area-plan-actions">
+              {picker}
+              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={openPicker} title="Upload a plan in place of this one">
+                <IconUpload size={12} /> Replace plan
               </button>
-            )}
+              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirm(true)} title="Remove the plan; the area keeps the default outline">
+                <IconTrash size={12} /> Remove plan
+              </button>
+            </span>
+          )}
+        </div>
+      ) : canManage ? (
+        <div
+          className="area-plan-row area-plan-drop"
+          data-plan="outline"
+          data-dragging={dragging ? 'yes' : undefined}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          onDragLeave={() => setDragging(false)}
+          onClick={openPicker}
+          role="button"
+          tabIndex={0}
+          aria-label={`Upload plan for ${area.area_name}`}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker() }
+          }}
+        >
+          {picker}
+          <IconUpload size={20} />
+          <span className="area-plan-drop-line">
+            {busy ? 'Uploading…' : 'Drop an SVG plan here, or click to browse'}
           </span>
-        )}
-      </div>
+          <span className="area-plan-meta">
+            Default outline · {placedLine} · SVG up to {limitMiB} MiB
+          </span>
+        </div>
+      ) : (
+        <div className="area-plan-row" data-plan="outline">
+          <IconImage size={16} className="area-plan-glyph" />
+          <span className="area-plan-state">
+            <strong>Default outline</strong>
+            <span className="area-plan-meta">{placedLine}</span>
+          </span>
+        </div>
+      )}
     </div>
   )
 }
