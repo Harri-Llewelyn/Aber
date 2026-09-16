@@ -152,6 +152,43 @@ describe('GatewayRepositoryPanel — host-run gateways', () => {
   })
 })
 
+describe('GatewayRepositoryPanel — archived in the forge', () => {
+  /**
+   * Archiving a gateway archives its repository (#197): forge-sweep marks it read-only and writes
+   * `forge_archived_at` once the forge has answered. The column is the sweep's answer, not the
+   * dashboard's assumption, so an archived gateway on a deployment with no forge says nothing
+   * about one.
+   */
+  const ARCHIVED = { ...GATEWAY, is_archived: true, forge_archived_at: '2026-09-16T10:00:00Z' }
+
+  it('says the repository is read-only and that restoring reverses it', () => {
+    render(<GatewayRepositoryPanel gateway={ARCHIVED} canOpenForge />)
+    const text = screen.getByText(/read-only/i).textContent
+    expect(text).toMatch(/archived/i)
+    expect(text).toMatch(/restored/i)
+  })
+
+  it('keeps every link, because reading is the point of archiving rather than deleting', () => {
+    render(<GatewayRepositoryPanel gateway={ARCHIVED} canOpenForge />)
+    expect(screen.getByTitle(/Open this gateway's repository/i)).toBeInTheDocument()
+    expect(screen.getByTitle(/issues/i)).toBeInTheDocument()
+    expect(screen.getByTitle(/wiki/i)).toBeInTheDocument()
+  })
+
+  it('stops inviting a pull request nothing could merge', () => {
+    render(<GatewayRepositoryPanel gateway={ARCHIVED} canOpenForge />)
+    expect(screen.queryByText(/open a pull request/i)).toBeNull()
+  })
+
+  it('says nothing about the archive for a gateway the sweep has not archived', () => {
+    // An archived gateway whose repository the sweep has not reached yet -- or a deployment with
+    // no forge at all, where it never will. `is_archived` alone must not claim otherwise.
+    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, is_archived: true }} canOpenForge />)
+    expect(screen.getByText(/open a pull request/i)).toBeInTheDocument()
+    expect(screen.queryByText(/read-only/i)).toBeNull()
+  })
+})
+
 describe('GatewayRepositoryPanel — what it no longer is', () => {
   it('offers nothing of the retired proposal dropzone', () => {
     const { container } = render(<GatewayRepositoryPanel gateway={GATEWAY} canOpenForge />)

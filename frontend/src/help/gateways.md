@@ -20,7 +20,7 @@ An edge gateway is what actually talks to machines and publishes their data to t
 - **ONLINE** -- heartbeat current.
 - **STALE** -- the stored status still says online, but the last heartbeat is older than 90 seconds. This is worked out when you look rather than written down, so it is true at the moment you read it.
 - **OFFLINE** -- no heartbeat and not mid-enrolment. This one is a fault.
-- **Archived** -- decommissioned on purpose, and left out of the attention signal for that reason.
+- **Archived** -- decommissioned on purpose, and left out of the attention signal for that reason. Archiving is the revocation: the broker account is disabled, any unredeemed enrolment token is burned, the appliance's deploy key is removed, and its repository in the forge is archived -- read-only, with every branch, issue and wiki page kept. Restoring the gateway reverses all four. Nothing here deletes a repository; that is done in the forge.
 
 **Type** says where the gateway runs and how far to trust its numbers. **Remote** runs on its own hardware out on the plant network. **Host** is a connector inside this stack, with nothing to install and no appliance to enrol. **Simulated** is host-run and its readings are generated rather than observed. **Shadow** belongs to playback and is not something you create.
 

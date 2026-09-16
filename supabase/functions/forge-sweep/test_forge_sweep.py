@@ -10,7 +10,9 @@ again when the role returns; a gateway repository whose push webhook was deleted
 repository somebody made by hand in the organisation has `main` protected; a gateway repository
 whose `appliance` and `**` rules were deleted and whose `main` was opened to deploy keys gets all
 three back the way enrolment set them; a key somebody re-registered read-only is read-write again;
-an archived gateway's key is removed; and the database's own sweep_forge() answers true, which is
+an archived gateway's key is removed and its repository is put into the forge's archive, read-only
+with every branch kept, and taken back out when the gateway is restored (#197); and the database's
+own sweep_forge() answers true, which is
 "asked" -- that call is asynchronous, and the function itself is what the rest of this file drives
 directly.
 
@@ -373,7 +375,107 @@ class TestRepositories(ForgeSweepBase):
             self.assertTrue(any(entry.startswith(self.repo) for entry in body["revoked"]), body)
             self.assertEqual(self.keys(), [], "an archived gateway's appliance can still reach the forge")
         finally:
-            rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": False})
+            # Sweeps as well as restoring: since 0114 the pass above also archived the repository.
+            self.restore_and_sweep()
+
+    def repository(self):
+        status, repo = forge(f"/repos/{ORGANISATION}/{self.repo}")
+        self.assertEqual(status, 200, repo)
+        return repo
+
+    def restore_and_sweep(self):
+        """
+        Put the row back AND sweep. Restoring alone leaves the repository read-only in the forge
+        until the next pass, and the tests that follow this one in the class would then enrol
+        against an archived repository -- which is a real state, and not the one they mean to be
+        testing.
+        """
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": False})
+        sweep()
+
+    def test_an_archived_gateway_has_its_repository_archived(self):
+        """
+        #197, and the half the deploy key never covered. Revoking the key stops the appliance
+        reaching the repository; it does nothing about the repository itself, which went on
+        reading in the forge's own listing exactly like one in service -- and the forge is where
+        the flow and the plant's notes about a gateway live.
+        """
+        self.enrol()
+        self.assertFalse(self.repository()["archived"], "enrolment created an archived repository")
+        status, _ = rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
+        self.assertIn(status, (200, 204))
+        try:
+            status, body = sweep()
+            self.assertEqual(status, 200, body)
+            self.assertIn(self.repo, body["archived"], body)
+
+            repo = self.repository()
+            self.assertTrue(repo["archived"], "the repository of an archived gateway is still live")
+            # ARCHIVED, NOT DELETED. The wiki is the one place a plant's notes about a gateway
+            # live, and the `appliance` branch is the last thing it reported -- a better record
+            # than the heartbeat table, which stops.
+            self.assertFalse(repo.get("empty", False), repo)
+            status, branches = forge(f"/repos/{ORGANISATION}/{self.repo}/branches")
+            self.assertEqual(status, 200, branches)
+            self.assertIn("main", [b["name"] for b in branches], branches)
+
+            # The row records what the forge answered, which is what the dashboard reads.
+            _, rows = rest(f"/gateways?id=eq.{TEST_GW_ID}&select=forge_archived_at")
+            self.assertIsNotNone(rows[0]["forge_archived_at"], rows)
+        finally:
+            self.restore_and_sweep()
+
+    def test_restoring_the_gateway_takes_its_repository_back_out(self):
+        self.enrol()
+        # Something the sweep must WRITE on the way back, so this can tell un-archiving FIRST from
+        # un-archiving last: Gitea refuses a webhook registration on an archived repository, so a
+        # pass that furnished before it un-archived would leave the hook missing and say so in
+        # `errors`.
+        hooks = self.our_hooks()
+        if hooks:
+            forge(f"/repos/{ORGANISATION}/{self.repo}/hooks/{hooks[0]['id']}", method="DELETE")
+
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertTrue(self.repository()["archived"], body)
+
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": False})
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertIn(self.repo, body["restored"], body)
+        self.assertFalse(self.repository()["archived"], "the repository stayed read-only")
+        self.assertEqual(body["errors"], [], body)
+        if hooks:
+            self.assertEqual(
+                len(self.our_hooks()), 1,
+                "the same pass could not re-register the hook, so it furnished before it "
+                "un-archived",
+            )
+
+        _, rows = rest(f"/gateways?id=eq.{TEST_GW_ID}&select=forge_archived_at")
+        self.assertIsNone(rows[0]["forge_archived_at"], rows)
+
+        # THE KEY DOES NOT COME BACK, and that is the same answer the broker credential gives.
+        # Archiving deleted it and the platform keeps no copy of the appliance's public key, so a
+        # machine that returns is re-enrolled -- which is also what un-archives the repository
+        # without waiting for a sweep.
+        self.assertEqual(self.keys(), [], "a deleted deploy key reappeared from somewhere")
+
+    def test_a_second_sweep_leaves_an_archived_repository_alone(self):
+        # The reconciliation is against the forge's own answer, so a repository already in the
+        # state the row asks for costs a read and no PATCH. Without that, every pass would report
+        # a change it did not make -- and the summary is what an operator reads.
+        self.enrol()
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
+        try:
+            sweep()
+            status, body = sweep()
+            self.assertEqual(status, 200, body)
+            self.assertNotIn(self.repo, body["archived"], body)
+            self.assertEqual(body["errors"], [], "an archived repository is being written to")
+        finally:
+            self.restore_and_sweep()
 
     def test_an_enrolled_gateway_reads_the_platform_repository_and_points_at_its_tag(self):
         """

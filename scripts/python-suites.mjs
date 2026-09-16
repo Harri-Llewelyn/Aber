@@ -531,6 +531,15 @@ export const SUITES = {
       'Revocation actually revokes. A revocation path that silently no-ops leaves a credential ' +
       'the dashboard reports as withdrawn and the broker still accepts.',
   },
+  'supabase/migrations/test_forge_follows_the_archive.py': {
+    lanes: ['db'],
+    why:
+      '0114 asks forge-sweep for a pass as an archive lands, and the three gates on that ask. ' +
+      'The one worth a CI job is the TRANSITION guard: `UPDATE OF is_archived` fires on the ' +
+      'column appearing in a SET list, not on its value changing, so losing it would make every ' +
+      'ordinary edit to an archived gateway walk the whole forge -- an outcome visible only as ' +
+      "somebody else's API rate limit.",
+  },
   'supabase/migrations/test_digital_thread_paging.py': {
     lanes: ['db'],
     why:

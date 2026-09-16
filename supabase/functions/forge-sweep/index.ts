@@ -15,11 +15,15 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  * admits deploy keys alone and the `**` rule that admits none, and its deploy keys reconciled
  * with the gateway row (an active gateway's keys are read-write on its own repository, an archived
  * or deleted gateway's are removed, which is the third revocation handle beside `disableClient`
- * and the enrolment token); and every other repository in the organisation -- a playbook somebody
- * made by hand -- has `main` protected the same way, without the incident template, because a
- * flow a gateway may later adopt should have been reviewed from the start. Nothing is created that
- * enrolment would not create; the only deletion is a key. A member who is not a dashboard identity
- * was put there by hand and is left alone.
+ * and the enrolment token); an archived gateway's repository is put into the forge's archive and a
+ * restored one taken back out (#197), which is what stops a retired gateway reading, in the forge's
+ * own listing, exactly like one in service; and every other repository in the organisation -- a
+ * playbook somebody made by hand -- has `main` protected the same way, without the incident
+ * template, because a flow a gateway may later adopt should have been reviewed from the start.
+ * Nothing is created that enrolment would not create, and nothing is ever deleted but a key: a
+ * repository outlives its gateway row on purpose, because its wiki is where a plant's notes about
+ * that gateway live. A member who is not a dashboard identity was put there by hand and is left
+ * alone.
  *
  * Authorised by FORGE_SWEEP_SECRET in `x-sweep-secret`, not by the anon key: the edge runtime boots
  * with VERIFY_JWT=false, and the gateway's key check proves only that the caller holds a key that
@@ -53,6 +57,7 @@ import {
   type PublishSpec,
   publishToForge,
   publishTrust,
+  setRepositoryArchived,
   TRUST_PREFIX,
   type TrustRoot,
 } from "../_shared/forge.ts";
@@ -86,6 +91,10 @@ interface Summary {
   rekeyed: string[];
   /** Keys removed from an archived or deleted gateway's repository. */
   revoked: string[];
+  /** A repository put into the forge's archive, because its gateway is archived or its row is gone. */
+  archived: string[];
+  /** A repository taken out of the archive, because its gateway was restored. */
+  restored: string[];
   /** A repository the platform publishes -- the playbook, the custom example -- committed or tagged. */
   published: string[];
   /** A gateway row taught that its repository exists (`forge_repository_at`). */
@@ -304,9 +313,44 @@ async function recordRepository(
 }
 
 /**
- * The repository half. A gateway's repository gets what enrolment gives one; any other repository
- * in the organisation gets `main` protected. A repository that already has everything costs a
- * handful of reads.
+ * `forge_archived_at`: whether this gateway's repository is in the forge's archive, as the sweep
+ * last saw it. Written here rather than stamped by the trigger that asks for the sweep, because
+ * this is the only code that has spoken to the forge -- an optimistic stamp would say the
+ * repository was archived on a deployment that has no forge at all.
+ *
+ * CLEARED on the way back, which `forge_repository_at` deliberately never is: that column answers
+ * "does a repository exist", where a failed pass must not read as "it is gone", and this one
+ * answers "is it read-only right now", where the sweep has just made it so either way.
+ */
+async function recordArchived(
+  admin: ReturnType<typeof serviceRoleClient>,
+  sparkplugId: string,
+  gateway: { forge_archived_at: string | null } | undefined,
+  archived: boolean,
+): Promise<void> {
+  // A repository whose row is gone has nowhere to record it. That is the delete case, and the
+  // repository outliving the row is the point of it.
+  if (!gateway) return;
+  if (archived === Boolean(gateway.forge_archived_at)) return;
+  const { error } = await admin
+    .from("gateways")
+    .update({ forge_archived_at: archived ? new Date().toISOString() : null })
+    .eq("sparkplug_id", sparkplugId);
+  if (error) throw new Error(`could not record the archive state of its repository: ${error.message}`);
+}
+
+/**
+ * The repository half. A gateway's repository gets what enrolment gives one, or the forge's
+ * archive if its gateway has been archived; any other repository in the organisation gets `main`
+ * protected. A repository that already has everything costs a handful of reads.
+ *
+ * THE ARCHIVE IS WHAT MAKES A RETIRED GATEWAY LOOK RETIRED (#197). Archiving already revoked the
+ * thing that matters -- the broker account -- and the sweep already removes the deploy key, so
+ * what was left was a repository that read, in the forge's own listing, exactly like one in
+ * service. Gitea's archive mark makes it read-only and badges it, keeping every branch: the
+ * `appliance` branch, the last thing the gateway reported, is a better record than the heartbeat
+ * table, which stops. Nothing here deletes a repository, ever -- a plant's notes about a gateway
+ * live in its wiki, and a delete is a decision a person takes in the forge.
  */
 async function sweepRepositories(
   cfg: ForgeConfig,
@@ -314,28 +358,66 @@ async function sweepRepositories(
   platform: boolean,
   summary: Summary,
 ): Promise<void> {
-  const { data, error } = await admin.from("gateways").select("sparkplug_id, is_archived, forge_repository_at");
+  const { data, error } = await admin
+    .from("gateways")
+    .select("sparkplug_id, is_archived, forge_repository_at, forge_archived_at");
   if (error) throw new Error(`could not read gateways: ${error.message}`);
   const gateways = new Map(
-    (data ?? []).map((g: { sparkplug_id: string; is_archived: boolean; forge_repository_at: string | null }) =>
-      [g.sparkplug_id, g]
-    ),
+    (data ?? []).map((
+      g: {
+        sparkplug_id: string;
+        is_archived: boolean;
+        forge_repository_at: string | null;
+        forge_archived_at: string | null;
+      },
+    ) => [g.sparkplug_id, g]),
   );
 
-  const repositories = await listAll<{ name: string }>(
+  // `archived` comes from the listing, so the reconciliation below costs a PATCH only where the
+  // forge and the row disagree. Gitea puts it on every repository it lists.
+  const repositories = await listAll<{ name: string; archived?: boolean }>(
     cfg,
     `/orgs/${FORGE_ORGANISATION}/repos`,
     `the repositories of '${FORGE_ORGANISATION}'`,
   );
-  for (const { name } of repositories) {
+  for (const { name, archived } of repositories) {
     const named = GATEWAY_REPOSITORY.exec(name);
+    const gateway = named ? gateways.get(named[1]) : undefined;
     try {
-      if (await ensureBranchProtection(cfg, name, { seedTemplate: !!named })) summary.protected.push(name);
-      if (!named) continue;
+      // A repository somebody made by hand: `main` protected and nothing else. One they also
+      // archived is left entirely alone -- protecting a branch is a write, and Gitea refuses
+      // writes to an archived repository, so the attempt would be an error on every pass.
+      // `seedTemplate: false` is not a default: ensureBranchProtection() seeds unless told not
+      // to, and a playbook is not a gateway -- it gets no incident template.
+      if (!named) {
+        if (!archived && await ensureBranchProtection(cfg, name, { seedTemplate: false })) {
+          summary.protected.push(name);
+        }
+        continue;
+      }
+
+      // Archived, or a repository whose row is gone. THE KEYS COME OFF BEFORE THE ARCHIVE GOES
+      // ON: a key left on it is a key the appliance can still clone with, and it must not be the
+      // thing the archive prevents this pass from removing. A pass that dies between the two
+      // leaves the keys gone and the archive to the next one.
+      if (!gateway || gateway.is_archived) {
+        await sweepDeployKeys(cfg, name, named[1], gateway, platform, summary);
+        await recordRepository(admin, name, named[1], gateway, summary);
+        if (await setRepositoryArchived(cfg, name, true, archived)) summary.archived.push(name);
+        await recordArchived(admin, named[1], gateway, true);
+        // No furnishing. Every call below is a write, and this repository is now read-only.
+        continue;
+      }
+
+      // Out of the archive FIRST, for the same reason in reverse: a restored gateway's repository
+      // is still read-only until this call, and everything after it is a write.
+      if (await setRepositoryArchived(cfg, name, false, archived)) summary.restored.push(name);
+      await recordArchived(admin, named[1], gateway, false);
+      if (await ensureBranchProtection(cfg, name, { seedTemplate: true })) summary.protected.push(name);
       if (await ensureApplianceProtection(cfg, name)) summary.protected.push(`${name} (appliance)`);
       if (await ensureWebhook(cfg, name)) summary.hooked.push(name);
-      await sweepDeployKeys(cfg, name, named[1], gateways.get(named[1]), platform, summary);
-      await recordRepository(admin, name, named[1], gateways.get(named[1]), summary);
+      await sweepDeployKeys(cfg, name, named[1], gateway, platform, summary);
+      await recordRepository(admin, name, named[1], gateway, summary);
     } catch (err) {
       summary.errors.push(`${name}: ${err instanceof Error ? err.message : err}`);
     }
@@ -492,7 +574,7 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "This deployment has no forge configured" }, 503);
   }
 
-  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], published: [], recorded: [], warnings: [], errors: [] };
+  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], archived: [], restored: [], published: [], recorded: [], warnings: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
     const readersId = await ensurePlatformOrganisation(cfg);

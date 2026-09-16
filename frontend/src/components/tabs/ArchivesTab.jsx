@@ -119,10 +119,13 @@ export function ArchivesTab({ showToast, hasPermission }) {
           devices. The name has to be typed back: this is the one irreversible action in the
           application, and the only dialog that asks for it. */}
       {/* Restore asks first but is not gated on typing the name, since it is recoverable. It names
-          the two consequences that are not obvious: the retention timer is cleared, not paused
-          (`/restore` sets `auto_delete_at` to NULL and re-archiving computes a fresh window), and a
+          the consequences that are not obvious: the retention timer is cleared, not paused
+          (`/restore` sets `auto_delete_at` to NULL and re-archiving computes a fresh window); a
           gateway's broker credential does not come back (archiving rotated it; restore flips
-          `is_archived` only), reported from `credential_revoked_at`. */}
+          `is_archived` only), reported from `credential_revoked_at`; and its repository comes out
+          of the forge's archive on the next sweep while its deploy key does not, reported from
+          `forge_archived_at` (0114). Both are the same shape of fact: restore returns the row, not
+          the credentials archiving withdrew. */}
       {confirmRestore && (
         <ConfirmModal
           message={
@@ -133,6 +136,11 @@ export function ArchivesTab({ showToast, hasPermission }) {
             (confirmRestore.entity_type === 'gateway' && confirmRestore.credential_revoked_at
               ? ' Its broker credential was revoked when it was archived and is not restored with it:' +
                 ' mint a new one on the Access Control page before it can publish again.'
+              : '') +
+            (confirmRestore.entity_type === 'gateway' && confirmRestore.forge_archived_at
+              ? ' Its repository comes back out of the forge’s archive within a few seconds. The' +
+                ' appliance’s deploy key does not come back with it — re-enrol the appliance before' +
+                ' it can pull its flow again.'
               : '')
           }
           confirmLabel="Restore"

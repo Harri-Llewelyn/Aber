@@ -1189,6 +1189,34 @@ export async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<boo
   return true;
 }
 
+/**
+ * Archive a repository, or take it out of the archive. Returns whether anything changed, so a
+ * caller that already knows the current state costs one call and a caller that does not costs one
+ * PATCH it did not need.
+ *
+ * ARCHIVING IS GITEA'S OWN READ-ONLY MARK, not a deletion and not a rename: every branch, tag,
+ * issue and wiki page stays and stays readable, the repository is badged as archived in every
+ * listing, and Gitea refuses writes to it -- pushes, issues, releases. The `appliance` branch, the
+ * last thing the gateway reported, survives; the heartbeat table does not. Reversible by the same
+ * call with `archived: false`, which is what restoring a gateway does.
+ *
+ * The wiki follows the repository, so there is nothing to archive separately.
+ */
+export async function setRepositoryArchived(
+  cfg: ForgeConfig,
+  name: string,
+  archived: boolean,
+  currently?: boolean,
+): Promise<boolean> {
+  if (currently === archived) return false;
+  const patched = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${name}`, { archived });
+  if (!patched.ok) {
+    throw await refused(`could not ${archived ? "archive" : "un-archive"} '${name}'`, patched);
+  }
+  console.log(`forge: '${name}' is ${archived ? "archived, and read-only" : "out of the archive"}`);
+  return true;
+}
+
 /** What enrolment tells the appliance about the platform repository, when this platform has one. */
 export interface PlatformLink {
   ssh_url: string;
@@ -1210,6 +1238,13 @@ export async function provisionGatewayRepository(
   try {
     await ensureOrganisation(cfg);
     const repo = await ensureRepository(cfg, name, gatewayName);
+    // OUT OF THE ARCHIVE BEFORE ANYTHING IS WRITTEN TO IT. Everything below is a write and Gitea
+    // refuses writes to an archived repository. A gateway restored from the archive keeps a
+    // read-only repository until forge-sweep's next pass (0114), and re-enrolling the appliance
+    // is exactly what an operator does when the machine comes back -- so enrolment cannot be the
+    // one path that finds the repository shut. An archived gateway never reaches here: archiving
+    // burns its unredeemed tokens, so it has nothing to redeem.
+    await setRepositoryArchived(cfg, name, false);
     await ensureBranchProtection(cfg, name);
     // BEFORE THE KEY: a writable key on a repository whose other branches are still open would be
     // a key that can push anywhere for the moment between the two calls.

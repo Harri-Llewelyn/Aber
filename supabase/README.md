@@ -2769,15 +2769,43 @@ appliance set. The drawer's **Reported** row shows the head and says *edited on 
 when that digest differs from the heartbeat's `flow_hash`, which is an edit made in the box's
 editor since the last deploy (`flowEditedOnAppliance()` in `frontend/src/utils/flowDrift.js`).
 
-**The sweep reconciles keys, the third revocation handle.** A gateway holds three things and
-loses all three on archive: the broker client (`disableClient`), any unredeemed enrolment token
-(`withdraw_gateway_enrollment_tokens()`), and now the deploy key. `forge-sweep` reads
+**The sweep reconciles keys, the third revocation handle.** A gateway holds four things and
+loses all four on archive: the broker client (`disableClient`), any unredeemed enrolment token
+(`withdraw_gateway_enrollment_tokens()`), the deploy key, and — since `0114`, below — the
+repository's own writability. `forge-sweep` reads
 `gateways` and, per gateway repository, removes every key when the row is archived or gone, and
 re-registers a read-only key read-write when the row is active, from the material the forge lists
 (Gitea has no edit for a deploy key). It also creates the two rules on a repository from before
 this and closes `main` again if a rule was found admitting pushes. `test_forge_events.py` covers
-the appliance push; `test_forge_sweep.py` covers the rules, a key downgraded by hand, and an
-archived gateway's key.
+the appliance push; `test_forge_sweep.py` covers the rules, a key downgraded by hand, an archived
+gateway's key, and the archive mark below.
+
+### Archiving a gateway reaches the forge (`0114`)
+
+**Archiving a gateway archives its repository, which is the fourth thing it loses**
+([#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197)). The key stops the appliance
+reaching the repository and does nothing about the repository itself, which went on reading in the
+forge's own listing exactly like one in service — and the forge is where a gateway's flow and a
+plant's notes about it live, so it was the one place the archive was invisible. The sweep now sets
+Gitea's own archive mark (`PATCH /repos/{owner}/{repo}`), which makes the repository read-only and
+badges it while keeping every branch, issue and wiki page — including `appliance`, the last thing
+the gateway reported, which is a better record than the heartbeat table, because that stops. A
+restored gateway's repository comes back out, **first in the pass**: everything else the sweep does
+is a write, and Gitea refuses writes to an archived repository.
+
+**Nothing deletes a repository, and that is the decision rather than an omission.** The wiki is the
+one place a plant's notes about a gateway live, so a delete is a decision a person takes in the
+forge, never a cascade from the dashboard; the forge is in every backup, and that is the retention
+answer rather than a second one. A repository whose gateway row is gone is archived, not removed.
+
+**Where the call lives** was the open question the request left. Not a new edge function: the
+database holds no forge credential and reaches Gitea through nothing, and the sweep already
+enumerates the organisation and matches each repository to its row. `0114` adds only the
+immediacy — `trg_gateways_forge_follows_archive` asks for one pass through `sweep_forge()`'s
+existing pg_net call as the archive lands, so the fifteen-minute timer is the retry rather than the
+first attempt. `forge_archived_at` is written by the sweep once the forge has answered, **not**
+stamped optimistically as `credential_revoked_at` is: a stamp written in the trigger would tell the
+dashboard a repository was archived on a deployment that has no forge at all.
 
 **`0110` records that the repository exists, because enrolment's own timestamp does not.**
 `enroll-gateway` sets `enrolled_at` in step 3 and creates the repository in step 4, and step 4 is
