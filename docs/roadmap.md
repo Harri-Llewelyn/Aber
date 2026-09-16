@@ -18,9 +18,10 @@ moves out, and the table below says where it went.
 `§[0-9]` in this file.
 
 **Ordering.** 1 is the platform's own: the rehearsal that turns the backup into a capability.
-2 audits the documentation, code and comments once the code has stopped moving. 3 is last by
-rule: it folds the migration chain, so every entry that changes the schema must have landed
-before it.
+2 audits the documentation, code and comments once the code has stopped moving. 3 recovers the
+headroom the chart has nearly spent, and follows 2 because one of its levers is 2's comment sweep.
+4 is last by rule: it folds the migration chain, so every entry that changes the schema must have
+landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -137,7 +138,52 @@ method so the next one starts from it.
 
 ---
 
-## 3 · The migration chain folds back into the baseline
+## 3 · The chart's release Secret is given room to grow
+
+**Builds on:** `.github/workflows/ci.yml` (the *Verify The Release Fits Helm's Secret* step) ·
+[`deploy/helm/acs-cymru/.helmignore`](../deploy/helm/acs-cymru/.helmignore) ·
+`scripts/sync-helm-chart-files.mjs` · entry 2, whose comment sweep is one of the levers here
+
+**Built:** the guard. Helm stores every release as one Secret holding the chart archive *and* the
+rendered manifest, and a Secret may not exceed 1 MiB; the CI step estimates the payload the way
+Helm encodes it and fails the build before a deploy can be refused. `.helmignore` already keeps
+the editor litter, the packaging artefacts and the two values files out of the archive.
+
+**The gap** is that the guard reports a number nobody has acted on, and the number is 98.6%.
+Measured on the dev cluster 2026-09-16, revision 69: **1,034,060 bytes of 1,048,576 — 14,516
+bytes of headroom**, and that is *after* gzip, so it is perhaps 60–100 KB of source. This has
+already refused a deploy once (revision 19, 2026-09-13). Every entry above it and every feature
+after 1.0 that adds a chart file spends from the same 14 KB, and the failure it buys is
+`helm upgrade` exiting on `Secret ... is invalid: data: Too long` — which reads as a broken
+chart rather than as a full one.
+
+**The levers, largest first, each a decision rather than a task.** The rendered objects are led by
+`openapi` (287 KB), `grafana-dashboards-platform` (97 KB), `timescaledb-maintenance` (84 KB),
+`grafana-alerting` (80 KB) and `mosquitto-scripts` (62 KB). **Does a file that only one pod ever
+reads need to be a ConfigMap at all**, or does it belong in that pod's image — the OpenAPI
+document is served by `swagger-ui` and by nothing else, and an image is not in the release. Which
+of `files/` **needs to be in the chart archive as well as the manifest**: it is mirrored in so Helm
+can template it, and anything templated is already in the manifest, so the archive copy is paid for
+twice. Whether the **template comment blocks**, which render to nothing and ship in the archive
+regardless, come down with entry 2's sweep or are worth a pass of their own. And whether the
+estimate's 1.332 multiplier still holds, since the thresholds are set on it.
+
+**Decided.** The guard stays and its thresholds move down as headroom is recovered, or the entry
+buys nothing that the next feature does not immediately spend. Nothing is moved out of the chart
+that an operator reads from `helm show` or from a pulled chart with no repository beside it —
+that is the argument `.helmignore` already records for the values files, and it outranks the bytes.
+**Note while doing it:** `.helmignore`'s "deliberately NOT ignored" paragraph argues at length that
+`values-dev.yaml` and `values-prod.yaml.example` stay in the package, and the two lines directly
+beneath it ignore them both. One of the two is wrong and the file cannot say which.
+
+**Done means:** the release estimate has a stated target with real headroom rather than a warning
+threshold it sits against; the CI step's thresholds have moved to match; each lever above is either
+taken or recorded as declined with its reason; and nothing an operator reads from a published chart
+has been moved somewhere they cannot reach.
+
+---
+
+## 4 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)

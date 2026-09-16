@@ -2,21 +2,22 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { isUuid } from '../../utils/isUuid'
 import { buildTargets, matchTargets } from '../../searchIndex'
-import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList } from './Icons'
+import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList, IconFactory } from './Icons'
 
 /**
- * One box that answers three questions: where is the page called X (the nav), where is the card
- * called X (`searchIndex.js`), and what is this UUID (resolved against the database). A UUID is
- * detected, not declared: nothing in the static index can look like one. Names are searched too,
- * because the page-level box can only be used by somebody who knows which page the thing is on. The
- * estate lookup is capped per kind (see `searchAssets`): this finds one thing, and the page's own
- * box works with a set.
+ * One box that answers three questions: where is the page called X (the nav), where is the card or
+ * setting called X (`searchIndex.js`), and what is this UUID (resolved against the database). A
+ * UUID is detected, not declared: nothing in the static index can look like one. Names are searched
+ * too, because the page-level box can only be used by somebody who knows which page the thing is
+ * on. The estate lookup is capped per kind (see `searchAssets`): this finds one thing, and the
+ * page's own box works with a set.
  */
 
 const ENTITY_LABEL = {
   device: 'Device',
   gateway: 'Gateway',
   cell: 'Cell',
+  area: 'Area',
   schema: 'Schema'
 }
 
@@ -24,6 +25,7 @@ const ENTITY_ICON = {
   device: <IconCpu size={15} />,
   gateway: <IconRadio size={15} />,
   cell: <IconLayoutDashboard size={15} />,
+  area: <IconFactory size={15} />,
   schema: <IconClipboardList size={15} />
 }
 
@@ -31,19 +33,33 @@ const ENTITY_ICON = {
 const isMac = () =>
   typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '')
 
-export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onSelectGateway, onSelectCell, onSelectSchema }) {
+export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onSelectSetting }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(0)
   const [entities, setEntities] = useState([])
+  const [settings, setSettings] = useState([])
   const [resolving, setResolving] = useState(false)
   const inputRef = useRef(null)
   const wrapRef = useRef(null)
 
   const trimmed = query.trim()
   const looksLikeId = isUuid(trimmed)
+  const canOpenSettings = useMemo(() => tabs.some(t => t.id === 'settings'), [tabs])
 
-  const targets = useMemo(() => buildTargets(tabs), [tabs])
+  /* The settings, once, the first time the box is opened rather than on mount: a dozen rows that
+     nobody who never searches should pay for. A failure leaves the list empty and the rest of the
+     index answers as it always did. */
+  useEffect(() => {
+    if (!open || !canOpenSettings || settings.length > 0) return
+    let stale = false
+    api.get('/api/v1/settings')
+      .then(rows => { if (!stale) setSettings(Array.isArray(rows) ? rows : []) })
+      .catch(() => { /* the index is still useful without them */ })
+    return () => { stale = true }
+  }, [open, canOpenSettings, settings.length])
+
+  const targets = useMemo(() => buildTargets(tabs, settings), [tabs, settings])
   const matches = useMemo(
     // An id is not matched against the static index: no page or card contains a hex string.
     () => (looksLikeId || !trimmed ? [] : matchTargets(trimmed, targets)),
@@ -98,7 +114,8 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       key: m.key,
       kind: m.kind,
       label: m.label,
-      detail: m.kind === 'card' ? m.page : null,
+      // A page is its own answer; a card and a setting need to say which page holds them.
+      detail: m.kind === 'page' ? null : m.page,
       icon: m.icon,
       target: m
     })), ...assetHits]
@@ -145,7 +162,12 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       if (kind === 'device') onSelectDevice?.(id)
       else if (kind === 'gateway') onSelectGateway?.(id)
       else if (kind === 'cell') onSelectCell?.(id)
+      else if (kind === 'area') onSelectArea?.(id)
       else if (kind === 'schema') onSelectSchema?.(id)
+    } else if (result.kind === 'setting' && onSelectSetting) {
+      // A setting CAN be jumped to: the page is a tablist by category, so its category is an
+      // anchor in all but name and landing on the wrong one would hide the row that was asked for.
+      onSelectSetting(result.target.settingKey)
     } else {
       // A card navigates to its page and no further: there are no anchors on cards, and claiming to
       // jump to a heading would be worse than landing at the top.
@@ -190,7 +212,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
           aria-controls="global-search-results"
           aria-activedescendant={showPanel ? activeId : undefined}
           aria-autocomplete="list"
-          aria-label="Search pages, cards and assets by name or id"
+          aria-label="Search pages, cards, settings and assets by name or id"
           autoComplete="off"
           spellCheck="false"
         />
@@ -211,7 +233,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
             /* Says what was searched and stops: RLS returns no rows rather than an error, so not
                found and not cleared for are the same reply. */
             <div className="global-search-empty">
-              No cell, gateway, device or schema with that id is visible to you.
+              No area, cell, gateway, device or schema with that id is visible to you.
             </div>
           )}
 

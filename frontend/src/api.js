@@ -2651,7 +2651,7 @@ const apiMethods = {
    * Which kind of thing a UUID names, and what it is called.
    *
    * The search bar's third answer: pasting an id from a Grafana alert, a topic or a log line.
-   * Four tables because four pages can focus one row. All four are asked at once and a list comes
+   * Five tables because five pages can focus one row. All five are asked at once and a list comes
    * back, so on the day two tables answer the caller shows both. A miss and a refusal both come
    * back empty: RLS returns no rows rather than an error, and the palette must not claim to know
    * which.
@@ -2659,7 +2659,7 @@ const apiMethods = {
   resolveId: async (uuid) => {
     if (!isUuid(uuid)) return [];
 
-    // `maybeSingle` rather than `single`: three of the four probes always miss. The name column is
+    // `maybeSingle` rather than `single`: four of the five probes always miss. The name column is
     // named per table (`schemas` calls it `schema_name`).
     const probe = (table, kind, nameColumn) =>
       supabase.from(table).select(`id, ${nameColumn}`).eq('id', uuid).maybeSingle()
@@ -2669,12 +2669,13 @@ const apiMethods = {
       probe('devices', 'device', 'name'),
       probe('gateways', 'gateway', 'name'),
       probe('cells', 'cell', 'name'),
+      probe('areas', 'area', 'name'),
       probe('schemas', 'schema', 'schema_name')
     ])).filter(Boolean);
   },
 
   /**
-   * The four asset kinds, matched by name.
+   * The five asset kinds, matched by name.
    *
    * The companion to `resolveId`, separate because a name search can hit many rows and fails
    * differently. `ilike` with the term escaped, since `%` and `_` are LIKE wildcards. Capped per
@@ -2700,6 +2701,7 @@ const apiMethods = {
       probe('devices', 'device', 'name'),
       probe('gateways', 'gateway', 'name'),
       probe('cells', 'cell', 'name'),
+      probe('areas', 'area', 'name'),
       probe('schemas', 'schema', 'schema_name')
     ]);
 

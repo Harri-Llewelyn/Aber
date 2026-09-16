@@ -3752,6 +3752,13 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 .setting-row:last-child { border-bottom: none; }
 
+/* The row the search bar was asked for. A page of thirty settings opens on the right category but
+   still needs to say which of them was meant. */
+.setting-row-found {
+  background: var(--accent-dim);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .setting-meta { flex: 1 1 320px; min-width: 0; }
 
 /* The label and its "?" on one line. The tip is outside the <label> so the label names the
