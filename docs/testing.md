@@ -41,6 +41,11 @@ python ingestion/test_directory_publish.py
 # The Unified Namespace bridge: the topic is fixed at the level a device honestly occupies, and
 # an incomplete path is skipped and counted rather than filled with a placeholder.
 python ingestion/test_uns_publish.py
+# The Sparkplug primary-host STATE certificates. The assertion worth having is that the birth and
+# the death carry the SAME timestamp: 3.0.0 pairs them that way, and each half reading its own
+# clock would produce two valid-looking messages a subscriber cannot match. Also that a host id
+# which is not one topic level is refused rather than published where the broker grants nothing.
+python ingestion/test_primary_host.py
 python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_payload_conformance.py

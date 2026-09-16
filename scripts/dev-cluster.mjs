@@ -559,6 +559,11 @@ function testEnvironment () {
   const domain = releaseValues().global?.publicBaseDomain || 'localhost'
   const modelBase = kubectl('get', 'deploy/supabase-functions', '-o',
     'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="AAS_MODEL_PUBLIC_BASE")].value}').out
+  // READ OFF THE RUNNING DAEMON, not out of a values file. validate.py's check 15 asserts that the
+  // primary host announced itself on `spBv1.0/STATE/<this>`, and asserting against anything other
+  // than the value the daemon was actually given would make the check agree with itself.
+  const primaryHostId = kubectl('get', 'deploy/ingestion', '-o',
+    'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="PRIMARY_HOST_ID")].value}').out
   return {
     ...process.env,
     ...secrets,
@@ -578,6 +583,7 @@ function testEnvironment () {
     NODERED_BASE_URL: process.env.NODERED_BASE_URL || `http://nodered.${domain}`,
     // What the exporter embeds, so the suite's loopback judgement is made on the real value.
     AAS_MODEL_PUBLIC_BASE: modelBase,
+    PRIMARY_HOST_ID: primaryHostId,
     // The forge's door is an OAuth flow whose registered callback is the Ingress host.
     GITEA_TEST_URL: process.env.GITEA_TEST_URL || `http://git.${domain}`,
     // Where a suite that acts as an appliance clones and pushes from this host; the clone URL

@@ -126,6 +126,16 @@ WATCHDOG_MAX_WAIT_SECONDS = 90
 # NCMD rebirth requests seen on the wire, appended by the validation subscriber.
 CAPTURED_NCMD = []
 
+# The Sparkplug primary host the daemon announces itself as. Read from THIS script's environment
+# for the reason the watchdog values above are: the assertion is only meaningful against the value
+# the ingestion container was actually given, and the chart passes both from one helper.
+PRIMARY_HOST_ID = os.getenv("PRIMARY_HOST_ID", "").strip()
+
+# Retained primary-host STATE messages seen on the wire, appended by the validation subscriber.
+# This validator connects as an ordinary gateway account, so what it can read here is exactly what
+# a physical third-party gateway can read.
+CAPTURED_STATE = []
+
 # Populated by seed_supabase(); the wire ids the daemon will resolve.
 SEEDED = {}
 
@@ -701,6 +711,11 @@ def run_simulation():
         CAPTURED_NCMD.append((msg.topic, msg.payload))
 
     client.message_callback_add("spBv1.0/+/NCMD/+", on_ncmd)
+
+    def on_state(_client, _userdata, msg):
+        CAPTURED_STATE.append((msg.topic, msg.payload, msg.retain))
+
+    client.message_callback_add("spBv1.0/STATE/#", on_state)
     # The CONNACK return code is the point: paho's connect() completes the TCP handshake and
     # returns, and the broker's verdict on the credential arrives in this callback and nowhere else.
     # A callback that ignored it made a rejected login indistinguishable from a good one, with the
@@ -713,6 +728,10 @@ def run_simulation():
         connack.append(rc)
         if rc == 0:
             c.subscribe("spBv1.0/+/NCMD/+")
+            # The primary host's birth certificate is RETAINED, so it arrives on subscribe rather
+            # than being waited for. A gateway does exactly this to learn, at connect, whether its
+            # consumer is there -- which is the property check 15 asserts.
+            c.subscribe("spBv1.0/STATE/#")
 
     client.on_connect = on_connect
 
@@ -1781,6 +1800,73 @@ def verify_results():
             print(f"⚠️  14.  JWT REFUSED AS APIKEY: skipped, could not reach the gateway: {e}")
     else:
         print("⚠️  14.  JWT REFUSED AS APIKEY: skipped, SUPABASE_SERVICE_ROLE_KEY not set.")
+
+    # 15. The Sparkplug primary host announces itself, and an ordinary gateway can read it.
+    #
+    # THIS IS THE CHECK THAT WOULD HAVE CAUGHT THE ORIGINAL FAULT. The broker's roles granted every
+    # gateway read of `spBv1.0/STATE/#` from the beginning and nothing ever published it, so every
+    # gateway on the site subscribed to a permanently empty topic (issue #149). Nothing failed: a
+    # topic with no publisher and a topic whose publisher is broken look identical from here, which
+    # is why it went unnoticed.
+    #
+    # THE CREDENTIAL IS THE POINT. This validator authenticates as a gateway account holding the
+    # shared `gateway` role, so what it reads below is exactly what a physical third-party gateway
+    # reads -- not what an admin or the daemon's own principal could see.
+    if not PRIMARY_HOST_ID:
+        print("⚠️  15.  PRIMARY HOST STATE: skipped, PRIMARY_HOST_ID not set in this environment.")
+    else:
+        expected_topic = f"spBv1.0/STATE/{PRIMARY_HOST_ID}"
+        birth = None
+        for topic, payload, retain in CAPTURED_STATE:
+            if topic != expected_topic:
+                continue
+            try:
+                doc = json.loads(payload.decode("utf-8"))
+            except Exception:
+                continue
+            if doc.get("online") is True:
+                birth = (doc, retain)
+                break
+
+        if birth is None:
+            seen = sorted({t for t, _p, _r in CAPTURED_STATE})
+            print(f"❌ 15.  PRIMARY HOST STATE FAIL: nothing retained on {expected_topic} said "
+                  "online: true.")
+            # Which of the three causes it is. A wrong host id and an absent publisher produce the
+            # same silence at the subscriber, and the broker refusing the write produces it too --
+            # so the topics actually seen are the one piece of evidence that separates them.
+            if seen:
+                print(f"      -> STATE topics that DID arrive: {', '.join(seen)}")
+                print("      -> a different host id here means the daemon and this Job were given "
+                      "different values; the chart passes both from one helper.")
+            else:
+                print("      -> no STATE topic arrived at all. Either the daemon is not publishing "
+                      "it, or the broker is refusing the write: check that the `ingestion` role "
+                      f"carries publishClientSend on {expected_topic}.")
+            passed = False
+        else:
+            doc, retain = birth
+            print(f"✅ 15.  PRIMARY HOST STATE: '{PRIMARY_HOST_ID}' announced itself online, and a "
+                  "gateway account can read it.")
+            print(f"      -> {expected_topic} online={doc.get('online')} timestamp={doc.get('timestamp')}")
+            # RETAINED IS HALF THE VALUE. Without it a gateway learns the state only at the next
+            # transition -- so it connects knowing nothing and stays that way, which is the failure
+            # this topic exists to prevent. A retained message arrives on SUBSCRIBE, which is how
+            # this one reached us at all.
+            if not retain:
+                print("❌ 15b. PRIMARY HOST STATE NOT RETAINED: a gateway connecting later would "
+                      "see nothing until the next transition.")
+                passed = False
+            else:
+                print("✅ 15b. RETAINED: a gateway connecting at any time learns the current state "
+                      "immediately.")
+            if not isinstance(doc.get("timestamp"), int):
+                print(f"❌ 15c. PRIMARY HOST STATE TIMESTAMP: expected a JSON number of UTC "
+                      f"milliseconds, got {doc.get('timestamp')!r}.")
+                passed = False
+            else:
+                print("✅ 15c. TIMESTAMP: a JSON number, as 3.0.0 requires (it pairs the birth "
+                      "with the death certificate).")
 
     print("==========================================")
     if passed:

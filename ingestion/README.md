@@ -11,7 +11,7 @@ allowed to be heard at all.
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
 | [`registry.py`](registry.py) | The Prometheus metric objects, built from the declarations in `metrics.py` |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 44 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 47 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
@@ -1186,6 +1186,80 @@ authoritative answer and needs no second opinion.
 
 ---
 
+## The Primary Host, and the STATE Every Gateway Watches
+
+Sparkplug gives an edge node one standard way to learn whether anything is still consuming what it
+publishes: a retained message on `spBv1.0/STATE/<host_id>`. The daemon is this site's **primary
+host application**. It publishes `online: true` retained once its subscription is in place, and
+registers `online: false` as the connection's Last Will, so the broker announces its death even
+when it is killed outright.
+
+**The site already had machinery for a consumer that goes away** — the rebirth poller, the
+[device watchdog](#device-liveness-watchdog) and the stale sweep. Those work. They work only for
+devices that behave the way *this stack* expects. A compliant third-party gateway watches STATE
+instead and decides for itself whether to keep publishing, buffer, or re-birth on the host's
+return; before this it watched a permanently empty topic and fell back to whatever its vendor
+chose. The broker's roles had granted every gateway read of that subtree from the beginning
+(`mosquitto/dynsec-roles.json`), so the promise was already made — nothing kept it (issue #149).
+
+**The birth and the death carry the same timestamp.** Sparkplug 3.0.0 pairs the two certificates of
+one connection by the time that connection was established, which is why `register_will()` returns
+the timestamp rather than each half reading its own clock.
+
+**QoS 1 and retained**, the one place this daemon departs from the QoS 0 it uses everywhere else. A
+gateway connecting later must learn the current state immediately rather than waiting for a
+transition it has already missed.
+
+**A shutdown publishes the death certificate itself, and the will fires too.** `_drain_and_exit()`
+publishes `online: false` first, before the historian drain, so a gateway hears it at the *start*
+of the shutdown rather than up to `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` later when the socket closes.
+The path then ends in `os._exit(0)` and never sends a `DISCONNECT`, so the broker treats the close
+as ungraceful and publishes the will as well — measured on the dev cluster, where a rollout yields
+**two** `online: false` messages.
+
+They are byte-identical, timestamp included, so a subscriber sees one state repeated rather than
+two events. The duplicate is kept rather than suppressed with a `disconnect()` before exit: that
+would make the broker discard the will, which is tidier only while the explicit publish succeeds
+— and if it did not, the topic would be left saying `online: true` for as long as the daemon
+stayed down. A repeated death certificate costs nothing; an absent one is the fault this exists to
+fix.
+
+### This daemon is the single primary host
+
+**i3X is not a second one.** It is a read-side adapter over what the historian already holds; its
+broker role publishes nothing, and a gateway that kept publishing while i3X was down would lose
+nothing by doing so.
+
+**The playback worker cannot announce itself either**, and not by convention — it authenticates *as
+the gateway it replays*, so it holds the shared `gateway` role, which grants read of this subtree
+and no write anywhere in it.
+
+**Nothing else on the broker may write it.** The `ingestion` role is granted `publishClientSend` on
+one literal topic — `spBv1.0/STATE/<the configured id>` — injected at reconcile time rather than
+written into `dynsec-roles.json`, because the id belongs to the deployment. So this principal
+cannot announce the death of a host application that is not it, and no gateway can forge a birth
+certificate saying the historian is alive when it is not. `scripts/check-broker-config.mjs` asserts
+all four of those by delivery.
+
+### Configuration
+
+`PRIMARY_HOST_ID` is **required and has no default**, and the daemon refuses to start without it.
+The id becomes part of the contract with every gateway on the site, including equipment this stack
+has never seen, so a default would put a word nobody chose into each of those vendors'
+configuration screens. The chart fails the render first, so an operator normally meets this at
+`helm upgrade` rather than in a crash loop.
+
+There is **no on/off switch**, unlike [the Directory](#the-directory-on-mqtt) and
+[the Unified Namespace](#the-unified-namespace). Those are off by default because they publish the
+address space and every reading, so enabling them is an exposure decision. This publishes two
+booleans on a topic the broker already grants every gateway read of.
+
+| Variable | Default | Notes |
+| :--- | :--- | :--- |
+| `PRIMARY_HOST_ID` | **required** | One topic level: no `/`, `+`, `#` or whitespace. `ingestion.primaryHostId` in the chart |
+
+---
+
 ## Configuration
 
 Read from the environment. **There are no default credentials**: the daemon refuses to start
@@ -1203,6 +1277,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `DEVICE_OFFLINE_TIMEOUT_SECONDS` | `300` | Silence after which a device is marked OFFLINE. `0` disables the watchdog |
 | `DEVICE_WATCHDOG_INTERVAL_SECONDS` | `30` | Sweep interval |
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
+| `PRIMARY_HOST_ID` | **required** | The Sparkplug primary host id — see [The Primary Host](#the-primary-host-and-the-state-every-gateway-watches). The daemon refuses to start without it |
 | `MAX_ALIASES_PER_NODE` | `5000` | Cap on the per-node alias table |
 | `MAX_ENTITIES_PER_CACHE` | `1000` | Cap on each entity resolution cache. Same reasoning, applied to the caches keyed by the id seen on the wire |
 | `DIRECTORY_REFRESH_SECONDS` | `5` | Seconds between directory refresh passes — see [The directory refresher](#the-directory-refresher). `0` disables the thread |

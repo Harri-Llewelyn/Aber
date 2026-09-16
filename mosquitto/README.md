@@ -30,12 +30,26 @@ what the gateway's own role allows. That is the same behaviour the ACL file had,
 lets the seeded flow's wildcard NCMD subscription keep working: a gateway receives its own rebirth
 request and not another node's.
 
-**There is no wildcard-write principal.** The ingestion daemon reads `spBv1.0/#` and writes one
-thing inside Sparkplug, the rebirth request `spBv1.0/+/NCMD/+`; it is the only writer of the
+**There is no wildcard-write principal.** The ingestion daemon reads `spBv1.0/#` and writes two
+things inside Sparkplug — the rebirth request `spBv1.0/+/NCMD/+`, and its own primary-host STATE
+on one literal topic (below); it is the only writer of the
 Directory (`ACS-Cymru/Directory/#`) and the Unified Namespace (`uns/#`). The i3X server reads
 `spBv1.0/#` and the Directory and publishes nothing. The monitoring account reads `$SYS/#` and
 publishes nothing. No gateway reads the Directory or the UNS: either is the whole plant behind one
 credential, and reading is silent.
+
+**One grant is not in this file, and cannot be.** The ingestion daemon is the site's Sparkplug
+primary host application: it publishes a retained `online: true` on `spBv1.0/STATE/<host_id>` and
+registers `online: false` as its Last Will, which is how a third-party gateway learns whether its
+consumer is there. The `gateway` role has granted every gateway *delivery* of that subtree since
+the beginning; the write half is derived from `PRIMARY_HOST_ID` by `mosquitto-dynsec-init.mjs` and
+added to the `ingestion` role at reconcile time, because the host id is named by the deployment
+rather than by this repository.
+
+It is **one literal topic, never `spBv1.0/STATE/#`**. A wildcard write would let this principal
+announce the death of a host application that is not it, which is the thing the shared role's own
+comment has always ruled out — *every edge node needs to read them; none may write one*. Applying
+the grant twice is a no-op, which is what keeps the boot reconcile idempotent.
 
 **The admin role reaches the plugin and nothing else.** The credential service authenticates as
 `admin` with `$CONTROL/dynamic-security/#` only. The role `mosquitto_ctrl dynsec init` would have

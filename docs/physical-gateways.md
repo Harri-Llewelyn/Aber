@@ -317,6 +317,43 @@ page shows the answer above the table, withholds Save for a Remote gateway and w
 drawer's bundle action until the deployment can issue one. A `503` reached some other way is shown
 with the variable it names and no retry, since retrying a deployment fault cannot succeed.
 
+### The third value: the primary host id
+
+A Sparkplug edge node has one standard way to find out whether anything is still consuming what it
+publishes: it watches a retained message on `spBv1.0/STATE/<host_id>`. The ingestion daemon is this
+site's **primary host application**. It publishes `{"online": true, …}` retained when it connects,
+and registers `{"online": false, …}` as its MQTT Last Will, so the broker announces its death even
+if it is killed outright.
+
+Set it once, on the stack:
+
+```
+--set ingestion.primaryHostId=<a name for this site>
+```
+
+**There is no default, and the render fails without one.** The id goes into the configuration of
+every gateway on the site — including third-party equipment this chart has never seen — so a
+default would put a word nobody chose into each of those vendors' configuration screens, and
+changing it later means revisiting every one of them. One topic level: no `/`, `+`, `#` or
+whitespace.
+
+**An appliance built from the bundle does not need configuring for this.** Its flows do not consult
+STATE; the daemon's own rebirth poller and device watchdog cover a consumer that goes away, and
+they cover it for devices that behave the way this stack expects.
+
+**Third-party equipment is the reason this exists.** A compliant Sparkplug gateway watches STATE
+and decides for itself whether to keep publishing, buffer, or re-birth when the host returns. Give
+it the id above wherever its vendor asks for a primary host, and it will do that. Give it nothing
+and it watches a topic that is never written, then falls back to whatever its vendor chose — which
+is what this stack did until the topic had a publisher.
+
+| Where | What it is |
+| :--- | :--- |
+| `ingestion.primaryHostId` | The value. Required; no default. |
+| `spBv1.0/STATE/<id>` | Where it is published, retained, at QoS 1. |
+| The broker's `gateway` role | Grants every enrolled gateway **read** of `spBv1.0/STATE/#`. |
+| The broker's `ingestion` role | Granted **write** on that one literal topic, and nothing wider — so no gateway, and no other service, can forge a birth certificate saying the historian is alive when it is not. |
+
 `MQTT_PUBLIC_HOST` is also folded into the broker certificate's SAN. Change it and the leaf is
 reissued on the next boot of `mosquitto-tls-init` — **the root is untouched, so no appliance has to be
 re-enrolled.** A certificate that does not name the address gateways dial fails verification at every

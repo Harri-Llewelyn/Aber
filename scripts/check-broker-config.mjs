@@ -100,6 +100,14 @@ const ACCOUNTS = {
   probe: 'probe-secret-00000001',
 };
 const IMPORTED = [GATEWAY_B, 'probe'];
+
+/**
+ * The Sparkplug primary host id this check reconciles against, and a second one it never grants.
+ * `OTHER` is what makes the grant's narrowness testable: the daemon must be unable to announce the
+ * death of a host application that is not it (issue #149).
+ */
+const PRIMARY_HOST_ID = 'Check-Site';
+const OTHER_HOST_ID = 'Someone-Else';
 const EXPECTED_CLIENTS = Object.keys(ACCOUNTS).sort();
 
 const INIT_ENV = {
@@ -117,6 +125,10 @@ const INIT_ENV = {
   MQTT_MONITOR_PASSWORD: ACCOUNTS.factoryplus_monitor,
   MQTT_VALIDATOR_USER: GATEWAY_A,
   MQTT_VALIDATOR_PASSWORD: ACCOUNTS[GATEWAY_A],
+  // Required by the reconcile, which derives the primary host's write grant from it rather than
+  // reading it out of the roles file. A literal here, not the chart's value: the point of the
+  // assertions below is that the grant is exactly this one topic.
+  PRIMARY_HOST_ID: PRIMARY_HOST_ID,
 };
 
 /**
@@ -470,6 +482,41 @@ try {
         'a gateway may NOT publish into the Unified Namespace (only decoded, verified readings belong there)',
         (delivers(GATEWAY_A, `uns/ACS-Cymru/Site/Area/Cell/${GATEWAY_A}/Speed`,
           'factoryplus_ingestion', 'uns/#')),
+        false
+      );
+
+      // The Sparkplug primary-host STATE (ingestion/primary_host.py). The roles have granted every
+      // gateway READ of this subtree from the beginning; until issue #149 nothing was allowed to
+      // write it, so every gateway watched a permanently empty topic and a compliant third-party
+      // one fell back to whatever its vendor chose. All four assertions matter:
+      //
+      //   * the daemon can write its OWN host id -- without this the birth certificate is refused
+      //     and the topic stays empty, which is the original fault;
+      //   * a gateway can READ it, which is the entire point of publishing it;
+      //   * the daemon canNOT write ANOTHER host id -- the grant is one literal topic, so this
+      //     principal cannot announce the death of a host application that is not it;
+      //   * a gateway canNOT write its own, because a birth certificate anyone can forge tells an
+      //     edge node its consumer is alive when it is not, which is worse than no STATE at all.
+      const stateTopic = `spBv1.0/STATE/${PRIMARY_HOST_ID}`;
+      expect(
+        'the ingestion principal MAY publish its own primary-host STATE',
+        (delivers('factoryplus_ingestion', stateTopic, 'factoryplus_ingestion', 'spBv1.0/STATE/#')),
+        true
+      );
+      expect(
+        'a gateway RECEIVES the primary-host STATE (this is what the read grant was always for)',
+        (delivers('factoryplus_ingestion', stateTopic, GATEWAY_A, 'spBv1.0/STATE/#')),
+        true
+      );
+      expect(
+        'the ingestion principal may NOT publish STATE for another host id (the grant is one literal topic)',
+        (delivers('factoryplus_ingestion', `spBv1.0/STATE/${OTHER_HOST_ID}`,
+          'factoryplus_ingestion', 'spBv1.0/STATE/#')),
+        false
+      );
+      expect(
+        'a gateway may NOT publish a primary-host STATE (a forgeable birth certificate is worse than none)',
+        (delivers(GATEWAY_A, stateTopic, 'factoryplus_ingestion', 'spBv1.0/STATE/#')),
         false
       );
 
