@@ -3125,6 +3125,24 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   flex-shrink: 0;
 }
 
+/* How much of the thread is on screen, between the key and the timeline. Centred over the whole
+   card rather than aligned to the tracks: it describes the page, not the axis, and the axis corner
+   it used to sit in is 210px hard against the left edge -- which is where readers missed it.
+   Larger than the legend beside it for the same reason; it is the line that tells you the view is
+   partial. Its own `dt-count-total` is not needed: the ratio carries both numbers. */
+.dt-count {
+  margin: 2px 0 12px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  /* The primary tier, not a muted one: this is the line a reader was missing, and the legend
+     immediately above it is already --text-muted at 11px. */
+  color: var(--text-primary);
+  /* Tabular figures so the numbers do not shuffle sideways as the poll and Load more change them
+     under a reader's eye. */
+  font-variant-numeric: tabular-nums;
+}
+
 /* Horizontal scrolling lives HERE rather than on the page, because the drawer is a flex sibling
    of the list: opening it takes 360px off this element's width, and a page that scrolled as a
    whole would push the lane labels off-screen the moment an event was selected. */
