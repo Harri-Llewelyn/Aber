@@ -1154,6 +1154,17 @@ scanned in full on every call, so this adds a predicate to a scan rather than a 
 the development stack, 4,065 rows: a default page 30 ms, a search matching nothing 53 ms. `pg_trgm`
 is the answer if a thread ever outgrows that.
 
+**A migration that adds an argument breaks the one before it, on the second boot.** `0077` named a
+single argument list in its `DROP` and then created its own — correct while it was the last word on
+the function, and wrong the moment `0115` came after it. On every replay `0077` recreated the
+nine-argument form beside the ten-argument one `0115` had left, and `0077`'s own self-check calls
+`digital_thread_page()` **by argument name**, which cannot choose between two candidates. The chain
+aborted *inside `0077`*, leaving a half-migrated database — and the first boot could not show it,
+because there was nothing yet for `0115` to have left behind. Both files now drop **every**
+declaration of the name before creating theirs, so each owns the function at its point in the chain
+whatever comes later. A migration adding an argument to a function an earlier one recreates wants
+the same treatment.
+
 **What `0115` deliberately does not do** is make an entity type whose *table* has been retired
 purgeable. Rows naming a table that no longer exists — `area_floors`, which `0113` retired — are
 still drawn, still unfilterable, and still cannot be hidden. "The table is gone" is a different

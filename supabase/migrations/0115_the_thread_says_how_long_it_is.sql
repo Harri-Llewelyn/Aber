@@ -31,12 +31,29 @@ SET search_path TO public;
 -- recreates the nine-argument form on every boot; this file runs after it and the last declaration
 -- wins, recorded in check-docs-drift.mjs's INTENDED_REDECLARATIONS.
 --
+-- EVERY DECLARATION, NOT 0077'S, and 0077 does the same for the same reason: a file that names one
+-- argument list owns the function only until something adds an argument after it, and then leaves
+-- a second declaration standing on every replay. The self-checks here and in 0077 call by name,
+-- which is the call that cannot choose between two candidates.
+--
 -- THE GRANTS DO NOT FOLLOW THE FUNCTION ACROSS THE DROP, and a function nobody may execute fails
 -- exactly like one that does not exist -- except that it fails in the browser, as an empty page,
 -- rather than here as a migration error. They are re-granted below.
-DROP FUNCTION IF EXISTS public.digital_thread_page(
-    integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone,
-    timestamp with time zone, bigint);
+DO $own$
+DECLARE
+    v_existing record;
+BEGIN
+    FOR v_existing IN
+        SELECT p.oid::regprocedure AS signature
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public' AND p.proname = 'digital_thread_page'
+    LOOP
+        -- No CASCADE, as in 0077: nothing may depend on this.
+        EXECUTE format('DROP FUNCTION %s', v_existing.signature);
+    END LOOP;
+END
+$own$;
 
 CREATE OR REPLACE FUNCTION public.digital_thread_page(
     p_limit integer DEFAULT 200,
@@ -171,8 +188,9 @@ DECLARE
   v_found     bigint;
   v_wildcard  bigint;
 BEGIN
-  -- 1. ONE DECLARATION. The DROP above names an argument list, and an argument list that has moved
-  --    on would leave both forms standing and every call by name ambiguous.
+  -- 1. ONE DECLARATION. Two candidates make every call by argument name ambiguous, which is how
+  --    this failed: the chain aborted inside 0077, on the SECOND boot, with a database left half
+  --    migrated. Cheap to assert and impossible to notice otherwise.
   SELECT count(*) INTO v_declared
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -180,8 +198,8 @@ BEGIN
 
   IF v_declared <> 1 THEN
     RAISE EXCEPTION
-      '0115 self-check: digital_thread_page is declared % time(s), not once -- the DROP above did '
-      'not match the form the previous migration left, so calls by argument name are ambiguous.',
+      '0115 self-check: digital_thread_page is declared % time(s), not once -- calls by argument '
+      'name cannot choose a candidate, and the next migration to call one will abort the chain.',
       v_declared;
   END IF;
 

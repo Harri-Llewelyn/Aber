@@ -17,12 +17,34 @@ COMMENT ON INDEX public.idx_digital_thread_recorded_id IS
   'Serves digital_thread_page()''s keyset order. MUST match its ORDER BY (recorded_at DESC, id DESC) exactly -- a cursor walking one order against an index in another degrades to a full sort per page, which is invisible until the table is large.';
 
 -- =================================================================================================
--- DROPPED AND RECREATED, NOT REPLACED: CREATE OR REPLACE would leave both argument lists
--- declared, and with the new ones defaulted a seven-argument call would be ambiguous. 0001
--- recreates the seven-argument form on every boot; this file runs after it and the last
--- declaration wins, recorded in check-docs-drift.mjs's INTENDED_REDECLARATIONS.
-DROP FUNCTION IF EXISTS public.digital_thread_page(
-    integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone);
+-- DROPPED AND RECREATED, NOT REPLACED: CREATE OR REPLACE would leave both argument lists declared,
+-- and with the new ones defaulted a seven-argument call would be ambiguous. 0001 recreates the
+-- seven-argument form on every boot; this file runs after it and the last declaration wins,
+-- recorded in check-docs-drift.mjs's INTENDED_REDECLARATIONS.
+--
+-- EVERY DECLARATION, NOT THE ONE 0001 LEAVES. Naming a single argument list was correct while this
+-- file was the last word on the function and wrong from the moment one came after it: a later
+-- migration that adds an argument (0115 adds `p_search`) leaves ITS form standing when the chain
+-- replays, so the CREATE below would make a second declaration and the self-check's call BY NAME
+-- at the foot of this file cannot choose between them. That fails the whole chain on the second
+-- boot, which the first boot has no way to show. Dropping whatever is there makes this file own
+-- the name at its point in the chain, whatever comes later.
+DO $own$
+DECLARE
+    v_existing record;
+BEGIN
+    FOR v_existing IN
+        SELECT p.oid::regprocedure AS signature
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public' AND p.proname = 'digital_thread_page'
+    LOOP
+        -- No CASCADE: nothing may depend on this. It is called over PostgREST, and a dependent
+        -- object appearing is a change that should fail here rather than be dropped quietly.
+        EXECUTE format('DROP FUNCTION %s', v_existing.signature);
+    END LOOP;
+END
+$own$;
 
 CREATE OR REPLACE FUNCTION public.digital_thread_page(
     p_limit integer DEFAULT 200,
