@@ -1621,7 +1621,7 @@ const apiMethods = {
       // An EMPTY list must return nothing rather than everything -- "these ids, of which there are
       // none" is not "no filter". The Digital Thread page no longer sends this: it asks the
       // database to match the name (`search` above) rather than resolving one to ids here, which is
-      // what stopped a deleted asset being unsearchable. The parameter is kept because it is the
+      // what stopped a deleted entity being unsearchable. The parameter is kept because it is the
       // right primitive for "this entity's history" and `p_search` cannot express an exact set.
       if (entityIds && entityIds.length === 0) return [];
 

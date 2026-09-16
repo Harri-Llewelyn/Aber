@@ -110,7 +110,7 @@ const show = async () => {
  */
 const showAll = async () => {
   await show()
-  fireEvent.click(screen.getByRole('button', { name: /Show deleted assets/i }))
+  fireEvent.click(screen.getByRole('button', { name: /Show deleted entities/i }))
   await waitFor(() => expect(screen.getByTitle('Clear every filter')).toBeInTheDocument())
 }
 
@@ -158,13 +158,13 @@ describe('Digital Thread filter bar', () => {
   /* SENT AS THE TYPED TEXT, not resolved to ids here. It is still a database predicate rather than
      a filter over the page -- the row limit is applied by the database, so post-filtering a 200-row
      page would show whichever fraction happened to match -- but the matching happens where the
-     audit snapshots are, which is the only place a deleted asset still has a name. */
+     audit snapshots are, which is the only place a deleted entity still has a name. */
   it('sends an entity NAME to the database to match', async () => {
     await show()
     fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'Simulated' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('search=Simulated'))
-    // And no longer resolves it against the live lists first, which is what made a deleted asset
+    // And no longer resolves it against the live lists first, which is what made a deleted entity
     // unsearchable: no match there meant an empty id list, which drew an empty thread.
     expect(lastThreadUrl()).not.toContain('entity_ids=')
   })
@@ -386,7 +386,7 @@ describe('Digital Thread swimlanes', () => {
        nothing said it was gone -- but the evidence is the same evidence that flags the lane above:
        it is a device, the devices lookup has landed, and its id is not in it. The snapshot is only
        where a LABEL comes from. The reader is also seeing this row because they turned Show
-       deleted assets on, so the page saying "deleted" is the page agreeing with the control that
+       deleted entities on, so the page saying "deleted" is the page agreeing with the control that
        revealed it. */
     const lane = screen.getByText('99999999…5555').closest('.dt-lane')
     const flag = within(lane).getByText('deleted')
@@ -978,13 +978,13 @@ describe('Digital Thread — removed tag filter', () => {
      from `service_role`, so hiding is a filter and removal is an administrative act. The fixture
      already contains the case: `cell-gone` and the orphan UUID on event 6. */
   describe('events for assets that no longer exist', () => {
-    const toggle = () => screen.getByRole('button', { name: /Show deleted assets/i })
+    const toggle = () => screen.getByRole('button', { name: /Show deleted entities/i })
 
     it('counts distinct ASSETS, not the events belonging to them', async () => {
       /* The control counts purged entities, not their rows: two in the fixture, however many rows
          they own. */
       await show()
-      expect(toggle()).toHaveTextContent('Show deleted assets (2)')
+      expect(toggle()).toHaveTextContent('Show deleted entities (2)')
     })
 
     it('hides them by default, and that is not an active filter', async () => {
@@ -1052,7 +1052,7 @@ describe('Digital Thread — removed tag filter', () => {
       })
       await show()
 
-      expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
     })
 
     it('hides nothing while the asset lookups are still outstanding', async () => {
@@ -1067,7 +1067,7 @@ describe('Digital Thread — removed tag filter', () => {
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
-      expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
     })
 
     it('does not treat an ARCHIVED asset as deleted', async () => {
@@ -1087,7 +1087,101 @@ describe('Digital Thread — removed tag filter', () => {
       render(<DigitalThreadTab />)
       await waitFor(() => expect(screen.getByText('Press_02')).toBeInTheDocument())
 
-      expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+    })
+  })
+
+  /* 0117: the rule reaches every kind the page can tell a deletion of, which is every kind whose
+     lookup it fetches AND whose table `digital_thread_page()` can probe. Schemas qualify and were
+     missing, so a deleted one wore the "deleted" flag, could not be hidden, and -- the count being
+     what draws the reveal control -- was offered no way to be. */
+  describe('deleted entities beyond the shopfloor tables', () => {
+    const SCHEMA_EVENTS = [
+      {
+        event_id: 11, entity_type: 'devices', entity_id: 'dev-1', event_type: 'UPDATE',
+        timestamp: '2026-08-02T12:00:00Z', description: 'Action UPDATE on devices [dev-1]',
+        changed_by: null, actor_source: 'user',
+        old_data: { id: 'dev-1', name: 'Simulated_CNC_01' },
+        new_data: { id: 'dev-1', name: 'Simulated_CNC_01' },
+      },
+      {
+        event_id: 12, entity_type: 'schemas', entity_id: 'schema-gone', event_type: 'DELETE',
+        timestamp: '2026-08-02T11:00:00Z', description: 'Action DELETE on schemas [schema-gone]',
+        changed_by: null, actor_source: 'user',
+        old_data: { id: 'schema-gone', schema_name: 'VALIDATE_Schema_Robot', version: 1 },
+        new_data: null,
+      },
+    ]
+
+    /** @param make what /api/v1/schemas resolves to, called per request so a rejection is attached. */
+    const withSchemas = (make) => {
+      api.get.mockImplementation((path) => {
+        if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(SCHEMA_EVENTS)
+        if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
+        if (path.startsWith('/api/v1/schemas')) return make()
+        return Promise.resolve([])
+      })
+    }
+
+    it('hides a schema its lookup cannot name, and counts it on the control', async () => {
+      withSchemas(() => Promise.resolve([]))
+      await show()
+
+      expect(screen.queryByText('VALIDATE_Schema_Robot')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Show deleted entities/i }))
+        .toHaveTextContent('Show deleted entities (1)')
+    })
+
+    it('reveals it, named from its snapshot, when asked', async () => {
+      withSchemas(() => Promise.resolve([]))
+      await show()
+      fireEvent.click(screen.getByRole('button', { name: /Show deleted entities/i }))
+
+      expect(await screen.findByText('VALIDATE_Schema_Robot')).toBeInTheDocument()
+    })
+
+    it('leaves a schema the lookup still holds alone', async () => {
+      withSchemas(() => Promise.resolve([{ id: 'schema-gone', schema_name: 'Robot pose', version: 2 }]))
+      await show()
+
+      expect(screen.getByText('Robot pose')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+    })
+
+    it('hides nothing when the schemas lookup was refused, rather than hiding all of them', async () => {
+      /* WHY THE LOOKUP REPORTS null RATHER THAN []: a refused request and an empty table are the
+         same value and opposite facts. Reading the first as the second would call every live schema
+         deleted and then hide it, so one 403 would silently empty a lane. */
+      withSchemas(() => Promise.reject(new Error('403')))
+      await show()
+
+      expect(await screen.findByText('VALIDATE_Schema_Robot')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(document.querySelector('.dt-lane-gone')).toBeNull()
+    })
+
+    it('never calls a role assignment deleted, because nothing here can probe auth.users', async () => {
+      /* The complement of the rule. `list_user_accounts()` names that lane (0116), but its subject
+         is an auth.users row the RPC cannot read, so the server can never hide one -- and a flag the
+         control cannot act on is the defect this describe exists for, in the other direction. */
+      api.get.mockImplementation((path) => {
+        if (path.startsWith('/api/v1/digital-thread')) {
+          return Promise.resolve([{
+            event_id: 13, entity_type: 'user_roles',
+            entity_id: '11111111-2222-4333-8444-555555555555', event_type: 'INSERT',
+            timestamp: '2026-08-02T10:00:00Z', description: 'Action INSERT on user_roles',
+            changed_by: null, actor_source: 'user',
+            old_data: null, new_data: { role: 'Auditor' },
+          }])
+        }
+        if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
+        return Promise.resolve([])
+      })
+      render(<DigitalThreadTab />)
+      await waitFor(() => expect(document.querySelector('.dt-lane-label')).toBeTruthy())
+
+      expect(document.querySelector('.dt-lane-gone')).toBeNull()
+      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
     })
   })
 

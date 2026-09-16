@@ -1187,6 +1187,48 @@ purgeable. Rows naming a table that no longer exists — `area_floors`, which `0
 still drawn, still unfilterable, and still cannot be hidden. "The table is gone" is a different
 question from "the row is gone", and it is being decided with the rest of the archival lifecycle.
 
+### What can be shown to be deleted (`0117`)
+
+**The page had two disagreeing answers to "is this entity gone".** The timeline flags a lane
+*deleted* when a lookup covering its kind has landed and does not hold the id — schemas included,
+since the tab fetches them to name the lane. The purged rule, which decides what is *hidden* and
+what `purged_assets` counts, named the four shopfloor tables and not that one. So a deleted schema
+wore the flag, could not be hidden, and was not counted — and because that count is what draws the
+reveal control, filtering to Schemas produced a page of lanes all marked deleted with nothing
+offering to hide them.
+
+It was not a corner case. On the development stack every one of the 122 audited schemas was gone
+(`public.schemas` was empty, the residue of `validate.py` fixture runs) and **their 283 rows were
+61% of the 467 the default filters selected**. Closing the gap takes the default view to 184.
+
+**Membership is not "is this shopfloor equipment" but "can this function probe a table for the
+row".** That is the rule `0077`, `0097` and `0115` were each applying, and each time a table that
+qualified was left out for a release. `0117` names six types against five probes:
+
+| type | probed in | why |
+|---|---|---|
+| `areas`, `cells`, `gateways`, `devices` | their own tables | the four `0077` and `0115` established |
+| `schemas` | `public.schemas` | its `SELECT` policy is `USING (true)` for `authenticated`, exactly as the four asset tables' are, so admitting it to a `SECURITY INVOKER` function adds no role that suddenly sees everything as deleted |
+| `device_nameplate` | `public.devices` | a nameplate is keyed by its device's id, so it is gone precisely when the device is. No rows carry the type yet; it is listed so it does not inherit this bug the first time one does |
+
+**`user_roles` and `service_principals` stay out.** Both are `auth.users` rows, which a
+`SECURITY INVOKER` function cannot read — `digital_thread_user_ids_matching()` exists because of
+that. A kind the server can never hide must never be flagged deleted either, so the tab's
+`DELETABLE_KINDS` drops `ACCESS` in the same change: **the flag and the filter are now one set on
+both sides**, which is the invariant whose absence caused this. `area_floors` stays out for the
+different reason `0115` gives — its table was retired, and "the table is gone" is not "the row is
+gone".
+
+**The control says "Show deleted entities", not assets.** A schema is a definition rather than
+shopfloor equipment, and the count now covers both. The wire key stays `purged_assets`: renaming it
+would break every caller to buy nothing a comment cannot say.
+
+**A tolerated lookup reports `null` when it failed, not `[]`.** `/api/v1/schemas` and
+`/api/v1/areas` are fetched with a `catch` so the page cannot fail to load because one of them did —
+but an empty list and a refused request are the same value and opposite facts. Reading the second as
+the first would call every live schema deleted and then hide it, so one `403` would silently empty a
+lane. The tab admits a kind to `DELETABLE_KINDS` only once that kind's own lookup has landed.
+
 ### A shape that can be pruned (`0079`)
 
 **The table could only grow, and suppression was never going to fix that.** `0005` already removes

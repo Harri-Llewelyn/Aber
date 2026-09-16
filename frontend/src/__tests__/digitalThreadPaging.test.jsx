@@ -27,7 +27,7 @@ vi.mock('../api', async () => {
 
 /**
  * One audit row, shaped as `mapDigitalThreadRow` leaves it. Its gateway must exist in the lookups
- * below, or the purged-asset filter hides it and every assertion fails for a reason that is not
+ * below, or the deleted-entity filter hides it and every assertion fails for a reason that is not
  * paging.
  */
 function event (id, recordedAt = '2026-01-01T00:00:00.000Z') {
@@ -51,6 +51,14 @@ function event (id, recordedAt = '2026-01-01T00:00:00.000Z') {
 const GATEWAYS = Array.from({ length: 300 }, (_, i) => ({
   gateway_id: `gw-${i + 1}`, gateway_name: `Gateway ${i + 1}`, devices: []
 }))
+
+/**
+ * Every schema any fixture here refers to. Seeded for the same reason as GATEWAYS: a schema the
+ * lookup cannot name reads as deleted (0117), and these fixtures are about sections and counts.
+ */
+const SCHEMAS = [
+  { id: 'c0000000-0000-4000-8000-000000000003', schema_name: 'Robot pose', version: 1 },
+]
 
 /**
  * A page as api.get resolves it: the array IS the resource, with the page facts attached.
@@ -77,6 +85,7 @@ function respond (threadHandler) {
     const path = String(url)
     if (path.includes('/digital-thread')) return Promise.resolve(threadHandler(path))
     if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+    if (path.startsWith('/api/v1/schemas')) return Promise.resolve(SCHEMAS)
     return Promise.resolve([])
   })
 }
@@ -332,24 +341,24 @@ describe('the count labels', () => {
 
 /**
  * Searching for something that has been deleted. Fixing the empty id list (0115) stopped the page
- * ASKING for nothing; it did not stop the page SHOWING nothing, because deleted assets are hidden
+ * ASKING for nothing; it did not stop the page SHOWING nothing, because deleted entities are hidden
  * by default and a search naming one matches only hidden rows. The reader saw "no events match"
  * with the answer behind a toggle they had no reason to try.
  */
 describe('DigitalThreadTab empty state', () => {
-  it('offers the deleted assets when the filters match only those', async () => {
+  it('offers the deleted entities when the filters match only those', async () => {
     // `purged_assets` is counted over everything the filters select INCLUDING the search, so an
     // empty page with a non-zero count is exactly this case and needs no second request.
     respond(() => page([], { nextCursor: null, purgedAssets: 1, totalMatching: 0 }))
     render(<DigitalThreadTab />)
 
-    expect(await screen.findByText(/one deleted asset does/i)).toBeInTheDocument()
+    expect(await screen.findByText(/one deleted entity does/i)).toBeInTheDocument()
     /* SCOPED TO THE EMPTY STATE. The filter bar carries the same control whenever anything is
        hidden, so an unscoped query finds two -- which is the arrangement here: the bar keeps the
        toggle available once there are results, and this restates it where the reader is actually
        looking and says why it would help. */
     const offer = within(document.querySelector('.empty-state'))
-      .getByRole('button', { name: /Show deleted assets \(1\)/ })
+      .getByRole('button', { name: /Show deleted entities \(1\)/ })
     fireEvent.click(offer)
     // And the click asks the server for them, rather than only re-filtering what is held.
     await waitFor(() => expect(threadCalls().some(u => u.includes('include_purged=true'))).toBe(true))
@@ -358,27 +367,27 @@ describe('DigitalThreadTab empty state', () => {
   it('counts more than one of them in words that agree', async () => {
     respond(() => page([], { nextCursor: null, purgedAssets: 4, totalMatching: 0 }))
     render(<DigitalThreadTab />)
-    expect(await screen.findByText(/4 deleted assets do/i)).toBeInTheDocument()
+    expect(await screen.findByText(/4 deleted entities do/i)).toBeInTheDocument()
   })
 
   it('says plainly that nothing matches when nothing does', async () => {
-    // No deleted assets behind the filter either: offering the toggle here would send the reader
+    // No deleted entities behind the filter either: offering the toggle here would send the reader
     // after something that is not there.
     respond(() => page([], { nextCursor: null, purgedAssets: 0, totalMatching: 0 }))
     render(<DigitalThreadTab />)
 
     expect(await screen.findByText(/No digital thread events match the filter criteria/i))
       .toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Show deleted assets/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Show deleted entities/ })).toBeNull()
   })
 
   it('does not offer them again once they are shown', async () => {
     respond(() => page([], { nextCursor: null, purgedAssets: 2, totalMatching: 0 }))
     render(<DigitalThreadTab />)
 
-    await screen.findByText(/2 deleted assets do/i)
+    await screen.findByText(/2 deleted entities do/i)
     fireEvent.click(within(document.querySelector('.empty-state'))
-      .getByRole('button', { name: /Show deleted assets \(2\)/ }))
+      .getByRole('button', { name: /Show deleted entities \(2\)/ }))
     // Still empty, but the toggle is on: repeating the offer would be a loop with no exit.
     await waitFor(() =>
       expect(screen.getByText(/No digital thread events match the filter criteria/i)).toBeInTheDocument())

@@ -253,6 +253,9 @@ python supabase/migrations/test_digital_thread_guard.py
 # every other test in the file would pass just as well against a broken cursor on a fixture
 # whose timestamps happen to be distinct -- and they are not, because one transaction's rows
 # all carry one now() and a batch relocation is deliberately one transaction (0033).
+# Also the purge rule (0117): the suite's list of types the rule covers is asserted against the
+# function's own, because the two drifting is how `areas` and then `schemas` each went a release
+# marked deleted by the page and unhideable by it.
 python supabase/migrations/test_digital_thread_paging.py
 # The delivery gate on broker-credential issuance (0078). NOT the happy path: the test that earns
 # its place is that a REAL gateway is not a delivery target, because a true there writes a real
