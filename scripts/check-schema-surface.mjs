@@ -35,6 +35,8 @@ const SURFACE = [
   { relation: 'timescale.telemetry_5m',      created_by: '0010' },
   { relation: 'timescale.telemetry_1h',      created_by: '0010' },
   { relation: 'public.telemetry_1h',         created_by: '0010' },
+  { relation: 'timescale.telemetry_horizons', created_by: '0111' },
+  { relation: 'public.telemetry_horizons',   created_by: '0111' },
   { relation: 'timescale.storage_footprint', created_by: '0027' },
   { relation: 'public.storage_footprint',    created_by: '0027' },
 ];

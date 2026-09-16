@@ -12,8 +12,10 @@
 --
 -- `public.telemetry` in Supabase is a postgres_fdw projection, and the wrapper pushes WHERE down
 -- but not LIMIT. The rollups serve trend queries (Grafana reads this database directly and never
--- crosses the FDW); `telemetry_latest` serves latest-value lookups. The CSV export reads raw: it
--- is an export of observations.
+-- crosses the FDW); `telemetry_latest` serves latest-value lookups. The CSV export reads raw by
+-- default -- it is an export of observations -- but may be asked for a rollup instead, which is
+-- the only way to export a period the raw retention window has already dropped (issue #160);
+-- `telemetry_horizons` is how it knows which resolutions still cover a range.
 -- =============================================================================================
 
 \set ON_ERROR_STOP on
@@ -45,6 +47,34 @@ SELECT DISTINCT ON (asset_id, metric_name)
 COMMENT ON VIEW telemetry_latest IS
   'Newest sample per (asset_id, metric_name). Evaluated on this server so postgres_fdw ships one '
   'row per series instead of a whole time window. Backed by idx_telemetry_asset_metric_time.';
+
+-- ---------------------------------------------------------------------------------------------
+-- 1b. telemetry_horizons -- how far back each resolution actually reaches.
+-- ---------------------------------------------------------------------------------------------
+-- WHAT IS THERE, NOT WHAT THE POLICY PROMISES. retention.sql and the policies below say what will
+-- eventually be dropped; they say nothing about a stack installed three weeks ago, which holds
+-- three weeks of raw whatever `retain_after` is set to. A reader deciding "will this range come
+-- back empty?" needs the first, and only the database can answer it.
+--
+-- EVALUATED HERE, FOR THE REASON telemetry_latest IS. Four rows cross postgres_fdw instead of the
+-- scan that answering this on the Supabase side would need -- and the wrapper pushes WHERE down
+-- but not LIMIT, so `ORDER BY time LIMIT 1` over the projection is not an alternative.
+--
+-- Each min() is an index scan per chunk (MergeAppend over the per-chunk time indexes), not a
+-- table scan, so the cost is the chunk count rather than the row count.
+CREATE OR REPLACE VIEW telemetry_horizons AS
+SELECT 'telemetry'::text    AS relation, (SELECT min(time)   FROM telemetry)    AS oldest
+UNION ALL
+SELECT 'telemetry_1m'::text AS relation, (SELECT min(bucket) FROM telemetry_1m) AS oldest
+UNION ALL
+SELECT 'telemetry_5m'::text AS relation, (SELECT min(bucket) FROM telemetry_5m) AS oldest
+UNION ALL
+SELECT 'telemetry_1h'::text AS relation, (SELECT min(bucket) FROM telemetry_1h) AS oldest;
+
+COMMENT ON VIEW telemetry_horizons IS
+  'Oldest timestamp held by each telemetry resolution -- the raw hypertable and the three rollups. '
+  'A NULL oldest means the relation is empty, which is not the same as a resolution that does not '
+  'exist. Evaluated on this server so four rows cross postgres_fdw rather than a scan.';
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. The rollups: 1 minute -> 5 minutes -> 1 hour.

@@ -287,8 +287,8 @@ END $$;
 -- ---------------------------------------------------------------------------------------------
 -- fdw_reader -- what Supabase's foreign tables connect as
 -- ---------------------------------------------------------------------------------------------
--- Read-only, and only the projection (telemetry, telemetry_latest, the three rollups and
--- storage_footprint). Nothing on the Supabase side writes through the FDW, so INSERT would be a
+-- Read-only, and only the projection (telemetry, telemetry_latest, the three rollups,
+-- telemetry_horizons and storage_footprint). Nothing on the Supabase side writes through the FDW, so INSERT would be a
 -- grant with no caller. Without this role the public user mapping runs as the historian
 -- superuser, so a widened local grant or a new foreign table would inherit superuser reach.
 
@@ -323,6 +323,16 @@ BEGIN
   EXECUTE format('GRANT SELECT ON public.telemetry_1m TO %I', v_role);
   EXECUTE format('GRANT SELECT ON public.telemetry_5m TO %I', v_role);
   EXECUTE format('GRANT SELECT ON public.telemetry_1h TO %I', v_role);
+  -- How far back each resolution reaches (migration 0111). Guarded on the view existing because a
+  -- first boot applies aggregates.sql after this file, as the archive manifest is.
+  --
+  -- WITHOUT THIS GRANT THE FAILURE IS SILENT AT THE DASHBOARD. The Supabase-side view is
+  -- security_invoker, so the remote query runs as this role; the export dialog swallows a failed
+  -- horizons lookup and labels every resolution "reach unknown", which is indistinguishable from a
+  -- stack that has not answered yet. Found in a browser, not by a test.
+  IF to_regclass('public.telemetry_horizons') IS NOT NULL THEN
+    EXECUTE format('GRANT SELECT ON public.telemetry_horizons TO %I', v_role);
+  END IF;
   IF to_regclass('public.storage_footprint') IS NOT NULL THEN
     EXECUTE format('GRANT SELECT ON public.storage_footprint TO %I', v_role);
   END IF;
@@ -334,7 +344,7 @@ BEGIN
   EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I', v_role);
 
   RAISE NOTICE
-    'roles: % may SELECT the six objects Supabase projects and cannot write any of them.', v_role;
+    'roles: % may SELECT the seven objects Supabase projects and cannot write any of them.', v_role;
 END $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -390,6 +400,18 @@ BEGIN
     END IF;
     IF (SELECT rolsuper FROM pg_roles WHERE rolname = 'fdw_reader') THEN
       RAISE EXCEPTION 'roles self-check: fdw_reader is a superuser, which defeats the entire role.';
+    END IF;
+
+    -- Asserted because its absence is SILENT at the dashboard rather than loud: the export
+    -- dialog's horizons lookup fails closed and labels every resolution "reach unknown", which
+    -- reads exactly like a stack that has not answered yet. Guarded on the view existing, as the
+    -- grant above is, because a first boot applies aggregates.sql after this file.
+    IF to_regclass('public.telemetry_horizons') IS NOT NULL
+       AND NOT has_table_privilege('fdw_reader', 'public.telemetry_horizons', 'SELECT') THEN
+      RAISE EXCEPTION
+        'roles self-check: fdw_reader cannot read telemetry_horizons, so the telemetry export '
+        'dialog cannot tell which resolutions still cover a range -- and it fails quietly, '
+        'reporting every resolution as "reach unknown".';
     END IF;
 
     RAISE NOTICE 'roles self-check passed: fdw_reader reads the projection and writes nothing.';

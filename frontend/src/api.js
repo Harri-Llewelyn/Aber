@@ -164,14 +164,32 @@ export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
  * Rollup resolutions a caller may ask for, and the relation each maps to.
  *
  * Continuous aggregates in TimescaleDB (timescaledb/aggregates.sql), exposed over the FDW. A
- * trend over a month is made cheap by there being fewer rows, not by asking for fewer. The CSV
- * export does not use these: a bucket average is not a reading any instrument produced.
+ * trend over a month is made cheap by there being fewer rows, not by asking for fewer.
+ *
+ * THE CSV EXPORT DEFAULTS TO RAW AND MAY BE ASKED FOR THESE. A bucket average is not a reading any
+ * instrument produced, so raw stays the default and a rollup is never substituted for it silently
+ * -- but past the raw retention window a rollup is the only thing that still answers, and refusing
+ * to export one meant reporting "no telemetry in that range" for data the stack was holding
+ * (issue #160). `relation` is also exported as TELEMETRY_RESOLUTION_RELATIONS so the export dialog
+ * can match a resolution to its row in `telemetry_horizons`.
  */
 const TELEMETRY_RESOLUTIONS = {
   '1m': { relation: 'telemetry_1m', bucketMinutes: 1 },
   '5m': { relation: 'telemetry_5m', bucketMinutes: 5 },
   '1h': { relation: 'telemetry_1h', bucketMinutes: 60 }
 };
+
+/**
+ * The relation each resolution reads, keyed as `telemetry_horizons` names them; `null` is raw.
+ *
+ * Derived from TELEMETRY_RESOLUTIONS rather than restated, so a resolution added there cannot be
+ * missing here -- the failure that would produce is a picker offering a choice whose horizon is
+ * silently unknown.
+ */
+export const TELEMETRY_RESOLUTION_RELATIONS = Object.freeze({
+  raw: 'telemetry',
+  ...Object.fromEntries(Object.entries(TELEMETRY_RESOLUTIONS).map(([k, v]) => [k, v.relation]))
+});
 
 export const TELEMETRY_DEFAULT_WINDOW_MINUTES = 60;
 
@@ -290,6 +308,34 @@ async function queryLatestTelemetry({ assetId, assetIds, metricName, minutes } =
   const { data, error } = await query.limit(TELEMETRY_MAX_ROWS);
   if (error) throw error;
   return data || [];
+}
+
+/**
+ * The oldest timestamp each telemetry resolution holds, as `{ telemetry: Date|null, ... }`.
+ *
+ * WHAT IS HELD, NOT WHAT THE POLICY PROMISES. `public.telemetry_horizons` reads min() from each
+ * relation on the TimescaleDB side; a stack installed three weeks ago reports three weeks of raw
+ * however `timescaledb.retention.retainFor` is set. A null means that relation is empty, which the
+ * caller must not read as "does not reach that far": an empty stack covers nothing at any
+ * resolution, and offering to switch would return nothing either.
+ *
+ * NEVER THROWS. This decorates the export dialog; a stack whose historian is unreachable must
+ * still be able to attempt an export and get the real error from the export itself, rather than a
+ * dialog that refuses to open.
+ */
+async function queryTelemetryHorizons() {
+  try {
+    const { data, error } = await supabase.from('telemetry_horizons').select('*');
+    if (error) throw error;
+    const out = {};
+    for (const row of data || []) {
+      const at = row?.oldest ? new Date(row.oldest) : null;
+      out[row.relation] = at && !Number.isNaN(at.getTime()) ? at : null;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 const mapDigitalThreadRow = (t) => ({
@@ -1855,6 +1901,13 @@ const apiMethods = {
     // Latest value per (device, metric) inside a bounded recent window. Used by the
     // Site Map, which only needs current state -- not the full history the
     // export dialog pages through.
+    // How far back each resolution reaches. Four rows, evaluated on the TimescaleDB side
+    // (migration 0111) -- the retention SETTINGS cannot answer this, because a young stack holds
+    // less than its policy allows and a widened policy does not restore dropped chunks.
+    if (path.startsWith('/api/v1/telemetry/horizons')) {
+      return queryTelemetryHorizons();
+    }
+
     if (path.startsWith('/api/v1/telemetry/latest')) {
       const url = new URL(path, window.location.origin);
       const minutes = Number.parseInt(url.searchParams.get('minutes') || '60', 10);
@@ -1879,8 +1932,9 @@ const apiMethods = {
         to: url.searchParams.get('to'),
         limit: Number.parseInt(url.searchParams.get('limit') || '', 10),
         offset: Number.parseInt(url.searchParams.get('offset') || '', 10),
-        // `?resolution=1m|5m|1h` reads a rollup instead of raw. Absent means raw, which is what
-        // the CSV export wants; see TELEMETRY_RESOLUTIONS.
+        // `?resolution=1m|5m|1h` reads a rollup instead of raw. ABSENT MEANS RAW, and that is the
+        // export's default rather than its only option: past the raw retention window a rollup is
+        // the only thing that still answers. See TELEMETRY_RESOLUTIONS.
         resolution: url.searchParams.get('resolution') || undefined
       });
     }
