@@ -1,7 +1,11 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { api, TELEMETRY_PAGE_SIZE, TELEMETRY_EXPORT_MAX_ROWS } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { telemetryValue, telemetryValueType } from '../../utils/telemetryValue'
+import {
+  EXPORT_RESOLUTIONS, bestResolutionFor, commentRow, coversRange, provenanceRow,
+  resolutionByKey, toExportRow
+} from '../../utils/telemetryExport'
 import { IconDownload, IconAlertTriangle, IconX } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
@@ -12,6 +16,19 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
  * still downloads the most recent rows and says so, in the dialog and in a comment line at the top
  * of the file. One metric per request, run sequentially, since concurrent range scans over the FDW
  * are the load pattern to avoid.
+ *
+ * RESOLUTION IS A CHOICE, AND RAW IS THE DEFAULT. An export is an export of observations, so a
+ * bucket average is never substituted for one silently. But the raw hypertable is retained for a
+ * fraction of the time the rollups are -- 90 days against the hourly rollup's five years by
+ * default -- and a range older than that used to return nothing under the sentence "No telemetry
+ * in that range for the selected metrics." That describes a device that published nothing, when
+ * what actually happened is that the chunks were dropped and the data is still held in a rollup
+ * (issue #160).
+ *
+ * BOTH HALVES, INFORM AND CONTROL. The picker alone would not be found by the person who needs it;
+ * the warning alone would be a dead end. So each resolution is labelled with how far back it
+ * actually reaches, and a range starting before the chosen resolution's horizon raises a warning
+ * that names the finest resolution which does cover it and offers to switch.
  */
 
 const PRESETS = [
@@ -29,6 +46,16 @@ function toLocalInputValue(date) {
          `T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
+/** Sentence-case for a resolution's `short`, which is written lower-case for use mid-sentence. */
+const capitalise = s => s.charAt(0).toUpperCase() + s.slice(1)
+
+/** A horizon as a reader recognises it. Absent means the lookup did not answer — say so plainly. */
+function horizonLabel(oldest) {
+  if (oldest === undefined) return 'reach unknown'
+  if (oldest === null) return 'no data'
+  return `back to ${oldest.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
+}
+
 export function TelemetryExportModal({ device, metricNames, onClose, showToast }) {
   // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onClose)
@@ -37,12 +64,25 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
   const [preset, setPreset]   = useState('1h')
   const [customFrom, setCustomFrom] = useState(() => toLocalInputValue(new Date(Date.now() - 3600_000)))
   const [customTo, setCustomTo]     = useState(() => toLocalInputValue(new Date()))
+  const [resolution, setResolution] = useState('raw')
+  const [horizons, setHorizons] = useState(null)   // null until the lookup settles
   const [busy, setBusy]       = useState(false)
   const [fetched, setFetched] = useState(0)
   const [error, setError]     = useState(null)
 
   const deviceId = device?.asset_id || device?.id
   const deviceName = device?.asset_name || device?.name || deviceId
+
+  // How far back each resolution reaches, read once when the dialog opens. It decorates the picker
+  // and drives the warning; it never gates the export, so a stack whose historian is unreachable
+  // still gets the real error from the export attempt rather than a dialog that refuses to run.
+  useEffect(() => {
+    let live = true
+    api.get('/api/v1/telemetry/horizons')
+      .then(h => { if (live) setHorizons(h || {}) })
+      .catch(() => { if (live) setHorizons({}) })
+    return () => { live = false }
+  }, [])
 
   /** Resolve the chosen range to absolute ISO bounds. */
   const resolveRange = () => {
@@ -64,9 +104,24 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
     }
   }
 
+  // The warning, recomputed as the range or the resolution changes. `covers === false` is the only
+  // state that warns: `null` means the horizon is not known, and warning on that would be the
+  // dialog refusing on its own ignorance.
+  const coverage = useMemo(() => {
+    const range = resolveRange()
+    if (range.error || horizons === null) return null
+    const entry = resolutionByKey(resolution)
+    const covers = coversRange(horizons, entry.relation, range.from)
+    if (covers !== false) return null
+    return { entry, better: bestResolutionFor(horizons, range.from), from: range.from }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, preset, customFrom, customTo, resolution, horizons])
+
   const runExport = async () => {
     const range = resolveRange()
     if (range.error) { setError(range.error); return }
+
+    const entry = resolutionByKey(resolution)
 
     setBusy(true)
     setError(null)
@@ -94,6 +149,9 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
             limit: String(pageSize),
             offset: String(offset)
           })
+          // Omitted entirely for raw: absent means raw, and `resolution=raw` is not a value the
+          // query accepts — an unknown one is refused rather than falling back.
+          if (entry.param) params.set('resolution', entry.param)
           const page = await api.get(`/api/v1/telemetry?${params.toString()}`)
 
           rows.push(...(page || []))
@@ -106,40 +164,57 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
       }
 
       if (rows.length === 0) {
-        setError('No telemetry in that range for the selected metrics.')
+        // NOT "the device published nothing", unless that is actually what happened. When the
+        // range starts before this resolution's horizon the true answer is that the rows were
+        // dropped by the retention policy and another resolution still holds the period — saying
+        // otherwise sends the reader to look for a fault in the device.
+        const better = horizons ? bestResolutionFor(horizons, range.from) : null
+        if (!coverage) {
+          // The range IS covered by this resolution and still came back empty, so the plain
+          // reading is the true one: this device published nothing then.
+          setError('No telemetry in that range for the selected metrics.')
+        } else if (better) {
+          const what = entry.key === 'raw'
+            ? 'Raw telemetry for that range has been dropped by the retention policy'
+            : `${capitalise(entry.short)} for that range are no longer held`
+          setError(`${what}. ${capitalise(better.short)} still cover it — switch resolution above and export again.`)
+        } else {
+          setError(
+            'That range starts before any resolution still holds data, so there is nothing left ' +
+            'to export for it. Choose a more recent range.'
+          )
+        }
         setBusy(false)
         return
       }
 
-      // Flattened: the three val_* columns are an implementation detail of the hypertable, so the
-      // CSV carries one `value` column plus the type that produced it.
-      const flat = rows.map(r => ({
-        time: r.time,
-        asset_id: r.asset_id,
-        metric_name: r.metric_name,
-        value: telemetryValue(r),
-        value_type: telemetryValueType(r)
+      const flat = rows.map(r => toExportRow(r, entry.key, {
+        value: telemetryValue, valueType: telemetryValueType
       }))
 
       if (truncated) {
         // Carried IN THE FILE, not only in the dialog -- the dialog is gone the moment it is
         // dismissed, and the file is what gets forwarded to someone else.
-        flat.unshift({
-          time: `# TRUNCATED at ${TELEMETRY_EXPORT_MAX_ROWS} rows`,
-          asset_id: '# most recent rows in range; narrow the range or select fewer metrics',
-          metric_name: '',
-          value: '',
-          value_type: ''
-        })
+        flat.unshift(commentRow(
+          entry.key,
+          `# TRUNCATED at ${TELEMETRY_EXPORT_MAX_ROWS} rows`,
+          '# most recent rows in range; narrow the range or select fewer metrics'
+        ))
       }
 
-      const stamp = range.from.slice(0, 10)
-      downloadCSV(flat, `${deviceName}-telemetry-${stamp}.csv`)
+      // Above the truncation notice, so the first line of the file says what the file IS. Same
+      // argument, applied to the question a rollup export raises and a raw one does not.
+      flat.unshift(provenanceRow(entry.key))
 
+      const stamp = range.from.slice(0, 10)
+      const suffix = entry.key === 'raw' ? '' : `-${entry.key}`
+      downloadCSV(flat, `${deviceName}-telemetry${suffix}-${stamp}.csv`)
+
+      const what = entry.key === 'raw' ? 'row' : 'bucket'
       showToast?.(
         truncated
-          ? `Exported ${rows.length} rows (truncated at the ${TELEMETRY_EXPORT_MAX_ROWS} row limit)`
-          : `Exported ${rows.length} row${rows.length === 1 ? '' : 's'}`,
+          ? `Exported ${rows.length} ${what}s (truncated at the ${TELEMETRY_EXPORT_MAX_ROWS} row limit)`
+          : `Exported ${rows.length} ${what}${rows.length === 1 ? '' : 's'}`,
         truncated ? 'error' : 'success'
       )
       setBusy(false)
@@ -218,6 +293,49 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
             </div>
           )}
         </div>
+
+        <div className="form-group">
+          <label className="form-label">Resolution</label>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }} role="group" aria-label="Export resolution">
+            {EXPORT_RESOLUTIONS.map(r => {
+              // `undefined` while the lookup is in flight or did not answer; `null` when the
+              // relation is empty. Both read as something other than a date, deliberately.
+              const oldest = horizons ? horizons[r.relation] : undefined
+              return (
+                <button
+                  key={r.key}
+                  className={`btn btn-sm ${resolution === r.key ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => { setResolution(r.key); setError(null) }}
+                  disabled={busy}
+                  aria-pressed={resolution === r.key}
+                  title={`${r.note} ${horizonLabel(oldest)}.`}
+                  style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '1px', padding: '5px 9px', lineHeight: 1.25 }}
+                >
+                  <span>{r.label}</span>
+                  <span style={{ fontSize: '11px', opacity: 0.75 }}>{horizonLabel(oldest)}</span>
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+            {resolution === 'raw'
+              ? 'Every reading as published. The raw hypertable is kept for a fraction of the time the rollups are, so an older range may need one of them.'
+              : 'Aggregated buckets, not individual readings. The file carries avg, min, max and last per bucket, and says so in its first line.'}
+          </div>
+        </div>
+
+        {coverage && (
+          <div style={{ fontSize: '12px', color: 'var(--warning-text, var(--text-muted))', marginBottom: '12px', display: 'flex', alignItems: 'flex-start', gap: '6px', padding: '8px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '6px' }}>
+            <IconAlertTriangle size={13} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <span>
+              That range starts before {coverage.entry.key === 'raw' ? 'raw telemetry' : coverage.entry.short} {coverage.entry.key === 'raw' ? 'begins' : 'begin'}
+              {horizons?.[coverage.entry.relation] ? ` (${horizonLabel(horizons[coverage.entry.relation])})` : ''}.
+              {coverage.better
+                ? <> {capitalise(coverage.better.short)} cover the whole range. <button className="btn btn-sm btn-primary" style={{ marginLeft: '4px', padding: '2px 8px' }} onClick={() => { setResolution(coverage.better.key); setError(null) }} disabled={busy}>Switch to {coverage.better.label.toLowerCase()}</button></>
+                : ' No resolution still holds the whole of it, so part of the range will be missing whatever you choose.'}
+            </span>
+          </div>
+        )}
 
         {busy && (
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>

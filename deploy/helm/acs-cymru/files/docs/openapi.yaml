@@ -664,6 +664,56 @@ paths:
         '401':
           description: Granted to authenticated users only; `anon` is refused.
 
+  /rest/v1/telemetry_horizons:
+    get:
+      tags: [Telemetry]
+      summary: How far back each telemetry resolution reaches
+      description: |
+        Four rows, one per relation: `telemetry` (raw) and the `telemetry_1m`, `telemetry_5m` and
+        `telemetry_1h` rollups, each with the oldest timestamp it still holds.
+
+        **What is held, not what the retention policy promises.** The policy says what will
+        eventually be dropped; it cannot tell you what is there. A stack installed three weeks ago
+        holds three weeks of raw however `retainFor` is set, and widening a policy does not restore
+        chunks already deleted. This reads `min()` from each relation on the TimescaleDB side, so
+        four rows cross `postgres_fdw` rather than a scan — the same move `/rest/v1/telemetry_latest`
+        makes, and necessary for the same reason: the wrapper pushes `WHERE` down but not `LIMIT`,
+        so `order=time.asc&limit=1` over the projection would stream the relation to discard all
+        but one row.
+
+        A null `oldest` means that relation is empty. That is not the same as "does not reach that
+        far": an empty stack covers nothing at any resolution.
+
+        **What it is for.** Exporting a range older than the raw retention window used to return
+        nothing and report that the device had published nothing. This is how a client tells the
+        difference, and which coarser resolution still answers.
+
+        No parameters: retention is a property of the chunk, not of a device, so the horizon is the
+        same for every asset. It carries no metric values and no device identity.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: One row per resolution.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    relation:
+                      type: string
+                      enum: [telemetry, telemetry_1m, telemetry_5m, telemetry_1h]
+                      description: The relation this horizon describes.
+                    oldest:
+                      type: string
+                      format: date-time
+                      nullable: true
+                      description: Oldest timestamp held, or null when the relation is empty.
+        '401':
+          description: Granted to authenticated users only; `anon` is refused.
+
   /rest/v1/telemetry_1m:
     get:
       tags: [Telemetry]

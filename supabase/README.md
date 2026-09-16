@@ -2780,6 +2780,27 @@ needing a backfill nothing can compute. The migration backfills only rows with a
 against them (`forge_head_sha` or `forge_appliance_sha`), which proves a repository. Nothing clears
 it: a sweep that could not reach the forge must not read as *the repository is gone*.
 
+**`0111` says how far back each telemetry resolution actually reaches.** Exporting telemetry over a
+range older than the raw retention window returned nothing and reported *"No telemetry in that range
+for the selected metrics"* — a sentence describing a device that published nothing, when what
+happened is that the chunks were dropped and the data is still held in a rollup
+([#160](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/160)). To offer that rollup the dialog has
+to know what each resolution still covers, and **the retention settings cannot answer it**: they say
+what will eventually be dropped, not what is there. A stack installed three weeks ago holds three
+weeks of raw however `retainFor` is set, and widening a policy does not restore deleted chunks.
+
+`timescale.telemetry_horizons` maps a view in `timescaledb/aggregates.sql` that reads `min()` from
+the raw hypertable and each rollup. It is evaluated on the other side for the reason
+`telemetry_latest` is: `postgres_fdw` pushes `WHERE` down but **not** `LIMIT`, so
+`ORDER BY time LIMIT 1` over the projection would stream the relation across the link to discard all
+but one row. Four rows cross instead. A null `oldest` means that relation is empty — not that it
+fails to reach that far, which is a distinction the dialog acts on: an empty stack covers nothing at
+any resolution, so there is no better one to offer.
+
+Readable by `authenticated` with no per-row policy, because it carries no metric values and no device
+identity: four relation names and four timestamps. Retention is a property of the chunk rather than
+of a device, so there is nothing to filter by either.
+
 ### The platform playbook is published by the sweep
 
 [`forge/gateway-platform/`](../forge/gateway-platform) is the playbook every appliance converges to
