@@ -439,7 +439,30 @@ describe('digital thread filtering', () => {
     expect(rpcArgs()).toBeUndefined();
   });
 
-  it('searches entity id and rendered description, case-insensitively', async () => {
+  it('hands the search to the database instead of filtering the page', async () => {
+    /* It used to be resolved in the tab against the LIVE lists and sent as `entity_ids`, so a name
+       that had been deleted matched nothing there, sent an EMPTY list, and drew an empty thread.
+       `p_search` (0115) matches the id and the audit-snapshot fields the timeline labels a lane
+       from, where a deleted asset still has a name. */
+    await api.get('/api/v1/digital-thread?search=Press_02');
+    expect(rpcArgs().p_search).toBe('Press_02');
+    expect(rpcArgs().p_entity_ids).toBeNull();
+  });
+
+  it('sends no search rather than an empty one', async () => {
+    // `''` would be a predicate matching every row through a LIKE, which is the same answer as no
+    // filter but arrived at by scanning for it.
+    await api.get('/api/v1/digital-thread');
+    expect(rpcArgs().p_search).toBeNull();
+    await api.get('/api/v1/digital-thread?search=%20%20');
+    expect(rpcArgs().p_search).toBeNull();
+  });
+
+  it('does not filter the page after the database has answered', async () => {
+    /* There used to be a substring match over the rendered `description`, which api.js synthesises
+       from the entity type and id -- so it searched the id by a longer route, and no caller ever
+       sent the parameter that reached it. A filter applied after the page also makes `rows.length`
+       say nothing about whether the database had more. */
     state.responses.digital_thread = {
       data: [
         { id: 1, entity_type: 'devices', entity_id: 'dev-alpha', action: 'INSERT', recorded_at: '2026-01-01T00:00:00Z' },
@@ -448,11 +471,8 @@ describe('digital thread filtering', () => {
       error: null
     };
 
-    const byId = await api.get('/api/v1/digital-thread?entity_id=ALPHA');
-    expect(byId.map(r => r.entity_id)).toEqual(['dev-alpha']);
-
-    const byDescription = await api.get('/api/v1/digital-thread?entity_id=action update');
-    expect(byDescription.map(r => r.entity_id)).toEqual(['cell-beta']);
+    const rows = await api.get('/api/v1/digital-thread?search=ALPHA');
+    expect(rows.map(r => r.entity_id)).toEqual(['dev-alpha', 'cell-beta']);
   });
 
   it('attaches the match total, and tells a missing one from a total of zero', async () => {

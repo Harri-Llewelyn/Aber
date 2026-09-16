@@ -1608,6 +1608,10 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .empty-text { font-size: 14px; color: var(--text-muted); }
 
+/* An empty state that can offer a way out puts the control under the sentence. `.empty-state` is
+   centred text, so the button needs to become a block to sit in the middle of it. */
+.empty-state .btn { display: inline-flex; margin-top: 12px; }
+
 /* ===== Telemetry Grid ===== */
 .telemetry-value {
   font-family: 'JetBrains Mono', monospace;

@@ -1594,7 +1594,11 @@ const apiMethods = {
       // and row limit all had no effect at all. They are honoured now.
       const url = new URL(path, window.location.origin);
       const entityType = url.searchParams.get('entity_type');
-      const search = (url.searchParams.get('entity_id') || '').trim();
+      // Pushed down as a SQL predicate (0115), matching the entity id and the audit-snapshot fields
+      // the timeline labels a lane from. It used to be resolved in the tab against the LIVE tables
+      // and sent as `entity_ids`, so searching for something deleted sent an empty list and drew an
+      // empty thread.
+      const search = (url.searchParams.get('search') || '').trim();
       const entityIds = url.searchParams.has('entity_ids')
         ? url.searchParams.get('entity_ids').split(',').filter(Boolean)
         : undefined;
@@ -1614,7 +1618,11 @@ const apiMethods = {
       const beforeId = (url.searchParams.get('before_id') || '').trim();
       const hasCursor = beforeRecordedAt !== '' && beforeId !== '';
 
-      // A tag that matches no device must return nothing rather than everything.
+      // An EMPTY list must return nothing rather than everything -- "these ids, of which there are
+      // none" is not "no filter". The Digital Thread page no longer sends this: it asks the
+      // database to match the name (`search` above) rather than resolving one to ids here, which is
+      // what stopped a deleted asset being unsearchable. The parameter is kept because it is the
+      // right primitive for "this entity's history" and `p_search` cannot express an exact set.
       if (entityIds && entityIds.length === 0) return [];
 
       // The deleted-asset filter is a predicate, not a post-filter, which is why this is an RPC:
@@ -1641,6 +1649,7 @@ const apiMethods = {
           : null,
         p_action: action || null,
         p_entity_ids: entityIds && entityIds.length ? entityIds : null,
+        p_search: search || null,
         p_since: since || null,
         p_until: until || null,
         // Omitted entirely when there is no cursor, rather than sent as null: PostgREST resolves an RPC
@@ -1653,17 +1662,12 @@ const apiMethods = {
       if (error) throw error;
 
       const payload = data || {};
-      let rows = (payload.events || []).map(mapDigitalThreadRow);
-
-      // Substring match, applied after mapping so it searches the rendered description rather
-      // than the raw columns -- that is what the field's placeholder promises.
-      if (search) {
-        const needle = search.toLowerCase();
-        rows = rows.filter(r =>
-          String(r.entity_id || '').toLowerCase().includes(needle) ||
-          String(r.description || '').toLowerCase().includes(needle)
-        );
-      }
+      // NOTHING IS FILTERED AFTER THIS POINT. There used to be a substring match here over the
+      // rendered `description`, which is synthesised below from the entity type and id -- so it
+      // searched the id by a longer route, and no caller ever sent the parameter that reached it.
+      // A filter applied after the page also makes `rows.length` say nothing about whether the
+      // database had more, which is why `next_cursor` is the only end-of-data signal.
+      const rows = (payload.events || []).map(mapDigitalThreadRow);
 
       // The array is still the return value, with the page-level facts attached to it, so
       // `.length`, `.map`, destructuring and bare-array mocks keep working.
@@ -1675,8 +1679,9 @@ const apiMethods = {
       rows.totalMatching = typeof payload.total_matching === 'number'
         ? payload.total_matching
         : null;
-      // NULL is the only end-of-data signal, and it comes from the server: `rows` has been through the
-      // description search, so its length says nothing about whether the database had more.
+      // NULL IS THE ONLY END-OF-DATA SIGNAL, and it comes from the server. A full page that happens
+      // to be the last one is ordinary, so "fewer rows than I asked for" is not a reliable test and
+      // callers must not invent one.
       rows.nextCursor = payload.next_cursor || null;
       return rows;
     }
