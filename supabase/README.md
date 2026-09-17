@@ -1400,6 +1400,45 @@ entries. Only the JS side is parsed as text; the SQL side is the function itself
 cannot drift into agreeing with a regex instead of with the database.
 
 
+### A lane nothing wrote (`0122`)
+
+**`device_nameplate` was a Digital Thread filter that could only ever answer empty.**
+`audit_domain_for()` classified it, `DIGITAL_THREAD_ENTITY_TYPES` listed it, `api.js` unions its
+rows into the timeline of the device they name, and the approvals page reads `entity_id` as a
+device id. Every consumer was built. The table carried **no trigger of any kind**, so no row was
+ever written: a live stack held 4,075 audit rows across eleven entity types and not one was a
+nameplate.
+
+**The obstacle was the key.** `log_digital_thread_event()` read `NEW.id`, and `device_nameplate` is
+keyed by `device_id` with no `id` column at all — so the trigger could not be attached, and would
+not have failed at write time but at `CREATE TRIGGER` time. That is the same shape that made
+`log_role_assignment()` a separate function for `user_roles`, whose key is `(user_id, role_id)`.
+
+**A third copy of the attribution ladder was the obvious move and the wrong one.** That ladder is
+eighty lines deciding who a caller is — `auth.uid()`, then `acs_cymru.actor_id`, then the
+`X-ACS-Cymru-Actor` header, then the effective role — and the copy that already exists carries a
+deliberately reduced version that has to be kept in step by hand. `0122` makes the key column a
+trigger argument instead, defaulting to `id`, so the seven triggers already attached are untouched
+and a table keyed differently needs a trigger rather than a function.
+
+**The cost of that is a silent failure mode, so it is asserted twice.** A trigger argument naming a
+column that is not there reads as NULL through `->>` rather than raising, which would file every
+row under no entity. `0122`'s self-check walks every trigger bound to the function and checks the
+column it names exists on the table it is attached to; `test_digital_thread_guard.py` asserts the
+same thing against whatever is actually attached, which is what a later migration can change. The
+function also raises by name rather than letting `entity_id`'s `NOT NULL` report it, because that
+constraint names `digital_thread` and not the trigger that is wrong.
+
+**The UPDATE arm is gated the way `system_settings`' is.** The nameplate editor upserts the whole
+row and stamps `updated_at` on every save, so an operator who opens the form and saves it unchanged
+writes a different row — and would file an event whose two snapshots are identical but for a
+timestamp, into a table that is append-only. `audit_telemetry_columns()` cannot cover this: it
+names the columns a gateway *heartbeat* rewrites, and widening it to `updated_at` would silence
+that column everywhere.
+
+**The entity id recorded is the device's.** A nameplate is an assertion about a device, so its
+edits belong in that device's history — which is what every reader already expected.
+
 ### A shape that can be pruned (`0079`)
 
 **The table could only grow, and suppression was never going to fix that.** `0005` already removes

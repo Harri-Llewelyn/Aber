@@ -548,7 +548,7 @@ function edgeFunctionNames() {
     // 0100 subtracts every column a heartbeat writes (audit_telemetry_columns()) before deciding
     // whether an UPDATE is an event; the baseline subtracts last_heartbeat alone, which recorded
     // every health-carrying heartbeat as an event.
-    'public.log_digital_thread_event': '0100 subtracts audit_telemetry_columns(); the baseline subtracts last_heartbeat alone',
+    'public.log_digital_thread_event': '0100 subtracts audit_telemetry_columns() where the baseline subtracts last_heartbeat alone; 0122 reads the entity id from the column a trigger argument names, defaulting to id',
     // 0100 records a changed flow hash as a FLOW_DEPLOYED row, since the trigger no longer sees
     // that column; the writes to the seven health columns are the baseline's.
     'public.ingest_record_gateway_health': '0100 adds the FLOW_DEPLOYED row on a changed flow hash; the baseline holds the health writes alone',
