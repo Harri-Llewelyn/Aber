@@ -425,8 +425,16 @@ describe('Digital Thread swimlanes', () => {
     const toggle = await screen.findByText(/Show all lanes \(\+10\)/)
     expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(30)
 
+    /* AND THE LEGEND SAYS SO. It named every lane while the cap drew thirty, so a reader adding up
+       the section badges got thirty against a header saying forty, with nothing on the page to
+       reconcile them. */
+    expect(screen.getByText(/30\/40 entities/)).toBeInTheDocument()
+
     fireEvent.click(toggle)
     await waitFor(() => expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(40))
+    // Uncapped, the ratio goes: forty of forty is not a fraction.
+    expect(screen.getByText(/40 entities/)).toBeInTheDocument()
+    expect(screen.queryByText(/40\/40/)).not.toBeInTheDocument()
   })
 })
 

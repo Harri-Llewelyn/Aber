@@ -6,9 +6,17 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { DigitalThreadTab, mergeFirstPage } from '../components/tabs/DigitalThreadTab'
+import fs from 'node:fs'
+import path from 'node:path'
+import {
+  DigitalThreadTab, mergeFirstPage, eventCountLabel, countRatio, isPartial,
+} from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
 import { DIGITAL_THREAD_ENTITY_TYPES } from '../constants'
+
+/* Newlines normalised on read, as digitalThreadFilters.test.jsx does it: .gitattributes checks
+   this file out with the platform's native ending, and the rule matcher below spans lines. */
+const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
 
 // Spread from the real module, not replaced: api.js exports constants the tab reads at import time,
 // and a bare stub drops them, which renders as an empty timeline.
@@ -44,12 +52,19 @@ const GATEWAYS = Array.from({ length: 300 }, (_, i) => ({
   gateway_id: `gw-${i + 1}`, gateway_name: `Gateway ${i + 1}`, devices: []
 }))
 
-/** A page as api.get resolves it: the array IS the resource, with the page facts attached. */
-function page (events, { nextCursor = null, truncated = false, purgedAssets = 0 } = {}) {
+/**
+ * A page as api.get resolves it: the array IS the resource, with the page facts attached.
+ * `totalMatching` defaults to null, which is what a server without 0115 returns and what every
+ * fixture here that is not about the total leaves it as.
+ */
+function page (events, {
+  nextCursor = null, truncated = false, purgedAssets = 0, totalMatching = null,
+} = {}) {
   const rows = [...events]
   rows.nextCursor = nextCursor
   rows.truncated = truncated
   rows.purgedAssets = purgedAssets
+  rows.totalMatching = totalMatching
   return rows
 }
 
@@ -253,9 +268,12 @@ describe('DigitalThreadTab section coverage', () => {
     expect(options[0].value).toBe('')
   })
 
-  it('the asset count in the header equals the lanes actually drawn', async () => {
+  it('the entity count in the header equals the lanes actually drawn', async () => {
     // The reconcilable-number property, stated directly: this is what a reader checks the page
     // against, and it was wrong by 27 on the stack that found it.
+    //
+    // ENTITIES, not assets. Two of these three lanes are a role assignment and a schema, neither
+    // of which is a thing on the shopfloor.
     respond(() => page([
       laneEvent(3, 'user_roles', 'a0000000-0000-4000-8000-000000000001'),
       laneEvent(2, 'schemas', 'c0000000-0000-4000-8000-000000000003'),
@@ -266,6 +284,165 @@ describe('DigitalThreadTab section coverage', () => {
     await screen.findByLabelText('Gateways lanes')
     const drawn = screen.getAllByRole('separator').length
     expect(drawn).toBe(3)
-    expect(screen.getByText(/3 assets · 3 events/)).toBeInTheDocument()
+    expect(screen.getByText(/3 entities · 3 events/)).toBeInTheDocument()
+  })
+})
+
+// =================================================================================================
+// HOW MUCH OF THE THREAD THIS IS
+//
+// "200 events" above a button offering 200 more is the same sentence whether the next page is the
+// last or the third of twelve. The server counts the whole match (0115) and the page names it.
+// =================================================================================================
+describe('the count labels', () => {
+  it('name the whole match when the page is a fraction of it', () => {
+    // Two spellings of one pair. The ratio goes where the space is a fixed-width label -- the
+    // 210px axis corner and the header button -- and the phrase where there is room for words.
+    expect(eventCountLabel(200, 467)).toBe('200 of 467 events')
+    expect(countRatio(200, 467)).toBe('200/467')
+  })
+
+  it('degrade to a plain count once everything matching is drawn', () => {
+    // The equal case is the end of the thread. "467 of 467" is a fraction of itself and reads as
+    // though something were still missing.
+    expect(eventCountLabel(467, 467)).toBe('467 events')
+    expect(countRatio(467, 467)).toBe('467')
+  })
+
+  it('name the drawn events alone when the server did not say how many match', () => {
+    // A server without 0115. The alternative is "200 of null events", which is what a bare-array
+    // fixture and an older database would both have produced.
+    expect(eventCountLabel(200, null)).toBe('200 events')
+    expect(countRatio(200, undefined)).toBe('200')
+    expect(isPartial(200, null)).toBe(false)
+  })
+
+  it('do not dress a total below the page up as a fraction', () => {
+    // Cannot happen against a server that counts before the cursor, which is the point of counting
+    // there. If it ever does, the page says what it is holding rather than a number it cannot be.
+    expect(eventCountLabel(200, 3)).toBe('200 events')
+    expect(countRatio(200, 3)).toBe('200')
+  })
+
+  it('count one event as one event', () => {
+    expect(eventCountLabel(1, null)).toBe('1 event')
+    expect(eventCountLabel(1, 9)).toBe('1 of 9 events')
+  })
+})
+
+describe('DigitalThreadTab total', () => {
+  const cursor = { recorded_at: '2026-01-01T00:00:00.000Z', id: 41 }
+
+  it('says what fraction of the match is on screen, in the legend and at the foot', async () => {
+    respond(() => page([event(42), event(41)], {
+      nextCursor: cursor, truncated: true, totalMatching: 467,
+    }))
+    render(<DigitalThreadTab />)
+
+    // Above the timeline, under the key, as its own line.
+    expect(await screen.findByText(/2 entities · 2\/467 events/)).toBeInTheDocument()
+    // And the foot of the page, which has room for the words. Both read the same pair, so they
+    // cannot end up describing different sets.
+    expect(screen.getByText(/^2 of 467 events$/)).toBeInTheDocument()
+  })
+
+  it('draws the count between the key and the timeline, not inside the swimlanes', async () => {
+    /* It lived in the axis corner -- a 210px lane label hard against the left edge, at lane-label
+       size, beside the first tick -- and readers missed it. Asserted by POSITION and not only by
+       text, because the text passed from there too. */
+    respond(() => page([event(42), event(41)], {
+      nextCursor: cursor, truncated: true, totalMatching: 467,
+    }))
+    render(<DigitalThreadTab />)
+    await screen.findByText(/2 entities · 2\/467 events/)
+
+    const count = document.querySelector('.dt-count')
+    expect(count).toBeTruthy()
+    expect(count.textContent).toMatch(/2 entities · 2\/467 events/)
+    // Between the two: after the key, before the scroller that holds the tracks.
+    expect(count.previousElementSibling).toHaveClass('dt-legend')
+    expect(count.nextElementSibling).toHaveClass('dt-scroll')
+    // And gone from the corner, which is now only the spacer that lines the ticks up.
+    expect(document.querySelector('.dt-axis-corner').textContent).toBe('')
+  })
+
+  it('is centred and larger than the key it sits under', async () => {
+    // jsdom lays nothing out, so the rule is read from the stylesheet. Without this the move is
+    // asserted as markup only, and the reason for it -- that the line was easy to miss -- is not.
+    const rule = APP_CSS.match(/\n\.dt-count \{([\s\S]*?)\n\}/)?.[1]
+    expect(rule, '.dt-count has no rule in App.css').toBeTruthy()
+    expect(rule).toMatch(/text-align:\s*center/)
+
+    const size = (r) => Number(/font-size:\s*(\d+)px/.exec(r)?.[1])
+    const legend = APP_CSS.match(/\n\.dt-legend \{([\s\S]*?)\n\}/)?.[1]
+    expect(size(rule)).toBeGreaterThan(size(legend))
+  })
+
+  it('drops the fraction when the loaded page is the whole match', async () => {
+    respond(() => page([event(2), event(1)], { nextCursor: null, totalMatching: 2 }))
+    render(<DigitalThreadTab />)
+    await waitFor(() => expect(screen.getByText(/^2 events$/)).toBeInTheDocument())
+    expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument()
+    expect(screen.queryByText(/2\/2|2 of 2/)).not.toBeInTheDocument()
+  })
+
+  it('falls back to the loaded count against a server that returns no total', async () => {
+    // Every other fixture in this file leaves `totalMatching` null, so this is the state they all
+    // assert against; stated once, explicitly, so the fallback is a decision rather than a default.
+    respond(() => page([event(2), event(1)], { nextCursor: cursor, truncated: true }))
+    render(<DigitalThreadTab />)
+    await waitFor(() => expect(screen.getByText(/^2 events$/)).toBeInTheDocument())
+    expect(screen.queryByText(/of null|of undefined|NaN|\/null|\/undefined/)).not.toBeInTheDocument()
+  })
+
+  it('holds the total still while the drawn count climbs towards it', async () => {
+    // A total recomputed after the cursor would count DOWN as the reader walked, which reads as
+    // rows leaving an append-only table.
+    respond((url) => url.includes('before_id')
+      ? page([event(40), event(39)], { nextCursor: null, totalMatching: 4 })
+      : page([event(42), event(41)], { nextCursor: cursor, truncated: true, totalMatching: 4 }))
+
+    render(<DigitalThreadTab />)
+    await screen.findByText(/^2 of 4 events$/)
+    fireEvent.click(screen.getByRole('button', { name: /Load \d+ more/ }))
+
+    // Four of four is the whole match, so the fraction goes.
+    await waitFor(() => expect(screen.getByText(/^4 events$/)).toBeInTheDocument())
+    expect(screen.getByText(/4 entities · 4 events/)).toBeInTheDocument()
+  })
+
+  it('names the total in the cut-off notice, which had only its own page to name', async () => {
+    respond(() => page(
+      Array.from({ length: 200 }, (_, i) => event(200 - i)),
+      { nextCursor: null, truncated: true, totalMatching: 467 }
+    ))
+    render(<DigitalThreadTab />)
+    expect(await screen.findByText(/newest 200 of 467 events/i)).toBeInTheDocument()
+  })
+
+  it('Export CSV says it writes the page rather than the match', async () => {
+    // The button read "(200)" beside a tooltip promising "the events matching the current
+    // filters", and wrote the 200. At 200 of 467 that is two thirds of the answer missing from a
+    // file somebody takes away as the record.
+    respond(() => page([event(42), event(41)], {
+      nextCursor: cursor, truncated: true, totalMatching: 467,
+    }))
+    render(<DigitalThreadTab />)
+
+    const button = await screen.findByRole('button', { name: /Export CSV/ })
+    expect(button).toHaveTextContent('Export CSV (2/467)')
+    expect(button.getAttribute('title')).toMatch(/loaded here/i)
+    expect(button.getAttribute('title')).toMatch(/467 match the current filters/i)
+  })
+
+  it('Export CSV promises the filtered set once it really holds it', async () => {
+    respond(() => page([event(2), event(1)], { nextCursor: null, totalMatching: 2 }))
+    render(<DigitalThreadTab />)
+
+    const button = await screen.findByRole('button', { name: /Export CSV/ })
+    expect(button).toHaveTextContent('Export CSV (2)')
+    expect(button.getAttribute('title')).toBe(
+      'Download the events matching the current filters as CSV'
+    )
   })
 })
