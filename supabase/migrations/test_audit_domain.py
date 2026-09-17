@@ -27,6 +27,7 @@ Every test rolls back. The rows these provoke are audit rows, and 0003 makes the
 append-only -- a committed fixture is permanent.
 """
 import os
+import re
 import unittest
 import psycopg2
 
@@ -126,6 +127,21 @@ class TheClassifier(AuditDomainFixture):
             for entity in ("cells", "devices", "gateways", "links"):
                 cur.execute("SELECT public.audit_domain_for(%s, 'UPDATE');", (entity,))
                 self.assertEqual(cur.fetchone()[0], "asset", entity)
+
+    def test_a_schema_is_asset(self):
+        """
+        THE ONE EXCEPTION TO THE AUTHORITY RULE, and 0120 is where it was made.
+
+        Writing a schema is Administrator-only, so the rule above would file it as security --
+        and it did, by falling through the fail-closed default, until a Manager reported a
+        Schemas lane that could only answer "no events". `schemas_select_authenticated` is
+        USING (true): every authenticated user already reads the registry, so a security lane
+        made the HISTORY of a world-readable table more secret than the table. The other three
+        security lanes do not have that shape; their tables are restricted too.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT public.audit_domain_for('schemas', 'UPDATE');")
+            self.assertEqual(cur.fetchone()[0], "asset")
 
     def test_credential_issued_stays_asset(self):
         """
@@ -311,6 +327,31 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
             as_user(cur, MANAGER_ID)
             self.assertTrue(self._visible(cur, row[0]))
 
+    def test_a_manager_can_read_a_schema_change(self):
+        """
+        0120, end to end rather than on the classifier alone. The lane the dashboard offers a
+        Shopfloor_Manager has to be one PostgreSQL will answer, or the filter is a promise the
+        policy breaks.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO public.schemas (schema_name, schema_definition)"
+                " VALUES ('Audit_Domain_Fixture_Schema', '{}'::jsonb);"
+            )
+            cur.execute(
+                "SELECT id, audit_domain FROM public.digital_thread"
+                " WHERE entity_type = 'schemas' ORDER BY id DESC LIMIT 1;"
+            )
+            row_id, domain = cur.fetchone()
+            self.assertEqual(domain, "asset", "the schema INSERT was stamped into the wrong lane")
+
+            as_user(cur, MANAGER_ID)
+            self.assertTrue(
+                self._visible(cur, row_id),
+                "a Shopfloor_Manager cannot read a schema change. The Schemas filter is offered "
+                "to that role, so this is a lane the page draws and the policy empties."
+            )
+
     def test_a_manager_still_reads_a_gateway_credential_issue(self):
         """The authority rule, asserted end to end rather than only on the classifier."""
         with self.conn.cursor() as cur:
@@ -354,6 +395,83 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
                 [r[0] for r in cur.fetchall()],
                 ["digital_thread_select_asset", "digital_thread_select_security"]
             )
+
+
+class TheDashboardAgreesWithTheClassifier(unittest.TestCase):
+    """
+    THE GUARD THAT WAS MISSING, and the reason 0120 was a bug for as long as it was.
+
+    The lane a kind belongs to is written down twice, in two languages: `audit_domain_for()`
+    decides which rows PostgreSQL returns, and `DIGITAL_THREAD_ENTITY_TYPES` in constants.js
+    decides which filters the page OFFERS -- `digitalThreadEntityTypesFor()` drops the security
+    ones for a Shopfloor_Manager. Nothing compared them. `schemas` said `asset` on one side and
+    took the fail-closed `security` on the other for twelve migrations, so the page offered a
+    Manager a Schemas filter that the policy could only answer with an empty timeline.
+
+    Only the JS side is read as text. The SQL side is the function itself, called, so this cannot
+    drift into agreeing with a regex instead of with the database.
+    """
+
+    #: `{ kind: 'X', table: 'y', label: 'Z', domain: 'asset' }`, the shape constants.js holds.
+    ENTRY = re.compile(
+        r"\{\s*kind:\s*'(?P<kind>[^']+)',\s*"
+        r"table:\s*'(?P<table>[^']+)',\s*"
+        r"label:\s*'[^']*',\s*"
+        r"domain:\s*'(?P<domain>[^']+)'\s*\}"
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        constants = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "frontend", "src", "constants.js"
+        )
+        with open(constants, encoding="utf-8") as handle:
+            source = handle.read()
+
+        # The one array, not every object literal in the file: `ENTITY_KIND_BY_TABLE` and the
+        # rest are derived from it and would be matched by nothing, but a future table of the
+        # same shape elsewhere in the file would be.
+        start = source.index("export const DIGITAL_THREAD_ENTITY_TYPES")
+        end = source.index("];", start)
+        cls.table = source[start:end]
+        cls.entries = [m.groupdict() for m in cls.ENTRY.finditer(cls.table)]
+
+    def setUp(self):
+        self.conn = get_connection()
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.conn.close()
+
+    def test_every_lane_was_parsed(self):
+        """
+        A regex that matches nothing passes every assertion below it.
+
+        Counted against `kind:`, not against a number written here: a lane retired on purpose
+        would fail a hardcoded floor, and a lane whose literal is reformatted past the regex is
+        exactly the silent skip this is for.
+        """
+        declared = self.table.count("kind:")
+        self.assertEqual(
+            len(self.entries), declared,
+            "DIGITAL_THREAD_ENTITY_TYPES declares %d lane(s) and this suite parsed %d -- the "
+            "literal's shape changed, so the lanes it missed are going unchecked."
+            % (declared, len(self.entries))
+        )
+        self.assertGreater(declared, 0, "DIGITAL_THREAD_ENTITY_TYPES parsed as empty")
+
+    def test_each_lane_lands_where_the_page_says_it_will(self):
+        with self.conn.cursor() as cur:
+            for entry in self.entries:
+                cur.execute("SELECT public.audit_domain_for(%s, 'UPDATE');", (entry["table"],))
+                self.assertEqual(
+                    cur.fetchone()[0], entry["domain"],
+                    "constants.js files %s (%s) under '%s'; audit_domain_for() does not. The "
+                    "filter dropdown and the RLS policy disagree, so that lane is either offered "
+                    "to a role that gets nothing or withheld from one entitled to it."
+                    % (entry["kind"], entry["table"], entry["domain"])
+                )
 
 
 if __name__ == "__main__":
