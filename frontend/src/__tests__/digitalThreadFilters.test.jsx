@@ -1185,6 +1185,126 @@ describe('Digital Thread — removed tag filter', () => {
     })
   })
 
+  /* 0118: the last two lanes that drew a bare uuid. A backup job has no name column and a service
+     principal has no table at all, so each needed a different answer -- a category from the payload
+     for one, the dashboard's own registry of pinned ids for the other. */
+  describe('lanes that have no name to be named by', () => {
+    const JOB_A = 'aaaaaaaa-1111-4000-8000-000000000001'
+    const JOB_B = 'bbbbbbbb-2222-4000-8000-000000000002'
+    const MCP    = 'b0000000-0000-4000-8000-000000000001'
+
+    /** Two jobs requested in the SAME minute, which is the case origin alone cannot tell apart. */
+    const JOB_EVENTS = [
+      {
+        event_id: 21, entity_type: 'backup_jobs', entity_id: JOB_A,
+        event_type: 'BACKUP_REQUESTED', timestamp: '2026-08-02T13:41:00Z',
+        description: 'Action BACKUP_REQUESTED on backup_jobs', changed_by: null,
+        actor_source: 'user', old_data: null,
+        new_data: { origin: 'requested', note: 'nightly check' },
+      },
+      {
+        event_id: 22, entity_type: 'backup_jobs', entity_id: JOB_B,
+        event_type: 'BACKUP_REQUESTED', timestamp: '2026-08-02T13:41:00Z',
+        description: 'Action BACKUP_REQUESTED on backup_jobs', changed_by: null,
+        actor_source: 'user', old_data: null,
+        new_data: { origin: 'scheduled', note: 'nightly check' },
+      },
+    ]
+
+    const respondWith = (events) => {
+      api.get.mockImplementation((path) => {
+        if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(events)
+        if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
+        return Promise.resolve([])
+      })
+    }
+
+    /** The lane label containing `text`, as one element. */
+    const laneLabelled = (text) =>
+      [...document.querySelectorAll('.dt-lane-label')]
+        .find(el => el.querySelector('.dt-lane-name')?.textContent === text)
+
+    it('names a backup job for the act it was, not its uuid', async () => {
+      respondWith(JOB_EVENTS)
+      render(<DigitalThreadTab />)
+
+      await waitFor(() => expect(laneLabelled('On request')).toBeTruthy())
+      expect(laneLabelled('Scheduled')).toBeTruthy()
+      // The uuid is gone from the label; it is still in the title and the drawer.
+      expect(laneLabelled('On request').querySelector('.dt-lane-unnamed')).toBeNull()
+    })
+
+    it('keeps two jobs of the same kind apart with the short id', async () => {
+      /* THE REASON THE QUALIFIER EXISTS. `origin` is a category: every job requested by hand shares
+         it, and these two share a minute as well, so without the id they are one label drawn
+         twice -- which is worse than the uuid it replaced, because it cannot be told apart at all. */
+      respondWith([
+        JOB_EVENTS[0],
+        { ...JOB_EVENTS[1], entity_id: JOB_B, new_data: { origin: 'requested', note: 'x' } },
+      ])
+      render(<DigitalThreadTab />)
+
+      await waitFor(() => expect(document.querySelectorAll('.dt-lane-qualifier').length).toBe(2))
+      const chips = [...document.querySelectorAll('.dt-lane-qualifier')].map(c => c.textContent)
+      expect(new Set(chips).size).toBe(2)
+      expect(chips.every(c => c.startsWith('aaaaaaaa') || c.startsWith('bbbbbbbb'))).toBe(true)
+    })
+
+    it('does not call a backup job deleted, having no table it could probe', async () => {
+      /* `backup_jobs` is outside DELETABLE_KINDS (0117), so naming it must not start flagging it. */
+      respondWith(JOB_EVENTS)
+      render(<DigitalThreadTab />)
+
+      await waitFor(() => expect(laneLabelled('On request')).toBeTruthy())
+      expect(document.querySelector('.dt-lane-gone')).toBeNull()
+    })
+
+    it('leaves a backup reading its stamp, which it shares the origin field with', async () => {
+      /* ORDER IN THE FIELD LIST IS THE ASSERTION. A `backups` row carries both `stamp` and
+         `origin`; the stamp is what the Backups page calls one, so `origin` sits last. */
+      respondWith([{
+        event_id: 23, entity_type: 'backups', entity_id: 'cccccccc-3333-4000-8000-000000000003',
+        event_type: 'BACKUP_TAKEN', timestamp: '2026-08-02T13:41:00Z',
+        description: 'Action BACKUP_TAKEN on backups', changed_by: null, actor_source: 'service',
+        old_data: null, new_data: { stamp: '20260802T134100Z', origin: 'scheduled' },
+      }])
+      render(<DigitalThreadTab />)
+
+      await waitFor(() => expect(laneLabelled('20260802T134100Z')).toBeTruthy())
+      expect(laneLabelled('Scheduled')).toBeFalsy()
+    })
+
+    it('names a pinned service principal from the registry the Access Control page uses', async () => {
+      respondWith([{
+        event_id: 24, entity_type: 'service_principals', entity_id: MCP,
+        event_type: 'TOKEN_MINTED', timestamp: '2026-08-02T13:41:00Z',
+        description: 'Action TOKEN_MINTED on service_principals', changed_by: null,
+        actor_source: 'user', old_data: null,
+        new_data: { jti: '49d996ed-7420-476e-a710-0b46c37c7213', ttl_days: 1 },
+      }])
+      render(<DigitalThreadTab />)
+
+      await waitFor(() => expect(laneLabelled('MCP read-only client')).toBeTruthy())
+    })
+
+    it('leaves an unregistered principal as its id rather than calling it Undocumented', async () => {
+      /* describePrincipal() answers "Undocumented principal" for an unknown id, which is the right
+         thing on a page listing one identity and the wrong thing here: every principal created at
+         runtime would draw the same lane, and the reader could not tell them apart. */
+      respondWith([{
+        event_id: 25, entity_type: 'service_principals',
+        entity_id: 'dddddddd-4444-4000-8000-000000000004',
+        event_type: 'TOKEN_MINTED', timestamp: '2026-08-02T13:41:00Z',
+        description: 'Action TOKEN_MINTED on service_principals', changed_by: null,
+        actor_source: 'user', old_data: null, new_data: { jti: 'x', ttl_days: 1 },
+      }])
+      render(<DigitalThreadTab />)
+
+      await waitFor(() => expect(document.querySelector('.dt-lane-unnamed')).toBeTruthy())
+      expect(screen.queryByText(/Undocumented principal/)).not.toBeInTheDocument()
+    })
+  })
+
   /* The swimlane redesign: contained track cards rather than ruled rows, asserted through the
      stylesheet because jsdom applies no layout. */
   /**

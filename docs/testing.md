@@ -256,6 +256,9 @@ python supabase/migrations/test_digital_thread_guard.py
 # Also the purge rule (0117): the suite's list of types the rule covers is asserted against the
 # function's own, because the two drifting is how `areas` and then `schemas` each went a release
 # marked deleted by the page and unhideable by it.
+# And the two labels no audit payload carries (0115, 0118): a person, and a backup job's note
+# and produced stamp. Both matchers are gated on has_role(), so this suite asserts their shape
+# rather than their answers -- it connects as the owner, which holds no role.
 python supabase/migrations/test_digital_thread_paging.py
 # The delivery gate on broker-credential issuance (0078). NOT the happy path: the test that earns
 # its place is that a REAL gateway is not a delivery target, because a true there writes a real

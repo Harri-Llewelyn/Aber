@@ -1229,6 +1229,50 @@ but an empty list and a refused request are the same value and opposite facts. R
 the first would call every live schema deleted and then hide it, so one `403` would silently empty a
 lane. The tab admits a kind to `DELETABLE_KINDS` only once that kind's own lookup has landed.
 
+### Naming the last two lanes (`0118`)
+
+**Two kinds of lane could not name themselves at all**, and each needed a different answer. On the
+development stack they were 25 of the lanes drawn: 24 backup jobs and one service principal, every
+one of them a bare uuid.
+
+**A backup job has no name, because there is nothing to name.** `backup_jobs` has no name column —
+a job is an *act*, not a thing — and its audit payload carries only `origin`, `note` and `status`.
+Of those, only `origin` says what the act was, so it joins the shared snapshot field list **last**:
+`backups` rows carry an `origin` too and must keep reading as their `stamp`, which is what the
+Backups page calls one, and the order of that list is the only thing deciding it.
+
+`origin` is a **category**, not an identity: every job requested by hand shares it. Two jobs
+requested in the same minute — which the development stack has twice over — would be one label
+drawn twice, and a label you cannot tell apart is worse than the uuid it replaced. So a lane named
+from a category carries its short id as the qualifier chip, the same element a schema's `v2` uses.
+`CATEGORY_IDENTITY_FIELDS` in `DigitalThreadTab.jsx` is that list, and it holds one field.
+
+**The note and the stamp are on two other tables**, and both are what an operator would type into
+the search: the note is theirs, and the stamp is what the Backups page shows. Neither is in the
+payload, so `digital_thread_backup_job_ids_matching()` supplies that disjunct — the same shape as
+the person matcher `0115` added, and **SECURITY DEFINER for the same reason**. `backup_jobs` and
+`backups` are Administrator-only while `digital_thread_select_security` admits Administrator *and*
+Auditor, so a plain join in a `SECURITY INVOKER` function would let an Auditor see a backup lane and
+never search it — silently, an empty disjunct being indistinguishable from no match. The gate inside
+is that same pair, and anybody else gets an empty array rather than an error.
+
+It is a **`LEFT JOIN`** deliberately: over half the jobs on a working stack produced no backup —
+they were cancelled or they failed — and an inner join would make exactly those unsearchable by
+their note as well, which is the only handle they have.
+
+**A service principal has no table at all.** The audit row *is* the record, which is why `api.js`
+lists them by reading this lane. Nothing can be joined, so the dashboard names them from
+`KNOWN_PRINCIPALS` in `utils/serviceIdentities.js` — the registry of ids a migration pinned, which
+the Access Control page already reads. An id outside it keeps its uuid rather than taking
+`describePrincipal()`'s `Undocumented principal` fallback: that wording is right on a page listing
+one identity and wrong here, where every runtime-created principal would draw the same lane.
+
+**This is the one place the search cannot reach a drawn name**, and it is a known exception rather
+than an oversight. A name held in frontend source has nothing in the database to match, so a service
+principal is findable by its id. The alternative — pinning those names into a migration so the
+search could read them — would put the same three strings in two places and let them drift, to buy
+a search for three ids an operator reaches through Access Control anyway.
+
 ### A shape that can be pruned (`0079`)
 
 **The table could only grow, and suppression was never going to fix that.** `0005` already removes
