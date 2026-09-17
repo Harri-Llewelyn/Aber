@@ -1439,6 +1439,48 @@ that column everywhere.
 **The entity id recorded is the device's.** A nameplate is an assertion about a device, so its
 edits belong in that device's history — which is what every reader already expected.
 
+### An area can be proposed (`0123`)
+
+**Areas gained a page in `0097` and a proposal lane only now.** An Operator holds `proposal:create`
+and could ask for a change to a device, a nameplate, a cell or a gateway — and on the one rung
+between the site and its cells was shown a greyed-out **Edit Details** reading *"Requires Admin
+permissions"*, with nothing to do about it. Reported by operators.
+
+This is the missing arm in six places, not a new mechanism: the queue, the per-asset and per-person
+caps, the RLS, the expiry and the audit trail already serve any lane the CHECK admits.
+
+**Three columns, which is every column of an area a person chooses.** `id` and `created_at` are the
+platform's, and the self-check asserts their absence rather than the allowlist's length — a count
+would pass on the boot that wrote it and break on the next migration that adds a column.
+
+**The decide gate resolves a role pair, not a permission, and that is the rule rather than an
+exception to it.** Every lane mirrors whatever its target table's own policy resolves, so the lane
+closes when that closes. `cells` and `gateways` resolve `cell:manage` and `gateway:manage` because
+that is what `cells_update_privileged` and its gateway twin resolve. `areas_update_privileged`
+resolves the role pair Administrator / Shopfloor_Manager, and **there is no `area:manage` grant
+anywhere in the schema** — so mirroring it means `has_role()` here, the same shape the two device
+lanes use. A lane gated on a permission its table does not consult would be a second, disagreeing
+answer to the same question.
+
+`approve_proposal()`'s outer gate needed no change: it is the union of everybody who may decide
+anything, and an area approver already passes it on the `has_role()` half.
+
+**The validation trigger's areas arm has no archived test, and cannot.** `areas` carries no
+`is_archived` column — an area is deleted outright and its cells become unfiled — so existing is the
+whole of what there is to check. Every other arm tests both, which is why its absence is commented
+rather than left to read as an oversight.
+
+**What the approval can still refuse is the point of approving being applying.** `areas_name_key`,
+`areas_name_topic_safe` and `areas_icon_valid` all run on the UPDATE inside the approver's
+transaction. A name that was free when the proposal was filed and taken by the time it was decided
+aborts the approval with the database's own sentence, and the proposal stays open — rather than
+recording an approval of something that did not happen.
+
+Nothing here touches `audit_domain_for()`: `0097` put `areas` in the asset lane and
+[`0120`](#the-lane-a-manager-was-offered-and-denied-0120) left it there, so a Shopfloor_Manager can
+read the history of what they approved. Nothing touches the `change_proposals` policies either,
+which name no lane at all.
+
 ### A shape that can be pruned (`0079`)
 
 **The table could only grow, and suppression was never going to fix that.** `0005` already removes
