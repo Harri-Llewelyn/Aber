@@ -306,6 +306,11 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         ("user_roles",      {"role": "Ghost_Role_0115"},            "Ghost_Role"),
         ("backups",         {"stamp": "ghost-stamp-0115"},          "ghost-stamp-0115"),
         ("device_nameplate", {"name": "Ghost Nameplate 0117"},      "Ghost Nameplate"),
+        # 0118. A backup job has no name column, and `origin` is the only identity its payload
+        # carries -- a CATEGORY, which the tab draws with the short id appended so two jobs
+        # requested in the same minute are still two lanes. Seeded with a value no real job has, so
+        # the direct counts stay exact on a stack that has taken backups.
+        ("backup_jobs",     {"origin": "ghostorigin0118"},          "ghostorigin0118"),
     ]
 
     # The entity types `is_purged` covers (0117): every type this function can probe a table for.
@@ -581,6 +586,60 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         # searched for, or every page would gain rows for no reason.
         self.cur.execute("SELECT cardinality(public.digital_thread_user_ids_matching(NULL));")
         self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_the_backup_job_matcher_is_security_definer_and_not_public(self):
+        """
+        0118. `backup_jobs` and `backups` are Administrator-only, while `digital_thread_select_
+        security` admits Administrator AND Auditor -- so through a plain join in a SECURITY INVOKER
+        function an Auditor could see a backup lane and never search it, silently, an empty
+        disjunct being indistinguishable from no match. The gate inside is a role check rather than
+        a grant, so EXECUTE to PUBLIC would let an anonymous caller probe for backup notes.
+        """
+        self.cur.execute(
+            "SELECT p.prosecdef,"
+            "       has_function_privilege('public',"
+            "           'public.digital_thread_backup_job_ids_matching(text)', 'EXECUTE')"
+            "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'public'"
+            "   AND p.proname = 'digital_thread_backup_job_ids_matching'"
+        )
+        row = self.cur.fetchone()
+        self.assertIsNotNone(row, "digital_thread_backup_job_ids_matching() is missing")
+        self.assertTrue(row[0], "it is not SECURITY DEFINER")
+        self.assertFalse(row[1], "PUBLIC may execute it")
+
+    def test_a_caller_who_may_not_ask_about_backups_gets_an_empty_array(self):
+        """The same reason as the person matcher above: it is one disjunct, not a request."""
+        self.cur.execute("SET LOCAL ROLE authenticated;")
+        self.cur.execute(
+            "SELECT cardinality(public.digital_thread_backup_job_ids_matching('%'));"
+        )
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_a_null_pattern_names_no_backup_job(self):
+        # What an unfiltered page relies on: a disjunct that matched rows for a null search would
+        # widen every page, and this one is evaluated on every call.
+        self.cur.execute(
+            "SELECT cardinality(public.digital_thread_backup_job_ids_matching(NULL));"
+        )
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_a_cancelled_job_is_still_reachable_by_its_note(self):
+        """
+        The LEFT JOIN, asserted on the plan rather than on rows: over half the jobs on a working
+        stack never produced a backup, and an inner join would drop exactly those -- the cancelled
+        and the failed, which are the ones somebody is looking for. Read from the deployed text
+        because the matcher answers '{}' to this suite's role whatever it holds.
+        """
+        self.cur.execute(
+            "SELECT pg_get_functiondef(p.oid) FROM pg_proc p"
+            "  JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'public'"
+            "   AND p.proname = 'digital_thread_backup_job_ids_matching'"
+        )
+        body = self.cur.fetchone()[0]
+        self.assertIn("LEFT JOIN", body,
+                      "an inner join would make a job that produced no backup unsearchable")
 
     def test_the_search_resolves_the_person_once_rather_than_per_row(self):
         """

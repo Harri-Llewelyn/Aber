@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
+import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
 import { ContextPanel } from '../common/ContextPanel'
 import {
   IconHistory, IconDownload, IconX, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
@@ -413,7 +414,21 @@ const SNAPSHOT_IDENTITY_FIELDS = [
   'label',         // system_settings, the wording the Settings page shows
   'key',           // system_settings, when it has no label
   'stamp',         // backups, which is what the Backups page calls one
+  // LAST, because it is a category rather than an identity: a backup job has no name column, and
+  // `origin` is the only thing its payload carries that says what the act was. `backups` rows also
+  // carry one, and reach `stamp` first -- which is the reason the order of this list matters.
+  'origin',        // backup_jobs; the short id is appended, see CATEGORY_IDENTITY_FIELDS
 ]
+
+/**
+ * Fields whose value names a KIND of thing rather than one thing. Every backup job requested by
+ * hand shares `origin`, and two of them requested in the same minute are otherwise one label drawn
+ * twice -- so a lane named from one of these carries its short id as the qualifier chip.
+ */
+const CATEGORY_IDENTITY_FIELDS = new Set(['origin'])
+
+/** How the Backups page words an origin, so one act is not described two ways in one dashboard. */
+const ORIGIN_LABELS = { requested: 'On request', scheduled: 'Scheduled' }
 
 /**
  * The identity an audit row carries in its payload, for an entity the lookups cannot name -- one
@@ -439,6 +454,14 @@ export function snapshotIdentity(event) {
         field: 'schema_name',
       }
     }
+
+    // Worded as the Backups page words it. An unrecognised origin is passed through rather than
+    // dropped: a new one is still more use than a uuid, and the search matches the stored value
+    // either way -- ILIKE is case-blind, so what is drawn is close enough to what is typed.
+    if (field === 'origin') {
+      return { label: ORIGIN_LABELS[value] || String(value), field: 'origin' }
+    }
+
     return { label: String(value), field }
   }
 
@@ -468,7 +491,12 @@ export function resolveLaneName(entityId, laneEvents, identities, { canTellDelet
     if (snapshot) {
       return {
         name: snapshot.label,
-        qualifier: snapshot.qualifier,
+        // A category names what the act WAS, not which one it was, so the id is what keeps two of
+        // them apart. Decided here rather than in snapshotIdentity(), which reads one event and
+        // does not know the entity it belongs to.
+        qualifier: CATEGORY_IDENTITY_FIELDS.has(snapshot.field)
+          ? shortId(entityId)
+          : snapshot.qualifier,
         fromSnapshot: true,
         identityField: snapshot.field,
         gone,
@@ -793,6 +821,14 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     // The email, which is all `auth.users` carries here (0116). An account without one falls
     // through to the id, as every unnamed entity did before.
     for (const u of userAccounts) if (u?.user_id && u.email) m.set(u.user_id, { name: u.email })
+    // THE MACHINE IDENTITIES, FROM A CONSTANT RATHER THAN A FETCH. There is no `service_principals`
+    // table to join -- the audit row IS the record, which is why api.js lists them by reading this
+    // lane -- so the dashboard's own registry of the ids a migration pinned is the only thing that
+    // can name one. An id outside it keeps its uuid rather than taking describePrincipal()'s
+    // "Undocumented principal", which would draw every unknown one as the same lane.
+    for (const [id, meta] of Object.entries(KNOWN_PRINCIPALS)) {
+      if (meta?.name) m.set(id, { name: meta.name })
+    }
     return m
   }, [areas, cells, gateways, devices, schemas, userAccounts])
 
