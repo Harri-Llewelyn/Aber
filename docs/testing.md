@@ -366,6 +366,64 @@ sh scripts/wait-for-ingestion-consuming.sh
 npm run dev:test
 ```
 
+### An empty database cannot exercise an assertion about history
+
+Every path above replays the migration chain onto **nothing** — CI, `npm run test:db`, and the
+self-check each migration runs at the end of itself. A migration that asserts over *accumulated
+rows* is invisible to all three, and the first thing it meets is a deployment.
+
+`0120` is the worked example. It moved `schemas` into the audit-domain asset lane, backfilled the
+rows already recorded, and then asserted that **no row in `digital_thread`** disagreed with the
+classifier. True of an empty database. False of any stack with history: a retired entity type's
+rows keep the lane they were stamped with, nothing backfills them, and the classifier's answer
+about them is its fail-closed default rather than a judgement. The dev cluster carried ten
+`area_floors` rows from before `0113` retired that table. `0120` passed 29 database suites twice,
+then failed `db-init` four times and took the Helm upgrade down with it.
+
+```bash
+# Capture the dev cluster's rows, load them over the migrated schema, replay the chain against
+# them. That second pass is what db-init does on every boot of a deployed stack.
+npm run test:db:history
+
+# Keep the capture, so the next run needs no cluster at all.
+node scripts/test-db.mjs --with-history --history-out=history.sql
+node scripts/test-db.mjs --history-file=history.sql
+```
+
+**Run it for any migration that touches rows that already exist** — anything carrying an `UPDATE`,
+a `DELETE`, a new `CHECK` constraint, or a self-check that counts. A migration that only creates
+objects cannot fail this way and does not need it.
+
+The capture is **read-only** against the live stack: a `pg_dump --data-only` of `public` and one
+`COPY … TO STDOUT` for `auth.users`. Nothing is written anywhere but the throwaway container.
+
+**What it copies, and what it does not.** `public` in full, which is what a migration asserts over.
+From `auth`, only `users`, and only the columns the harness's GoTrue-shaped fixture also has — the
+live schema carries 35 and the fixture 21, so the whole table cannot land, and `changed_by` is the
+column that makes an audit row attributable. The rest of `auth` is GoTrue's own bookkeeping, which
+no migration reads.
+
+**What the suites do against history, and the one that does not.** Twenty-eight of the twenty-nine
+database suites pass unchanged against a real stack's rows — most scope their assertions to ids
+they seeded and genuinely do not care what else is in the table.
+`test_digital_thread_paging.py` is the exception, and not because paging is broken. Its `walk()`
+follows at most 100 pages of 7, and its fixture is stamped `2026-01-01`, older than every real
+row; on a stack carrying 4,075 events the newest-first walk spends its whole budget before
+reaching the rows it seeded. The same bound quietly costs that file its control — the test
+asserting a `recorded_at`-only cursor *loses* rows, without which the rest of it is vacuous, then
+passes because the budget ran out rather than because the cursor is wrong. Scoping the walk to the
+fixture's own range would fix both; until then, expect that one suite red here and read the rest.
+
+Two things make the load possible and are worth knowing before changing it. Triggers and foreign
+keys are off for the duration (`session_replication_role = replica`) — the audit stamp trigger
+would otherwise re-stamp every row from *today's* classifier, destroying the very history being
+reproduced, and the dump's table order cannot satisfy the circular foreign keys `pg_dump` warns
+about on `devices`, `schemas` and `metric_catalog`. `postgres` is not a superuser on this image,
+but Supabase grants it that setting. And the tables emptied first are chosen **by privilege, not by
+ownership**: `auth.users` is owned by `supabase_auth_admin` and `postgres` may still truncate it,
+while `auth.schema_migrations` it may not.
+
+
 ### The URLs that are names, not forwards
 
 Most of the lane reaches the cluster through a port-forward on `127.0.0.1`. Two variables do not:
