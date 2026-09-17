@@ -39,10 +39,26 @@ function actorTitle(event) {
  */
 const ENTITY_KIND = ENTITY_KIND_BY_TABLE
 /**
- * The kinds backed by a real table. Absence from `entityNames` means DELETED only for these; for
- * any other kind the lookup never covered it.
+ * The kinds a deletion can be told about: this page fetches a lookup covering them, and
+ * `digital_thread_page()` can probe a table for their rows (0117). Absence from `entityIdentities`
+ * means the row is gone, for these and for nothing else. `NAMEPLATE` qualifies because
+ * `device_nameplate` is keyed by the device's id, so the devices lookup names it and the devices
+ * probe answers for it.
+ *
+ * ONE SET FOR BOTH USES -- the "deleted" flag and the hide filter. As two sets, a schema sat in the
+ * gap: flagged deleted, never hidden, never counted, and since the count is what draws the reveal
+ * control, no way to hide it.
+ *
+ * ACCESS IS OUT, though `list_user_accounts()` does name that lane (0116): its subject is an
+ * `auth.users` row the RPC cannot probe, so the server can never hide one and the page must not
+ * claim a deletion it cannot act on. An unnameable person falls back to a shortened id, unflagged.
  */
-const ASSET_ENTITY_KINDS = new Set(['AREA', 'CELL', 'GATEWAY', 'DEVICE'])
+export const DELETABLE_KINDS = new Set(
+  ['AREA', 'CELL', 'GATEWAY', 'DEVICE', 'SCHEMA', 'NAMEPLATE']
+)
+
+/** Before any lookup lands, nothing is answerable. Hoisted so it is not a new Set every render. */
+const EMPTY_KINDS = new Set()
 
 const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
@@ -200,7 +216,7 @@ const DEFAULT_LANE_LIMIT = 30
 const DEFAULT_POLL_SECONDS = 60
 
 /**
- * Rows per request. `digital_thread_page()` scans the whole match to count deleted assets whatever
+ * Rows per request. `digital_thread_page()` scans the whole match to count deleted entities whatever
  * the page size, so a larger page only costs; paging is the answer, not a bigger page.
  */
 const PAGE_SIZE = 200
@@ -428,21 +444,6 @@ export function snapshotIdentity(event) {
 
   return null
 }
-
-/**
- * The kinds a lookup covers, so absence from `entityNames` means the row is gone.
- *
- * DERIVED FROM WHAT THE PAGE ACTUALLY FETCHES, and that is the whole point of the set existing.
- * `NAMEPLATE` is here because `device_nameplate` is keyed by the device's id, so the devices lookup
- * names it; `ACCESS` because `list_user_accounts()` names a person (0116). Every other kind --
- * backups, backup jobs, service identities, proposals -- is absent from `entityNames` for a reason
- * that has nothing to do with deletion, so a lane of that kind must never wear the "deleted" flag.
- * Before 0116 that was academic: none of those kinds could be named at all, so none reached the
- * flag. Widening `snapshotIdentity()` is what would have made it false.
- */
-export const LOOKED_UP_KINDS = new Set(
-  ['AREA', 'CELL', 'GATEWAY', 'DEVICE', 'SCHEMA', 'NAMEPLATE', 'ACCESS']
-)
 
 /**
  * The lane label in three falls: the live join, then the audit snapshot, then a shortened id.
@@ -701,6 +702,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   // Set once the asset lookups have landed; until then every id looks absent. Stays false if they
   // fail: unable to tell purged from live means hide nothing.
   const [lookupsLoaded, setLookupsLoaded] = useState(false)
+  // The subset of DELETABLE_KINDS whose lookup actually landed, which is the set that may be called
+  // deleted and hidden. Narrower than the constant whenever a tolerated lookup failed.
+  const [loadedKinds, setLoadedKinds] = useState(EMPTY_KINDS)
   const [loading, setLoading]         = useState(true)
   const [entityTypeFilter, setEntityTypeFilter] = useState(initialEntity?.type || '')
   const [nameFilter, setNameFilter]   = useState(initialEntity?.id || '')
@@ -725,25 +729,38 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
 
   useEffect(() => {
     // Cells, gateways, devices and schemas are joined here so the log can be searched by name; the
-    // audit row stores only `entity_id`. Absence from this map is also what marks an asset as
-    // purged, so every audited table must be fetched.
+    // audit row stores only `entity_id`. Absence from this map is also what marks an entity as
+    // deleted, so every audited table must be fetched.
+    //
+    // A TOLERATED LOOKUP RESOLVES TO null WHEN IT FAILED, which `[]` cannot say: an empty list and
+    // a refused request are the same value and opposite facts, and reading the second as the first
+    // would call every live entity of that kind deleted and then hide it. `loadedKinds` below
+    // admits only the kinds whose own lookup landed.
+    const tolerated = (p) => p.then(r => r || []).catch(() => null)
     Promise.all([
       api.get('/api/v1/devices'),
       api.get('/api/v1/gateways'),
       api.get('/api/v1/cells'),
       // Tolerated rather than required: this page must not fail to load because one lookup did,
       // and the uuid fallback below is exactly the behaviour that was there before.
-      api.get('/api/v1/schemas').catch(() => []),
-      api.get('/api/v1/areas').catch(() => []),
+      tolerated(api.get('/api/v1/schemas')),
+      tolerated(api.get('/api/v1/areas')),
       // A ROLE-ASSIGNMENT ROW IS ABOUT A PERSON. `log_role_assignment()` keys it by `user_id`, and
       // this is the only way to turn that into anybody (0116). REFUSED FOR A SHOPFLOOR_MANAGER OR
       // AN OPERATOR, deliberately -- and they cannot see the lane either, so the empty list they
       // fall back to names nothing they were going to be shown.
-      api.listUserAccounts().catch(() => [])
+      tolerated(api.listUserAccounts())
     ])
       .then(([d, g, c, sc, ar, us]) => {
         setDevices(d); setGateways(g); setCells(c); setSchemas(sc || []); setAreas(ar || [])
-        setUserAccounts(us || []); setLookupsLoaded(true)
+        setUserAccounts(us || [])
+        // SUBTRACTED FROM THE CONSTANT, never listed again: a second list of kinds here is the
+        // same two-sources-of-truth defect `DELETABLE_KINDS` was written to end, and it would go
+        // stale silently the next time a kind joined. The required three landed or this branch did
+        // not run, so only the tolerated lookups can take a kind away.
+        const unanswerable = new Set([!sc && 'SCHEMA', !ar && 'AREA'].filter(Boolean))
+        setLoadedKinds(new Set([...DELETABLE_KINDS].filter(k => !unanswerable.has(k))))
+        setLookupsLoaded(true)
       })
       .catch(() => {})
   }, [])
@@ -757,7 +774,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
    * ellipsises away first. The lane draws it as its own element; `entityNames` below composes it
    * for every reader that wants one string.
    *
-   * WHAT IS IN HERE ALSO DECIDES DELETION: `LOOKED_UP_KINDS` reads it to tell an absence that means
+   * WHAT IS IN HERE ALSO DECIDES DELETION: `DELETABLE_KINDS` reads it to tell an absence that means
    * "gone" from one that means "nothing ever looked this kind up".
    */
   const entityIdentities = useMemo(() => {
@@ -808,33 +825,38 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   const [truncated, setTruncated] = useState(false)
 
   /**
-   * How many deleted assets the current filters cover. The server's count wins; a response without
+   * How many deleted entities the current filters cover. The server's count wins; a response without
    * one (an older API, or a bare-array fixture) falls back to counting the page, never to zero,
    * which would hide the control that reveals them.
    */
-  const purgedAssetCount = useMemo(() => {
+  const purgedEntityCount = useMemo(() => {
     if (serverPurgedCount !== null) return serverPurgedCount
     if (!lookupsLoaded) return 0
-    // DISTINCT ASSETS, not events. Counting rows answered a question nobody asked -- the button
-    // read "(54)" beside a page whose own header said 16 assets.
+    // DISTINCT ENTITIES, not events. Counting rows answered a question nobody asked -- the button
+    // read "(54)" beside a page whose own header said 16 assets. Scoped to `loadedKinds` for the
+    // same reason the filter is: a kind nothing can answer for is unnamed, not deleted, and
+    // counting it here would draw a control that reveals nothing.
     const seen = new Set()
-    for (const e of allEvents) if (!entityNames.has(e.entity_id)) seen.add(e.entity_id)
+    for (const e of allEvents) {
+      if (loadedKinds.has(entityKind(e.entity_type)) && !entityNames.has(e.entity_id)) {
+        seen.add(e.entity_id)
+      }
+    }
     return seen.size
-  }, [serverPurgedCount, allEvents, entityNames, lookupsLoaded])
+  }, [serverPurgedCount, allEvents, entityNames, lookupsLoaded, loadedKinds])
 
   /**
-   * What the page renders. Purged assets are hidden by default. `digital_thread_page()` applies the
-   * same rule as a predicate before the row limit; this client-side filter is kept for a server
+   * What the page renders. Deleted entities are hidden by default. `digital_thread_page()` applies
+   * the same rule as a predicate before the row limit; this client-side filter is kept for a server
    * without the RPC.
    */
   const events = useMemo(() => {
     if (showPurged || !lookupsLoaded) return allEvents
-    // Scoped to the asset kinds: `entityNames` is built from those three tables, so any other kind
-    // is absent for reasons unrelated to deletion.
-    return allEvents.filter(e => ASSET_ENTITY_KINDS.has(entityKind(e.entity_type))
+    // The same set that decides the "deleted" flag, so the two cannot disagree about a kind.
+    return allEvents.filter(e => loadedKinds.has(entityKind(e.entity_type))
       ? entityNames.has(e.entity_id)
       : true)
-  }, [allEvents, entityNames, showPurged, lookupsLoaded])
+  }, [allEvents, entityNames, showPurged, lookupsLoaded, loadedKinds])
 
   /**
    * The counts the page renders. Two spellings of one pair of numbers -- the ratio where the space
@@ -894,7 +916,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     if (isInitial) setLoading(true)
     api.get(buildUrl(null))
       // `d` is the event array carrying the page-level counts as properties. A fixture that
-      // resolves a bare array reports no deleted assets and no truncation.
+      // resolves a bare array reports no deleted entities and no truncation.
       .then(d => {
         const fresh = Array.isArray(d) ? d : []
         // The poll merges into the loaded pages rather than replacing them: a reader six pages back
@@ -955,7 +977,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
 
   const activeFilterCount =
     (entityTypeFilter ? 1 : 0) + (nameFilter ? 1 : 0) + (actionFilter ? 1 : 0) +
-    // Showing purged assets is the deviation, so Clear filters returns them to hidden.
+    // Showing deleted entities is the deviation, so Clear filters returns them to hidden.
     (rangeIsFiltering ? 1 : 0) + (showPurged ? 1 : 0)
 
   const resetFilters = () => {
@@ -1010,14 +1032,15 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       .map(lane => ({
         ...lane,
         ...resolveLaneName(lane.entityId, lane.events, entityIdentities, {
-          // Until the lookups land every id looks absent, so nothing may be called deleted yet.
-          canTellDeleted: lookupsLoaded && LOOKED_UP_KINDS.has(lane.kind),
+          // Until a kind's lookup lands every id of it looks absent, so nothing may be called
+          // deleted yet. Empty until then, and permanently short of a kind whose lookup failed.
+          canTellDeleted: loadedKinds.has(lane.kind),
         }),
       }))
       .sort((a, b) =>
         b.events.length - a.events.length ||
         String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)))
-  }, [events, entityIdentities, lookupsLoaded])
+  }, [events, entityIdentities, loadedKinds])
 
   const visibleLanes = showAllLanes ? lanes : lanes.slice(0, laneLimit)
   const hiddenLaneCount = lanes.length - visibleLanes.length
@@ -1300,16 +1323,19 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             </>
           )}
 
-          {/* Shown only when something is purged, like Clear filters and the custom inputs. Same
+          {/* Shown only when something is deleted, like Clear filters and the custom inputs. Same
               shape as the Gateways and Cells toggles. The tooltip says no longer in the database,
-              because absence from the lookups is all the test sees. */}
-          {purgedAssetCount > 0 && (
+              because absence from the lookups is all the test sees.
+
+              ENTITIES, NOT ASSETS: the count covers schemas as well as areas, cells, gateways and
+              devices (0117), and a schema is a definition rather than shopfloor equipment. */}
+          {purgedEntityCount > 0 && (
             <button
               className={`btn btn-sm ${showPurged ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => setShowPurged(v => !v)}
-              title="Include events for assets that are no longer in the database. The records are kept either way -- this only changes what is listed."
+              title="Include events for entities that are no longer in the database. The records are kept either way -- this only changes what is listed."
             >
-              <IconTrash size={13} /> Show deleted assets ({purgedAssetCount})
+              <IconTrash size={13} /> Show deleted entities ({purgedEntityCount})
             </button>
           )}
 
@@ -1338,20 +1364,20 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                   select INCLUDING the search, so a search naming something deleted comes back with
                   no events and a non-zero count. Without this the page says "nothing matches" while
                   holding the answer behind a toggle the reader has no reason to try. */}
-              {!showPurged && purgedAssetCount > 0 ? (
+              {!showPurged && purgedEntityCount > 0 ? (
                 <>
                   <div className="empty-text">
-                    Nothing here matches, but {purgedAssetCount === 1
-                      ? 'one deleted asset does'
-                      : `${purgedAssetCount} deleted assets do`}. Their records are kept; this view
-                    just hides them.
+                    Nothing here matches, but {purgedEntityCount === 1
+                      ? 'one deleted entity does'
+                      : `${purgedEntityCount} deleted entities do`}. Their records are kept; this
+                    view just hides them.
                   </div>
                   <button
                     className="btn btn-primary btn-sm"
                     onClick={() => setShowPurged(true)}
-                    title="Include events for assets that are no longer in the database"
+                    title="Include events for entities that are no longer in the database"
                   >
-                    <IconTrash size={13} /> Show deleted assets ({purgedAssetCount})
+                    <IconTrash size={13} /> Show deleted entities ({purgedEntityCount})
                   </button>
                 </>
               ) : (

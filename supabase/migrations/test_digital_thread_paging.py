@@ -32,6 +32,7 @@ with "nothing happened".
 
 import json
 import os
+import re
 import unittest
 import psycopg2
 
@@ -304,11 +305,14 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
                              "label": "Ghost Label 0115"},          "ghost.key.0115"),
         ("user_roles",      {"role": "Ghost_Role_0115"},            "Ghost_Role"),
         ("backups",         {"stamp": "ghost-stamp-0115"},          "ghost-stamp-0115"),
+        ("device_nameplate", {"name": "Ghost Nameplate 0117"},      "Ghost Nameplate"),
     ]
 
-    # The four asset tables `is_purged` probes. Seeds of any other type name no table to be absent
-    # from and are never purged, whatever the reader asks for.
-    PURGEABLE = {"areas", "cells", "gateways", "devices"}
+    # The entity types `is_purged` covers (0117): every type this function can probe a table for.
+    # `device_nameplate` is keyed by its device's id, so `devices` answers for it. A seed of any
+    # other type names no readable table to be absent from and is never called deleted, whatever
+    # the reader asks for. Asserted against the function's own list below, so the two are one fact.
+    PURGEABLE = {"areas", "cells", "gateways", "devices", "schemas", "device_nameplate"}
 
     @classmethod
     def setUpClass(cls):
@@ -424,14 +428,62 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
     def test_an_entity_with_no_table_behind_it_is_not_called_deleted(self):
         """
         The other half of the same rule. A `user_roles` or `backups` row names nothing that could
-        be probed for, so answering "absent from all four asset tables" would mark the whole
-        security lane deleted the moment the purge rule stopped naming its tables.
+        be probed for, so answering "absent from every asset table" would mark the whole security
+        lane deleted the moment the purge rule stopped naming its tables.
         """
         drawn = [e["entity_id"] for e in self.page(include_purged=False)["events"]]
         for entity_type, _, _ in self.SEEDS:
             if entity_type not in self.PURGEABLE:
                 with self.subTest(entity_type=entity_type):
                     self.assertIn(str(self.by_type[entity_type]), drawn)
+
+    def test_a_deleted_schema_is_hidden_like_any_other_entity(self):
+        """
+        0117. A schema has a table behind it and the dashboard fetches that table to name the lane,
+        so the page could tell the deletion and say so -- while the purge rule named four tables and
+        could not act on it. The lane wore the flag, could not be hidden, and was not counted, so
+        the control that reveals deleted entities was never drawn beside it. On the stack that found
+        this, deleted schemas were 283 of the 467 rows the default filters selected.
+        """
+        schema_id = str(self.by_type["schemas"])
+        hidden = [e["entity_id"] for e in self.page(include_purged=False)["events"]]
+        self.assertNotIn(schema_id, hidden,
+                         "a deleted schema is still drawn when deleted entities are hidden")
+
+        shown = [e["entity_id"] for e in self.page(include_purged=True)["events"]]
+        self.assertIn(schema_id, shown,
+                      "asking for deleted entities does not bring the schema back")
+
+    def test_a_nameplate_is_gone_when_its_device_is(self):
+        """
+        `device_nameplate` is keyed by the device's id, so `devices` is the probe that answers for
+        it and it needs no table of its own in the anti-join. Listed before any row carries the
+        type, so it does not inherit the schema bug the first time one does.
+        """
+        drawn = [e["entity_id"] for e in self.page(include_purged=False)["events"]]
+        self.assertNotIn(str(self.by_type["device_nameplate"]), drawn)
+
+    def test_the_rule_names_exactly_the_types_it_can_probe(self):
+        """
+        The function's own list against this suite's, so the two cannot drift -- which is how
+        `areas` (0097) and then `schemas` went missing from it, each for a release. A type named
+        here with no probe below it would read as deleted always; a probe with no type named would
+        never be consulted.
+        """
+        self.cur.execute(
+            "SELECT pg_get_functiondef(p.oid) FROM pg_proc p"
+            "  JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'public' AND p.proname = 'digital_thread_page'"
+        )
+        body = self.cur.fetchone()[0]
+        listed = set(re.findall(
+            r"'([a-z_]+)'",
+            re.search(r"entity_type IN \(([^)]*)\)", body).group(1)))
+        self.assertEqual(listed, self.PURGEABLE)
+
+        # Every named type is answered by a probe: its own table, or `devices` for a nameplate.
+        probed = set(re.findall(r"FROM public\.([a-z_]+)\s+\w+ WHERE \w+\.id = t\.entity_id", body))
+        self.assertEqual(probed, self.PURGEABLE - {"device_nameplate"})
 
     # ---------------------------------------------------------------------------------------
     # The search finds what the timeline draws

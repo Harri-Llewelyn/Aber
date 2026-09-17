@@ -374,7 +374,7 @@ describe('telemetry filtering by device tag', () => {
 });
 
 describe('digital thread filtering', () => {
-  /* The filters are RPC arguments: `digital_thread_page()` hides deleted assets with an anti-join
+  /* The filters are RPC arguments: `digital_thread_page()` hides deleted entities with an anti-join
      PostgREST cannot express. */
   const rpcArgs = () => state.rpcCalls.find(c => c.fn === 'digital_thread_page')?.args;
 
@@ -395,7 +395,7 @@ describe('digital thread filtering', () => {
     expect(rpcArgs().p_entity_ids).toEqual(['dev-a', 'dev-b']);
   });
 
-  it('hides deleted assets unless asked, as a predicate rather than afterwards', async () => {
+  it('hides deleted entities unless asked, as a predicate rather than afterwards', async () => {
     // THE ONE THIS MIGRATION EXISTS FOR. Applied in the query, the 200-row budget is spent on rows
     // that will be shown; applied afterwards, it was spent on rows that were then thrown away.
     await api.get('/api/v1/digital-thread');
@@ -443,7 +443,7 @@ describe('digital thread filtering', () => {
     /* It used to be resolved in the tab against the LIVE lists and sent as `entity_ids`, so a name
        that had been deleted matched nothing there, sent an EMPTY list, and drew an empty thread.
        `p_search` (0115) matches the id and the audit-snapshot fields the timeline labels a lane
-       from, where a deleted asset still has a name. */
+       from, where a deleted entity still has a name. */
     await api.get('/api/v1/digital-thread?search=Press_02');
     expect(rpcArgs().p_search).toBe('Press_02');
     expect(rpcArgs().p_entity_ids).toBeNull();

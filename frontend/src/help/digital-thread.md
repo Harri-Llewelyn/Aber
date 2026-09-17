@@ -6,6 +6,7 @@ The record of what changed, who changed it, and what it looked like before. Ever
 
 - **The entity filter** narrows to one asset's history: everything that has ever been done to this device, in order.
 - **The action filter** narrows to one kind of change across every asset -- every archive, every schema assignment.
+- **Show deleted entities** brings back the rows belonging to things that are no longer in the database -- a deleted schema, a decommissioned cell. They are hidden by default, so the page reads as the plant as it stands; their records are kept either way, and the number on the button is how many are behind it. The button appears only when there is something to reveal.
 - **Property** and **Previous** show the field that changed and the value it held before, which is the pair that answers "when did this become wrong".
 - **Raw audit payload** opens the entry exactly as it was recorded, for the cases where the rendered summary is not enough.
 
