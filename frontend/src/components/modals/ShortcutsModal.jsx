@@ -54,8 +54,17 @@ export function ShortcutsModal({ onClose }) {
   const groups = shortcutGroups({ mac: isMac() })
 
   return (
-    <div className="modal-overlay" style={{ zIndex: 1100 }}>
-      <div className="modal modal-md" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+    /* Closes on a click outside it, which most dialogs here deliberately do not: this one holds no
+       input, so there is nothing a stray click could discard. The same pair TelemetryModal uses --
+       the overlay closes and the dialog stops the click reaching it. */
+    <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={onClose}>
+      <div
+        className="modal modal-md"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
+        onClick={e => e.stopPropagation()}
+      >
         <div className="modal-header-row">
           <div className="modal-title">Keyboard shortcuts</div>
           <button
