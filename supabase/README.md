@@ -1273,6 +1273,35 @@ principal is findable by its id. The alternative — pinning those names into a 
 search could read them — would put the same three strings in two places and let them drift, to buy
 a search for three ids an operator reaches through Access Control anyway.
 
+### A device is offline until it says otherwise (`0119`)
+
+**Two devices registered through the dashboard showed as Online having never sent a byte.** The
+device insert in `api.js` wrote `status: body.status || 'ONLINE'`, so creating a row asserted that
+the machine was running. Nothing would ever have corrected it: the liveness watchdog tracks devices
+the ingestion daemon has *seen*, so a device that has never connected is not a device it is
+watching.
+
+`status` is **observed, never asserted**. Ingestion writes `ONLINE` on a DBIRTH and the column
+defaults to `OFFLINE`, so the dashboard has no business sending one. The insert no longer does, and
+the update path guards `status` and `is_quarantined` the way it already guarded the other optional
+fields — both are what the platform observed rather than what an operator asked for, and no edit
+form sends either.
+
+**The constraint is what stops it coming back.** `devices_online_implies_born` refuses any row that
+is `ONLINE` with a NULL `first_dbirth_at`, so the lie cannot be told again from any path — the
+dashboard, PostgREST, or a fixture. Every `ONLINE` writer was audited before it was added
+(`ingest_set_device_state`, `ingest_register_quarantined_device`, and the approve-quarantine merge
+all set `first_dbirth_at`), and the two repository fixtures that would have violated it were
+corrected rather than exempted.
+
+**"Awaiting first birth" is not the same as offline**, and the Devices page now says so. A device
+that has never spoken is not a device that has stopped speaking: the first is a provisioning step
+that has not finished, the second is a fault. The badge is neutral until the device is more than
+24 hours past provisioning and only then turns to a warning, and the Offline / DDEATH filter
+excludes the never-seen — a filter for things that have *died* should not list things that were
+never alive.
+
+
 ### Three ids, one of them spendable (`0121`)
 
 **The event drawer hands a reader three copyable ids and only one of them went anywhere.** Entity ID
@@ -1344,11 +1373,25 @@ written.
 **Existing rows are re-stamped.** `audit_domain` is written once, at INSERT, by
 `trg_digital_thread_stamp_domain`, so recorded rows would otherwise keep `security` while new ones
 land in `asset`. That split is not free: `test_audit_domain.py` holds the stored column and the
-classifier equal, and buying the exception means weakening that invariant — so the correction is the
-cheaper option. It is **not** the history-rewriting the append-only trigger's `HINT` refuses:
-`audit_domain` is the routing decision this migration changes, not a fact about the act, and no
-other column is touched. The trigger exempts `postgres`, which is the role db-init applies the chain
-as.
+classifier equal for every kind the platform records, and buying the exception means weakening that
+invariant — so the correction is the cheaper option. It is **not** the history-rewriting the
+append-only trigger's `HINT` refuses: `audit_domain` is the routing decision this migration changes,
+not a fact about the act, and no other column is touched. The trigger exempts `postgres`, which is
+the role db-init applies the chain as.
+
+**A self-check must assert only what its own migration changed**, and `0120` shipped asserting more
+than that. Its check counted every row in the table disagreeing with the classifier, not every
+*schema* row — and a database with history has others. The dev stack carried ten `area_floors` rows
+stamped `asset` from before [`0113`](#a-floor-becomes-an-area-0113) retired that table, which the
+classifier now fail-closes to `security`: rows no migration has ever backfilled, and about which the
+classifier's answer is a default rather than a judgement.
+
+An empty database has none of that, so the assertion passed in CI, passed in every `npm run test:db`
+run, and **aborted the chain the first time it met a real deployment** — the `db-init` Job failed
+four times and took the Helm upgrade down with it. The scope error was copied from
+`test_every_row_in_the_table_agrees_with_it`, which had the same blind spot for the same reason and
+is now scoped to the kinds `DIGITAL_THREAD_ENTITY_TYPES` declares. The lesson is cheap to state and
+was not cheap to find: **a throwaway database cannot exercise an assertion about history.**
 
 **Nothing compared the two sides, which is why this survived twelve migrations.** The lane a kind
 belongs to was written down twice in two languages, and `TheDashboardAgreesWithTheClassifier` in
