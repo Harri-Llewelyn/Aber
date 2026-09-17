@@ -472,5 +472,147 @@ class TestMigrationIsIdempotent(AuditGuardTestCase):
         )
 
 
+class TestNameplateEditsReachTheThread(AuditGuardTestCase):
+    """
+    0122, AND THE REASON IT IS HERE RATHER THAN IN ITS OWN FILE.
+
+    `device_nameplate` was a Digital Thread lane that nothing wrote. The classifier knew it, the
+    dashboard offered it as a filter and resolved its rows against the device they name -- and the
+    table carried no trigger at all, so the filter answered empty on every stack that ever ran. A
+    live one held 4,075 audit rows across eleven entity types and not one was a nameplate.
+
+    The obstacle was the function this file is about. `log_digital_thread_event()` read `NEW.id`,
+    and this table is keyed by `device_id` with no `id` column, so the trigger could not be
+    attached. 0122 makes the key column a trigger argument defaulting to `id` -- which is why the
+    assertions below belong beside the rest of that function's behaviour rather than apart from it.
+    """
+
+    NAMEPLATE = ("INSERT INTO public.device_nameplate (device_id, manufacturer_name, serial_number) "
+                 "VALUES (%s, 'Acme', 'SN-1')")
+
+    def test_a_new_nameplate_is_filed_under_its_device(self):
+        """
+        THE WHOLE POINT OF THE KEY COLUMN. The id recorded is the DEVICE's, not a row id of its
+        own, because a nameplate is an assertion about a device and api.js unions the two into one
+        timeline. Reading `NEW.id` here would not have produced a wrong id -- it would not have
+        compiled.
+        """
+        self.cur.execute(self.NAMEPLATE, (self.device_id,))
+        self.cur.execute(
+            "SELECT entity_type, entity_id::text, action FROM public.digital_thread "
+            " WHERE id > %s AND entity_type = 'device_nameplate'",
+            (self._high_water,),
+        )
+        self.assertEqual(
+            self.cur.fetchall(), [("device_nameplate", self.device_id, "INSERT")],
+            "a nameplate insert did not reach the thread under its device's id",
+        )
+
+    def test_an_edit_is_logged(self):
+        self.cur.execute(self.NAMEPLATE, (self.device_id,))
+        self._mark()
+        self.cur.execute(
+            "UPDATE public.device_nameplate SET serial_number = 'SN-2' WHERE device_id = %s",
+            (self.device_id,),
+        )
+        self.assertEqual(self.audit_count("device_nameplate"), 1,
+                         "correcting a serial number is an edit to the asset record and an event")
+
+    def test_a_save_that_moved_only_the_bookkeeping_columns_is_not(self):
+        """
+        THE NEGATIVE CASE, AND IT IS NOT HYPOTHETICAL. The editor upserts the whole row and stamps
+        `updated_at` on every save, so an operator who opens the form and saves it unchanged writes
+        a different row. Without the WHEN clause that files an event whose two snapshots are
+        identical but for a timestamp -- into an append-only table, so it could never be tidied up.
+
+        audit_telemetry_columns() cannot cover this: it names the columns a gateway HEARTBEAT
+        rewrites, and widening it to `updated_at` would silence that column on every table.
+        """
+        self.cur.execute(self.NAMEPLATE, (self.device_id,))
+        self._mark()
+        # `now()` is TRANSACTION-scoped, so writing it here would reproduce the value the
+        # INSERT above already stored and the function's own no-op guard would swallow the write
+        # -- leaving this test passing with the WHEN clause removed. An explicitly different
+        # timestamp is what makes it measure the clause it is about.
+        self.cur.execute(
+            "UPDATE public.device_nameplate "
+            "   SET updated_at = now() + interval '1 hour', updated_by = NULL "
+            " WHERE device_id = %s",
+            (self.device_id,),
+        )
+        self.assertEqual(self.audit_count("device_nameplate"), 0,
+                         "a save that changed no nameplate field was recorded as an event")
+
+    def test_clearing_a_nameplate_is_logged(self):
+        """Deleting the row is how the editor models "no nameplate data", so it is an event."""
+        self.cur.execute(self.NAMEPLATE, (self.device_id,))
+        self._mark()
+        self.cur.execute("DELETE FROM public.device_nameplate WHERE device_id = %s",
+                         (self.device_id,))
+        rows = self.audit_rows("device_nameplate")
+        self.assertEqual([r[1] for r in rows], ["DELETE"])
+        self.assertIsNotNone(rows[0][2], "a DELETE must carry what was there before it")
+
+    def test_the_row_lands_in_the_asset_lane(self):
+        """
+        Without this the feature is invisible to the role that uses it: digital_thread_select_asset
+        is what admits a Shopfloor_Manager, and a Manager is one of the two roles RLS lets edit a
+        nameplate at all. The classifier has said `asset` since 0070; 0122 is the first file whose
+        rows depend on the answer.
+        """
+        self.cur.execute(self.NAMEPLATE, (self.device_id,))
+        self.cur.execute(
+            "SELECT DISTINCT audit_domain FROM public.digital_thread "
+            " WHERE id > %s AND entity_type = 'device_nameplate'",
+            (self._high_water,),
+        )
+        self.assertEqual(self.cur.fetchall(), [("asset",)])
+
+    def test_every_trigger_on_this_function_names_a_column_that_exists(self):
+        """
+        THE COST OF MAKING THE KEY A STRING. A trigger argument naming a column that is not there
+        reads as NULL through `->>` rather than failing, so the mistake is silent at the point it
+        is made. 0122's own self-check asserts this at migration time; this asserts it against
+        whatever is actually attached, which is the thing a later migration can change.
+        """
+        self.cur.execute(
+            r"""
+            SELECT n.nspname || '.' || c.relname || ' -> ' || k.col
+              FROM pg_trigger t
+              JOIN pg_class c     ON c.oid = t.tgrelid
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              JOIN pg_proc p      ON p.oid = t.tgfoid
+             CROSS JOIN LATERAL (
+                    SELECT coalesce(
+                             (regexp_match(pg_get_triggerdef(t.oid),
+                                           'log_digital_thread_event\(''([^'']*)''\)'))[1],
+                             'id') AS col) k
+             WHERE p.proname = 'log_digital_thread_event'
+               AND NOT t.tgisinternal
+               AND NOT EXISTS (SELECT 1 FROM pg_attribute a
+                                WHERE a.attrelid = c.oid AND a.attnum > 0
+                                  AND NOT a.attisdropped AND a.attname = k.col)
+            """
+        )
+        self.assertEqual(self.cur.fetchall(), [],
+                         "a digital thread trigger names a key column its table does not have")
+
+    def test_the_nameplate_triggers_are_attached(self):
+        """
+        The pair, by name. The function is re-created by four migrations and the triggers by one,
+        so the way this regresses is a later file replacing the function and nobody noticing the
+        lane went quiet again -- which is exactly how it stayed empty for as long as it did.
+        """
+        self.cur.execute(
+            "SELECT tgname FROM pg_trigger "
+            " WHERE tgrelid = 'public.device_nameplate'::regclass AND NOT tgisinternal "
+            " ORDER BY tgname"
+        )
+        self.assertEqual(
+            [r[0] for r in self.cur.fetchall()],
+            ["trg_device_nameplate_digital_thread", "trg_device_nameplate_digital_thread_update"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
