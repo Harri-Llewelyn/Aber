@@ -400,6 +400,7 @@ export function filterProposals(rows, lane, query) {
 
 /** The kind-and-text filter bar, identical over both queues because the queues are one shape. */
 function ProposalFilters({ rows, lane, onLane, query, onQuery, placeholder, label }) {
+  const activeFilterCount = (lane !== 'all' ? 1 : 0) + (query ? 1 : 0)
   return (
     <div className="filter-bar">
       <select
@@ -425,10 +426,14 @@ function ProposalFilters({ rows, lane, onLane, query, onQuery, placeholder, labe
         placeholder={placeholder}
         title={`Filter ${label} by what they are about`}
       />
-      {(lane !== 'all' || query) && (
-        <button type="button" className="btn btn-sm btn-ghost"
-                onClick={() => { onLane('all'); onQuery('') }}>
-          Clear filters
+      {activeFilterCount > 0 && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm filter-bar-spacer"
+          onClick={() => { onLane('all'); onQuery('') }}
+          title="Clear every filter"
+        >
+          <IconX size={13} /> Clear filters ({activeFilterCount})
         </button>
       )}
     </div>

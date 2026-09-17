@@ -620,6 +620,32 @@ describe('the queue that is waiting can be filtered too', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /clear filters/i })[0])
     expect(screen.getAllByTestId('proposal-row')).toHaveLength(2)
   })
+
+  it('counts what it would clear, like every other filter bar', async () => {
+    /* This bar said "Clear filters" with no icon and no count while the asset pages said
+       "Clear filters (n)" with both. Two filters here, so unlike the Areas page the number
+       actually moves. */
+    mockLoad([
+      deviceProposal({ id: 'o1', target_label: 'Lathe_01' }),
+      deviceProposal({ id: 'o2', entity_type: 'device_nameplate', target_label: 'Press_02' })
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+
+    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), {
+      target: { value: 'device_nameplate' }
+    })
+    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+
+    fireEvent.change(screen.getByTitle(/filter open proposals/i), { target: { value: 'Press' } })
+    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (2)')
+
+    fireEvent.click(screen.getByTitle('Clear every filter'))
+    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    expect(screen.getAllByTestId('proposal-row')).toHaveLength(2)
+  })
 })
 
 describe('filterProposals', () => {
