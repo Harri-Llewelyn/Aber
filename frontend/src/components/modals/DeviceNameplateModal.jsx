@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { IconLock, IconTag, IconCheck, IconAlertTriangle } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
+import { HelpTip } from '../common/HelpTip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { patchFromForm, submitProposal } from '../../utils/proposeFromForm'
 
@@ -12,19 +13,79 @@ import { patchFromForm, submitProposal } from '../../utils/proposeFromForm'
  * device answers for itself is locked and says so.
  */
 
-/** Mirrors `device_nameplate`'s columns and the template's ordinal, so the form reads like the spec. */
+/**
+ * Mirrors `device_nameplate`'s columns and the template's ordinal, so the form reads like the spec.
+ *
+ * `help` is carried by the fields a reader cannot answer from the label alone. The three
+ * manufacturer identifiers are one such set -- designation, type and serial number narrow from the
+ * model to the production variant to this individual machine -- and the label of each says none of
+ * that. Fields whose label is its own definition carry nothing; the template's own description is
+ * still on every label's hover text.
+ */
 const FIELDS = [
-  { column: 'uri_of_the_product', idShort: 'URIOfTheProduct', label: 'Product URI', placeholder: 'https://manufacturer.example/products/…' },
+  {
+    column: 'uri_of_the_product', idShort: 'URIOfTheProduct', label: 'Product URI',
+    placeholder: 'https://manufacturer.example/products/…',
+    help: 'The manufacturer\'s own web address for this machine — theirs, not this platform\'s. '
+      + 'It identifies the product INSTANCE, so where a manufacturer issues one per unit, that is '
+      + 'the one to use rather than the address of the model\'s brochure page.\n\n'
+      + 'It must be a full absolute address beginning with a scheme, such as https:. A bare '
+      + 'string is refused, because it exports as a broken link that no AAS consumer reports and '
+      + 'every consumer mis-renders.\n\n'
+      + 'Leave it blank if the manufacturer publishes no such address. This is not the device\'s id '
+      + 'on this platform — that is its Sparkplug ID, issued here and shown in the device drawer.'
+  },
   { column: 'manufacturer_name', idShort: 'ManufacturerName', label: 'Manufacturer' },
-  { column: 'manufacturer_product_designation', idShort: 'ManufacturerProductDesignation', label: 'Product designation' },
-  { column: 'manufacturer_product_type', idShort: 'ManufacturerProductType', label: 'Product type' },
-  { column: 'serial_number', idShort: 'SerialNumber', label: 'Serial number' },
-  { column: 'year_of_construction', idShort: 'YearOfConstruction', label: 'Year of construction', placeholder: '2024', inputMode: 'numeric' },
-  { column: 'date_of_manufacture', idShort: 'DateOfManufacture', label: 'Date of manufacture', type: 'date' },
+  {
+    column: 'manufacturer_product_designation', idShort: 'ManufacturerProductDesignation',
+    label: 'Product designation',
+    help: 'What the manufacturer CALLS this machine — the name on the brochure, the one an '
+      + 'engineer would say out loud. For example "KR 10 R1100".\n\n'
+      + 'The broadest of the three identifiers: every machine of this model shares it. Product '
+      + 'type narrows it to a variant, and serial number narrows that to this individual unit.'
+  },
+  {
+    column: 'manufacturer_product_type', idShort: 'ManufacturerProductType',
+    label: 'Product type',
+    help: 'The manufacturer\'s code for which VARIANT of the product this is — what you would quote '
+      + 'to order another one exactly like it. Often an article or order number such as '
+      + '"00-123-456".\n\n'
+      + 'Two machines with the same product designation can differ here, if they were ordered with '
+      + 'different options. If the manufacturer draws no such distinction, leave it blank rather '
+      + 'than repeating the designation.'
+  },
+  {
+    column: 'serial_number', idShort: 'SerialNumber', label: 'Serial number',
+    help: 'The number identifying THIS machine and no other, as stamped on its physical plate. '
+      + 'The narrowest of the three identifiers.\n\n'
+      + 'Not the Sparkplug ID: that is issued by this platform and means nothing to the '
+      + 'manufacturer. This is the number to quote in a warranty claim.'
+  },
+  {
+    column: 'year_of_construction', idShort: 'YearOfConstruction', label: 'Year of construction',
+    placeholder: '2024', inputMode: 'numeric',
+    help: 'The four-digit year the machine was built. Mandatory in the IDTA template, and the one '
+      + 'of this pair a nameplate almost always carries.\n\n'
+      + 'Date of manufacture below is the same fact to the day, for the rarer plate that states '
+      + 'one. Fill in whichever the plate gives; they do not have to agree to the day, and neither '
+      + 'is derived from the other.'
+  },
+  {
+    column: 'date_of_manufacture', idShort: 'DateOfManufacture', label: 'Date of manufacture',
+    type: 'date',
+    help: 'The exact date the machine was manufactured, where the plate states one. Optional, and '
+      + 'usually blank: most plates give only the year, which belongs in the field above.'
+  },
   { column: 'hardware_version', idShort: 'HardwareVersion', label: 'Hardware version' },
   { column: 'firmware_version', idShort: 'FirmwareVersion', label: 'Firmware version' },
   { column: 'software_version', idShort: 'SoftwareVersion', label: 'Software version' },
-  { column: 'country_of_origin', idShort: 'CountryOfOrigin', label: 'Country of origin', placeholder: 'DE' }
+  {
+    column: 'country_of_origin', idShort: 'CountryOfOrigin', label: 'Country of origin',
+    placeholder: 'DE',
+    help: 'Where the machine was manufactured, as a two-letter ISO 3166-1 country code — DE for '
+      + 'Germany, GB for the United Kingdom, JP for Japan. Not the manufacturer\'s head office, '
+      + 'and not the full country name.'
+  }
 ]
 
 const blankForm = () => Object.fromEntries(FIELDS.map(f => [f.column, '']))
@@ -177,23 +238,34 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                 const inputId = `nameplate-${field.column}`
                 return (
                   <div key={field.column}>
-                    <label
-                      className="form-label"
-                      htmlFor={inputId}
-                      title={element
-                        ? `${element.id_short} — ${element.semantic_id_type} ${element.semantic_id}\n\n${element.description || ''}`
-                        : field.label}
-                    >
-                      {field.label}
-                      {element?.is_mandatory && (
-                        <span
-                          style={{ color: 'var(--text-muted)', marginLeft: '4px' }}
-                          title="Mandatory in the IDTA template. This platform does not require it — the exported submodel deliberately does not claim conformance to the template."
-                        >
-                          *
-                        </span>
-                      )}
-                    </label>
+                    {/* The tip is a SIBLING of the label, not a child: a button inside a label is
+                        labelled by it too, so the input stops being the only thing that answers to
+                        the field's name. The row carries the label's bottom margin so the spacing
+                        is the same as a field without a tip. */}
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '7px' }}>
+                      <label
+                        className="form-label"
+                        htmlFor={inputId}
+                        style={{ marginBottom: 0 }}
+                        title={element
+                          ? `${element.id_short} — ${element.semantic_id_type} ${element.semantic_id}\n\n${element.description || ''}`
+                          : field.label}
+                      >
+                        {field.label}
+                        {element?.is_mandatory && (
+                          <span
+                            style={{ color: 'var(--text-muted)', marginLeft: '4px' }}
+                            title="Mandatory in the IDTA template. This platform does not require it — the exported submodel deliberately does not claim conformance to the template."
+                          >
+                            *
+                          </span>
+                        )}
+                      </label>
+                      {/* Only on the fields whose label does not define them. The label's own hover
+                          text carries the template's wording; this carries how to tell the field
+                          from its neighbours, which is what the three identifiers actually need. */}
+                      {field.help && <HelpTip text={field.help} label={`What ${field.label} means`} />}
+                    </div>
                     {isPublished ? (
                       <input
                         id={inputId}
