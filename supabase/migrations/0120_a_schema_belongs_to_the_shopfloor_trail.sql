@@ -92,15 +92,23 @@ BEGIN
             '0120 self-check: an unclassified entity type no longer fails closed.';
     END IF;
 
-    -- The backfill reached everything. Asserted over the whole table, not over `schemas`: the
-    -- invariant test_audit_domain.py holds is that no stored row disagrees with the classifier.
+    -- The backfill reached every SCHEMA row, which is the whole of what this file moved.
+    --
+    -- SCOPED, AND THE SCOPE IS THE POINT. Asserting it over the whole table fails on any database
+    -- with history: rows of a kind that was reclassified, or whose table was later retired, keep
+    -- the lane they were stamped with and no migration has ever backfilled one. A live stack
+    -- carried ten `area_floors` rows stamped `asset` from before 0113 retired that table, which
+    -- the classifier now fail-closes to `security` -- rows this file is not responsible for and
+    -- must not fail on. An empty test database has no such history, so the wider assertion passed
+    -- everywhere it was run and aborted the chain on the first real one.
     SELECT count(*) INTO v_stranded
       FROM public.digital_thread
-     WHERE audit_domain IS DISTINCT FROM public.audit_domain_for(entity_type, action);
+     WHERE entity_type = 'schemas'
+       AND audit_domain IS DISTINCT FROM public.audit_domain_for(entity_type, action);
 
     IF v_stranded > 0 THEN
         RAISE EXCEPTION
-            '0120 self-check: % stored row(s) disagree with the classifier after the backfill -- '
+            '0120 self-check: % schema row(s) disagree with the classifier after the backfill -- '
             'a row in the wrong lane is readable by the wrong role.', v_stranded;
     END IF;
 

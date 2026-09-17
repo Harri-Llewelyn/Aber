@@ -60,6 +60,35 @@ def as_user(cur, user_id):
     cur.execute('SET LOCAL "request.jwt.claims" = %s;', ('{"sub": "%s"}' % user_id,))
 
 
+#: `{ kind: 'X', table: 'y', label: 'Z', domain: 'asset' }`, the shape constants.js holds.
+_LANE_ENTRY = re.compile(
+    r"\{\s*kind:\s*'(?P<kind>[^']+)',\s*"
+    r"table:\s*'(?P<table>[^']+)',\s*"
+    r"label:\s*'[^']*',\s*"
+    r"domain:\s*'(?P<domain>[^']+)'\s*\}"
+)
+
+
+def dashboard_lanes():
+    """
+    `DIGITAL_THREAD_ENTITY_TYPES` from constants.js: the kinds the platform still records.
+
+    Read as text because it is the only place the frontend's half of this decision is written
+    down. Two suites want it -- one to check the two sides agree, one to scope an assertion to
+    the rows the platform is still writing -- and a second copy would be a second answer.
+    """
+    path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "frontend", "src", "constants.js"
+    )
+    with open(path, encoding="utf-8") as handle:
+        source = handle.read()
+    start = source.index("export const DIGITAL_THREAD_ENTITY_TYPES")
+    end = source.index("];", start)
+    table = source[start:end]
+    return table, [m.groupdict() for m in _LANE_ENTRY.finditer(table)]
+
+
 class AuditDomainFixture(unittest.TestCase):
 
     @classmethod
@@ -171,16 +200,35 @@ class TheClassifier(AuditDomainFixture):
             cur.execute("SELECT public.audit_domain_for('a_table_invented_later', 'INSERT');")
             self.assertEqual(cur.fetchone()[0], "security")
 
-    def test_every_row_in_the_table_agrees_with_it(self):
-        """The backfill reached everything, and nothing has been written past the trigger since."""
+    def test_every_row_of_a_kind_still_recorded_agrees_with_it(self):
+        """
+        Nothing has been written past the trigger, and every reclassification has been backfilled.
+
+        SCOPED TO THE KINDS THE PLATFORM STILL RECORDS, because the unscoped form asserts
+        something that is false on any database with history. A type that was reclassified, or
+        whose table was later retired, keeps the lane its rows were stamped with -- and for a
+        retired type the classifier's answer is its FAIL-CLOSED DEFAULT rather than a judgement
+        about those rows. A live stack carried ten `area_floors` rows stamped `asset` from before
+        0113 retired that table.
+
+        An empty database has no history, so the unscoped assertion passed in CI and in every
+        throwaway run, and aborted the migration chain the first time it met a real deployment --
+        0120's self-check had copied it.
+        """
+        _, lanes = dashboard_lanes()
+        recorded = [lane["table"] for lane in lanes]
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT count(*) FROM public.digital_thread"
-                " WHERE audit_domain IS DISTINCT FROM"
-                "       public.audit_domain_for(entity_type, action);"
+                "SELECT entity_type, count(*) FROM public.digital_thread"
+                " WHERE entity_type = ANY(%s)"
+                "   AND audit_domain IS DISTINCT FROM"
+                "       public.audit_domain_for(entity_type, action)"
+                " GROUP BY 1;",
+                (recorded,),
             )
+            disagreeing = cur.fetchall()
             self.assertEqual(
-                cur.fetchone()[0], 0,
+                disagreeing, [],
                 "rows disagree with the classifier -- a row in the wrong lane is readable by the "
                 "wrong role, which is the whole subject of 0070."
             )
@@ -412,30 +460,9 @@ class TheDashboardAgreesWithTheClassifier(unittest.TestCase):
     drift into agreeing with a regex instead of with the database.
     """
 
-    #: `{ kind: 'X', table: 'y', label: 'Z', domain: 'asset' }`, the shape constants.js holds.
-    ENTRY = re.compile(
-        r"\{\s*kind:\s*'(?P<kind>[^']+)',\s*"
-        r"table:\s*'(?P<table>[^']+)',\s*"
-        r"label:\s*'[^']*',\s*"
-        r"domain:\s*'(?P<domain>[^']+)'\s*\}"
-    )
-
     @classmethod
     def setUpClass(cls):
-        constants = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "..", "frontend", "src", "constants.js"
-        )
-        with open(constants, encoding="utf-8") as handle:
-            source = handle.read()
-
-        # The one array, not every object literal in the file: `ENTITY_KIND_BY_TABLE` and the
-        # rest are derived from it and would be matched by nothing, but a future table of the
-        # same shape elsewhere in the file would be.
-        start = source.index("export const DIGITAL_THREAD_ENTITY_TYPES")
-        end = source.index("];", start)
-        cls.table = source[start:end]
-        cls.entries = [m.groupdict() for m in cls.ENTRY.finditer(cls.table)]
+        cls.table, cls.entries = dashboard_lanes()
 
     def setUp(self):
         self.conn = get_connection()
