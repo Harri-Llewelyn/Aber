@@ -213,7 +213,7 @@ describe('the hover summary', () => {
    track read back. */
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
+  return { ...actual, api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
 describe('the component draws the badges', () => {

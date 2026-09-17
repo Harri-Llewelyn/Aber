@@ -22,7 +22,7 @@ const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').r
 // and a bare stub drops them, which renders as an empty timeline.
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
+  return { ...actual, api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
 /**

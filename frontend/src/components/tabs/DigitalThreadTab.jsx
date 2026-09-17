@@ -377,37 +377,104 @@ export const shortId = (id) => {
 }
 
 /**
- * The identity an audit row carries in its payload, for an entity no longer in the database. `name`
- * first, then `sparkplug_id`, which is immutable and is what telemetry and alerts are keyed by.
- * Both snapshots are checked because an INSERT has only `new_data` and a DELETE only `old_data`.
- * Cells have no `sparkplug_id` and fall through to null.
+ * The fields an audit snapshot can name its subject with, in the order they are preferred.
+ *
+ * SHARED WITH `digital_thread_page()`'s `p_search` (0115). A field the search matches and this does
+ * not is a row you can find and cannot identify; a field here that the search does not match is a
+ * lane you can see and cannot search for. `sparkplug_id` is immutable and is what telemetry and
+ * alerts are keyed by, so it outranks the rest where a row carries both.
+ *
+ * `role` is deliberately absent even though `user_roles` rows carry one, and 0115 searches it: the
+ * lane is a PERSON, keyed by `user_roles.user_id`, and the role is what happened to them rather
+ * than who they are. Labelling the lane with it would give two Administrators one name and would
+ * change under a reader as pages arrive, because `resolveLaneName()` takes whichever event it
+ * meets first. `list_user_accounts()` (0116) is how that lane gets named.
+ */
+const SNAPSHOT_IDENTITY_FIELDS = [
+  'name',          // areas, cells, gateways, devices
+  'sparkplug_id',  // gateways, devices -- immutable, and the key telemetry uses
+  'schema_name',   // schemas; `version` is appended below
+  'label',         // system_settings, the wording the Settings page shows
+  'key',           // system_settings, when it has no label
+  'stamp',         // backups, which is what the Backups page calls one
+]
+
+/**
+ * The identity an audit row carries in its payload, for an entity the lookups cannot name -- one
+ * deleted, or of a kind nothing looks up. Both snapshots are checked because an INSERT has only
+ * `new_data` and a DELETE only `old_data`.
  */
 export function snapshotIdentity(event) {
-  const name = event?.new_data?.name || event?.old_data?.name
-  if (name) return { label: String(name), field: 'name' }
+  const read = (field) => event?.new_data?.[field] ?? event?.old_data?.[field]
 
-  const wireId = event?.new_data?.sparkplug_id || event?.old_data?.sparkplug_id
-  if (wireId) return { label: String(wireId), field: 'sparkplug_id' }
+  for (const field of SNAPSHOT_IDENTITY_FIELDS) {
+    const value = read(field)
+    if (value === null || value === undefined || value === '') continue
+
+    // A schema's version is part of its identity -- a lineage shares `schema_name` and differs
+    // ONLY in `version` -- so it is returned separately rather than appended. Appended, it is the
+    // end of the string, and the end of the string is what a 260px label ellipsises away: sixteen
+    // versions of one schema drew sixteen lanes reading `VALIDATE_Schema_Robot_St…`.
+    if (field === 'schema_name') {
+      const version = read('version')
+      return {
+        label: String(value),
+        qualifier: version ? `v${version}` : undefined,
+        field: 'schema_name',
+      }
+    }
+    return { label: String(value), field }
+  }
 
   return null
 }
 
 /**
- * The lane label in three falls: the live join, then the audit snapshot, then a shortened id. A
- * purged entity and one merely absent from the fetched page both fall to the snapshot; the page
- * cannot tell them apart and does not claim to.
+ * The kinds a lookup covers, so absence from `entityNames` means the row is gone.
+ *
+ * DERIVED FROM WHAT THE PAGE ACTUALLY FETCHES, and that is the whole point of the set existing.
+ * `NAMEPLATE` is here because `device_nameplate` is keyed by the device's id, so the devices lookup
+ * names it; `ACCESS` because `list_user_accounts()` names a person (0116). Every other kind --
+ * backups, backup jobs, service identities, proposals -- is absent from `entityNames` for a reason
+ * that has nothing to do with deletion, so a lane of that kind must never wear the "deleted" flag.
+ * Before 0116 that was academic: none of those kinds could be named at all, so none reached the
+ * flag. Widening `snapshotIdentity()` is what would have made it false.
  */
-export function resolveLaneName(entityId, laneEvents, entityNames) {
-  const joined = entityNames.get(entityId)
-  if (joined) return { name: joined, fromSnapshot: false }
+export const LOOKED_UP_KINDS = new Set(
+  ['AREA', 'CELL', 'GATEWAY', 'DEVICE', 'SCHEMA', 'NAMEPLATE', 'ACCESS']
+)
+
+/**
+ * The lane label in three falls: the live join, then the audit snapshot, then a shortened id.
+ *
+ * `gone` is separate from `fromSnapshot` and answers a different question. `fromSnapshot` is where
+ * the NAME came from; `gone` is whether the page is entitled to say the entity is deleted, which it
+ * is only when a lookup covering that kind has landed and does not hold the id. A kind nothing
+ * looks up is unnamed, not deleted.
+ */
+export function resolveLaneName(entityId, laneEvents, identities, { canTellDeleted = false } = {}) {
+  const joined = identities.get(entityId)
+  if (joined?.name) {
+    return { name: joined.name, qualifier: joined.qualifier, fromSnapshot: false, gone: false }
+  }
+
+  // Absent from a lookup that covers this kind, once that lookup has landed. Decided here rather
+  // than from `fromSnapshot`, so an entity deleted without a name in its payload is still flagged.
+  const gone = Boolean(canTellDeleted)
 
   for (const e of laneEvents) {
     const snapshot = snapshotIdentity(e)
     if (snapshot) {
-      return { name: snapshot.label, fromSnapshot: true, identityField: snapshot.field }
+      return {
+        name: snapshot.label,
+        qualifier: snapshot.qualifier,
+        fromSnapshot: true,
+        identityField: snapshot.field,
+        gone,
+      }
     }
   }
-  return { name: null, fromSnapshot: false }
+  return { name: null, fromSnapshot: false, gone }
 }
 
 /**
@@ -646,6 +713,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   const [cells, setCells]             = useState([])
   const [areas, setAreas]             = useState([])
   const [schemas, setSchemas] = useState([])
+  // Empty for a role that may not ask (0116), which is also a role that cannot see the lane.
+  const [userAccounts, setUserAccounts] = useState([])
   const [selectedEventId, setSelectedEventId] = useState(null)
   const [showAllLanes, setShowAllLanes] = useState(false)
 
@@ -665,29 +734,62 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       // Tolerated rather than required: this page must not fail to load because one lookup did,
       // and the uuid fallback below is exactly the behaviour that was there before.
       api.get('/api/v1/schemas').catch(() => []),
-      api.get('/api/v1/areas').catch(() => [])
+      api.get('/api/v1/areas').catch(() => []),
+      // A ROLE-ASSIGNMENT ROW IS ABOUT A PERSON. `log_role_assignment()` keys it by `user_id`, and
+      // this is the only way to turn that into anybody (0116). REFUSED FOR A SHOPFLOOR_MANAGER OR
+      // AN OPERATOR, deliberately -- and they cannot see the lane either, so the empty list they
+      // fall back to names nothing they were going to be shown.
+      api.listUserAccounts().catch(() => [])
     ])
-      .then(([d, g, c, sc, ar]) => {
-        setDevices(d); setGateways(g); setCells(c); setSchemas(sc || []); setAreas(ar || []); setLookupsLoaded(true)
+      .then(([d, g, c, sc, ar, us]) => {
+        setDevices(d); setGateways(g); setCells(c); setSchemas(sc || []); setAreas(ar || [])
+        setUserAccounts(us || []); setLookupsLoaded(true)
       })
       .catch(() => {})
   }, [])
 
-  /** entity_id -> display name, across all five audited tables. */
-  const entityNames = useMemo(() => {
+  /**
+   * entity_id -> `{ name, qualifier }`, across every audited table this page can look one up in.
+   *
+   * STRUCTURED RATHER THAN COMPOSED, because the lane label and everything else want different
+   * things from it. A schema's `version` is the only thing separating one member of a lineage from
+   * another, and it is at the END of the composed string -- which is what a fixed-width label
+   * ellipsises away first. The lane draws it as its own element; `entityNames` below composes it
+   * for every reader that wants one string.
+   *
+   * WHAT IS IN HERE ALSO DECIDES DELETION: `LOOKED_UP_KINDS` reads it to tell an absence that means
+   * "gone" from one that means "nothing ever looked this kind up".
+   */
+  const entityIdentities = useMemo(() => {
     const m = new Map()
-    for (const ar of areas)   m.set(ar.area_id, ar.area_name)
-    for (const c of cells)    m.set(c.cell_id, c.cell_name)
-    for (const g of gateways) m.set(g.gateway_id, g.gateway_name)
-    for (const d of devices)  m.set(d.asset_id, d.asset_name)
-    // The version is part of a schema's name: a lineage shares `schema_name` and differs only in
-    // `version`.
+    for (const ar of areas)   m.set(ar.area_id, { name: ar.area_name })
+    for (const c of cells)    m.set(c.cell_id, { name: c.cell_name })
+    for (const g of gateways) m.set(g.gateway_id, { name: g.gateway_name })
+    for (const d of devices)  m.set(d.asset_id, { name: d.asset_name })
     for (const sc of schemas) {
       const id = sc.id || sc.schema_uuid
-      if (id) m.set(id, sc.version ? `${sc.schema_name} v${sc.version}` : sc.schema_name)
+      if (id) m.set(id, {
+        name: sc.schema_name,
+        qualifier: sc.version ? `v${sc.version}` : undefined,
+      })
+    }
+    // The email, which is all `auth.users` carries here (0116). An account without one falls
+    // through to the id, as every unnamed entity did before.
+    for (const u of userAccounts) if (u?.user_id && u.email) m.set(u.user_id, { name: u.email })
+    return m
+  }, [areas, cells, gateways, devices, schemas, userAccounts])
+
+  /**
+   * The same thing as one string per id, which is what the search, the export, the drawer title and
+   * the causation list all want. Derived rather than built a second time, so the two cannot drift.
+   */
+  const entityNames = useMemo(() => {
+    const m = new Map()
+    for (const [id, v] of entityIdentities) {
+      if (v.name) m.set(id, v.qualifier ? `${v.name} ${v.qualifier}` : v.name)
     }
     return m
-  }, [areas, cells, gateways, devices, schemas])
+  }, [entityIdentities])
 
   /**
    * Events whose asset has been purged: in the log, absent from every live table. The list
@@ -907,11 +1009,17 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       byEntity.get(key).events.push(e)
     }
     return [...byEntity.values()]
-      .map(lane => ({ ...lane, ...resolveLaneName(lane.entityId, lane.events, entityNames) }))
+      .map(lane => ({
+        ...lane,
+        ...resolveLaneName(lane.entityId, lane.events, entityIdentities, {
+          // Until the lookups land every id looks absent, so nothing may be called deleted yet.
+          canTellDeleted: lookupsLoaded && LOOKED_UP_KINDS.has(lane.kind),
+        }),
+      }))
       .sort((a, b) =>
         b.events.length - a.events.length ||
         String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)))
-  }, [events, entityNames])
+  }, [events, entityIdentities, lookupsLoaded])
 
   const visibleLanes = showAllLanes ? lanes : lanes.slice(0, laneLimit)
   const hiddenLaneCount = lanes.length - visibleLanes.length
@@ -1328,7 +1436,12 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                               drawer's Entity ID field. */}
                           <div
                             className="dt-lane-label"
-                            title={lane.name ? `${lane.name} — ${lane.entityId}` : lane.entityId}
+                            title={[
+                              lane.name
+                                ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
+                                : null,
+                              lane.entityId,
+                            ].filter(Boolean).join(' — ')}
                           >
                             {React.createElement(SECTION_ICON[lane.kind] || IconCpu, {
                               size: 12, className: 'dt-lane-icon'
@@ -1338,10 +1451,24 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                               /* Neither the join nor a snapshot could name it: the shortened id,
                                  monospaced. */
                               : <span className="dt-lane-name dt-lane-unnamed mono">{shortId(lane.entityId)}</span>}
+                            {/* THE PART THAT MUST SURVIVE TRUNCATION. A schema lineage shares its
+                                name and differs only here, so ellipsising this away leaves a
+                                column of identical labels. */}
+                            {lane.qualifier && (
+                              <span className="dt-lane-qualifier">{lane.qualifier}</span>
+                            )}
                             {/* A name recovered from the audit payload means the entity is gone;
                                 say so. */}
-                            {lane.fromSnapshot && (
-                              <span className="dt-lane-gone" title="This entity no longer exists — the name is the one recorded in its final audit snapshot">
+                            {/* `gone`, not `fromSnapshot`: the name coming from a snapshot says
+                                where the label came from, and a settings or backup lane is named
+                                that way while existing perfectly well. */}
+                            {lane.gone && (
+                              <span
+                                className="dt-lane-gone"
+                                title={lane.fromSnapshot
+                                  ? 'This entity no longer exists — the name is the one recorded in its final audit snapshot'
+                                  : 'This entity no longer exists, and its audit rows carry no name to recover'}
+                              >
                                 deleted
                               </span>
                             )}

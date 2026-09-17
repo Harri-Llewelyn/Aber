@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -14,7 +14,7 @@ import { api } from '../api'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
+  return { ...actual, api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
 // The three audit_domain_for() names, and the two backup kinds (0101) it files there by its
@@ -82,5 +82,51 @@ describe('the filter bar on the page', () => {
   it('lists them for an auditor', async () => {
     const offered = await optionsOffered('Auditor')
     for (const l of SECURITY_LABELS) expect(offered).toContain(l)
+  })
+})
+
+/**
+ * A role-assignment row is keyed by `user_roles.user_id`, so the lane is a PERSON -- and nothing
+ * served to the browser could turn that id into anybody until `list_user_accounts()` (0116). The
+ * lane drew a shortened uuid, which answers two thirds of "who was given what, and when".
+ */
+describe('naming the person a role assignment is about', () => {
+  const USER = 'a0000000-0000-0000-0000-000000000002'
+  const roleEvent = {
+    event_id: 70, entity_type: 'user_roles', entity_id: USER, event_type: 'ROLE_GRANTED',
+    timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: null, actor_source: 'user',
+    old_data: null, new_data: { role: 'Administrator', role_id: 1 },
+  }
+
+  const renderWith = (accounts) => {
+    api.get.mockImplementation((p) =>
+      Promise.resolve(String(p).startsWith('/api/v1/digital-thread') ? [roleEvent] : []))
+    api.listUserAccounts.mockResolvedValue(accounts)
+    render(<DigitalThreadTab userRole="Administrator" />)
+  }
+
+  it('labels the lane with the person, not with the role they were granted', async () => {
+    renderWith([{ user_id: USER, email: 'manager@acs-cymru.local' }])
+    expect(await screen.findByText('manager@acs-cymru.local')).toBeInTheDocument()
+    // The role is what HAPPENED to them; it is in the drawer, not in the lane's name.
+    expect(screen.queryByText(/^Administrator$/)).toBeNull()
+  })
+
+  it('does not call the person deleted merely because the lane was named from a lookup', async () => {
+    renderWith([{ user_id: USER, email: 'manager@acs-cymru.local' }])
+    const lane = (await screen.findByText('manager@acs-cymru.local')).closest('.dt-lane')
+    expect(within(lane).queryByText('deleted')).toBeNull()
+  })
+
+  it('falls back to the shortened id when the caller may not list accounts', async () => {
+    /* A Shopfloor_Manager or Operator is REFUSED by 0116, and api.js rejects. They cannot see this
+       lane either, so the fallback names nothing they were going to be shown -- but the page must
+       still render rather than fail on the rejection. */
+    api.get.mockImplementation((p) =>
+      Promise.resolve(String(p).startsWith('/api/v1/digital-thread') ? [roleEvent] : []))
+    api.listUserAccounts.mockRejectedValue(new Error('insufficient privileges'))
+    render(<DigitalThreadTab userRole="Administrator" />)
+
+    expect(await screen.findByText('a0000000…0002')).toBeInTheDocument()
   })
 })

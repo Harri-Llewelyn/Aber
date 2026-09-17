@@ -8,7 +8,7 @@ import { api } from '../api';
  * The Devices page navigates here with the device it was on. These cover the handover itself: the
  * filters narrow to that device, and the page stays a normal page afterwards.
  */
-vi.mock('../api', () => ({ api: { get: vi.fn() } }));
+vi.mock('../api', () => ({ api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn() } }));
 
 const DEVICE_ID = '11111111-2222-3333-4444-555555555555';
 

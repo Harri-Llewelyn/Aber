@@ -17,7 +17,7 @@ const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').r
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
+  return { ...actual, api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
 const CELLS = [{ cell_id: 'cell-1', cell_name: 'Assembly Line 1' }]
@@ -364,9 +364,40 @@ describe('Digital Thread swimlanes', () => {
     await showAll()
     // Neither joinable nor recoverable from a snapshot: event 6 carries no payload at all.
     expect(screen.getByText('99999999…5555')).toBeInTheDocument()
-    // Not flagged deleted -- nothing says it was; it is merely unidentifiable.
+
+    /* AND IT IS STILL FLAGGED DELETED. This used to assert the opposite, on the reasoning that
+       nothing said it was gone -- but the evidence is the same evidence that flags the lane above:
+       it is a device, the devices lookup has landed, and its id is not in it. The snapshot is only
+       where a LABEL comes from. The reader is also seeing this row because they turned Show
+       deleted assets on, so the page saying "deleted" is the page agreeing with the control that
+       revealed it. */
     const lane = screen.getByText('99999999…5555').closest('.dt-lane')
-    expect(within(lane).queryByText('deleted')).toBeNull()
+    const flag = within(lane).getByText('deleted')
+    expect(flag).toBeInTheDocument()
+    expect(flag.getAttribute('title')).toMatch(/carry no name to recover/)
+  })
+
+  it('does not flag a lane whose kind nothing looks up', async () => {
+    /* A settings, backup or service-identity lane is absent from `entityNames` because nothing
+       fetches those tables -- not because the row is gone. Widening snapshotIdentity() is what
+       made this reachable: before it, none of those kinds could be named at all, so none of them
+       ever reached the flag. */
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve([{
+        event_id: 90, entity_type: 'system_settings', entity_id: 'set-1', event_type: 'UPDATE',
+        timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: null,
+        actor_source: 'user', old_data: { key: 'ui.x', label: 'Lanes drawn before folding' },
+        new_data: { key: 'ui.x', label: 'Lanes drawn before folding' },
+      }])
+      if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
+      if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+      if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
+      return Promise.resolve([])
+    })
+    render(<DigitalThreadTab />)
+
+    const label = await screen.findByText('Lanes drawn before folding')
+    expect(within(label.closest('.dt-lane')).queryByText('deleted')).toBeNull()
   })
 
   /* Sections. The cap is applied before the cut, not per section, so one asset's history is
@@ -1178,10 +1209,27 @@ describe('Digital Thread — removed tag filter', () => {
     })
     render(<DigitalThreadTab />)
 
-    // The version is part of the name: a lineage is a chain of rows sharing one `schema_name`, and
-    // which version something happened to is the point of a schema's audit trail.
-    await waitFor(() => expect(screen.getByText('Test-Schema v2')).toBeInTheDocument())
+    /* The version is part of the identity: a lineage is a chain of rows sharing one `schema_name`,
+       and which version something happened to is the point of a schema's audit trail. It is drawn
+       as its OWN element rather than appended, because appended it is the end of the string and the
+       end of the string is what a fixed-width label ellipsises first -- sixteen versions of one
+       schema drew sixteen lanes reading `VALIDATE_Schema_Robot_St…`. */
+    await waitFor(() => expect(screen.getByText('Test-Schema')).toBeInTheDocument())
+    const label = screen.getByText('Test-Schema').closest('.dt-lane-label')
+    expect(within(label).getByText('v2')).toHaveClass('dt-lane-qualifier')
+    // And still one string wherever one is wanted -- the hover, the export, the drawer.
+    expect(label.getAttribute('title')).toContain('Test-Schema v2')
     expect(screen.queryByText(SCHEMA_ID)).toBeNull()
+  })
+
+  it('keeps the version out of the part that can be ellipsised away', async () => {
+    // The property, stated against the stylesheet: `.dt-lane-name` is the one element allowed to
+    // lose characters, so the qualifier must not be inside it and must not shrink.
+    const rule = APP_CSS.match(/\n\.dt-lane-qualifier \{([\s\S]*?)\n\}/)?.[1]
+    expect(rule, '.dt-lane-qualifier has no rule in App.css').toBeTruthy()
+    expect(rule).toMatch(/flex-shrink:\s*0/)
+    expect(APP_CSS.match(/\n\.dt-lane-name \{([\s\S]*?)\n\}/)?.[1])
+      .toMatch(/text-overflow:\s*ellipsis/)
   })
 
   it('still filters by name, which was sharing the id-restriction path with tags', async () => {
