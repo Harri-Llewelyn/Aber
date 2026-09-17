@@ -1,19 +1,54 @@
 import React, { useState, useMemo } from 'react'
-import { IconFileCode, IconDownload } from '../common/Icons'
+import { IconFileCode } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
-import { usePendingKey } from '../../hooks/usePendingAction'
+import { usePendingAction } from '../../hooks/usePendingAction'
 import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { groupCatalog } from '../../utils/metricGroup'
 import {
   STANDARD_OPTIONS, SEMANTIC_ID_TYPES, inferSemanticIdType, LOCAL_EXTENSION_LABEL
 } from '../../utils/standards'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
-import { gatewayAcceptsDevices } from '../../utils/gatewayType'
+import { HelpTip } from '../common/HelpTip'
 
 /** Sentinel for the standard filter's default. Not a `standard` value -- '' means local extension. */
 const ANY_STANDARD = '__any__'
 
-export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
+/** Border and text treatment for a field a save attempt found empty. */
+const INVALID_FIELD = { borderColor: 'var(--danger)' }
+
+/** The asterisk beside a label that must be filled in, with the convention spelled out on hover. */
+function RequiredMark() {
+  return (
+    <span style={{ color: 'var(--danger)', marginLeft: '3px' }} title="Required — the schema cannot be saved without it" aria-hidden="true">*</span>
+  )
+}
+
+/** What a save attempt found missing, beneath the field it is about. */
+function FieldError({ children }) {
+  return (
+    <div role="alert" style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '4px' }}>
+      {children}
+    </div>
+  )
+}
+
+const SEMANTIC_ID_HELP = 'The identifier of the standard Submodel this schema corresponds to, so an '
+  + 'AAS consumer can recognise it as, say, a Digital Nameplate rather than a set of metric names '
+  + 'only this platform understands. Use the published id of an IDTA submodel template, for example '
+  + 'https://admin-shell.io/idta/nameplate/3/0/Nameplate.\n\n'
+  + 'Leave it blank for a schema you have composed yourself, which is most of them: a local '
+  + 'composition matches no published template, and claiming one it does not match is worse than '
+  + 'claiming none.\n\n'
+  + 'The type beside it says how to read the id — IRI for a URL, IRDI for an ECLASS or IEC code, '
+  + 'ModelReference for a pointer to another element in this shell. It is guessed from what you '
+  + 'type and can be corrected.'
+
+/**
+ * Build a schema from catalog metrics. It does this and nothing else: a device is given its schema
+ * on the Devices page, where the rest of what a device needs -- its gateway, its cell, its
+ * conformance policy -- is also decided.
+ */
+export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
   // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
   useEscapeKey(onCancel)
 
@@ -24,9 +59,9 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [semanticId, setSemanticId] = useState('')
   const [semanticIdType, setSemanticIdType] = useState('')
-  const [deviceName, setDeviceName] = useState('')
-  const [gatewayId, setGatewayId] = useState('')
-  const [groupId, setGroupId] = useState('ACS-Cymru')
+  // Set by a save attempt, not by typing: a form that turns red while a name is half-typed accuses
+  // the reader of an error they are in the middle of not making.
+  const [showRequired, setShowRequired] = useState(false)
 
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
 
@@ -50,8 +85,17 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
   }
 
   const selectedMetrics = activeCatalog.filter(m => selectedIds.has(m.metric_uuid))
-  const canSave = schemaName.trim().length > 0 && selectedMetrics.length > 0
-  const canUseDeviceActions = canSave && deviceName.trim().length > 0
+
+  // What is missing, in the order the fields appear, so the summary reads down the form. A schema
+  // with no metrics constrains nothing, which is why the picker is required rather than merely
+  // usual.
+  const missing = [
+    schemaName.trim() ? null : 'a name',
+    selectedMetrics.length ? null : 'at least one metric'
+  ].filter(Boolean)
+  const canSave = missing.length === 0
+  const nameMissing = showRequired && !schemaName.trim()
+  const metricsMissing = showRequired && selectedMetrics.length === 0
 
   const buildSchemaPayload = () => {
     const properties = {}
@@ -73,18 +117,14 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
     }
   }
 
-  const buildDeviceDetails = () => ({
-    device_name: deviceName,
-    gateway_id: gatewayId || null,
-    group_id: groupId || 'ACS-Cymru'
-  })
+  const [submitting, runSubmit] = usePendingAction()
 
-  // Which of the two submissions is running. Keyed rather than boolean so the button that was
-  // clicked is the one that spins.
-  const [submitting, runSubmit] = usePendingKey()
-
-  const handleSubmit = (action) => {
-    return onSubmit(buildSchemaPayload(), buildDeviceDetails(), action)
+  /* Save stays clickable while the form is incomplete, and the click is what reveals what is
+     missing. A disabled button cannot be clicked, so it cannot answer the question a reader who has
+     just tried to save is actually asking. */
+  const handleSave = () => {
+    if (!canSave) { setShowRequired(true); return }
+    runSubmit(() => onSubmit(buildSchemaPayload()))
   }
 
   return (
@@ -98,8 +138,20 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Schema Name</label>
-          <input className="form-control" value={schemaName} onChange={e => setSchemaName(e.target.value)} placeholder="e.g. Six-Axis-Robot-Arm-Standard" title="Unique schema name" />
+          <label className="form-label" htmlFor="schema-builder-name">
+            Schema Name <RequiredMark />
+          </label>
+          <input
+            id="schema-builder-name"
+            className="form-control"
+            style={nameMissing ? INVALID_FIELD : undefined}
+            aria-invalid={nameMissing || undefined}
+            value={schemaName}
+            onChange={e => setSchemaName(e.target.value)}
+            placeholder="e.g. Six-Axis-Robot-Arm-Standard"
+            title="Unique schema name"
+          />
+          {nameMissing && <FieldError>Give the schema a name before saving it.</FieldError>}
         </div>
 
         <div className="form-group">
@@ -108,9 +160,17 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Semantic ID <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span></label>
+          {/* The tip is a sibling of the label, never a child: a button inside a label answers to
+              the label's name too, and the field stops being the only thing that does. */}
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '7px' }}>
+            <label className="form-label" style={{ marginBottom: 0 }} htmlFor="schema-builder-semantic-id">
+              Semantic ID <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span>
+            </label>
+            <HelpTip text={SEMANTIC_ID_HELP} label="What a semantic ID is for" />
+          </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <input
+              id="schema-builder-semantic-id"
               className="form-control mono"
               style={{ flex: '1 1 auto', fontSize: '11px' }}
               value={semanticId}
@@ -135,7 +195,11 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Metrics <span className="section-count">{selectedMetrics.length} selected</span></label>
+          <label className="form-label">
+            Metrics <RequiredMark />
+            <span className="section-count">{selectedMetrics.length} selected</span>
+          </label>
+          {metricsMissing && <FieldError>Tick at least one metric. A schema with none constrains nothing.</FieldError>}
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
             <input
               className="form-control"
@@ -198,70 +262,18 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
           </div>
         </div>
 
-        {selectedMetrics.length > 0 && (
-          <>
-            <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0', paddingTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              Fill these in to download a spec sheet or provision a device with this schema attached — not required just to save the schema.
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Device Name</label>
-              <input className="form-control" value={deviceName} onChange={e => setDeviceName(e.target.value)} placeholder="e.g. Robot_Arm_04" title="Friendly label for the device record" />
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                A display label. The Sparkplug ID the device must publish under is issued when the record is created, and appears in the spec sheet.
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Assigned Edge Gateway</label>
-              <select className="form-control" value={gatewayId} onChange={e => setGatewayId(e.target.value)}>
-                <option value="">— Unassigned Gateway —</option>
-                {/* Disabled rather than absent (#144); see DevicesTab's picker. */}
-                {(gateways || []).filter(g => !g.is_archived).map(g => (
-                  <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
-                    {g.gateway_name}{gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Group ID</label>
-              <input className="form-control" value={groupId} onChange={e => setGroupId(e.target.value)} title="Sparkplug B group id -- used only to render the topic string below" />
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Not stored — only used to compute the topic string in a downloaded spec sheet.
-              </div>
-            </div>
-          </>
-        )}
-
-        <div className="modal-actions" style={{ flexWrap: 'wrap' }}>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={!!submitting} title="Discard and close">Cancel</button>
-          {/* Both submissions save the same schema, so one running locks the other, and only the
-              one clicked reports; `submitting` names the mode. */}
+        <div className="modal-actions">
+          <button className="btn btn-ghost" onClick={onCancel} disabled={submitting} title="Discard and close">Cancel</button>
+          {/* Never disabled while the form is incomplete: the click is what tells a reader what is
+              missing, and a disabled button cannot be clicked. */}
           <ActionButton
-            className={`btn btn-primary ${!canSave ? 'btn-disabled' : ''}`}
-            disabled={!canSave || !!submitting}
-            pending={submitting === 'save'}
+            className="btn btn-primary"
+            pending={submitting}
             pendingLabel="Saving…"
-            onClick={() => canSave && runSubmit('save', () => handleSubmit('save'))}
-            title="Save the schema only"
+            onClick={handleSave}
+            title={canSave ? "Save this schema" : `Still needed: ${missing.join(" and ")}`}
           >
-            Save Schema Only
-          </ActionButton>
-          {/* There is no separate "Save & Provision Device" action: provisioning is a prerequisite
-              of the spec sheet, which quotes the Sparkplug ID the platform issues. */}
-          <ActionButton
-            className={`btn btn-primary ${!canUseDeviceActions ? 'btn-disabled' : ''}`}
-            disabled={!canUseDeviceActions || !!submitting}
-            pending={submitting === 'download'}
-            // Three round trips deep -- schema, device, spec sheet -- so this is the longest wait
-            // on the page and the one most likely to be clicked twice.
-            pendingLabel="Provisioning…"
-            onClick={() => canUseDeviceActions && runSubmit('download', () => handleSubmit('download'))}
-            title={!canUseDeviceActions ? 'Enter a device name first' : 'Save the schema, provision the device, and download a spec sheet quoting its issued Sparkplug ID'}
-          >
-            <IconDownload size={13} /> Save, Provision &amp; Download Spec
+            Save Schema
           </ActionButton>
         </div>
       </div>

@@ -7,7 +7,6 @@ import { SchemaDetailModal } from '../modals/SchemaDetailModal'
 import { SchemaForkModal } from '../modals/SchemaForkModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { downloadJSON } from '../../utils/downloadJSON'
-import { deviceSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
 import {
   schemaVersionLabel, schemaStatus, statusBadgeClass, statusLabel, isSchemaEditable,
   canForkSchema, nextVersion, isCurrentSchema, SCHEMA_STATUS
@@ -31,7 +30,6 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectDevice, initialSchemaId }) {
   const [schemas, setSchemas]         = useState([])
   const [catalog, setCatalog]         = useState([])
-  const [gateways, setGateways]       = useState([])
   const [devices, setDevices]         = useState([])
   const [loading, setLoading]         = useState(true)
   const [showValidateModal, setShowValidateModal] = useState(false)
@@ -59,14 +57,15 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     try {
       // The catalog is still read here, for the schema builder and the detail modal's metric
       // picker: a schema is built from catalog rows, so the page that builds one needs them even
-      // though it no longer lists them.
-      const [sch, cat, gw, dev] = await Promise.all([
+      // though it no longer lists them. Devices are for the per-schema counts. Gateways are not
+      // read at all -- a schema is bound to a device, and which gateway serves that device is the
+      // Devices page's question.
+      const [sch, cat, dev] = await Promise.all([
         api.get('/api/v1/schemas'),
         api.get('/api/v1/metric-catalog'),
-        api.get('/api/v1/gateways'),
         api.get('/api/v1/devices'),
       ])
-      setSchemas(sch); setCatalog(cat); setGateways(gw); setDevices(dev)
+      setSchemas(sch); setCatalog(cat); setDevices(dev)
     } finally { setLoading(false) }
   }, [])
 
@@ -84,46 +83,16 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
   const deviceCountFor = (schemaUuid) => devicesForSchema(schemaUuid).length
 
-  const handleBuilderSubmit = async (schemaPayload, deviceDetails, action) => {
+  /**
+   * Save a schema the builder composed, and nothing else. The dialog used to register a device and
+   * download a spec sheet as well; a device is given its schema on the Devices page, where its
+   * gateway, cell and conformance policy are decided too, and the definition is downloaded from
+   * this page's context panel.
+   */
+  const handleBuilderSubmit = async (schemaPayload) => {
     try {
-      const saved = await api.post('/api/v1/schemas', schemaPayload)
-
-      if (action === 'download') {
-        // Provisioning is a prerequisite: the spec sheet quotes the Sparkplug identifiers, which
-        // are derived from database ids.
-        const device = await api.post('/api/v1/devices', {
-          asset_name: deviceDetails.device_name,
-          active_gateway_id: deviceDetails.gateway_id,
-          schema_id: saved.schema_uuid
-        })
-
-        const gateway = gateways.find(g => g.gateway_id === deviceDetails.gateway_id)
-        const gatewayId = gateway
-          ? (gateway.sparkplug_id || gatewaySparkplugId(gateway.gateway_id))
-          : 'YOUR_GATEWAY_SPARKPLUG_ID'
-        const deviceId = device.sparkplug_id || deviceSparkplugId(device.id)
-
-        const spec = {
-          schema_name: schemaPayload.schema_name,
-          schema_uuid: saved.schema_uuid,
-          description: schemaPayload.description,
-          metrics: schemaPayload.schema_definition.properties,
-          required: schemaPayload.schema_definition.required,
-          device_name: deviceDetails.device_name,
-          device_sparkplug_id: deviceId,
-          gateway_name: gateway?.gateway_name || null,
-          gateway_sparkplug_id: gatewayId,
-          topics: {
-            dbirth: `spBv1.0/${deviceDetails.group_id}/DBIRTH/${gatewayId}/${deviceId}`,
-            ddata: `spBv1.0/${deviceDetails.group_id}/DDATA/${gatewayId}/${deviceId}`
-          }
-        }
-        downloadJSON(spec, `${deviceDetails.device_name}-spec-sheet.json`)
-        showToast(`Schema saved, device '${deviceDetails.device_name}' provisioned, spec sheet downloaded`, 'success')
-      } else {
-        showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success')
-      }
-
+      await api.post('/api/v1/schemas', schemaPayload)
+      showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success')
       setShowBuilderModal(false)
       load()
     } catch (e) {
@@ -327,7 +296,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               className={`btn btn-primary btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
               disabled={!canManageSchema}
               onClick={() => canManageSchema && setShowBuilderModal(true)}
-              title={!canManageSchema ? 'Requires Admin permissions' : 'Build a schema from the metric catalog, then download a spec sheet or provision a device'}
+              title={!canManageSchema ? 'Requires Admin permissions' : 'Compose a schema from catalog metrics. Attach it to a device on the Devices page'}
             >
               <IconClipboardList size={14} /> Build Schema from Catalog
             </button>
@@ -526,7 +495,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           onClose={() => setShowValidateModal(false)}
         />
       )}
-      {showBuilderModal && <SchemaBuilderModal catalog={catalog} gateways={gateways} onSubmit={handleBuilderSubmit} onCancel={() => setShowBuilderModal(false)} />}
+      {showBuilderModal && <SchemaBuilderModal catalog={catalog} onSubmit={handleBuilderSubmit} onCancel={() => setShowBuilderModal(false)} />}
       </div>
 
       <ContextPanel

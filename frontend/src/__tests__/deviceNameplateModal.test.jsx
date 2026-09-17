@@ -187,4 +187,62 @@ describe('DeviceNameplateModal', () => {
     expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
     expect(screen.getByText(/ask one of them to make the change/i)).toBeInTheDocument();
   });
+
+  /**
+   * The three manufacturer identifiers narrow from the model, to the ordered variant, to this
+   * individual machine, and not one of the three labels says so. A reader who guesses wrong puts a
+   * serial number where an AAS consumer expects a model name, and the export is wrong in a way
+   * nothing validates.
+   */
+  describe('the fields a label does not define', () => {
+    const tipFor = (label) => screen.getByRole('button', { name: new RegExp(`What ${label} means`, 'i') });
+
+    it('explains each of the three manufacturer identifiers', async () => {
+      respond();
+      render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
+      await waitFor(() => expect(fieldFor('Serial number')).toBeInTheDocument());
+
+      for (const label of ['Product designation', 'Product type', 'Serial number']) {
+        expect(tipFor(label)).toBeInTheDocument();
+      }
+    });
+
+    it("explains the product URI, which is the manufacturer's and not this platform's", async () => {
+      respond();
+      render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
+      await waitFor(() => expect(fieldFor('Product URI')).toBeInTheDocument());
+
+      fireEvent.click(tipFor('Product URI'));
+      expect(screen.getByRole('tooltip').textContent).toMatch(/not this platform/i);
+    });
+
+    it('distinguishes the year from the date, which are the other confusable pair', async () => {
+      respond();
+      render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
+      await waitFor(() => expect(fieldFor('Year of construction')).toBeInTheDocument());
+
+      fireEvent.click(tipFor('Year of construction'));
+      expect(screen.getByRole('tooltip').textContent).toMatch(/Date of manufacture/);
+    });
+
+    it('leaves a self-evident label alone', async () => {
+      // A tip on every field is a tip on none: the reader stops looking.
+      respond();
+      render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
+      await waitFor(() => expect(fieldFor('Manufacturer')).toBeInTheDocument());
+
+      expect(screen.queryByRole('button', { name: /What Manufacturer means/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /What Hardware version means/i })).toBeNull();
+    });
+
+    it('keeps the field the only thing the label answers to', async () => {
+      // The tip is a sibling of the label, not a child: a button inside a label is labelled by it
+      // too, and every getByLabelText in this file would then be ambiguous.
+      respond();
+      render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
+      await waitFor(() => expect(fieldFor('Product URI')).toBeInTheDocument());
+
+      expect(fieldFor('Product URI').tagName).toBe('INPUT');
+    });
+  });
 });
