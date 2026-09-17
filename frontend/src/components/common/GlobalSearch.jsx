@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { isUuid } from '../../utils/isUuid'
 import { buildTargets, matchTargets } from '../../searchIndex'
-import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList, IconFactory, IconHistory } from './Icons'
+import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList, IconFactory, IconHistory, IconX } from './Icons'
 
 /**
  * One box that answers three questions: where is the page called X (the nav), where is the card or
@@ -167,6 +167,15 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
     return () => document.removeEventListener('mousedown', onPointer)
   }, [open])
 
+  /* Empties the box and stays in it -- the difference from `dismiss`, which also closes the panel
+     and gives up the focus. `entities` is cleared with the text because the lookup is debounced:
+     left alone, the previous query's hits would sit under an empty box until the timer fired. */
+  const clear = () => {
+    setQuery('')
+    setEntities([])
+    inputRef.current?.focus()
+  }
+
   const dismiss = () => {
     setOpen(false)
     setQuery('')
@@ -241,9 +250,30 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
           spellCheck="false"
         />
         {/* The shortcut, printed rather than left to be discovered. It is hidden once there is
-            something in the box, where it would be competing with the text it sits beside. */}
+            something in the box, where it would be competing with the text it sits beside -- and
+            that is what leaves this slot free for the control below, which is wanted at exactly
+            the moment the hint is not. */}
         {!trimmed && (
           <span className="global-search-kbd" aria-hidden="true">{isMac() ? '⌘' : 'Ctrl'} K</span>
+        )}
+
+        {/* Escape already did this, but only for somebody who knew. `query` rather than `trimmed`:
+            a box holding only spaces looks empty and is not, and the control that empties it should
+            appear whenever there is anything to empty. */}
+        {query && (
+          <button
+            type="button"
+            className="global-search-clear"
+            // The box keeps the focus, so the next thing typed lands where it was going anyway.
+            // `mousedown` is where the blur would happen, which is why it is stopped there and not
+            // on the click.
+            onMouseDown={e => e.preventDefault()}
+            onClick={clear}
+            aria-label="Clear the search"
+            title="Clear the search (Esc)"
+          >
+            <IconX size={13} />
+          </button>
         )}
       </div>
 

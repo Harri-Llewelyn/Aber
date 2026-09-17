@@ -177,6 +177,61 @@ describe('the palette', () => {
     expect(screen.queryByRole('listbox')).toBeNull()
   })
 
+  describe('emptying the box', () => {
+    const clearButton = () => screen.queryByRole('button', { name: 'Clear the search' })
+
+    it('offers nothing to clear while the box is empty', () => {
+      render(<GlobalSearch {...props()} />)
+      fireEvent.focus(screen.getByRole('combobox'))
+      expect(clearButton()).toBeNull()
+      // The shortcut hint has the slot until there is something to clear.
+      expect(document.querySelector('.global-search-kbd')).toBeTruthy()
+    })
+
+    it('takes the hint\'s place rather than widening the box', () => {
+      render(<GlobalSearch {...props()} />)
+      type('cold storage')
+      expect(clearButton()).toBeTruthy()
+      expect(document.querySelector('.global-search-kbd')).toBeNull()
+    })
+
+    it('empties the box and keeps the focus in it', async () => {
+      render(<GlobalSearch {...props()} />)
+      const input = type('cold storage')
+      await screen.findByRole('listbox')
+
+      fireEvent.click(clearButton())
+
+      expect(input).toHaveValue('')
+      // Emptied, not dismissed: the next thing typed lands where it was going anyway.
+      expect(document.activeElement).toBe(input)
+      expect(screen.queryByRole('listbox')).toBeNull()
+    })
+
+    it('appears for whitespace, which looks empty and is not', () => {
+      render(<GlobalSearch {...props()} />)
+      type('   ')
+      // No panel -- nothing is searched -- but the box is not empty, so it can be emptied.
+      expect(screen.queryByRole('listbox')).toBeNull()
+      expect(clearButton()).toBeTruthy()
+    })
+
+    it('drops the previous query\'s asset hits with the text', async () => {
+      /* The estate lookup is debounced, so without clearing `entities` the last query's rows would
+         sit under an empty box until the timer fired. */
+      api.searchAssets.mockResolvedValue([{ kind: 'device', id: UUID, name: 'CNC_01' }])
+      render(<GlobalSearch {...props()} />)
+      const input = type('CNC')
+      expect(await screen.findByText('CNC_01')).toBeInTheDocument()
+
+      fireEvent.click(clearButton())
+
+      expect(screen.queryByText('CNC_01')).toBeNull()
+      fireEvent.change(input, { target: { value: 'cold storage' } })
+      expect(screen.queryByText('CNC_01')).toBeNull()
+    })
+  })
+
   it('navigates to a card by opening the page that holds it', async () => {
     const p = props()
     render(<GlobalSearch {...p} />)
