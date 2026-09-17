@@ -155,21 +155,38 @@ describe('Digital Thread filter bar', () => {
     await waitFor(() => expect(lastThreadUrl()).toContain('action=DELETE'))
   })
 
-  // Resolved to ids rather than filtered after the fetch: the row limit is applied by the
-  // database, so post-filtering a 200-row page would show whichever fraction happened to match.
-  it('resolves an entity NAME to ids and filters on those', async () => {
+  /* SENT AS THE TYPED TEXT, not resolved to ids here. It is still a database predicate rather than
+     a filter over the page -- the row limit is applied by the database, so post-filtering a 200-row
+     page would show whichever fraction happened to match -- but the matching happens where the
+     audit snapshots are, which is the only place a deleted asset still has a name. */
+  it('sends an entity NAME to the database to match', async () => {
     await show()
     fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'Simulated' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('entity_ids=dev-1'))
-    expect(lastThreadUrl()).not.toContain('dev-2')
+    await waitFor(() => expect(lastThreadUrl()).toContain('search=Simulated'))
+    // And no longer resolves it against the live lists first, which is what made a deleted asset
+    // unsearchable: no match there meant an empty id list, which drew an empty thread.
+    expect(lastThreadUrl()).not.toContain('entity_ids=')
   })
 
   it('still matches on a raw id, so an id pasted from elsewhere works', async () => {
     await show()
     fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'gw-1' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('entity_ids=gw-1'))
+    await waitFor(() => expect(lastThreadUrl()).toContain('search=gw-1'))
+  })
+
+  it('searches for a name no live asset has, instead of drawing an empty thread', async () => {
+    /* THE BUG THIS REPLACES. `Decommissioned Line` is in the fixture's audit payload and in no
+       live list, so resolving the name against the live lists produced no ids -- and an empty id
+       list is not "no filter", it is "these, of which there are none". The page asked for nothing
+       and drew nothing, on the one question it exists to answer. */
+    await show()
+    fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/),
+      { target: { value: 'Decommissioned' } })
+
+    await waitFor(() => expect(lastThreadUrl()).toContain('search=Decommissioned'))
+    expect(lastThreadUrl()).not.toContain('entity_ids=')
   })
 
   it('counts the active filters and clears them together, the time range included', async () => {
@@ -1236,7 +1253,7 @@ describe('Digital Thread — removed tag filter', () => {
     await show()
     fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'Press' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('entity_ids=dev-2'))
+    await waitFor(() => expect(lastThreadUrl()).toContain('search=Press'))
   })
 })
 

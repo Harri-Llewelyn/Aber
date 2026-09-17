@@ -846,22 +846,20 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   const hasMoreToLoad = isPartial(events.length, totalMatching)
 
   /**
-   * A name search resolves to matching ids so the row limit applies in the database, as the action
-   * filter and the time range do.
+   * The search, sent as the typed text (0115).
+   *
+   * IT USED TO BE RESOLVED HERE, against `entityNames` -- the LIVE tables -- and sent as a list of
+   * ids. So a search naming something that had been deleted matched no live row, sent an EMPTY id
+   * list, and rendered as an empty thread: the one question this page exists to answer, answered
+   * "nothing happened". The lane label never had that problem, because it falls back to the audit
+   * snapshot; `p_search` reads the same fields, so the search now finds what the timeline draws.
+   *
+   * Still a database predicate rather than a filter over the page, which is what makes the row
+   * limit apply to rows that will be shown, as the action filter and the time range do.
    */
-  const namedEntityIds = useMemo(() => {
-    const q = nameFilter.trim().toLowerCase()
-    if (!q) return null
-    return [...entityNames.entries()]
-      .filter(([id, name]) =>
-        String(name || '').toLowerCase().includes(q) || String(id).toLowerCase().includes(q))
-      .map(([id]) => id)
-  }, [nameFilter, entityNames])
+  const search = nameFilter.trim()
 
-  /**
-   * Where the next page starts; null at the end. The server's answer rather than a short page: the
-   * description search in api.js can filter a page down to nothing while the thread continues.
-   */
+  /** Where the next page starts; null at the end. Null is the only end-of-data signal (0077). */
   const [nextCursor, setNextCursor] = useState(null)
   const [loadingMore, setLoadingMore] = useState(false)
 
@@ -876,7 +874,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     let url = `/api/v1/digital-thread?limit=${PAGE_SIZE}`
     if (entityTypeFilter) url += `&entity_type=${encodeURIComponent(entityTypeFilter)}`
     if (actionFilter)     url += `&action=${encodeURIComponent(actionFilter)}`
-    if (namedEntityIds)   url += `&entity_ids=${encodeURIComponent(namedEntityIds.join(','))}`
+    if (search)           url += `&search=${encodeURIComponent(search)}`
     // Evaluated here, not held in state: see timeWindow's note on a rolling window going stale
     // under auto-refresh.
     const { since, until } = timeWindow(rangePreset, customStart, customEnd)
@@ -890,7 +888,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       url += `&before_id=${encodeURIComponent(cursor.id)}`
     }
     return url
-  }, [entityTypeFilter, actionFilter, namedEntityIds, rangePreset, customStart, customEnd, showPurged])
+  }, [entityTypeFilter, actionFilter, search, rangePreset, customStart, customEnd, showPurged])
 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
@@ -1335,11 +1333,34 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
           ) : events.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon"><IconHistory size={36} /></div>
-              <div className="empty-text">
-                {rangeIsFiltering
-                  ? 'No digital thread events in this time range. Widen it, or switch back to All time.'
-                  : 'No digital thread events match the filter criteria.'}
-              </div>
+              {/* THE DELETED CASE FIRST, because it is the one the reader can act on and the one
+                  they most often arrive at: `purged_assets` is counted over everything the filters
+                  select INCLUDING the search, so a search naming something deleted comes back with
+                  no events and a non-zero count. Without this the page says "nothing matches" while
+                  holding the answer behind a toggle the reader has no reason to try. */}
+              {!showPurged && purgedAssetCount > 0 ? (
+                <>
+                  <div className="empty-text">
+                    Nothing here matches, but {purgedAssetCount === 1
+                      ? 'one deleted asset does'
+                      : `${purgedAssetCount} deleted assets do`}. Their records are kept; this view
+                    just hides them.
+                  </div>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => setShowPurged(true)}
+                    title="Include events for assets that are no longer in the database"
+                  >
+                    <IconTrash size={13} /> Show deleted assets ({purgedAssetCount})
+                  </button>
+                </>
+              ) : (
+                <div className="empty-text">
+                  {rangeIsFiltering
+                    ? 'No digital thread events in this time range. Widen it, or switch back to All time.'
+                    : 'No digital thread events match the filter criteria.'}
+                </div>
+              )}
             </div>
           ) : (
             <>

@@ -5,7 +5,7 @@
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
@@ -327,6 +327,61 @@ describe('the count labels', () => {
   it('count one event as one event', () => {
     expect(eventCountLabel(1, null)).toBe('1 event')
     expect(eventCountLabel(1, 9)).toBe('1 of 9 events')
+  })
+})
+
+/**
+ * Searching for something that has been deleted. Fixing the empty id list (0115) stopped the page
+ * ASKING for nothing; it did not stop the page SHOWING nothing, because deleted assets are hidden
+ * by default and a search naming one matches only hidden rows. The reader saw "no events match"
+ * with the answer behind a toggle they had no reason to try.
+ */
+describe('DigitalThreadTab empty state', () => {
+  it('offers the deleted assets when the filters match only those', async () => {
+    // `purged_assets` is counted over everything the filters select INCLUDING the search, so an
+    // empty page with a non-zero count is exactly this case and needs no second request.
+    respond(() => page([], { nextCursor: null, purgedAssets: 1, totalMatching: 0 }))
+    render(<DigitalThreadTab />)
+
+    expect(await screen.findByText(/one deleted asset does/i)).toBeInTheDocument()
+    /* SCOPED TO THE EMPTY STATE. The filter bar carries the same control whenever anything is
+       hidden, so an unscoped query finds two -- which is the arrangement here: the bar keeps the
+       toggle available once there are results, and this restates it where the reader is actually
+       looking and says why it would help. */
+    const offer = within(document.querySelector('.empty-state'))
+      .getByRole('button', { name: /Show deleted assets \(1\)/ })
+    fireEvent.click(offer)
+    // And the click asks the server for them, rather than only re-filtering what is held.
+    await waitFor(() => expect(threadCalls().some(u => u.includes('include_purged=true'))).toBe(true))
+  })
+
+  it('counts more than one of them in words that agree', async () => {
+    respond(() => page([], { nextCursor: null, purgedAssets: 4, totalMatching: 0 }))
+    render(<DigitalThreadTab />)
+    expect(await screen.findByText(/4 deleted assets do/i)).toBeInTheDocument()
+  })
+
+  it('says plainly that nothing matches when nothing does', async () => {
+    // No deleted assets behind the filter either: offering the toggle here would send the reader
+    // after something that is not there.
+    respond(() => page([], { nextCursor: null, purgedAssets: 0, totalMatching: 0 }))
+    render(<DigitalThreadTab />)
+
+    expect(await screen.findByText(/No digital thread events match the filter criteria/i))
+      .toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Show deleted assets/ })).toBeNull()
+  })
+
+  it('does not offer them again once they are shown', async () => {
+    respond(() => page([], { nextCursor: null, purgedAssets: 2, totalMatching: 0 }))
+    render(<DigitalThreadTab />)
+
+    await screen.findByText(/2 deleted assets do/i)
+    fireEvent.click(within(document.querySelector('.empty-state'))
+      .getByRole('button', { name: /Show deleted assets \(2\)/ }))
+    // Still empty, but the toggle is on: repeating the offer would be a loop with no exit.
+    await waitFor(() =>
+      expect(screen.getByText(/No digital thread events match the filter criteria/i)).toBeInTheDocument())
   })
 })
 
