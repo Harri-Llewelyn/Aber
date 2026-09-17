@@ -1919,6 +1919,11 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .area-thumb-header .zone-name { flex: 1 1 auto; }
 
+/* The description tip belongs to the name, not to the counts. `margin-left` is dropped because the
+   header's own `gap` is already the spacing, and `flex-shrink` because an 18px circle is the first
+   thing a flex row would squeeze when a long area name takes the line. */
+.area-thumb-header .help-tip { flex-shrink: 0; margin-left: 0; }
+
 /* The counts keep the right-hand end whether they share the name's line or take one below it. */
 .area-thumb-counts { flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
 

@@ -365,6 +365,16 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           >
             {ar.area_name}
           </button>
+          {/* What the area IS, for the areas that say. Only when there is one: a bare "?" on every
+              area without a description would be a question mark that answers nothing. The name's
+              own title carries the status, which is a different fact and changes on its own. */}
+          {ar.description && (
+            <HelpTip
+              label={`About ${ar.area_name}`}
+              text={ar.description}
+              size={12}
+            />
+          )}
           {/* The Area-Wide tally rides with the others rather than taking a line of its own under
               the plan: it is a count, and the counts live here. It is a breakdown, not an addition
               -- the gateway and device figures beside it already include these. */}
