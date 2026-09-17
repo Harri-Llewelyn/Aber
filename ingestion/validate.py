@@ -598,10 +598,13 @@ def seed_supabase():
         (VAL_MISMATCH_DEVICE, "mismatch"),
         (VAL_ALIAS_DEVICE, "alias"),
     ):
+        # NO `status`: the column defaults to OFFLINE, which is what a device the broker has never
+        # heard from is. Seeding ONLINE was both untrue -- nothing had published yet -- and a weaker
+        # fixture, because check 10 could then not tell a device the watchdog had correctly timed
+        # out from one whose birth had never registered at all. 0119 refuses the seeded row outright.
         res = supabase_client.table("devices").insert({
             "name": label,
             "gateway_id": SEEDED["gateway_uuid"],
-            "status": "ONLINE",
             "is_quarantined": False
         }).execute()
         row = res.data[0] if res.data else {}

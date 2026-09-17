@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   DEVICE_STATUS,
   deviceLifecycleStatus,
+  deviceStatusBadge,
   deviceStatusChipClass,
   deviceStatusBadgeClass,
   deviceStatusDotColor,
@@ -132,5 +133,75 @@ describe('rollupDeviceStatus', () => {
     for (const devices of combinations) {
       expect(['normal', 'idle', 'attention']).toContain(rollupDeviceStatus(devices))
     }
+  })
+})
+
+/**
+ * The badge adds one distinction the three lifecycle states cannot draw between them: a device
+ * registered here and never yet heard from is offline, but "Offline" alone says a machine went
+ * away, and this one has not arrived.
+ *
+ * This is where the defect showed. The row was written ONLINE at creation, so a machine that had
+ * never connected was drawn green -- and the AWAITING FIRST BIRTH treatment, which existed, was
+ * unreachable until the 24h overdue clock caught up with it.
+ */
+describe('deviceStatusBadge', () => {
+  const DAY = 24 * 60 * 60 * 1000
+  // A device with a birth behind it. The fixture above deliberately has none, because a row with
+  // no first_dbirth_at is the case this block is about.
+  const born = (over = {}) => device({
+    first_dbirth_at: new Date(Date.now() - DAY).toISOString(),
+    created_at: new Date(Date.now() - 2 * DAY).toISOString(),
+    ...over
+  })
+
+  it('says a device has never been born from the moment it is registered', () => {
+    const badge = deviceStatusBadge(device({ status: 'OFFLINE', created_at: new Date().toISOString() }))
+    expect(badge.label).toBe('AWAITING FIRST BIRTH')
+    expect(badge.awaitingBirth).toBe(true)
+  })
+
+  it('does not dress a minute-old registration as a fault', () => {
+    // Nothing is wrong with a device nobody has plugged in yet. The neutral badge is the point:
+    // a warning here would train operators to ignore the colour.
+    const badge = deviceStatusBadge(device({ status: 'OFFLINE', created_at: new Date().toISOString() }))
+    expect(badge.overdue).toBe(false)
+    expect(badge.badgeClass).toBe('badge-neutral')
+  })
+
+  it('escalates the same badge once the wait is overdue', () => {
+    // The label does not change, because nothing about the device did.
+    const badge = deviceStatusBadge(device({
+      status: 'OFFLINE', created_at: new Date(Date.now() - 5 * DAY).toISOString()
+    }))
+    expect(badge.label).toBe('AWAITING FIRST BIRTH')
+    expect(badge.overdue).toBe(true)
+    expect(badge.badgeClass).toBe('badge-warning')
+  })
+
+  it('reports it as offline for anything that asks the lifecycle question', () => {
+    // The shopfloor rollup, the map chip and the cell tile ask whether the cell is talking to the
+    // platform. For that question a device that never spoke and one that stopped are one answer,
+    // which is why this is not a fourth DEVICE_STATUS.
+    expect(deviceStatusBadge(device({ status: 'OFFLINE' })).status).toBe(DEVICE_STATUS.OFFLINE)
+  })
+
+  it('leaves a device that has actually been heard from to the lifecycle states', () => {
+    expect(deviceStatusBadge(born()).label).toBe(DEVICE_STATUS.ONLINE)
+    expect(deviceStatusBadge(born({ status: 'OFFLINE' })).label).toBe(DEVICE_STATUS.OFFLINE)
+    expect(deviceStatusBadge(born()).awaitingBirth).toBe(false)
+  })
+
+  it('ranks quarantined above it: a device waiting to be admitted is not waiting to be born', () => {
+    // A quarantined row always carries a first_dbirth_at anyway -- it is created by a DBIRTH that
+    // arrived -- but the precedence is stated rather than left to that.
+    const badge = deviceStatusBadge(device({ is_quarantined: true, first_dbirth_at: null }))
+    expect(badge.label).toBe(DEVICE_STATUS.QUARANTINED)
+  })
+
+  it('carries the title the badge is read through, not just a class', () => {
+    // The hover text is the only place the distinction is explained, so it is part of the contract.
+    expect(deviceStatusBadge(device({ status: 'OFFLINE' })).title).toMatch(/never sent a Sparkplug B DBIRTH/)
+    expect(deviceStatusBadge(born()).title).toMatch(/DBIRTH/)
   })
 })
