@@ -1273,6 +1273,43 @@ principal is findable by its id. The alternative — pinning those names into a 
 search could read them — would put the same three strings in two places and let them drift, to buy
 a search for three ids an operator reaches through Access Control anyway.
 
+### The lane a Manager was offered and denied (`0120`)
+
+**`audit_domain_for()` classifies every audit row into `asset` or `security`**, and
+`digital_thread_select_security` admits Administrator and Auditor alone. `schemas` had never been
+listed in either arm, so it took the fail-closed `ELSE 'security'` — while `DIGITAL_THREAD_ENTITY_TYPES`
+in `frontend/src/constants.js` declares the kind `asset`, and `digitalThreadEntityTypesFor()` uses
+that to decide which filters a role is offered. A Shopfloor_Manager was therefore shown a **Schemas**
+filter that the policy could only ever answer with an empty timeline.
+
+**The classifier's rule is who may PERFORM the act**, and writing a schema is Administrator-only, so
+the default was not obviously wrong. What makes it wrong is the table it audits:
+`schemas_select_authenticated` is `USING (true)`. Every authenticated user already reads the schema
+registry, so a security lane made the *history* of a world-readable table more secret than the table
+itself. The other three security lanes do not have that shape — `user_roles`, `system_settings` and
+`service_principals` are restricted to read as well as to write, so their lane and their contents
+agree. `schemas` is the one exception the rule needed, and the rule is otherwise kept.
+
+The binding was leaking regardless: `schema_id` is in `GOVERNANCE_FIELDS`, so a Manager could
+already see that a schema had been bound to a machine — just not that the schema had ever been
+written.
+
+**Existing rows are re-stamped.** `audit_domain` is written once, at INSERT, by
+`trg_digital_thread_stamp_domain`, so recorded rows would otherwise keep `security` while new ones
+land in `asset`. That split is not free: `test_audit_domain.py` holds the stored column and the
+classifier equal, and buying the exception means weakening that invariant — so the correction is the
+cheaper option. It is **not** the history-rewriting the append-only trigger's `HINT` refuses:
+`audit_domain` is the routing decision this migration changes, not a fact about the act, and no
+other column is touched. The trigger exempts `postgres`, which is the role db-init applies the chain
+as.
+
+**Nothing compared the two sides, which is why this survived twelve migrations.** The lane a kind
+belongs to was written down twice in two languages, and `TheDashboardAgreesWithTheClassifier` in
+`test_audit_domain.py` now reads the JS table and calls `audit_domain_for()` for each of its twelve
+entries. Only the JS side is parsed as text; the SQL side is the function itself, so the check
+cannot drift into agreeing with a regex instead of with the database.
+
+
 ### A shape that can be pruned (`0079`)
 
 **The table could only grow, and suppression was never going to fix that.** `0005` already removes
@@ -2440,10 +2477,12 @@ because the draft can be published by somebody else in between, and the approval
 right. `test_change_proposals.py` asserts that a draft published underneath an open proposal aborts
 its approval.
 
-**The audit row lands in the `security` domain**, because `audit_domain_for('schemas')` says so and
-`0070`'s rule is who may perform the act. So the proposing `Operator` cannot read it — what they can
-read is their own proposal row, carrying `status`, `decided_by` and `applied_thread_id`. The queue
-is the proposer's record; the thread is the platform's.
+**The audit row landed in the `security` domain**, because `audit_domain_for('schemas')` said so and
+`0070`'s rule is who may perform the act. [`0120`](#the-lane-a-manager-was-offered-and-denied-0120)
+moves `schemas` to the asset lane, which does not change the conclusion here: `digital_thread_select_asset`
+admits Administrator, Shopfloor_Manager and Auditor, so the proposing `Operator` still cannot read
+it. What they can read is their own proposal row, carrying `status`, `decided_by` and
+`applied_thread_id`. The queue is the proposer's record; the thread is the platform's.
 
 ### The queue moves to the assets an Operator can see (`0090`)
 

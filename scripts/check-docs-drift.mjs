@@ -541,7 +541,7 @@ function edgeFunctionNames() {
     // 0086 adds `device_nameplate` and `change_proposals` to the ASSET lane, which would otherwise
     // take the fail-closed 'security' branch. Rewritten in full because the classifier is one CASE.
     'public.platform_health_rows': '0092 narrows expected_publishers to devices behind a gateway that has reported at least once; 0001 holds the bound-to-a-gateway form that alerted on edge nodes nobody had deployed',
-    'public.audit_domain_for': '0086 adds device_nameplate and change_proposals to the asset lane; 0090 adds the three *_links lanes; 0097 adds areas; 0098 holds the form without area_floors, which 0113 retires',
+    'public.audit_domain_for': '0120 adds schemas to the asset lane, the one entity whose own table is readable by every authenticated user; 0086 adds device_nameplate and change_proposals; 0090 adds the three *_links lanes; 0097 adds areas; 0098 holds the form without area_floors, which 0113 retires',
     // 0087 narrows both gates from has_role(Administrator, Shopfloor_Manager) to
     // has_authority(schema:manage); the bodies are otherwise the baseline's.
     'public.fork_schema': '0087 narrows the gate to schema:manage; the baseline holds the pair',
