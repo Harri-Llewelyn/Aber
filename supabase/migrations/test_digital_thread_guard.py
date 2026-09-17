@@ -94,10 +94,13 @@ class AuditGuardTestCase(unittest.TestCase):
             "INSERT INTO public.gateways (id, name, cell_id, status) VALUES (%s, %s, %s, 'ONLINE')",
             (self.gateway_id, f"guard-gw-{self.gateway_id[:8]}", self.cell_id),
         )
+        # first_dbirth_at alongside the status, because devices_online_implies_born (0119) refuses
+        # ONLINE without one. These tests are about the audit guard rather than about liveness, and
+        # a fixture pretending to be live is now required to say when it was born.
         self.device_id = str(uuid.uuid4())
         self.cur.execute(
-            "INSERT INTO public.devices (id, name, gateway_id, status) "
-            "VALUES (%s, %s, %s, 'ONLINE')",
+            "INSERT INTO public.devices (id, name, gateway_id, status, first_dbirth_at) "
+            "VALUES (%s, %s, %s, 'ONLINE', now())",
             (self.device_id, f"guard-dev-{self.device_id[:8]}", self.gateway_id),
         )
         self._mark()

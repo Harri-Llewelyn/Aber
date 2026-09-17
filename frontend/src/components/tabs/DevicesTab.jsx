@@ -29,10 +29,10 @@ import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { TelemetryModal } from '../modals/TelemetryModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
 import {
+  DEVICE_STATUS,
   deviceLifecycleStatus,
-  deviceStatusBadgeClass,
-  deviceStatusDotColor,
-  deviceStatusTitle
+  deviceStatusBadge,
+  deviceStatusDotColor
 } from '../../utils/deviceStatus'
 import {
   SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, NON_CELL_SOURCES,
@@ -585,9 +585,13 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     } else if (cellFilter && (a.effective_cell_id || '') !== cellFilter) return false
     if (attentionOnly && !needsAttention(a)) return false
 
-    if (statusFilter === 'online'   && (a.status === 'OFFLINE' || a.is_archived)) return false
-    if (statusFilter === 'offline'  && a.status !== 'OFFLINE') return false
-    // "Never seen" is distinct from offline: the row exists but no DBIRTH has ever arrived.
+    // Through the shared helper, not a literal comparison, so a row with a null status lands in
+    // the same lane the badge draws it in rather than in neither.
+    if (statusFilter === 'online'   && (deviceLifecycleStatus(a) !== DEVICE_STATUS.ONLINE || a.is_archived)) return false
+    // "Never seen" is distinct from offline: the row exists but no DBIRTH has ever arrived. This
+    // option is labelled "Offline / DDEATH", which is a claim about something the device sent, so
+    // a device that has never sent anything is excluded here and answered by `unborn` below.
+    if (statusFilter === 'offline'  && (deviceLifecycleStatus(a) !== DEVICE_STATUS.OFFLINE || isNeverSeen(a))) return false
     if (statusFilter === 'unborn'   && !isNeverSeen(a)) return false
     if (statusFilter === 'overdue'  && !isProvisioningOverdue(a)) return false
     if (statusFilter === 'unmodelled' && unmodelledFor(a).length === 0) return false
@@ -846,25 +850,27 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
                               <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
                             </span>
-                          ) : isProvisioningOverdue(a) ? (
-                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Provisioned more than 24h ago and has never sent a DBIRTH">
-                              <IconAlertTriangle size={11} /> AWAITING FIRST BIRTH
-                            </span>
                           ) : (
-                            // The lifecycle badge, resolved by utils/deviceStatus.js so this cell,
-                            // the drawer and the shopfloor chip agree. Three states: ONLINE,
-                            // OFFLINE, QUARANTINED.
+                            // Resolved by utils/deviceStatus.js so this cell, the drawer and the
+                            // shopfloor chip agree: ONLINE, OFFLINE, QUARANTINED, and AWAITING
+                            // FIRST BIRTH for a device never heard from. The sentence-casing below
+                            // renders that last label as "Awaiting first birth" unaided.
                             (() => {
-                              const status = deviceLifecycleStatus(a)
+                              const badge = deviceStatusBadge(a)
                               const alert = alertFor(a)
                               return (
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
                                   <span
-                                    className={`badge ${deviceStatusBadgeClass(status)}`}
-                                    title={deviceStatusTitle(status)}
+                                    className={`badge ${badge.badgeClass}`}
+                                    style={badge.overdue ? { background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' } : undefined}
+                                    title={badge.title}
                                   >
-                                    <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
-                                    {status.charAt(0) + status.slice(1).toLowerCase()}
+                                    {/* The triangle replaces the dot only once the wait is overdue:
+                                        a device registered a minute ago is not a fault. */}
+                                    {badge.overdue
+                                      ? <IconAlertTriangle size={11} />
+                                      : <span className="badge-dot" style={{ background: deviceStatusDotColor(badge.status) }} />}
+                                    {badge.label.charAt(0) + badge.label.slice(1).toLowerCase()}
                                   </span>
                                   {/* The alert sits beside the lifecycle state, not instead of it:
                                       an overheating machine is still ONLINE. */}
@@ -1416,14 +1422,14 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             {/* One badge for the lifecycle state. ARCHIVED stays separate because it is a separate
                 axis. */}
             {(() => {
-              const status = deviceLifecycleStatus(selectedDevice)
+              const badge = deviceStatusBadge(selectedDevice)
               return (
                 <span
-                  className={`badge ${deviceStatusBadgeClass(status)}`}
+                  className={`badge ${badge.badgeClass}`}
                   style={{ fontSize: '11px' }}
-                  title={deviceStatusTitle(status)}
+                  title={badge.title}
                 >
-                  {status}
+                  {badge.label}
                 </span>
               )
             })()}

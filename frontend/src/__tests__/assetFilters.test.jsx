@@ -170,6 +170,36 @@ describe('DevicesTab filters', () => {
     expect(screen.getByText('Robot_03')).toBeTruthy()
   })
 
+  it('keeps a device that has never spoken out of the "Offline / DDEATH" lane', async () => {
+    // The two are neighbouring options with different meanings, and the label of this one is a
+    // claim: a DDEATH is something a device sends, and Robot_03 has never sent anything. Before
+    // the status fix the question could not even arise -- a never-born device was stored ONLINE.
+    api.get.mockImplementation(routeGet())
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+
+    fireEvent.change(screen.getByTitle('Filter by operational state'), { target: { value: 'offline' } })
+    await waitFor(() => expect(screen.getByText('CNC_02')).toBeTruthy())
+    expect(screen.queryByText('Robot_03')).toBeNull()
+  })
+
+  it('draws a registered device as awaiting its first birth, never as running', async () => {
+    // The defect, at the render site: Robot_03 has never sent a DBIRTH, and the row must not carry
+    // an Online badge for it under any status the database happens to hold.
+    api.get.mockImplementation(routeGet())
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+
+    fireEvent.change(screen.getByTitle('Filter by operational state'), { target: { value: 'unborn' } })
+    await waitFor(() => expect(screen.getByText('Robot_03')).toBeTruthy())
+
+    // Scoped to the row: "Online" is also the text of an option in the filter above it.
+    const row = screen.getByText('Robot_03').closest('tr')
+    expect(within(row).getByText('Awaiting first birth')).toBeTruthy()
+    expect(within(row).queryByText('Online')).toBeNull()
+    expect(row.querySelector('.badge-online')).toBeNull()
+  })
+
   it('surfaces only devices needing operator action', async () => {
     api.get.mockImplementation(routeGet())
     renderDevices()

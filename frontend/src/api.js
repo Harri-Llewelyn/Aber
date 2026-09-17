@@ -2187,7 +2187,10 @@ const apiMethods = {
         asset_type: emptyToNull(body.asset_type),
         connection_method: emptyToNull(body.connection_method),
         schema_id: emptyToNull(body.schema_id),
-        status: body.status || 'ONLINE',
+        // NO `status`. It is observed, never asserted: ingestion writes ONLINE on a DBIRTH, and the
+        // column defaults to OFFLINE for a device that has not connected. Sending one here claims a
+        // machine is running before the platform has heard from it, which
+        // devices_online_implies_born now refuses.
         // Omitted entirely when the caller sends nothing: cell_id has no column default, and NULL
         // means "inherit from the gateway".
         ...locationFieldsFrom(body)
@@ -2564,10 +2567,12 @@ const apiMethods = {
       // are keyed by sparkplug_id. gateway_id is written from whichever key the caller supplied (the
       // UI models it as `active_gateway_id`).
       const patch = {
-        name: body.asset_name,
-        status: body.status,
-        is_quarantined: body.is_quarantined
+        name: body.asset_name
       };
+      // Guarded like the optional fields below, not assigned unconditionally: both are what the
+      // platform observed rather than what an operator asked for, and no edit form sends either.
+      if ('status' in body) patch.status = body.status;
+      if ('is_quarantined' in body) patch.is_quarantined = body.is_quarantined;
       if ('asset_type' in body) patch.asset_type = emptyToNull(body.asset_type);
       // emptyToNull, so clearing the field in the form stores NULL rather than ''. Absent and empty
       // are the same thing to every reader of a description, and two representations of one state is

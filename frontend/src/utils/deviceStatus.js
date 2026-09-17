@@ -7,6 +7,7 @@
  * connectivity lifecycle. Threshold and condition alerting belongs in Grafana; what is left here
  * is what the platform knows about the device, from the database.
  */
+import { isNeverSeen, isProvisioningOverdue } from './deviceProvisioning';
 
 /**
  * The three lifecycle states, in the order of precedence they are resolved in. QUARANTINED
@@ -83,6 +84,44 @@ export function deviceStatusDotColor(status) {
   if (status === DEVICE_STATUS.ONLINE) return 'var(--success)';
   if (status === DEVICE_STATUS.QUARANTINED) return 'var(--warning)';
   return 'var(--text-muted)';
+}
+
+/**
+ * The badge one device wears: the lifecycle state, plus the distinction the three states cannot
+ * draw between a device that went quiet and one never heard from. Read `first_dbirth_at`, which is
+ * write-once, so the answer does not flicker with the last message.
+ *
+ * Not a fourth DEVICE_STATUS: the rollup, the map chip and the cell tile ask whether the cell is
+ * talking to the platform, and for that question the two are one answer. `status` here is that
+ * answer, and `overdue` (deviceProvisioning.js) changes only how loudly the badge is drawn.
+ */
+export function deviceStatusBadge(device) {
+  if (isNeverSeen(device)) {
+    const overdue = isProvisioningOverdue(device);
+    return {
+      label: 'AWAITING FIRST BIRTH',
+      status: DEVICE_STATUS.OFFLINE,
+      awaitingBirth: true,
+      overdue,
+      badgeClass: overdue ? 'badge-warning' : 'badge-neutral',
+      title: overdue
+        ? 'Awaiting first birth — provisioned more than 24h ago and has never sent a Sparkplug B '
+          + 'DBIRTH. Check that the device is powered, reachable and publishing under the Sparkplug '
+          + 'ID this platform issued it'
+        : 'Awaiting first birth — registered here and has never sent a Sparkplug B DBIRTH. Nothing '
+          + 'is wrong yet: the device has not connected for the first time',
+    };
+  }
+
+  const status = deviceLifecycleStatus(device);
+  return {
+    label: status,
+    status,
+    awaitingBirth: false,
+    overdue: false,
+    badgeClass: deviceStatusBadgeClass(status),
+    title: deviceStatusTitle(status),
+  };
 }
 
 /** Hover text explaining what the state means and where it came from. */

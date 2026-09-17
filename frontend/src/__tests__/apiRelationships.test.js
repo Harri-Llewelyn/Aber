@@ -240,6 +240,35 @@ describe('device gateway assignment', () => {
   });
 });
 
+/**
+ * Liveness is OBSERVED. Ingestion writes ONLINE on a DBIRTH and the column defaults to OFFLINE;
+ * the UI registers a device and says nothing at all about whether it is running.
+ *
+ * The defect these lock down: the insert defaulted `status` to 'ONLINE' when the caller sent none,
+ * and no caller ever sent one -- so every device ever registered through the UI was drawn green
+ * before it had connected, and stayed green, because the liveness watchdog only times out devices
+ * it has actually heard from. 0119 adds the constraint that refuses such a row outright.
+ */
+describe('device liveness is never asserted by the UI', () => {
+  it('sends no status at all when registering a device, so the column default stands', async () => {
+    await api.post('/api/v1/devices', { asset_name: 'KUKA_r2e', active_gateway_id: 'gw-9' });
+    expect(callFor('devices').payload).not.toHaveProperty('status');
+  });
+
+  it('sends no status on an ordinary edit either', async () => {
+    // The device form sends name, gateway, schema and location. An unguarded `status: body.status`
+    // here is one careless caller away from writing the same lie through the edit path.
+    await api.put('/api/v1/devices/dev-1', { asset_name: 'KUKA_r2e', schema_id: 'schema-1' });
+    expect(callFor('devices').payload).not.toHaveProperty('status');
+    expect(callFor('devices').payload).not.toHaveProperty('is_quarantined');
+  });
+
+  it('still writes a status the caller does state, so the quarantine paths keep working', async () => {
+    await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', status: 'OFFLINE', is_quarantined: false });
+    expect(callFor('devices').payload).toMatchObject({ status: 'OFFLINE', is_quarantined: false });
+  });
+});
+
 describe('device DBIRTH parameters', () => {
   // asset_config is keyed by sparkplug_id, a generated column derived from the device's UUID, so
   // the UI derives it locally: 'dev' + the first 21 unhyphenated hex chars.
