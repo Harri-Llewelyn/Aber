@@ -165,7 +165,7 @@ describe('the page', () => {
   it('sends the coerced value, not the string from the input', async () => {
     await show()
     fireEvent.change(screen.getByLabelText('Lanes drawn before folding'), { target: { value: '45' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
 
     await waitFor(() => expect(api.patchSetting).toHaveBeenCalled())
     expect(api.patchSetting).toHaveBeenCalledWith('ui.digital_thread_lane_limit', 45)
@@ -176,7 +176,7 @@ describe('the page', () => {
     const input = screen.getByLabelText('Lanes drawn before folding')
     // The DOM number input would reject this itself in a browser; the page must not depend on that.
     fireEvent.change(input, { target: { value: 'not-a-number' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
 
     await waitFor(() => expect(screen.getByText(/Enter a number/i)).toBeInTheDocument())
     expect(api.patchSetting).not.toHaveBeenCalled()
@@ -190,7 +190,7 @@ describe('the page', () => {
     )
     await show()
     fireEvent.change(screen.getByLabelText('Lanes drawn before folding'), { target: { value: '45' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
 
     await waitFor(() =>
       expect(screen.getByText(/requires the Administrator role/i)).toBeInTheDocument())
@@ -200,9 +200,11 @@ describe('the page', () => {
     await show()
     const input = screen.getByLabelText('Lanes drawn before folding')
     fireEvent.change(input, { target: { value: '45' } })
-    fireEvent.click(screen.getByRole('button', { name: /Discard/i }))
+    // Awaited for the reason given above: neither control is promised in the tick that changed
+    // the input, and a synchronous lookup here is a pass that depends on how busy the run is.
+    fireEvent.click(await screen.findByRole('button', { name: /Discard/i }))
 
-    expect(input.value).toBe('30')
+    await waitFor(() => expect(input.value).toBe('30'))
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull()
   })
 

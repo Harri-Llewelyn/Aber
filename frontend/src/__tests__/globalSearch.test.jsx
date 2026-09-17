@@ -153,7 +153,8 @@ describe('the palette', () => {
     onSelectCell: vi.fn(),
     onSelectArea: vi.fn(),
     onSelectSchema: vi.fn(),
-    onSelectSetting: vi.fn()
+    onSelectSetting: vi.fn(),
+    onSelectThread: vi.fn()
   })
 
   const type = (value) => {
@@ -270,6 +271,69 @@ describe('the palette', () => {
       const message = await screen.findByText(/visible to you/i)
       expect(message.textContent).toMatch(/cell, gateway, device or schema/i)
       expect(message.textContent).not.toMatch(/does not exist/i)
+    })
+
+    /**
+     * THE ID HAD ONE CONSUMER AND IT COVERED FIVE KINDS. `resolveId` probes areas, cells,
+     * gateways, devices and schemas; the Digital Thread records twelve, so the copyable Entity ID
+     * in its drawer was a dead end for a setting, a backup, a proposal or a person. The thread's
+     * own search matches `entity_id` whatever kind carries it, so this row is the answer for all
+     * seven -- and it is offered for the other five too, because "what happened to this" is the
+     * second question somebody pasting an id is asking.
+     */
+    it('offers the Digital Thread for an id no asset probe could name', async () => {
+      api.resolveId.mockResolvedValue([])
+      render(<GlobalSearch {...props()} />)
+      type(UUID)
+
+      expect(await screen.findByText(/Find this ID in the Digital Thread/)).toBeTruthy()
+    })
+
+    it('offers it for a resolved id as well, beneath the asset itself', async () => {
+      api.resolveId.mockResolvedValue([{ kind: 'device', id: UUID, name: 'Haas VF-2' }])
+      render(<GlobalSearch {...props()} />)
+      type(UUID)
+
+      await screen.findByText('Haas VF-2')
+      const rows = [...document.querySelectorAll('.global-search-result-label')]
+        .map(el => el.textContent)
+      // The asset first: it is the more specific answer, and a row that moves under the cursor
+      // once the lookup lands is the reason the static index is ordered this way too.
+      expect(rows).toEqual(['Haas VF-2', 'Find this ID in the Digital Thread'])
+    })
+
+    it('hands over the id in the box, not the one before it', async () => {
+      /* The row carries the term, so correcting a digit has to move it. Two unresolved ids in a
+         row leave the asset list empty and `looksLikeId` true throughout, which is the shape that
+         would strand the first id on the row.
+
+         It cannot strand one TODAY: `matches` is a fresh `[]` on every render for an id, so the
+         memo recomputes regardless of its dependency list. This pins the behaviour rather than
+         the mechanism, which is the half that should outlive a change to either. */
+      api.resolveId.mockResolvedValue([])
+      const p = props()
+      render(<GlobalSearch {...p} />)
+      type(UUID)
+      await screen.findByText(/Find this ID in the Digital Thread/)
+
+      const second = '11111111-2222-4333-8444-555555555555'
+      type(second)
+      await waitFor(() => expect(api.resolveId).toHaveBeenCalledWith(second))
+
+      fireEvent.click(screen.getByText(/Find this ID in the Digital Thread/))
+      expect(p.onSelectThread).toHaveBeenCalledWith(second)
+    })
+
+    it('hands the id to the thread rather than to an asset page', async () => {
+      api.resolveId.mockResolvedValue([])
+      const p = props()
+      render(<GlobalSearch {...p} />)
+      type(UUID)
+
+      fireEvent.click(await screen.findByText(/Find this ID in the Digital Thread/))
+      expect(p.onSelectThread).toHaveBeenCalledWith(UUID)
+      // Not an entity hit: those open a page for a kind this id may not have.
+      expect(p.onSelectDevice).not.toHaveBeenCalled()
     })
 
     it('does not run the static matcher against it', async () => {

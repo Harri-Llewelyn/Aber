@@ -1,6 +1,7 @@
 import React, { useRef } from 'react'
 import { IconX, IconAlertTriangle, IconAlertCircle, IconExternalLink } from './Icons'
 import CopyableId from './CopyableId'
+import { HelpTip } from './HelpTip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { grafanaAlertUrl } from '../../constants'
 
@@ -18,8 +19,9 @@ import { grafanaAlertUrl } from '../../constants'
  *
  * @param {node} subtitle Optional line under the title.
  *
- * @param {Array} fields [{ label, value, mono?, copyable?, title?, full?, danger? }]. `copyable`
- * renders a CopyableId; `danger` colours the value only.
+ * @param {Array} fields [{ label, value, mono?, copyable?, title?, help?, full?, danger? }].
+ * `copyable` renders a CopyableId; `danger` colours the value only; `help` puts a HelpTip beside
+ * the label, for a field whose name does not say what it is for.
  *
  * @param {Array} actions [{ label, icon, onClick, href?, disabled?, title?, primary?, pending?,
  * pendingLabel? }]. `pending` puts that one action into the in-flight state.
@@ -122,7 +124,12 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
             <dl className="context-panel-fields">
               {fields.map((f, i) => (
                 <div key={i} className={`context-field${f.full ? ' context-field-full' : ''}`}>
-                  <dt className="context-field-label">{f.label}</dt>
+                  {/* The tip sits on the LABEL, which is what a reader hovers to ask what a field
+                      is; `title` below is on the value and answers a different question. */}
+                  <dt className="context-field-label">
+                    {f.label}
+                    {f.help && <HelpTip text={f.help} label={`What ${f.label} means`} size={11} />}
+                  </dt>
                   <dd
                     className={`context-field-value${f.mono && !f.copyable ? ' mono' : ''}`
                       + (f.danger ? ' context-field-danger' : '')}

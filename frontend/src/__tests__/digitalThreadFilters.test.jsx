@@ -134,7 +134,7 @@ describe('Digital Thread filter bar', () => {
     // into the section header.
     expect(document.querySelector('.filter-bar')).toBeTruthy()
     expect(screen.getByTitle(/Show only events against one kind of asset/)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/Search by entity name or ID/)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/)).toBeInTheDocument()
     // The wording is load-bearing: this control filters `digital_thread.action`, while the coloured
     // markers show a derived classification. See digitalThreadActionFilter.test.jsx.
     expect(screen.getByTitle(/Filter by the database action/)).toBeInTheDocument()
@@ -161,7 +161,7 @@ describe('Digital Thread filter bar', () => {
      audit snapshots are, which is the only place a deleted entity still has a name. */
   it('sends an entity NAME to the database to match', async () => {
     await show()
-    fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'Simulated' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'Simulated' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('search=Simulated'))
     // And no longer resolves it against the live lists first, which is what made a deleted entity
@@ -171,7 +171,7 @@ describe('Digital Thread filter bar', () => {
 
   it('still matches on a raw id, so an id pasted from elsewhere works', async () => {
     await show()
-    fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'gw-1' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'gw-1' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('search=gw-1'))
   })
@@ -182,7 +182,7 @@ describe('Digital Thread filter bar', () => {
        list is not "no filter", it is "these, of which there are none". The page asked for nothing
        and drew nothing, on the one question it exists to answer. */
     await show()
-    fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/),
+    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/),
       { target: { value: 'Decommissioned' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('search=Decommissioned'))
@@ -192,7 +192,7 @@ describe('Digital Thread filter bar', () => {
   it('counts the active filters and clears them together, the time range included', async () => {
     await show()
     fireEvent.change(screen.getByTitle(/Filter by the database action/), { target: { value: 'UPDATE' } })
-    fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'Press' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'Press' } })
     fireEvent.change(rangeSelect(), { target: { value: '7d' } })
 
     const clear = await screen.findByTitle('Clear every filter')
@@ -1465,7 +1465,7 @@ describe('Digital Thread — removed tag filter', () => {
 
   it('still filters by name, which was sharing the id-restriction path with tags', async () => {
     await show()
-    fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'Press' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'Press' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('search=Press'))
   })

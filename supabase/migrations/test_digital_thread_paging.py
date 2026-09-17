@@ -748,5 +748,126 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         self.assertEqual(self.total(search="\\"), 0)
 
 
+class TheOtherTwoIdsTheDrawerShows(unittest.TestCase):
+    """
+    0121. The event drawer offers three copyable ids; the search took one of them.
+
+    `digital_thread.id` and `causation_id` had no consumer anywhere in the platform -- no filter,
+    no search, no RPC argument -- so a reader handed a mutation id in a ticket had nowhere to put
+    it, and the drawer's sibling list could only ever report the members of a transaction that
+    happened to be loaded.
+
+    The disjunct is ADDITIVE and these tests are written to catch it becoming a replacement: a
+    search term that is digits still has to match a name made of digits.
+    """
+
+    CAUSATION = 880121
+    # Digits, and deliberately not any row's id: the additive test turns on this name being found
+    # by the name disjunct while the numeric one matches nothing.
+    NUMERIC_NAME = "40121"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.conn = get_connection()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def setUp(self):
+        self.cur = self.conn.cursor()
+        # Three rows sharing one causation, as one committed act would leave them, plus a fourth
+        # under its own -- so "found the group" is distinguishable from "found everything".
+        self.ids = []
+        for i in range(3):
+            self.cur.execute(
+                """
+                INSERT INTO public.digital_thread
+                       (entity_type, entity_id, action, new_data, recorded_at, actor_source,
+                        causation_id)
+                VALUES ('devices', gen_random_uuid(), 'INSERT', %s::jsonb,
+                        timestamptz '2026-01-01 00:00:00+00', 'migration', %s)
+                RETURNING id
+                """,
+                (json.dumps({"name": "Txn Member %d 0121" % i}), self.CAUSATION),
+            )
+            self.ids.append(self.cur.fetchone()[0])
+
+        self.cur.execute(
+            """
+            INSERT INTO public.digital_thread
+                   (entity_type, entity_id, action, new_data, recorded_at, actor_source,
+                    causation_id)
+            VALUES ('devices', gen_random_uuid(), 'INSERT', %s::jsonb,
+                    timestamptz '2026-01-01 00:00:00+00', 'migration', %s)
+            RETURNING id
+            """,
+            (json.dumps({"name": self.NUMERIC_NAME}), self.CAUSATION + 1),
+        )
+        self.outsider = self.cur.fetchone()[0]
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.cur.close()
+
+    def total(self, search):
+        self.cur.execute(
+            "SELECT (public.digital_thread_page(p_limit => 1000, p_include_purged => true,"
+            "        p_search => %s) ->> 'total_matching')::bigint",
+            (search,),
+        )
+        return self.cur.fetchone()[0]
+
+    def test_a_mutation_id_finds_its_own_row(self):
+        self.assertGreaterEqual(self.total(str(self.ids[0])), 1)
+
+    def test_a_transaction_id_finds_every_member_of_the_group(self):
+        """
+        What makes the drawer's count exact rather than a lower bound. Against a direct count of
+        the group, so this cannot pass by finding a different three rows.
+        """
+        self.cur.execute(
+            "SELECT count(*) FROM public.digital_thread WHERE causation_id = %s",
+            (self.CAUSATION,),
+        )
+        direct = self.cur.fetchone()[0]
+        self.assertEqual(direct, 3, "the fixture did not land")
+        self.assertGreaterEqual(self.total(str(self.CAUSATION)), direct)
+
+    def test_a_transaction_id_does_not_sweep_in_a_neighbouring_one(self):
+        # An off-by-one in the predicate, or a LIKE where an equality was meant, would take both.
+        found = self.total(str(self.CAUSATION))
+        self.cur.execute(
+            "SELECT count(*) FROM public.digital_thread WHERE causation_id = %s",
+            (self.CAUSATION + 1,),
+        )
+        self.assertLess(found, 3 + self.cur.fetchone()[0] + 1)
+
+    def test_a_name_made_of_digits_still_matches_by_name(self):
+        """
+        THE ADDITIVE TEST. If the numeric term ever became a replacement rather than an extra
+        disjunct, this row -- whose name is digits and whose id is not that number -- would stop
+        being findable, and nothing else here would notice.
+        """
+        self.assertNotIn(int(self.NUMERIC_NAME), self.ids)
+        self.assertGreaterEqual(self.total(self.NUMERIC_NAME), 1)
+
+    def test_a_numeric_term_matching_no_row_matches_no_row(self):
+        self.assertEqual(self.total("999999999999999999"), 0)
+
+    def test_an_overlong_number_is_text_rather_than_an_overflow(self):
+        """
+        bigint tops out at 19 digits and the cast RAISES rather than missing, which would fail the
+        whole page. The guard is the length bound in the pattern CTE; without it this call errors
+        instead of returning a count.
+        """
+        self.assertEqual(self.total("9" * 26), 0)
+
+    def test_a_number_with_anything_else_in_it_is_not_an_id(self):
+        # `t.raw ~ '^[0-9]{1,18}$'` anchors both ends. Unanchored, ' 12 ' or 'v12' would cast.
+        for term in ("12a", "a12", "1.2", "-12", "1 2"):
+            self.assertIsInstance(self.total(term), int, term)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

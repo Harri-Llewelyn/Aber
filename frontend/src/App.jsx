@@ -506,6 +506,9 @@ function Dashboard({ session, onSignOut }) {
           onSelectArea={showArea}
           onSelectSchema={showSchema}
           onSelectSetting={showSetting}
+          /* No type: the search knows the id and not what it belongs to, and the thread's own
+             search matches an entity id whatever kind carries it. */
+          onSelectThread={(id) => viewThreadFor(id, '')}
         />
 
         {/* The right-hand side holds the one control whose value moves, the alert pill, plus the
