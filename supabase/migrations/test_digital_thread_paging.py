@@ -624,6 +624,79 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         )
         self.assertEqual(self.cur.fetchone()[0], 0)
 
+    # Self-seeded and never committed: the grant, the job and the backup all go in on the owner's
+    # connection and roll back with everything else, so this asserts the matcher's ANSWERS without
+    # leaving a role assignment behind in an append-only table. CI's RLS job applies the migrations
+    # and not seed.sql, so a suite leaning on `admin@acs-cymru.local` would fail there with a
+    # failure that looks like the gate and is really the fixture.
+    ADMIN_ID = "a0d17070-0000-4000-8000-0000000d7318"
+    AUDITOR_ID = "a0d17070-0000-4000-8000-0000000d7418"
+
+    def _become(self, user_id, role_name):
+        """Grant `role_name` to `user_id`, then become them the way PostgREST does: claims only."""
+        self.cur.execute("SELECT id FROM public.roles WHERE name = %s;", (role_name,))
+        role_id = self.cur.fetchone()[0]
+        self.cur.execute(
+            "INSERT INTO public.user_roles (user_id, role_id) VALUES (%s, %s)"
+            " ON CONFLICT (user_id, role_id) DO NOTHING;",
+            (user_id, role_id),
+        )
+        self.cur.execute("SET LOCAL ROLE authenticated;")
+        self.cur.execute('SET LOCAL "request.jwt.claims" = %s;', ('{"sub": "%s"}' % user_id,))
+
+    def test_an_administrator_finds_a_job_by_the_note_they_typed(self):
+        """
+        The half of 0118 that needs a role, and the reason the helper exists at all: the note is on
+        `backup_jobs` and in no audit payload, so without this disjunct a search for what somebody
+        typed when they asked for the backup reaches the Backups page and not the thread.
+        """
+        self.cur.execute(
+            "INSERT INTO public.backup_jobs (origin, status, note)"
+            " VALUES ('requested', 'COMPLETED', 'ghostnote0118') RETURNING id;"
+        )
+        job_id = self.cur.fetchone()[0]
+        self._become(self.ADMIN_ID, "Administrator")
+
+        self.cur.execute(
+            "SELECT %s = ANY(public.digital_thread_backup_job_ids_matching('%%ghostnote0118%%'));",
+            (job_id,),
+        )
+        self.assertTrue(self.cur.fetchone()[0], "an Administrator cannot find a job by its note")
+
+    def test_an_auditor_finds_a_job_by_a_stamp_they_may_not_read(self):
+        """
+        WHY THE HELPER IS SECURITY DEFINER, stated as the case that would otherwise fail silently.
+        `backup_jobs` and `backups` are Administrator-only; `digital_thread_select_security` admits
+        Auditors as well. Through a plain join in a SECURITY INVOKER function an Auditor would see
+        the backup lane and match nothing in it, which is indistinguishable from no match.
+        """
+        # A stamp has to look like a backup directory name (a CHECK on the table names the exact
+        # shape), so what keeps this fixture distinctive is an impossible year rather than a word.
+        self.cur.execute(
+            "INSERT INTO public.backups (stamp, origin, location)"
+            " VALUES ('01180118T011800Z', 'scheduled', 'volume://ghost') RETURNING id;"
+        )
+        backup_id = self.cur.fetchone()[0]
+        self.cur.execute(
+            "INSERT INTO public.backup_jobs (origin, status, backup_id)"
+            " VALUES ('scheduled', 'COMPLETED', %s) RETURNING id;",
+            (backup_id,),
+        )
+        job_id = self.cur.fetchone()[0]
+        self._become(self.AUDITOR_ID, "Auditor")
+
+        # The premise: this role genuinely cannot read the table the answer comes from.
+        self.cur.execute("SELECT count(*) FROM public.backup_jobs WHERE id = %s;", (job_id,))
+        self.assertEqual(self.cur.fetchone()[0], 0, "an Auditor can read backup_jobs after all")
+
+        self.cur.execute(
+            "SELECT %s = ANY("
+            "  public.digital_thread_backup_job_ids_matching('%%01180118T011800Z%%'));",
+            (job_id,),
+        )
+        self.assertTrue(self.cur.fetchone()[0],
+                        "an Auditor cannot find a job by the stamp of the backup it produced")
+
     def test_a_cancelled_job_is_still_reachable_by_its_note(self):
         """
         The LEFT JOIN, asserted on the plan rather than on rows: over half the jobs on a working
