@@ -49,7 +49,7 @@ describe('DigitalThreadTab handover', () => {
     // The id lands in the name filter because that filter matches on id as well as name, which is
     // what makes the handover exact rather than a name search that could match two devices. The
     // database matches it now (0115), so a handover from a DELETED asset's page works too.
-    expect(screen.getByPlaceholderText(/Search by entity name or ID/).value).toBe(DEVICE_ID);
+    expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value).toBe(DEVICE_ID);
     await waitFor(() =>
       expect(threadCalls().some((url) => url.includes(`search=${DEVICE_ID}`))).toBe(true));
     expect(threadCalls().some((url) => url.includes('entity_type=DEVICE'))).toBe(true);
@@ -65,14 +65,14 @@ describe('DigitalThreadTab handover', () => {
     const onClearEntity = vi.fn();
     render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={onClearEntity} />);
     await waitFor(() =>
-      expect(screen.getByPlaceholderText(/Search by entity name or ID/).value).toBe(DEVICE_ID));
+      expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value).toBe(DEVICE_ID));
 
     fireEvent.click(screen.getByRole('button', { name: /clear/i }));
 
     // Without the callback the parent would still hold the entity and the effect would put the
     // filter straight back, so the button would look broken.
     expect(onClearEntity).toHaveBeenCalled();
-    expect(screen.getByPlaceholderText(/Search by entity name or ID/).value).toBe('');
+    expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value).toBe('');
   });
 
   it('re-narrows when a second device is handed over', async () => {
@@ -81,12 +81,12 @@ describe('DigitalThreadTab handover', () => {
       <DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />
     );
     await waitFor(() =>
-      expect(screen.getByPlaceholderText(/Search by entity name or ID/).value).toBe(DEVICE_ID));
+      expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value).toBe(DEVICE_ID));
 
     rerender(<DigitalThreadTab initialEntity={{ id: other, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
 
     await waitFor(() =>
-      expect(screen.getByPlaceholderText(/Search by entity name or ID/).value).toBe(other));
+      expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value).toBe(other));
   });
 
   // The fixture is the shape api.js emits, so the row it produces has to render completely.

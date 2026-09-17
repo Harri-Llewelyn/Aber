@@ -394,6 +394,29 @@ export const shortId = (id) => {
 }
 
 /**
+ * What the three copyable ids in the event drawer are for. Each one ends by saying where it can be
+ * pasted, because an identifier a reader cannot spend is the thing they were asking about.
+ */
+const ENTITY_ID_HELP =
+  'The row this change was made to -- a device, a schema, a setting -- in the table this lane '
+  + 'names. It is the id the rest of the platform knows that entity by. Paste it into the search '
+  + 'box above for everything that has ever happened to it, or into the global search (Ctrl+K), '
+  + 'which opens the asset itself where it has a page and offers this one where it does not.'
+
+const MUTATION_ID_HELP =
+  'This audit row, not the thing it changed. It is the value to quote in a ticket or an incident '
+  + 'note: it never changes, and two edits a second apart are told apart by it and by nothing '
+  + 'else. The search box above accepts it; it is `digital_thread.id` in SQL and the '
+  + '`mutation_id` column of the CSV export.'
+
+const TRANSACTION_ID_HELP =
+  'The database transaction that wrote this row. Every audit row carrying the same one was written '
+  + 'by a SINGLE act -- an approval that also rebound a schema, a delete that cascaded. Use "Show '
+  + 'whole transaction" below to load all of them. It is unique within this database only, and is '
+  + 'not preserved by a restore from a dump: group by it, never store it as a reference. It is '
+  + '`digital_thread.causation_id` in SQL and `transaction_id` in the CSV export.'
+
+/**
  * The fields an audit snapshot can name its subject with, in the order they are preferred.
  *
  * SHARED WITH `digital_thread_page()`'s `p_search` (0115). A field the search matches and this does
@@ -565,23 +588,55 @@ export function causationSiblings(event, events) {
 }
 
 /**
- * Rendered only when there are siblings. The set is filtered, so the page cannot tell a single-row
- * act from siblings outside the filter; absence asserts nothing.
+ * Rendered whenever the row carries a transaction, siblings or not: a group whose other members
+ * are outside the current filter looks identical to a single-row act, and the control that
+ * resolves the difference is the one thing that must not be hidden in that case.
+ *
+ * `isolated` means the search IS this transaction, so the loaded set is the whole of it and the
+ * count can be stated rather than hedged.
  */
-function CausationGroup({ siblings, entityNames, onSelect }) {
-  if (!siblings.length) return null
+function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransaction, isolated }) {
+  if (!event?.causation_id) return null
 
   return (
     <div className="dt-causation">
       <div className="context-panel-section-label">
         Same transaction
-        <span className="section-count">{siblings.length}</span>
+        {/* A count only where there is one to give. Outside an isolated transaction, zero loaded
+            siblings is an unknown rather than a total, and a "0" chip beside a hint that says so
+            asserts the very thing the hint is refusing to. */}
+        {(isolated || siblings.length > 0) && (
+          <span className="section-count">{siblings.length}</span>
+        )}
       </div>
 
       <p className="dt-causation-hint">
-        {siblings.length === 1 ? 'One other change was' : `${siblings.length} other changes were`}
-        {' '}written by the same act. Limited to the events currently loaded and filtered.
+        {isolated
+          ? (siblings.length === 0
+              ? 'Nothing else was written by this act.'
+              : `${siblings.length === 1 ? 'One other change' : `${siblings.length} other changes`} `
+                + 'written by this act, and this is all of them.')
+          : (siblings.length === 0
+              ? 'Nothing else written by this act is loaded — which is not the same as there '
+                + 'being nothing else.'
+              : `${siblings.length === 1 ? 'One other change was' : `${siblings.length} other changes were`} `
+                + 'written by the same act. Limited to the events currently loaded and filtered.')}
       </p>
+
+      {/* Absent once the search is already this transaction: a control that would do what has been
+          done reads as though it might do something more. */}
+      {!isolated && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm dt-causation-all"
+          onClick={() => onShowTransaction(event.causation_id)}
+          title={`Search for transaction ${event.causation_id}, so every row it wrote is loaded `
+               + 'whatever kind of entity it touched. Clears the entity and action filters, which '
+               + 'would each hide part of one act.'}
+        >
+          Show whole transaction
+        </button>
+      )}
 
       <ul className="dt-causation-list">
         {siblings.map(s => {
@@ -1016,6 +1071,20 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     // Showing deleted entities is the deviation, so Clear filters returns them to hidden.
     (rangeIsFiltering ? 1 : 0) + (showPurged ? 1 : 0)
 
+  /**
+   * Load every row one transaction wrote, by searching its id (0121).
+   *
+   * The entity and action filters are cleared because one act crosses both by definition -- an
+   * approval that rebinds a schema writes an UPDATE on `devices` and a PROPOSAL_APPLIED row, and
+   * either filter would hide half of it and leave the count looking complete. The time range is
+   * kept: the rows share one `recorded_at`, so a range holding this event holds its siblings.
+   */
+  const showWholeTransaction = (causationId) => {
+    setNameFilter(String(causationId))
+    setEntityTypeFilter('')
+    setActionFilter('')
+  }
+
   const resetFilters = () => {
     setEntityTypeFilter(''); setNameFilter(''); setActionFilter('')
     setRangePreset('all'); setCustomStart(''); setCustomEnd(''); setShowPurged(false)
@@ -1213,6 +1282,10 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     if (next) setSelectedEventId(next.event_id)
   }
 
+  /** Whether the loaded set already IS one transaction, which is what lets the drawer stop hedging. */
+  const isTransactionIsolated = !!selected?.causation_id
+    && nameFilter.trim() === String(selected.causation_id)
+
   /** The other rows this event's transaction wrote. See causationSiblings(). */
   const selectedSiblings = useMemo(
     () => (selected ? causationSiblings(selected, events) : []),
@@ -1235,8 +1308,10 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         ? 'current'
         : (snapshotIdentity(e) ? `audit snapshot (${snapshotIdentity(e).field})` : 'unresolved'),
       entity_id:      e.entity_id,
+      // The UI's words, not the database's: these are `digital_thread.id` and `causation_id`, and
+      // the drawer calls them Mutation ID and Transaction ID. One name per thing, across all three.
       mutation_id:    e.event_id,
-      causation_id:   e.causation_id ?? '',
+      transaction_id: e.causation_id ?? '',
       action:         e.event_type,
       classification: MARKERS[a.kind].label,
       actor:          actorLabel(e),
@@ -1261,7 +1336,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
               Digital Thread
               <HelpTip
                 label="About the Digital Thread"
-                text="Every attributed change to a cell, gateway, device, schema or proposal, in order and with its cause. Append-only and unprunable by any application role. Administrators and Auditors also see the security lane: role assignments, service identities and settings."
+                text="Every attributed change to a cell, gateway, device, schema or proposal, in order and with its cause. Append-only and unprunable by any application role. Administrators and Auditors also see the security lane: role assignments, service identities, settings, backups and backup jobs."
               />
             </h3>
             {/* WHAT IS LOADED, not what matches. Export writes the events the page is holding,
@@ -1303,8 +1378,10 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             style={{ width: '220px' }}
             value={nameFilter}
             onChange={e => setNameFilter(e.target.value)}
-            placeholder="Search by entity name or ID…"
-            title="Filter by the asset's name, or by its id"
+            placeholder="Search by name, entity, mutation or transaction ID…"
+            title={'Filter by the name or id of an entity. A term that is only digits also matches '
+                 + 'a mutation id and a transaction id, so any of the three ids the event drawer '
+                 + 'shows can be pasted here.'}
           />
 
           <select
@@ -1748,19 +1825,34 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
           ...(selected.changed_by
             ? [{ label: 'User ID', value: selected.changed_by, copyable: true, mono: true, title: 'The signed-in user who made this change' }]
             : []),
-          { label: 'Entity ID', value: selected.entity_id, copyable: true, mono: true, title: 'The asset this change was made to' },
+          {
+            label: 'Entity ID',
+            value: selected.entity_id,
+            copyable: true,
+            mono: true,
+            title: 'The asset this change was made to',
+            help: ENTITY_ID_HELP
+          },
           // The audit row's own id. It identifies THIS mutation rather than the asset it touched,
           // which is what you need to quote when two edits a second apart are being told apart.
-          { label: 'Mutation ID', value: String(selected.event_id), copyable: true, mono: true, title: 'Audit row ID for this single change' },
+          {
+            label: 'Mutation ID',
+            value: String(selected.event_id),
+            copyable: true,
+            mono: true,
+            title: 'Audit row ID for this single change',
+            help: MUTATION_ID_HELP
+          },
           // Only when there is one: rows written before causation existed carry none.
           ...(selected.causation_id
             ? [{
-                label: 'Transaction',
+                label: 'Transaction ID',
                 value: String(selected.causation_id),
                 copyable: true,
                 mono: true,
                 title: 'The database transaction that wrote this row. Every audit row sharing it '
-                     + 'was written by ONE act. Unique within this database only.'
+                     + 'was written by ONE act. Unique within this database only.',
+                help: TRANSACTION_ID_HELP
               }]
             : []),
           { label: 'Description', value: selected.description, full: true }
@@ -1770,9 +1862,12 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             {/* Above the diff, for the reason the subtitle nav is: a control that changes what the
                 drawer shows belongs above it. */}
             <CausationGroup
+              event={selected}
               siblings={selectedSiblings}
               entityNames={entityNames}
               onSelect={setSelectedEventId}
+              onShowTransaction={showWholeTransaction}
+              isolated={isTransactionIsolated}
             />
             <EventDiff event={selected} diff={selectedAnalysis.diff} />
           </>

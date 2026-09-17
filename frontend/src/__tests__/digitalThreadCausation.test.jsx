@@ -3,7 +3,11 @@
  * so every row a transaction writes shares it. This suite pins two claims about what the page must
  * not say: a NULL causation is not a group (legacy rows carry NULL, and matching NULL to NULL would
  * fabricate a causal link), and absence asserts nothing (the sibling list is drawn from the
- * fetched, filtered set, so it is a lower bound and renders only when siblings exist).
+ * fetched, filtered set, so it is a lower bound).
+ *
+ * Being a lower bound is why the section renders with no siblings rather than disappearing, and
+ * why "Show whole transaction" exists: searching the id makes the loaded set the act, and the
+ * hedge in the hint is dropped exactly when it stops being true.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
@@ -161,17 +165,26 @@ describe('the Same transaction control', () => {
       expect(screen.getByRole('button', { name: /Copy entity id dev-2/ })).toBeInTheDocument())
   })
 
-  it('is absent on an event whose transaction wrote nothing else', async () => {
-    /* Not "0 related changes": because the set is filtered, the page cannot tell a single-row act
-       from one whose siblings are outside the filter, so it asserts neither. */
+  it('is still shown when no sibling is loaded, because that is not the same as none existing', async () => {
+    /* Not "0 related changes", and not hidden either. The set is filtered, so the page cannot tell
+       a single-row act from one whose siblings are outside the filter -- which is exactly when the
+       control that resolves the difference must be reachable. Hiding it left a reader with a
+       transaction id, a wrong impression and nothing to click. */
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
-    // Event 3 is the ingestion status flip -- its own transaction, no siblings.
+    // Event 3 is the ingestion status flip -- its own transaction, no loaded siblings.
     const nav = document.querySelector('.dt-drawer-nav-btns')
     fireEvent.click(within(nav).getByRole('button', { name: /Next/ }))
 
-    await waitFor(() => expect(document.querySelector('.dt-causation')).toBeNull())
+    await waitFor(() => expect(document.querySelector('.dt-causation')).toBeTruthy())
+    expect(within(group()).getByText(/not the same as there being nothing else/))
+      .toBeInTheDocument()
+    expect(within(group()).getByRole('button', { name: /Show whole transaction/ }))
+      .toBeInTheDocument()
+    /* And no count: zero LOADED siblings is an unknown, not a total, so a "0" beside the heading
+       would assert the thing the hint is refusing to. */
+    expect(group().querySelector('.section-count')).toBeNull()
   })
 
   it('shows the transaction id in the drawer metadata', async () => {
@@ -179,8 +192,60 @@ describe('the Same transaction control', () => {
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: new RegExp(`Copy transaction ${TXN}`, 'i') }))
+      expect(screen.getByRole('button', { name: new RegExp(`Copy transaction id ${TXN}`, 'i') }))
         .toBeInTheDocument())
+  })
+
+  it('searches the transaction id, so the sibling list stops being a lower bound', async () => {
+    /* The list reads the LOADED events, so it can only ever report the siblings that happened to
+       be on the page. Searching the id makes the loaded set the transaction, which is what turns
+       the count from a floor into the answer. */
+    await show()
+    await selectEvent(/UPDATE on Simulated_CNC_01/)
+    await waitFor(() => expect(group()).toBeTruthy())
+
+    fireEvent.click(within(group()).getByRole('button', { name: /Show whole transaction/ }))
+
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value)
+        .toBe(String(TXN)))
+    await waitFor(() =>
+      expect(api.get.mock.calls.some(([url]) => url.includes(`search=${TXN}`))).toBe(true))
+  })
+
+  it('clears the entity and action filters, which each hide half of one act', async () => {
+    /* A transaction crosses entity kinds and actions by definition -- an approval writes an UPDATE
+       on one table and a PROPOSAL_APPLIED row on another. Leaving either filter set would show
+       part of the act under a count that reads as the whole of it. */
+    await show()
+    fireEvent.change(screen.getByTitle(/Show only events against one kind of asset/),
+      { target: { value: 'DEVICE' } })
+    // The filter is a query parameter, so the page refetches; selecting before that lands picks
+    // an event out of the list that is about to be replaced.
+    await waitFor(() =>
+      expect(api.get.mock.calls.some(([url]) => url.includes('entity_type=DEVICE'))).toBe(true))
+    await selectEvent(/UPDATE on Simulated_CNC_01/)
+    await waitFor(() => expect(group()).toBeTruthy())
+
+    fireEvent.click(within(group()).getByRole('button', { name: /Show whole transaction/ }))
+
+    await waitFor(() =>
+      expect(screen.getByTitle(/Show only events against one kind of asset/).value).toBe(''))
+  })
+
+  it('stops hedging once the search IS the transaction', async () => {
+    /* The caveat is true while the page holds a filtered subset and false once it holds the act.
+       Repeating it there would teach a reader to discount a number that is exact. */
+    await show()
+    await selectEvent(/UPDATE on Simulated_CNC_01/)
+    await waitFor(() => expect(group()).toBeTruthy())
+
+    fireEvent.click(within(group()).getByRole('button', { name: /Show whole transaction/ }))
+
+    await waitFor(() =>
+      expect(within(group()).queryByText(/Limited to the events currently loaded/)).toBeNull())
+    expect(within(group()).queryByRole('button', { name: /Show whole transaction/ })).toBeNull()
+    expect(within(group()).getByText(/this is all of them/)).toBeInTheDocument()
   })
 
   it('offers the siblings as real buttons, so the list is keyboard reachable', async () => {

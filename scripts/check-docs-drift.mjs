@@ -537,7 +537,7 @@ function edgeFunctionNames() {
     // function as soon as another adds an argument after it -- see supabase/README.md, "A migration
     // that adds an argument breaks the one before it".
     'public.digital_thread_page':
-      '0118 adds the backup-job disjunct and the origin field; 0117 admits schemas and device nameplates to the purged rule; 0115 returns total_matching, adds p_search and admits areas; 0077 adds the keyset cursor; the baseline holds the unpaged form',
+      '0121 makes a bare-integer search match the row id and the causation id; 0118 adds the backup-job disjunct and the origin field; 0117 admits schemas and device nameplates to the purged rule; 0115 returns total_matching, adds p_search and admits areas; 0077 adds the keyset cursor; the baseline holds the unpaged form',
     // 0086 adds `device_nameplate` and `change_proposals` to the ASSET lane, which would otherwise
     // take the fail-closed 'security' branch. Rewritten in full because the classifier is one CASE.
     'public.platform_health_rows': '0092 narrows expected_publishers to devices behind a gateway that has reported at least once; 0001 holds the bound-to-a-gateway form that alerted on edge nodes nobody had deployed',

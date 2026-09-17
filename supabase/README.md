@@ -1273,6 +1273,53 @@ principal is findable by its id. The alternative — pinning those names into a 
 search could read them — would put the same three strings in two places and let them drift, to buy
 a search for three ids an operator reaches through Access Control anyway.
 
+### Three ids, one of them spendable (`0121`)
+
+**The event drawer hands a reader three copyable ids and only one of them went anywhere.** Entity ID
+had a single consumer in the platform — the global search's `resolveId`, which probes five tables
+(areas, cells, gateways, devices, schemas) while the Digital Thread records **twelve** kinds. So a
+setting, a backup, a backup job, a proposal, a service identity or a person had a copyable id in the
+drawer and nothing in the app that would take it. Mutation ID and the transaction had no consumer at
+all: no filter, no search, no RPC argument.
+
+**A search term that is nothing but digits now also matches `digital_thread.id` and `causation_id`.**
+It is an additional disjunct, so the name and entity-id matching is untouched and an entity whose
+name happens to be digits still matches by name — nothing is taken away, rows are only added. Both
+columns are indexed: `digital_thread_pkey` leads on `id`, `idx_digital_thread_causation` covers the
+other.
+
+The term is **bounded to 18 digits**. `raw::bigint` on a longer run raises `numeric_value_out_of_range`,
+which fails the whole page rather than missing a row; bigint's maximum is 19 digits, so 18 can never
+overflow, and a longer number is still matched as text like any other search.
+
+**A short numeric term is noisy, and that is not new.** Searching `22` matches the row whose id is 22
+*and* every entity whose uuid contains `22` — but the second half is the pre-existing
+`entity_id::text ILIKE` disjunct, not something this migration introduced. Real mutation ids are four
+digits and up, where a uuid substring collision is rare, so this adds signal to existing noise rather
+than noise of its own.
+
+**This is what makes the drawer's "Same transaction" list exact.** The list is derived from the
+loaded, filtered events, so it could only ever report the siblings that happened to be on the page,
+and the hint said so. Searching the causation id makes the loaded set the transaction, so the count
+becomes the answer instead of a floor — and the page drops the hedge exactly when it stops being
+true. The control clears the entity and action filters, because one act crosses both by definition:
+an approval writes an UPDATE on `devices` and a `PROPOSAL_APPLIED` row, and either filter would show
+half of it under a count that reads as the whole.
+
+**The section now renders whenever the row carries a transaction**, siblings or not. It used to
+render only when a sibling was loaded — which meant a group whose other members were outside the
+filter looked identical to a single-row act *and* hid the one control that resolves the difference.
+
+**RLS is unchanged.** `digital_thread_page()` is `SECURITY INVOKER`, so a Shopfloor_Manager searching
+a mutation id reads what `digital_thread_select_asset` admits and nothing more.
+
+**One word per id.** The drawer said *Transaction*, the CSV column said `causation_id`, and the
+database column is `causation_id` — so one thing read as two, which is how it was reported as four
+ids in a drawer that shows three. The UI and the export now both say **Transaction ID**, the same
+precedent `mutation_id` already set for `digital_thread.id`, and each tooltip names its SQL column so
+an id can be carried into a query without guessing.
+
+
 ### The lane a Manager was offered and denied (`0120`)
 
 **`audit_domain_for()` classifies every audit row into `asset` or `security`**, and

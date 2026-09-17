@@ -2,14 +2,15 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { isUuid } from '../../utils/isUuid'
 import { buildTargets, matchTargets } from '../../searchIndex'
-import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList, IconFactory } from './Icons'
+import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList, IconFactory, IconHistory } from './Icons'
 
 /**
  * One box that answers three questions: where is the page called X (the nav), where is the card or
- * setting called X (`searchIndex.js`), and what is this UUID (resolved against the database). A
- * UUID is detected, not declared: nothing in the static index can look like one. Names are searched
- * too, because the page-level box can only be used by somebody who knows which page the thing is
- * on. The estate lookup is capped per kind (see `searchAssets`): this finds one thing, and the
+ * setting called X (`searchIndex.js`), and what is this UUID (resolved against the database, and
+ * always also offered to the Digital Thread, which knows twelve kinds where `resolveId` reads
+ * five). A UUID is detected, not declared: nothing in the static index can look like one. Names
+ * are searched too, because the page-level box can only be used by somebody who knows which page
+ * the thing is on. The estate lookup is capped per kind (see `searchAssets`): this finds one thing, and the
  * page's own box works with a set.
  */
 
@@ -33,7 +34,7 @@ const ENTITY_ICON = {
 const isMac = () =>
   typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '')
 
-export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onSelectSetting }) {
+export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onSelectSetting, onSelectThread }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(0)
@@ -104,9 +105,28 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       entity: e
     }))
 
-    // An id can only be an asset: no page or card contains a hex string, so there is nothing to
-    // merge and a "nothing found" flash while the lookup runs would be the only effect.
-    if (looksLikeId) return assetHits
+    // An id can only be an asset or an audit subject: no page or card contains a hex string, so
+    // there is nothing to merge and a "nothing found" flash while the lookup runs would be the
+    // only effect.
+    //
+    // THE THREAD IS OFFERED WHETHER OR NOT A PROBE ANSWERED. `resolveId` reads five tables, and
+    // the Digital Thread records twelve kinds -- a setting, a backup, a proposal, a person had a
+    // copyable id in the drawer and nowhere in the app that would take it. The thread's own search
+    // matches `entity_id` for every kind, so this one row is the answer for all seven it cannot
+    // name, and it stays offered for the five it can: an asset's history is the other question
+    // somebody pasting an id is asking.
+    if (looksLikeId) {
+      /* Not an entity hit: it opens a page with a filter rather than an asset, and `activate`
+         tells them apart by `kind`. */
+      return [...assetHits, {
+        key: `thread:${trimmed}`,
+        kind: 'thread',
+        label: 'Find this ID in the Digital Thread',
+        detail: 'Digital Thread',
+        icon: <IconHistory size={15} />,
+        threadId: trimmed
+      }]
+    }
 
     // Pages and cards first, assets after: the static index answers instantly and the estate lookup
     // arrives later, so assets on top would move under the cursor.
@@ -119,7 +139,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       icon: m.icon,
       target: m
     })), ...assetHits]
-  }, [looksLikeId, entities, matches])
+  }, [looksLikeId, entities, matches, trimmed])
 
   // The highlight is clamped rather than reset, so it survives a keystroke that only shortens the
   // list. Resetting to 0 on every change would fight a user who has arrowed down and then typed.
@@ -164,6 +184,10 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       else if (kind === 'cell') onSelectCell?.(id)
       else if (kind === 'area') onSelectArea?.(id)
       else if (kind === 'schema') onSelectSchema?.(id)
+    } else if (result.kind === 'thread') {
+      // The id goes into the page's own search, which matches the entity id of every kind rather
+      // than the five `resolveId` can name.
+      onSelectThread?.(result.threadId)
     } else if (result.kind === 'setting' && onSelectSetting) {
       // A setting CAN be jumped to: the page is a tablist by category, so its category is an
       // anchor in all but name and landing on the wrong one would hide the row that was asked for.
@@ -229,10 +253,11 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
             <div className="global-search-empty"><div className="spinner spinner-sm" /> Looking up that id…</div>
           )}
 
-          {looksLikeId && !resolving && results.length === 0 && (
-            /* Says what was searched and stops: RLS returns no rows rather than an error, so not
-               found and not cleared for are the same reply. */
-            <div className="global-search-empty">
+          {looksLikeId && !resolving && entities.length === 0 && (
+            /* A NOTE, NOT AN EMPTY STATE: the thread row below is always offered for an id, so
+               there is never nothing to show. Says what was searched and stops -- RLS returns no
+               rows rather than an error, so not found and not cleared for are the same reply. */
+            <div className="global-search-note">
               No area, cell, gateway, device or schema with that id is visible to you.
             </div>
           )}

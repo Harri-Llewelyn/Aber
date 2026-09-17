@@ -681,6 +681,16 @@ html, body, #root {
   color: var(--text-muted);
 }
 
+/* A finding above the results rather than instead of them: an id always has the Digital Thread
+   row to offer, so this says what the asset probes did not find and leaves the row to speak. */
+.global-search-note {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
 .global-search-foot {
   padding: 7px 12px;
   border-top: 1px solid var(--border);
@@ -2831,6 +2841,17 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   letter-spacing: 0.7px;
   color: var(--text-muted);
   margin-bottom: 2px;
+  /* Flex so an optional HelpTip sits on the label's line; a label with no tip is unaffected. */
+  display: flex;
+  align-items: center;
+}
+
+/* Tighter than the 6px a form label gives it: these labels are 11px and uppercase, and the
+   standard gap reads as a gap rather than as part of the label. */
+.context-field-label .help-tip {
+  margin-left: 3px;
+  width: 15px;
+  height: 15px;
 }
 
 /* `break-word`, not an ellipsis. A truncated UUID is useless and a truncated topic path is worse
@@ -3552,6 +3573,11 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   line-height: 1.45;
   color: var(--text-muted);
   margin: 0 0 8px 0;
+}
+
+/* Its own row under the hint: a full-width control here would read as the section's heading. */
+.dt-causation-all {
+  margin-bottom: 8px;
 }
 
 .dt-causation-list {
