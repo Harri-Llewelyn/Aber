@@ -1114,6 +1114,79 @@ already loaded rather than replacing it — append-only means held rows cannot c
 only belong at the top — and starts again only when the two ranges no longer overlap, which is the
 one case where prepending would splice a hole into the middle of the list.
 
+### Saying how much of the thread this is (`0115`)
+
+**A page that can be paged still has to say what fraction of the whole it is.** `0077` gave the tab
+a way to ask for more; it did not give it anything to say. The legend read "200 events" above a
+button offering 200 more, and read the same whether the next page was the last or the third of
+twelve. `truncated` says there *is* more and cannot say how much.
+
+`0115` returns **`total_matching`** — how many rows the filters select, counted under the same
+purged rule the page opens with, minus the cursor and the limit. It costs one aggregate over a CTE
+that was already being scanned in full to count deleted assets, so the number was there to be
+returned and was not. It does not move as the reader pages, which is the property the page needs to
+render `200 of 467` and have the second number hold still.
+
+**`is_purged` had never gained `areas`.** `0077` anti-joined the three asset tables that existed and
+`0097` added a fourth, so a deleted area's rows were counted in the total, were *not* counted by
+`purged_assets`, and were hidden anyway by the tab's own client-side filter, which does know about
+areas. Server and page disagreed about what the reader was looking at. That costs nothing while
+neither prints a number and becomes a wrong number the moment one does — on the development stack,
+467 rows drawn under a total of 471.
+
+**A deleted asset could not be searched for.** The thread stores `entity_id` and nothing else about
+the entity, so the tab resolved a typed name against its own lookups of the *live* tables and sent
+the matching ids as `p_entity_ids`. A name that had been deleted matched no live row, sent an empty
+id list, and rendered as an empty thread — the one question the page exists to answer, answered
+"nothing happened". **`p_search` matches the id and the same audit-snapshot fields the lane label
+falls back to** (`name`, `sparkplug_id`, `schema_name`, `label`, `key`, `role`, `stamp`), so the
+search finds what the timeline draws. That list is shared with `snapshotIdentity()` in
+`DigitalThreadTab.jsx`; a field in one and not the other is a lane you can see and cannot search
+for, or the reverse.
+
+**LIKE metacharacters in the search are literal.** The field promises a substring of a name or an
+id, and an unescaped `%` would hand the whole thread to somebody who typed a percentage into it. A
+self-check asserts a bare `%` does not select every row.
+
+**One label is not in the payload, and it is matched separately.** A role-assignment row is keyed by
+`user_roles.user_id` and names the *role*, so the search cannot read a person out of the snapshot
+the way it reads a device — and the dashboard labels that lane from `auth.users` (`0116`). A lane
+the timeline draws and the search cannot match is exactly the drift the shared field list exists to
+prevent, so `digital_thread_user_ids_matching()` supplies that one disjunct. It is SECURITY DEFINER,
+Administrator and Auditor only, and returns an **empty array rather than an error** for anybody
+else: it is part of a query, and raising would turn "your search matched nothing here" into "the
+Digital Thread is broken" for a reader who cannot see that lane anyway.
+
+**Its CTE is `MATERIALIZED`, and that is measured rather than stylistic.** Inlined, Postgres put the
+helper in the per-row `Filter` of every partition scan — a `STABLE` function is *allowed* to be
+evaluated once and is not promised to be. On the development stack's 4,065 rows that took a search
+from 53 ms to **583 ms**; materialised it is 32 ms. That is the shape of cost that reads as "the
+thread got big" rather than as a query doing the wrong thing, which is why the suite asserts the
+keyword is still there.
+
+**The search is a scan and that is the right shape here.** No index serves `ILIKE`, and a search
+matching nothing reads the whole match before the `LIMIT` discards it — but `matching` is already
+scanned in full on every call, so this adds a predicate to a scan rather than a scan. Measured on
+the development stack, 4,065 rows: a default page 18 ms, a search matching nothing — the worst case,
+a full scan the `LIMIT` then discards — 32 ms. `pg_trgm` is the answer if a thread ever outgrows
+that.
+
+**A migration that adds an argument breaks the one before it, on the second boot.** `0077` named a
+single argument list in its `DROP` and then created its own — correct while it was the last word on
+the function, and wrong the moment `0115` came after it. On every replay `0077` recreated the
+nine-argument form beside the ten-argument one `0115` had left, and `0077`'s own self-check calls
+`digital_thread_page()` **by argument name**, which cannot choose between two candidates. The chain
+aborted *inside `0077`*, leaving a half-migrated database — and the first boot could not show it,
+because there was nothing yet for `0115` to have left behind. Both files now drop **every**
+declaration of the name before creating theirs, so each owns the function at its point in the chain
+whatever comes later. A migration adding an argument to a function an earlier one recreates wants
+the same treatment.
+
+**What `0115` deliberately does not do** is make an entity type whose *table* has been retired
+purgeable. Rows naming a table that no longer exists — `area_floors`, which `0113` retired — are
+still drawn, still unfilterable, and still cannot be hidden. "The table is gone" is a different
+question from "the row is gone", and it is being decided with the rest of the archival lifecycle.
+
 ### A shape that can be pruned (`0079`)
 
 **The table could only grow, and suppression was never going to fix that.** `0005` already removes

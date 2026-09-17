@@ -532,9 +532,12 @@ function edgeFunctionNames() {
     // 0074 creates it with the token denylist arm; 0076 rewrites it to add the principal arm, whose
     // check runs first so its message wins once a principal revocation has cascaded to its tokens.
     'public.auth_pre_request': '0076 adds the principal arm; 0074 holds the token-only form',
-    // 0077 adds a keyset cursor (two defaulted arguments) and DROPs the seven-argument form first,
-    // because CREATE OR REPLACE cannot change an argument list.
-    'public.digital_thread_page': '0077 adds the keyset cursor; the baseline holds the unpaged form',
+    // Each adds defaulted arguments and DROPs EVERY existing declaration first, because CREATE OR
+    // REPLACE cannot change an argument list and a file that names one list stops owning the
+    // function as soon as another adds an argument after it -- see supabase/README.md, "A migration
+    // that adds an argument breaks the one before it".
+    'public.digital_thread_page':
+      '0115 returns total_matching, adds p_search and admits areas to the purged rule; 0077 adds the keyset cursor; the baseline holds the unpaged form',
     // 0086 adds `device_nameplate` and `change_proposals` to the ASSET lane, which would otherwise
     // take the fail-closed 'security' branch. Rewritten in full because the classifier is one CASE.
     'public.platform_health_rows': '0092 narrows expected_publishers to devices behind a gateway that has reported at least once; 0001 holds the bound-to-a-gateway form that alerted on edge nodes nobody had deployed',

@@ -1,5 +1,5 @@
 """
-The Digital Thread's keyset cursor (0077).
+The Digital Thread's keyset cursor (0077), and how far it has to walk (0115).
 
 WHAT THIS IS DEFENDING. Every way paging breaks is silent. A repeated row shows the reader one
 event twice; a skipped row never shows it at all; a cursor that stops early looks exactly like the
@@ -20,8 +20,17 @@ EVERY TEST ROLLS BACK, and here that is not tidiness. `digital_thread` is append
 it so and 0026 revoked DELETE even from service_role -- so a committed fixture is permanent. Two
 thirds of a development stack's audit log turned out to be exactly that (see scripts/test-db.mjs),
 which is the failure this file must not repeat.
+
+0115 ADDS TWO MORE WAYS TO BE QUIETLY INCOMPLETE, and the second class below defends them.
+`total_matching` is what lets the page say "200 of 467" instead of "200 events"; counted after the
+cursor rather than before it, it would count down as the reader walked, which reads as rows leaving
+an append-only table. And `p_search` matches the audit snapshot, because the tab used to resolve a
+typed name against the LIVE tables -- so searching for something that had been deleted sent an
+empty id list and rendered as an empty thread, answering the one question this page exists for
+with "nothing happened".
 """
 
+import json
 import os
 import unittest
 import psycopg2
@@ -267,6 +276,292 @@ class DigitalThreadPaging(unittest.TestCase):
         self.assertEqual(count, 1, f"digital_thread_page is declared {count} times, not once")
         self.assertIn("p_before_recorded_at", args)
         self.assertIn("p_before_id", args)
+        # 0115 appends p_search and drops 0077's form in turn. Same argument: two declarations
+        # would fail at the call site as ambiguous rather than here.
+        self.assertIn("p_search", args)
+
+
+# =================================================================================================
+# HOW LONG THE THREAD IS, AND FINDING A ROW IN IT (0115)
+#
+# Every assertion below is SCOPED WITH p_entity_ids to the ids this fixture seeds, so the numbers
+# are exact on a stack whose thread already holds thousands of rows. That is also what makes them
+# relative rather than absolute: each compares the function's answer to a direct count of the same
+# set, never to a number written here.
+# =================================================================================================
+class DigitalThreadTotalAndSearch(unittest.TestCase):
+    # One seed per field the lane label falls back to, so "the search reads them all" is a loop
+    # over the same table rather than a list that drifts from the one in the function. The terms
+    # are distinctive, which is what keeps the direct counts exact on a populated stack.
+    #
+    #   entity_type, snapshot payload, a term that must find exactly this row
+    SEEDS = [
+        ("devices",         {"name": "Ghost Press 0115"},           "Ghost Press"),
+        ("areas",           {"name": "Ghost Area 0115"},            "Ghost Area"),
+        ("gateways",        {"sparkplug_id": "ghostspark0115"},     "ghostspark0115"),
+        ("schemas",         {"schema_name": "Ghost_Schema_0115"},   "Ghost_Schema"),
+        ("system_settings", {"key": "ghost.key.0115",
+                             "label": "Ghost Label 0115"},          "ghost.key.0115"),
+        ("user_roles",      {"role": "Ghost_Role_0115"},            "Ghost_Role"),
+        ("backups",         {"stamp": "ghost-stamp-0115"},          "ghost-stamp-0115"),
+    ]
+
+    # The four asset tables `is_purged` probes. Seeds of any other type name no table to be absent
+    # from and are never purged, whatever the reader asks for.
+    PURGEABLE = {"areas", "cells", "gateways", "devices"}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.conn = get_connection()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def setUp(self):
+        self.cur = self.conn.cursor()
+        # None of these entities exists in any live table, which is the state this file is about:
+        # the audit row is the only record left of them.
+        self.ids, self.by_type = [], {}
+        for entity_type, payload, _ in self.SEEDS:
+            self.cur.execute(
+                """
+                INSERT INTO public.digital_thread
+                       (entity_type, entity_id, action, new_data, recorded_at, actor_source)
+                VALUES (%s, gen_random_uuid(), 'INSERT', %s::jsonb,
+                        timestamptz '2026-01-01 00:00:00+00', 'migration')
+                RETURNING entity_id
+                """,
+                (entity_type, json.dumps(payload)),
+            )
+            entity_id = self.cur.fetchone()[0]
+            self.ids.append(entity_id)
+            self.by_type[entity_type] = entity_id
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.cur.close()
+
+    # ---------------------------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------------------------
+    def page(self, *, limit=200, include_purged=True, search=None, ids=None, cursor=None):
+        """One call, scoped to this fixture's entities unless `ids` says otherwise."""
+        self.cur.execute(
+            """
+            SELECT public.digital_thread_page(
+                p_limit              => %s,
+                p_include_purged     => %s,
+                p_entity_ids         => %s::uuid[],
+                p_search             => %s,
+                p_before_recorded_at => %s,
+                p_before_id          => %s
+            )
+            """,
+            (limit, include_purged, self.ids if ids is None else ids, search,
+             (cursor or {}).get("recorded_at"), (cursor or {}).get("id")),
+        )
+        return self.cur.fetchone()[0]
+
+    def total(self, **kwargs):
+        return self.page(**kwargs)["total_matching"]
+
+    # ---------------------------------------------------------------------------------------
+    # The total is about the match, not the page
+    # ---------------------------------------------------------------------------------------
+    def test_the_total_counts_every_matching_row(self):
+        """Against a direct count of the same set, taken the long way round."""
+        # Read before the call: `total()` reuses this cursor, so evaluating it first would consume
+        # the result set this fetch is waiting on.
+        self.cur.execute(
+            "SELECT count(*) FROM public.digital_thread WHERE entity_id = ANY(%s::uuid[])",
+            (self.ids,),
+        )
+        direct = self.cur.fetchone()[0]
+        self.assertEqual(self.total(), direct)
+
+    def test_the_total_does_not_shrink_as_the_reader_pages(self):
+        """
+        The legend renders "N of TOTAL". A total recomputed after the cursor would count down
+        towards zero while the reader walked, which reads as the thread getting shorter behind
+        them -- and would be indistinguishable from rows being removed from an append-only table.
+        """
+        first = self.page(limit=1)
+        self.assertIsNotNone(first["next_cursor"], "the fixture is too small to page")
+        second = self.page(limit=1, cursor=first["next_cursor"])
+        self.assertEqual(first["total_matching"], second["total_matching"])
+
+    def test_a_page_is_never_larger_than_its_own_total(self):
+        """The assertion that catches a total counted over `visible` instead of `matching`."""
+        payload = self.page(limit=1)
+        self.assertLessEqual(len(payload["events"]), payload["total_matching"])
+
+    def test_revealing_deleted_assets_cannot_reveal_fewer(self):
+        """`p_include_purged` widens the set, so the total has to widen with it."""
+        self.assertGreater(self.total(include_purged=True), self.total(include_purged=False))
+
+    # ---------------------------------------------------------------------------------------
+    # The purge rule covers every asset table there is
+    # ---------------------------------------------------------------------------------------
+    def test_a_deleted_area_is_purged_like_any_other_asset(self):
+        """
+        0077 anti-joined the three asset tables that existed; 0097 added areas and nothing came
+        back to widen it. A deleted area's rows were counted in the total, uncounted by
+        `purged_assets`, and hidden anyway by the tab's own filter -- so the two disagreed about
+        what the reader was looking at.
+        """
+        drawn = [e["entity_id"] for e in self.page(include_purged=False)["events"]]
+        self.assertNotIn(
+            str(self.by_type["areas"]), drawn,
+            "a deleted area is still drawn when deleted assets are hidden",
+        )
+        self.assertEqual(
+            self.page()["purged_assets"],
+            sum(1 for t, _, _ in self.SEEDS if t in self.PURGEABLE),
+            "purged_assets does not count every deleted asset the fixture seeded",
+        )
+
+    def test_an_entity_with_no_table_behind_it_is_not_called_deleted(self):
+        """
+        The other half of the same rule. A `user_roles` or `backups` row names nothing that could
+        be probed for, so answering "absent from all four asset tables" would mark the whole
+        security lane deleted the moment the purge rule stopped naming its tables.
+        """
+        drawn = [e["entity_id"] for e in self.page(include_purged=False)["events"]]
+        for entity_type, _, _ in self.SEEDS:
+            if entity_type not in self.PURGEABLE:
+                with self.subTest(entity_type=entity_type):
+                    self.assertIn(str(self.by_type[entity_type]), drawn)
+
+    # ---------------------------------------------------------------------------------------
+    # The search finds what the timeline draws
+    # ---------------------------------------------------------------------------------------
+    def test_a_deleted_asset_is_found_by_the_name_in_its_snapshot(self):
+        """
+        The failure this replaces: the tab resolved a name against the LIVE tables, so searching
+        for something deleted sent an empty id list and rendered as an empty thread.
+        """
+        payload = self.page(search="Ghost Press")
+        self.assertEqual(payload["total_matching"], 1)
+        self.assertEqual(payload["events"][0]["entity_id"], str(self.by_type["devices"]))
+
+    def test_the_search_reads_every_field_the_lane_label_falls_back_to(self):
+        """
+        `snapshotIdentity()` in DigitalThreadTab.jsx labels a lane from these fields. A field it
+        reads and the search does not is a lane you can see and cannot search for; a field the
+        search reads and it does not is a row you can find and cannot identify.
+        """
+        for entity_type, payload, term in self.SEEDS:
+            with self.subTest(entity_type=entity_type, field=sorted(payload)[0]):
+                self.assertEqual(self.total(search=term), 1)
+
+        # `system_settings` carries both, and the label is what a reader would type.
+        self.assertEqual(self.total(search="Ghost Label"), 1)
+
+    def test_the_search_reads_the_snapshot_a_delete_leaves(self):
+        """An INSERT has only `new_data` and a DELETE only `old_data`; both are the lane's name."""
+        self.cur.execute(
+            """
+            INSERT INTO public.digital_thread
+                   (entity_type, entity_id, action, old_data, recorded_at, actor_source)
+            VALUES ('devices', gen_random_uuid(), 'DELETE',
+                    jsonb_build_object('name', 'Ghost Final 0115'),
+                    timestamptz '2026-01-01 00:00:00+00', 'migration')
+            RETURNING entity_id
+            """
+        )
+        self.ids.append(self.cur.fetchone()[0])
+        self.assertEqual(self.total(search="Ghost Final"), 1)
+
+    def test_an_id_is_still_a_search_term(self):
+        """The handover from another page puts a uuid in the same box."""
+        self.assertEqual(self.total(search=str(self.by_type["gateways"])), 1)
+
+    def test_a_search_matching_nothing_returns_nothing(self):
+        """
+        Rather than everything. An empty filter read as "no filter" is the same class of bug as
+        the empty id list, pointing the other way and much harder to notice.
+        """
+        payload = self.page(search="no-entity-is-named-this")
+        self.assertEqual(payload["total_matching"], 0)
+        self.assertEqual(payload["events"], [])
+
+    def test_the_search_is_not_case_sensitive(self):
+        self.assertEqual(self.total(search="ghost press"), 1)
+
+    # -----------------------------------------------------------------------------------------
+    # The one label the audit payload does not carry
+    # -----------------------------------------------------------------------------------------
+    def test_the_person_matcher_is_security_definer_and_not_public(self):
+        """
+        `digital_thread_user_ids_matching()` reads `auth.users`, which `authenticated` cannot --
+        so without SECURITY DEFINER it answers every search with an empty array and the
+        role-assignment lane silently goes back to being unsearchable, an empty disjunct being
+        indistinguishable from no match. And the gate inside it is a role check rather than a
+        grant, so EXECUTE to PUBLIC would let an anonymous caller probe for email addresses.
+        """
+        self.cur.execute(
+            "SELECT p.prosecdef,"
+            "       has_function_privilege('public',"
+            "           'public.digital_thread_user_ids_matching(text)', 'EXECUTE')"
+            "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'public' AND p.proname = 'digital_thread_user_ids_matching'"
+        )
+        row = self.cur.fetchone()
+        self.assertIsNotNone(row, "digital_thread_user_ids_matching() is missing")
+        self.assertTrue(row[0], "it is not SECURITY DEFINER")
+        self.assertFalse(row[1], "PUBLIC may execute it")
+
+    def test_a_caller_who_may_not_ask_gets_an_empty_array_rather_than_an_error(self):
+        """
+        It is one disjunct of a search. Raising would fail the whole page for a reader who cannot
+        see the role-assignment lane anyway -- turning "your search matched nothing here" into
+        "the Digital Thread is broken".
+        """
+        self.cur.execute("SET LOCAL ROLE authenticated;")
+        # cardinality() rather than the array itself: psycopg2 hands back an unparsed uuid[] as
+        # the literal '{}', which compares equal to neither [] nor None.
+        self.cur.execute("SELECT cardinality(public.digital_thread_user_ids_matching('%@%'));")
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_a_null_pattern_names_nobody(self):
+        # What an unfiltered page relies on: the disjunct has to match no row when nothing was
+        # searched for, or every page would gain rows for no reason.
+        self.cur.execute("SELECT cardinality(public.digital_thread_user_ids_matching(NULL));")
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_the_search_resolves_the_person_once_rather_than_per_row(self):
+        """
+        The CTE holding it is MATERIALIZED. Inlined, a STABLE function is ALLOWED to be evaluated
+        once and is not promised to be -- Postgres put this one in the per-row Filter of every
+        partition scan, which took a search from 53ms to 583ms on 4,065 rows. That is the shape of
+        cost that reads as "the thread got big" rather than as a query doing the wrong thing.
+        """
+        self.cur.execute(
+            "SELECT pg_get_functiondef(p.oid) FROM pg_proc p"
+            "  JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'public' AND p.proname = 'digital_thread_page'"
+        )
+        body = self.cur.fetchone()[0]
+        self.assertIn("MATERIALIZED", body,
+                      "the pattern CTE is no longer materialised; the helper will be called per row")
+
+    def test_a_like_metacharacter_is_a_character(self):
+        """
+        The box promises a substring of a name or an id. Unescaped, a typed percentage hands back
+        the whole thread and an underscore quietly matches any character -- both of which look
+        like a search that worked.
+        """
+        seeded = self.total()
+        # No seeded value holds a percent sign, so an unescaped '%' would return all of them.
+        self.assertEqual(self.total(search="%"), 0)
+        # Two hold a literal underscore. Unescaped, '_' matches any single character and so
+        # matches every row; the assertion is that it does not.
+        self.assertLess(self.total(search="_"), seeded)
+        # The other half: escaping must make the character literal, not drop it.
+        self.assertEqual(self.total(search="Ghost_Schema"), 1)
+        # The escape character itself has to survive being escaped.
+        self.assertEqual(self.total(search="\\"), 0)
 
 
 if __name__ == "__main__":
