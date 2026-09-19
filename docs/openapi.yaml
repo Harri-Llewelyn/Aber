@@ -1658,7 +1658,7 @@ paths:
         `value` is `jsonb` and `value_type` says what it holds; a CHECK constraint enforces the
         pair, so a reader may trust the type. `anon` is revoked.
       parameters:
-        - { name: key, in: query, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_lane_limit`' }
+        - { name: key, in: query, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_poll_seconds`' }
         - { name: category, in: query, schema: { type: string }, description: 'e.g. `eq.Digital Thread`' }
         - $ref: '#/components/parameters/Select'
       responses:
@@ -1680,7 +1680,7 @@ paths:
         A non-Administrator receives `204` with zero rows affected rather than an error: the row
         is invisible to the UPDATE policy.
       parameters:
-        - { name: key, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_lane_limit`' }
+        - { name: key, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_poll_seconds`' }
       requestBody:
         required: true
         content:
@@ -4270,12 +4270,12 @@ components:
           description: |
             Dotted, lowercase, `namespace.name`. IMMUTABLE: a key names the value some code reads,
             so renaming one would silently disconnect it from that reader.
-          example: ui.digital_thread_lane_limit
+          example: ui.digital_thread_poll_seconds
         value:
           description: |
             The value, as JSON. Its JSON type must match `value_type` — a CHECK constraint enforces
             the pair, which is what lets a reader trust the type rather than re-validating it.
-          example: 30
+          example: 60
         value_type:
           type: string
           enum: [string, number, boolean, json]
@@ -4284,7 +4284,7 @@ components:
           type: string
           description: 'Grouping for the settings page.'
           example: Digital Thread
-        label: { type: string, example: 'Lanes drawn before folding' }
+        label: { type: string, example: 'Refresh interval (seconds)' }
         description:
           type: string
           description: 'What changing this does, in an operator''s terms.'
@@ -4295,7 +4295,7 @@ components:
             The environment variable or code constant this overrides, named so the fallback is
             greppable from either end. An absent row means the fallback applies, which is what
             keeps local boot zero-configuration.
-          example: DEFAULT_LANE_LIMIT in DigitalThreadTab.jsx
+          example: the 60_000 ms interval in DigitalThreadTab.jsx
         updated_at: { type: string, format: date-time }
         updated_by:
           type: string

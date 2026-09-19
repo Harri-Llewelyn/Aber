@@ -205,12 +205,6 @@ export function timeWindow(preset, customStart, customEnd) {
 }
 
 /**
- * Lanes drawn before the rest fold behind a toggle. About a screen of lanes at 28px; a smaller cap
- * folded a single lane on a sixteen-asset stack.
- */
-const DEFAULT_LANE_LIMIT = 30
-
-/**
  * The fallback for the `ui.digital_thread_poll_seconds` setting, whose `fallback_source` names this
  * constant.
  */
@@ -356,8 +350,6 @@ const SECTIONS = DIGITAL_THREAD_ENTITY_TYPES.map(({ kind, label }) => ({
   Icon: SECTION_ICONS[kind] || FALLBACK_SECTION_ICON
 }))
 
-const SECTION_ICON = Object.fromEntries(SECTIONS.map(s => [s.kind, s.Icon]))
-
 /**
  * Is only some of what exists being drawn? `total` is null wherever the count is not known — a
  * server that returns no total (0115) — and not knowing is not a fraction.
@@ -365,27 +357,11 @@ const SECTION_ICON = Object.fromEntries(SECTIONS.map(s => [s.kind, s.Icon]))
 export const isPartial = (shown, total) => typeof total === 'number' && total > shown
 
 /**
- * The pair where there is no room for words: "200/467", or "200" when that is all of them. The axis
- * corner is a 210px lane label and the export button a header control; the phrase below overflows
- * both. Used for the events against the whole match AND for the lanes against the lane cap, which
- * are the two numbers in that label and were both being drawn as though they were the whole thing.
+ * What is drawn over what there is, as a ratio: "200/467", or "200" when that is all of them. The
+ * events against the whole match, on the header row and the Export button.
  */
 export const countRatio = (shown, total) =>
   isPartial(shown, total) ? `${shown}/${total}` : String(shown)
-
-/**
- * How many events are drawn, and out of how many when that is not all of them: "200 of 467 events".
- *
- * The foot of the page used to read "200 events" above a button offering 200 more, which is the
- * same sentence whether the next page is the last or the third of twelve.
- *
- * @param {number}  shown events currently drawn
- * @param {?number} total events matching the filters, or null if the server did not say
- */
-export function eventCountLabel (shown, total) {
-  const events = (n) => `${n} ${n === 1 ? 'event' : 'events'}`
-  return isPartial(shown, total) ? `${shown} of ${events(total)}` : events(shown)
-}
 
 /** A UUID shortened to something a person can compare at a glance, when there is no name. */
 export const shortId = (id) => {
@@ -805,11 +781,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   // Principal id -> `machine_principals` row (0125), for the same roles as the accounts above.
   const [machinePrincipals, setMachinePrincipals] = useState(() => new Map())
   const [selectedEventId, setSelectedEventId] = useState(null)
-  const [showAllLanes, setShowAllLanes] = useState(false)
 
-  /* Runtime overrides, each falling back to the constant above, which is what a stack whose
-     Settings were never touched runs on. */
-  const laneLimit = useSetting('ui.digital_thread_lane_limit', DEFAULT_LANE_LIMIT)
+  /* A runtime override, falling back to the constant above, which is what a stack whose Settings
+     were never touched runs on. */
   const pollSeconds = useSetting('ui.digital_thread_poll_seconds', DEFAULT_POLL_SECONDS)
 
   useEffect(() => {
@@ -961,11 +935,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [allEvents, entityNames, showPurged, lookupsLoaded, loadedKinds])
 
   /**
-   * The counts the page renders. Two spellings of one pair of numbers -- the ratio where the space
-   * is a fixed-width label, the phrase where there is room -- derived here so the three places that
-   * draw them cannot end up describing different sets.
+   * The counts the page renders, derived here so the header row and the Export button cannot end
+   * up describing different sets.
    */
-  const countLabel = eventCountLabel(events.length, totalMatching)
   const eventRatio = countRatio(events.length, totalMatching)
   const hasMoreToLoad = isPartial(events.length, totalMatching)
 
@@ -1161,36 +1133,30 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)))
   }, [events, entityIdentities, loadedKinds])
 
-  const visibleLanes = showAllLanes ? lanes : lanes.slice(0, laneLimit)
-  const hiddenLaneCount = lanes.length - visibleLanes.length
-
   /**
-   * The visible lanes, cut into sections after the cap is applied, so the cap means what it says
-   * across the whole set. Empty sections are omitted.
-   */
-  /**
-   * Lanes grouped into sections. Nothing visible may be dropped here: known kinds keep their order
-   * and icons, and every remaining kind gets a section of its own with the fallback icon.
+   * Every lane, grouped into sections. Nothing may be dropped here: known kinds keep their order
+   * and icons, and every remaining kind gets a section of its own with the fallback icon. Empty
+   * sections are omitted.
    */
   const sections = useMemo(() => {
     const known = SECTIONS
       .filter(s => allowedKinds.has(s.kind))
-      .map(s => ({ ...s, lanes: visibleLanes.filter(l => l.kind === s.kind) }))
+      .map(s => ({ ...s, lanes: lanes.filter(l => l.kind === s.kind) }))
       .filter(s => s.lanes.length > 0)
 
     const claimed = new Set(SECTIONS.map(s => s.kind))
-    const leftovers = [...new Set(visibleLanes.map(l => l.kind).filter(k => !claimed.has(k)))]
+    const leftovers = [...new Set(lanes.map(l => l.kind).filter(k => !claimed.has(k)))]
       .sort()
       .map(kind => ({
         kind,
         // The raw kind, uppercased: it reads as a gap to close rather than a considered label.
         label: kind,
         Icon: FALLBACK_SECTION_ICON,
-        lanes: visibleLanes.filter(l => l.kind === kind)
+        lanes: lanes.filter(l => l.kind === kind)
       }))
 
     return [...known, ...leftovers]
-  }, [visibleLanes, allowedKinds])
+  }, [lanes, allowedKinds])
 
   /**
    * The x-axis extent, from the events rather than the range control: the default range is
@@ -1218,7 +1184,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
 
   // The track carries 14px of padding at each end so extreme markers are not clipped; positions are
   // a calc against the padded width. Takes a fraction, because a cluster badge sits at the mean of
-  // its members' positions.
+  // its members' positions. THE ONE FORMULA for everything placed along the time axis: markers,
+  // badges, ticks and gridlines all go through it, so a tick and the line under it cannot drift
+  // apart.
   const offsetForFraction = (f) => `calc(14px + (100% - 28px) * ${f})`
 
   /* The track's rendered width, needed to know which markers collide: the threshold is in pixels
@@ -1246,11 +1214,11 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
    */
   const laneClusters = useMemo(() => {
     const m = new Map()
-    for (const lane of visibleLanes) {
+    for (const lane of lanes) {
       m.set(lane.key, clusterEvents(lane.events, (e) => fractionFor(e.timestamp), trackWidth))
     }
     return m
-  }, [visibleLanes, fractionFor, trackWidth])
+  }, [lanes, fractionFor, trackWidth])
 
   /**
    * How many badges are drawn, which the legend's Grouped entry counts. Badges rather than the
@@ -1340,7 +1308,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   })
 
   return (
-    <div className="page-layout">
+    /* `dt-page`: the page fills the viewport and the timeline scrolls inside the card, so the axis
+       row has a scroller to pin to. See .dt-page in App.css. */
+    <div className="page-layout dt-page">
       <div className="page-main">
         {/* The description is a tip on the title; Export sits in the header with the other actions
             and states the filtered count it will write. */}
@@ -1479,8 +1449,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         </div>
           </div>{/* .card-body */}
 
-        {/* A second `.card-body`, so the controls and the trace get a divider from one rule. */}
-        <div className="card-body">
+        {/* A second `.card-body`, so the controls and the trace get a divider from one rule.
+            `dt-timeline` is the one part of the card that gives way when the viewport is short. */}
+        <div className="card-body dt-timeline">
           {loading ? (
             <div className="loading-wrap"><div className="spinner" /> Loading digital thread trace sequence…</div>
           ) : events.length === 0 ? (
@@ -1521,24 +1492,22 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                   colour key at the right. */}
               <div className="dt-header">
                 {/* ENTITIES, not assets: a lane can be a setting, a role assignment or a backup
-                    job, and `asset` is the shopfloor class. BOTH NUMBERS ARE WHAT IS DRAWN over
-                    what there is -- the cap draws thirty lanes of however many matched, and a
-                    reader adding up the section badges must get the number above them. */}
+                    job, and `asset` is the shopfloor class. Every lane is drawn, so the first
+                    number is the whole set and a reader adding up the section counts gets it; the
+                    second is what is loaded over what matched. */}
                 <div
                   className="dt-count"
                   title={[
-                    hiddenLaneCount > 0
-                      ? `${visibleLanes.length} of ${lanes.length} entities have a lane drawn; `
-                        + 'the rest are behind Show all lanes.'
-                      : `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
+                    `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
                     hasMoreToLoad
                       ? `${events.length} of the ${totalMatching} events matching these filters `
                         + 'are loaded; the rest are behind Load more, at the foot of the page.'
                       : 'Every event matching these filters is loaded.'
                   ].join('\n')}
                 >
-                  {countRatio(visibleLanes.length, lanes.length)}
-                  {' '}{lanes.length === 1 ? 'entity' : 'entities'} · {eventRatio} events
+                  {lanes.length}
+                  {' '}{lanes.length === 1 ? 'entity' : 'entities'}
+                  {' · '}{eventRatio} {events.length === 1 && !hasMoreToLoad ? 'event' : 'events'}
                 </div>
 
                 {/* The legend for a derived colour scale: nothing else on the page says what
@@ -1578,7 +1547,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                         <span
                           key={t.f}
                           className="dt-tick"
-                          style={{ left: `calc(14px + (100% - 28px) * ${t.f})` }}
+                          style={{ left: offsetForFraction(t.f) }}
                           title={t.title}
                         >
                           {t.label}
@@ -1587,184 +1556,166 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                     </div>
                   </div>
 
-                  {sections.map(section => (
-                    <React.Fragment key={section.kind}>
-                      {/* The count is what is drawn, not what exists: the lane cap may fold some,
-                          and the toggle below names the remainder. */}
-                      <div className="dt-section" role="separator" aria-label={`${section.label} lanes`}>
-                        {/* Icon, name and count as one badge, so a section reads as a heading over
-                            the track cards. The rule beside it is CSS. */}
-                        <span className="dt-section-badge">
-                          <section.Icon size={12} />
-                          <span className="dt-section-name">{section.label}</span>
-                          <span className="dt-section-count">{section.lanes.length}</span>
-                        </span>
-                      </div>
-
-                      {section.lanes.map(lane => (
-                        <div className="dt-lane" key={lane.key}>
-                          {/* No type badge: the section heading and the icon already carry the
-                              kind, and the width goes to the name. The UUID is copyable in the
-                              drawer's Entity ID field. */}
-                          <div
-                            className="dt-lane-label"
-                            title={[
-                              lane.name
-                                ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
-                                : null,
-                              lane.entityId,
-                            ].filter(Boolean).join(' — ')}
-                          >
-                            {React.createElement(SECTION_ICON[lane.kind] || IconCpu, {
-                              size: 12, className: 'dt-lane-icon'
-                            })}
-                            {lane.name
-                              ? <strong className="dt-lane-name">{lane.name}</strong>
-                              /* Neither the join nor a snapshot could name it: the shortened id,
-                                 monospaced. */
-                              : <span className="dt-lane-name dt-lane-unnamed mono">{shortId(lane.entityId)}</span>}
-                            {/* THE PART THAT MUST SURVIVE TRUNCATION. A schema lineage shares its
-                                name and differs only here, so ellipsising this away leaves a
-                                column of identical labels. */}
-                            {lane.qualifier && (
-                              <span className="dt-lane-qualifier">{lane.qualifier}</span>
-                            )}
-                            {/* A name recovered from the audit payload means the entity is gone;
-                                say so. */}
-                            {/* `gone`, not `fromSnapshot`: the name coming from a snapshot says
-                                where the label came from, and a settings or backup lane is named
-                                that way while existing perfectly well. */}
-                            {lane.gone && (
-                              <span
-                                className="dt-lane-gone"
-                                title={lane.fromSnapshot
-                                  ? 'This entity no longer exists — the name is the one recorded in its final audit snapshot'
-                                  : 'This entity no longer exists, and its audit rows carry no name to recover'}
-                              >
-                                deleted
-                              </span>
-                            )}
+                  {/* Everything under the axis. Its own box, so the gridlines can span exactly the
+                      rows and nothing above them. */}
+                  <div className="dt-body">
+                    {sections.map(section => (
+                      <React.Fragment key={section.kind}>
+                        {/* The count is what is drawn, not what exists: the lane cap may fold some,
+                            and the toggle below names the remainder. */}
+                        <div className="dt-section" role="separator" aria-label={`${section.label} lanes`}>
+                          {/* A row of the grid: the heading in the label column and an empty track
+                              beside it, so it takes the row's rule and the row's rhythm. */}
+                          <div className="dt-lane-label">
+                            <section.Icon size={12} className="dt-section-icon" />
+                            <span className="dt-section-name">{section.label}</span>
+                            <span className="dt-section-count">{section.lanes.length}</span>
                           </div>
+                          <div className="dt-track" aria-hidden="true" />
+                        </div>
 
-                          <div className="dt-track">
-                            {(laneClusters.get(lane.key) || []).map(item => {
-                              /* The ring follows the drawer: a badge is lit while the drawer shows
-                                 any of its events, so the highlight stays put while Previous / Next
-                                 steps through the burst. */
-                              const isSelected = item.events
-                                .some(e => String(e.event_id) === String(selectedEventId))
+                        {section.lanes.map(lane => (
+                          <div className="dt-lane" key={lane.key}>
+                            {/* No type badge and no icon: the section heading carries the kind and
+                                is pinned in view, so the width goes to the name. The UUID is
+                                copyable in the drawer's Entity ID field. */}
+                            <div
+                              className="dt-lane-label"
+                              title={[
+                                lane.name
+                                  ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
+                                  : null,
+                                lane.entityId,
+                              ].filter(Boolean).join(' — ')}
+                            >
+                              {lane.name
+                                ? <strong className="dt-lane-name">{lane.name}</strong>
+                                /* Neither the join nor a snapshot could name it: the shortened id,
+                                   monospaced. */
+                                : <span className="dt-lane-name dt-lane-unnamed mono">{shortId(lane.entityId)}</span>}
+                              {/* THE PART THAT MUST SURVIVE TRUNCATION. A schema lineage shares its
+                                  name and differs only here, so ellipsising this away leaves a
+                                  column of identical labels. */}
+                              {lane.qualifier && (
+                                <span className="dt-lane-qualifier">{lane.qualifier}</span>
+                              )}
+                              {/* A name recovered from the audit payload means the entity is gone;
+                                  say so. */}
+                              {/* `gone`, not `fromSnapshot`: the name coming from a snapshot says
+                                  where the label came from, and a settings or backup lane is named
+                                  that way while existing perfectly well. */}
+                              {lane.gone && (
+                                <span
+                                  className="dt-lane-gone"
+                                  title={lane.fromSnapshot
+                                    ? 'This entity no longer exists — the name is the one recorded in its final audit snapshot'
+                                    : 'This entity no longer exists, and its audit rows carry no name to recover'}
+                                >
+                                  deleted
+                                </span>
+                              )}
+                            </div>
 
-                              if (item.isCluster) {
+                            <div className="dt-track">
+                              {(laneClusters.get(lane.key) || []).map(item => {
+                                /* The ring follows the drawer: a badge is lit while the drawer shows
+                                   any of its events, so the highlight stays put while Previous / Next
+                                   steps through the burst. */
+                                const isSelected = item.events
+                                  .some(e => String(e.event_id) === String(selectedEventId))
+
+                                if (item.isCluster) {
+                                  return (
+                                    <button
+                                      key={`cluster-${item.event.event_id}`}
+                                      type="button"
+                                      className={`dt-cluster${isSelected ? ' dt-node-selected' : ''}`}
+                                      style={{ left: offsetForFraction(item.xOffset) }}
+                                      /* The oldest member (see clusterEvents on the tiebreak), so
+                                         Next means and then what. */
+                                      onClick={() => setSelectedEventId(item.event.event_id)}
+                                      title={clusterSummary(
+                                        item.events,
+                                        (e) => analysis.get(e.event_id)?.kind || 'operational'
+                                      )}
+                                      aria-label={`${item.events.length} events on `
+                                        + `${lane.name || lane.entityId} from `
+                                        + `${new Date(item.event.timestamp).toLocaleString()} — open the first`}
+                                      aria-pressed={isSelected}
+                                    >
+                                      {item.events.length}
+                                    </button>
+                                  )
+                                }
+
+                                const e = item.event
+                                const kind = analysis.get(e.event_id)?.kind || 'operational'
                                 return (
                                   <button
-                                    key={`cluster-${item.event.event_id}`}
+                                    key={e.event_id}
                                     type="button"
-                                    className={`dt-cluster${isSelected ? ' dt-node-selected' : ''}`}
+                                    className={`dt-node dt-node-${kind}${isSelected ? ' dt-node-selected' : ''}`}
                                     style={{ left: offsetForFraction(item.xOffset) }}
-                                    /* The oldest member (see clusterEvents on the tiebreak), so
-                                       Next means and then what. */
-                                    onClick={() => setSelectedEventId(item.event.event_id)}
-                                    title={clusterSummary(
-                                      item.events,
-                                      (e) => analysis.get(e.event_id)?.kind || 'operational'
-                                    )}
-                                    aria-label={`${item.events.length} events on `
-                                      + `${lane.name || lane.entityId} from `
-                                      + `${new Date(item.event.timestamp).toLocaleString()} — open the first`}
+                                    onClick={() => setSelectedEventId(e.event_id)}
+                                    /* A plain `title`, as elsewhere: what, who, when. The rest is in
+                                       the drawer. */
+                                    title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e)}\n${new Date(e.timestamp).toLocaleString()}`}
+                                    aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
                                     aria-pressed={isSelected}
-                                  >
-                                    {item.events.length}
-                                  </button>
+                                  />
                                 )
-                              }
-
-                              const e = item.event
-                              const kind = analysis.get(e.event_id)?.kind || 'operational'
-                              return (
-                                <button
-                                  key={e.event_id}
-                                  type="button"
-                                  className={`dt-node dt-node-${kind}${isSelected ? ' dt-node-selected' : ''}`}
-                                  style={{ left: offsetForFraction(item.xOffset) }}
-                                  onClick={() => setSelectedEventId(e.event_id)}
-                                  /* A plain `title`, as elsewhere: what, who, when. The rest is in
-                                     the drawer. */
-                                  title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e)}\n${new Date(e.timestamp).toLocaleString()}`}
-                                  aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
-                                  aria-pressed={isSelected}
-                                />
-                              )
-                            })}
+                              })}
+                            </div>
                           </div>
-                        </div>
+                        ))}
+                      </React.Fragment>
+                    ))}
+
+                    {/* Faint dotted verticals from each tick down the whole grid, so an event on
+                        one lane can be read against the same instant on another. Drawn once,
+                        behind the rows, rather than once per lane; placed last so the first
+                        section stays the body's first child. Positioned by the same helper as
+                        the ticks and the markers. Nothing here is content. */}
+                    <div className="dt-gridlines" aria-hidden="true">
+                      {ticks.map(t => (
+                        <span key={t.f} className="dt-gridline" style={{ left: offsetForFraction(t.f) }} />
                       ))}
-                    </React.Fragment>
-                  ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {hiddenLaneCount > 0 && (
-                <button
-                  className="btn btn-ghost btn-sm dt-lane-toggle"
-                  onClick={() => setShowAllLanes(true)}
-                  title={`Draw the remaining ${hiddenLaneCount} lanes`}
-                >
-                  Show all lanes (+{hiddenLaneCount})
-                </button>
-              )}
-              {showAllLanes && lanes.length > laneLimit && (
-                <button
-                  className="btn btn-ghost btn-sm dt-lane-toggle"
-                  onClick={() => setShowAllLanes(false)}
-                  title={`Collapse back to the ${laneLimit} busiest assets`}
-                >
-                  Show fewer lanes
-                </button>
-              )}
-
-              {/* How much of the thread this is, and where its end is. `countLabel` is drawn against
-                  the whole match; the parenthetical is the rarer disagreement between what was
-                  FETCHED and what survived the client-side purged filter, which is a no-op against a
-                  server that hides them itself and is not against one that does not. */}
-              <div className="dt-pagination">
-                <span
-                  className="dt-pagination-count"
-                  title={hasMoreToLoad
-                    ? `${totalMatching} events match the current filters; this page holds the `
-                      + `newest ${events.length}.`
-                    : 'Every event matching the current filters is on this page.'}
-                >
-                  {countLabel}
-                  {events.length !== allEvents.length && ` (${allEvents.length} loaded)`}
-                </span>
-                {nextCursor ? (
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={loadMore}
-                    disabled={loadingMore}
-                    title={`Fetch the next ${PAGE_SIZE} events, older than the oldest one loaded`}
-                  >
-                    {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
-                  </button>
-                ) : truncated ? (
-                  /* Cut off with no way forward: `truncated` and `next_cursor` come from the same
-                     response, but a database without the paging RPC returns only the first. The
-                     view is still incomplete and the reader is told so. */
-                  <span className="dt-pagination-end">
-                    Showing the newest {allEvents.length}
-                    {typeof totalMatching === 'number' && ` of ${totalMatching}`} events — there are
-                    older ones this view cannot reach.
-                  </span>
-                ) : (
-                  /* Only meaningful once something was paged: a first response holding the whole
-                     thread has no end to announce. */
-                  allEvents.length >= PAGE_SIZE && (
+              {/* Where the thread's end is, drawn only when there is something to say about it: a
+                  page still to load, a cut-off, or an end met at a page boundary. The count is on
+                  the header row and is not said twice. A first response holding the whole thread
+                  has no end to announce, so on a stack smaller than one page there is no foot. */}
+              {(nextCursor || truncated || allEvents.length >= PAGE_SIZE) && (
+                <div className="dt-pagination">
+                  {nextCursor ? (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={loadMore}
+                      disabled={loadingMore}
+                      title={`Fetch the next ${PAGE_SIZE} events, older than the oldest one loaded`}
+                    >
+                      {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
+                    </button>
+                  ) : truncated ? (
+                    /* Cut off with no way forward: `truncated` and `next_cursor` come from the same
+                       response, but a database without the paging RPC returns only the first. The
+                       view is still incomplete and the reader is told so. */
+                    <span className="dt-pagination-end">
+                      Showing the newest {allEvents.length}
+                      {typeof totalMatching === 'number' && ` of ${totalMatching}`} events — there are
+                      older ones this view cannot reach.
+                    </span>
+                  ) : (
                     <span className="dt-pagination-end">
                       End of the thread — every event matching these filters is loaded.
                     </span>
-                  )
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>{/* .card-body — the timeline */}

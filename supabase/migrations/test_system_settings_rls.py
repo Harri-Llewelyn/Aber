@@ -42,7 +42,7 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 ADMIN_ID = "5e771465-0000-4000-8000-00000000ad11"
 OPERATOR_ID = "5e771465-0000-4000-8000-00000000009e"
 
-SEEDED_KEY = "ui.digital_thread_lane_limit"
+SEEDED_KEY = "ui.digital_thread_poll_seconds"
 
 
 def get_connection():
@@ -201,7 +201,7 @@ class SystemSettingsRLS(unittest.TestCase):
                     "SELECT count(*) FROM public.system_settings WHERE key = %s;", (SEEDED_KEY,)
                 )
                 if cur.fetchone()[0] != 1:
-                    raise RuntimeError(f"{SEEDED_KEY} is not seeded; 0031 did not run cleanly.")
+                    raise RuntimeError(f"{SEEDED_KEY} is not seeded; 0002 did not run cleanly.")
                 # BY NAME, not by a hardcoded id. `roles.id` is an integer assigned by 0001 and
                 # a suite that hardcodes 1 == Administrator is asserting a fact about a sequence.
                 cur.execute("SELECT id, name FROM public.roles WHERE name IN %s;",

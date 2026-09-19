@@ -7268,7 +7268,7 @@ SELECT s.name, s.datatype, s.description, s.category, s.units, 'ASHRAE 223P', v.
 ON CONFLICT (name) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
--- Declared settings  (6 rows)
+-- Declared settings  (5 rows)
 -- -------------------------------------------------------------------------------------------
 -- Through seed_setting(), not as INSERTs: the function refreshes label, description and bounds
 -- on every replay while leaving the value alone, so an operator's change survives a restart.
@@ -7277,17 +7277,8 @@ ON CONFLICT (name) DO NOTHING;
 -- 4. The settings this migration declares
 -- ---------------------------------------------------------------------------------------------
 -- Few, and every one has a reader; a setting nothing reads is a control that does nothing.
-SELECT public.seed_setting(
-    'ui.digital_thread_lane_limit',
-    to_jsonb(30),
-    'number',
-    'Digital Thread',
-    'Lanes drawn before folding',
-    'How many asset lanes the Digital Thread draws before the remainder go behind "Show all '
-    'lanes". Raise it on a large estate; lower it if the initial render feels slow.',
-    'DEFAULT_LANE_LIMIT in DigitalThreadTab.jsx'
-);
-
+-- `ui.digital_thread_lane_limit` was declared here until the Digital Thread stopped capping
+-- its lanes; 0128 removes the row from stacks that already hold it.
 SELECT public.seed_setting(
     'ui.digital_thread_poll_seconds',
     to_jsonb(60),

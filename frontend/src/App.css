@@ -3158,6 +3158,39 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Digital Thread swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
    apart and two a second apart look different. */
 
+/* The page fills the viewport instead of growing past it, so the timeline can scroll inside the
+   card and the axis row can pin to the top of that scroll. A chain of flex columns from here down
+   to .dt-scroll: every link may shrink, and everything beside the scroller -- the card header, the
+   filter bar, the header row, the lane toggle, the foot -- is told not to. A maximum rather than a
+   height, so a short thread gets a short card. */
+.dt-page { height: 100%; }
+
+.dt-page > .page-main {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.dt-page > .page-main > .card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dt-page > .page-main > .card > :not(.dt-timeline) { flex-shrink: 0; }
+
+/* The card body holding the timeline: the one link in the card that gives way, and inside it the
+   scroller is the one thing that does. */
+.dt-timeline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dt-timeline > :not(.dt-scroll) { flex-shrink: 0; }
+
+.dt-timeline > .dt-scroll { min-height: 0; }
+
 /* The row above the timeline: the count at the left, the colour key at the right. Baseline-aligned,
    because the two are set at different sizes. */
 .dt-header {
@@ -3204,16 +3237,58 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   font-variant-numeric: tabular-nums;
 }
 
-/* Horizontal scrolling lives HERE rather than on the page, because the drawer is a flex sibling
+/* Both scrolls live HERE rather than on the page. Horizontal, because the drawer is a flex sibling
    of the list: opening it takes 360px off this element's width, and a page that scrolled as a
-   whole would push the lane labels off-screen the moment an event was selected. */
+   whole would push the lane labels off-screen the moment an event was selected. Vertical, because
+   this is the box the axis row pins to: a sticky element resolves against its nearest scroll
+   container, and this was already one for the horizontal axis, so while the page did the vertical
+   scrolling the axis pinned to a box that never moved. The .dt-page chain is what gives this
+   element a height to overflow. */
 .dt-scroll {
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
+/* The three widths every rule below is laid out from, declared once: a gridline is placed against
+   the track's box, and the track's box is what is left of a lane after the label and the gap. The
+   minimum width is their sum, so the track can never be forced past the box it is drawn in. */
 .dt-swimlanes {
-  min-width: 620px;
+  --dt-label-width: 260px;
+  --dt-lane-gap: 10px;
+  --dt-track-min: 380px;
+  /* The axis track's height, which is also where a pinned section heading sits. */
+  --dt-axis-height: 24px;
+  min-width: calc(var(--dt-label-width) + var(--dt-lane-gap) + var(--dt-track-min));
+}
+
+/* The rows, in a box of their own under the axis. `isolation` makes it a stacking context, which
+   is what lets the gridlines sit at z-index -1: behind every row, its hover tint and its sticky
+   label, and above nothing but the card. */
+.dt-body {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Vertical gridlines, one per axis tick, spanning the track column of every row. Positioned once
+   here rather than once per lane. Inert: nothing under the pointer is a line. */
+.dt-gridlines {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--dt-label-width) + var(--dt-lane-gap));
+  right: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Dotted and faint: a reference to read a marker against, not a rule to follow. */
+.dt-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dotted var(--text-dim);
+  opacity: 0.35;
 }
 
 /* A lane is one ruled row of a grid: the label column and the track, divided from the row below by
@@ -3221,7 +3296,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .dt-lane {
   display: flex;
   align-items: stretch;
-  gap: 10px;
+  gap: var(--dt-lane-gap);
   border-bottom: 1px solid var(--border);
 }
 
@@ -3237,35 +3312,52 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
 }
 
-/* The section rule: Cells, then Gateways, then Devices, a plant's own containment order. Sticky
-   like the labels beside it, spanning only the label column so it never rides over the markers. */
+/* The axis row pins to the top of the scroller and the rows pass under it. Opaque for that reason,
+   and above the lane labels and section headings, which are sticky on the other axis and would
+   ride over it on a diagonal scroll. ON THE BASE SURFACE, as the section headings are, so the two
+   read as one header system: the `thead` tint is 2% in the light theme and did not read as a band
+   on a white card, while the base colour is a header band in both themes. The track inside stays
+   bare: the row is what is opaque, and a scale is not a lane. */
+.dt-lane.dt-axis {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-base);
+}
+
+/* The corner is part of the row, so it takes the row's colour. */
+.dt-axis .dt-lane-label {
+  background: var(--bg-base);
+}
+
+/* The section heading is a row of the grid: the same two columns as a lane, the same height and
+   the same rule beneath, so the first lane under it has an edge above it and the rhythm does not
+   break at a section. Stated here rather than shared with .dt-lane, which the lane counts and the
+   hover rule select on. Sticky under the axis row, so a reader deep in a section still knows which
+   one; the offset is the axis track plus the row's divider. Above the labels (2), because its own
+   lanes come after it in the DOM and would paint over it as they scrolled under. Opaque for the
+   rows that pass under it, on the base surface so it stands apart from the rows it heads; see the
+   axis row above for why not the `thead` tint. */
 .dt-section {
   position: sticky;
-  left: 0;
-  z-index: 2;
+  top: calc(var(--dt-axis-height) + 1px);
+  z-index: 3;
   display: flex;
-  align-items: center;
-  width: 210px;
-  padding: 10px 10px 4px 0;
-  background: var(--bg-card);
+  align-items: stretch;
+  gap: var(--dt-lane-gap);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-base);
+}
+
+/* A heading's label: the icon at 9px, where the lanes' names indent to meet its text. The row's
+   own colour, opaque, so markers cannot show through it either. */
+.dt-section .dt-lane-label {
+  padding-left: 9px;
+  background: var(--bg-base);
   color: var(--text-muted);
 }
 
-/* The heading as a BADGE rather than three loose items on a ruled row, so a section heading and an
-   asset lane are not separated by identical lines with the hierarchy left to the text. */
-.dt-section-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-}
-
-/* The first heading sits flush under the axis; the rest earn their space from the lanes above. */
-.dt-axis + .dt-section { padding-top: 4px; }
+.dt-section-icon { flex-shrink: 0; }
 
 .dt-section-name {
   font-size: 11px;
@@ -3274,14 +3366,11 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   letter-spacing: 0.7px;
 }
 
-/* No parentheses: inside a badge the count is already visually separate, and `( 6 )` was
-   punctuation doing a job the container now does. */
+/* The count, dim and monospaced beside the name; the label's own gap separates them. */
 .dt-section-count {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text-dim);
-  padding-left: 5px;
-  border-left: 1px solid var(--border);
 }
 
 /* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
@@ -3296,14 +3385,19 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   position: sticky;
   left: 0;
   z-index: 2;
-  flex: 0 0 260px;
+  flex: 0 0 var(--dt-label-width);
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  /* 9px on the left lines the lane icon up with the icon inside the section badge above it. */
-  padding: 0 8px 0 9px;
+  /* 27px on the left: a section heading's icon sits at 9px and its text 18px after that, so a
+     lane's name lines up with the heading's text rather than its icon. */
+  padding: 0 8px 0 27px;
   background: var(--bg-card);
+  /* The column's edge, on every row including the axis and the headings: what makes the label
+     column read as a column, and marks the line markers pass under when the timeline is scrolled
+     sideways. Inside the 260px, so the track and the gridlines start where they did. */
+  border-right: 1px solid var(--border);
   font-size: 12px;
 }
 
@@ -3315,14 +3409,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* The kind, carried at a twelfth of the width the DEVICE/GATEWAY/CELL badge used to cost -- and
-   still readable when the section heading has been scrolled past. Dim, because it repeats what
-   the heading above already said; the name is what the eye is looking for. */
-.dt-lane-icon {
-  flex-shrink: 0;
-  color: var(--text-dim);
 }
 
 /* No name resolved anywhere -- not from a live row, not from an audit snapshot. Dimmer than a
@@ -3366,11 +3452,15 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .dt-track {
   position: relative;
   flex: 1;
-  min-width: 380px;
+  min-width: var(--dt-track-min);
   height: 28px;
+  /* A stacking context of its own, so a marker's z-index -- a badge is 3, the active ring 4, a
+     hovered badge 5 -- orders markers within their track and never lifts one above a sticky
+     label (2) or a pinned heading (3) it is passing under. */
+  isolation: isolate;
 }
 
-.dt-axis-track { height: 24px; }
+.dt-axis-track { height: var(--dt-axis-height); }
 
 .dt-tick {
   position: absolute;
@@ -3481,10 +3571,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 0 5px;
 }
 
-.dt-lane-toggle { margin-top: 10px; }
-
-/* The foot of the timeline, where the reader finds out whether they are looking at everything.
-   Separated by a rule, because it makes a claim about the data above it. */
+/* The foot of the timeline, present only when the thread continues past what is loaded or ended
+   at a page boundary. Separated by a rule, because it makes a claim about the data above it. */
 .dt-pagination {
   display: flex;
   align-items: center;
@@ -3493,11 +3581,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-}
-
-.dt-pagination-count {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* Muted and italic: it is a statement of completeness, not a warning. The truncated case gets the
