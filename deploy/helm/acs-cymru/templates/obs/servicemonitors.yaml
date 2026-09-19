@@ -41,11 +41,22 @@ So each entry was verified against the pinned image before it was written:
                   background thread beside the watchdog, heartbeat and stats reporter. Not a
                   re-instrumentation: the counters already existed (issues #22, #24).
 
-DELIBERATELY ABSENT:
+  supabase-db /   postgres_exporter AS A SIDECAR IN EACH DATABASE POD (`databaseMetrics`), which
+  timescaledb     is why the credentials question the absence note used to raise went away: the
+                  sidecar shares the pod's network namespace, both pg_hba files trust loopback,
+                  and so the role it connects as has NO PASSWORD AT ALL and cannot authenticate
+                  from anywhere else.
+                  (postgres-exporter v0.20.1, with `settings`, `stat_user_tables` and
+                  `statio_user_tables` switched off: ~265 series on the historian and ~309 on
+                  supabase-db, against 2,505 and 3,489 with the defaults. values.yaml has the
+                  measurements.)
 
-  supabase-db /   Postgres exposes nothing without postgres_exporter, which needs its own
-  timescaledb     credentials and its own scrape story. Worth doing, and worth doing properly
-                  rather than half-added here.
+                  WATCH `pg_scrape_collector_success`, NOT ONLY `up`. A collector that fails --
+                  a missing extension, a privilege the role turns out not to hold -- is reported
+                  ONLY by that gauge: the exporter keeps serving, the scrape succeeds and
+                  `pg_exporter_last_scrape_error` stays 0, so the affected series are just absent.
+                  Both were observed while this was built.
+
 
 REQUIRES THE PROMETHEUS OPERATOR CRDs. ServiceMonitor is not a core type; without
 kube-prometheus-stack (or at least its CRDs), `helm install` fails with `no matches for kind
@@ -114,6 +125,32 @@ Without it the targets are simply DOWN, which reads as the pods being unreachabl
       "port" "metrics"
       "path" "/metrics"
       "why" "the exporter sidecar; metrics are prefixed broker_") -}}
+{{- end -}}
+{{/*
+  THE TWO DATABASES. Each selects the database's own ClusterIP Service, which carries a `metrics`
+  port FOR THIS FILE ALONE -- Alloy finds the sidecar by the pod annotation and never reads the
+  Service, so under the chart's own observability stack these objects are not what makes the
+  scrape work. They exist for an external Prometheus Operator, which selects Services.
+*/}}
+{{- if .Values.databaseMetrics.enabled -}}
+{{- if .Values.supabaseDb.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "supabase-db"
+      "component" "supabase-db"
+      "service" "supabase-db"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the postgres_exporter sidecar, connecting over loopback as a role with no password") -}}
+{{- end -}}
+{{- if .Values.timescaledb.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "timescaledb"
+      "component" "timescaledb"
+      "service" "timescaledb"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the postgres_exporter sidecar; the historian's chunk and policy-job series ride here too") -}}
+{{- end -}}
 {{- end -}}
 {{- range $t := $targets }}
 ---

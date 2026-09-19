@@ -46,6 +46,15 @@ spec:
       port: 5432
       targetPort: postgres
       protocol: TCP
+    {{- if .Values.databaseMetrics.enabled }}
+    {{- /* FOR THE ServiceMonitor PATH ONLY. Alloy discovers the sidecar by the pod annotation and
+           never reads this; an external Prometheus Operator selects a SERVICE, so without a named
+           port here the exporter is invisible to it. Nothing else dials it. */}}
+    - name: metrics
+      port: {{ .Values.databaseMetrics.port }}
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -76,6 +85,9 @@ spec:
         # only runs them on an EMPTY data directory, so a change reaches an existing volume not at
         # all. The annotation makes that visible in `kubectl rollout history` rather than silent.
         checksum/init: {{ include (print $.Template.BasePath "/data/timescaledb-configmap.yaml") . | sha256sum }}
+        {{- if .Values.databaseMetrics.enabled }}
+        {{- include "acs-cymru.scrapeAnnotations" (dict "port" .Values.databaseMetrics.port "path" "/metrics") | nindent 8 }}
+        {{- end }}
         {{- if .Values.postgresTls.enabled }}
         # pg_hba and the TLS flags are read at start, so a change to either rolls the pod.
         checksum/tls: {{ include (print $.Template.BasePath "/data/postgres-tls.yaml") . | sha256sum }}
@@ -181,6 +193,9 @@ spec:
             {{- end }}
         {{- if .Values.postgresTls.enabled }}
         {{- include "acs-cymru.dbCertificateReload" (dict "ctx" . "image" (printf "%s:%s" .Values.timescaledb.image.repository .Values.timescaledb.image.tag) "pullPolicy" .Values.timescaledb.image.pullPolicy "user" .Values.timescaledb.username "db" .Values.timescaledb.database) | nindent 8 }}
+        {{- end }}
+        {{- if .Values.databaseMetrics.enabled }}
+        {{- include "acs-cymru.dbMetricsExporter" (dict "ctx" . "db" $component "database" .Values.timescaledb.database) | nindent 8 }}
         {{- end }}
       volumes:
         - name: init

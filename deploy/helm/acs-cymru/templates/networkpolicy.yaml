@@ -40,6 +40,11 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
 {{- /* ---------------------------------------------------------------------------------------
      THE EDGES. `from` and `to` are component label values; `port` is the DESTINATION port.
      Add a flow here and both policies follow. Nothing else in this file needs editing.
+
+     `alloy -> supabase-db` and `alloy -> timescaledb` on the exporter port are THE SCRAPE, not a
+     database connection: the postgres_exporter sidecar sits in the database's own pod and dials
+     loopback, which no NetworkPolicy governs. Without these two the exporters are DOWN under
+     default-deny, which reads as the databases being unreachable rather than as a missing rule.
 --------------------------------------------------------------------------------------------- */ -}}
 {{- $edges := list
 
@@ -112,6 +117,8 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "alloy"              "to" "supabase-rest"      "port" 3001 "why" "scrape: the admin listener")
   (dict "from" "alloy"              "to" "grafana"            "port" 3000 "why" "scrape")
   (dict "from" "alloy"              "to" "mosquitto"          "port" (int .Values.mosquitto.metrics.port) "why" "scrape: the exporter sidecar")
+  (dict "from" "alloy"              "to" "supabase-db"        "port" (int .Values.databaseMetrics.port) "why" "scrape: the postgres_exporter sidecar")
+  (dict "from" "alloy"              "to" "timescaledb"        "port" (int .Values.databaseMetrics.port) "why" "scrape: the postgres_exporter sidecar")
   (dict "from" "alloy"              "to" "prometheus"         "port" 9090 "why" "scrape")
   (dict "from" "alloy"              "to" "loki"               "port" 3100 "why" "scrape")
   (dict "from" "alloy"              "to" "alloy"              "port" 12345 "why" "scrape: one DaemonSet pod reads another's on a multi-node cluster")

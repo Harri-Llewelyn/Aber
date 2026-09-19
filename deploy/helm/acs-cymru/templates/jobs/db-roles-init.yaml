@@ -98,6 +98,59 @@ spec:
                      -v pw="$ROLE_PASSWORD" -v role="$role" -f /tmp/set-role-password.sql
               done
               echo 'Scoped role passwords set successfully.'
+{{- if .Values.databaseMetrics.enabled }}
+
+              # metrics_reader, for the postgres_exporter sidecar in the database pod. Created
+              # here rather than by a migration because CREATE ROLE and GRANT pg_monitor need a
+              # superuser, and db-init connects as `postgres`, which is not one on this image --
+              # the same reason supabase_read_only_user is ALTERed here. The historian's copy is
+              # in timescaledb/roles.sql, which carries the full argument for the shape.
+              #
+              # NO PASSWORD, EVER. pg_hba admits the network with scram, so a role without one
+              # cannot authenticate off loopback -- which is what makes pg_monitor proportionate.
+              # PASSWORD NULL is re-asserted on every upgrade rather than only at creation.
+              #
+              # `WITH INHERIT TRUE` IS NOT OPTIONAL. PostgreSQL fixes inheritance on the GRANT from
+              # the member's rolinherit at grant time, and a later ALTER ROLE does not revise it.
+              # Without it the exporter starts, reports no scrape error, and serves no WAL series.
+              #
+              # THE HEREDOC DELIMITER IS QUOTED so the shell leaves `$do$` alone; unquoted, `$$`
+              # would expand to this shell's PID and psql would receive a syntax error.
+              echo 'Creating metrics_reader for the exporter sidecar...'
+              psql -v ON_ERROR_STOP=1 -h {{ include "acs-cymru.supabaseDb.host" . }} -p {{ include "acs-cymru.supabaseDb.port" . }}                    -U supabase_admin -d postgres <<'SQL'
+              DO $do$
+              BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metrics_reader') THEN
+                  CREATE ROLE metrics_reader LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT;
+                END IF;
+              END
+              $do$;
+              ALTER ROLE metrics_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT
+                                             PASSWORD NULL;
+              GRANT CONNECT ON DATABASE postgres TO metrics_reader;
+              GRANT pg_monitor TO metrics_reader WITH INHERIT TRUE;
+
+              -- The same self-check the historian's roles.sql makes, for the same reason: a
+              -- membership held without inheritance is invisible everywhere downstream.
+              DO $do$
+              BEGIN
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_auth_members m
+                    JOIN pg_roles g ON g.oid = m.roleid
+                    JOIN pg_roles r ON r.oid = m.member
+                   WHERE g.rolname = 'pg_monitor' AND r.rolname = 'metrics_reader'
+                     AND m.inherit_option
+                ) THEN
+                  RAISE EXCEPTION 'metrics_reader holds pg_monitor without INHERIT; re-issue the grant WITH INHERIT TRUE';
+                END IF;
+                IF EXISTS (SELECT 1 FROM pg_authid WHERE rolname = 'metrics_reader' AND rolpassword IS NOT NULL) THEN
+                  RAISE EXCEPTION 'metrics_reader has a password, so it can authenticate over the network';
+                END IF;
+              END
+              $do$;
+              SQL
+              echo 'metrics_reader ready.'
+{{- end }}
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { memory: 256Mi }

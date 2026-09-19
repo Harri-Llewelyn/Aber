@@ -358,7 +358,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `storage-init` | `node:24-alpine` | hook Job: the storage buckets |
 | `storage-policies` | `supabase/postgres:17.6.1.160` | hook Job: the storage RLS policies |
 | `supabase-auth` | `supabase/gotrue:v2.189.0` | behind `api.<domain>/auth/v1` |
-| `supabase-db` | `supabase/postgres:17.6.1.160` | `supabase-db:5432` |
+| `supabase-db` | `supabase/postgres:17.6.1.160`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `supabase-db:5432`; `:9187` is scraped |
 | `supabase-envoy` | `envoyproxy/envoy:v1.39.1` | the gateway: `api.<domain>` (Service `supabase-kong:8000`), Studio on 8001, the forge on 8002 |
 | `supabase-functions` | `ghcr.io/harri-llewelyn/acs-cymru/edge-runtime` | behind `api.<domain>/functions/v1` |
 | `supabase-meta` | `supabase/postgres-meta:v0.96.6` | in-cluster only, for Studio |
@@ -368,7 +368,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `swagger-ui` | `ghcr.io/harri-llewelyn/acs-cymru/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
 | `test-db-tls` | `supabase/postgres:17.6.1.160` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
 | `test-fdw` | `supabase/postgres:17.6.1.160` | `helm test`: the postgres_fdw gate |
-| `timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `timescaledb:5432` |
+| `timescaledb` | `timescale/timescaledb:2.29.2-pg17`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `timescaledb:5432`; `:9187` is scraped |
 | `timescaledb-maintenance` | `timescale/timescaledb:2.29.2-pg17` | hook Job: extension, retention, rollups, roles |
 
 ---
