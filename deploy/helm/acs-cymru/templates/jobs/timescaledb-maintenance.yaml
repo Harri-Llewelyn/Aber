@@ -140,6 +140,21 @@ spec:
               */}}
               echo 'Updating the timescaledb extension to the version the image ships...'
               $PSQL -f /sql/extension.sql
+{{- if and .Values.databaseMetrics.enabled .Values.databaseMetrics.statementStats }}
+
+              {{/*
+                AFTER extension.sql, with nothing depending on it either way -- it creates an
+                extension of its own and touches no TimescaleDB surface. Placed here so it is
+                applied before anything that might want to read the view.
+
+                GATED ON THE SAME FLAG AS THE PRELOAD ARGUMENT, because the two halves are one
+                decision: the library on the server's command line and the extension in the
+                database. With the flag off the StatefulSet drops the library, and creating the
+                extension would leave a view that raises on every read.
+              */}}
+              echo 'Reconciling statement statistics...'
+              $PSQL -f /sql/statistics.sql
+{{- end }}
 
               echo 'Reconciling compression and retention policies...'
               $PSQL -v compress_after={{ .Values.timescaledb.retention.compressAfter | quote }} -v retain_after={{ .Values.timescaledb.retention.retainFor | quote }} -f /sql/retention.sql

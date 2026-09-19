@@ -162,7 +162,23 @@ visible on the Gateways page without a shell on anything. **Nothing consumes it.
 cannot yet say "this gateway predates the capability you are looking for", so an operator inferring
 why one gateway shows health and another does not is reading two columns and joining them by eye.
 
-### 4.3 A renamed metric orphans its history
+### 4.3 Turning statement statistics on or off restarts the historian
+
+`databaseMetrics.statementStats` adds `pg_stat_statements` to the historian's
+`shared_preload_libraries`. That is a **postmaster setting**: PostgreSQL reads it once at start and
+`-c` on the command line is the only way to set it, so flipping the flag either way rolls
+`timescaledb-0`. One restart, on the upgrade that changes it — not on every upgrade afterwards.
+
+It is a separate flag from `databaseMetrics.enabled` for exactly this reason: the exporter itself
+costs no restart, and an operator can take the metrics without taking a restart of the database they
+are watching. `supabase-db` is unaffected either way — `supabase/postgres` preloads the library
+already.
+
+The historian's image preloads `timescaledb` alone, and `-c` **replaces** that value rather than
+appending to it, so the chart names both libraries with `timescaledb` first. A build that dropped it
+would start a server that does not know what a hypertable is.
+
+### 4.4 A renamed metric orphans its history
 
 `metric_catalog` registers every metric name with its standard and semantic id. A future version that
 **renames** a metric would leave the old name's history under the old name — the historian records

@@ -60,6 +60,7 @@ const MIRRORS = [
       name === 'retention.sql' ||
       name === 'aggregates.sql' ||
       name === 'storage.sql' ||
+      name === 'statistics.sql' ||
       // ADDED LATE, AND THE DELAY IS THE ARGUMENT FOR THIS LIST BEING EXPLICIT. `cold_archive.sql`
       // shipped with cold telemetry archival and was never added here, so the chart carried no manifest
       // table -- and `0068`'s self-check probes it over the FDW, which meant db-init FAILED on

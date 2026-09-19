@@ -86,6 +86,9 @@ spec:
         # all. The annotation makes that visible in `kubectl rollout history` rather than silent.
         checksum/init: {{ include (print $.Template.BasePath "/data/timescaledb-configmap.yaml") . | sha256sum }}
         {{- if .Values.databaseMetrics.enabled }}
+        # The exporter reads its query file once, at startup, so an edit has to roll the pod or it
+        # sits in the ConfigMap unread.
+        checksum/exporter-queries: {{ include (print $.Template.BasePath "/data/timescaledb-exporter-configmap.yaml") . | sha256sum }}
         {{- include "acs-cymru.scrapeAnnotations" (dict "port" .Values.databaseMetrics.port "path" "/metrics") | nindent 8 }}
         {{- end }}
         {{- if .Values.postgresTls.enabled }}
@@ -133,6 +136,21 @@ spec:
             - max_parallel_workers={{ .Values.timescaledb.workers.parallel }}
             - -c
             - timescaledb.telemetry_level={{ .Values.timescaledb.telemetryLevel }}
+            {{- if and .Values.databaseMetrics.enabled .Values.databaseMetrics.statementStats }}
+            {{- /*
+              TIMESCALEDB STAYS FIRST IN THE LIST. The image writes `shared_preload_libraries =
+              timescaledb` into its own conf at initdb and this `-c` replaces that value outright
+              rather than appending to it, so the extension has to be named again here or the server
+              starts without it and does not know what a hypertable is.
+
+              A POSTMASTER SETTING: it takes effect only at start, so turning statement statistics
+              on or off rolls this pod. That is the one restart this costs, and it is why the flag
+              is separate from `databaseMetrics.enabled` -- an operator can take the exporter
+              without taking a restart of the database it watches.
+            */}}
+            - -c
+            - shared_preload_libraries=timescaledb,pg_stat_statements
+            {{- end }}
             {{- if .Values.postgresTls.enabled }}
             {{- include "acs-cymru.dbTlsServerArgs" . | nindent 12 }}
             {{- end }}
@@ -195,12 +213,17 @@ spec:
         {{- include "acs-cymru.dbCertificateReload" (dict "ctx" . "image" (printf "%s:%s" .Values.timescaledb.image.repository .Values.timescaledb.image.tag) "pullPolicy" .Values.timescaledb.image.pullPolicy "user" .Values.timescaledb.username "db" .Values.timescaledb.database) | nindent 8 }}
         {{- end }}
         {{- if .Values.databaseMetrics.enabled }}
-        {{- include "acs-cymru.dbMetricsExporter" (dict "ctx" . "db" $component "database" .Values.timescaledb.database) | nindent 8 }}
+        {{- include "acs-cymru.dbMetricsExporter" (dict "ctx" . "db" $component "database" .Values.timescaledb.database "queries" true) | nindent 8 }}
         {{- end }}
       volumes:
         - name: init
           configMap:
             name: {{ printf "%s-timescaledb-init" (include "acs-cymru.fullname" .) }}
+        {{- if .Values.databaseMetrics.enabled }}
+        - name: exporter-queries
+          configMap:
+            name: {{ printf "%s-timescaledb-exporter" (include "acs-cymru.fullname" .) }}
+        {{- end }}
         {{- if .Values.postgresTls.enabled }}
         {{- include "acs-cymru.dbTlsServerVolumes" (dict "ctx" . "db" "timescaledb") | nindent 8 }}
         {{- end }}

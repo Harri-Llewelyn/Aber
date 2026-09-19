@@ -344,6 +344,21 @@ databaseMetrics:
   #
   # Re-enable any of them through `extraArgs` (`--collector.settings`), knowing the cost above.
   extraArgs: []
+  # Per-statement timing from `pg_stat_statements`: calls, total time, rows and block I/O for the
+  # busiest statements, which is the ONLY server-side view of how long a write actually took.
+  # `acs_ingestion_write_seconds` measures the same write from the client and cannot tell a slow
+  # disk from lock contention from a saturated pool; these series can.
+  #
+  # ON THE HISTORIAN THIS COSTS ONE POD RESTART, once. `shared_preload_libraries` is a postmaster
+  # setting, so adding the library rolls the StatefulSet -- and the historian's image preloads
+  # `timescaledb` alone. supabase/postgres already preloads it and tracks ~2,000 statements, so
+  # that side costs nothing. Turning this off rolls the historian back the same way.
+  #
+  # BOUNDED BY CONSTRUCTION: the exporter reports the top 100 statements (its own default), so this
+  # is ~500 series per database however many statements the server has tracked. The statement TEXT
+  # is NOT exported -- the label is `queryid`, a hash -- which keeps both the cardinality and the
+  # query literals out of Prometheus.
+  statementStats: true
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }

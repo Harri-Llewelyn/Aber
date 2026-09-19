@@ -129,6 +129,17 @@ spec:
                                              PASSWORD NULL;
               GRANT CONNECT ON DATABASE postgres TO metrics_reader;
               GRANT pg_monitor TO metrics_reader WITH INHERIT TRUE;
+{{- if .Values.databaseMetrics.statementStats }}
+
+              -- pg_stat_statements LIVES IN THE `extensions` SCHEMA ON THIS IMAGE, not in public,
+              -- and pg_monitor grants nothing on a schema. The exporter's collector queries the
+              -- view UNQUALIFIED, so both of these are needed: USAGE to reach the schema at all,
+              -- and the search_path so the unqualified name resolves. With either missing the
+              -- collector fails with `permission denied for schema extensions` and only
+              -- pg_scrape_collector_success reports it.
+              GRANT USAGE ON SCHEMA extensions TO metrics_reader;
+              ALTER ROLE metrics_reader SET search_path = public, extensions;
+{{- end }}
 
               -- The same self-check the historian's roles.sql makes, for the same reason: a
               -- membership held without inheritance is invisible everywhere downstream.
