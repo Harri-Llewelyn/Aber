@@ -729,6 +729,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
 | `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none |
 | `principal_permissions` | own row, or `Administrator` | none — `create_machine_principal()` is the only write path |
+| `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`) |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
 ### The two privileged roles, and what separates them (`0069`)
@@ -1260,18 +1261,20 @@ It is a **`LEFT JOIN`** deliberately: over half the jobs on a working stack prod
 they were cancelled or they failed — and an inner join would make exactly those unsearchable by
 their note as well, which is the only handle they have.
 
-**A service principal has no table at all.** The audit row *is* the record, which is why `api.js`
-lists them by reading this lane. Nothing can be joined, so the dashboard names them from
-`KNOWN_PRINCIPALS` in `utils/serviceIdentities.js` — the registry of ids a migration pinned, which
-the Access Control page already reads. An id outside it keeps its uuid rather than taking
+**A service principal's name comes from two places.** The audit row *is* the record of the
+identity, which is why `api.js` lists tokens by reading this lane; the three identities a migration
+pinned are named from `KNOWN_PRINCIPALS` in `utils/serviceIdentities.js`, and one an Administrator
+created from the Access Control page is named from its `machine_principals` row (`0125`), read by
+the same two roles that may read this lane. An id in neither keeps its uuid rather than taking
 `describePrincipal()`'s `Undocumented principal` fallback: that wording is right on a page listing
-one identity and wrong here, where every runtime-created principal would draw the same lane.
+one identity and wrong here, where every unnamed principal would draw the same lane.
 
 **This is the one place the search cannot reach a drawn name**, and it is a known exception rather
-than an oversight. A name held in frontend source has nothing in the database to match, so a service
-principal is findable by its id. The alternative — pinning those names into a migration so the
-search could read them — would put the same three strings in two places and let them drift, to buy
-a search for three ids an operator reaches through Access Control anyway.
+than an oversight. The three pinned names are held in frontend source and have nothing in the
+database to match; the names in `machine_principals` are in the database, and `digital_thread_page()`
+does not join them, because a search across one lane's names is not worth a redeclaration of the
+function that pages every lane. A service principal is findable by its id, which an operator
+reaches through Access Control anyway.
 
 ### A device is offline until it says otherwise (`0119`)
 
@@ -2186,8 +2189,9 @@ overlap. Rotating a ten-year one left ten years.
 ### The Access Control page states what is outstanding
 
 The page lists every gateway with what the platform knows about its broker credential, lists the
-machine identities on both planes, lets an Administrator create one, mints tokens for the identities
-that read one, and shows what stands against each.
+machine identities on both planes, lets an Administrator create a database principal with a name
+and a purpose (`0125`) and issue its first token in the next dialog, mints tokens for the
+identities that read one, and shows what stands against each.
 
 **It also reads the broker (`0102`).** Since the broker's accounts moved to its Dynamic Security
 plugin ([`mosquitto/README.md`](../mosquitto/README.md)), the page holds two columns for each
@@ -3307,6 +3311,54 @@ failure does not fail the export: the file is still returned, the response says 
 and the page says to keep the file. Every export is an `EXPORTED` row on the thread, written by a
 trigger on the insert. Readable by the three roles the bucket admits (Administrator,
 Shopfloor_Manager, Auditor), and the export itself is offered to `archive:manage`.
+
+### A machine has a name an operator gave it (`0125`)
+
+**`create_machine_principal()` made an identity nobody could name.** The `auth.users` row holds
+an id and nothing else, which is what keeps it unable to sign in; the permissions and a note went
+to an append-only audit row; and the Access Control page named the three identities a migration
+pinned from `KNOWN_PRINCIPALS` in `serviceIdentities.js` and called every other one
+*Undocumented principal*. That is the right word for a fixture a suite left behind and the wrong
+word for an identity an Administrator created on purpose, which nothing on the page let them do
+anyway: the RPC and its `api.js` wrapper existed, and no button called either.
+
+**The name lives in `machine_principals`**, keyed to the `auth.users` row and cascading with it:
+`name` (unique ignoring case, 1 to 80 characters), `purpose` (up to 500), `created_by` and
+`created_at`. Not in `auth.users.raw_user_meta_data`, which `0116` relies on being empty on
+every account this stack creates and which GoTrue owns; not in the audit row, which records what
+was asked for at the time rather than what the identity is for now. The function takes the name
+and purpose and writes the row **in the same transaction** as the identity, so a principal created
+from the page cannot exist without a name, and a blank or duplicate name is refused before
+anything exists. Read is Administrator and Auditor, matching `list_user_accounts()`: a name here
+labels digital-thread rows both roles may read, and holds nothing a token could be derived from.
+No write policy; the function is the only write path.
+
+**The two-argument form is dropped, not overloaded.** PostgREST resolves an RPC by the argument
+names in the body, and an overload whose extra arguments default makes every old-shape call
+ambiguous. `0080` recreates its form on every boot and `0125` drops it on every boot, in that
+order, and the self-check asserts exactly one declaration survives. Recorded in
+`check-docs-drift.mjs`'s `INTENDED_REDECLARATIONS`. The first suite to call the function found
+that `0080`'s body never ran: its `ON CONFLICT (principal_id, permission_id)` is ambiguous inside a
+function whose first output column is also `principal_id`, and PL/pgSQL refuses it at the call.
+`0125` names the constraint instead. Nothing had called it since `0080` shipped.
+
+**The page creates, then mints.** *New Principal* on the Database principals card takes a name, a
+purpose and a set of permissions from the fixed menu, calls the RPC, and opens the existing token
+dialog for the new row so the first token is shown once the way every other is. No new edge
+function: `mint-service-token` already signs and records, and a principal left without a token is
+harmless, since it reaches nothing until one is signed and *Withdraw* covers it either way. The
+dialog says which plane the identity is on (*does not reach the broker*), because the page lists
+identities on both and an MQTT client is issued a broker account, not a principal.
+
+**The menu is the allow-list, checked at build time.** `GRANTABLE_PERMISSIONS` in
+`serviceIdentities.js` is the keys of `PERMISSION_REACH`, and `check-docs-drift.mjs` (11e)
+asserts it equals `c_allowed` in the last migration that declares the function, so a permission
+added to one side without the other fails the build rather than the click. Check 11d is
+unchanged: it requires a registry entry for every id a migration pins, and a principal created at
+runtime has no id to write down ahead of time, which is what the table is for. The Digital Thread
+reads the same table to label the *Service identities* lane, so a principal created from the page
+is named there too; the search still cannot reach that name, for the reason stated under
+[Naming the last two lanes](#naming-the-last-two-lanes-0118).
 
 ### The platform playbook is published by the sweep
 

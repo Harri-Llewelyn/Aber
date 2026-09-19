@@ -491,7 +491,10 @@ own** rather than a person's role (`0080`), `factoryplus_i3x` reads the broker n
 publishes nothing, and `gateway-credential-service` can add one broker account and do nothing else.
 The three database identities are `auth.users` rows with no email, no password and no identity
 provider, so none can sign in — and a trigger on `user_roles` refuses any of them a role, so widening
-`Operator` for the people who hold it cannot widen them by accident.
+`Operator` for the people who hold it cannot widen them by accident. An Administrator can create a
+further one from the **Access Control** page (`0125`): a name, a purpose and a set of read-only
+permissions from a fixed menu, then its first token shown once. Such an identity reaches the
+database only, never the broker.
 
 **The ingestion daemon does not hold `SUPABASE_SERVICE_ROLE_KEY`.** It used to, and that was the one
 credential whose compromise no policy written anywhere else could contain, sitting in the process

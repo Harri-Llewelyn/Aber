@@ -605,6 +605,14 @@ export const SUITES = {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
   },
+  'supabase/migrations/test_machine_principal_naming.py': {
+    lanes: ['db'],
+    why:
+      '0125 -- that a principal created from the page carries the name it was given, in the same ' +
+      'transaction as the identity; that the two-argument form is gone rather than overloaded, ' +
+      'which is what keeps the RPC unambiguous; and that the name table is readable by the two ' +
+      'roles that label the audit lane and by nobody else.',
+  },
   'supabase/migrations/test_shadow_lane_is_not_assignable.py': {
     lanes: ['db'],
     why:

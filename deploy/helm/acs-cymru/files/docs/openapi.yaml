@@ -854,6 +854,43 @@ paths:
                     reason:       { type: string, nullable: true, description: Free text supplied at revocation. }
         '403': { description: Role is neither Administrator nor Auditor. }
 
+  /rest/v1/machine_principals:
+    get:
+      tags: [Audit]
+      summary: List the names Administrators gave machine principals
+      description: |
+        One row per database principal created from the Access Control page (`0125`): the name
+        the page lists it by, the purpose in the Administrator's own words, who created it and
+        when. The three identities a migration pinned have no row here; the dashboard names them
+        from its own registry.
+
+        **Written only by `create_machine_principal()`**, in the same transaction as the
+        `auth.users` row it describes, so an identity created from the page cannot exist without a
+        name. No write policy exists. Deleting the `auth.users` row cascades to this one.
+
+        Read is `Administrator` and `Auditor`, matching `list_user_accounts()`: a name here labels
+        digital-thread rows both roles may read, and holds nothing a token could be derived from.
+      parameters:
+        - { name: principal_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` to name one identity.' }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Named machine principals.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    principal_id: { type: string, format: uuid }
+                    name:         { type: string, description: Unique ignoring case, 1 to 80 characters. }
+                    purpose:      { type: string, nullable: true, description: Up to 500 characters. }
+                    created_by:   { type: string, format: uuid, nullable: true, description: The Administrator whose session created it. }
+                    created_at:   { type: string, format: date-time }
+        '403': { description: Role is neither Administrator nor Auditor. }
+
   # ------------------------------------------------------------ Registry ----
   /rest/v1/asset_config:
     get:
