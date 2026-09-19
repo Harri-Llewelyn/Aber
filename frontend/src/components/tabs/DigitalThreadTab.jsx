@@ -1218,7 +1218,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
 
   // The track carries 14px of padding at each end so extreme markers are not clipped; positions are
   // a calc against the padded width. Takes a fraction, because a cluster badge sits at the mean of
-  // its members' positions.
+  // its members' positions. THE ONE FORMULA for everything placed along the time axis: markers,
+  // badges, ticks and gridlines all go through it, so a tick and the line under it cannot drift
+  // apart.
   const offsetForFraction = (f) => `calc(14px + (100% - 28px) * ${f})`
 
   /* The track's rendered width, needed to know which markers collide: the threshold is in pixels
@@ -1578,7 +1580,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                         <span
                           key={t.f}
                           className="dt-tick"
-                          style={{ left: `calc(14px + (100% - 28px) * ${t.f})` }}
+                          style={{ left: offsetForFraction(t.f) }}
                           title={t.title}
                         >
                           {t.label}
@@ -1587,119 +1589,134 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                     </div>
                   </div>
 
-                  {sections.map(section => (
-                    <React.Fragment key={section.kind}>
-                      {/* The count is what is drawn, not what exists: the lane cap may fold some,
-                          and the toggle below names the remainder. */}
-                      <div className="dt-section" role="separator" aria-label={`${section.label} lanes`}>
-                        {/* Icon, name and count as one badge, so a section reads as a heading over
-                            the track cards. The rule beside it is CSS. */}
-                        <span className="dt-section-badge">
-                          <section.Icon size={12} />
-                          <span className="dt-section-name">{section.label}</span>
-                          <span className="dt-section-count">{section.lanes.length}</span>
-                        </span>
-                      </div>
+                  {/* Everything under the axis. Its own box, so the gridlines can span exactly the
+                      rows and nothing above them. */}
+                  <div className="dt-body">
+                    {sections.map(section => (
+                      <React.Fragment key={section.kind}>
+                        {/* The count is what is drawn, not what exists: the lane cap may fold some,
+                            and the toggle below names the remainder. */}
+                        <div className="dt-section" role="separator" aria-label={`${section.label} lanes`}>
+                          {/* Icon, name and count as one badge, so a section reads as a heading over
+                              the track cards. The rule beside it is CSS. */}
+                          <span className="dt-section-badge">
+                            <section.Icon size={12} />
+                            <span className="dt-section-name">{section.label}</span>
+                            <span className="dt-section-count">{section.lanes.length}</span>
+                          </span>
+                        </div>
 
-                      {section.lanes.map(lane => (
-                        <div className="dt-lane" key={lane.key}>
-                          {/* No type badge: the section heading and the icon already carry the
-                              kind, and the width goes to the name. The UUID is copyable in the
-                              drawer's Entity ID field. */}
-                          <div
-                            className="dt-lane-label"
-                            title={[
-                              lane.name
-                                ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
-                                : null,
-                              lane.entityId,
-                            ].filter(Boolean).join(' — ')}
-                          >
-                            {React.createElement(SECTION_ICON[lane.kind] || IconCpu, {
-                              size: 12, className: 'dt-lane-icon'
-                            })}
-                            {lane.name
-                              ? <strong className="dt-lane-name">{lane.name}</strong>
-                              /* Neither the join nor a snapshot could name it: the shortened id,
-                                 monospaced. */
-                              : <span className="dt-lane-name dt-lane-unnamed mono">{shortId(lane.entityId)}</span>}
-                            {/* THE PART THAT MUST SURVIVE TRUNCATION. A schema lineage shares its
-                                name and differs only here, so ellipsising this away leaves a
-                                column of identical labels. */}
-                            {lane.qualifier && (
-                              <span className="dt-lane-qualifier">{lane.qualifier}</span>
-                            )}
-                            {/* A name recovered from the audit payload means the entity is gone;
-                                say so. */}
-                            {/* `gone`, not `fromSnapshot`: the name coming from a snapshot says
-                                where the label came from, and a settings or backup lane is named
-                                that way while existing perfectly well. */}
-                            {lane.gone && (
-                              <span
-                                className="dt-lane-gone"
-                                title={lane.fromSnapshot
-                                  ? 'This entity no longer exists — the name is the one recorded in its final audit snapshot'
-                                  : 'This entity no longer exists, and its audit rows carry no name to recover'}
-                              >
-                                deleted
-                              </span>
-                            )}
-                          </div>
+                        {section.lanes.map(lane => (
+                          <div className="dt-lane" key={lane.key}>
+                            {/* No type badge: the section heading and the icon already carry the
+                                kind, and the width goes to the name. The UUID is copyable in the
+                                drawer's Entity ID field. */}
+                            <div
+                              className="dt-lane-label"
+                              title={[
+                                lane.name
+                                  ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
+                                  : null,
+                                lane.entityId,
+                              ].filter(Boolean).join(' — ')}
+                            >
+                              {React.createElement(SECTION_ICON[lane.kind] || IconCpu, {
+                                size: 12, className: 'dt-lane-icon'
+                              })}
+                              {lane.name
+                                ? <strong className="dt-lane-name">{lane.name}</strong>
+                                /* Neither the join nor a snapshot could name it: the shortened id,
+                                   monospaced. */
+                                : <span className="dt-lane-name dt-lane-unnamed mono">{shortId(lane.entityId)}</span>}
+                              {/* THE PART THAT MUST SURVIVE TRUNCATION. A schema lineage shares its
+                                  name and differs only here, so ellipsising this away leaves a
+                                  column of identical labels. */}
+                              {lane.qualifier && (
+                                <span className="dt-lane-qualifier">{lane.qualifier}</span>
+                              )}
+                              {/* A name recovered from the audit payload means the entity is gone;
+                                  say so. */}
+                              {/* `gone`, not `fromSnapshot`: the name coming from a snapshot says
+                                  where the label came from, and a settings or backup lane is named
+                                  that way while existing perfectly well. */}
+                              {lane.gone && (
+                                <span
+                                  className="dt-lane-gone"
+                                  title={lane.fromSnapshot
+                                    ? 'This entity no longer exists — the name is the one recorded in its final audit snapshot'
+                                    : 'This entity no longer exists, and its audit rows carry no name to recover'}
+                                >
+                                  deleted
+                                </span>
+                              )}
+                            </div>
 
-                          <div className="dt-track">
-                            {(laneClusters.get(lane.key) || []).map(item => {
-                              /* The ring follows the drawer: a badge is lit while the drawer shows
-                                 any of its events, so the highlight stays put while Previous / Next
-                                 steps through the burst. */
-                              const isSelected = item.events
-                                .some(e => String(e.event_id) === String(selectedEventId))
+                            <div className="dt-track">
+                              {(laneClusters.get(lane.key) || []).map(item => {
+                                /* The ring follows the drawer: a badge is lit while the drawer shows
+                                   any of its events, so the highlight stays put while Previous / Next
+                                   steps through the burst. */
+                                const isSelected = item.events
+                                  .some(e => String(e.event_id) === String(selectedEventId))
 
-                              if (item.isCluster) {
+                                if (item.isCluster) {
+                                  return (
+                                    <button
+                                      key={`cluster-${item.event.event_id}`}
+                                      type="button"
+                                      className={`dt-cluster${isSelected ? ' dt-node-selected' : ''}`}
+                                      style={{ left: offsetForFraction(item.xOffset) }}
+                                      /* The oldest member (see clusterEvents on the tiebreak), so
+                                         Next means and then what. */
+                                      onClick={() => setSelectedEventId(item.event.event_id)}
+                                      title={clusterSummary(
+                                        item.events,
+                                        (e) => analysis.get(e.event_id)?.kind || 'operational'
+                                      )}
+                                      aria-label={`${item.events.length} events on `
+                                        + `${lane.name || lane.entityId} from `
+                                        + `${new Date(item.event.timestamp).toLocaleString()} — open the first`}
+                                      aria-pressed={isSelected}
+                                    >
+                                      {item.events.length}
+                                    </button>
+                                  )
+                                }
+
+                                const e = item.event
+                                const kind = analysis.get(e.event_id)?.kind || 'operational'
                                 return (
                                   <button
-                                    key={`cluster-${item.event.event_id}`}
+                                    key={e.event_id}
                                     type="button"
-                                    className={`dt-cluster${isSelected ? ' dt-node-selected' : ''}`}
+                                    className={`dt-node dt-node-${kind}${isSelected ? ' dt-node-selected' : ''}`}
                                     style={{ left: offsetForFraction(item.xOffset) }}
-                                    /* The oldest member (see clusterEvents on the tiebreak), so
-                                       Next means and then what. */
-                                    onClick={() => setSelectedEventId(item.event.event_id)}
-                                    title={clusterSummary(
-                                      item.events,
-                                      (e) => analysis.get(e.event_id)?.kind || 'operational'
-                                    )}
-                                    aria-label={`${item.events.length} events on `
-                                      + `${lane.name || lane.entityId} from `
-                                      + `${new Date(item.event.timestamp).toLocaleString()} — open the first`}
+                                    onClick={() => setSelectedEventId(e.event_id)}
+                                    /* A plain `title`, as elsewhere: what, who, when. The rest is in
+                                       the drawer. */
+                                    title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e)}\n${new Date(e.timestamp).toLocaleString()}`}
+                                    aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
                                     aria-pressed={isSelected}
-                                  >
-                                    {item.events.length}
-                                  </button>
+                                  />
                                 )
-                              }
-
-                              const e = item.event
-                              const kind = analysis.get(e.event_id)?.kind || 'operational'
-                              return (
-                                <button
-                                  key={e.event_id}
-                                  type="button"
-                                  className={`dt-node dt-node-${kind}${isSelected ? ' dt-node-selected' : ''}`}
-                                  style={{ left: offsetForFraction(item.xOffset) }}
-                                  onClick={() => setSelectedEventId(e.event_id)}
-                                  /* A plain `title`, as elsewhere: what, who, when. The rest is in
-                                     the drawer. */
-                                  title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e)}\n${new Date(e.timestamp).toLocaleString()}`}
-                                  aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
-                                  aria-pressed={isSelected}
-                                />
-                              )
-                            })}
+                              })}
+                            </div>
                           </div>
-                        </div>
+                        ))}
+                      </React.Fragment>
+                    ))}
+
+                    {/* Faint dotted verticals from each tick down the whole grid, so an event on
+                        one lane can be read against the same instant on another. Drawn once,
+                        behind the rows, rather than once per lane; placed last so the first
+                        section stays the body's first child. Positioned by the same helper as
+                        the ticks and the markers. Nothing here is content. */}
+                    <div className="dt-gridlines" aria-hidden="true">
+                      {ticks.map(t => (
+                        <span key={t.f} className="dt-gridline" style={{ left: offsetForFraction(t.f) }} />
                       ))}
-                    </React.Fragment>
-                  ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 

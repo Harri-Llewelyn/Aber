@@ -3212,8 +3212,43 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   overflow-y: hidden;
 }
 
+/* The three widths every rule below is laid out from, declared once: a gridline is placed against
+   the track's box, and the track's box is what is left of a lane after the label and the gap. The
+   minimum width is their sum, so the track can never be forced past the box it is drawn in. */
 .dt-swimlanes {
-  min-width: 620px;
+  --dt-label-width: 260px;
+  --dt-lane-gap: 10px;
+  --dt-track-min: 380px;
+  min-width: calc(var(--dt-label-width) + var(--dt-lane-gap) + var(--dt-track-min));
+}
+
+/* The rows, in a box of their own under the axis. `isolation` makes it a stacking context, which
+   is what lets the gridlines sit at z-index -1: behind every row, its hover tint and its sticky
+   label, and above nothing but the card. */
+.dt-body {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Vertical gridlines, one per axis tick, spanning the track column of every row. Positioned once
+   here rather than once per lane. Inert: nothing under the pointer is a line. */
+.dt-gridlines {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--dt-label-width) + var(--dt-lane-gap));
+  right: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Dotted and faint: a reference to read a marker against, not a rule to follow. */
+.dt-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dotted var(--text-dim);
+  opacity: 0.35;
 }
 
 /* A lane is one ruled row of a grid: the label column and the track, divided from the row below by
@@ -3221,7 +3256,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .dt-lane {
   display: flex;
   align-items: stretch;
-  gap: 10px;
+  gap: var(--dt-lane-gap);
   border-bottom: 1px solid var(--border);
 }
 
@@ -3265,7 +3300,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 /* The first heading sits flush under the axis; the rest earn their space from the lanes above. */
-.dt-axis + .dt-section { padding-top: 4px; }
+.dt-body > .dt-section:first-child { padding-top: 4px; }
 
 .dt-section-name {
   font-size: 11px;
@@ -3296,7 +3331,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   position: sticky;
   left: 0;
   z-index: 2;
-  flex: 0 0 260px;
+  flex: 0 0 var(--dt-label-width);
   min-width: 0;
   display: flex;
   align-items: center;
@@ -3366,7 +3401,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .dt-track {
   position: relative;
   flex: 1;
-  min-width: 380px;
+  min-width: var(--dt-track-min);
   height: 28px;
 }
 
