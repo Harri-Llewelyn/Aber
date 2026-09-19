@@ -132,6 +132,25 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
 
   /* The grid is the map, so it widens as the plant shrinks, and the pin grows with the tile: at
      the narrowest a pin is still above the 24px a pointer needs. */
+  it('offers an area\'s description beside its name, and only where there is one', async () => {
+    /* The description was readable only after clicking into the panel, so the map said what every
+       area was CALLED and nothing about what it IS. Conditional: Building A has no description,
+       and a "?" there would be a question mark that answers nothing. */
+    await renderSiteMap()
+
+    const withOne = thumbs()[1]
+    const tip = within(withOne).getByRole('button', { name: 'About Building B' })
+    expect(tip).toHaveClass('help-tip')
+
+    // The bubble is portalled and shows on hover, so it is absent until the pointer arrives.
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    fireEvent.mouseEnter(tip)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('The annexe')
+
+    // Building A has none, so it gets none.
+    expect(within(thumbs()[0]).queryByRole('button', { name: /^About Building A$/ })).toBeNull()
+  })
+
   it('sizes the grid and its pins from the number of areas', async () => {
     await renderSiteMap()
     expect(grid().style.getPropertyValue('--map-columns')).toBe('2')
