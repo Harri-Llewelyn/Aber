@@ -602,6 +602,27 @@ html, body, #root {
 
 .global-search-input::placeholder { color: var(--text-dim); }
 
+/* Takes the slot the shortcut hint vacates, so the box's width never moves as one replaces the
+   other. Dim at rest for the same reason the hint is: the text beside it is what should be read. */
+.global-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.global-search-clear:hover { color: var(--text-primary); background: var(--bg-glass); }
+.global-search-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 .global-search-kbd {
   flex-shrink: 0;
   padding: 1px 5px;
