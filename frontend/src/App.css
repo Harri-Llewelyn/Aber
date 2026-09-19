@@ -3314,53 +3314,51 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The axis row pins to the top of the scroller and the rows pass under it. Opaque in the card
    colour for that reason, and above the lane labels and section headings, which are sticky on the
-   other axis and would ride over it on a diagonal scroll. The track inside stays bare: the row is
-   what is opaque, and a scale is not a lane. */
+   other axis and would ride over it on a diagonal scroll. Tinted like `thead tr` over that, as the
+   section headings are, so the two read as one header system. The track inside stays bare: the
+   row is what is opaque, and a scale is not a lane. */
 .dt-lane.dt-axis {
   position: sticky;
   top: 0;
   z-index: 3;
   background: var(--bg-card);
+  background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
 }
 
-/* The section rule: Cells, then Gateways, then Devices, a plant's own containment order. Sticky on
-   both axes: like the labels beside it, spanning only the label column so it never rides over the
-   markers; and under the axis row, so a reader deep in a section still knows which one. The offset
-   is the axis track plus the row's divider. Above the labels (2), because its own lanes come after
-   it in the DOM and would paint over it as they scrolled under. The space above it is margin, not
-   padding: sticky pins the border box, and padding would pin dead space under the axis and hide a
-   row of labels with it. */
+/* The corner is part of the row, so it takes the row's tint over its own opaque colour. */
+.dt-axis .dt-lane-label {
+  background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
+}
+
+/* The section heading is a row of the grid: the same two columns as a lane, the same height and
+   the same rule beneath, so the first lane under it has an edge above it and the rhythm does not
+   break at a section. Stated here rather than shared with .dt-lane, which the lane counts and the
+   hover rule select on. Sticky under the axis row, so a reader deep in a section still knows which
+   one; the offset is the axis track plus the row's divider. Above the labels (2), because its own
+   lanes come after it in the DOM and would paint over it as they scrolled under. Opaque in the
+   card colour for the rows that pass under it, and tinted like `thead tr` over that, so it and the
+   pinned date row read as one header system. */
 .dt-section {
   position: sticky;
-  left: 0;
   top: calc(var(--dt-axis-height) + 1px);
   z-index: 3;
   display: flex;
-  align-items: center;
-  /* The whole label column, so a label scrolling under a pinned heading does not peek out beside
-     it. */
-  width: var(--dt-label-width);
-  margin-top: 10px;
-  padding: 0 10px 4px 0;
+  align-items: stretch;
+  gap: var(--dt-lane-gap);
+  border-bottom: 1px solid var(--border);
   background: var(--bg-card);
+  background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
+}
+
+/* A heading's label: the icon at 9px, where the lanes' names indent to meet its text. Tinted like
+   the row it heads, over the opaque colour that keeps markers from showing through it. */
+.dt-section .dt-lane-label {
+  padding-left: 9px;
+  background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
   color: var(--text-muted);
 }
 
-/* The heading as a BADGE rather than three loose items on a ruled row, so a section heading and an
-   asset lane are not separated by identical lines with the hierarchy left to the text. */
-.dt-section-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-}
-
-/* The first heading sits flush under the axis; the rest earn their space from the lanes above. */
-.dt-body > .dt-section:first-child { margin-top: 4px; }
+.dt-section-icon { flex-shrink: 0; }
 
 .dt-section-name {
   font-size: 11px;
@@ -3369,14 +3367,11 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   letter-spacing: 0.7px;
 }
 
-/* No parentheses: inside a badge the count is already visually separate, and `( 6 )` was
-   punctuation doing a job the container now does. */
+/* The count, dim and monospaced beside the name; the label's own gap separates them. */
 .dt-section-count {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text-dim);
-  padding-left: 5px;
-  border-left: 1px solid var(--border);
 }
 
 /* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
@@ -3396,9 +3391,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   display: flex;
   align-items: center;
   gap: 6px;
-  /* 9px on the left lines the lane icon up with the icon inside the section badge above it. */
-  padding: 0 8px 0 9px;
+  /* 27px on the left: a section heading's icon sits at 9px and its text 18px after that, so a
+     lane's name lines up with the heading's text rather than its icon. */
+  padding: 0 8px 0 27px;
   background: var(--bg-card);
+  /* The column's edge, on every row including the axis and the headings: what makes the label
+     column read as a column, and marks the line markers pass under when the timeline is scrolled
+     sideways. Inside the 260px, so the track and the gridlines start where they did. */
+  border-right: 1px solid var(--border);
   font-size: 12px;
 }
 
@@ -3410,14 +3410,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* The kind, carried at a twelfth of the width the DEVICE/GATEWAY/CELL badge used to cost -- and
-   still readable when the section heading has been scrolled past. Dim, because it repeats what
-   the heading above already said; the name is what the eye is looking for. */
-.dt-lane-icon {
-  flex-shrink: 0;
-  color: var(--text-dim);
 }
 
 /* No name resolved anywhere -- not from a live row, not from an audit snapshot. Dimmer than a
@@ -3463,6 +3455,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   flex: 1;
   min-width: var(--dt-track-min);
   height: 28px;
+  /* A stacking context of its own, so a marker's z-index -- a badge is 3, the active ring 4, a
+     hovered badge 5 -- orders markers within their track and never lifts one above a sticky
+     label (2) or a pinned heading (3) it is passing under. */
+  isolation: isolate;
 }
 
 .dt-axis-track { height: var(--dt-axis-height); }

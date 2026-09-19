@@ -104,9 +104,33 @@ describe('the axis row stays in view', () => {
     expect(ruleFor('.dt-axis-track')).toMatch(/height:\s*var\(--dt-axis-height\)/)
     expect(ruleFor('.dt-swimlanes')).toMatch(/--dt-axis-height:\s*\d+px/)
     expect(zIndex(section)).toBeGreaterThan(zIndex(ruleFor('.dt-lane-label')))
-    // Space above a heading is margin, not padding: sticky pins the border box, so padding would
-    // pin dead space under the axis and cover a row of labels with nothing.
-    expect(section).not.toMatch(/padding:\s*[1-9]/)
-    expect(section).toMatch(/margin-top:/)
+    // A row of the grid, so only the row's own border box pins: no margin above it to pin dead
+    // space under the axis, and no padding to hide a row of labels with.
+    expect(section).not.toMatch(/margin/)
+    expect(section).not.toMatch(/padding/)
+    expect(section).toMatch(/border-bottom:\s*1px solid var\(--border\)/)
+  })
+
+  it('keeps every marker under the labels and the headings it passes', () => {
+    /* Badges carry z-index 3 and the active ring 4, the same numbers as the heading and above the
+       label's 2, and in one stacking context the later element wins -- so a badge scrolling under
+       a pinned heading or sideways under a sticky label painted over it. Each track is its own
+       stacking context, which keeps those numbers inside the track. */
+    expect(ruleFor('.dt-track')).toMatch(/isolation:\s*isolate/)
+    expect(zIndex(ruleFor('.dt-track'))).toBeNaN()
+    expect(zIndex(ruleFor('.dt-track .dt-cluster'))).toBeGreaterThanOrEqual(zIndex(ruleFor('.dt-section')))
+  })
+
+  it('tints the header rows the way every table tints thead', () => {
+    /* The pinned date row and the pinned heading under it read as one header system, and both
+       take the tint as an image over the opaque card colour that keeps the rows from showing
+       through as they pass. The label column of each is opaque in its own right and takes the
+       same tint, or it would sit as an untinted block at the left of a tinted row. */
+    const tint = /background-image:\s*linear-gradient\(var\(--bg-glass\), var\(--bg-glass\)\)/
+    expect(ruleFor('thead tr')).toMatch(/background:\s*var\(--bg-glass\)/)
+    expect(ruleFor('.dt-lane.dt-axis')).toMatch(tint)
+    expect(ruleFor('.dt-axis .dt-lane-label')).toMatch(tint)
+    expect(ruleFor('.dt-section')).toMatch(tint)
+    expect(ruleFor('.dt-section .dt-lane-label')).toMatch(tint)
   })
 })

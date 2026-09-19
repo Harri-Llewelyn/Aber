@@ -1354,13 +1354,38 @@ describe('Digital Thread — removed tag filter', () => {
         .toMatch(/background-image:\s*linear-gradient\(var\(--bg-glass\)/)
     })
 
-    it('renders the section heading as one badge', async () => {
+    it('renders the section heading as a row of the grid', async () => {
       await show()
-      const badge = document.querySelector('.dt-section-badge')
-      expect(badge).toBeTruthy()
-      // The count lives inside the badge, so it cannot drift away from the label it counts.
-      expect(badge.querySelector('.dt-section-count')).toBeTruthy()
-      expect(badge.querySelector('.dt-section-name')).toBeTruthy()
+      const heading = document.querySelector('.dt-section')
+      expect(heading).toBeTruthy()
+      // The same two columns as a lane: a sticky label holding the name and its count, and an
+      // empty track, so the heading takes the row's rule and the row's rhythm, and the first lane
+      // under it has an edge above it.
+      const label = heading.querySelector('.dt-lane-label')
+      expect(label).toBeTruthy()
+      expect(label.querySelector('.dt-section-name')).toBeTruthy()
+      expect(label.querySelector('.dt-section-count')).toBeTruthy()
+      expect(heading.querySelector('.dt-track')).toBeTruthy()
+      // Not a pill: nothing draws a badge any more.
+      expect(ruleFor('.dt-section-badge')).toBeUndefined()
+      expect(ruleFor('.dt-section')).not.toMatch(/border-radius/)
+      expect(ruleFor('.dt-section')).toMatch(/border-bottom:\s*1px solid var\(--border\)/)
+    })
+
+    it('rules the edge of the label column on every row', async () => {
+      // The axis corner and the headings are .dt-lane-label too, so one rule draws the whole
+      // column edge; a rule on lanes alone would break at every heading.
+      expect(ruleFor('.dt-lane-label')).toMatch(/border-right:\s*1px solid var\(--border\)/)
+    })
+
+    it('carries the kind on the heading, not on every row under it', async () => {
+      /* The heading is pinned in view since the axis was, so an icon on each lane repeated what
+         was always on screen and cost the name its width. */
+      await show()
+      expect(document.querySelector('.dt-section .dt-lane-label svg')).toBeTruthy()
+      const laneLabels = [...document.querySelectorAll('.dt-lane:not(.dt-axis) .dt-lane-label')]
+      expect(laneLabels.length).toBeGreaterThan(0)
+      expect(laneLabels.some(l => l.querySelector('svg'))).toBe(false)
     })
   })
 

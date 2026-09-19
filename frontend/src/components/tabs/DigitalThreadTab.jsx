@@ -356,8 +356,6 @@ const SECTIONS = DIGITAL_THREAD_ENTITY_TYPES.map(({ kind, label }) => ({
   Icon: SECTION_ICONS[kind] || FALLBACK_SECTION_ICON
 }))
 
-const SECTION_ICON = Object.fromEntries(SECTIONS.map(s => [s.kind, s.Icon]))
-
 /**
  * Is only some of what exists being drawn? `total` is null wherever the count is not known — a
  * server that returns no total (0115) — and not knowing is not a fraction.
@@ -1584,20 +1582,21 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                         {/* The count is what is drawn, not what exists: the lane cap may fold some,
                             and the toggle below names the remainder. */}
                         <div className="dt-section" role="separator" aria-label={`${section.label} lanes`}>
-                          {/* Icon, name and count as one badge, so a section reads as a heading over
-                              the track cards. The rule beside it is CSS. */}
-                          <span className="dt-section-badge">
-                            <section.Icon size={12} />
+                          {/* A row of the grid: the heading in the label column and an empty track
+                              beside it, so it takes the row's rule and the row's rhythm. */}
+                          <div className="dt-lane-label">
+                            <section.Icon size={12} className="dt-section-icon" />
                             <span className="dt-section-name">{section.label}</span>
                             <span className="dt-section-count">{section.lanes.length}</span>
-                          </span>
+                          </div>
+                          <div className="dt-track" aria-hidden="true" />
                         </div>
 
                         {section.lanes.map(lane => (
                           <div className="dt-lane" key={lane.key}>
-                            {/* No type badge: the section heading and the icon already carry the
-                                kind, and the width goes to the name. The UUID is copyable in the
-                                drawer's Entity ID field. */}
+                            {/* No type badge and no icon: the section heading carries the kind and
+                                is pinned in view, so the width goes to the name. The UUID is
+                                copyable in the drawer's Entity ID field. */}
                             <div
                               className="dt-lane-label"
                               title={[
@@ -1607,9 +1606,6 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                                 lane.entityId,
                               ].filter(Boolean).join(' — ')}
                             >
-                              {React.createElement(SECTION_ICON[lane.kind] || IconCpu, {
-                                size: 12, className: 'dt-lane-icon'
-                              })}
                               {lane.name
                                 ? <strong className="dt-lane-name">{lane.name}</strong>
                                 /* Neither the join nor a snapshot could name it: the shortened id,
