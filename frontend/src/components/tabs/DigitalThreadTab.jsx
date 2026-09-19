@@ -365,27 +365,12 @@ const SECTION_ICON = Object.fromEntries(SECTIONS.map(s => [s.kind, s.Icon]))
 export const isPartial = (shown, total) => typeof total === 'number' && total > shown
 
 /**
- * The pair where there is no room for words: "200/467", or "200" when that is all of them. The axis
- * corner is a 210px lane label and the export button a header control; the phrase below overflows
- * both. Used for the events against the whole match AND for the lanes against the lane cap, which
- * are the two numbers in that label and were both being drawn as though they were the whole thing.
+ * What is drawn over what there is, as a ratio: "200/467", or "200" when that is all of them. Used
+ * for the events against the whole match AND for the lanes against the lane cap, which are the two
+ * numbers in the header row's label and were both being drawn as though they were the whole thing.
  */
 export const countRatio = (shown, total) =>
   isPartial(shown, total) ? `${shown}/${total}` : String(shown)
-
-/**
- * How many events are drawn, and out of how many when that is not all of them: "200 of 467 events".
- *
- * The foot of the page used to read "200 events" above a button offering 200 more, which is the
- * same sentence whether the next page is the last or the third of twelve.
- *
- * @param {number}  shown events currently drawn
- * @param {?number} total events matching the filters, or null if the server did not say
- */
-export function eventCountLabel (shown, total) {
-  const events = (n) => `${n} ${n === 1 ? 'event' : 'events'}`
-  return isPartial(shown, total) ? `${shown} of ${events(total)}` : events(shown)
-}
 
 /** A UUID shortened to something a person can compare at a glance, when there is no name. */
 export const shortId = (id) => {
@@ -961,11 +946,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [allEvents, entityNames, showPurged, lookupsLoaded, loadedKinds])
 
   /**
-   * The counts the page renders. Two spellings of one pair of numbers -- the ratio where the space
-   * is a fixed-width label, the phrase where there is room -- derived here so the three places that
-   * draw them cannot end up describing different sets.
+   * The counts the page renders, derived here so the header row and the Export button cannot end
+   * up describing different sets.
    */
-  const countLabel = eventCountLabel(events.length, totalMatching)
   const eventRatio = countRatio(events.length, totalMatching)
   const hasMoreToLoad = isPartial(events.length, totalMatching)
 
@@ -1543,7 +1526,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                   ].join('\n')}
                 >
                   {countRatio(visibleLanes.length, lanes.length)}
-                  {' '}{lanes.length === 1 ? 'entity' : 'entities'} · {eventRatio} events
+                  {' '}{lanes.length === 1 ? 'entity' : 'entities'}
+                  {' · '}{eventRatio} {events.length === 1 && !hasMoreToLoad ? 'event' : 'events'}
                 </div>
 
                 {/* The legend for a derived colour scale: nothing else on the page says what
@@ -1742,49 +1726,37 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                 </button>
               )}
 
-              {/* How much of the thread this is, and where its end is. `countLabel` is drawn against
-                  the whole match; the parenthetical is the rarer disagreement between what was
-                  FETCHED and what survived the client-side purged filter, which is a no-op against a
-                  server that hides them itself and is not against one that does not. */}
-              <div className="dt-pagination">
-                <span
-                  className="dt-pagination-count"
-                  title={hasMoreToLoad
-                    ? `${totalMatching} events match the current filters; this page holds the `
-                      + `newest ${events.length}.`
-                    : 'Every event matching the current filters is on this page.'}
-                >
-                  {countLabel}
-                  {events.length !== allEvents.length && ` (${allEvents.length} loaded)`}
-                </span>
-                {nextCursor ? (
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={loadMore}
-                    disabled={loadingMore}
-                    title={`Fetch the next ${PAGE_SIZE} events, older than the oldest one loaded`}
-                  >
-                    {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
-                  </button>
-                ) : truncated ? (
-                  /* Cut off with no way forward: `truncated` and `next_cursor` come from the same
-                     response, but a database without the paging RPC returns only the first. The
-                     view is still incomplete and the reader is told so. */
-                  <span className="dt-pagination-end">
-                    Showing the newest {allEvents.length}
-                    {typeof totalMatching === 'number' && ` of ${totalMatching}`} events — there are
-                    older ones this view cannot reach.
-                  </span>
-                ) : (
-                  /* Only meaningful once something was paged: a first response holding the whole
-                     thread has no end to announce. */
-                  allEvents.length >= PAGE_SIZE && (
+              {/* Where the thread's end is, drawn only when there is something to say about it: a
+                  page still to load, a cut-off, or an end met at a page boundary. The count is on
+                  the header row and is not said twice. A first response holding the whole thread
+                  has no end to announce, so on a stack smaller than one page there is no foot. */}
+              {(nextCursor || truncated || allEvents.length >= PAGE_SIZE) && (
+                <div className="dt-pagination">
+                  {nextCursor ? (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={loadMore}
+                      disabled={loadingMore}
+                      title={`Fetch the next ${PAGE_SIZE} events, older than the oldest one loaded`}
+                    >
+                      {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
+                    </button>
+                  ) : truncated ? (
+                    /* Cut off with no way forward: `truncated` and `next_cursor` come from the same
+                       response, but a database without the paging RPC returns only the first. The
+                       view is still incomplete and the reader is told so. */
+                    <span className="dt-pagination-end">
+                      Showing the newest {allEvents.length}
+                      {typeof totalMatching === 'number' && ` of ${totalMatching}`} events — there are
+                      older ones this view cannot reach.
+                    </span>
+                  ) : (
                     <span className="dt-pagination-end">
                       End of the thread — every event matching these filters is loaded.
                     </span>
-                  )
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>{/* .card-body — the timeline */}

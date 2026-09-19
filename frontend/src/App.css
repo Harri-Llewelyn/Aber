@@ -3579,8 +3579,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* A flex item of the timeline column now, so it is told not to stretch to the card's width. */
 .dt-lane-toggle { margin-top: 10px; align-self: flex-start; }
 
-/* The foot of the timeline, where the reader finds out whether they are looking at everything.
-   Separated by a rule, because it makes a claim about the data above it. */
+/* The foot of the timeline, present only when the thread continues past what is loaded or ended
+   at a page boundary. Separated by a rule, because it makes a claim about the data above it. */
 .dt-pagination {
   display: flex;
   align-items: center;
@@ -3589,11 +3589,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-}
-
-.dt-pagination-count {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* Muted and italic: it is a statement of completeness, not a warning. The truncated case gets the

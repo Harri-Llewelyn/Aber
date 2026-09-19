@@ -9,7 +9,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  DigitalThreadTab, mergeFirstPage, eventCountLabel, countRatio, isPartial,
+  DigitalThreadTab, mergeFirstPage, countRatio, isPartial,
 } from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
 import { DIGITAL_THREAD_ENTITY_TYPES } from '../constants'
@@ -179,7 +179,7 @@ describe('DigitalThreadTab paging', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Load \d+ more/ }))
 
     // Four events across two pages, and the count is the page's own claim about itself.
-    await waitFor(() => expect(screen.getByText(/^4 events$/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/4 entities · 4 events/)).toBeInTheDocument())
   })
 
   // The whole point of the change: a cut-off view must say so. This is what was missing.
@@ -202,19 +202,14 @@ describe('DigitalThreadTab paging', () => {
     expect(await screen.findByText(/every event matching these filters is loaded/i)).toBeInTheDocument()
   })
 
-  it('stays quiet about the end on a stack smaller than one page', async () => {
+  it('draws no foot at all on a stack smaller than one page', async () => {
+    // Nothing to load, nothing cut off, no boundary met: a foot here could only repeat the count
+    // the header row already carries.
     respond(() => page([event(2), event(1)], { nextCursor: null, truncated: false }))
     render(<DigitalThreadTab />)
-    await waitFor(() => expect(screen.getByText(/^2 events$/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
     expect(screen.queryByText(/every event matching these filters is loaded/i)).not.toBeInTheDocument()
-  })
-
-  // A page can filter to nothing in the browser -- the description search runs after the fetch --
-  // and the footer must not then claim the reader is seeing everything that was loaded.
-  it('reports the loaded total and the drawn total separately when they differ', async () => {
-    respond(() => page([event(3), event(2), event(1)], { nextCursor: null, purgedAssets: 0 }))
-    render(<DigitalThreadTab />)
-    await waitFor(() => expect(screen.getByText(/^3 events$/)).toBeInTheDocument())
+    expect(document.querySelector('.dt-pagination')).toBeNull()
   })
 })
 
@@ -303,39 +298,28 @@ describe('DigitalThreadTab section coverage', () => {
 // "200 events" above a button offering 200 more is the same sentence whether the next page is the
 // last or the third of twelve. The server counts the whole match (0115) and the page names it.
 // =================================================================================================
-describe('the count labels', () => {
-  it('name the whole match when the page is a fraction of it', () => {
-    // Two spellings of one pair. The ratio goes where the space is a fixed-width label -- the
-    // 210px axis corner and the header button -- and the phrase where there is room for words.
-    expect(eventCountLabel(200, 467)).toBe('200 of 467 events')
+describe('the count ratio', () => {
+  it('names the whole match when the page is a fraction of it', () => {
     expect(countRatio(200, 467)).toBe('200/467')
   })
 
-  it('degrade to a plain count once everything matching is drawn', () => {
-    // The equal case is the end of the thread. "467 of 467" is a fraction of itself and reads as
+  it('degrades to a plain count once everything matching is drawn', () => {
+    // The equal case is the end of the thread. "467/467" is a fraction of itself and reads as
     // though something were still missing.
-    expect(eventCountLabel(467, 467)).toBe('467 events')
     expect(countRatio(467, 467)).toBe('467')
   })
 
-  it('name the drawn events alone when the server did not say how many match', () => {
-    // A server without 0115. The alternative is "200 of null events", which is what a bare-array
-    // fixture and an older database would both have produced.
-    expect(eventCountLabel(200, null)).toBe('200 events')
+  it('names the drawn events alone when the server did not say how many match', () => {
+    // A server without 0115. The alternative is "200/null", which is what a bare-array fixture
+    // and an older database would both have produced.
     expect(countRatio(200, undefined)).toBe('200')
     expect(isPartial(200, null)).toBe(false)
   })
 
-  it('do not dress a total below the page up as a fraction', () => {
+  it('does not dress a total below the page up as a fraction', () => {
     // Cannot happen against a server that counts before the cursor, which is the point of counting
     // there. If it ever does, the page says what it is holding rather than a number it cannot be.
-    expect(eventCountLabel(200, 3)).toBe('200 events')
     expect(countRatio(200, 3)).toBe('200')
-  })
-
-  it('count one event as one event', () => {
-    expect(eventCountLabel(1, null)).toBe('1 event')
-    expect(eventCountLabel(1, 9)).toBe('1 of 9 events')
   })
 })
 
@@ -397,7 +381,7 @@ describe('DigitalThreadTab empty state', () => {
 describe('DigitalThreadTab total', () => {
   const cursor = { recorded_at: '2026-01-01T00:00:00.000Z', id: 41 }
 
-  it('says what fraction of the match is on screen, in the legend and at the foot', async () => {
+  it('says what fraction of the match is on screen, once, on the header row', async () => {
     respond(() => page([event(42), event(41)], {
       nextCursor: cursor, truncated: true, totalMatching: 467,
     }))
@@ -405,9 +389,16 @@ describe('DigitalThreadTab total', () => {
 
     // Above the timeline, on the header row beside the key.
     expect(await screen.findByText(/2 entities · 2\/467 events/)).toBeInTheDocument()
-    // And the foot of the page, which has room for the words. Both read the same pair, so they
-    // cannot end up describing different sets.
-    expect(screen.getByText(/^2 of 467 events$/)).toBeInTheDocument()
+    // And nowhere else: the foot used to say it again in words, under a button offering more.
+    expect(screen.queryByText(/2 of 467 events/)).not.toBeInTheDocument()
+    expect(document.querySelector('.dt-pagination-count')).toBeNull()
+    expect(screen.getByRole('button', { name: /Load \d+ more/ })).toBeInTheDocument()
+  })
+
+  it('counts one event as one event', async () => {
+    respond(() => page([event(1)], { nextCursor: null, totalMatching: 1 }))
+    render(<DigitalThreadTab />)
+    expect(await screen.findByText(/1 entity · 1 event$/)).toBeInTheDocument()
   })
 
   it('draws the count beside the key, above the timeline and not inside the swimlanes', async () => {
@@ -449,8 +440,7 @@ describe('DigitalThreadTab total', () => {
   it('drops the fraction when the loaded page is the whole match', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null, totalMatching: 2 }))
     render(<DigitalThreadTab />)
-    await waitFor(() => expect(screen.getByText(/^2 events$/)).toBeInTheDocument())
-    expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
     expect(screen.queryByText(/2\/2|2 of 2/)).not.toBeInTheDocument()
   })
 
@@ -459,7 +449,7 @@ describe('DigitalThreadTab total', () => {
     // assert against; stated once, explicitly, so the fallback is a decision rather than a default.
     respond(() => page([event(2), event(1)], { nextCursor: cursor, truncated: true }))
     render(<DigitalThreadTab />)
-    await waitFor(() => expect(screen.getByText(/^2 events$/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
     expect(screen.queryByText(/of null|of undefined|NaN|\/null|\/undefined/)).not.toBeInTheDocument()
   })
 
@@ -471,12 +461,12 @@ describe('DigitalThreadTab total', () => {
       : page([event(42), event(41)], { nextCursor: cursor, truncated: true, totalMatching: 4 }))
 
     render(<DigitalThreadTab />)
-    await screen.findByText(/^2 of 4 events$/)
+    await screen.findByText(/2 entities · 2\/4 events/)
     fireEvent.click(screen.getByRole('button', { name: /Load \d+ more/ }))
 
     // Four of four is the whole match, so the fraction goes.
-    await waitFor(() => expect(screen.getByText(/^4 events$/)).toBeInTheDocument())
-    expect(screen.getByText(/4 entities · 4 events/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/4 entities · 4 events/)).toBeInTheDocument())
+    expect(screen.queryByText(/4\/4/)).not.toBeInTheDocument()
   })
 
   it('names the total in the cut-off notice, which had only its own page to name', async () => {
