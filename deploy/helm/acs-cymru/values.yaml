@@ -305,6 +305,49 @@ postgresTls:
   # Names clients dial beyond the Service names. The dev loop's port-forward dials `localhost`.
   extraDnsSans: []
 
+# Server-side metrics for both databases: a postgres_exporter sidecar in each database pod,
+# scraped as `job="supabase-db"` and `job="timescaledb"`. Without it neither database reports a
+# connection count, a WAL figure, a cache hit ratio or a deadlock, and the historian reports
+# nothing about chunks, compression or its policy jobs -- on a platform whose subject is a
+# time-series historian.
+#
+# A SIDECAR, NOT A DEPLOYMENT. Both pg_hba files trust loopback (postgres-tls.yaml keeps that line
+# with TLS on), so sharing the pod's network namespace means no password, no client certificate,
+# no Service and no database edge in the NetworkPolicy. A Deployment would need all four.
+#
+# ONE FLAG PER SIDECAR, NOT `observability.enabled`. The exporters are useful to an external
+# Prometheus that scrapes the ServiceMonitors with the chart's own observability stack switched
+# off, which gating them on `observability.enabled` would deny. Same reasoning as
+# `mosquitto.metrics`, and the ServiceMonitors read this flag.
+databaseMetrics:
+  enabled: true
+  image:
+    repository: quay.io/prometheuscommunity/postgres-exporter
+    # A version, not a floating tag.
+    tag: v0.20.1
+    pullPolicy: IfNotPresent
+  # 9187 is the exporter's registered default and what its own documentation assumes.
+  port: 9187
+  # THREE DEFAULT COLLECTORS ARE OFF, and each is a measurement rather than a preference. With
+  # the defaults a scrape of the historian is 2,505 series and of supabase-db 3,489; without
+  # these three it is ~265 and ~309, and no panel or rule loses an input.
+  #
+  #   settings              one series per GUC (355 / 325). Server configuration does not vary
+  #                         between scrapes; it is not a time series.
+  #   stat_user_tables      21 series per table (1,365 / 2,079).
+  #   statio_user_tables    8 series per table (520 / 776).
+  #
+  # The per-table pair is worse than chatty ON THE HISTORIAN SPECIFICALLY: 37 of its 65 "user
+  # tables" are `_timescaledb_internal` chunks, 29 series each, and the chunk count grows with
+  # retention and with every hypertable added. That is unbounded cardinality attached to the one
+  # component whose table count is a function of how long the platform has been running.
+  #
+  # Re-enable any of them through `extraArgs` (`--collector.settings`), knowing the cost above.
+  extraArgs: []
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
 # ---------------------------------------------------------------------------------------------
 # Realtime
 # ---------------------------------------------------------------------------------------------
@@ -588,9 +631,15 @@ mosquitto:
     fsGroupChangePolicy: OnRootMismatch
   # Broker metrics via an exporter sidecar (Mosquitto publishes its statistics to `$SYS/#`
   # and has no HTTP endpoint). The metric prefix is `broker_`, not `mosquitto_`; 48 series.
-  # Off by default (a third-party image). Authenticates with the monitor account.
+  # Authenticates with the monitor account.
+  #
+  # ON BY DEFAULT since the databases' exporters were added, and for the same reason: these three
+  # exporters describe the platform's own subject -- the broker the fleet publishes to and the two
+  # databases the telemetry lands in -- and a stack that cannot say whether it is receiving or
+  # storing anything is not observing itself. Being a third-party image was the earlier argument
+  # for leaving it off; 48 series behind one flag is not the cost that argument assumed.
   metrics:
-    enabled: false
+    enabled: true
     port: 9234
     image:
       repository: sapcc/mosquitto-exporter

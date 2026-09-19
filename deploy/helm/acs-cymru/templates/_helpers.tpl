@@ -772,6 +772,53 @@ Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "po
     limits: { memory: 64Mi }
 {{- end -}}
 
+{{/*
+The postgres_exporter sidecar, defined once and used by both database pods. `db` names the
+component (and so the `job` label Alloy writes), `database` the database it connects to.
+
+THE DSN CARRIES NO PASSWORD AND NO `sslmode`, and both halves are load-bearing.
+
+  No password, because `metrics_reader` has none and cannot be given one: the network is admitted
+  by `hostssl ... scram-sha-256`, so a role with no password CANNOT AUTHENTICATE FROM ANYWHERE BUT
+  LOOPBACK, which is the whole argument for granting it `pg_monitor`. The sidecar shares the pod's
+  network namespace, so 127.0.0.1 is the database beside it.
+
+  No `sslmode`, because libpq then defaults to `prefer`: measured on the dev stack, that negotiates
+  TLSv1.3 over loopback when `postgresTls` is on and falls back to plaintext when it is off, with
+  `trust` matching either way (a pg_hba `host` line matches SSL and non-SSL alike). One DSN, correct
+  under both settings, and no `sslmode=disable` for the TLS render check to find.
+
+NO READINESS PROBE, DELIBERATELY, and this is where it departs from the broker's exporter. A
+readinessProbe on ANY container gates the whole pod's Service endpoints: an exporter that could not
+reach its database would take the database itself out of `timescaledb:5432` and stop the stack. A
+metrics sidecar must never be able to do that. Whether the exporter is working is a question for
+the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
+*/}}
+{{- define "acs-cymru.dbMetricsExporter" -}}
+{{- $m := .ctx.Values.databaseMetrics -}}
+- name: metrics
+  image: "{{ $m.image.repository }}:{{ $m.image.tag }}"
+  imagePullPolicy: {{ $m.image.pullPolicy }}
+  args:
+    - --web.listen-address=:{{ $m.port }}
+    {{- /* Argued in values.yaml, with the series counts that decided it. */}}
+    - --no-collector.settings
+    - --no-collector.stat_user_tables
+    - --no-collector.statio_user_tables
+    {{- range $m.extraArgs }}
+    - {{ . | quote }}
+    {{- end }}
+  env:
+    - name: DATA_SOURCE_NAME
+      value: postgresql://metrics_reader@127.0.0.1:5432/{{ .database }}
+  ports:
+    - name: metrics
+      containerPort: {{ $m.port }}
+      protocol: TCP
+  resources:
+    {{- toYaml $m.resources | nindent 4 }}
+{{- end -}}
+
 {{/* The server-side settings, as `-c` flags appended to each image's own command. */}}
 {{- define "acs-cymru.dbTlsServerArgs" -}}
 - -c

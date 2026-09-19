@@ -131,7 +131,15 @@ BEGIN
 
   -- pg_monitor for the historian I/O panels. A read-only membership: it grants visibility into
   -- pg_stat_* and nothing else.
-  EXECUTE format('GRANT pg_monitor TO %I', v_role);
+  --
+  -- `WITH INHERIT TRUE` IS LOAD-BEARING AND WAS MISSING. PostgreSQL 16 moved inheritance onto the
+  -- grant, fixed from the member's `rolinherit` AT GRANT TIME, and this role is NOINHERIT -- so
+  -- the membership was recorded with `inherit_option = false` and did nothing. Measured: the role
+  -- held the membership and `pg_has_role(..., 'usage')` was still false, with none of the other
+  -- backends' query text visible. The shipped pg_stat_io panel did not notice, because pg_stat_io
+  -- is world-readable; the next panel that genuinely needs pg_monitor would have returned empty.
+  -- `ALTER ROLE ... INHERIT` does NOT revise an existing grant, so this must say so here.
+  EXECUTE format('GRANT pg_monitor TO %I WITH INHERIT TRUE', v_role);
 
   -- The storage footprint, created by storage.sql (which runs before this file). Bytes and chunk
   -- time-spans only: storage_footprint_rows() is SECURITY DEFINER so this grant need not widen to
@@ -146,6 +154,47 @@ BEGIN
   RAISE NOTICE
     'roles: % may read the rollups, raw telemetry, telemetry_latest, assets, telemetry_gapfill() '
     'and pg_stat_* -- read-only throughout.', v_role;
+END $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- metrics_reader -- the postgres_exporter sidecar
+-- ---------------------------------------------------------------------------------------------
+-- THE ONLY ROLE HERE WITH NO PASSWORD, AND THAT IS ITS SECURITY ARGUMENT RATHER THAN AN OMISSION.
+-- pg_hba admits the network with `hostssl ... scram-sha-256`, so a role with no password CANNOT
+-- AUTHENTICATE FROM ANYWHERE BUT LOOPBACK, where `trust` matches. The exporter is a sidecar in
+-- this pod and reaches 127.0.0.1 through the shared network namespace; nothing off the pod can
+-- present this role at all. That is what makes `pg_monitor` -- a role grant rather than the narrow
+-- views the Grafana reader gets -- the proportionate answer: the grant is broad over statistics
+-- and reachable from nowhere.
+--
+-- Takes no psql variable, unlike every other role in this file, for the same reason.
+DO $$
+DECLARE
+  v_role CONSTANT text := 'metrics_reader';
+  v_dbname CONSTANT text := current_database();
+BEGIN
+  -- INHERIT, not NOINHERIT. The other roles here are NOINHERIT and this one must not be: see the
+  -- grant below.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role) THEN
+    EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT', v_role);
+    RAISE NOTICE 'roles: created %', v_role;
+  END IF;
+
+  -- PASSWORD NULL on every boot, not merely at creation: this file is the authority on the role's
+  -- reach, and a password set by hand would open the network path the paragraph above rules out.
+  EXECUTE format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT '
+                 'PASSWORD NULL', v_role);
+
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', v_dbname, v_role);
+
+  -- `WITH INHERIT TRUE` FOR THE REASON RECORDED ON grafana_reader ABOVE. Without it the exporter
+  -- runs, reports `pg_exporter_last_scrape_error 0`, and silently serves no WAL series at all --
+  -- which is one of the figures this exporter was added to provide.
+  EXECUTE format('GRANT pg_monitor TO %I WITH INHERIT TRUE', v_role);
+
+  RAISE NOTICE
+    'roles: % holds pg_monitor and no password, so it reads pg_stat_* from the sidecar on '
+    'loopback and cannot authenticate from the network.', v_role;
 END $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -416,4 +465,41 @@ BEGIN
 
     RAISE NOTICE 'roles self-check passed: fdw_reader reads the projection and writes nothing.';
   END IF;
+END $$;
+
+-- A pg_monitor membership that is held but not inherited is the one failure in this file that
+-- NOTHING downstream reports: the role passes `pg_has_role(..., 'member')`, the exporter starts,
+-- the scrape succeeds, and the series that needed the privilege are simply absent. Asserted for
+-- each role granted it above, and only for those.
+DO $$
+DECLARE
+  v_role text;
+BEGIN
+  FOREACH v_role IN ARRAY ARRAY['metrics_reader', 'grafana_reader'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role);
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_auth_members m
+        JOIN pg_roles g ON g.oid = m.roleid
+        JOIN pg_roles r ON r.oid = m.member
+       WHERE g.rolname = 'pg_monitor' AND r.rolname = v_role AND m.inherit_option
+    ) THEN
+      RAISE EXCEPTION
+        'roles self-check: % holds pg_monitor without INHERIT, so the membership does nothing. '
+        'PostgreSQL fixes inheritance on the GRANT from the role''s rolinherit at grant time, and '
+        'ALTER ROLE ... INHERIT does not revise it -- re-issue the grant WITH INHERIT TRUE.',
+        v_role;
+    END IF;
+  END LOOP;
+
+  IF EXISTS (SELECT 1 FROM pg_authid WHERE rolname = 'metrics_reader' AND rolpassword IS NOT NULL)
+  THEN
+    RAISE EXCEPTION
+      'roles self-check: metrics_reader has a password, so it can authenticate over the network. '
+      'It holds pg_monitor precisely because it was reachable only from loopback.';
+  END IF;
+
+  RAISE NOTICE
+    'roles self-check passed: every pg_monitor membership is inherited, and metrics_reader has '
+    'no password.';
 END $$;

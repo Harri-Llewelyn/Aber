@@ -426,7 +426,8 @@ for Node-RED, removed because nothing can observe what Node-RED is running.
 
 `refresh_directory_liveness()` writes both every minute from Prometheus's `up` series. The job names
 it joins on are the chart's component names: `0103` renamed the gateway's from the retired scrape
-config's `envoy` to `supabase-envoy`, the name the collector labels the pod with.
+config's `envoy` to `supabase-envoy`, the name the collector labels the pod with, and `0127` added
+the two databases once something scraped them.
 
 | | |
 | :--- | :--- |
@@ -3729,6 +3730,25 @@ id under the old name, and a name-targeted clause raises on the primary key ever
 skipping. The rename is guarded on the new name being free, so a service an operator registered
 under it by hand is kept. The anon key's vault description in `0002` no longer names Kong either;
 the seed rewrites the three revocation secrets on every boot, so that needed no migration.
+
+## The Directory observes both databases (`0127`)
+
+Both databases read `UNKNOWN` on the Directory page, and the map was right to say so: nothing
+scraped either of them. `UNKNOWN` is the honest value — it means *nothing observes this service*,
+which is a different claim from `DOWN`, and the page has to keep those apart or it fabricates
+health the way the seeded `'ACTIVE'` literals once did.
+
+What changed is underneath: a `postgres_exporter` sidecar now runs in each database pod, and Alloy
+labels every scraped pod's `job` with its component, so `supabase-db` and `timescaledb` are jobs
+that exist. `0127` adds the two rows that join to them.
+
+**The service names are the join key, not decoration.** They must match
+`directory_services.service_name` exactly — *Supabase PostgreSQL* and *TimescaleDB Telemetry
+Store*, as `0002` seeds them. A near-miss is the worse of the two failures available here: the
+database is scraped, the series arrive, and the page still says `UNKNOWN`, which reads as a missing
+exporter rather than as a typo in a map. `scripts/check-docs-drift.mjs` asserts in one direction —
+every job the map names is one a scraped pod actually carries — because a job named here that no
+pod produces makes a healthy service report `UNKNOWN` forever.
 
 ## Schema Versioning
 
