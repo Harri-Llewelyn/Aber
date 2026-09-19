@@ -729,7 +729,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
 | `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none |
 | `principal_permissions` | own row, or `Administrator` | none — `create_machine_principal()` is the only write path |
-| `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`) |
+| `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
 ### The two privileged roles, and what separates them (`0069`)
@@ -3359,6 +3359,23 @@ runtime has no id to write down ahead of time, which is what the table is for. T
 reads the same table to label the *Service identities* lane, so a principal created from the page
 is named there too; the search still cannot reach that name, for the reason stated under
 [Naming the last two lanes](#naming-the-last-two-lanes-0118).
+
+### A principal can be described again (`0126`)
+
+**`0125` closed the table and left out the ordinary case.** A purpose that was right when it was
+typed is not right once the report is renamed or the client moves lines, and a table with no
+write policy had no way to say so. `describe_machine_principal(p_principal_id, p_name,
+p_purpose)` is the one write path after creation: Administrator only, machine principals only,
+**rows that exist only**, so the three identities a migration pinned are refused with a message
+saying their name lives in the dashboard's registry rather than *not found*. The name stays
+unique ignoring case, excluding the row being renamed. An unchanged save writes nothing and
+returns `NULL`; a change is a `PRINCIPAL_DESCRIBED` row on the *Service identities* lane carrying
+the old and new name and purpose, and the function returns that row's id.
+
+**Permissions are not editable, on purpose.** Widening what a principal holds is a change of
+authority that every token already signed for it would carry at once; that is a new principal.
+The dialog says so, and offers the name and purpose alone. On the page, the pencil beside a
+principal's name is offered only for a row with a name of its own.
 
 ### The platform playbook is published by the sweep
 

@@ -20,7 +20,9 @@ ambiguous (a 300 rather than a row). 0080 recreates that form on every boot; 012
 every boot; this asserts the order held.
 
 The name table reads for Administrator and Auditor, the two roles that label the audit lane, and
-for nobody else. No write policy: the function is the only write path.
+for nobody else. No write policy: the create function is the only write path at creation, and
+`describe_machine_principal()` (0126) the only one after it -- Administrator only, rows that exist
+only, and every change a PRINCIPAL_DESCRIBED row carrying what it replaced.
 
 EVERY TEST ROLLS BACK. The fixtures are seeded inside the test's own transaction, and
 `SET LOCAL ROLE` scopes the impersonation to it, so nothing is committed and nothing needs
@@ -301,6 +303,100 @@ class WhoMayReadTheNames(NamingBase):
             (self.named,),
         )
         self.assertEqual(self.cur.fetchone()["n"], 0)
+
+
+class ANameCanBeChangedAgain(NamingBase):
+    """0126: describe_machine_principal() is the one write path after creation."""
+
+    def setUp(self):
+        super().setUp()
+        self.as_user(self.admin)
+        self.subject = self.create("Before", purpose="Old purpose")["principal_id"]
+        self.other = self.create("Taken")["principal_id"]
+        self.as_postgres()
+
+    def describe(self, principal_id, name, purpose=None):
+        self.cur.execute(
+            "SELECT public.describe_machine_principal(%s, %s, %s) AS audit_id;",
+            (principal_id, name, purpose),
+        )
+        return self.cur.fetchone()["audit_id"]
+
+    def _refused(self, errcls, principal_id, name, purpose=None):
+        self.cur.execute("SAVEPOINT attempt;")
+        with self.assertRaises(errcls) as ctx:
+            self.describe(principal_id, name, purpose)
+        self.cur.execute("ROLLBACK TO SAVEPOINT attempt;")
+        return str(ctx.exception)
+
+    def _row(self, principal_id):
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT name, purpose FROM public.machine_principals WHERE principal_id = %s;",
+            (principal_id,),
+        )
+        return self.cur.fetchone()
+
+    def test_the_row_changes_and_the_thread_keeps_what_it_replaced(self):
+        self.as_user(self.admin)
+        audit_id = self.describe(self.subject, "  After  ", "New purpose")
+        self.assertIsNotNone(audit_id)
+        self.assertEqual(self._row(self.subject), {"name": "After", "purpose": "New purpose"})
+        self.cur.execute(
+            "SELECT action, old_data, new_data, changed_by FROM public.digital_thread WHERE id = %s;",
+            (audit_id,),
+        )
+        audit = self.cur.fetchone()
+        self.assertEqual(audit["action"], "PRINCIPAL_DESCRIBED")
+        self.assertEqual(audit["old_data"], {"name": "Before", "purpose": "Old purpose"})
+        self.assertEqual(audit["new_data"], {"name": "After", "purpose": "New purpose"})
+        self.assertEqual(str(audit["changed_by"]), self.admin)
+
+    def test_an_unchanged_save_writes_nothing(self):
+        self.as_user(self.admin)
+        self.assertIsNone(self.describe(self.subject, "Before", "Old purpose"))
+        # A purpose of whitespace is the same as the stored NULL would be, but here the stored
+        # purpose is text, so only an identical pair is "unchanged".
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT count(*) AS n FROM public.digital_thread "
+            "WHERE entity_id = %s AND action = 'PRINCIPAL_DESCRIBED';",
+            (self.subject,),
+        )
+        self.assertEqual(self.cur.fetchone()["n"], 0)
+
+    def test_keeping_ones_own_name_is_not_a_collision(self):
+        self.as_user(self.admin)
+        self.assertIsNotNone(self.describe(self.subject, "before", "Old purpose"))
+        self.assertEqual(self._row(self.subject)["name"], "before")
+
+    def test_another_rows_name_is_refused(self):
+        self.as_user(self.admin)
+        message = self._refused(psycopg2.errors.UniqueViolation, self.subject, " taken ")
+        self.assertIn("already exists", message)
+        self.assertEqual(self._row(self.subject)["name"], "Before")
+
+    def test_a_pinned_identity_has_no_row_to_describe(self):
+        # A machine principal with no machine_principals row, as the three pinned ones are.
+        pinned = str(uuid.uuid4())
+        self.cur.execute("INSERT INTO auth.users (id) VALUES (%s);", (pinned,))
+        self.as_user(self.admin)
+        message = self._refused(psycopg2.errors.InvalidParameterValue, pinned, "Renamed")
+        self.assertIn("no name row", message)
+
+    def test_a_person_cannot_be_described(self):
+        self.as_user(self.admin)
+        message = self._refused(psycopg2.errors.InvalidParameterValue, self.auditor, "Renamed")
+        self.assertIn("not a machine principal", message)
+
+    def test_a_shopfloor_manager_is_refused(self):
+        self.as_user(self.manager)
+        self._refused(psycopg2.errors.InsufficientPrivilege, self.subject, "Renamed")
+        self.assertEqual(self._row(self.subject)["name"], "Before")
+
+    def test_a_blank_name_is_refused(self):
+        self.as_user(self.admin)
+        self._refused(psycopg2.errors.InvalidParameterValue, self.subject, "   ")
 
 
 if __name__ == "__main__":

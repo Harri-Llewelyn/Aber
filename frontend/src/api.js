@@ -853,6 +853,23 @@ const apiMethods = {
   },
 
   /**
+   * Rename a principal created from the page, or change its purpose (0126).
+   *
+   * Through `describe_machine_principal()`, Administrator only and the one write path to
+   * `machine_principals` after creation. Refuses a pinned identity, which has no row. Resolves to
+   * the audit row id, or null when nothing changed.
+   */
+  describeServicePrincipal: async (principalId, name, purpose) => {
+    const { data, error } = await supabase.rpc('describe_machine_principal', {
+      p_principal_id: principalId,
+      p_name: name,
+      p_purpose: purpose || null,
+    });
+    if (error) throw new Error(error.message || 'Could not describe the machine principal');
+    return data;
+  },
+
+  /**
    * Every gateway with what the platform knows about its broker credential.
    *
    * Two reads, not a join: `gateway_status` carries `enrolled_at` and `credential_revoked_at`

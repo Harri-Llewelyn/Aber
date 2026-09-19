@@ -48,6 +48,9 @@ vi.mock('../components/modals/ServicePrincipalCreateModal', () => ({
     </div>
   )
 }))
+vi.mock('../components/modals/ServicePrincipalDescribeModal', () => ({
+  ServicePrincipalDescribeModal: ({ principal }) => <div data-testid="describe-modal">{principal.name}</div>
+}))
 vi.mock('../components/modals/ServiceTokenInventoryModal', () => ({
   ServiceTokenInventoryModal: ({ principalName, status }) => (
     <div data-testid="inventory-modal">{principalName}:{status.rows.length}</div>
@@ -443,6 +446,27 @@ describe('AccessControlTab', () => {
     expect(screen.getByTitle('Reads the hourly rollup.')).toBeTruthy()
     expect(screen.queryByText(/Undocumented principal/i)).toBeNull()
     expect(within(screen.getByText('Line 4 OEE report').closest('tr')).queryByRole('button', { name: /Issue Token/i })).toBeTruthy()
+  })
+
+  /**
+   * Renaming is offered only where there is a row to rename (0126): a pinned identity is named in
+   * the registry and the RPC refuses it, so a pencil on its row would open a dialog to fail.
+   */
+  it('offers Describe for a named principal and not for a pinned one', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([
+      MCP_PRINCIPAL,
+      {
+        principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: ['telemetry:read'],
+        created_at: null, can_sign_in: false, name: 'Line 4 OEE report', purpose: null,
+      }
+    ])
+    await renderServices()
+    await waitFor(() => expect(screen.getByText('Line 4 OEE report')).toBeTruthy())
+
+    expect(screen.queryByRole('button', { name: /Describe MCP read-only client/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Describe Line 4 OEE report/ }))
+    await waitFor(() => expect(screen.getByTestId('describe-modal').textContent).toBe('Line 4 OEE report'))
   })
 
   it('offers New Principal on the database principals card, and not when the list was refused', async () => {
