@@ -10,32 +10,28 @@
 {{- end -}}
 {{- end -}}
 {{- /*
-Renders nothing when no route resolved, rather than failing here.
-
-The ASSERTION lives in acs-cymru.validateIngress (_helpers.tpl), because a `fail` inside a resource
-template pre-empts the whole validation chain -- an install with no credentials at all was being told
-about hostnames, which is true but the third-most useful thing to say. One ordered place for
-validation; this file just declines to emit an Ingress with empty `host:` fields, which the API server
-would accept and which would then match every request reaching the controller.
+Renders nothing when no route resolved, rather than failing here: the assertion lives in
+acs-cymru.validateIngress, because a `fail` inside a resource template pre-empts the whole
+validation chain. This file just declines to emit an Ingress with empty `host:` fields, which the
+API server would accept and which would then match every request reaching the controller.
 */ -}}
 {{- if $enabled -}}
 {{/*
 =================================================================================================
 Subdomain routing, one Ingress.
 
-WHY SUBDOMAINS AND NOT PATHS. Path-based routing on one host looks tidier and is not viable here:
-Grafana needs `serve_from_sub_path` plus a matching root_url, Node-RED needs BOTH httpAdminRoot and
-httpNodeRoot moved -- which changes the quarantine webhook's path, and that path is REGISTERED IN
-THE DATABASE in webhook_endpoints -- and Studio is a Next.js app with its own basePath assumptions.
-Subdomains avoid all three.
+WHY SUBDOMAINS AND NOT PATHS. Grafana would need `serve_from_sub_path` plus a matching root_url;
+Node-RED would need both httpAdminRoot and httpNodeRoot moved, which changes the quarantine
+webhook's path, and that path is REGISTERED IN THE DATABASE in webhook_endpoints; Studio is a
+Next.js app with its own basePath assumptions.
 
-EVERY HOST COMES FROM THE SAME HELPER the service itself is configured from. That is the point of
-§7's URL split: `acs-cymru.grafanaUrl` feeds this Ingress rule, Grafana's GF_SERVER_ROOT_URL, and
-the redirect_uris db-init registers in auth.oauth_clients. Three consumers, one value, so an ingress
-hostname cannot disagree with what a service advertises or with what GoTrue will accept.
+EVERY HOST COMES FROM THE SAME HELPER the service itself is configured from -- §7's URL split.
+`acs-cymru.grafanaUrl` feeds this rule, Grafana's GF_SERVER_ROOT_URL and the redirect_uris db-init
+registers in auth.oauth_clients, so an ingress hostname cannot disagree with what a service
+advertises or with what GoTrue will accept.
 
-MQTT: only 9001 (WebSockets) is here. Raw MQTT on 1883 is TCP and cannot ride an HTTP Ingress at
-all -- that is the mosquitto-external LoadBalancer's job. Traefik and ingress-nginx both carry the
+MQTT: only 9001 (WebSockets) is here. Raw MQTT on 1883 is TCP and cannot ride an HTTP Ingress --
+that is the mosquitto-external LoadBalancer's job. Traefik and ingress-nginx both carry the
 WebSocket upgrade without an annotation.
 =================================================================================================
 */}}

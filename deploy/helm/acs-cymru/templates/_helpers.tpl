@@ -1,16 +1,7 @@
 {{/*
-=================================================================================================
-Shared template helpers.
+Shared template helpers: the values several services must be handed identically.
 
-This file exists because several services must be handed the SAME value, and a definition
-repeated per service drifts the first time one of them is edited alone.
-
-Four groups:
-  1. Names and labels
-  2. Validation  -- fail the render, not the pod
-  3. Connection strings
-  4. Environment blocks
-=================================================================================================
+  1. Names and labels   2. Validation, which fails the render   3. Connection strings   4. Env blocks
 */}}
 
 {{/* ---------------------------------------------------------------------------------------- */}}
@@ -39,16 +30,10 @@ Release-qualified name, for objects that are NOT addressed by name from inside t
 {{- end -}}
 
 {{/*
-SERVICE NAMES ARE NOT PREFIXED, and that is the chart's central design decision rather than an
-oversight. Service names are the component names, so in-cluster DNS resolves
-`http://supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` -- the URLs grafana.ini,
-settings.js and the edge-function environment carry.
-
-Prefixing them with the release name would break all of that and buy nothing: two releases of this
-stack in one namespace is not a supported configuration (they would contend for the MQTT host
-port, the Realtime replication slot and the tenant name). Use two namespaces.
-
-Do not "tidy" a Service name. deploy/k8s/README.md carries the divergence table this belongs to.
+SERVICE NAMES ARE NOT PREFIXED. They are the component names, so in-cluster DNS resolves
+`supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` -- the URLs grafana.ini, settings.js
+and the edge-function environment carry. Two releases of this stack in one namespace is not a
+supported configuration; use two namespaces. Do not rename a Service to tidy it.
 */}}
 {{- define "acs-cymru.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
@@ -93,21 +78,14 @@ storageClassName: {{ $sc | quote }}
 {{- end -}}
 
 {{/*
-Render a `repository:tag` image reference, defaulting an EMPTY tag to the chart's appVersion.
+`repository:tag` for the images this repository BUILDS, defaulting an empty tag to the chart's
+appVersion so the chart and its images ship from one release tag. An explicit tag still wins, so a
+deployment can pull one component at a different build without forking the chart.
 
-Used only by the images this repository BUILDS -- edge-runtime, ingestion, node-red, frontend,
-test-runner and i3x-service. Their tag is empty in values.yaml on purpose, so the chart and the
-images it names ship from one release tag and cannot drift: .github/workflows/release.yml stamps
-appVersion from the `v*` tag and pushes all of them at the same string, in the same run.
-
-It is deliberately NOT used for third-party images. Those pins are decisions, several of them
-load-bearing -- supabase/realtime and supabase/storage-api migrate shared schemas on boot,
-supabase/studio is Zod-coupled to a postgres-meta version, nodered/node-red is what the generated
-settings.js depends on. Floating any of them onto our appVersion would mean bumping this chart
-silently changed which Postgres the databases run, which is the opposite of what a pin is for.
-
-An explicit `tag` still wins, so a deployment can pull one component at a different build (a hotfix,
-a bisect, a locally-built image) without forking the chart.
+NOT used for third-party images: those pins carry couplings -- realtime and storage-api migrate
+shared schemas on boot, studio is Zod-coupled to a postgres-meta version, node-red is what the
+generated settings.js depends on -- and floating them onto appVersion would make a chart bump
+silently change which Postgres the databases run.
 
   {{ include "acs-cymru.image" (dict "image" .Values.ingestion.image "ctx" .) }}
 */}}
@@ -137,18 +115,13 @@ http://prometheus:9090
 {{- end -}}
 
 {{/*
-The Sparkplug primary host id, validated. Used by the ingestion daemon, which publishes the STATE
-birth and death certificates, and by the broker's reconcile, which grants it write on that one
-topic -- so the two cannot drift.
+The Sparkplug primary host id, validated. The ingestion daemon publishes the STATE birth and death
+certificates under it and the broker's reconcile grants write on that one topic, so the two cannot
+drift.
 
-REQUIRED, WITH NO DEFAULT. Every gateway on the site is configured to watch
-`spBv1.0/STATE/<id>` to learn whether the historian is consuming, which makes the id part of the
-contract with equipment this chart has never seen. A default would put a word nobody chose into
-each of those vendors' configuration screens, and changing it later means revisiting every one.
-
-Failing the render rather than installing without it: the daemon refuses to start without the
-value, so an install that skipped this would come up with ingestion in CrashLoopBackOff and the
-cause named only in a pod log.
+REQUIRED, WITH NO DEFAULT: every gateway on site is configured to watch `spBv1.0/STATE/<id>`, which
+makes the id part of the contract with equipment this chart has never seen. Failing the render
+rather than installing without it -- the daemon refuses to start, naming only an env var.
 */}}
 {{- define "acs-cymru.primaryHostId" -}}
 {{- $id := .Values.ingestion.primaryHostId | default "" -}}
@@ -172,10 +145,9 @@ http://loki:3100
 {{- end -}}
 
 {{/*
-Pod annotations that make a workload a scrape target. Alloy (templates/obs/alloy.yaml) keeps
-every pod in the release carrying `prometheus.io/scrape: "true"`, reads the port and path from
-the other two, and labels the series `service` with the pod's component. The convention is the
-one most Prometheus configurations already read, so a cluster's own Prometheus can use it too.
+Pod annotations that make a workload a scrape target. Alloy (templates/obs/alloy.yaml) keeps every
+pod carrying `prometheus.io/scrape: "true"`, reads the port and path from the other two, and labels
+the series `service` with the pod's component. A cluster's own Prometheus reads the same convention.
 
   {{ include "acs-cymru.scrapeAnnotations" (dict "port" 9108 "path" "/metrics") | nindent 8 }}
 */}}
@@ -194,14 +166,11 @@ prometheus.io/path: {{ .path | default "/metrics" | quote }}
 {{/* ---------------------------------------------------------------------------------------- */}}
 
 {{/*
-The Supabase credentials are a SET.
-
-`anonKey` and `serviceRoleKey` are JWTs signed by `jwtSecret`; `publishableKey` and `secretKey`
-are the keys callers present, which the gateway translates to those JWTs. Generating one without
-the others invalidates the rest, and every request then fails at the gateway against a stack that
-looks fine. So: all supplied, or none and a legible refusal. The chart never generates them.
-
-Skipped entirely when `existingSecret` is set, because the values are then not the chart's to see.
+The Supabase credentials are a SET: `anonKey` and `serviceRoleKey` are JWTs signed by `jwtSecret`,
+and `publishableKey`/`secretKey` are what callers present for the gateway to translate. Generating
+one without the others invalidates the rest and every request then fails at the gateway against a
+stack that looks fine. All supplied or none; the chart never generates them. Skipped under
+`existingSecret`, when the values are not the chart's to see -- see kubernetes-architecture.md §3.2.
 */}}
 {{- define "acs-cymru.validateSecrets" -}}
 {{- if not .Values.secrets.existingSecret -}}
@@ -212,12 +181,10 @@ Skipped entirely when `existingSecret` is set, because the values are then not t
 {{- end -}}
 {{- end -}}
 {{/*
-GRAFANA NEEDS THE BI READER PASSWORD, and only Grafana does -- the maintenance Job treats an empty
-value as "do not create the role", which is the right behaviour for a stack with no reporting tool
-attached. With Grafana enabled it is not optional: its render-datasource initContainer refuses to
-start without one, and the fallback it used to have -- the `postgres` superuser credential -- is
-exactly what this replaced. Caught here so the failure is one Helm error rather than a Grafana pod
-in CrashLoopBackOff reporting a database it cannot authenticate against.
+GRAFANA IS THE ONLY CONSUMER of the BI reader password: the maintenance Job reads an empty value as
+"do not create the role", which is right for a stack with no reporting tool. With Grafana enabled
+its render-datasource initContainer refuses to start without one, so this is a Helm error rather
+than a Grafana pod in CrashLoopBackOff against a database it cannot authenticate to.
 */}}
 {{- if and .Values.grafana.enabled (not .Values.secrets.biReaderPassword) -}}
 {{- $missing = append $missing "secrets.biReaderPassword (BI_READER_PASSWORD, required when grafana.enabled)" -}}
@@ -226,15 +193,11 @@ in CrashLoopBackOff reporting a database it cannot authenticate against.
 {{- $missing = append $missing "secrets.ingestWriterPassword (INGEST_WRITER_PASSWORD, required while ingestion.dbUser is ingest_writer -- the role does not exist without it, and the only other historian credential is the superuser)" -}}
 {{- end -}}
 {{/*
-  THE TWO MACHINE-PRINCIPAL KEYS, and they are here because their absence is the WORST failure
-  shape this helper exists to prevent: not a template error, and not a stack that rejects requests,
-  but a `helm install` that reports success while a pod halts itself and reports `0 of 1 updated
-  replicas are available` for ten minutes. The ingestion daemon refuses to start its MQTT loop
-  without SUPABASE_INGESTION_KEY -- correctly, since running fail-open would let unquarantined
-  devices through -- and the message names neither the chart nor the values file.
-
-  Unconditional, because neither workload has an `enabled` flag: the chart always deploys both.
-*/}}
+  THE TWO MACHINE-PRINCIPAL KEYS. Their absence is the worst shape this helper prevents: `helm
+  install` REPORTS SUCCESS while the ingestion daemon halts itself -- it refuses to start its MQTT
+  loop without SUPABASE_INGESTION_KEY rather than run fail-open -- and the only symptom is
+  `0 of 1 updated replicas are available`. Unconditional: neither workload has an `enabled` flag.
+  */}}
 {{- if not .Values.secrets.ingestionKey -}}
 {{- $missing = append $missing "secrets.ingestionKey (SUPABASE_INGESTION_KEY, required -- the ingestion daemon halts rather than start its MQTT loop without it, so the stack installs and then never becomes ready)" -}}
 {{- end -}}
@@ -245,18 +208,13 @@ in CrashLoopBackOff reporting a database it cannot authenticate against.
 {{- $missing = append $missing "secrets.fdwReaderPassword (FDW_READER_PASSWORD, required -- Supabase's postgres_fdw mapping authenticates as fdw_reader, and the only alternative is the historian superuser)" -}}
 {{- end -}}
 {{/*
-THE CREDENTIAL SERVICE'S TOKEN, for the same reason one line up and with a worse blast radius.
+THE CREDENTIAL SERVICE'S TOKEN. It exits 2 on anything shorter than 32 characters rather than
+running open, because it can issue a Mosquitto account for any edge node and the gateway role turns
+that into publishing Sparkplug telemetry AS that gateway. 32, not "not empty", is the length it
+checks.
 
-It exits 2 on anything shorter than 32 characters rather than running open -- correctly, because it
-can issue a Mosquitto account for any edge node and the gateway's role turns an account into the
-ability to publish Sparkplug telemetry AS that gateway. There is no safe default to fall back to.
-
-But it is a SIDECAR IN THE BROKER'S POD, so its refusal is not contained the way Grafana's would
-be: the pod never reaches Ready, and every workload that waits on the broker -- ingestion,
-i3x-service, both e2e Jobs -- times out against a broker that is running perfectly well. The
-rollout error then names i3x-service, which is neither the cause nor anywhere near it.
-
-32, not "not empty", because the length is the check the service actually applies.
+It is a SIDECAR IN THE BROKER'S POD, so its refusal is not contained: the pod never reaches Ready
+and everything waiting on the broker times out, with the rollout error naming i3x-service.
 */}}
 {{- if and .Values.gatewayCredential.enabled (lt (len (.Values.secrets.mqttCredentialServiceToken | default "")) 32) -}}
 {{- $missing = append $missing "secrets.mqttCredentialServiceToken (MQTT_CREDENTIAL_SERVICE_TOKEN, 32+ characters, required when gatewayCredential.enabled)" -}}
@@ -270,15 +228,10 @@ the same rollout timeout as above. The credential service authenticates as it; n
 {{- $missing = append $missing "secrets.mqttDynsecAdminPassword (MQTT_DYNSEC_ADMIN_PASSWORD, required -- the account the credential service administers the broker's Dynamic Security plugin as)" -}}
 {{- end -}}
 {{/*
-CONDITIONAL, LIKE THE TOKEN ABOVE, because playback is off by default and a cluster that never
-enables it needs no key at all.
-
-The failure this catches is quiet in the way this whole block exists for: playback_worker.py refuses
-to start without the key, so the pod CrashLoopBackOffs -- which is at least visible -- but the
-message names an environment variable rather than the values key that fills it, and the operator who
-set `playback.enabled: true` has no reason to connect the two. `mqttPlaybackCredentials` is NOT
-required beside it: a worker with no broker credentials is a correct state for a stack that has
-issued no playback targets yet.
+CONDITIONAL, like the token above, because playback is off by default. playback_worker.py refuses to
+start without the key, and the CrashLoopBackOff names an environment variable rather than the values
+key that fills it. `mqttPlaybackCredentials` is NOT required beside it: a worker with no broker
+credentials is correct for a stack that has issued no playback targets yet.
 */}}
 {{- if and .Values.playback.enabled (not .Values.secrets.playbackKey) -}}
 {{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required when playback.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback)" -}}
@@ -289,18 +242,13 @@ issued no playback targets yet.
 {{/*
 THE DEMO SECRET IS REFUSED ON ANYTHING THAT IS NOT PLAINLY LOCAL.
 
-`values-dev.yaml` legitimately carries the published Supabase demo credentials, and CI installs
-with it every run — so this cannot simply ban the value. What it bans is the combination that has
-no innocent reading: the demo JWT secret together with a public hostname somebody chose.
+`values-dev.yaml` legitimately carries the published Supabase demo credentials and CI installs with
+it, so the value alone cannot be banned. What is banned is the combination with a public hostname
+somebody chose, which has no innocent reading: the published keys in this repository would
+authenticate at the edge, and nothing about the stack would look wrong.
 
-A deployment on the demo set is one where the published keys in this repository authenticate
-at the edge, and the giveaway is precisely that nothing looks wrong: every pod is healthy, every
-request succeeds, and the credentials are in a file thousands of people already have.
-
-The local forms below are the ones the chart's own docs and CI use; anything else is taken to be
-a deployment other people can reach. Overriding this by editing the list is not a workaround —
-`node scripts/setup.mjs` mints a matching set in one command, and `values-prod.yaml.example`
-documents where to put it.
+The local forms below are the ones the chart's docs and CI use. `node scripts/setup.mjs` mints a
+matching set in one command; `values-prod.yaml.example` documents where to put it.
 */}}
 {{- $demoJwtSecret := "super-secret-jwt-token-with-at-least-32-characters" -}}
 {{- if eq (.Values.secrets.jwtSecret | default "") $demoJwtSecret -}}
@@ -331,16 +279,10 @@ Only checked when realtime is enabled AND the chart owns the secret.
 {{- fail (printf "\n\nacs-cymru: secrets.realtimeSecretKeyBase must be AT LEAST 64 characters (got %d).\nsupabase/realtime refuses to boot otherwise. Generate one with:  openssl rand -hex 32\n" (len $base)) -}}
 {{- end -}}
 {{/*
-  THE THIRD SECRET THAT MAKES REALTIME REFUSE TO BOOT, beside the other two by this block's own
-  logic rather than as a new idea. `METRICS_JWT_SECRET` became mandatory in v2.102.3 --
-  `System.fetch_env!`, so the container aborts during boot rather than defaulting. Unset, the pod
-  CrashLoopBackOffs and the only clue is an Elixir stack trace ten frames deep.
-
-  secret.yaml gained the value when the version was pinned -- but NOTHING CONSUMED IT. The chart carried the secret and never passed it to
-  the pod. This is what stops that being possible again.
-
-  No length rule: unlike the two above, it only has to exist and be secret.
-*/}}
+  THE THIRD SECRET THAT MAKES REALTIME REFUSE TO BOOT. `METRICS_JWT_SECRET` is `System.fetch_env!`
+  as of v2.102.3, so the container aborts during boot and the only clue is an Elixir stack trace ten
+  frames deep. No length rule: unlike the two above it only has to exist and be secret.
+  */}}
 {{- if not .Values.secrets.realtimeMetricsJwtSecret -}}
 {{- fail "\n\nacs-cymru: secrets.realtimeMetricsJwtSecret is required (METRICS_JWT_SECRET).\nsupabase/realtime v2.102.3 refuses to boot otherwise. Generate one with:  openssl rand -hex 32\n\nDeliberately NOT secrets.jwtSecret: it signs the bearer token realtime's /metrics endpoint\nrequires, and sharing the API signing key would let anyone holding it mint metrics tokens.\n" -}}
 {{- end -}}
@@ -364,15 +306,11 @@ handshake fails with a bare 403 that names nothing.
 {{- end -}}
 
 {{/*
-A browser-facing URL that resolves to the empty string is worse than a missing one.
-
-GoTrue builds every user-facing redirect from GOTRUE_SITE_URL, including the OAuth consent
-redirect; empty means /oauth/authorize sends the browser to `/oauth/consent` with no origin, and
-Grafana and Node-RED SSO both fail at the consent step with nothing naming the cause. The OAuth
-`redirect_uris` db-init registers would be empty too, so the clients could never match.
-
-A data-tier-only install genuinely does not need a domain, which is why this is gated on
-supabaseAuth rather than asserted unconditionally.
+A browser-facing URL that resolves to the empty string is worse than a missing one. GoTrue builds
+every user-facing redirect from GOTRUE_SITE_URL, so /oauth/authorize sends the browser to
+`/oauth/consent` with no origin and both SSO flows fail at the consent step with nothing naming the
+cause; the `redirect_uris` db-init registers would be empty too. Gated on supabaseAuth, because a
+data-tier-only install genuinely needs no domain.
 */}}
 {{- define "acs-cymru.validatePublicUrls" -}}
 {{- if .Values.supabaseAuth.enabled -}}
@@ -386,15 +324,11 @@ supabaseAuth rather than asserted unconditionally.
 {{- end -}}
 
 {{/*
-TLS on the ingress and `scheme: http` is a contradiction that fails as an OAuth error.
-
-Every browser-facing URL is composed from `global.scheme`, and db-init registers those URLs as the
-OAuth clients' `redirect_uris`. With TLS terminating at the ingress the browser arrives over https
-and presents an https redirect_uri, while GoTrue holds the http one it was given -- and answers
-`invalid redirect_uri`, which reads as a Grafana or Node-RED fault. Grafana's own root_url would be
-wrong in the same breath, so it would redirect users to http and lose the session cookie.
-
-Nothing crashes and no pod reports unhealthy: only sign-in breaks.
+TLS ON THE INGRESS WITH `scheme: http` IS A CONTRADICTION THAT FAILS AS AN OAUTH ERROR. Every
+browser-facing URL is composed from `global.scheme`, and db-init registers those as the OAuth
+clients' `redirect_uris`: the browser arrives over https and presents an https redirect_uri while
+GoTrue holds the http one, answering `invalid redirect_uri`. Grafana's root_url would send users to
+http and lose the session cookie. Nothing crashes; only sign-in breaks.
 */}}
 {{- define "acs-cymru.validateScheme" -}}
 {{- if and .Values.ingress.enabled .Values.ingress.tls.enabled (ne .Values.global.scheme "https") -}}
@@ -403,16 +337,13 @@ Nothing crashes and no pod reports unhealthy: only sign-in breaks.
 {{- end -}}
 
 {{/*
-An enabled ingress that resolved no hostname.
+AN INGRESS WITH EMPTY `host:` FIELDS IS ACCEPTED BY THE API SERVER and then matches every request
+arriving at the controller, so unrelated traffic reaches the dashboard while no intended hostname
+routes.
 
-An `Ingress` with empty `host:` fields is ACCEPTED by the API server and then matches every request
-arriving at the controller -- so unrelated traffic reaches the dashboard while none of the intended
-hostnames route at all.
-
-CHECKED HERE RATHER THAN IN ingress.yaml, and the ordering is the reason. A `fail` inside a resource
-template pre-empts this whole chain, so an install with no credentials at all was being told about
-hostnames -- true, but the third-most useful thing to say. Validation belongs in one ordered place;
-ingress.yaml simply renders nothing when there is nothing to render.
+Checked here rather than in ingress.yaml because a `fail` inside a resource template pre-empts this
+chain: an install with no credentials at all was being told about hostnames. Validation belongs in
+one ordered place; ingress.yaml renders nothing when there is nothing to render.
 */}}
 {{- define "acs-cymru.validateIngress" -}}
 {{- if .Values.ingress.enabled -}}
@@ -429,18 +360,15 @@ ingress.yaml simply renders nothing when there is nothing to render.
 {{/*
 The single-writer workloads, and why each one is.
 
-ONE LIST, READ RATHER THAN RESTATED. `acs-cymru.validateAutoscaling` below derives its refusal set
-from this block, and CI's replica/strategy check parses this same block out of the file. Neither
-keeps its own copy, because a copy is how this list came to be wrong: it named `i3x-service` from the
-day it was written, the guard hardcoded a duplicate that did not, and nothing compared them -- so the
-one workload whose in-memory state makes a second replica CLIENT-VISIBLE was the one the guard would
-have let through (issue #27).
+ONE LIST, READ RATHER THAN RESTATED: `acs-cymru.validateAutoscaling` below and CI's
+replica/strategy check both parse this block. A second copy is how it came to be wrong -- the
+guard's duplicate omitted `i3x-service`, whose in-memory state makes a second replica
+client-visible (issue #27).
 
-PARSED AS YAML, so the shape matters: `name: reason`, with continuation lines indented. The KEY is
-the name `autoscaling.components` takes, which for the Supabase components is the unprefixed one --
-`realtime`, not `supabase-realtime`. CI resolves both spellings against the rendered manifests and
-treats a name that matches NEITHER as an error rather than skipping it, because a name nothing
-resolves to protects nothing and would do so silently.
+PARSED AS YAML, so the shape matters: `name: reason`, continuation lines indented. The KEY is the
+name `autoscaling.components` takes, which for the Supabase components is unprefixed -- `realtime`,
+not `supabase-realtime`. CI resolves both spellings against the rendered manifests and treats a
+name matching neither as an error, because a name nothing resolves to protects nothing.
 */}}
 {{- define "acs-cymru.singleWriterWorkloads" -}}
 ingestion: a plain paho subscribe with no shared-subscription group -- every replica consumes every
@@ -470,13 +398,10 @@ loki: single-binary mode with filesystem storage on a ReadWriteOnce PVC -- the i
 {{/*
 The workloads that MAY autoscale, and why each is safe to run more than one of.
 
-THE COMPLEMENT OF THE BLOCK ABOVE IS NOT AN ANSWER, which is why this is written out rather than
-derived. "Not single-writer" includes every name that does not exist -- a typo, a component that
-was renamed, a workload this chart has never shipped -- and issue #31 is precisely that those all
-used to pass. An allow-list is the only shape where an unrecognised name is wrong by default.
-
-Read by `acs-cymru.validateAutoscaling` and by hpas.yaml, which asserts its own dispatch table
-matches these keys -- so the set exists once and the two cannot drift apart.
+Written out rather than derived as the complement of the block above: "not single-writer" also
+admits every name that does not exist -- a typo, a renamed component, one this chart never shipped
+-- and those all used to pass (issue #31). An allow-list is the only shape where an unrecognised
+name is wrong by default.
 */}}
 {{- define "acs-cymru.autoscalableWorkloads" -}}
 supabase-rest: PostgREST is stateless and holds a connection pool per replica
@@ -486,24 +411,19 @@ frontend: NGINX serving static files
 {{- end -}}
 
 {{/*
-An HPA on a workload that must not have one.
-
-TWO REFUSALS, AND THE SECOND IS THE ONE ISSUE #31 WAS ABOUT.
+An HPA on a workload that must not have one. Two refusals:
 
   1. A SINGLE-WRITER workload. Every one is one replica for a reason recorded in its own manifest,
-     and the damage from scaling it is SILENT -- no error, no crash, just duplicated telemetry, a
-     split fleet, or two processes racing on one volume. An autoscaler makes that happen at 3am
-     under load, which is the worst possible moment to discover it.
+     and the damage from scaling it is SILENT -- duplicated telemetry, a split fleet, or two
+     processes racing on one volume -- which an autoscaler makes happen under load.
 
-  2. A name that is NEITHER allowed nor forbidden. This used to render no HPA and no error, so
-     `superbase-rest` -- a typo -- installed cleanly and simply never scaled. The symptom arrives
-     months later as a component that "should be autoscaling and isn't", with nothing logged at
-     install time to search for. It also meant the forbidden list was the only protection a
-     single-writer workload had, so any one missing from it was unguarded; `i3x-service` was
-     missing until #27.
+  2. A name that is NEITHER allowed nor forbidden. `superbase-rest`, a typo, used to install
+     cleanly and simply never scale, with nothing logged to search for; it also meant the forbidden
+     list was a single-writer workload's only protection, so any name missing from it was unguarded
+     (issues #27 and #31).
 
-The order matters: forbidden is checked first so a single-writer workload keeps its specific
-explanation rather than being reported as merely unrecognised.
+Forbidden is checked first, so a single-writer workload keeps its specific explanation rather than
+being reported as merely unrecognised.
 */}}
 {{- define "acs-cymru.validateAutoscaling" -}}
 {{- if .Values.autoscaling.enabled -}}
@@ -522,11 +442,10 @@ explanation rather than being reported as merely unrecognised.
 {{- if lt (len $forbidden) 9 -}}
 {{/*
   A PARSE FAILURE MUST NOT READ AS "NOTHING IS FORBIDDEN". `fromYaml` answers a map carrying an
-  `Error` key rather than failing, so a typo in the block above would silently empty this guard and
-  every single-writer workload would become autoscalable with no error anywhere. Checked against a
-  floor rather than an exact count, so that adding a workload does not mean editing two places --
-  which is the whole point of deriving the list.
-*/}}
+  `Error` key rather than failing, so a typo in the block above would silently empty this guard.
+  Checked against a floor rather than an exact count, so adding a workload does not mean editing
+  two places -- which is the point of deriving the list.
+  */}}
 {{- fail (printf "\n\nacs-cymru: the single-writer workload list did not parse -- got %d entries: %v.\n\nThis guard derives its refusal set from `acs-cymru.singleWriterWorkloads` in _helpers.tpl, which\nis read as YAML. An unparseable block would leave the guard EMPTY and every single-writer\nworkload autoscalable, with no error, so it fails here instead. Check that block for a broken\nindent or a stray colon.\n" (len $forbidden) $forbidden) -}}
 {{- end -}}
 {{- range .Values.autoscaling.components -}}
@@ -551,27 +470,22 @@ explanation rather than being reported as merely unrecognised.
 {{- end -}}
 
 {{/*
-Broker TLS, and the two ways of asking for a broker nobody can reach.
+Broker TLS: the two ways of asking for a broker nobody can reach. Both are refused rather than
+rendered, because both produce a stack that reports entirely healthy.
 
-BOTH ARE REFUSED RATHER THAN RENDERED, because both produce a stack that reports entirely healthy:
+  1. `external.plaintext: false` with TLS OFF leaves the external Service with NO PORTS. The API
+     server rejects that, but as "spec.ports: Required value" on a Service, naming neither setting.
+     Wanting no external broker is `external.enabled: false`.
 
-  1. `external.plaintext: false` with TLS OFF leaves the external Service with NO PORTS. That is
-     invalid to the API server, so this one at least fails -- but it fails as
-     "spec.ports: Required value" on a Service, which names neither setting. Anyone who genuinely
-     wants no external broker wants `external.enabled: false`.
+  2. TLS on, external LoadBalancer, and a certificate carrying nothing a gateway could match -- no
+     IP SAN and no operator-supplied DNS SAN. In-cluster clients dial `mosquitto` and verify
+     perfectly; every gateway dials the IP and fails on a hostname mismatch the broker never logs.
+     The stack reports healthy, the simulator keeps producing, and the fleet is off.
 
-  2. TLS on, external LoadBalancer, and the certificate carrying NOTHING a gateway could match --
-     no IP SAN and no operator-supplied DNS SAN either. In-cluster clients dial `mosquitto` and
-     verify perfectly; every gateway dials the IP and fails on a hostname mismatch the broker never
-     logs. So the stack reports healthy, the simulator keeps producing telemetry, and the fleet is
-     off -- which reads as a gateway or network fault, nowhere near this setting.
-
-     Refused rather than warned about, for the same reason as the autoscaling list: Helm has no
-     non-fatal warning that `helm template` would surface, so a "warning" here is either an abort or
-     nothing at all. And the condition is narrow enough to be unambiguous -- `publicBaseDomain`
-     alone does not satisfy it, because `mqtt.<domain>` is the WebSocket name, not the address a
-     gateway dials. Supplying EITHER an IP SAN or an explicit DNS SAN clears it, so a deployment
-     behind plant DNS is not blocked; only one with no external identity at all.
+Refused rather than warned about: Helm has no non-fatal warning `helm template` would surface.
+`publicBaseDomain` alone does not satisfy it -- `mqtt.<domain>` is the WebSocket name, not the
+address a gateway dials -- and either an IP SAN or an explicit DNS SAN clears it, so a deployment
+behind plant DNS is not blocked.
 */}}
 {{- define "acs-cymru.validateBrokerTls" -}}
 {{- if .Values.mosquitto.enabled -}}
@@ -596,19 +510,15 @@ told about the hostnames it also lacks.
 The two GATEWAY MQTT usernames must be well-formed sparkplug_ids, and the monitoring account must
 have a password.
 
-WHY THE RENDER AND NOT THE POD. A gateway account's role confines it to
-`spBv1.0/+/+/<username>/#` (mosquitto/dynsec-roles.json, and the per-gateway role the reconcile
-generates), and `verify_gateway_binding()` requires that same segment to be the gateway row's
-GENERATED `sparkplug_id`. So a friendly username here does not fail: the client authenticates
-perfectly, and then the broker silently drops every message it publishes. Nothing logs a reason at
-either end -- the symptom is an edge node that connects and produces no telemetry, which reads as a
-broken simulator or a broken ingestion daemon.
+WHY THE RENDER AND NOT THE POD. A gateway account's role confines it to `spBv1.0/+/+/<username>/#`
+(mosquitto/dynsec-roles.json, and the per-gateway role the reconcile generates), and
+`verify_gateway_binding()` requires that same segment to be the gateway row's GENERATED
+`sparkplug_id`. A friendly username authenticates perfectly and then has every message it publishes
+silently dropped, with nothing logged at either end -- an edge node that connects and produces no
+telemetry, which reads as a broken simulator or a broken daemon.
 
-The monitoring password is checked because the broker's own probes authenticate as that account:
-an empty one leaves the pod permanently NotReady and takes down every workload that waits on it,
-reporting nothing about MQTT.
-
-Skipped when `existingSecret` is set -- the values are then not the chart's to see.
+The broker's own probes authenticate as the monitoring account, so an empty password leaves the pod
+permanently NotReady and takes down every workload waiting on it. Skipped under `existingSecret`.
 */}}
 {{- define "acs-cymru.validateMqttPrincipals" -}}
 {{- if not .Values.secrets.existingSecret -}}
@@ -628,15 +538,13 @@ Skipped when `existingSecret` is set -- the values are then not the chart's to s
 Publishing Studio requires the credentials that make it a door rather than a hole.
 
 `ingress.routes.studio` names the GATEWAY's studio listener, so the console is behind an OAuth flow
-and an `Administrator` check -- but only if that flow has a client to run. With the secrets unset the
-gateway substitutes credentials that cannot authenticate and 0081 registers no client, so the route
-publishes a hostname whose every request ends at a login nobody can complete.
+and an `Administrator` check -- but only if that flow has a client to run. With the secrets unset
+the gateway substitutes credentials that cannot authenticate and 0081 registers no client, so the
+route publishes a hostname whose every request ends at a login nobody can complete.
 
-THAT IS NOT A SECURITY FAILURE, and it is refused anyway. Fail-closed is the right RUNTIME behaviour
-for a stack that was upgraded before the variables existed; it is the wrong INSTALL behaviour for an
-operator who has just asked for the route by name, because the symptom -- a redirect loop through
-GoTrue ending in `invalid client` -- reads as a broken proxy rather than as two empty values. The
-chart's rule is to validate values and fail the render, never the pod.
+Fail-closed is the right RUNTIME behaviour and the wrong INSTALL behaviour for an operator who has
+just asked for the route by name: the redirect loop through GoTrue ending in `invalid client` reads
+as a broken proxy rather than as two empty values.
 */}}
 {{- define "acs-cymru.validateStudioRoute" -}}
 {{- if and .Values.ingress.enabled (eq (index .Values.ingress.routes "studio") true) -}}
@@ -650,11 +558,11 @@ chart's rule is to validate values and fail the render, never the pod.
 A Secure-cookie login published over plain http on a host a browser will not keep the cookie for.
 
 The gateway's studio and gitea listeners sign in through Envoy's oauth2 filter, which writes every
-cookie it uses (nonce, code verifier, HMAC, bearer) with the Secure attribute. A browser keeps a
-Secure cookie only on an https origin or on localhost / *.localhost, so on any other http host the
-authorization round trip returns to a callback holding no state, and Envoy answers 401 `CSRF token
-validation failed`. The dashboard, Grafana and Node-RED are unaffected: their sessions are their
-own. Nothing crashes and no pod is unhealthy; the two doors never open.
+cookie it uses with the Secure attribute. A browser keeps those only on an https origin or on
+localhost / *.localhost, so on any other http host the authorization round trip returns to a
+callback holding no state and Envoy answers 401 `CSRF token validation failed`. The dashboard,
+Grafana and Node-RED are unaffected: their sessions are their own. Nothing crashes and no pod is
+unhealthy; the two doors never open.
 
 The URL is judged, not global.scheme: a publicUrls.* override carries its own scheme.
 */}}
@@ -690,11 +598,9 @@ The URL is judged, not global.scheme: a publicUrls.* override carries its own sc
 Broker client transport, shared by the ingestion daemon, i3X, Node-RED, playback and the e2e
 validator.
 
-DEFINED ONCE because they must agree. They read the SAME environment variable names --
-ingestion.py's `configure_mqtt_tls()`, i3x_service.py, playback_worker.py, validate.py and
-node-red-init.mjs's transport reconciliation were written against one contract deliberately -- so a
-port set for one and not another is a class of mistake worth making unrepresentable. Same reasoning
-as the NetworkPolicy edge list.
+DEFINED ONCE because they must agree: all five read the same environment variable names against one
+deliberate contract, so a port set for one and not another is a class of mistake worth making
+unrepresentable. Same reasoning as the NetworkPolicy edge list.
 */}}
 {{- define "acs-cymru.brokerClientEnv" -}}
 {{- $tls := .Values.mosquitto.tls -}}
@@ -719,13 +625,10 @@ as the NetworkPolicy edge list.
 The CA-only projection of the broker certificate Secret.
 
 ONLY `ca.crt` IS PROJECTED, AND THAT IS THE POINT. `mosquitto-tls` is a kubernetes.io/tls Secret, so
-it holds `tls.key` -- THE BROKER'S PRIVATE KEY -- alongside the CA certificate. Mounting the whole
-Secret into every client pod would hand each of them the key that lets anything
-impersonate the broker, to verify a certificate they only need the public CA for.
-
-`items` restricts the projection at the kubelet, so the key is never written into either pod's
-filesystem. 0444: a CA certificate is public by nature and every process in the container may read
-it; it is the absence of tls.key that matters here, not the mode.
+it also holds `tls.key` -- THE BROKER'S PRIVATE KEY. Mounting the whole Secret into every client pod
+would hand each of them the key that lets anything impersonate the broker, when verifying a
+certificate needs only the public CA. `items` restricts the projection at the kubelet, so the key is
+never written into either pod's filesystem.
 */}}
 {{- define "acs-cymru.brokerClientCaVolume" -}}
 - name: broker-ca
@@ -751,13 +654,10 @@ it; it is the absence of tls.key that matters here, not the mode.
 {{/* ---------------------------------------------------------------------------------------- */}}
 
 {{/*
-M2. TimescaleDB is reached at `timescaledb:5432`, NEVER the host-published 5433.
-
-5433 exists only to keep the dev loop's forwarded port off a developer's local PostgreSQL; the
-server listens on 5432. The postgres_fdw foreign server in 0001_baseline_schema.sql is the reader
-that matters here -- a wrong port there fails as a relation-level error from PostgREST rather than
-as a connection error, so it reads as a schema fault. `helm test` (M6) queries the foreign table to
-pin it.
+M2. TimescaleDB is reached at `timescaledb:5432`, NEVER the host-published 5433, which exists only
+to keep the dev loop's forwarded port off a developer's local PostgreSQL. A wrong port in
+0001_baseline_schema.sql's postgres_fdw foreign server fails as a relation-level error from
+PostgREST, so it reads as a schema fault; `helm test` (M6) queries the foreign table to pin it.
 */}}
 {{- define "acs-cymru.timescale.host" -}}timescaledb{{- end -}}
 {{- define "acs-cymru.timescale.port" -}}5432{{- end -}}
@@ -925,10 +825,10 @@ DSN at the wrong character and the failure reads as a bad hostname.
 {{/*
 Browser-facing URLs. Each falls back to <sub>.<publicBaseDomain> so a deployment sets one value.
 
-THESE ARE NEVER THE IN-CLUSTER ADDRESS. The distinction is the single most repeated hazard in this
-stack: auth_url is followed by the BROWSER, token_url and userinfo are called by the CONTAINER, and
-using one for both fails in a way that names neither. In-cluster URLs are not configurable at all
--- the Service names are the ones every in-cluster URL carries, so they are constants.
+THESE ARE NEVER THE IN-CLUSTER ADDRESS, the most repeated hazard in this stack: auth_url is followed
+by the BROWSER, token_url and userinfo are called by the CONTAINER, and using one for both fails in
+a way that names neither. In-cluster URLs are not configurable at all -- the Service names every
+in-cluster URL carries are constants.
 */}}
 {{- define "acs-cymru.publicUrl" -}}
 {{- $explicit := index .ctx.Values.publicUrls .key -}}
@@ -951,26 +851,21 @@ using one for both fails in a way that names neither. In-cluster URLs are not co
 The browser origins the gateway echoes an Access-Control-Allow-Origin for -- a JSON array,
 substituted into `__CORS_ORIGINS__` in files/envoy/envoy.yaml.
 
-WHY THIS IS DERIVED AND NOT CONFIGURED. It is the stack's ONLY statement of origin policy: the
-edge functions carry no Access-Control-Allow-Origin of their own on purpose (see
-supabase/functions/_shared/cors.ts), since the gateway is the only layer that sees a request
-before deciding to route it. So an origin that is wrong here has nothing behind it to compensate.
+DERIVED, NOT CONFIGURED. It is the stack's ONLY statement of origin policy: the edge functions carry
+no Access-Control-Allow-Origin of their own on purpose (supabase/functions/_shared/cors.ts), since
+the gateway is the only layer that sees a request before deciding to route it, so an origin wrong
+here has nothing behind it to compensate. Deriving from the dashboard's and Swagger UI's own helpers
+makes it impossible for the list to name a host the chart does not serve or to miss one it does -- a
+four-origin localhost literal shipped here for as long as Kubernetes did, so on a real cluster the
+dashboard authenticated and then could not read a single response, and nothing caught it because
+`curl` sends no Origin and does not enforce the answer.
 
-The two browser-facing origins are the dashboard and Swagger UI, and both already have a helper
-because the Ingress needs their hostnames. Deriving from those helpers is what makes it impossible
-for the origin list to name a host the chart does not serve, or to miss one that it does -- the
-same single-source argument values.yaml makes for publicUrls.grafana, and the failure this closes
-is worse: a four-origin localhost literal shipped here for as long as Kubernetes did, so on a real
-cluster the dashboard authenticated and then could not read a single response. Nothing caught it,
-because `curl` sends no Origin and does not enforce the answer.
+`corsExtraOrigins` is for what the chart cannot know: a reverse proxy in front of the Ingress, a
+tunnel, a second hostname. Appended rather than replacing, so adding one cannot drop the dashboard's
+own origin.
 
-`corsExtraOrigins` is for the cases the chart cannot know: a reverse proxy in front of the Ingress,
-a tunnel, a second hostname on the same deployment. Appended rather than replacing, so adding one
-cannot silently drop the dashboard's own origin.
-
-EMPTY IS REFUSED. A data-tier install with no publicBaseDomain and no publicUrls has no browser
-origin to name, and rendering `origins: []` produces a gateway that starts and refuses every
-browser request -- the exact failure this helper exists to end, arrived at by a different route.
+EMPTY IS REFUSED: rendering `origins: []` produces a gateway that starts and refuses every browser
+request -- this helper's own failure, arrived at by another route.
 */}}
 {{- define "acs-cymru.corsOrigins" -}}
 {{- $origins := list -}}
@@ -984,15 +879,11 @@ browser request -- the exact failure this helper exists to end, arrived at by a 
 {{/*
 REFUSED ONLY WHEN THERE IS SOMETHING TO REFUSE FOR.
 
-An install with no public surface at all -- no publicBaseDomain and no publicUrls -- has no
-browser to serve and no origin to name, and an empty list is the honest answer there. It is also
+An install with no public surface at all has no browser to serve and no origin to name, and is
 already refused, more specifically, by the `no browser-facing URL` and `no route resolved a
-hostname` guards. Failing here as well would MASK them: this helper is reached first, so a
-missing publicBaseDomain reported the CORS symptom instead of the cause. (Caught by the chart
-guard-rail suite in ci.yml, which asserts each guard's own message.)
-
-The narrow case that IS this helper's to catch: publicUrls.supabase set, so the API is genuinely
-browser-facing, while nothing names an origin allowed to call it.
+hostname` guards. Failing here as well would MASK them: this helper is reached first, so a missing
+publicBaseDomain reported the CORS symptom instead of the cause. CI's chart guard-rail suite asserts
+each guard's own message.
 */}}
 {{- if and (not $origins) (include "acs-cymru.supabaseUrl" .) -}}
 {{- fail "\n\nacs-cymru: the gateway would be given an EMPTY browser-origin list.\n\npublicUrls.supabase names a browser-facing API, but no origin could be derived for the\ndashboard or for Swagger UI -- so the gateway would start cleanly and then refuse every browser\nrequest to it, returning 200 with no Access-Control-Allow-Origin. That presents as a\ndashboard which signs in and then shows empty tables, with nothing failing anywhere you\nwould think to look.\n\nSet global.publicBaseDomain, or publicUrls.frontend / publicUrls.docs, or\nglobal.corsExtraOrigins if this deployment is reached only through a proxy whose hostname\nthe chart cannot derive.\n" -}}
@@ -1055,14 +946,12 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
 {{- $routes = append $routes (dict "name" "grafana" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "grafana")) "service" "grafana" "port" 3000) -}}
 {{- end -}}
 {{/* STUDIO IS PUBLISHED THROUGH THE GATEWAY, NEVER DIRECTLY, and this line is the whole control.
-     `supabase-studio:3000` is a database console with no login, no roles and no session, running
-     as the database owner -- naming it here would put that on a public hostname. The gateway's
-     `studio` listener on 8001 is the same console behind an OAuth flow and an `Administrator`
-     check, so the route names the GATEWAY Service and the Studio Service is reachable in-cluster
-     only.
+     `supabase-studio:3000` is a database console with no login, no roles and no session, running as
+     the database owner. The gateway's `studio` listener on 8001 is the same console behind an OAuth
+     flow and an `Administrator` check, so the route names the GATEWAY Service.
 
-     Gated on the gateway AS WELL as on Studio existing: without the gateway this route has no
-     backend to name and is correctly absent rather than pointed somewhere unauthenticated. */}}
+     Gated on the gateway as well as on Studio: without it the route has no backend to name and is
+     correctly absent rather than pointed somewhere unauthenticated. */}}
 {{- if and .Values.supabaseStudio.enabled .Values.supabaseEnvoy.enabled -}}
 {{- $routes = append $routes (dict "name" "studio" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "studio")) "service" .Values.supabaseEnvoy.serviceName "port" 8001) -}}
 {{- end -}}
@@ -1079,16 +968,13 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
 {{- end -}}
 {{- if and .Values.gitea.enabled .Values.supabaseEnvoy.enabled -}}
 {{/* THE WEB HALF OF THE FORGE ONLY, AND THROUGH THE GATEWAY, NEVER DIRECTLY. Git over SSH is TCP
-     and cannot ride an HTTP Ingress at all -- that is `gitea-external`'s job, exactly as raw MQTT
-     is mosquitto-external's. Naming this route is therefore not enough to make an appliance able
-     to clone, which is the thing that would otherwise be discovered on a gateway rather than here.
+     and cannot ride an HTTP Ingress -- that is `gitea-external`'s job, as raw MQTT is
+     mosquitto-external's -- so naming this route does not make an appliance able to clone.
 
      THE BACKEND IS THE GATEWAY'S `forge` LISTENER (8002) AND THIS LINE IS THE WHOLE CONTROL, as
      Studio's is. Gitea runs with reverse-proxy authentication on, which signs in whoever the
-     X-WEBAUTH-USER header names -- from any peer, measured. A route naming `gitea:3000` would put
-     that on a public hostname, where a request from the internet chooses its own identity. Gated
-     on the gateway for the same reason as Studio's: without it the forge's web UI is correctly
-     absent rather than published bare. */}}
+     X-WEBAUTH-USER header names, from any peer (measured). A route naming `gitea:3000` would put
+     that on a public hostname, where a request chooses its own identity. */}}
 {{- $routes = append $routes (dict "name" "gitea" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "gitea")) "service" .Values.supabaseEnvoy.serviceName "port" 8002) -}}
 {{- end -}}
 {{- if .Values.mosquitto.enabled -}}
@@ -1103,21 +989,15 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
 Wait-for initContainer. Usage:
   (dict "ctx" $ "name" "wait-for-db" "command" "<shell test>" "describe" "supabase-db")
 
-WHY THIS EXISTS. Kubernetes has no `depends_on`. A Deployment whose dependency is not up does not
-wait -- it starts, fails, and CrashLoopBackOffs with an error about the dependency rather than
-about the ordering, which is a slower way to learn the same thing. These loops make the ordering
-explicit and make the pod sit in Init: with a legible reason.
+Kubernetes has no `depends_on`: a Deployment whose dependency is down starts, fails, and
+CrashLoopBackOffs with an error about the dependency rather than about the ordering. These loops
+make the ordering explicit and leave the pod in Init: with a legible reason. The loop is bounded --
+an unbounded wait is Init: forever with no failure to alert on.
 
-The loop is bounded. An unbounded wait produces a pod that is Init: forever with no failure to
-alert on -- worse than a clean failure, because nothing surfaces it.
-
-`command` AND `describe` ARE REQUIRED, and the render fails without them rather than emitting a
-container that cannot work. A caller that omitted them -- i3x-service passed `port`, which this
-helper does not take -- produced `until ; do`, which is valid YAML holding a shell syntax error.
-So `helm lint`, `helm template` and kubeconform all passed, the manifest installed cleanly, and the
-only symptom was one Deployment in Init:CrashLoopBackOff with `/bin/sh: syntax error: unexpected
-";"` buried in an initContainer's log. That is the chart's stated rule -- validate values and fail
-the render, never the pod -- applied to its own helpers.
+`command` AND `describe` ARE REQUIRED, and the render fails without them. A caller that omitted them
+produced `until ; do`: valid YAML holding a shell syntax error, so helm lint, helm template and
+kubeconform all passed and the only symptom was one Deployment in Init:CrashLoopBackOff. The chart's
+rule -- validate values and fail the render, never the pod -- applied to its own helpers.
 */}}
 {{- define "acs-cymru.waitFor" -}}
 {{- if not .command }}{{- fail (printf "acs-cymru.waitFor(%s): `command` is required. It is the shell test the until-loop runs; without it the container renders as `until ; do` and dies with a shell syntax error at runtime instead of failing here." (.name | default "<unnamed>")) }}{{- end }}
@@ -1152,15 +1032,13 @@ the render, never the pod -- applied to its own helpers.
 Wait for a Postgres to accept a QUERY, not merely a connection.
 
 `pg_isready` is not enough against supabase/postgres: it answers during the image's own bootstrap
-while the server still refuses queries, so a migration Job gated on it starts too early and fails
-part-way through -- leaving a half-applied schema, which is the worst outcome available here.
+while the server still refuses queries, so a migration Job gated on it starts too early and leaves a
+half-applied schema.
 
-OPTIONAL `query` LETS A CALLER WAIT FOR A SCHEMA RATHER THAN A SERVER, which is a different and
-usually stronger precondition. `psql -c` exits non-zero on a missing relation exactly as it does on
-a refused connection, so one probe covers "the database is down" and "the migrations have not run
-yet" without distinguishing them -- and the caller does not need to, because the answer to both is
-"keep waiting". Optional `describe` names what is being waited FOR in the log and the timeout
-message; without it the message names only the host, which is the least useful half.
+OPTIONAL `query` WAITS FOR A SCHEMA RATHER THAN A SERVER. `psql -c` exits non-zero on a missing
+relation exactly as on a refused connection, so one probe covers "the database is down" and "the
+migrations have not run" without distinguishing them -- the answer to both is to keep waiting.
+Optional `describe` names what is being waited for in the log and the timeout message.
 */}}
 {{- define "acs-cymru.waitForPostgres" -}}
 - name: {{ .name }}
@@ -1200,13 +1078,10 @@ message; without it the message names only the host, which is the least useful h
 {{/*
 The same, but `optional: true` -- for a key the Secret is allowed NOT to carry.
 
-WHY A SECOND HELPER RATHER THAN A FLAG ON THE ONE ABOVE. The default must stay fail-closed. A
-required secretKeyRef stops the pod from starting when the key is absent, which is the right
-outcome for every credential this chart has ever passed: a container that boots without its
-credential fails later, further away, and in a way that reads as a broken upstream.
-
-For a key an install may legitimately not hold: absent means empty, and the consumer treats
-empty as "not configured".
+A SECOND HELPER RATHER THAN A FLAG, so the default stays fail-closed. A required secretKeyRef stops
+the pod starting when the key is absent, which is right for every credential this chart passes: a
+container that boots without its credential fails later, further away, and reads as a broken
+upstream. Here absent means empty, and the consumer treats empty as "not configured".
 */}}
 {{- define "acs-cymru.optionalSecretEnv" -}}
 - name: {{ .name }}
@@ -1220,15 +1095,14 @@ empty as "not configured".
 {{/*
 The MQTT principals the chart itself provisions, as env, for the broker's assemble-config
 initContainer, which writes them into the Dynamic Security document on every start. The set must
-match PLATFORM_PRINCIPALS in scripts/lib/mosquitto-dynsec.mjs, which is what reads these names.
+match PLATFORM_PRINCIPALS in scripts/lib/mosquitto-dynsec.mjs, which reads these names.
 
-An EMPTY password skips that account rather than writing an empty one. `mqttValidatorPassword` is
-the case that matters: the validator is a fixture, so a production install leaves it unset and
-should simply not have the account. Gateway accounts are not here at all: they are issued against a
-row that already exists, through the credential service.
+An EMPTY password skips that account rather than writing an empty one -- `mqttValidatorPassword` is
+the case that matters, since the validator is a fixture a production install leaves unset. Gateway
+accounts are not here: they are issued against an existing row through the credential service.
 
-Consumers (ingestion, i3x, node-red, the validator Job) each take only THEIR OWN pair, so this is
-deliberately not used there: the point of the split is that no workload holds another's credential.
+Consumers take only THEIR OWN pair, so this is deliberately not used there: the point of the split
+is that no workload holds another's credential.
 */}}
 {{- define "acs-cymru.mqttPrincipals" -}}
 INGESTION I3X VALIDATOR MONITOR
@@ -1243,18 +1117,14 @@ INGESTION I3X VALIDATOR MONITOR
 {{- end -}}
 
 {{/*
-Node-RED authentication environment — one definition included in two places, and load-bearing
-for that reason.
+Node-RED authentication environment -- one definition included in two places, and load-bearing for
+that reason.
 
 BOTH the node-red container AND its init container must receive this block, identically.
-scripts/node-red-init.mjs's settingsAreCorrect() EVALUATES the settings.js it wrote, and
-settings.js resolves every one of these from process.env at load time. A value present when the
-file was written and absent when it is read makes the settings look wrong on every boot and get
-rewritten forever -- silently, because an unloadable settings.js is already handled as "replace
-it". One definition, included twice, is what prevents that.
-
-Defined here, with the helpers, so the anchor's guarantee is established rather
-than bolted on beside the Deployment that happens to need it first.
+node-red-init.mjs's settingsAreCorrect() EVALUATES the settings.js it wrote, and settings.js
+resolves every one of these from process.env at load time. A value present when the file was written
+and absent when it is read makes the settings look wrong on every boot and get rewritten forever,
+silently, because an unloadable settings.js is already handled as "replace it".
 */}}
 {{- define "acs-cymru.noderedAuthEnv" -}}
 {{- $secretName := include "acs-cymru.secretName" . -}}
@@ -1286,16 +1156,14 @@ than bolted on beside the Deployment that happens to need it first.
 {{/*
 The COMPONENT LABEL of whichever gateway is deployed.
 
-NOT the Service name, and the distinction is the whole reason this exists. Promotion works by the
-Envoy Service ADOPTING the name `supabase-kong`, so every consumer's URL keeps resolving -- but
-NetworkPolicy and ServiceMonitor select POD LABELS, which the adopted name does not touch. Hard-
-coding `supabase-kong` in those two leaves the policy denying every flow to the gateway and the
-scrape selecting nothing, both of which present as the gateway being down rather than as a
-mislabelled selector.
+NOT the Service name, and that distinction is why this exists. Promotion works by the Envoy Service
+ADOPTING the name `supabase-kong`, so every consumer's URL keeps resolving -- but NetworkPolicy and
+ServiceMonitor select POD LABELS, which the adopted name does not touch. Hard-coding
+`supabase-kong` there leaves the policy denying every flow to the gateway and the scrape selecting
+nothing, both presenting as the gateway being down.
 
-Returns `supabase-envoy` when Envoy is enabled, `supabase-kong` otherwise. Both enabled is refused
-by templates/supabase/envoy.yaml when they would share a Service name; while they legitimately run
-side by side, the NetworkPolicy follows Envoy because that is the one being proven.
+Returns `supabase-envoy` when Envoy is enabled, `supabase-kong` otherwise. Where both legitimately
+run side by side the NetworkPolicy follows Envoy, because that is the one being proven.
 */}}
 {{- define "acs-cymru.gatewayComponent" -}}
 {{- if .Values.supabaseEnvoy.enabled -}}
@@ -1341,15 +1209,15 @@ The chart's own scheduling floor: the sum of the `requests` it will ask for, as
 "<millicores> <bytes>".
 
 DERIVED FROM .Values RATHER THAN WRITTEN DOWN, for the reason validateAutoscaling derives its
-allow-list: a floor that has to be edited in a second place when a component's requests change is
-a floor that will be wrong, and wrong HIGH here refuses an install that would have worked.
+allow-list: a floor edited in a second place will be wrong, and wrong HIGH here refuses an install
+that would have worked.
 
 Counted: every component that runs continuously and is enabled. NOT counted, deliberately --
-  * e2e, backup, coldArchive: Jobs and CronJobs. They are transient, so including them would
-    raise the floor above what the stack actually holds and refuse a node that can run it.
-  * init containers: a pod's effective request is max(init, sum(containers)), and every init
-    container here asks for less than the containers it precedes, so they never set the floor.
-Each entry is `path.to.component` paired with its replica count, because the scheduler multiplies.
+  * e2e, backup, coldArchive: Jobs and CronJobs, transient, so counting them would refuse a node
+    that can run the stack.
+  * init containers: a pod's effective request is max(init, sum(containers)), and each asks for
+    less than the containers it precedes.
+Each entry pairs `path.to.component` with its replica count, because the scheduler multiplies.
 */}}
 {{- define "acs-cymru.requestFloor" -}}
 {{- $cpu := 0 -}}
@@ -1399,32 +1267,21 @@ Each entry is `path.to.component` paired with its replica count, because the sch
 {{/*
 Refuses an install onto a cluster that cannot schedule the stack.
 
-The failure this prevents is SILENT, which is why it is a refusal and not a note: when the
-requests do not fit, `helm install` reports success, every workload is created, and the pods sit
-Pending forever. Nothing appears in any container log, because no container ever starts. Only
-`kubectl describe pod` names it, and only if you already suspect capacity.
+The failure it prevents is SILENT: when the requests do not fit, `helm install` reports success,
+every workload is created, and the pods sit Pending forever with nothing in any container log,
+because no container ever starts.
 
-FOUR THINGS IT DELIBERATELY DOES NOT DO:
+FOUR THINGS IT DELIBERATELY DOES NOT DO, each erring towards allowing a tight install rather than
+refusing one that would have worked -- a false refusal cannot be told from a broken chart:
 
-  * It does not run on upgrade (`.Release.IsInstall`). A stack that is already running has already
-    proved it fits; refusing its upgrade because a node is momentarily drained would be a
-    self-inflicted outage.
-  * It does not run when `lookup` returns nothing. That is the case under `helm template`, under
-    `--dry-run`, and when the installing credential may not list nodes -- all three are legitimate,
-    and none is evidence about capacity. `lookup` answers an empty map rather than failing, so this
-    reads as "no opinion" and says nothing.
-  * It does not exclude tainted nodes. Excluding them would be more accurate on a managed cluster
-    whose control plane carries NoSchedule, but supabaseDb and timescaledb accept `tolerations`, so
-    a tainted node may well be exactly where they are meant to land. Counting them over-states
-    capacity, which errs towards letting an install proceed -- the same direction as every other
-    choice here.
-  * It does not multiply the DaemonSet by the node count. On a multi-node cluster the collector
-    runs per node and the true floor is higher, but the allocatable being summed grows faster than
-    the floor does, so the single-node figure is the conservative one.
-
-Every one of those errs towards allowing an install that might be tight rather than refusing one
-that would have worked. A false refusal is the expensive mistake here: the operator cannot tell it
-from a broken chart.
+  * Not on upgrade (`.Release.IsInstall`). A running stack has proved it fits; refusing its upgrade
+    because a node is drained would be a self-inflicted outage.
+  * Nothing when `lookup` returns nothing -- `helm template`, `--dry-run`, or a credential that may
+    not list nodes. `lookup` answers an empty map rather than failing, so this reads as no opinion.
+  * No exclusion of tainted nodes. supabaseDb and timescaledb accept `tolerations`, so a tainted
+    node may be exactly where they are meant to land.
+  * No multiplying the DaemonSet by the node count. On a multi-node cluster the allocatable being
+    summed grows faster than the floor does, so the single-node figure is the conservative one.
 */}}
 {{- define "acs-cymru.validateCapacity" -}}
 {{/*
